@@ -1,968 +1,188 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-
-type Role = "user" | "assistant";
-
-type Message = {
-  id: string;
-  role: Role;
-  content: string;
-  createdAt: number;
-};
-
-type AgentKey = "general" | "seo" | "social" | "prospecting";
-
-type Conversation = {
-  id: string;
-  title: string;
-  agent: AgentKey;
-  messages: Message[];
-  createdAt: number;
-  updatedAt: number;
-};
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 type Lang = "fr" | "en";
 
-const STORAGE_KEY = "boost_ai_conversations_v2";
-const LANG_KEY = "boost_ai_lang_v2";
-
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
+const LANG_KEY = "boost_ai_landing_lang_v1";
 
 const copy = {
   fr: {
-    brand: "Boost My Businesses AI",
-    subtitle: "Assistant business premium",
-    newChat: "Nouvelle conversation",
-    heroTitle: "Demande à ton assistant business IA",
-    heroSub:
-      "Un espace premium pour centraliser tes agents, tester tes workflows et présenter un vrai produit SaaS.",
-    placeholder: "Tape ton message...",
-    send: "Envoyer",
-    attachmentsSoon: "Pièces jointes bientôt",
-    thinking: "L’assistant réfléchit...",
-    emptyState:
-      "Commence une conversation, choisis un agent et envoie une demande.",
-    suggestionsTitle: "Suggestions rapides",
-    conversations: "Conversations",
-    noConversations: "Aucune conversation pour le moment",
-    agentLabel: "Agent",
-    languageLabel: "Langue",
-    welcome:
-      "Bienvenue sur Boost AI. Dis-moi ce que tu veux automatiser.",
-    error:
-      "Erreur de connexion avec l’agent n8n. Vérifie le webhook ou la réponse du workflow.",
-    agents: {
-      general: "Assistant général",
-      seo: "Agent SEO",
-      social: "Agent Social Media",
-      prospecting: "Agent Prospection",
-    },
-    prompts: {
-      general: [
-        "Prépare un plan d’automatisation pour une PME",
-        "Résume les tâches business qu’une IA peut gérer",
-        "Donne-moi une stratégie simple pour gagner du temps",
-      ],
-      seo: [
-        "Donne-moi 10 idées d’articles SEO pour une agence IA",
-        "Crée un plan de contenu SEO sur 30 jours",
-        "Trouve des angles SEO pour un site de consulting",
-      ],
-      social: [
-        "Donne-moi 15 idées de posts LinkedIn sur l’automatisation",
-        "Crée un calendrier de contenu sur 7 jours",
-        "Écris 5 hooks TikTok pour un business IA",
-      ],
-      prospecting: [
-        "Rédige un cold message pour une agence marketing",
-        "Écris 3 messages de prospection personnalisés",
-        "Crée une séquence de relance simple",
-      ],
-    },
+    badge: "SaaS Multi-Agents",
+    title: "Un espace IA premium. Plusieurs agents business.",
+    subtitle:
+      "Présente tes systèmes IA comme un vrai produit SaaS avec une landing page propre, des pages agents dédiées et de la place pour une future monétisation.",
+    primaryCta: "Tester l'agent général",
+    secondaryCta: "Voir l'agent Sales",
+    agents: [
+      {
+        label: "Agent 01",
+        title: "Assistant général",
+        desc: "Ton assistant connecté à n8n pour traiter de vraies demandes et exécuter des workflows.",
+        href: "/agent/general",
+        link: "Ouvrir la page →",
+      },
+      {
+        label: "Agent 02",
+        title: "Agent Sales",
+        desc: "Future page dédiée aux workflows de vente, à la conversion de prospects et à la prospection outbound.",
+        href: "/agent/sales",
+        link: "Ouvrir la page →",
+      },
+      {
+        label: "Agent 03",
+        title: "Agent Support",
+        desc: "Future page dédiée au support client, à l’automatisation de FAQ et à l’assistance utilisateur.",
+        href: "/agent/support",
+        link: "Ouvrir la page →",
+      },
+    ],
+    bottomTitle: "Pourquoi cette structure est importante",
+    bottomText:
+      "Au lieu de montrer une simple démo générique, tu peux envoyer tes clients directement vers la page agent qui correspond à leur besoin. Ton offre devient plus claire, plus premium et plus facile à vendre.",
   },
   en: {
-    brand: "Boost My Businesses AI",
-    subtitle: "Premium business assistant",
-    newChat: "New conversation",
-    heroTitle: "Ask your AI business assistant",
-    heroSub:
-      "A premium workspace to centralize your agents, test workflows, and showcase a real SaaS product.",
-    placeholder: "Type your message...",
-    send: "Send",
-    attachmentsSoon: "Attachments soon",
-    thinking: "The assistant is thinking...",
-    emptyState:
-      "Start a conversation, choose an agent, and send a request.",
-    suggestionsTitle: "Quick suggestions",
-    conversations: "Conversations",
-    noConversations: "No conversations yet",
-    agentLabel: "Agent",
-    languageLabel: "Language",
-    welcome:
-      "Welcome to Boost AI. Tell me what you want to automate.",
-    error:
-      "Connection error with the n8n agent. Check the webhook or workflow response.",
-    agents: {
-      general: "General Assistant",
-      seo: "SEO Agent",
-      social: "Social Media Agent",
-      prospecting: "Prospecting Agent",
-    },
-    prompts: {
-      general: [
-        "Build an automation plan for a small business",
-        "Summarize business tasks AI can handle",
-        "Give me a simple strategy to save time with AI",
-      ],
-      seo: [
-        "Give me 10 SEO blog ideas for an AI agency",
-        "Create a 30-day SEO content plan",
-        "Find SEO angles for a consulting website",
-      ],
-      social: [
-        "Give me 15 LinkedIn post ideas on automation",
-        "Create a 7-day content calendar",
-        "Write 5 TikTok hooks for an AI business",
-      ],
-      prospecting: [
-        "Write a cold outreach message for a marketing agency",
-        "Write 3 personalized prospecting messages",
-        "Create a simple follow-up sequence",
-      ],
-    },
+    badge: "Multi-Agent SaaS",
+    title: "One premium AI workspace. Multiple business agents.",
+    subtitle:
+      "Present your AI systems like a real SaaS product with a clean landing page, dedicated agent pages, and room for future monetization.",
+    primaryCta: "Try General Agent",
+    secondaryCta: "View Sales Agent",
+    agents: [
+      {
+        label: "Agent 01",
+        title: "General Assistant",
+        desc: "Your live n8n-connected assistant for real requests and workflow execution.",
+        href: "/agent/general",
+        link: "Open page →",
+      },
+      {
+        label: "Agent 02",
+        title: "Sales Agent",
+        desc: "Future dedicated page for sales workflows, prospect conversion and outbound messaging.",
+        href: "/agent/sales",
+        link: "Open page →",
+      },
+      {
+        label: "Agent 03",
+        title: "Support Agent",
+        desc: "Future dedicated page for customer support, FAQ automation and client assistance.",
+        href: "/agent/support",
+        link: "Open page →",
+      },
+    ],
+    bottomTitle: "Why this structure matters",
+    bottomText:
+      "Instead of showing one generic demo, you can send clients directly to the agent page that matches their need. That makes your offer clearer, more premium, and easier to sell.",
   },
 };
 
-export default function Page() {
+export default function LandingPage() {
   const [lang, setLang] = useState<Lang>("en");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<string>("");
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [typingPhase, setTypingPhase] = useState(0);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-
-  const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
-  const t = copy[lang];
 
   useEffect(() => {
-    const storedLang = localStorage.getItem(LANG_KEY) as Lang | null;
-    if (storedLang === "fr" || storedLang === "en") {
-      setLang(storedLang);
+    const saved = localStorage.getItem(LANG_KEY) as Lang | null;
+    if (saved === "fr" || saved === "en") {
+      setLang(saved);
     }
-
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Conversation[];
-        if (parsed.length) {
-          setConversations(parsed);
-          setActiveId(parsed[0].id);
-          return;
-        }
-      } catch {}
-    }
-
-    const first = createConversation("general", copy[storedLang === "fr" ? "fr" : "en"].welcome);
-    setConversations([first]);
-    setActiveId(first.id);
   }, []);
 
   useEffect(() => {
     localStorage.setItem(LANG_KEY, lang);
   }, [lang]);
 
-  useEffect(() => {
-    if (conversations.length) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    }
-  }, [conversations]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversations, activeId, loading]);
-
-  useEffect(() => {
-    if (!loading) return;
-    const id = window.setInterval(() => {
-      setTypingPhase((p) => (p + 1) % 4);
-    }, 350);
-    return () => window.clearInterval(id);
-  }, [loading]);
-
-  const activeConversation = useMemo(() => {
-    return conversations.find((c) => c.id === activeId) ?? null;
-  }, [conversations, activeId]);
-
-  function createConversation(agent: AgentKey, welcomeText: string): Conversation {
-    return {
-      id: uid(),
-      title: lang === "fr" ? "Nouvelle conversation" : "New conversation",
-      agent,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: [
-        {
-          id: uid(),
-          role: "assistant",
-          content: welcomeText,
-          createdAt: Date.now(),
-        },
-      ],
-    };
-  }
-
-  function handleNewConversation(agent?: AgentKey) {
-    const nextAgent = agent ?? activeConversation?.agent ?? "general";
-    const conv = createConversation(nextAgent, t.welcome);
-    setConversations((prev) => [conv, ...prev]);
-    setActiveId(conv.id);
-    setInput("");
-  }
-
-  function updateConversation(patch: Partial<Conversation>) {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === activeId ? { ...c, ...patch, updatedAt: Date.now() } : c))
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-    );
-  }
-
-  function updateMessages(messages: Message[]) {
-    updateConversation({
-      messages,
-      title:
-        messages.find((m) => m.role === "user")?.content.slice(0, 36) ||
-        (lang === "fr" ? "Nouvelle conversation" : "New conversation"),
-    });
-  }
-
-  function handleAgentChange(agent: AgentKey) {
-    if (!activeConversation) return;
-    updateConversation({ agent });
-  }
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!input.trim() || loading || !activeConversation) return;
-
-    const userText = input.trim();
-
-    const nextMessages = [
-      ...activeConversation.messages,
-      {
-        id: uid(),
-        role: "user" as const,
-        content: userText,
-        createdAt: Date.now(),
-      },
-    ];
-
-    updateMessages(nextMessages);
-    setInput("");
-    setLoading(true);
-
-    try {
-      const payload = {
-        message: userText,
-        agent: activeConversation.agent,
-        language: lang,
-        conversationId: activeConversation.id,
-      };
-
-      const res = await fetch(webhookUrl as string, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      const reply =
-        data.output ||
-        data.response ||
-        data.message ||
-        data.reply ||
-        data.text ||
-        (lang === "fr"
-          ? "Réponse reçue, mais aucun champ exploitable n’a été trouvé."
-          : "Response received, but no usable text field was found.");
-
-      const current = conversations.find((c) => c.id === activeId);
-      const safeBase = current?.messages ?? nextMessages;
-
-      updateMessages([
-        ...safeBase,
-        {
-          id: uid(),
-          role: "assistant",
-          content: String(reply),
-          createdAt: Date.now(),
-        },
-      ]);
-    } catch {
-      const current = conversations.find((c) => c.id === activeId);
-      const safeBase = current?.messages ?? nextMessages;
-
-      updateMessages([
-        ...safeBase,
-        {
-          id: uid(),
-          role: "assistant",
-          content: t.error,
-          createdAt: Date.now(),
-        },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function usePrompt(prompt: string) {
-    setInput(prompt);
-  }
-
-  function typingDots() {
-    return ".".repeat(typingPhase === 0 ? 1 : typingPhase);
-  }
+  const t = copy[lang];
 
   return (
-    <>
-      <div className="shell">
-        <aside className="sidebar">
-          <div className="sidebar-top">
-            <div className="brand">
-              <div className="brand-icon">AI</div>
-              <div>
-                <div className="brand-title">{t.brand}</div>
-                <div className="brand-subtitle">{t.subtitle}</div>
-              </div>
-            </div>
-
-            <button className="new-chat-btn" onClick={() => handleNewConversation()}>
-              <span>＋</span>
-              {t.newChat}
-            </button>
-
-            <div className="control-card">
-              <div className="control-label">{t.languageLabel}</div>
-              <div className="segmented">
-                <button
-                  className={lang === "fr" ? "segmented-btn active" : "segmented-btn"}
-                  onClick={() => setLang("fr")}
-                >
-                  FR
-                </button>
-                <button
-                  className={lang === "en" ? "segmented-btn active" : "segmented-btn"}
-                  onClick={() => setLang("en")}
-                >
-                  EN
-                </button>
-              </div>
-            </div>
-
-            <div className="control-card">
-              <div className="control-label">{t.agentLabel}</div>
-              <select
-                className="agent-select"
-                value={activeConversation?.agent ?? "general"}
-                onChange={(e) => handleAgentChange(e.target.value as AgentKey)}
-              >
-                <option value="general">{t.agents.general}</option>
-                <option value="seo">{t.agents.seo}</option>
-                <option value="social">{t.agents.social}</option>
-                <option value="prospecting">{t.agents.prospecting}</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="sidebar-section">
-            <div className="section-title">{t.conversations}</div>
-
-            <div className="conversation-list">
-              {conversations.length === 0 ? (
-                <div className="empty-sidebar">{t.noConversations}</div>
-              ) : (
-                conversations.map((conv) => (
-                  <button
-                    key={conv.id}
-                    className={conv.id === activeId ? "conversation-item active" : "conversation-item"}
-                    onClick={() => setActiveId(conv.id)}
-                  >
-                    <div className="conversation-top">
-                      <span className="conversation-agent">
-                        {t.agents[conv.agent]}
-                      </span>
-                    </div>
-                    <div className="conversation-title">{conv.title}</div>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </aside>
-
-        <main className="main">
-          <div className="hero">
-            <div className="hero-badge">Premium AI Workspace</div>
-            <h1>{t.heroTitle}</h1>
-            <p>{t.heroSub}</p>
-          </div>
-
-          <div className="suggestions-wrap">
-            <div className="suggestions-title">{t.suggestionsTitle}</div>
-            <div className="suggestions-grid">
-              {t.prompts[activeConversation?.agent ?? "general"].map((prompt) => (
-                <button
-                  key={prompt}
-                  className="suggestion-card"
-                  onClick={() => usePrompt(prompt)}
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <section className="chat-panel">
-            <div className="messages">
-              {!activeConversation || activeConversation.messages.length === 0 ? (
-                <div className="empty-state">{t.emptyState}</div>
-              ) : (
-                activeConversation.messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={msg.role === "user" ? "message-row user" : "message-row assistant"}
-                  >
-                    <div className={msg.role === "user" ? "bubble user" : "bubble assistant"}>
-                      {msg.content}
-                    </div>
-                  </div>
-                ))
-              )}
-
-              {loading && (
-                <div className="message-row assistant">
-                  <div className="bubble assistant typing">
-                    {t.thinking}
-                    {typingDots()}
-                  </div>
-                </div>
-              )}
-
-              <div ref={bottomRef} />
-            </div>
-
-            <form className="composer" onSubmit={handleSubmit}>
-              <button
-                type="button"
-                className="ghost-btn"
-                title={t.attachmentsSoon}
-                disabled
-              >
-                ＋
-              </button>
-
-              <input
-                className="composer-input"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={t.placeholder}
-              />
-
-              <button type="submit" className="send-btn" disabled={loading}>
-                {t.send}
-              </button>
-            </form>
-          </section>
-        </main>
+    <main className="landing-page">
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            width: 140,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setLang("fr")}
+            style={{
+              height: 42,
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background:
+                lang === "fr"
+                  ? "rgba(124, 92, 255, 0.18)"
+                  : "rgba(255,255,255,0.04)",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            FR
+          </button>
+          <button
+            type="button"
+            onClick={() => setLang("en")}
+            style={{
+              height: 42,
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background:
+                lang === "en"
+                  ? "rgba(124, 92, 255, 0.18)"
+                  : "rgba(255,255,255,0.04)",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            EN
+          </button>
+        </div>
       </div>
 
-      <style jsx global>{`
-        * {
-          box-sizing: border-box;
-        }
+      <section className="landing-hero">
+        <div className="hero-badge">{t.badge}</div>
+        <h1>{t.title}</h1>
+        <p>{t.subtitle}</p>
 
-        html,
-        body {
-          margin: 0;
-          padding: 0;
-          background:
-            radial-gradient(circle at top left, rgba(124, 92, 255, 0.12), transparent 24%),
-            radial-gradient(circle at top right, rgba(58, 143, 255, 0.1), transparent 18%),
-            linear-gradient(180deg, #07101f 0%, #081226 100%);
-          color: #eef2ff;
-          font-family:
-            Inter,
-            ui-sans-serif,
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-        }
+        <div className="landing-actions">
+          <Link href="/agent/general" className="primary-btn">
+            {t.primaryCta}
+          </Link>
 
-        button,
-        input,
-        select {
-          font: inherit;
-        }
+          <Link href="/agent/sales" className="secondary-btn">
+            {t.secondaryCta}
+          </Link>
+        </div>
+      </section>
 
-        .shell {
-          display: grid;
-          grid-template-columns: 320px 1fr;
-          min-height: 100vh;
-        }
+      <section className="landing-grid">
+        {t.agents.map((agent) => (
+          <div key={agent.title} className="landing-card">
+            <div className="card-label">{agent.label}</div>
+            <h3>{agent.title}</h3>
+            <p>{agent.desc}</p>
+            <Link href={agent.href} className="text-link">
+              {agent.link}
+            </Link>
+          </div>
+        ))}
+      </section>
 
-        .sidebar {
-          padding: 18px;
-          border-right: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(7, 13, 28, 0.72);
-          backdrop-filter: blur(22px);
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-
-        .sidebar-top {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .brand {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 14px;
-          border-radius: 18px;
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-        }
-
-        .brand-icon {
-          width: 42px;
-          height: 42px;
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          background: linear-gradient(135deg, #7c5cff, #4ea1ff);
-          color: white;
-          box-shadow: 0 10px 24px rgba(124, 92, 255, 0.28);
-        }
-
-        .brand-title {
-          font-weight: 700;
-          font-size: 15px;
-          letter-spacing: -0.02em;
-        }
-
-        .brand-subtitle {
-          color: #93a3c7;
-          font-size: 12px;
-          margin-top: 2px;
-        }
-
-        .new-chat-btn {
-          border: none;
-          cursor: pointer;
-          border-radius: 16px;
-          padding: 13px 14px;
-          color: white;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          justify-content: center;
-          font-weight: 600;
-          background: linear-gradient(135deg, #7c5cff, #4ea1ff);
-          box-shadow: 0 14px 30px rgba(89, 90, 255, 0.22);
-        }
-
-        .control-card {
-          border-radius: 18px;
-          padding: 14px;
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(255, 255, 255, 0.07);
-        }
-
-        .control-label {
-          color: #95a4c7;
-          font-size: 12px;
-          margin-bottom: 10px;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-        }
-
-        .segmented {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
-
-        .segmented-btn {
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.03);
-          color: #dfe7ff;
-          border-radius: 12px;
-          padding: 10px 0;
-          cursor: pointer;
-        }
-
-        .segmented-btn.active {
-          background: rgba(124, 92, 255, 0.18);
-          border-color: rgba(124, 92, 255, 0.35);
-          color: white;
-        }
-
-        .agent-select {
-          width: 100%;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.03);
-          color: white;
-          border-radius: 12px;
-          padding: 12px;
-          outline: none;
-        }
-
-        .sidebar-section {
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          flex: 1;
-        }
-
-        .section-title {
-          color: #cfd8f5;
-          font-size: 13px;
-          font-weight: 600;
-          padding: 0 4px;
-        }
-
-        .conversation-list {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          overflow-y: auto;
-          padding-right: 2px;
-        }
-
-        .conversation-item {
-          text-align: left;
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          background: rgba(255, 255, 255, 0.03);
-          border-radius: 16px;
-          padding: 12px;
-          color: white;
-          cursor: pointer;
-          transition: all 0.18s ease;
-        }
-
-        .conversation-item:hover {
-          background: rgba(255, 255, 255, 0.05);
-          transform: translateY(-1px);
-        }
-
-        .conversation-item.active {
-          background: rgba(124, 92, 255, 0.12);
-          border-color: rgba(124, 92, 255, 0.28);
-          box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.08);
-        }
-
-        .conversation-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 8px;
-        }
-
-        .conversation-agent {
-          font-size: 11px;
-          color: #9fb1da;
-          text-transform: uppercase;
-          letter-spacing: 0.07em;
-        }
-
-        .conversation-title {
-          font-size: 14px;
-          line-height: 1.35;
-          color: #f1f5ff;
-        }
-
-        .empty-sidebar {
-          color: #8193b9;
-          font-size: 13px;
-          padding: 12px 4px;
-        }
-
-        .main {
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-          padding: 28px;
-          gap: 20px;
-        }
-
-        .hero {
-          max-width: 860px;
-          margin: 0 auto;
-          width: 100%;
-        }
-
-        .hero-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          color: #cad5f8;
-          font-size: 12px;
-          margin-bottom: 14px;
-        }
-
-        .hero h1 {
-          margin: 0;
-          font-size: clamp(30px, 4vw, 44px);
-          line-height: 1.02;
-          letter-spacing: -0.04em;
-        }
-
-        .hero p {
-          margin: 14px 0 0;
-          color: #99a9cd;
-          font-size: 16px;
-          line-height: 1.7;
-          max-width: 780px;
-        }
-
-        .suggestions-wrap {
-          max-width: 860px;
-          margin: 0 auto;
-          width: 100%;
-        }
-
-        .suggestions-title {
-          color: #cfd8f5;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 10px;
-        }
-
-        .suggestions-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 12px;
-        }
-
-        .suggestion-card {
-          text-align: left;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.04);
-          color: #edf2ff;
-          border-radius: 18px;
-          padding: 14px 14px;
-          cursor: pointer;
-          line-height: 1.45;
-          transition: all 0.18s ease;
-          min-height: 78px;
-        }
-
-        .suggestion-card:hover {
-          background: rgba(255, 255, 255, 0.06);
-          border-color: rgba(124, 92, 255, 0.24);
-          transform: translateY(-1px);
-        }
-
-        .chat-panel {
-          max-width: 860px;
-          margin: 0 auto;
-          width: 100%;
-          flex: 1;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          border-radius: 28px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.04);
-          backdrop-filter: blur(18px);
-          box-shadow:
-            0 20px 60px rgba(0, 0, 0, 0.25),
-            inset 0 1px 0 rgba(255, 255, 255, 0.04);
-          overflow: hidden;
-        }
-
-        .messages {
-          flex: 1;
-          min-height: 420px;
-          max-height: calc(100vh - 360px);
-          overflow-y: auto;
-          padding: 22px;
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
-
-        .message-row {
-          display: flex;
-          animation: fadeUp 0.22s ease;
-        }
-
-        .message-row.user {
-          justify-content: flex-end;
-        }
-
-        .message-row.assistant {
-          justify-content: flex-start;
-        }
-
-        .bubble {
-          max-width: 78%;
-          padding: 14px 16px;
-          border-radius: 18px;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
-        }
-
-        .bubble.user {
-          background: linear-gradient(135deg, #7c5cff, #4ea1ff);
-          color: white;
-          border-bottom-right-radius: 6px;
-        }
-
-        .bubble.assistant {
-          background: rgba(255, 255, 255, 0.92);
-          color: #101827;
-          border-bottom-left-radius: 6px;
-        }
-
-        .bubble.typing {
-          min-width: 180px;
-        }
-
-        .composer {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 16px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(7, 12, 24, 0.75);
-          backdrop-filter: blur(18px);
-          position: sticky;
-          bottom: 0;
-        }
-
-        .ghost-btn {
-          width: 48px;
-          height: 48px;
-          border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.04);
-          color: #9fb1da;
-          cursor: not-allowed;
-          flex-shrink: 0;
-        }
-
-        .composer-input {
-          flex: 1;
-          min-width: 0;
-          height: 52px;
-          border-radius: 16px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.05);
-          color: white;
-          padding: 0 16px;
-          outline: none;
-        }
-
-        .composer-input::placeholder {
-          color: #8293ba;
-        }
-
-        .send-btn {
-          height: 52px;
-          border: none;
-          border-radius: 16px;
-          padding: 0 18px;
-          background: linear-gradient(135deg, #7c5cff, #4ea1ff);
-          color: white;
-          font-weight: 700;
-          cursor: pointer;
-          box-shadow: 0 12px 30px rgba(89, 90, 255, 0.24);
-        }
-
-        .send-btn:disabled {
-          opacity: 0.6;
-          cursor: default;
-        }
-
-        .empty-state {
-          color: #97a8cf;
-          padding: 24px 4px;
-        }
-
-        @keyframes fadeUp {
-          from {
-            opacity: 0;
-            transform: translateY(6px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @media (max-width: 1100px) {
-          .shell {
-            grid-template-columns: 1fr;
-          }
-
-          .sidebar {
-            border-right: none;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          }
-
-          .suggestions-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .messages {
-            max-height: none;
-          }
-        }
-
-        @media (max-width: 720px) {
-          .main {
-            padding: 16px;
-          }
-
-          .sidebar {
-            padding: 14px;
-          }
-
-          .bubble {
-            max-width: 92%;
-          }
-
-          .composer {
-            padding: 12px;
-          }
-
-          .hero h1 {
-            font-size: 28px;
-          }
-        }
-      `}</style>
-    </>
+      <section className="landing-bottom">
+        <div className="landing-bottom-card">
+          <h2>{t.bottomTitle}</h2>
+          <p>{t.bottomText}</p>
+        </div>
+      </section>
+    </main>
   );
 }
