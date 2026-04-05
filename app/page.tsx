@@ -10,71 +10,183 @@ const LANG_KEY = "boost_ai_landing_lang_v1";
 const copy = {
   fr: {
     badge: "SaaS Multi-Agents",
-    title: "Un espace IA premium. Plusieurs agents business.",
+    title: "Des agents IA qui font gagner du temps, capturent plus de leads et convertissent mieux.",
     subtitle:
-      "Présente tes systèmes IA comme un vrai produit SaaS avec une landing page propre, des pages agents dédiées et de la place pour une future monétisation.",
-    primaryCta: "Tester l'agent général",
-    secondaryCta: "Voir l'agent Sales",
+      "Automatise tes ventes, ton support et ta génération de leads avec des systèmes IA qui répondent 24h/24, qualifient les prospects, prennent des rendez-vous et réduisent la charge de ton équipe.",
+    primaryCta: "Découvrir l'Assistant Personnel",
+    secondaryCta: "Découvrir le système WhatsApp IA",
+    proof: [
+      "Réponses instantanées 24/7",
+      "Moins de charge manuelle",
+      "Plus de leads traités sans recruter",
+    ],
+    agentsTitle: "Des systèmes conçus pour des résultats business",
     agents: [
       {
         label: "Agent 01",
-        title: "Assistant général",
-        desc: "Ton assistant connecté à n8n pour traiter de vraies demandes et exécuter des workflows.",
+        title: "Assistant Personnel IA",
+        desc: "Centralise les demandes, exécute des actions, aide à traiter les tâches répétitives et fluidifie les opérations du quotidien.",
+        result: "Gagne du temps et automatise les opérations à faible valeur.",
         href: "/agent/general",
         link: "Ouvrir la page →",
       },
       {
         label: "Agent 02",
-        title: "Agent Sales",
-        desc: "Future page dédiée aux workflows de vente, à la conversion de prospects et à la prospection outbound.",
-        href: "/agent/sales",
+        title: "AI WhatsApp Lead Handling System",
+        desc: "Répond instantanément aux leads WhatsApp, détecte l’intention, pousse à la réservation, transfère à un humain si nécessaire et gère les urgences.",
+        result: "Capture plus de leads et augmente la conversion sans ralentir l’équipe.",
+        href: "/agent/whatsapp-lead-system",
         link: "Ouvrir la page →",
       },
       {
         label: "Agent 03",
-        title: "Agent Support",
-        desc: "Future page dédiée au support client, à l’automatisation de FAQ et à l’assistance utilisateur.",
+        title: "Agent Support IA",
+        desc: "Gère les demandes fréquentes, automatise les FAQ et absorbe une partie du support avant intervention humaine.",
+        result: "Réduit la charge support et améliore le temps de réponse client.",
         href: "/agent/support",
         link: "Ouvrir la page →",
+      },
+    ],
+    useCasesTitle: "Cas d’usage",
+    useCasesText:
+      "Ces systèmes peuvent être adaptés à plusieurs activités qui ont besoin de répondre vite, qualifier des demandes et automatiser une partie du suivi.",
+    useCases: [
+      "Cliniques et cabinets médicaux",
+      "Dentistes et opticiens",
+      "Agences et consultants",
+      "Centres de formation",
+      "Beauty, spa, salons",
+      "Immobilier et services locaux",
+    ],
+    pricingTitle: "Offres",
+    pricingText:
+      "Une manière simple de présenter tes automatisations comme des offres concrètes et vendables.",
+    pricing: [
+      {
+        name: "Starter",
+        price: "À partir de 299€",
+        description: "Une automatisation ciblée pour un besoin précis.",
+        bullets: [
+          "1 système IA",
+          "1 cas d’usage principal",
+          "Setup de base",
+        ],
+      },
+      {
+        name: "Growth",
+        price: "À partir de 799€",
+        description: "Plus de logique, plus d’intégrations, plus d’impact business.",
+        bullets: [
+          "1 à 2 systèmes IA",
+          "Connexions outils métier",
+          "Optimisé pour conversion / gain de temps",
+        ],
+        featured: true,
+      },
+      {
+        name: "Custom",
+        price: "Sur devis",
+        description: "Architecture sur mesure pour besoin plus avancé.",
+        bullets: [
+          "Multi-flows",
+          "Automatisations métier",
+          "Support et évolution possibles",
+        ],
       },
     ],
     bottomTitle: "Pourquoi cette structure est importante",
     bottomText:
-      "Au lieu de montrer une simple démo générique, tu peux envoyer tes clients directement vers la page agent qui correspond à leur besoin. Ton offre devient plus claire, plus premium et plus facile à vendre.",
+      "Au lieu de montrer une simple démo générique, tu peux envoyer tes clients directement vers la page qui correspond à leur besoin. Ton offre devient plus claire, plus premium et plus facile à vendre.",
   },
   en: {
     badge: "Multi-Agent SaaS",
-    title: "One premium AI workspace. Multiple business agents.",
+    title: "AI agents that save time, capture more leads, and help businesses convert faster.",
     subtitle:
-      "Present your AI systems like a real SaaS product with a clean landing page, dedicated agent pages, and room for future monetization.",
-    primaryCta: "Try General Agent",
-    secondaryCta: "View Sales Agent",
+      "Automate sales, support, and lead generation with AI systems that reply 24/7, qualify prospects, book appointments, and reduce team workload.",
+    primaryCta: "Explore Personal Assistant",
+    secondaryCta: "Explore WhatsApp AI System",
+    proof: [
+      "Instant replies 24/7",
+      "Less manual workload",
+      "More leads handled without hiring",
+    ],
+    agentsTitle: "Systems designed for business outcomes",
     agents: [
       {
         label: "Agent 01",
-        title: "General Assistant",
-        desc: "Your live n8n-connected assistant for real requests and workflow execution.",
+        title: "AI Personal Assistant",
+        desc: "Centralizes requests, executes actions, helps with repetitive tasks, and streamlines day-to-day operations.",
+        result: "Save time and automate low-value operations.",
         href: "/agent/general",
         link: "Open page →",
       },
       {
         label: "Agent 02",
-        title: "Sales Agent",
-        desc: "Future dedicated page for sales workflows, prospect conversion and outbound messaging.",
-        href: "/agent/sales",
+        title: "AI WhatsApp Lead Handling System",
+        desc: "Replies instantly to WhatsApp leads, detects intent, pushes booking, hands off to human staff when needed, and handles urgent cases.",
+        result: "Capture more leads and improve conversion without slowing down your team.",
+        href: "/agent/whatsapp-lead-system",
         link: "Open page →",
       },
       {
         label: "Agent 03",
-        title: "Support Agent",
-        desc: "Future dedicated page for customer support, FAQ automation and client assistance.",
+        title: "AI Support Agent",
+        desc: "Handles common support requests, automates FAQs, and absorbs part of the support load before human intervention.",
+        result: "Reduce support workload and improve response time.",
         href: "/agent/support",
         link: "Open page →",
       },
     ],
+    useCasesTitle: "Use cases",
+    useCasesText:
+      "These systems can be adapted to businesses that need fast replies, lead qualification, and structured automation.",
+    useCases: [
+      "Clinics and medical practices",
+      "Dentists and opticians",
+      "Agencies and consultants",
+      "Training centers",
+      "Beauty, spa, salons",
+      "Real estate and local services",
+    ],
+    pricingTitle: "Pricing",
+    pricingText:
+      "A simple way to present your automations as real offers clients can understand and buy.",
+    pricing: [
+      {
+        name: "Starter",
+        price: "From €299",
+        description: "One focused automation for one clear business need.",
+        bullets: [
+          "1 AI system",
+          "1 main use case",
+          "Basic setup",
+        ],
+      },
+      {
+        name: "Growth",
+        price: "From €799",
+        description: "More logic, more integrations, more business impact.",
+        bullets: [
+          "1 to 2 AI systems",
+          "Business tool integrations",
+          "Optimized for conversion / time savings",
+        ],
+        featured: true,
+      },
+      {
+        name: "Custom",
+        price: "Custom quote",
+        description: "Tailored architecture for more advanced workflows.",
+        bullets: [
+          "Multi-flow setup",
+          "Business automation logic",
+          "Support and evolution options",
+        ],
+      },
+    ],
     bottomTitle: "Why this structure matters",
     bottomText:
-      "Instead of showing one generic demo, you can send clients directly to the agent page that matches their need. That makes your offer clearer, more premium, and easier to sell.",
+      "Instead of showing one generic demo, you can send clients directly to the page that matches their need. That makes your offer clearer, more premium, and easier to sell.",
   },
 };
 
@@ -153,15 +265,57 @@ export default function LandingPage() {
         <h1>{t.title}</h1>
         <p>{t.subtitle}</p>
 
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            marginTop: 18,
+            marginBottom: 6,
+          }}
+        >
+          {t.proof.map((item) => (
+            <span
+              key={item}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.82)",
+                fontSize: 13,
+              }}
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+
         <div className="landing-actions">
           <Link href="/agent/general" className="primary-btn">
             {t.primaryCta}
           </Link>
 
-          <Link href="/agent/sales" className="secondary-btn">
+          <Link
+            href="/agent/whatsapp-lead-system"
+            className="secondary-btn"
+          >
             {t.secondaryCta}
           </Link>
         </div>
+      </section>
+
+      <section style={{ marginTop: 24, marginBottom: 14 }}>
+        <h2
+          style={{
+            fontSize: "1.7rem",
+            fontWeight: 700,
+            color: "white",
+            marginBottom: 10,
+          }}
+        >
+          {t.agentsTitle}
+        </h2>
       </section>
 
       <section className="landing-grid">
@@ -170,6 +324,25 @@ export default function LandingPage() {
             <div className="card-label">{agent.label}</div>
             <h3>{agent.title}</h3>
             <p>{agent.desc}</p>
+
+            <div
+              style={{
+                marginTop: 14,
+                padding: "12px 14px",
+                borderRadius: 14,
+                background: "rgba(124, 92, 255, 0.08)",
+                border: "1px solid rgba(124, 92, 255, 0.14)",
+                color: "rgba(255,255,255,0.88)",
+                fontSize: 14,
+                lineHeight: 1.55,
+              }}
+            >
+              <strong style={{ color: "white" }}>
+                {lang === "fr" ? "Résultat :" : "Outcome:"}
+              </strong>{" "}
+              {agent.result}
+            </div>
+
             <Link href={agent.href} className="text-link">
               {agent.link}
             </Link>
@@ -177,7 +350,114 @@ export default function LandingPage() {
         ))}
       </section>
 
-      <section className="landing-bottom">
+      <section className="landing-bottom" style={{ marginTop: 26 }}>
+        <div className="landing-bottom-card">
+          <h2>{t.useCasesTitle}</h2>
+          <p style={{ marginBottom: 18 }}>{t.useCasesText}</p>
+
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+            }}
+          >
+            {t.useCases.map((item) => (
+              <span
+                key={item}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.82)",
+                  fontSize: 14,
+                }}
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-bottom" style={{ marginTop: 22 }}>
+        <div className="landing-bottom-card">
+          <h2>{t.pricingTitle}</h2>
+          <p style={{ marginBottom: 24 }}>{t.pricingText}</p>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 18,
+            }}
+          >
+            {t.pricing.map((plan) => (
+              <div
+                key={plan.name}
+                style={{
+                  borderRadius: 24,
+                  padding: 22,
+                  background: plan.featured
+                    ? "linear-gradient(180deg, rgba(124,92,255,0.16), rgba(255,255,255,0.04))"
+                    : "rgba(255,255,255,0.03)",
+                  border: plan.featured
+                    ? "1px solid rgba(124,92,255,0.28)"
+                    : "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "rgba(255,255,255,0.62)",
+                    marginBottom: 6,
+                  }}
+                >
+                  {plan.name}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "1.8rem",
+                    fontWeight: 800,
+                    color: "white",
+                    marginBottom: 10,
+                  }}
+                >
+                  {plan.price}
+                </div>
+
+                <p
+                  style={{
+                    color: "rgba(255,255,255,0.72)",
+                    lineHeight: 1.6,
+                    marginBottom: 14,
+                  }}
+                >
+                  {plan.description}
+                </p>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {plan.bullets.map((bullet) => (
+                    <div
+                      key={bullet}
+                      style={{
+                        color: "rgba(255,255,255,0.82)",
+                        fontSize: 14,
+                      }}
+                    >
+                      • {bullet}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-bottom" style={{ marginTop: 22 }}>
         <div className="landing-bottom-card">
           <h2>{t.bottomTitle}</h2>
           <p>{t.bottomText}</p>
