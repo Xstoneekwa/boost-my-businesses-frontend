@@ -556,6 +556,24 @@ export default function UGCAdsEnginePage() {
     return () => window.clearInterval(id);
   }, [loading, mounted]);
 
+  useEffect(() => {
+    function handlePostMessage(event: MessageEvent) {
+      if (event.data?.type !== "ugc_modify_submitted") return;
+      const feedbackPrompt = event.data.feedback_prompt ?? "";
+      const content =
+        lang === "fr"
+          ? `✏️ Modification reçue : "${feedbackPrompt}". Le système régénère votre visuel...`
+          : `✏️ Modification received: "${feedbackPrompt}". The system is regenerating your visual...`;
+      setMessages((prev) => [
+        ...prev,
+        { id: uid(), role: "assistant", content, createdAt: Date.now() },
+      ]);
+    }
+
+    window.addEventListener("message", handlePostMessage);
+    return () => window.removeEventListener("message", handlePostMessage);
+  }, [lang]);
+
   const demoImages = useMemo(
     () => [
       {
