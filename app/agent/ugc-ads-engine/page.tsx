@@ -491,6 +491,7 @@ export default function UGCAdsEnginePage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pollingRef = useRef<number | null>(null);
+  const pollingJobsRef = useRef<Set<string>>(new Set());
   const webhookUrl = "/api/ugc-start";
   const t = copy[lang];
 
@@ -572,9 +573,11 @@ export default function UGCAdsEnginePage() {
       ]);
 
       if (!jobId) return;
+      if (pollingJobsRef.current.has(jobId)) return;
 
       if (pollingRef.current) window.clearInterval(pollingRef.current);
 
+      pollingJobsRef.current.add(jobId);
       let attempts = 0;
       const MAX_ATTEMPTS = 20;
 
@@ -591,6 +594,7 @@ export default function UGCAdsEnginePage() {
           if (data.status === "preview_ready" && previewSrc) {
             window.clearInterval(pollingRef.current!);
             pollingRef.current = null;
+            pollingJobsRef.current.delete(jobId);
             setMessages((prev) => [
               ...prev,
               {
@@ -619,6 +623,7 @@ export default function UGCAdsEnginePage() {
         } catch {
           window.clearInterval(pollingRef.current!);
           pollingRef.current = null;
+          pollingJobsRef.current.delete(jobId);
           setMessages((prev) => [
             ...prev,
             {
@@ -637,6 +642,7 @@ export default function UGCAdsEnginePage() {
         if (attempts >= MAX_ATTEMPTS) {
           window.clearInterval(pollingRef.current!);
           pollingRef.current = null;
+          pollingJobsRef.current.delete(jobId);
           setMessages((prev) => [
             ...prev,
             {
