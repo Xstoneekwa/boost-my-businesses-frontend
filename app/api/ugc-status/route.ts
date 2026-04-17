@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabase();
 
     const { data, error } = await supabase
-      .from("job_master")
+      .from("ugc_jobs")
       .select("*")
       .eq("job_id", jobId)
       .single();
@@ -36,7 +36,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    const BASE = "https://app.boostmybusinesses.com/webhook/ugc-feedback-link";
+
+    return NextResponse.json({
+      ...data,
+      status: data.status,
+      current_step: data.current_step,
+      image_url: data.image_url,
+      storage_path: data.storage_path,
+      approve_url: `${BASE}?job_id=${data.job_id}&action=approve`,
+      modify_url: `${BASE}?job_id=${data.job_id}&action=modify`,
+    });
   } catch (err) {
     return NextResponse.json(
       {
