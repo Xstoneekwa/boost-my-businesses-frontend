@@ -490,6 +490,7 @@ export default function UGCAdsEnginePage() {
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pollingRef = useRef<number | null>(null);
   const webhookUrl = "/api/ugc-start";
   const t = copy[lang];
 
@@ -560,6 +561,7 @@ export default function UGCAdsEnginePage() {
     function handlePostMessage(event: MessageEvent) {
       if (event.data?.type !== "ugc_modify_submitted") return;
       const feedbackPrompt = event.data.feedback_prompt ?? "";
+      const jobId: string = event.data.job_id ?? "";
       const content =
         lang === "fr"
           ? `✏️ Modification reçue : "${feedbackPrompt}". Le système régénère votre visuel...`
@@ -568,10 +570,97 @@ export default function UGCAdsEnginePage() {
         ...prev,
         { id: uid(), role: "assistant", content, createdAt: Date.now() },
       ]);
+
+      if (!jobId) return;
+
+      if (pollingRef.current) window.clearInterval(pollingRef.current);
+
+      let attempts = 0;
+      const MAX_ATTEMPTS = 20;
+
+      pollingRef.current = window.setInterval(async () => {
+        attempts += 1;
+
+        try {
+          const res = await fetch(
+            `/api/ugc-status?job_id=${encodeURIComponent(jobId)}`
+          );
+          const data = await res.json();
+          const previewSrc = buildPreviewSrc(data);
+
+          if (data.status === "preview_ready" && previewSrc) {
+            window.clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: "assistant",
+                content:
+                  data.reply ||
+                  data.message ||
+                  data.text ||
+                  copy[lang].previewLabel,
+                createdAt: Date.now(),
+                previewImageUrl: previewSrc,
+                storagePath: data.storage_path ?? null,
+                fileName: data.file_name ?? null,
+                previewCreatedAt:
+                  data.preview_created_at ??
+                  data.created_at ??
+                  new Date().toISOString(),
+                actionType: "preview_actions",
+                approveUrl: data.approve_url ?? null,
+                modifyUrl: data.modify_url ?? null,
+              },
+            ]);
+            return;
+          }
+        } catch {
+          window.clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: "assistant",
+              content:
+                lang === "fr"
+                  ? "Erreur lors de la vérification du statut. Veuillez réessayer."
+                  : "Error checking the generation status. Please try again.",
+              createdAt: Date.now(),
+            },
+          ]);
+          return;
+        }
+
+        if (attempts >= MAX_ATTEMPTS) {
+          window.clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: "assistant",
+              content:
+                lang === "fr"
+                  ? "Le visuel n'a pas été prêt dans le délai imparti. Veuillez réessayer."
+                  : "The visual was not ready in time. Please try again.",
+              createdAt: Date.now(),
+            },
+          ]);
+        }
+      }, 3000);
     }
 
     window.addEventListener("message", handlePostMessage);
-    return () => window.removeEventListener("message", handlePostMessage);
+    return () => {
+      window.removeEventListener("message", handlePostMessage);
+      if (pollingRef.current) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
   }, [lang]);
 
   const demoImages = useMemo(
