@@ -14,7 +14,7 @@ const copy = {
     subtitle:
       "Automatise tes ventes, ton support et ta génération de leads avec des systèmes IA qui répondent 24h/24, qualifient les prospects, prennent des rendez-vous et réduisent la charge de ton équipe.",
     primaryCta: "Découvrir l'Assistant Personnel",
-    secondaryCta: "Découvrir le système WhatsApp IA",
+    secondaryCta: "Découvrir UGC Ads Engine",
     proof: [
       "Réponses instantanées 24/7",
       "Moins de charge manuelle",
@@ -40,6 +40,14 @@ const copy = {
       },
       {
         label: "Agent 03",
+        title: "UGC Ads Engine",
+        desc: "Transforme une simple idée ou image en vidéo UGC structurée avec script, hook, narration, direction vidéo, contrôle qualité et logique de fallback.",
+        result: "Produit plus vite du contenu marketing prêt à publier et pensé pour convertir.",
+        href: "/agent/ugc-ads-engine",
+        link: "Ouvrir la page →",
+      },
+      {
+        label: "Agent 04",
         title: "Agent Support IA",
         desc: "Gère les demandes fréquentes, automatise les FAQ et absorbe une partie du support avant intervention humaine.",
         result: "Réduit la charge support et améliore le temps de réponse client.",
@@ -49,7 +57,7 @@ const copy = {
     ],
     useCasesTitle: "Cas d’usage",
     useCasesText:
-      "Ces systèmes peuvent être adaptés à plusieurs activités qui ont besoin de répondre vite, qualifier des demandes et automatiser une partie du suivi.",
+      "Ces systèmes peuvent être adaptés à plusieurs activités qui ont besoin de répondre vite, qualifier des demandes, automatiser une partie du suivi ou produire du contenu marketing plus rapidement.",
     useCases: [
       "Cliniques et cabinets médicaux",
       "Dentistes et opticiens",
@@ -57,6 +65,8 @@ const copy = {
       "Centres de formation",
       "Beauty, spa, salons",
       "Immobilier et services locaux",
+      "E-commerce et marques DTC",
+      "Créateurs et agences ads",
     ],
     pricingTitle: "Offres",
     pricingText:
@@ -104,7 +114,7 @@ const copy = {
     subtitle:
       "Automate sales, support, and lead generation with AI systems that reply 24/7, qualify prospects, book appointments, and reduce team workload.",
     primaryCta: "Explore Personal Assistant",
-    secondaryCta: "Explore WhatsApp AI System",
+    secondaryCta: "Explore UGC Ads Engine",
     proof: [
       "Instant replies 24/7",
       "Less manual workload",
@@ -130,6 +140,14 @@ const copy = {
       },
       {
         label: "Agent 03",
+        title: "UGC Ads Engine",
+        desc: "Turns a simple idea or image into a structured UGC video with script, hook, narrative flow, video direction, quality control, and fallback logic.",
+        result: "Produce ready-to-publish marketing content faster and with more consistency.",
+        href: "/agent/ugc-ads-engine",
+        link: "Open page →",
+      },
+      {
+        label: "Agent 04",
         title: "AI Support Agent",
         desc: "Handles common support requests, automates FAQs, and absorbs part of the support load before human intervention.",
         result: "Reduce support workload and improve response time.",
@@ -139,7 +157,7 @@ const copy = {
     ],
     useCasesTitle: "Use cases",
     useCasesText:
-      "These systems can be adapted to businesses that need fast replies, lead qualification, and structured automation.",
+      "These systems can be adapted to businesses that need fast replies, lead qualification, structured automation, or faster marketing content production.",
     useCases: [
       "Clinics and medical practices",
       "Dentists and opticians",
@@ -147,6 +165,8 @@ const copy = {
       "Training centers",
       "Beauty, spa, salons",
       "Real estate and local services",
+      "E-commerce and DTC brands",
+      "Creators and ad agencies",
     ],
     pricingTitle: "Pricing",
     pricingText:
@@ -296,10 +316,7 @@ export default function LandingPage() {
             {t.primaryCta}
           </Link>
 
-          <Link
-            href="/agent/whatsapp-lead-system"
-            className="secondary-btn"
-          >
+          <Link href="/agent/ugc-ads-engine" className="secondary-btn">
             {t.secondaryCta}
           </Link>
         </div>
@@ -318,7 +335,12 @@ export default function LandingPage() {
         </h2>
       </section>
 
-      <section className="landing-grid">
+      <section
+        className="landing-grid"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+        }}
+      >
         {t.agents.map((agent) => (
           <div key={agent.title} className="landing-card">
             <div className="card-label">{agent.label}</div>
