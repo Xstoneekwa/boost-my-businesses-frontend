@@ -1389,10 +1389,31 @@ export default function UGCAdsEnginePage() {
                                   autoPlay
                                   className="w-full rounded-xl"
                                 />
-                                {msg.title ? (
-                                  <p className="mt-3 text-sm font-semibold text-white">
-                                    {msg.title}
-                                  </p>
+                                {(msg.title || msg.description || msg.hashtags?.length) ? (
+                                  <div className="mt-3 space-y-2 px-1">
+                                    {msg.title ? (
+                                      <h3 className="text-sm font-semibold text-white">
+                                        {msg.title}
+                                      </h3>
+                                    ) : null}
+                                    {msg.description ? (
+                                      <p className="text-sm leading-6 text-white/72">
+                                        {msg.description}
+                                      </p>
+                                    ) : null}
+                                    {msg.hashtags?.length ? (
+                                      <div className="flex flex-wrap gap-2 pt-1">
+                                        {msg.hashtags.map((tag) => (
+                                          <span
+                                            key={tag}
+                                            className="rounded-full bg-[rgba(124,92,255,0.18)] px-3 py-1 text-xs font-medium text-[#a78bfa]"
+                                          >
+                                            {tag.startsWith("#") ? tag : `#${tag}`}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </div>
                                 ) : null}
                               </div>
                             ) : null}
