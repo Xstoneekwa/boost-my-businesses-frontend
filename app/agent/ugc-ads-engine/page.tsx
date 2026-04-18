@@ -611,6 +611,9 @@ export default function UGCAdsEnginePage() {
         let attempts = 0;
         const MAX_ATTEMPTS = 40;
 
+        let metaWaitAttempts = 0;
+        const MAX_META_WAIT = 3;
+
         videoPollingRef.current = window.setInterval(async () => {
           attempts += 1;
 
@@ -620,13 +623,19 @@ export default function UGCAdsEnginePage() {
             );
             const data = await res.json();
 
-            const isVideoReady =
-              (data.status === "video_completed" ||
-                (data.status === "completed" &&
-                  data.current_step === "video_completed")) &&
-              !!data.video_url;
+            const isStatusDone =
+              data.status === "video_completed" ||
+              (data.status === "completed" &&
+                data.current_step === "video_completed");
 
-            if (isVideoReady) {
+            if (isStatusDone && !!data.video_url) {
+              const hasAllMeta = !!data.title && !!data.hashtags;
+
+              if (!hasAllMeta && metaWaitAttempts < MAX_META_WAIT) {
+                metaWaitAttempts += 1;
+                return;
+              }
+
               window.clearInterval(videoPollingRef.current!);
               videoPollingRef.current = null;
               videoPollingJobsRef.current.delete(jobId);
@@ -641,7 +650,7 @@ export default function UGCAdsEnginePage() {
                   videoUrl: data.video_url,
                   title: data.title ?? null,
                   description: data.description ?? null,
-                  hashtags: Array.isArray(data.hashtags) ? data.hashtags : null,
+                  hashtags: data.hashtags ?? null,
                 },
               ]);
               return;
