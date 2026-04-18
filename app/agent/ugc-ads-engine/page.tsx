@@ -24,9 +24,13 @@ type Message = {
   storagePath?: string | null;
   fileName?: string | null;
   previewCreatedAt?: string | null;
-  actionType?: "preview_actions" | null;
+  actionType?: "preview_actions" | "video_completed" | null;
   approveUrl?: string | null;
   modifyUrl?: string | null;
+  videoUrl?: string | null;
+  title?: string | null;
+  description?: string | null;
+  hashtags?: string[] | null;
 };
 
 const LANG_KEY = "ugc_ads_engine_lang_v1";
@@ -492,6 +496,8 @@ export default function UGCAdsEnginePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pollingRef = useRef<number | null>(null);
   const pollingJobsRef = useRef<Set<string>>(new Set());
+  const videoPollingRef = useRef<number | null>(null);
+  const videoPollingJobsRef = useRef<Set<string>>(new Set());
   const webhookUrl = "/api/ugc-start";
   const t = copy[lang];
 
@@ -561,8 +567,11 @@ export default function UGCAdsEnginePage() {
   useEffect(() => {
     function handlePostMessage(event: MessageEvent) {
       if (event.data?.type !== "ugc_modify_submitted") return;
-      const feedbackPrompt = event.data.feedback_prompt ?? "";
+
+      const feedbackPrompt: string = event.data.feedback_prompt ?? "";
+      const feedbackIntent: string = event.data.feedback_intent ?? "";
       const jobId: string = event.data.job_id ?? "";
+
       const content =
         lang === "fr"
           ? `✏️ Modification reçue : "${feedbackPrompt}". Le système régénère votre visuel...`
@@ -573,25 +582,135 @@ export default function UGCAdsEnginePage() {
       ]);
 
       if (!jobId) return;
-      if (pollingJobsRef.current.has(jobId)) return;
 
-      if (pollingRef.current) window.clearInterval(pollingRef.current);
+      if (feedbackIntent === "VIDEO") {
+        if (videoPollingJobsRef.current.has(jobId)) return;
+        if (videoPollingRef.current) window.clearInterval(videoPollingRef.current);
 
-      pollingJobsRef.current.add(jobId);
-      let attempts = 0;
-      const MAX_ATTEMPTS = 20;
+        videoPollingJobsRef.current.add(jobId);
+        let attempts = 0;
+        const MAX_ATTEMPTS = 40;
 
-      pollingRef.current = window.setInterval(async () => {
-        attempts += 1;
+        videoPollingRef.current = window.setInterval(async () => {
+          attempts += 1;
 
-        try {
-          const res = await fetch(
-            `/api/ugc-status?job_id=${encodeURIComponent(jobId)}`
-          );
-          const data = await res.json();
-          const previewSrc = buildPreviewSrc(data);
+          try {
+            const res = await fetch(
+              `/api/ugc-status?job_id=${encodeURIComponent(jobId)}`
+            );
+            const data = await res.json();
 
-          if (data.status === "preview_ready" && previewSrc) {
+            const isVideoReady =
+              (data.status === "video_completed" ||
+                (data.status === "completed" &&
+                  data.current_step === "video_completed")) &&
+              !!data.video_url;
+
+            if (isVideoReady) {
+              window.clearInterval(videoPollingRef.current!);
+              videoPollingRef.current = null;
+              videoPollingJobsRef.current.delete(jobId);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: uid(),
+                  role: "assistant",
+                  content: lang === "fr" ? "🎬 Ta vidéo est prête !" : "🎬 Your video is ready!",
+                  createdAt: Date.now(),
+                  actionType: "video_completed",
+                  videoUrl: data.video_url,
+                  title: data.title ?? null,
+                  description: data.description ?? null,
+                  hashtags: Array.isArray(data.hashtags) ? data.hashtags : null,
+                },
+              ]);
+              return;
+            }
+          } catch {
+            window.clearInterval(videoPollingRef.current!);
+            videoPollingRef.current = null;
+            videoPollingJobsRef.current.delete(jobId);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: "assistant",
+                content:
+                  lang === "fr"
+                    ? "Erreur lors de la vérification de la vidéo. Veuillez réessayer."
+                    : "Error checking video status. Please try again.",
+                createdAt: Date.now(),
+              },
+            ]);
+            return;
+          }
+
+          if (attempts >= MAX_ATTEMPTS) {
+            window.clearInterval(videoPollingRef.current!);
+            videoPollingRef.current = null;
+            videoPollingJobsRef.current.delete(jobId);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: "assistant",
+                content:
+                  lang === "fr"
+                    ? "La vidéo n'a pas été prête dans le délai imparti. Veuillez réessayer."
+                    : "The video was not ready in time. Please try again.",
+                createdAt: Date.now(),
+              },
+            ]);
+          }
+        }, 15000);
+      } else {
+        if (pollingJobsRef.current.has(jobId)) return;
+        if (pollingRef.current) window.clearInterval(pollingRef.current);
+
+        pollingJobsRef.current.add(jobId);
+        let attempts = 0;
+        const MAX_ATTEMPTS = 20;
+
+        pollingRef.current = window.setInterval(async () => {
+          attempts += 1;
+
+          try {
+            const res = await fetch(
+              `/api/ugc-status?job_id=${encodeURIComponent(jobId)}`
+            );
+            const data = await res.json();
+            const previewSrc = buildPreviewSrc(data);
+
+            if (data.status === "preview_ready" && previewSrc) {
+              window.clearInterval(pollingRef.current!);
+              pollingRef.current = null;
+              pollingJobsRef.current.delete(jobId);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: uid(),
+                  role: "assistant",
+                  content:
+                    data.reply ||
+                    data.message ||
+                    data.text ||
+                    copy[lang].previewLabel,
+                  createdAt: Date.now(),
+                  previewImageUrl: previewSrc,
+                  storagePath: data.storage_path ?? null,
+                  fileName: data.file_name ?? null,
+                  previewCreatedAt:
+                    data.preview_created_at ??
+                    data.created_at ??
+                    new Date().toISOString(),
+                  actionType: "preview_actions",
+                  approveUrl: data.approve_url ?? null,
+                  modifyUrl: data.modify_url ?? null,
+                },
+              ]);
+              return;
+            }
+          } catch {
             window.clearInterval(pollingRef.current!);
             pollingRef.current = null;
             pollingJobsRef.current.delete(jobId);
@@ -601,62 +720,34 @@ export default function UGCAdsEnginePage() {
                 id: uid(),
                 role: "assistant",
                 content:
-                  data.reply ||
-                  data.message ||
-                  data.text ||
-                  copy[lang].previewLabel,
+                  lang === "fr"
+                    ? "Erreur lors de la vérification du statut. Veuillez réessayer."
+                    : "Error checking the generation status. Please try again.",
                 createdAt: Date.now(),
-                previewImageUrl: previewSrc,
-                storagePath: data.storage_path ?? null,
-                fileName: data.file_name ?? null,
-                previewCreatedAt:
-                  data.preview_created_at ??
-                  data.created_at ??
-                  new Date().toISOString(),
-                actionType: "preview_actions",
-                approveUrl: data.approve_url ?? null,
-                modifyUrl: data.modify_url ?? null,
               },
             ]);
             return;
           }
-        } catch {
-          window.clearInterval(pollingRef.current!);
-          pollingRef.current = null;
-          pollingJobsRef.current.delete(jobId);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: uid(),
-              role: "assistant",
-              content:
-                lang === "fr"
-                  ? "Erreur lors de la vérification du statut. Veuillez réessayer."
-                  : "Error checking the generation status. Please try again.",
-              createdAt: Date.now(),
-            },
-          ]);
-          return;
-        }
 
-        if (attempts >= MAX_ATTEMPTS) {
-          window.clearInterval(pollingRef.current!);
-          pollingRef.current = null;
-          pollingJobsRef.current.delete(jobId);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: uid(),
-              role: "assistant",
-              content:
-                lang === "fr"
-                  ? "Le visuel n'a pas été prêt dans le délai imparti. Veuillez réessayer."
-                  : "The visual was not ready in time. Please try again.",
-              createdAt: Date.now(),
-            },
-          ]);
-        }
-      }, 3000);
+          if (attempts >= MAX_ATTEMPTS) {
+            window.clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            pollingJobsRef.current.delete(jobId);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: "assistant",
+                content:
+                  lang === "fr"
+                    ? "Le visuel n'a pas été prêt dans le délai imparti. Veuillez réessayer."
+                    : "The visual was not ready in time. Please try again.",
+                createdAt: Date.now(),
+              },
+            ]);
+          }
+        }, 3000);
+      }
     }
 
     window.addEventListener("message", handlePostMessage);
@@ -665,6 +756,10 @@ export default function UGCAdsEnginePage() {
       if (pollingRef.current) {
         window.clearInterval(pollingRef.current);
         pollingRef.current = null;
+      }
+      if (videoPollingRef.current) {
+        window.clearInterval(videoPollingRef.current);
+        videoPollingRef.current = null;
       }
     };
   }, [lang]);
