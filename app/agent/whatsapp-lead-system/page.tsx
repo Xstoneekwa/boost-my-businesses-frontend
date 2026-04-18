@@ -3,10 +3,17 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import NavbarFooter from "../../components/NavbarFooter";
 
 type Lang = "fr" | "en";
 
 const LANG_KEY = "whatsapp_ai_system_lang_v1";
+
+// ── Accent colors (WhatsApp identity) ──────────────────────
+const AC = "#25D366";
+const AC_DIM = "rgba(37,211,102,0.10)";
+const AC_BORDER = "rgba(37,211,102,0.22)";
+const AC_TEXT = "#25D366";
 
 const copy = {
   fr: {
@@ -14,9 +21,9 @@ const copy = {
     heroTitle:
       "Des leads WhatsApp gérés automatiquement, qualifiés instantanément et transférés au bon moment.",
     heroSubtitle:
-      "Ce système IA répond aux prospects 24h/24, détecte l’intention, pousse à la réservation et escalade les cas urgents vers ton équipe via Slack.",
+      "Ce système IA répond aux prospects 24h/24, détecte l'intention, pousse à la réservation et escalade les cas urgents vers ton équipe via Slack.",
     primaryCta: "Ouvrir la démo visuelle",
-    secondaryCta: "Retour à l’accueil",
+    secondaryCta: "Retour à l'accueil",
     stats: [
       { label: "Disponibilité", value: "24/7" },
       { label: "Actions clés", value: "FAQ • Booking • Urgence" },
@@ -24,176 +31,96 @@ const copy = {
     ],
     productBoxTitle: "Ce que fait le système",
     productSteps: [
-      {
-        label: "Message entrant",
-        text: "“Je veux prendre rendez-vous”",
-      },
-      {
-        label: "Détection IA",
-        text: "L’intention de réservation est détectée instantanément",
-      },
-      {
-        label: "Réponse automatique",
-        text: "Le lien de réservation est envoyé automatiquement",
-      },
-      {
-        label: "Fallback urgence",
-        text: "Les cas critiques déclenchent une alerte Slack pour l’équipe",
-      },
+      { label: "Message entrant", text: "\u201cJe veux prendre rendez-vous\u201d" },
+      { label: "Détection IA", text: "L\u2019intention de réservation est détectée instantanément" },
+      { label: "Réponse automatique", text: "Le lien de réservation est envoyé automatiquement" },
+      { label: "Fallback urgence", text: "Les cas critiques déclenchent une alerte Slack pour l\u2019équipe" },
     ],
     problemTitle: "Le problème que ce système résout",
-    problemText:
-      "Beaucoup d’entreprises perdent des leads sur WhatsApp parce que les réponses arrivent trop tard, que l’équipe est débordée et qu’aucun suivi structuré n’existe.",
-    problems: [
-      "Réponses trop lentes",
-      "Équipe surchargée",
-      "Pas de suivi structuré",
-    ],
+    problemText: "Beaucoup d\u2019entreprises perdent des leads sur WhatsApp parce que les réponses arrivent trop tard, que l\u2019équipe est débordée et qu\u2019aucun suivi structuré n\u2019existe.",
+    problems: ["Réponses trop lentes", "Équipe surchargée", "Pas de suivi structuré"],
     solutionTitle: "La solution",
-    solutionText:
-      "Ce workflow automatise l’ensemble du parcours lead, du premier message jusqu’à l’escalade humaine si nécessaire.",
+    solutionText: "Ce workflow automatise l\u2019ensemble du parcours lead, du premier message jusqu\u2019à l\u2019escalade humaine si nécessaire.",
     solutions: [
       "Réponses IA instantanées (24/7)",
-      "Détection intelligente d’intention (inquiry, booking, urgent)",
+      "Détection intelligente d\u2019intention (inquiry, booking, urgent)",
       "Suggestions automatiques de rendez-vous",
       "Escalade humaine pour les cas critiques",
       "Alertes Slack pour la visibilité équipe",
     ],
     featuresTitle: "Fonctionnalités",
-    featuresText:
-      "Ce n’est pas juste un chatbot. C’est un système de gestion de leads structuré et prêt à être adapté à de vrais besoins business.",
+    featuresText: "Ce n\u2019est pas juste un chatbot. C\u2019est un système de gestion de leads structuré et prêt à être adapté à de vrais besoins business.",
     features: [
       "Intégration WhatsApp (Meta API)",
       "Agent conversationnel IA",
-      "Classification d’intention (GPT-based)",
-      "Détection d’urgence & escalade",
+      "Classification d\u2019intention (GPT-based)",
+      "Détection d\u2019urgence & escalade",
       "Système de notifications Slack",
       "Structure prête pour CRM",
       "Intégration lien de réservation (Calendly)",
       "Architecture prête pour mémoire",
     ],
     demoTitle: "Démo visuelle",
-    demoText:
-      "Clique sur une capture pour l’ouvrir en grand et mieux visualiser le workflow, les alertes et l’expérience utilisateur.",
+    demoText: "Clique sur une capture pour l\u2019ouvrir en grand et mieux visualiser le workflow, les alertes et l\u2019expérience utilisateur.",
     workflowTitle: "Comment le système fonctionne",
-    workflowText:
-      "Pour le prospect, l’expérience est simple. En coulisses, le système route, qualifie et escalade selon des règles concrètes.",
+    workflowText: "Pour le prospect, l\u2019expérience est simple. En coulisses, le système route, qualifie et escalade selon des règles concrètes.",
     flowSteps: [
       "Le prospect envoie un message sur WhatsApp",
-      "L’IA détecte l’intention (inquiry / booking / urgent)",
-      "L’IA répond instantanément",
-      "Si nécessaire → escalade vers un humain",
-      "L’équipe reçoit une alerte via Slack",
+      "L\u2019IA détecte l\u2019intention (inquiry / booking / urgent)",
+      "L\u2019IA répond instantanément",
+      "Si nécessaire \u2192 escalade vers un humain",
+      "L\u2019équipe reçoit une alerte via Slack",
       "Le lead reçoit une confirmation claire",
     ],
     stackTitle: "Stack technique",
-    stackText:
-      "Le système s’appuie sur des outils crédibles et prêts pour la production.",
-    stack: [
-      "n8n (workflow automation)",
-      "OpenAI (AI agent)",
-      "WhatsApp Cloud API",
-      "Slack API",
-      "Calendly",
-      "Airtable / Notion / autre CRM",
-    ],
+    stackText: "Le système s\u2019appuie sur des outils crédibles et prêts pour la production.",
+    stack: ["n8n (workflow automation)", "OpenAI (AI agent)", "WhatsApp Cloud API", "Slack API", "Calendly", "Airtable / Notion / autre CRM"],
     impactTitle: "Résultat business",
-    impactText:
-      "La valeur n’est pas seulement technique. Elle améliore directement la vitesse, la charge de travail et la conversion.",
+    impactText: "La valeur n\u2019est pas seulement technique. Elle améliore directement la vitesse, la charge de travail et la conversion.",
     businessResults: [
       "Temps de réponse plus rapide (instantané vs heures)",
       "Meilleure conversion des leads",
-      "Moins de charge pour l’équipe",
+      "Moins de charge pour l\u2019équipe",
       "Meilleure gestion des cas urgents",
     ],
     useCasesTitle: "Autres domaines où ce système marche",
-    useCasesText:
-      "Ce flow peut être adapté à d’autres activités qui dépendent de la messagerie, des rendez-vous ou de la qualification rapide.",
+    useCasesText: "Ce flow peut être adapté à d\u2019autres activités qui dépendent de la messagerie, des rendez-vous ou de la qualification rapide.",
     useCases: {
-      "Santé & Médical": [
-        "Cliniques",
-        "Dentistes",
-        "Physiothérapeutes",
-        "Opticiens",
-        "Dermatologues",
-        "Médecins privés",
-      ],
-      "Services": [
-        "Salons de beauté",
-        "Coiffeurs",
-        "Spas",
-        "Centres de massage",
-        "Tattoo studios",
-      ],
-      "Business locaux": [
-        "Garages",
-        "Services de nettoyage",
-        "Agences immobilières",
-        "Courtiers en assurance",
-      ],
-      "Services high-ticket": [
-        "Coachs",
-        "Consultants",
-        "Agences",
-        "Freelancers",
-      ],
-      Éducation: [
-        "Centres de formation",
-        "Cours en ligne",
-        "Tuteurs",
-      ],
+      "Santé & Médical": ["Cliniques", "Dentistes", "Physiothérapeutes", "Opticiens", "Dermatologues", "Médecins privés"],
+      "Services": ["Salons de beauté", "Coiffeurs", "Spas", "Centres de massage", "Tattoo studios"],
+      "Business locaux": ["Garages", "Services de nettoyage", "Agences immobilières", "Courtiers en assurance"],
+      "Services high-ticket": ["Coachs", "Consultants", "Agences", "Freelancers"],
+      "Éducation": ["Centres de formation", "Cours en ligne", "Tuteurs"],
     },
     ctaEyebrow: "Démo live",
     ctaTitle: "Tu veux ce système pour ton business ?",
-    ctaText:
-      "Teste la logique du système ou contacte directement le numéro business utilisé pour la démonstration.",
+    ctaText: "Teste la logique du système ou contacte directement le numéro business utilisé pour la démonstration.",
     ctaDemo: "Ouvrir la démo visuelle",
     ctaWhatsApp: "Tester en live sur WhatsApp",
-    backHome: "Retour à l’accueil",
   },
   en: {
     badge: "AI WhatsApp Automation",
-    heroTitle:
-      "WhatsApp leads handled automatically, qualified instantly, and escalated at the right moment.",
-    heroSubtitle:
-      "This AI system replies to prospects 24/7, detects intent, pushes booking, and escalates urgent cases to your team via Slack.",
+    heroTitle: "WhatsApp leads handled automatically, qualified instantly, and escalated at the right moment.",
+    heroSubtitle: "This AI system replies to prospects 24/7, detects intent, pushes booking, and escalates urgent cases to your team via Slack.",
     primaryCta: "Open visual demo",
     secondaryCta: "Back to homepage",
     stats: [
       { label: "Availability", value: "24/7" },
-      { label: "Core actions", value: "FAQ • Booking • Urgent" },
+      { label: "Core actions", value: "FAQ \u2022 Booking \u2022 Urgent" },
       { label: "Escalation", value: "Slack handoff" },
     ],
     productBoxTitle: "What this system does",
     productSteps: [
-      {
-        label: "Incoming lead message",
-        text: "“I want to book an appointment”",
-      },
-      {
-        label: "AI detection",
-        text: "Booking intent is detected instantly",
-      },
-      {
-        label: "Automated response",
-        text: "The booking link is sent automatically",
-      },
-      {
-        label: "Urgent fallback",
-        text: "Critical cases trigger a Slack alert for the team",
-      },
+      { label: "Incoming lead message", text: "\u201cI want to book an appointment\u201d" },
+      { label: "AI detection", text: "Booking intent is detected instantly" },
+      { label: "Automated response", text: "The booking link is sent automatically" },
+      { label: "Urgent fallback", text: "Critical cases trigger a Slack alert for the team" },
     ],
     problemTitle: "The problem this system solves",
-    problemText:
-      "Many businesses lose WhatsApp leads because replies are too slow, staff is overloaded, and there is no structured follow-up.",
-    problems: [
-      "Replies come too late",
-      "Staff is overwhelmed",
-      "No structured follow-up exists",
-    ],
+    problemText: "Many businesses lose WhatsApp leads because replies are too slow, staff is overloaded, and there is no structured follow-up.",
+    problems: ["Replies come too late", "Staff is overwhelmed", "No structured follow-up exists"],
     solutionTitle: "The solution",
-    solutionText:
-      "This workflow automates the entire lead journey, from the first message to human escalation when needed.",
+    solutionText: "This workflow automates the entire lead journey, from the first message to human escalation when needed.",
     solutions: [
       "Instant AI replies (24/7)",
       "Smart intent detection (inquiry, booking, urgent)",
@@ -202,8 +129,7 @@ const copy = {
       "Slack alerts for team visibility",
     ],
     featuresTitle: "Features",
-    featuresText:
-      "This is not just a chatbot. It is a structured lead handling system designed for real business workflows.",
+    featuresText: "This is not just a chatbot. It is a structured lead handling system designed for real business workflows.",
     features: [
       "WhatsApp integration (Meta API)",
       "AI conversational agent",
@@ -215,33 +141,22 @@ const copy = {
       "Memory-ready architecture",
     ],
     demoTitle: "Visual demo",
-    demoText:
-      "Click any screenshot to open it larger and inspect the workflow, alerts, and end-user experience.",
+    demoText: "Click any screenshot to open it larger and inspect the workflow, alerts, and end-user experience.",
     workflowTitle: "How the system works",
-    workflowText:
-      "For the lead, the experience feels simple. Under the hood, the system routes, qualifies, and escalates using real logic.",
+    workflowText: "For the lead, the experience feels simple. Under the hood, the system routes, qualifies, and escalates using real logic.",
     flowSteps: [
       "Lead sends a message on WhatsApp",
       "AI detects intent (inquiry / booking / urgent)",
       "AI responds instantly",
-      "If needed → escalates to human",
+      "If needed \u2192 escalates to human",
       "Team receives a Slack alert",
       "Lead gets a clear confirmation message",
     ],
     stackTitle: "Tech stack",
-    stackText:
-      "The system is built on credible, production-ready tools.",
-    stack: [
-      "n8n (workflow automation)",
-      "OpenAI (AI agent)",
-      "WhatsApp Cloud API",
-      "Slack API",
-      "Calendly",
-      "Airtable / Notion / any other CRM",
-    ],
+    stackText: "The system is built on credible, production-ready tools.",
+    stack: ["n8n (workflow automation)", "OpenAI (AI agent)", "WhatsApp Cloud API", "Slack API", "Calendly", "Airtable / Notion / any other CRM"],
     impactTitle: "Business impact",
-    impactText:
-      "The value is not just technical. It directly improves speed, workload, and lead conversion.",
+    impactText: "The value is not just technical. It directly improves speed, workload, and lead conversion.",
     businessResults: [
       "Faster response time (instant vs hours)",
       "Higher lead conversion",
@@ -249,90 +164,76 @@ const copy = {
       "Better handling of urgent cases",
     ],
     useCasesTitle: "Other industries this system fits",
-    useCasesText:
-      "This flow can be adapted to businesses that rely on messaging, appointments, or fast lead qualification.",
+    useCasesText: "This flow can be adapted to businesses that rely on messaging, appointments, or fast lead qualification.",
     useCases: {
-      "Health & Medical": [
-        "Clinics",
-        "Dentists",
-        "Physiotherapists",
-        "Opticians",
-        "Dermatologists",
-        "Private doctors",
-      ],
-      "Service Businesses": [
-        "Beauty salons",
-        "Hairdressers",
-        "Spas",
-        "Massage centers",
-        "Tattoo studios",
-      ],
-      "Local Businesses": [
-        "Car repair shops",
-        "Cleaning services",
-        "Real estate agencies",
-        "Insurance brokers",
-      ],
-      "High-ticket services": [
-        "Coaches",
-        "Consultants",
-        "Agencies",
-        "Freelancers",
-      ],
-      Education: [
-        "Training centers",
-        "Online courses",
-        "Tutors",
-      ],
+      "Health & Medical": ["Clinics", "Dentists", "Physiotherapists", "Opticians", "Dermatologists", "Private doctors"],
+      "Service Businesses": ["Beauty salons", "Hairdressers", "Spas", "Massage centers", "Tattoo studios"],
+      "Local Businesses": ["Car repair shops", "Cleaning services", "Real estate agencies", "Insurance brokers"],
+      "High-ticket services": ["Coaches", "Consultants", "Agencies", "Freelancers"],
+      "Education": ["Training centers", "Online courses", "Tutors"],
     },
     ctaEyebrow: "Live demo",
     ctaTitle: "Want this system for your business?",
-    ctaText:
-      "Test the system logic or contact the business number used for this demo.",
+    ctaText: "Test the system logic or contact the business number used for this demo.",
     ctaDemo: "Open visual demo",
     ctaWhatsApp: "Test it live on WhatsApp",
-    backHome: "Back to homepage",
   },
 };
 
-function SectionTitle({
-  eyebrow,
-  title,
-  text,
-}: {
-  eyebrow: string;
-  title: string;
-  text?: string;
-}) {
+function SectionTitle({ eyebrow, title, text }: { eyebrow: string; title: string; text?: string }) {
   return (
-    <div className="max-w-3xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">
+    <div style={{ maxWidth: 720 }}>
+      <p
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 11,
+          fontWeight: 500,
+          letterSpacing: "0.14em",
+          textTransform: "uppercase",
+          color: AC_TEXT,
+          opacity: 0.75,
+          marginBottom: 8,
+        }}
+      >
         {eyebrow}
       </p>
-      <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-4xl">
+      <h2
+        style={{
+          fontFamily: "'Syne', sans-serif",
+          fontSize: "clamp(1.4rem, 2.5vw, 2rem)",
+          fontWeight: 700,
+          letterSpacing: "-0.025em",
+          color: "#f0f0ef",
+          lineHeight: 1.15,
+          marginBottom: text ? 12 : 0,
+        }}
+      >
         {title}
       </h2>
-      {text ? (
-        <p className="mt-4 text-base leading-8 text-white/68 md:text-lg">
+      {text && (
+        <p style={{ fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.7 }}>
           {text}
         </p>
-      ) : null}
+      )}
     </div>
   );
 }
 
+const cardBase: React.CSSProperties = {
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 20,
+  padding: "20px 18px",
+  transition: "border-color 200ms, transform 200ms",
+};
+
 export default function WhatsAppLeadSystemPage() {
   const [lang, setLang] = useState<Lang>("en");
-  const [selectedImage, setSelectedImage] = useState<null | {
-    src: string;
-    alt: string;
-  }>(null);
+  const [selectedImage, setSelectedImage] = useState<null | { src: string; alt: string }>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(LANG_KEY) as Lang | null;
-    if (saved === "fr" || saved === "en") {
-      setLang(saved);
-    }
+    if (saved === "fr" || saved === "en") setLang(saved);
   }, []);
 
   useEffect(() => {
@@ -354,384 +255,487 @@ export default function WhatsAppLeadSystemPage() {
       src: "/demo/n8n-workflow.png",
       alt: lang === "fr" ? "Capture workflow n8n" : "n8n workflow screenshot",
       title: "n8n workflow",
-      desc:
-        lang === "fr"
-          ? "Le workflow complet : détection du lead, logique de réservation, escalade urgente et handoff humain."
-          : "The full workflow covering lead detection, booking logic, urgent escalation, and human handoff.",
+      desc: lang === "fr"
+        ? "Le workflow complet : détection du lead, logique de réservation, escalade urgente et handoff humain."
+        : "The full workflow covering lead detection, booking logic, urgent escalation, and human handoff.",
     },
     {
       src: "/demo/slack-alert.png",
       alt: lang === "fr" ? "Capture alerte Slack" : "Slack alert screenshot",
       title: "Slack alert",
-      desc:
-        lang === "fr"
-          ? "L’équipe reçoit une visibilité immédiate quand une intervention humaine est nécessaire."
-          : "The team gets immediate visibility when a handoff or urgent case requires human attention.",
+      desc: lang === "fr"
+        ? "L\u2019équipe reçoit une visibilité immédiate quand une intervention humaine est nécessaire."
+        : "The team gets immediate visibility when a handoff or urgent case requires human attention.",
     },
     {
       src: "/demo/whatsapp-flow.png",
       alt: lang === "fr" ? "Capture conversation WhatsApp" : "WhatsApp flow screenshot",
       title: "WhatsApp flow",
-      desc:
-        lang === "fr"
-          ? "Le prospect reçoit une réponse claire et rapide selon son intention."
-          : "The lead receives a clear instant reply depending on the detected intent.",
+      desc: lang === "fr"
+        ? "Le prospect reçoit une réponse claire et rapide selon son intention."
+        : "The lead receives a clear instant reply depending on the detected intent.",
     },
   ];
 
-  return (
-    <main className="min-h-screen bg-[#07111f] text-white">
-      <section className="relative overflow-hidden border-b border-white/8">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(54,109,255,0.18),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(37,211,102,0.12),transparent_30%)]" />
-        <div className="absolute left-[-10%] top-[-20%] h-[420px] w-[420px] rounded-full bg-[#2b6fff]/10 blur-3xl" />
-        <div className="absolute bottom-[-15%] right-[-10%] h-[340px] w-[340px] rounded-full bg-[#25D366]/10 blur-3xl" />
+  const section: React.CSSProperties = { padding: "64px 0" };
+  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 24px" };
+  const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: 0 };
 
-        <div className="relative mx-auto max-w-7xl px-6 py-20 md:px-10 md:py-28">
-          <div className="mb-8 flex justify-end">
-            <div className="grid w-[140px] grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setLang("fr")}
-                className={`h-[42px] rounded-xl border border-white/10 text-white transition ${
-                  lang === "fr"
-                    ? "bg-[rgba(124,92,255,0.18)]"
-                    : "bg-white/5"
-                }`}
+  return (
+    <NavbarFooter agent="whatsapp" lang={lang} onLangChange={setLang}>
+      <main style={{ background: "#07111f", color: "#f0f0ef" }}>
+
+        {/* ── HERO ──────────────────────────────────────── */}
+        <section
+          style={{
+            position: "relative",
+            overflow: "hidden",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "radial-gradient(ellipse 60% 70% at 0% 50%, rgba(37,211,102,0.09) 0%, transparent 60%), radial-gradient(ellipse 40% 50% at 100% 20%, rgba(37,211,102,0.05) 0%, transparent 55%)",
+              pointerEvents: "none",
+            }}
+          />
+
+          <div style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.15fr 0.85fr",
+                gap: 48,
+                alignItems: "center",
+              }}
+            >
+              {/* Left */}
+              <div>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "5px 13px 5px 8px",
+                    background: AC_DIM,
+                    border: `1px solid ${AC_BORDER}`,
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: AC_TEXT,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    letterSpacing: "0.06em",
+                    marginBottom: 22,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: AC,
+                      boxShadow: `0 0 10px ${AC}`,
+                      flexShrink: 0,
+                    }}
+                  />
+                  {t.badge}
+                </div>
+
+                <h1
+                  style={{
+                    fontFamily: "'Syne', sans-serif",
+                    fontSize: "clamp(1.8rem, 3.5vw, 3rem)",
+                    fontWeight: 800,
+                    lineHeight: 1.07,
+                    letterSpacing: "-0.03em",
+                    color: "#f0f0ef",
+                    marginBottom: 18,
+                  }}
+                >
+                  {t.heroTitle}
+                </h1>
+
+                <p style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 28, maxWidth: 520 }}>
+                  {t.heroSubtitle}
+                </p>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
+                  <a
+                    href="#demo"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "13px 26px",
+                      background: AC,
+                      color: "#04110a",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      borderRadius: 999,
+                      textDecoration: "none",
+                      boxShadow: `0 4px 24px rgba(37,211,102,0.30)`,
+                      transition: "opacity 150ms, transform 150ms",
+                    }}
+                  >
+                    {t.primaryCta}
+                  </a>
+
+                  <Link
+                    href="/"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "12px 22px",
+                      background: "transparent",
+                      color: "rgba(255,255,255,0.80)",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      borderRadius: 999,
+                      textDecoration: "none",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      transition: "border-color 150ms, background 150ms",
+                    }}
+                  >
+                    {t.secondaryCta}
+                  </Link>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                  {t.stats.map((stat) => (
+                    <div
+                      key={stat.label}
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 14,
+                        padding: "12px 14px",
+                        transition: "border-color 200ms",
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+                    >
+                      <p style={{ fontSize: 10, color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
+                        {stat.label}
+                      </p>
+                      <p style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700, color: AC }}>
+                        {stat.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right — demo panel */}
+              <div
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 24,
+                  padding: 16,
+                }}
               >
-                FR
-              </button>
-              <button
-                type="button"
-                onClick={() => setLang("en")}
-                className={`h-[42px] rounded-xl border border-white/10 text-white transition ${
-                  lang === "en"
-                    ? "bg-[rgba(124,92,255,0.18)]"
-                    : "bg-white/5"
-                }`}
-              >
-                EN
-              </button>
+                <div
+                  style={{
+                    background: "#0b1628",
+                    border: "1px solid rgba(255,255,255,0.07)",
+                    borderRadius: 16,
+                    padding: 16,
+                  }}
+                >
+                  <p style={{ fontSize: 10, color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 14 }}>
+                    {t.productBoxTitle}
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {t.productSteps.map((step, i) => {
+                      const isLast = i === t.productSteps.length - 1;
+                      return (
+                        <div
+                          key={step.label}
+                          style={{
+                            background: isLast ? AC_DIM : "rgba(255,255,255,0.04)",
+                            border: `1px solid ${isLast ? AC_BORDER : "rgba(255,255,255,0.07)"}`,
+                            borderRadius: 12,
+                            padding: "10px 14px",
+                          }}
+                        >
+                          <p style={{ fontSize: 9, color: isLast ? AC_TEXT : "rgba(255,255,255,0.35)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>
+                            {step.label}
+                          </p>
+                          <p style={{ fontSize: 13, color: isLast ? "#f0f0ef" : "rgba(255,255,255,0.72)" }}>
+                            {step.text}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+        </section>
 
-          <div className="grid items-center gap-12 lg:grid-cols-[1.15fr_0.85fr]">
-            <div>
-              <div className="inline-flex rounded-full border border-white/12 bg-white/6 px-4 py-2 text-sm text-white/75 backdrop-blur-sm">
-                {t.badge}
-              </div>
-
-              <h1 className="mt-6 max-w-5xl text-4xl font-semibold tracking-tight text-white md:text-6xl md:leading-[1.04]">
-                {t.heroTitle}
-              </h1>
-
-              <p className="mt-6 max-w-3xl text-lg leading-8 text-white/72">
-                {t.heroSubtitle}
-              </p>
-
-              <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-                <a
-                  href="#demo"
-                  className="inline-flex items-center justify-center rounded-2xl bg-white px-6 py-3 font-semibold shadow-[0_10px_30px_rgba(255,255,255,0.08)] transition duration-300 hover:scale-[1.02] hover:shadow-[0_14px_40px_rgba(255,255,255,0.14)]"
+        {/* ── PROBLEM ───────────────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={lang === "fr" ? "Problème" : "Problem"} title={t.problemTitle} text={t.problemText} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+              {t.problems.map((item) => (
+                <div
+                  key={item}
+                  style={cardBase}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.30)"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
                 >
-                  <span className="!text-[#000000]">{t.primaryCta}</span>
-                </a>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 8px rgba(239,68,68,0.5)", marginBottom: 14 }} />
+                  <p style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.82)", lineHeight: 1.5 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-                <Link
-                  href="/"
-                  className="inline-flex items-center justify-center rounded-2xl border border-white/12 bg-white/6 px-6 py-3 font-semibold text-white backdrop-blur-sm transition duration-300 hover:scale-[1.02] hover:bg-white/10 hover:shadow-[0_12px_32px_rgba(255,255,255,0.08)]"
+        <hr style={divider} />
+
+        {/* ── SOLUTION ──────────────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={lang === "fr" ? "Solution" : "Solution"} title={t.solutionTitle} text={t.solutionText} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+              {t.solutions.map((item, index) => (
+                <div
+                  key={item}
+                  style={cardBase}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
                 >
-                  {t.secondaryCta}
-                </Link>
-              </div>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
+                    {index + 1}
+                  </div>
+                  <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", lineHeight: 1.6 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-              <div className="mt-10 grid gap-4 md:grid-cols-3">
-                {t.stats.map((stat) => (
+        <hr style={divider} />
+
+        {/* ── FEATURES ──────────────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={lang === "fr" ? "Fonctionnalités" : "Features"} title={t.featuresTitle} text={t.featuresText} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 32 }}>
+              {t.features.map((item) => (
+                <div
+                  key={item}
+                  style={{ ...cardBase, padding: "14px 16px" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+                >
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* ── VISUAL DEMO ───────────────────────────────── */}
+        <section id="demo" style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={lang === "fr" ? "Démo visuelle" : "Visual demo"} title={t.demoTitle} text={t.demoText} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32 }}>
+              {demoImages.map((img) => (
+                <button
+                  key={img.src}
+                  type="button"
+                  onClick={() => setSelectedImage({ src: img.src, alt: img.alt })}
+                  style={{ ...cardBase, textAlign: "left", cursor: "pointer", background: "rgba(255,255,255,0.03)" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+                >
+                  <div style={{ overflow: "hidden", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", marginBottom: 14 }}>
+                    <Image src={img.src} alt={img.alt} width={1400} height={900} style={{ width: "100%", height: "auto", display: "block", transition: "transform 400ms" }} />
+                  </div>
+                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700, color: "#f0f0ef", marginBottom: 6 }}>{img.title}</h3>
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>{img.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* ── WORKFLOW ───────────────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <div style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 48, alignItems: "start" }}>
+              <SectionTitle eyebrow="Workflow" title={t.workflowTitle} text={t.workflowText} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {t.flowSteps.map((step, index) => (
                   <div
-                    key={stat.label}
-                    className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
+                    key={step}
+                    style={{ display: "flex", gap: 14, alignItems: "center", ...cardBase, padding: "14px 18px" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
                   >
-                    <p className="text-sm text-white/55">{stat.label}</p>
-                    <p className="mt-2 text-xl font-semibold text-white">
-                      {stat.value}
-                    </p>
+                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {index + 1}
+                    </div>
+                    <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", lineHeight: 1.55 }}>{step}</p>
                   </div>
                 ))}
               </div>
             </div>
+          </div>
+        </section>
 
-            <div className="rounded-[32px] border border-white/10 bg-white/6 p-6 shadow-2xl shadow-black/30 backdrop-blur-sm transition duration-500 hover:-translate-y-1 hover:shadow-[0_20px_70px_rgba(0,0,0,0.35)]">
-              <div className="rounded-[24px] border border-white/10 bg-[#0b1628] p-6">
-                <p className="text-sm text-white/50">{t.productBoxTitle}</p>
+        <hr style={divider} />
 
-                <div className="mt-5 space-y-4">
-                  {t.productSteps.map((step) => (
-                    <div
-                      key={step.label}
-                      className="rounded-2xl border border-white/8 bg-white/5 p-4 transition duration-300 hover:bg-white/7"
+        {/* ── STACK + IMPACT ────────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div style={{ ...cardBase, borderRadius: 24, padding: 28 }}>
+                <SectionTitle eyebrow={lang === "fr" ? "Stack technique" : "Tech stack"} title={t.stackTitle} text={t.stackText} />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 20 }}>
+                  {t.stack.map((item) => (
+                    <span
+                      key={item}
+                      style={{ padding: "6px 14px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", fontSize: 13, color: "rgba(255,255,255,0.68)", transition: "border-color 150ms, color 150ms", cursor: "default" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.color = AC_TEXT; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.10)"; (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.68)"; }}
                     >
-                      <p className="text-sm text-white/50">{step.label}</p>
-                      <p className="mt-1 text-white">{step.text}</p>
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ ...cardBase, borderRadius: 24, padding: 28 }}>
+                <SectionTitle eyebrow={lang === "fr" ? "Impact business" : "Business impact"} title={t.impactTitle} text={t.impactText} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20 }}>
+                  {t.businessResults.map((item) => (
+                    <div
+                      key={item}
+                      style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "11px 14px", fontSize: 13.5, color: "rgba(255,255,255,0.72)", transition: "border-color 150ms" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; }}
+                    >
+                      <span style={{ color: AC, fontSize: 12, flexShrink: 0 }}>✓</span>
+                      {item}
                     </div>
                   ))}
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <SectionTitle
-          eyebrow={lang === "fr" ? "Problème" : "Problem"}
-          title={t.problemTitle}
-          text={t.problemText}
-        />
+        <hr style={divider} />
 
-        <div className="mt-10 grid gap-6 md:grid-cols-3">
-          {t.problems.map((item) => (
-            <div
-              key={item}
-              className="rounded-[28px] border border-white/10 bg-white/5 p-6 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
-            >
-              <div className="mb-4 h-3 w-3 rounded-full bg-red-400" />
-              <p className="text-lg font-medium leading-8 text-white/88">
-                {item}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <SectionTitle
-          eyebrow={lang === "fr" ? "Solution" : "Solution"}
-          title={t.solutionTitle}
-          text={t.solutionText}
-        />
-
-        <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {t.solutions.map((item, index) => (
-            <div
-              key={item}
-              className="rounded-[28px] border border-white/10 bg-white/5 p-6 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
-            >
-              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-white font-semibold text-[#07111f]">
-                {index + 1}
-              </div>
-              <p className="text-base leading-8 text-white/80">{item}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <SectionTitle
-          eyebrow={lang === "fr" ? "Fonctionnalités" : "Features"}
-          title={t.featuresTitle}
-          text={t.featuresText}
-        />
-
-        <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-          {t.features.map((item) => (
-            <div
-              key={item}
-              className="rounded-[24px] border border-white/10 bg-white/5 p-5 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
-            >
-              <p className="text-sm leading-7 text-white/78">{item}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section id="demo" className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <SectionTitle
-          eyebrow={lang === "fr" ? "Démo visuelle" : "Visual demo"}
-          title={t.demoTitle}
-          text={t.demoText}
-        />
-
-        <div className="mt-10 grid gap-8 lg:grid-cols-3">
-          {demoImages.map((img) => (
-            <button
-              key={img.src}
-              type="button"
-              onClick={() => setSelectedImage({ src: img.src, alt: img.alt })}
-              className="rounded-[28px] border border-white/10 bg-white/5 p-4 text-left transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
-            >
-              <div className="overflow-hidden rounded-[20px] border border-white/10">
-                <Image
-                  src={img.src}
-                  alt={img.alt}
-                  width={1400}
-                  height={900}
-                  className="h-auto w-full transition duration-500 hover:scale-[1.02]"
-                />
-              </div>
-              <h3 className="mt-4 text-xl font-semibold text-white">
-                {img.title}
-              </h3>
-              <p className="mt-2 text-sm leading-7 text-white/65">
-                {img.desc}
-              </p>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
-          <div>
-            <SectionTitle
-              eyebrow={lang === "fr" ? "Workflow" : "Workflow"}
-              title={t.workflowTitle}
-              text={t.workflowText}
-            />
-          </div>
-
-          <div className="space-y-4">
-            {t.flowSteps.map((step, index) => (
-              <div
-                key={step}
-                className="flex gap-4 rounded-[24px] border border-white/10 bg-white/5 p-5 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
-              >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white font-semibold text-[#07111f]">
-                  {index + 1}
-                </div>
-                <p className="pt-1 text-base leading-8 text-white/78">{step}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <div className="grid gap-8 lg:grid-cols-2">
-          <div className="rounded-[32px] border border-white/10 bg-white/5 p-8 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7">
-            <SectionTitle
-              eyebrow={lang === "fr" ? "Stack technique" : "Tech stack"}
-              title={t.stackTitle}
-              text={t.stackText}
-            />
-            <div className="mt-8 flex flex-wrap gap-3">
-              {t.stack.map((item) => (
-                <span
-                  key={item}
-                  className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/82 transition duration-300 hover:border-white/20 hover:bg-white/10"
-                >
-                  {item}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-[32px] border border-white/10 bg-white/5 p-8 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7">
-            <SectionTitle
-              eyebrow={lang === "fr" ? "Impact business" : "Business impact"}
-              title={t.impactTitle}
-              text={t.impactText}
-            />
-            <div className="mt-8 space-y-4">
-              {t.businessResults.map((item) => (
+        {/* ── USE CASES ─────────────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={lang === "fr" ? "Cas d'usage" : "Use cases"} title={t.useCasesTitle} text={t.useCasesText} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+              {Object.entries(t.useCases).map(([category, items]) => (
                 <div
-                  key={item}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white/80 transition duration-300 hover:border-white/20 hover:bg-white/8"
+                  key={category}
+                  style={cardBase}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
                 >
-                  {item}
+                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 15, fontWeight: 700, color: "#f0f0ef", marginBottom: 14 }}>{category}</h3>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                    {items.map((item) => (
+                      <span key={item} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", fontSize: 12.5, color: "rgba(255,255,255,0.65)" }}>
+                        {item}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="mx-auto max-w-7xl px-6 py-16 md:px-10">
-        <SectionTitle
-          eyebrow={lang === "fr" ? "Cas d’usage" : "Use cases"}
-          title={t.useCasesTitle}
-          text={t.useCasesText}
-        />
-
-        <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {Object.entries(t.useCases).map(([category, items]) => (
+        {/* ── CTA FINAL ─────────────────────────────────── */}
+        <section style={{ ...section, paddingTop: 0 }}>
+          <div style={container}>
             <div
-              key={category}
-              className="rounded-[28px] border border-white/10 bg-white/5 p-6 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/7"
+              style={{
+                background: "linear-gradient(135deg, rgba(37,211,102,0.08) 0%, rgba(255,255,255,0.02) 50%, rgba(37,211,102,0.05) 100%)",
+                border: `1px solid ${AC_BORDER}`,
+                borderRadius: 28,
+                padding: "48px 36px",
+                textAlign: "center",
+                position: "relative",
+                overflow: "hidden",
+              }}
             >
-              <h3 className="text-xl font-semibold text-white">{category}</h3>
-              <div className="mt-4 flex flex-wrap gap-3">
-                {items.map((item) => (
-                  <span
-                    key={item}
-                    className="rounded-full border border-white/10 bg-white/6 px-3 py-2 text-sm text-white/78 transition duration-300 hover:border-white/20 hover:bg-white/10"
-                  >
-                    {item}
-                  </span>
-                ))}
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent, ${AC}, transparent)` }} />
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, letterSpacing: "0.14em", textTransform: "uppercase", color: AC_TEXT, marginBottom: 14 }}>
+                {t.ctaEyebrow}
+              </p>
+              <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.5rem, 2.5vw, 2.2rem)", fontWeight: 800, color: "#f0f0ef", letterSpacing: "-0.025em", marginBottom: 12 }}>
+                {t.ctaTitle}
+              </h2>
+              <p style={{ fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.7, maxWidth: 520, margin: "0 auto 28px" }}>
+                {t.ctaText}
+              </p>
+              <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+                <a
+                  href="#demo"
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "13px 26px", background: "rgba(255,255,255,0.08)", color: "#f0f0ef", fontSize: 14, fontWeight: 600, borderRadius: 999, textDecoration: "none", border: "1px solid rgba(255,255,255,0.16)", transition: "background 150ms" }}
+                >
+                  {t.ctaDemo}
+                </a>
+                <a
+                  href={waHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "13px 26px", background: AC, color: "#04110a", fontSize: 14, fontWeight: 700, borderRadius: 999, textDecoration: "none", boxShadow: `0 6px 28px rgba(37,211,102,0.28)`, transition: "opacity 150ms, transform 150ms" }}
+                >
+                  {t.ctaWhatsApp}
+                </a>
               </div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-20 md:px-10">
-        <div className="rounded-[36px] border border-white/10 bg-gradient-to-r from-[#18233c] via-[#0d1627] to-[#0a1220] p-10 text-center shadow-[0_20px_80px_rgba(0,0,0,0.28)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">
-            {t.ctaEyebrow}
-          </p>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white md:text-4xl">
-            {t.ctaTitle}
-          </h2>
-          <p className="mx-auto mt-4 max-w-3xl text-base leading-8 text-white/68 md:text-lg">
-            {t.ctaText}
-          </p>
-
-          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <a
-              href="#demo"
-              className="inline-flex items-center justify-center rounded-2xl bg-white px-6 py-3 font-semibold shadow-[0_10px_30px_rgba(255,255,255,0.08)] transition duration-300 hover:scale-[1.02] hover:shadow-[0_14px_40px_rgba(255,255,255,0.14)]"
-            >
-              <span className="!text-[#000000]">{t.ctaDemo}</span>
-            </a>
-
-            <a
-              href={waHref}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center rounded-2xl bg-[#25D366] px-6 py-3 font-semibold text-[#04110a] shadow-[0_10px_30px_rgba(37,211,102,0.20)] transition duration-300 hover:scale-[1.02] hover:brightness-110 hover:shadow-[0_16px_40px_rgba(37,211,102,0.28)]"
-            >
-              {t.ctaWhatsApp}
-            </a>
           </div>
-        </div>
-      </section>
+        </section>
 
+      </main>
+
+      {/* ── Lightbox ───────────────────────────────────── */}
       {selectedImage && (
         <div
           onClick={() => setSelectedImage(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.85)", padding: 16 }}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="relative max-h-[95vh] max-w-[95vw]"
-          >
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "relative", maxHeight: "95vh", maxWidth: "95vw" }}>
             <button
               type="button"
               onClick={() => setSelectedImage(null)}
-              className="absolute right-3 top-3 z-10 rounded-full bg-black/70 px-3 py-1 text-sm text-white"
+              style={{ position: "absolute", right: 12, top: 12, zIndex: 10, borderRadius: 999, background: "rgba(0,0,0,0.70)", border: "none", color: "white", padding: "4px 12px", fontSize: 13, cursor: "pointer" }}
             >
               ✕
             </button>
-
             <Image
               src={selectedImage.src}
               alt={selectedImage.alt}
               width={1800}
               height={1200}
-              className="max-h-[90vh] w-auto rounded-2xl object-contain"
+              style={{ maxHeight: "90vh", width: "auto", borderRadius: 16, objectFit: "contain" }}
             />
           </div>
         </div>
       )}
-    </main>
+    </NavbarFooter>
   );
 }
