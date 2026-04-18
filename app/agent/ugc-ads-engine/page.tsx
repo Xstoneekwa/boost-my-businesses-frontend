@@ -1389,21 +1389,37 @@ export default function UGCAdsEnginePage() {
                                   autoPlay
                                   className="w-full rounded-xl"
                                 />
-                                {(msg.title || msg.description || msg.hashtags?.length) ? (
-                                  <div className="mt-3 space-y-2 px-1">
-                                    {msg.title ? (
-                                      <h3 className="text-sm font-semibold text-white">
+                                <div className="mt-3 space-y-3 px-1">
+                                  {msg.title ? (
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-white/40">
+                                        {lang === "fr" ? "Titre" : "Title"}
+                                      </p>
+                                      <p className="mt-1 text-sm font-semibold text-white">
                                         {msg.title}
-                                      </h3>
-                                    ) : null}
-                                    {msg.description ? (
-                                      <p className="text-sm leading-6 text-white/72">
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                  {msg.description ? (
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-white/40">
+                                        {lang === "fr" ? "Description" : "Description"}
+                                      </p>
+                                      <p className="mt-1 text-sm leading-6 text-white/72">
                                         {msg.description}
                                       </p>
-                                    ) : null}
-                                    {msg.hashtags?.length ? (
-                                      <div className="flex flex-wrap gap-2 pt-1">
-                                        {msg.hashtags.map((tag) => (
+                                    </div>
+                                  ) : null}
+                                  {msg.hashtags ? (
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-white/40">
+                                        Hashtags
+                                      </p>
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {(typeof msg.hashtags === "string"
+                                          ? (msg.hashtags as string).trim().split(/\s+/)
+                                          : msg.hashtags
+                                        ).filter(Boolean).map((tag) => (
                                           <span
                                             key={tag}
                                             className="rounded-full bg-[rgba(124,92,255,0.18)] px-3 py-1 text-xs font-medium text-[#a78bfa]"
@@ -1412,9 +1428,9 @@ export default function UGCAdsEnginePage() {
                                           </span>
                                         ))}
                                       </div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
                             ) : null}
 
