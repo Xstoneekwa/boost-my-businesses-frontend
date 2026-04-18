@@ -465,7 +465,9 @@ function normalizeMessages(raw: unknown): Message[] {
           ? msg.previewCreatedAt
           : null,
       actionType:
-        msg.actionType === "preview_actions" ? "preview_actions" : null,
+        msg.actionType === "preview_actions" || msg.actionType === "video_completed"
+          ? msg.actionType
+          : null,
       approveUrl:
         typeof msg.approveUrl === "string" || msg.approveUrl === null
           ? msg.approveUrl
@@ -474,6 +476,17 @@ function normalizeMessages(raw: unknown): Message[] {
         typeof msg.modifyUrl === "string" || msg.modifyUrl === null
           ? msg.modifyUrl
           : null,
+      videoUrl:
+        typeof msg.videoUrl === "string" || msg.videoUrl === null
+          ? msg.videoUrl
+          : null,
+      title:
+        typeof msg.title === "string" || msg.title === null ? msg.title : null,
+      description:
+        typeof msg.description === "string" || msg.description === null
+          ? msg.description
+          : null,
+      hashtags: Array.isArray(msg.hashtags) ? msg.hashtags : null,
     };
   });
 }
@@ -572,6 +585,14 @@ export default function UGCAdsEnginePage() {
       const feedbackIntent: string = event.data.feedback_intent ?? "";
       const jobId: string = event.data.job_id ?? "";
 
+      if (jobId) {
+        const activeSet =
+          feedbackIntent === "VIDEO"
+            ? videoPollingJobsRef.current
+            : pollingJobsRef.current;
+        if (activeSet.has(jobId)) return;
+      }
+
       const content =
         lang === "fr"
           ? `✏️ Modification reçue : "${feedbackPrompt}". Le système régénère votre visuel...`
@@ -584,7 +605,6 @@ export default function UGCAdsEnginePage() {
       if (!jobId) return;
 
       if (feedbackIntent === "VIDEO") {
-        if (videoPollingJobsRef.current.has(jobId)) return;
         if (videoPollingRef.current) window.clearInterval(videoPollingRef.current);
 
         videoPollingJobsRef.current.add(jobId);
@@ -1335,6 +1355,11 @@ export default function UGCAdsEnginePage() {
                         msg.actionType === "preview_actions" &&
                         !!msg.previewImageUrl;
 
+                      const showVideoCard =
+                        msg.role === "assistant" &&
+                        msg.actionType === "video_completed" &&
+                        !!msg.videoUrl;
+
                       return (
                         <div
                           key={msg.id}
@@ -1353,6 +1378,22 @@ export default function UGCAdsEnginePage() {
                                   className="h-auto w-full max-w-[240px] object-cover"
                                   unoptimized
                                 />
+                              </div>
+                            ) : null}
+
+                            {showVideoCard ? (
+                              <div className="mb-2 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1628] p-3">
+                                <video
+                                  src={msg.videoUrl as string}
+                                  controls
+                                  autoPlay
+                                  className="w-full rounded-xl"
+                                />
+                                {msg.title ? (
+                                  <p className="mt-3 text-sm font-semibold text-white">
+                                    {msg.title}
+                                  </p>
+                                ) : null}
                               </div>
                             ) : null}
 
