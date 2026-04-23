@@ -9,7 +9,7 @@
 //     {/* page content */}
 //   </NavbarFooter>
 //
-// agent prop: "whatsapp" | "assistant" | "ugc" | "support" | undefined
+// agent prop: "whatsapp" | "assistant" | "ugc" | "support" | "restaurant" | undefined
 // The "B" logo mark and CTA button take the agent's accent color.
 // Passing no agent (homepage) keeps the logo neutral white.
 // ============================================================
@@ -18,7 +18,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type Agent = "whatsapp" | "assistant" | "ugc" | "support";
+type Agent = "whatsapp" | "assistant" | "ugc" | "support" | "restaurant";
 type Lang = "fr" | "en";
 
 const AGENT_COLORS: Record<Agent, string> = {
@@ -26,6 +26,7 @@ const AGENT_COLORS: Record<Agent, string> = {
   assistant: "#8B7CF6",
   ugc: "#F97316",
   support: "#3B82F6",
+  restaurant: "#F59E0B",
 };
 
 const AGENT_HOVER: Record<Agent, string> = {
@@ -33,12 +34,14 @@ const AGENT_HOVER: Record<Agent, string> = {
   assistant: "rgba(139,124,246,0.10)",
   ugc: "rgba(249,115,22,0.10)",
   support: "rgba(59,130,246,0.10)",
+  restaurant: "rgba(245,158,11,0.10)",
 };
 
 const NAV_LINKS = [
   { label: { fr: "UGC Ads Engine", en: "UGC Ads Engine" }, href: "/agent/ugc-ads-engine", agent: "ugc" as Agent },
   { label: { fr: "AI Assistant", en: "AI Assistant" }, href: "/agent/general", agent: "assistant" as Agent },
   { label: { fr: "WhatsApp Leads", en: "WhatsApp Leads" }, href: "/agent/whatsapp-lead-system", agent: "whatsapp" as Agent },
+  { label: { fr: "AI Restaurant Call Assistant", en: "AI Restaurant Call Assistant" }, href: "/agent/restaurant-call-assistant", agent: "restaurant" as Agent },
   { label: { fr: "Support Agent", en: "Support Agent" }, href: "/agent/support", agent: "support" as Agent },
 ];
 
@@ -165,6 +168,7 @@ export default function NavbarFooter({
             display: "flex",
             gap: 2,
             flex: 1,
+            minWidth: 0,
             justifyContent: "center",
           }}
           className="nav-links-desktop"
@@ -207,11 +211,13 @@ export default function NavbarFooter({
         </nav>
 
         {/* Right side */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, position: "relative", zIndex: 1 }}>
           {/* Lang toggle */}
           <div
             style={{
               display: "flex",
+              position: "relative",
+              zIndex: 1,
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: 999,

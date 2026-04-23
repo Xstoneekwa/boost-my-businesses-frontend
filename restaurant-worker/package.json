@@ -1,0 +1,27 @@
+{
+  "name": "restaurant-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Background worker for AI Restaurant Call Assistant events.",
+  "main": "dist/worker.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/worker.ts",
+    "start": "node dist/worker.js",
+    "enqueue:test": "tsx src/enqueue-test-job.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "bullmq": "^5.56.1",
+    "dotenv": "^16.4.7",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}
