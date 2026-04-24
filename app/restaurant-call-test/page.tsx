@@ -422,34 +422,51 @@ export default function RestaurantCallTestPage() {
     setState({ status: "loading", data: null, error: null });
 
     try {
+      const endpoint = "/api/restaurant-call-test/text";
+      const requestBody = {
+        message: message.trim(),
+        caller_phone: callerPhone.trim(),
+        language,
+      };
+
+      console.log("[restaurant-call-test:text] frontend request", {
+        endpoint,
+        body: requestBody,
+      });
+
       const response = await fetch("/api/restaurant-call-test/text", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          message: message.trim(),
-          caller_phone: callerPhone.trim(),
-          language,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const payload = (await response.json()) as unknown;
 
+      console.log("[restaurant-call-test:text] frontend response", {
+        endpoint,
+        status: response.status,
+        ok: response.ok,
+        payload,
+      });
+
       if (!response.ok) {
-        throw new Error(t.webhookError);
+        throw new Error(readString(payload, ["message", "error"], t.webhookError));
       }
 
       if (!isRecord(payload) || payload.success !== true) {
-        throw new Error(t.webhookError);
+        throw new Error(readString(payload, ["message", "error"], t.webhookError));
       }
 
       setState({ status: "success", data: normalizeTextTestResult(payload), error: null });
-    } catch {
+    } catch (error) {
+      console.error("[restaurant-call-test:text] frontend error", error);
+
       setState({
         status: "error",
         data: null,
-        error: t.webhookError,
+        error: error instanceof Error ? error.message : t.webhookError,
       });
     }
   }
@@ -467,6 +484,11 @@ export default function RestaurantCallTestPage() {
     setCallSummary("");
 
     try {
+      console.log("[restaurant-call-test:voice] frontend action", {
+        callerPhone: callerPhone.trim(),
+        language,
+      });
+
       const result = await startVoiceTest({
         callerPhone: callerPhone.trim(),
         language,
@@ -497,8 +519,15 @@ export default function RestaurantCallTestPage() {
       setCallStatus("completed");
       setCallSummary(result.summary || t.voiceCompletedSummary);
     } catch (error) {
+      console.error("[restaurant-call-test:voice] frontend error", error);
       setCallStatus("failed");
-      setCallSummary(error instanceof Error && error.message === "missing_phone" ? t.voicePhoneRequired : t.voiceFailedSummary);
+      setCallSummary(
+        error instanceof Error
+          ? error.message === "missing_phone"
+            ? t.voicePhoneRequired
+            : error.message || t.voiceFailedSummary
+          : t.voiceFailedSummary
+      );
     }
   }
 

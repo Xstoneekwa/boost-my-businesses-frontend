@@ -52,23 +52,36 @@ function readBoolean(source: unknown, key: string, fallback = false) {
 
 export async function startVoiceTest(options: VoiceTestStartOptions = {}): Promise<VoiceTestStartResult> {
   const endpoint = restaurantCallTestConfig.voiceTestMode === "live" ? "/api/voice-test/start-live" : "/api/voice-test/start";
+  const requestBody = {
+    mode: restaurantCallTestConfig.voiceTestMode,
+    provider: restaurantCallTestConfig.voiceTestProvider,
+    caller_phone: options.callerPhone,
+    language: options.language,
+  };
+
+  console.log("[restaurant-call-test:voice] request", {
+    endpoint,
+    body: requestBody,
+  });
 
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      mode: restaurantCallTestConfig.voiceTestMode,
-      provider: restaurantCallTestConfig.voiceTestProvider,
-      caller_phone: options.callerPhone,
-      language: options.language,
-    }),
+    body: JSON.stringify(requestBody),
   });
   const payload = (await response.json()) as unknown;
 
+  console.log("[restaurant-call-test:voice] response", {
+    endpoint,
+    status: response.status,
+    ok: response.ok,
+    payload,
+  });
+
   if (!response.ok) {
-    throw new Error(readString(payload, "message", "voice_test_failed"));
+    throw new Error(readString(payload, "error", readString(payload, "message", "voice_test_failed")));
   }
 
   if (restaurantCallTestConfig.voiceTestMode === "live") {

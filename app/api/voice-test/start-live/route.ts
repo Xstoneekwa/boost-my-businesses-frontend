@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type VoiceTestLiveRequest = {
   caller_phone?: unknown;
   language?: unknown;
@@ -77,6 +80,18 @@ function responseHeadersToRecord(headers: Headers) {
   return Object.fromEntries(headers.entries());
 }
 
+function normalizePhoneToE164(value: string) {
+  const compact = value.trim().replace(/[\s\-()]/g, "");
+  const normalized = compact.replace(/^\++/, "+");
+  const withPlus = normalized.startsWith("+") ? normalized : `+${normalized}`;
+
+  if (!/^\+[1-9]\d{7,14}$/.test(withPlus)) {
+    return null;
+  }
+
+  return withPlus;
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.RESTAURANT_VAPI_API_KEY;
   const assistantId = process.env.RESTAURANT_VAPI_ASSISTANT_ID;
@@ -125,6 +140,7 @@ export async function POST(request: Request) {
 
   try {
     const callerPhone = typeof body.caller_phone === "string" ? body.caller_phone.trim() : "";
+    const normalizedCallerPhone = callerPhone ? normalizePhoneToE164(callerPhone) : "";
 
     if (!callerPhone) {
       console.log("[voice-test:start-live] missing required phone number", { body });
@@ -140,6 +156,30 @@ export async function POST(request: Request) {
           status: "missing_phone",
           summary: null,
           debug,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!normalizedCallerPhone) {
+      console.log("[voice-test:start-live] invalid phone number", {
+        original: callerPhone,
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          mode: "live",
+          provider: "vapi",
+          error: "Phone number must be a valid E.164 number.",
+          message: "Phone number must be a valid E.164 number.",
+          callId: null,
+          status: "invalid_phone",
+          summary: null,
+          debug: {
+            ...debug,
+            normalizedCallerPhone: null,
+          },
         },
         { status: 400 }
       );
@@ -172,7 +212,7 @@ export async function POST(request: Request) {
       assistantId,
       phoneNumberId,
       customer: {
-        number: callerPhone,
+        number: normalizedCallerPhone,
       },
     };
     debug.vapiRequestPayload = vapiRequestPayload;

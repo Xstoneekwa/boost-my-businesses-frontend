@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type TextTestRequest = {
   message?: unknown;
@@ -134,6 +135,12 @@ async function parseBackendResponse(response: Response) {
 export async function POST(request: Request) {
   const endpointUrl = process.env.RESTAURANT_CALL_TEXT_TEST_ENDPOINT_URL || process.env.RESTAURANT_CALL_TEST_WEBHOOK_URL;
 
+  console.log("[restaurant-call-test:text] environment", {
+    hasRestaurantCallTextTestEndpointUrl: Boolean(process.env.RESTAURANT_CALL_TEXT_TEST_ENDPOINT_URL),
+    hasRestaurantCallTestWebhookUrl: Boolean(process.env.RESTAURANT_CALL_TEST_WEBHOOK_URL),
+    endpointUrl: endpointUrl || null,
+  });
+
   if (!endpointUrl) {
     return NextResponse.json(
       {
@@ -146,6 +153,8 @@ export async function POST(request: Request) {
 
   try {
     const body = (await request.json()) as TextTestRequest;
+    console.log("[restaurant-call-test:text] received body", body);
+
     const message = typeof body.message === "string" ? body.message.trim() : "";
     const callerPhone = typeof body.caller_phone === "string" ? body.caller_phone.trim() : "";
     const language = typeof body.language === "string" && body.language.trim() ? body.language.trim() : "en";
@@ -161,45 +170,64 @@ export async function POST(request: Request) {
     }
 
     const intent = inferIntent(message);
+    const backendPayload = {
+      message: {
+        toolCalls: [
+          {
+            function: {
+              name: TOOL_NAME,
+              arguments: {
+                intent,
+                question: message,
+                language,
+              },
+            },
+          },
+        ],
+      },
+      customer: {
+        number: callerPhone,
+      },
+      call: {
+        id: `text_test_${Date.now()}`,
+      },
+      source: "restaurant_call_text_test",
+    };
+
+    console.log("[restaurant-call-test:text] backend request", {
+      endpointUrl,
+      body: backendPayload,
+    });
+
     const backendResponse = await fetch(endpointUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({
-        message: {
-          toolCalls: [
-            {
-              function: {
-                name: TOOL_NAME,
-                arguments: {
-                  intent,
-                  question: message,
-                  language,
-                },
-              },
-            },
-          ],
-        },
-        customer: {
-          number: callerPhone,
-        },
-        call: {
-          id: `text_test_${Date.now()}`,
-        },
-        source: "restaurant_call_text_test",
-      }),
+      body: JSON.stringify(backendPayload),
       cache: "no-store",
     });
 
     const raw = await parseBackendResponse(backendResponse);
+    console.log("[restaurant-call-test:text] backend response", {
+      ok: backendResponse.ok,
+      status: backendResponse.status,
+      statusText: backendResponse.statusText,
+      body: raw,
+    });
 
     if (!backendResponse.ok) {
       return NextResponse.json(
         {
           success: false,
           error: "text_test_failed",
+          message: readString(raw, ["message", "error", "details"], "The test service returned an error."),
+          debug: {
+            status: backendResponse.status,
+            statusText: backendResponse.statusText,
+            body: raw,
+          },
         },
         { status: 502 }
       );
@@ -216,11 +244,14 @@ export async function POST(request: Request) {
         },
       }
     );
-  } catch {
+  } catch (error) {
+    console.error("[restaurant-call-test:text] unhandled error", error);
+
     return NextResponse.json(
       {
         success: false,
         error: "text_test_failed",
+        message: error instanceof Error ? error.message : "The test service returned an error.",
       },
       { status: 500 }
     );
