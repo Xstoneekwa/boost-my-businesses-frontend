@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties, FormEvent } from "react";
-import { useEffect, useState } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -51,12 +51,80 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ResetPasswordPageShell({
+  children,
+  lang,
+  setLang,
+}: {
+  children: ReactNode;
+  lang: ReturnType<typeof useRestaurantLanguage>[0];
+  setLang: ReturnType<typeof useRestaurantLanguage>[1];
+}) {
+  const t = restaurantCommonCopy[lang];
+
+  return (
+    <main style={pageStyle}>
+      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px 24px 72px" }}>
+        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, marginBottom: 58, flexWrap: "wrap" }}>
+          <Link href="/agent/restaurant-call-assistant" style={{ display: "inline-flex", alignItems: "center", gap: 10, color: "#f0f0ef", textDecoration: "none" }}>
+            <span style={{ width: 32, height: 32, borderRadius: 8, background: AC, color: "#160b02", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Syne', sans-serif", fontWeight: 900 }}>
+              B
+            </span>
+            <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 14, fontWeight: 800 }}>BoostMyBusinesses</span>
+              <span style={{ color: "rgba(255,255,255,0.42)", fontSize: 11 }}>{t.reset.brandSub}</span>
+            </span>
+          </Link>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <RestaurantLanguageToggle lang={lang} onLangChange={setLang} />
+            <Link href="/restaurant-login" style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.76)", borderRadius: 999, padding: "10px 15px", textDecoration: "none", fontSize: 13, fontWeight: 700 }}>
+              {t.backToLogin}
+            </Link>
+          </div>
+        </header>
+
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))", gap: 28, alignItems: "center" }}>
+          <div>
+            <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 14 }}>
+              {t.reset.eyebrow}
+            </p>
+            <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(2.25rem, 5vw, 4rem)", lineHeight: 1.02, letterSpacing: "-0.045em", maxWidth: 680, marginBottom: 18 }}>
+              {t.reset.title}
+            </h1>
+            <p style={{ color: "rgba(255,255,255,0.58)", fontSize: 16, lineHeight: 1.75, maxWidth: 610 }}>
+              {t.reset.text}
+            </p>
+          </div>
+
+          {children}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function ResetPasswordCardFallback() {
+  const [lang, setLang] = useRestaurantLanguage();
+  const t = restaurantCommonCopy[lang];
+
+  return (
+    <ResetPasswordPageShell lang={lang} setLang={setLang}>
+      <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 26, padding: "clamp(20px, 3vw, 30px)", boxShadow: "0 28px 90px rgba(0,0,0,0.26)" }}>
+        <p style={{ color: "rgba(255,255,255,0.62)", fontSize: 14, lineHeight: 1.7 }}>
+          {t.reset.checking}
+        </p>
+      </div>
+    </ResetPasswordPageShell>
+  );
+}
+
 function getHashParams() {
   if (typeof window === "undefined") return new URLSearchParams();
   return new URLSearchParams(window.location.hash.replace(/^#/, ""));
 }
 
-export default function RestaurantResetPasswordPage() {
+function RestaurantResetPasswordContent() {
   const searchParams = useSearchParams();
   const [lang, setLang] = useRestaurantLanguage();
   const t = restaurantCommonCopy[lang];
@@ -138,41 +206,8 @@ export default function RestaurantResetPasswordPage() {
   }
 
   return (
-    <main style={pageStyle}>
-      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px 24px 72px" }}>
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, marginBottom: 58, flexWrap: "wrap" }}>
-          <Link href="/agent/restaurant-call-assistant" style={{ display: "inline-flex", alignItems: "center", gap: 10, color: "#f0f0ef", textDecoration: "none" }}>
-            <span style={{ width: 32, height: 32, borderRadius: 8, background: AC, color: "#160b02", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Syne', sans-serif", fontWeight: 900 }}>
-              B
-            </span>
-            <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 14, fontWeight: 800 }}>BoostMyBusinesses</span>
-              <span style={{ color: "rgba(255,255,255,0.42)", fontSize: 11 }}>{t.reset.brandSub}</span>
-            </span>
-          </Link>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <RestaurantLanguageToggle lang={lang} onLangChange={setLang} />
-            <Link href="/restaurant-login" style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.76)", borderRadius: 999, padding: "10px 15px", textDecoration: "none", fontSize: 13, fontWeight: 700 }}>
-              {t.backToLogin}
-            </Link>
-          </div>
-        </header>
-
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))", gap: 28, alignItems: "center" }}>
-          <div>
-            <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 14 }}>
-              {t.reset.eyebrow}
-            </p>
-            <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(2.25rem, 5vw, 4rem)", lineHeight: 1.02, letterSpacing: "-0.045em", maxWidth: 680, marginBottom: 18 }}>
-              {t.reset.title}
-            </h1>
-            <p style={{ color: "rgba(255,255,255,0.58)", fontSize: 16, lineHeight: 1.75, maxWidth: 610 }}>
-              {t.reset.text}
-            </p>
-          </div>
-
-          <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 26, padding: "clamp(20px, 3vw, 30px)", boxShadow: "0 28px 90px rgba(0,0,0,0.26)" }}>
+    <ResetPasswordPageShell lang={lang} setLang={setLang}>
+      <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 26, padding: "clamp(20px, 3vw, 30px)", boxShadow: "0 28px 90px rgba(0,0,0,0.26)" }}>
             {recoveryState === "checking" && (
               <p style={{ color: "rgba(255,255,255,0.62)", fontSize: 14, lineHeight: 1.7 }}>
                 {t.reset.checking}
@@ -224,9 +259,15 @@ export default function RestaurantResetPasswordPage() {
                 </button>
               </form>
             )}
-          </div>
-        </section>
       </div>
-    </main>
+    </ResetPasswordPageShell>
+  );
+}
+
+export default function RestaurantResetPasswordPage() {
+  return (
+    <Suspense fallback={<ResetPasswordCardFallback />}>
+      <RestaurantResetPasswordContent />
+    </Suspense>
   );
 }
