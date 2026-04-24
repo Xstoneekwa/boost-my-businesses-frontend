@@ -58,6 +58,10 @@ export async function POST(request: Request) {
     const providedSecret = request.headers.get("x-worker-enqueue-secret");
     const expectedSecret = process.env.WORKER_ENQUEUE_SECRET?.trim();
 
+    console.log("EXPECTED SECRET:", expectedSecret ?? null);
+    console.log("RECEIVED SECRET:", providedSecret ?? null);
+    console.log("MATCH:", Boolean(expectedSecret && providedSecret === expectedSecret));
+
     if (!expectedSecret || providedSecret !== expectedSecret) {
       return NextResponse.json(
         { success: false, message: "Unauthorized" },
