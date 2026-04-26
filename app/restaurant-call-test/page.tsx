@@ -641,6 +641,7 @@ export default function RestaurantCallTestPage() {
         </section>
 
         <section
+          className="call-test-result-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
@@ -764,7 +765,7 @@ export default function RestaurantCallTestPage() {
           </form>
 
           <section style={{ ...cardStyle, padding: "clamp(18px, 3vw, 26px)", minHeight: "100%", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 20 }}>
+            <div className="mobile-card-row" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 20 }}>
               <div>
                 <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
                   {t.voiceTestTitle}
@@ -818,7 +819,7 @@ export default function RestaurantCallTestPage() {
               </button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 14 }}>
+            <div className="call-test-voice-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 14 }}>
               {voiceDetails.map((item) => (
                 <div key={item.label} style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)", borderRadius: 14, padding: 12, minHeight: 78 }}>
                   <p style={{ color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", lineHeight: 1.35 }}>

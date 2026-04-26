@@ -97,7 +97,7 @@ export default async function RestaurantAnalyticsLocationsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow={tenantCopy?.eyebrow ?? "Location analytics"}
         title={tenantCopy?.title ?? "Locations"}
@@ -107,11 +107,12 @@ export default async function RestaurantAnalyticsLocationsPage() {
 
       <AnalyticsSectionCard title={tenantCopy?.listTitle ?? "Location list"} eyebrow={tenantCopy?.listEyebrow ?? "Restaurant sites"} description={tenantCopy?.listDescription ?? "Location links use the real Supabase location id used by analytics_calls_by_location.location_id."}>
         {result.locations.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 12 }}>
+          <div className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 12 }}>
             {result.locations.map((location) => (
               <Link
                 key={location.id}
                 href={`/restaurant-analytics/locations/${location.id}`}
+                className="dashboard-compact-card"
                 style={{
                   border: "1px solid rgba(255,255,255,0.07)",
                   background: "rgba(255,255,255,0.025)",
@@ -125,7 +126,7 @@ export default async function RestaurantAnalyticsLocationsPage() {
                 <p style={{ color: "rgba(255,255,255,0.46)", fontSize: 12, marginBottom: 14 }}>
                   {tenantCopy ? copy.dashboard.locationDetail.locationScope : location.id}
                 </p>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                <div className="dashboard-location-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
                   <Metric label={tenantCopy ? copy.dashboard.locationDetail.calls : "Calls"} value={formatInteger(location.calls)} />
                   <Metric label={tenantCopy ? copy.dashboard.locationDetail.bookings : "Bookings"} value={formatInteger(location.bookings)} />
                   <Metric label={tenantCopy ? copy.dashboard.locationDetail.handoffs : "Handoffs"} value={formatPercent(percentOf(location.handoffs, location.calls))} />
@@ -143,7 +144,7 @@ export default async function RestaurantAnalyticsLocationsPage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="dashboard-mini-kpi">
       <p style={{ color: ANALYTICS_ACCENT_TEXT, fontSize: 13, fontWeight: 900, marginBottom: 3 }}>{value}</p>
       <p style={{ color: "rgba(255,255,255,0.42)", fontSize: 11 }}>{label}</p>
     </div>

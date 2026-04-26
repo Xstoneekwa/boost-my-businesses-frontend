@@ -66,7 +66,7 @@ export default async function RestaurantAnalyticsTenantDetailPage({ params }: Te
   const tenantFallbacks = locationRows.reduce((sum, row) => sum + readNumber(row, ["total_fallbacks", "fallbacks", "fallback_calls", "fallbackCalls"]), 0);
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow="Tenant detail"
         title={tenantName}
@@ -79,20 +79,21 @@ export default async function RestaurantAnalyticsTenantDetailPage({ params }: Te
         }
       />
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
         <AnalyticsKpiCard label="Tenant Calls" value={tenantCalls.toLocaleString()} trend="Live" detail="Total calls processed for this tenant." />
         <AnalyticsKpiCard label="Bookings" value={tenantBookings.toLocaleString()} trend={formatPercent(percentOf(tenantBookings, tenantCalls))} detail="Bookings captured or qualified by AI." tone="good" />
         <AnalyticsKpiCard label="Escalations" value={tenantHandoffs.toLocaleString()} trend={formatPercent(percentOf(tenantHandoffs, tenantCalls))} detail="Handoffs sent with context and priority." tone="warning" />
         <AnalyticsKpiCard label="Fallbacks" value={tenantFallbacks.toLocaleString()} trend={formatPercent(percentOf(tenantFallbacks, tenantCalls))} detail="Calls that needed fallback logic." tone="danger" />
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18 }}>
+      <section className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18 }}>
         <AnalyticsSectionCard title="Locations" eyebrow="Site performance" description="Locations connected to this tenant, linked with real Supabase location ids.">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {locations.length ? locations.map((location) => (
               <Link
                 key={location.id}
                 href={`/restaurant-analytics/locations/${location.id}`}
+                className="mobile-card-row"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr repeat(3, minmax(70px, 0.35fr))",

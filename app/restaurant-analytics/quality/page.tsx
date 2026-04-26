@@ -253,7 +253,7 @@ export default async function RestaurantAnalyticsQualityPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow={tenantCopy?.eyebrow ?? "Quality assurance"}
         title={tenantCopy?.title ?? "Quality"}
@@ -267,14 +267,14 @@ export default async function RestaurantAnalyticsQualityPage() {
         </div>
       )}
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
         <AnalyticsKpiCard label={tenantCopy?.reviewedCalls ?? "Reviewed Calls"} value={formatInteger(result.kpis.reviewedCalls)} trend={tenantCopy ? copy.dashboard.liveData : "Live"} detail={tenantCopy?.reviewedDetail ?? "Calls sampled for QA in the current period."} />
         <AnalyticsKpiCard label={tenantCopy?.passRate ?? "Pass Rate"} value={formatPercent(result.kpis.passRate)} trend={tenantCopy?.title ?? "Quality"} detail={tenantCopy?.passDetail ?? "Calls that met quality standards."} tone="good" />
         <AnalyticsKpiCard label={tenantCopy?.needsTuning ?? "Needs Tuning"} value={formatInteger(result.kpis.needsTuning)} trend="Queue" detail={tenantCopy?.needsTuningDetail ?? "Calls marked for prompt or routing improvement."} tone="warning" />
         <AnalyticsKpiCard label={tenantCopy?.criticalQa ?? "Critical QA"} value={formatInteger(result.kpis.criticalQa)} trend="Action" detail={tenantCopy?.criticalDetail ?? "Quality issues that need immediate review."} tone="danger" />
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18, marginBottom: 18 }}>
+      <section className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18, marginBottom: 18 }}>
         <QualitySummaryCard
           metrics={
             tenantCopy
@@ -314,7 +314,7 @@ export default async function RestaurantAnalyticsQualityPage() {
         </AnalyticsSectionCard>
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18, marginBottom: 18 }}>
+      <section className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18, marginBottom: 18 }}>
         <AnalyticsSectionCard
           title={tenantCopy?.topEscalation ?? "Top Escalation Reasons"}
           eyebrow={tenantCopy?.handoffDrivers ?? "Human handoff drivers"}
@@ -324,7 +324,7 @@ export default async function RestaurantAnalyticsQualityPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {result.escalationReasons.map((item) => (
                 <div key={item.reason} style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)", borderRadius: 14, padding: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+                  <div className="dashboard-inline-stat" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
                     <p style={{ color: "#f0f0ef", fontSize: 14, fontWeight: 800 }}>{item.reason}</p>
                     <span style={{ color: ANALYTICS_ACCENT_TEXT, fontSize: 13, fontWeight: 900 }}>{item.count}</span>
                   </div>
@@ -344,7 +344,7 @@ export default async function RestaurantAnalyticsQualityPage() {
           tone="accent"
         >
           {result.missedOpportunities.length ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+            <div className="dashboard-three-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               {result.missedOpportunities.map((item) => (
                 <div key={item.label} style={{ border: `1px solid ${ANALYTICS_ACCENT_BORDER}`, background: "rgba(7,17,31,0.42)", borderRadius: 14, padding: 14 }}>
                   <p style={{ color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
@@ -363,14 +363,14 @@ export default async function RestaurantAnalyticsQualityPage() {
         </AnalyticsSectionCard>
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18 }}>
+      <section className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18 }}>
         <AnalyticsSectionCard
           title={tenantCopy?.frustratedTitle ?? "Frustrated Customers Detected"}
           eyebrow={tenantCopy?.sentiment ?? "Sentiment monitoring"}
           description={tenantCopy?.frustratedDescription ?? "Signals that should be reviewed before they become public feedback or lost repeat visits."}
         >
           {result.frustratedSignals.length ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+            <div className="dashboard-three-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
               {result.frustratedSignals.map((item) => (
                 <div key={item.label} style={{ border: "1px solid rgba(248,113,113,0.22)", background: "rgba(248,113,113,0.075)", borderRadius: 14, padding: 14 }}>
                   <p style={{ color: "#FCA5A5", fontSize: 24, fontFamily: "'Syne', sans-serif", fontWeight: 800, marginBottom: 6 }}>{item.value}</p>

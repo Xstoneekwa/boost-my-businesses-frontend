@@ -21,10 +21,11 @@ export default function QualitySummaryCard({ metrics, title = "Quality Summary",
       description={description}
       tone="accent"
     >
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+      <div className="dashboard-three-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
         {metrics.map((metric) => (
           <div
             key={metric.label}
+            className="dashboard-mini-kpi"
             style={{
               border: "1px solid rgba(255,255,255,0.08)",
               background: "rgba(7,17,31,0.45)",

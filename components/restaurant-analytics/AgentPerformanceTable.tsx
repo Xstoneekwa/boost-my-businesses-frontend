@@ -29,7 +29,7 @@ export default function AgentPerformanceTable({ rows }: AgentPerformanceTablePro
               padding: 14,
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9 }}>
+            <div className="dashboard-inline-stat" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9 }}>
               <div>
                 <p style={{ color: "#f0f0ef", fontSize: 13.5, fontWeight: 800, marginBottom: 3 }}>{row.agentName}</p>
                 <p style={{ color: "rgba(255,255,255,0.38)", fontSize: 12 }}>

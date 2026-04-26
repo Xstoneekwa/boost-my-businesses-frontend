@@ -161,6 +161,7 @@ const copy = {
 
 export default function Page() {
   const pathname = usePathname();
+  const [hydratedPathname, setHydratedPathname] = useState("");
   const [lang, setLang] = useState<Lang>("en");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>("");
@@ -178,6 +179,10 @@ export default function Page() {
     window.addEventListener("scroll", handler, { passive: true });
     return () => window.removeEventListener("scroll", handler);
   }, []);
+
+  useEffect(() => {
+    setHydratedPathname(pathname ?? "");
+  }, [pathname]);
 
   useEffect(() => {
     const storedLang = localStorage.getItem(LANG_KEY) as Lang | null;
@@ -296,7 +301,7 @@ export default function Page() {
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "linear-gradient(180deg, #07101f 0%, #081226 100%)", color: "#eef2ff", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
 
       {/* ── NAVBAR ── */}
-      <header style={{
+      <header className="flex-wrap md:flex-nowrap px-4 sm:px-6" style={{
         position: "sticky", top: 0, zIndex: 100, height: 58,
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 24px", gap: 16,
@@ -312,9 +317,9 @@ export default function Page() {
           </span>
         </Link>
 
-        <nav style={{ display: "flex", gap: 2, flex: 1, justifyContent: "center" }}>
+        <nav className="hidden lg:flex" style={{ display: "flex", gap: 2, flex: 1, justifyContent: "center" }}>
           {NAV_LINKS.map((link) => {
-            const isActive = pathname === link.href;
+            const isActive = hydratedPathname === link.href;
             return (
               <Link key={link.href} href={link.href} style={{ padding: "5px 11px", fontSize: 12.5, fontWeight: 500, color: isActive ? link.color : "rgba(255,255,255,0.48)", textDecoration: "none", borderRadius: 999, background: isActive ? "rgba(255,255,255,0.06)" : "transparent", transition: "color 150ms" }}
                 onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.color = link.color; }}
@@ -333,17 +338,17 @@ export default function Page() {
               </button>
             ))}
           </div>
-          <Link href="/#pricing" style={{ padding: "7px 16px", background: AC, color: "#000", fontSize: 12.5, fontWeight: 700, borderRadius: 999, textDecoration: "none" }}>
+          <Link className="hidden sm:inline-flex" href="/#pricing" style={{ padding: "7px 16px", background: AC, color: "#000", fontSize: 12.5, fontWeight: 700, borderRadius: 999, textDecoration: "none" }}>
             {t.navCta}
           </Link>
         </div>
       </header>
 
       {/* ── SHELL ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", flex: 1, minHeight: 0 }}>
+      <div className="assistant-shell-grid" style={{ display: "grid", gridTemplateColumns: "260px 1fr", flex: 1, minHeight: 0 }}>
 
         {/* ── SIDEBAR ── */}
-        <aside style={{ padding: 14, borderRight: "1px solid rgba(255,255,255,0.07)", background: "rgba(7,13,28,0.80)", backdropFilter: "blur(22px)", display: "flex", flexDirection: "column", gap: 11, overflowY: "auto" }}>
+        <aside className="assistant-sidebar" style={{ padding: 14, borderRight: "1px solid rgba(255,255,255,0.07)", background: "rgba(7,13,28,0.80)", backdropFilter: "blur(22px)", display: "flex", flexDirection: "column", gap: 11, overflowY: "auto" }}>
 
           {/* Brand */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, borderRadius: 14, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
@@ -407,7 +412,7 @@ export default function Page() {
         </aside>
 
         {/* ── RIGHT COLUMN ── */}
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
+        <div className="assistant-main" style={{ display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
           <main style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18, flex: 1 }}>
 
             {/* Hero */}
@@ -425,7 +430,7 @@ export default function Page() {
             </div>
 
             {/* Stats */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 820, margin: "0 auto", width: "100%" }}>
+            <div className="assistant-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 820, margin: "0 auto", width: "100%" }}>
               {t.stats.map((stat) => (
                 <div key={stat.label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 13, padding: "11px 14px", transition: "border-color 200ms" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }}
@@ -439,7 +444,7 @@ export default function Page() {
             {/* Suggestions */}
             <div style={{ maxWidth: 820, margin: "0 auto", width: "100%" }}>
               <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 10, fontWeight: 500, marginBottom: 9, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.09em" }}>{t.suggestionsTitle}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <div className="assistant-prompts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
                 {t.prompts[activeConversation?.agent ?? "general"].map((prompt) => (
                   <button key={prompt} onClick={() => usePrompt(prompt)} style={{ textAlign: "left", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", color: "#edf2ff", borderRadius: 14, padding: "12px 13px", cursor: "pointer", lineHeight: 1.45, fontSize: 12.5, transition: "all 150ms", minHeight: 68 }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = AC_DIM; (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)"; }}
@@ -458,7 +463,7 @@ export default function Page() {
                 ) : (
                   activeConversation.messages.map((msg) => (
                     <div key={msg.id} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-                      <div style={{ maxWidth: "78%", padding: "12px 16px", borderRadius: 18, lineHeight: 1.65, whiteSpace: "pre-wrap", fontSize: 13.5, background: msg.role === "user" ? `linear-gradient(135deg, ${AC}, #a594f9)` : "rgba(255,255,255,0.92)", color: msg.role === "user" ? "#fff" : "#101827", borderBottomRightRadius: msg.role === "user" ? 5 : 18, borderBottomLeftRadius: msg.role === "assistant" ? 5 : 18, fontWeight: msg.role === "user" ? 500 : 400, boxShadow: "0 8px 20px rgba(0,0,0,0.10)" }}>
+                      <div className="mobile-chat-bubble" style={{ maxWidth: "78%", padding: "12px 16px", borderRadius: 18, lineHeight: 1.65, whiteSpace: "pre-wrap", fontSize: 13.5, background: msg.role === "user" ? `linear-gradient(135deg, ${AC}, #a594f9)` : "rgba(255,255,255,0.92)", color: msg.role === "user" ? "#fff" : "#101827", borderBottomRightRadius: msg.role === "user" ? 5 : 18, borderBottomLeftRadius: msg.role === "assistant" ? 5 : 18, fontWeight: msg.role === "user" ? 500 : 400, boxShadow: "0 8px 20px rgba(0,0,0,0.10)" }}>
                         {msg.content}
                       </div>
                     </div>
@@ -466,7 +471,7 @@ export default function Page() {
                 )}
                 {loading && (
                   <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                    <div style={{ maxWidth: "78%", padding: "12px 16px", borderRadius: 18, borderBottomLeftRadius: 5, lineHeight: 1.65, fontSize: 13.5, background: "rgba(255,255,255,0.92)", color: "#101827", minWidth: 180 }}>
+                    <div className="mobile-chat-bubble-loading" style={{ maxWidth: "78%", padding: "12px 16px", borderRadius: 18, borderBottomLeftRadius: 5, lineHeight: 1.65, fontSize: 13.5, background: "rgba(255,255,255,0.92)", color: "#101827", minWidth: 180 }}>
                       {t.thinking}{typingDots()}
                     </div>
                   </div>
@@ -474,10 +479,10 @@ export default function Page() {
                 <div ref={bottomRef} />
               </div>
 
-              <form onSubmit={handleSubmit} style={{ display: "flex", alignItems: "center", gap: 11, padding: 15, borderTop: "1px solid rgba(255,255,255,0.07)", background: "rgba(7,12,24,0.80)" }}>
+              <form onSubmit={handleSubmit} className="mobile-chat-form" style={{ display: "flex", alignItems: "center", gap: 11, padding: 15, borderTop: "1px solid rgba(255,255,255,0.07)", background: "rgba(7,12,24,0.80)" }}>
                 <button type="button" title={t.attachmentsSoon} disabled style={{ width: 46, height: 46, borderRadius: 13, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", color: "#9fb1da", cursor: "not-allowed", flexShrink: 0, fontSize: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>＋</button>
                 <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={t.placeholder} style={{ flex: 1, height: 46, borderRadius: 13, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.05)", color: "white", padding: "0 15px", outline: "none", fontSize: 13.5 }} />
-                <button type="submit" disabled={loading || !input.trim()} style={{ height: 46, border: "none", borderRadius: 13, padding: "0 20px", background: AC, color: "#000", fontWeight: 700, cursor: "pointer", fontSize: 13.5, boxShadow: `0 8px 22px rgba(139,124,246,0.26)`, opacity: (loading || !input.trim()) ? 0.6 : 1, transition: "opacity 150ms" }}>{t.send}</button>
+                <button className="mobile-chat-form-submit" type="submit" disabled={loading || !input.trim()} style={{ height: 46, border: "none", borderRadius: 13, padding: "0 20px", background: AC, color: "#000", fontWeight: 700, cursor: "pointer", fontSize: 13.5, boxShadow: `0 8px 22px rgba(139,124,246,0.26)`, opacity: (loading || !input.trim()) ? 0.6 : 1, transition: "opacity 150ms" }}>{t.send}</button>
               </form>
             </section>
 
@@ -485,7 +490,7 @@ export default function Page() {
 
           {/* ── FOOTER ── */}
           <footer style={{ borderTop: "1px solid rgba(255,255,255,0.07)", padding: "24px 28px 18px", background: "rgba(255,255,255,0.01)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 32, marginBottom: 20 }}>
+            <div className="assistant-footer-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 32, marginBottom: 20 }}>
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
                   <span style={{ width: 22, height: 22, borderRadius: 4, background: AC, color: "#000", fontFamily: "'Syne', sans-serif", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>B</span>
@@ -518,7 +523,7 @@ export default function Page() {
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="assistant-footer-bottom" style={{ display: "flex", justifyContent: "space-between", paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
               <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "rgba(255,255,255,0.20)" }}>{t.footerCopy}</p>
               <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "rgba(255,255,255,0.20)" }}>{t.footerMade}</p>
             </div>

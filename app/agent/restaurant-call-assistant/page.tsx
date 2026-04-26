@@ -406,8 +406,8 @@ export default function RestaurantCallAssistantPage() {
 
   const t = copy[lang];
 
-  const section: React.CSSProperties = { padding: "64px 0" };
-  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 24px" };
+  const section: React.CSSProperties = { padding: "clamp(42px, 7vw, 64px) 0" };
+  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 clamp(16px, 3vw, 24px)" };
   const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: 0 };
   const dashboardPreviewKpis = [
     { label: "Total Calls", value: "1,284", detail: lang === "fr" ? "Appels entrants traités" : "Inbound calls handled" },
@@ -430,7 +430,7 @@ export default function RestaurantCallAssistantPage() {
     borderBottom: "1px solid rgba(255,255,255,0.06)",
     fontSize: 12.5,
     color: "rgba(255,255,255,0.64)",
-    whiteSpace: "nowrap",
+    whiteSpace: "normal",
   };
   const previewHeadStyle: React.CSSProperties = {
     ...previewCellStyle,
@@ -463,7 +463,7 @@ export default function RestaurantCallAssistantPage() {
             }}
           />
 
-          <div style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
+          <div className="responsive-container responsive-hero-shell" style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
             <div
               style={{
                 display: "grid",
@@ -504,6 +504,7 @@ export default function RestaurantCallAssistantPage() {
                 </div>
 
                 <h1
+                  className="responsive-hero-title"
                   style={{
                     fontFamily: "'Syne', sans-serif",
                     fontSize: "clamp(1.8rem, 3.5vw, 3rem)",
@@ -517,11 +518,11 @@ export default function RestaurantCallAssistantPage() {
                   {t.heroTitle}
                 </h1>
 
-                <p style={{ fontSize: 16, color: "rgba(255,255,255,0.58)", lineHeight: 1.7, marginBottom: 28, maxWidth: 560 }}>
+                <p className="responsive-body-copy" style={{ fontSize: 16, color: "rgba(255,255,255,0.58)", lineHeight: 1.7, marginBottom: 28, maxWidth: 560 }}>
                   {t.heroSubtitle}
                 </p>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
+                <div className="responsive-hero-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
                   <CallTestButton>
                     {t.testCta}
                   </CallTestButton>
@@ -574,6 +575,7 @@ export default function RestaurantCallAssistantPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
                   {t.stats.map((stat) => (
                     <div
+                      className="responsive-stat-card"
                       key={stat.label}
                       style={{
                         background: "rgba(255,255,255,0.04)",
@@ -613,7 +615,7 @@ export default function RestaurantCallAssistantPage() {
                     padding: 16,
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+                  <div className="mobile-card-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
                     <p style={{ fontSize: 10, color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.1em" }}>
                       {t.productBoxTitle}
                     </p>
@@ -841,7 +843,7 @@ export default function RestaurantCallAssistantPage() {
                 </span>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
+              <div className="responsive-stat-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
                 {dashboardPreviewKpis.map((kpi) => (
                   <div key={kpi.label} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.62)", borderRadius: 18, padding: 16 }}>
                     <p style={{ color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
@@ -858,8 +860,8 @@ export default function RestaurantCallAssistantPage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 14 }}>
                 <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.58)", borderRadius: 20, padding: 16, minWidth: 0 }}>
                   <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>Calls by Tenant</h4>
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 360 }}>
+                  <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
+                    <table className="mobile-preview-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 360 }}>
                       <thead>
                         <tr>
                           <th style={{ ...previewHeadStyle, textAlign: "left" }}>Tenant</th>
@@ -884,8 +886,8 @@ export default function RestaurantCallAssistantPage() {
 
                 <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.58)", borderRadius: 20, padding: 16, minWidth: 0 }}>
                   <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>Calls by Location</h4>
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 360 }}>
+                  <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
+                    <table className="mobile-preview-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 360 }}>
                       <thead>
                         <tr>
                           <th style={{ ...previewHeadStyle, textAlign: "left" }}>Location</th>
@@ -916,7 +918,7 @@ export default function RestaurantCallAssistantPage() {
                       { label: "Intent accuracy", value: "94%" },
                       { label: "Fallback rate", value: "3.2%" },
                     ].map((item) => (
-                      <div key={item.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.46)", borderRadius: 14, padding: "12px 13px" }}>
+                      <div key={item.label} className="mobile-card-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.46)", borderRadius: 14, padding: "12px 13px" }}>
                         <span style={{ color: "rgba(255,255,255,0.62)", fontSize: 13 }}>{item.label}</span>
                         <span style={{ color: AC_TEXT, fontSize: 13, fontWeight: 800 }}>{item.value}</span>
                       </div>
@@ -994,6 +996,7 @@ export default function RestaurantCallAssistantPage() {
         <section style={{ ...section, paddingTop: 0 }}>
           <div style={container}>
             <div
+              className="responsive-cta-card"
               style={{
                 background: "linear-gradient(135deg, rgba(245,158,11,0.10) 0%, rgba(255,255,255,0.02) 50%, rgba(180,83,9,0.08) 100%)",
                 border: `1px solid ${AC_BORDER}`,
@@ -1011,10 +1014,10 @@ export default function RestaurantCallAssistantPage() {
               <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.5rem, 2.5vw, 2.2rem)", fontWeight: 800, color: "#f0f0ef", letterSpacing: "-0.025em", marginBottom: 12 }}>
                 {t.ctaTitle}
               </h2>
-              <p style={{ fontSize: 15, color: "rgba(255,255,255,0.54)", lineHeight: 1.7, maxWidth: 620, margin: "0 auto 28px" }}>
+              <p className="responsive-body-copy" style={{ fontSize: 15, color: "rgba(255,255,255,0.54)", lineHeight: 1.7, maxWidth: 620, margin: "0 auto 28px" }}>
                 {t.ctaText}
               </p>
-              <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+              <div className="responsive-cta-actions" style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
                 <CallTestButton shadow="0 6px 28px">
                   {t.testCta}
                 </CallTestButton>

@@ -15,7 +15,7 @@ export function DataTable<T extends Record<string, string>>({
   rows: T[];
 }) {
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
       <div style={{ minWidth: 560, display: "flex", flexDirection: "column", gap: 8 }}>
         <div
           style={{
@@ -64,7 +64,7 @@ export function DataTable<T extends Record<string, string>>({
                   fontWeight: column.accent || columnIndex === 0 ? 700 : 500,
                   fontSize: 13,
                   textAlign: column.align ?? "left",
-                  whiteSpace: "nowrap",
+                  whiteSpace: columnIndex === 0 ? "normal" : "nowrap",
                 }}
               >
                 {row[column.key]}

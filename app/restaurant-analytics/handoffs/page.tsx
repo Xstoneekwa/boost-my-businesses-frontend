@@ -132,7 +132,7 @@ export default async function RestaurantAnalyticsHandoffsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow={tenantCopy?.eyebrow ?? "Human escalation"}
         title={tenantCopy?.title ?? "Handoffs"}
@@ -140,7 +140,7 @@ export default async function RestaurantAnalyticsHandoffsPage() {
         badges={[tenantCopy?.operationsQueue ?? "Operations queue", tenantCopy ? copy.dashboard.liveData : "Live data"]}
       />
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
         <AnalyticsKpiCard label={tenantCopy?.open ?? "Open Handoffs"} value={result.stats.open.toLocaleString()} trend="Queue" detail={tenantCopy?.openDetail ?? "Escalations waiting for team action."} tone="warning" />
         <AnalyticsKpiCard label={tenantCopy?.resolvedToday ?? "Resolved Today"} value={result.stats.resolvedToday.toLocaleString()} trend="Today" detail={tenantCopy?.resolvedDetail ?? "Handoffs closed by staff today."} tone="good" />
         <AnalyticsKpiCard label={tenantCopy?.avgAssignment ?? "Avg Assignment"} value={result.stats.avgAssignment} trend={tenantCopy ? copy.dashboard.liveData : "Live"} detail={tenantCopy?.avgDetail ?? "Average time before staff assignment."} tone="good" />
@@ -151,7 +151,11 @@ export default async function RestaurantAnalyticsHandoffsPage() {
         {result.handoffs.length ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {result.handoffs.map((handoff) => (
-              <div key={handoff.id} style={{ display: "grid", gridTemplateColumns: "1fr 0.8fr 0.5fr 0.5fr 60px", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)" }}>
+              <div
+                key={handoff.id}
+                className="mobile-card-row"
+                style={{ display: "grid", gridTemplateColumns: "1fr 0.8fr 0.5fr 0.5fr 60px", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)" }}
+              >
                 <span style={{ color: "#f0f0ef", fontSize: 13, fontWeight: 800 }}>{handoff.reason}</span>
                 <span style={{ color: "rgba(255,255,255,0.62)", fontSize: 13 }}>{handoff.location}</span>
                 <span style={{ color: handoff.priority === "High" || handoff.priority === "Critical" ? "#F87171" : ANALYTICS_ACCENT_TEXT, fontSize: 13, fontWeight: 800 }}>{handoff.priority}</span>

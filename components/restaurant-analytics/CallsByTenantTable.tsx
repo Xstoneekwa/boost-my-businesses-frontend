@@ -15,7 +15,7 @@ export type CallsByTenantTableProps = {
 
 export default function CallsByTenantTable({ rows }: CallsByTenantTableProps) {
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
       <div style={{ minWidth: 620, display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1.25fr repeat(4, minmax(92px, 0.65fr))", gap: 12, padding: "0 14px 4px" }}>
           {["Tenant", "Calls", "Completed", "Esc.", "Auto"].map((label, index) => (
@@ -49,7 +49,7 @@ export default function CallsByTenantTable({ rows }: CallsByTenantTableProps) {
               background: "rgba(255,255,255,0.025)",
             }}
           >
-            <span style={{ color: "#f0f0ef", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>{row.tenantName}</span>
+            <span style={{ color: "#f0f0ef", fontSize: 13, fontWeight: 700, whiteSpace: "normal" }}>{row.tenantName}</span>
             <span style={cellStyle}>{row.totalCalls.toLocaleString()}</span>
             <span style={cellStyle}>{row.completedCalls.toLocaleString()}</span>
             <span style={cellStyle}>{row.escalations.toLocaleString()}</span>

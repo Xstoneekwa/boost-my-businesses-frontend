@@ -26,6 +26,7 @@ export default function AnalyticsKpiCard({
 }: AnalyticsKpiCardProps) {
   return (
     <article
+      className="dashboard-summary-card"
       style={{
         border: "1px solid rgba(255,255,255,0.08)",
         background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))",
@@ -47,8 +48,9 @@ export default function AnalyticsKpiCard({
       >
         {label}
       </p>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+      <div className="mobile-card-row" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <p
+          className="dashboard-kpi-value"
           style={{
             color: "#f0f0ef",
             fontFamily: "'Syne', sans-serif",
@@ -62,6 +64,7 @@ export default function AnalyticsKpiCard({
         </p>
         {trend && (
           <span
+            className="dashboard-badge-pill"
             style={{
               color: toneColors[tone],
               background: "rgba(255,255,255,0.055)",

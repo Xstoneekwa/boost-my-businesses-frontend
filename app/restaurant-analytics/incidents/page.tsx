@@ -19,7 +19,7 @@ export default async function RestaurantAnalyticsIncidentsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow="Reliability"
         title="Incidents"
@@ -27,7 +27,7 @@ export default async function RestaurantAnalyticsIncidentsPage() {
         badges={["Fallback monitoring", "Live soon"]}
       />
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
         <AnalyticsKpiCard label="Open Incidents" value="3" trend="Needs review" detail="Issues currently affecting automation quality." tone="warning" />
         <AnalyticsKpiCard label="Resolved" value="19" trend="7 days" detail="Incidents closed in the current period." tone="good" />
         <AnalyticsKpiCard label="Integration Issues" value="4" trend="Low" detail="Timeouts or downstream provider failures." />
@@ -35,10 +35,10 @@ export default async function RestaurantAnalyticsIncidentsPage() {
       </section>
 
       <AnalyticsSectionCard title="Incident log" eyebrow="Ops reliability" description="Placeholder incident list ready for error records, fallback clusters, and integration health data.">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+        <div className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
           {incidents.map((incident) => (
-            <div key={incident.id} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.025)", borderRadius: 16, padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+            <div className="dashboard-compact-card" key={incident.id} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.025)", borderRadius: 16, padding: 16 }}>
+              <div className="dashboard-inline-stat" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
                 <h2 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16 }}>{incident.title}</h2>
                 <span style={{ color: incident.severity === "High" ? "#F87171" : ANALYTICS_ACCENT_TEXT, fontSize: 12, fontWeight: 800 }}>{incident.severity}</span>
               </div>

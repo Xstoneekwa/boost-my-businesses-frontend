@@ -277,8 +277,8 @@ export default function WhatsAppLeadSystemPage() {
     },
   ];
 
-  const section: React.CSSProperties = { padding: "64px 0" };
-  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 24px" };
+  const section: React.CSSProperties = { padding: "clamp(42px, 7vw, 64px) 0" };
+  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 clamp(16px, 3vw, 24px)" };
   const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: 0 };
 
   return (
@@ -303,8 +303,9 @@ export default function WhatsAppLeadSystemPage() {
             }}
           />
 
-          <div style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
+          <div className="responsive-container responsive-hero-shell" style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
             <div
+              className="mobile-split-grid-wide"
               style={{
                 display: "grid",
                 gridTemplateColumns: "1.15fr 0.85fr",
@@ -345,6 +346,7 @@ export default function WhatsAppLeadSystemPage() {
                 </div>
 
                 <h1
+                  className="responsive-hero-title"
                   style={{
                     fontFamily: "'Syne', sans-serif",
                     fontSize: "clamp(1.8rem, 3.5vw, 3rem)",
@@ -358,11 +360,11 @@ export default function WhatsAppLeadSystemPage() {
                   {t.heroTitle}
                 </h1>
 
-                <p style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 28, maxWidth: 520 }}>
+                <p className="responsive-body-copy" style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 28, maxWidth: 520 }}>
                   {t.heroSubtitle}
                 </p>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
+                <div className="responsive-hero-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
                   <a
                     href="#demo"
                     style={{
@@ -404,9 +406,10 @@ export default function WhatsAppLeadSystemPage() {
                   </Link>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                   {t.stats.map((stat) => (
                     <div
+                      className="responsive-stat-card"
                       key={stat.label}
                       style={{
                         background: "rgba(255,255,255,0.04)",
@@ -482,9 +485,10 @@ export default function WhatsAppLeadSystemPage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Problème" : "Problem"} title={t.problemTitle} text={t.problemText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+            <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
               {t.problems.map((item) => (
                 <div
+                  className="responsive-info-card"
                   key={item}
                   style={cardBase}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.30)"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
@@ -504,9 +508,10 @@ export default function WhatsAppLeadSystemPage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Solution" : "Solution"} title={t.solutionTitle} text={t.solutionText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+            <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
               {t.solutions.map((item, index) => (
                 <div
+                  className="responsive-info-card"
                   key={item}
                   style={cardBase}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
@@ -528,9 +533,10 @@ export default function WhatsAppLeadSystemPage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Fonctionnalités" : "Features"} title={t.featuresTitle} text={t.featuresText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 32 }}>
+            <div className="mobile-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 32 }}>
               {t.features.map((item) => (
                 <div
+                  className="responsive-feature-card"
                   key={item}
                   style={{ ...cardBase, padding: "14px 16px" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
@@ -549,7 +555,7 @@ export default function WhatsAppLeadSystemPage() {
         <section id="demo" style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Démo visuelle" : "Visual demo"} title={t.demoTitle} text={t.demoText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32 }}>
+            <div className="mobile-grid-3 responsive-gallery-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32 }}>
               {demoImages.map((img) => (
                 <button
                   key={img.src}
@@ -575,7 +581,7 @@ export default function WhatsAppLeadSystemPage() {
         {/* ── WORKFLOW ───────────────────────────────────── */}
         <section style={section}>
           <div style={container}>
-            <div style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 48, alignItems: "start" }}>
+            <div className="mobile-split-grid" style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 48, alignItems: "start" }}>
               <SectionTitle eyebrow="Workflow" title={t.workflowTitle} text={t.workflowText} />
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {t.flowSteps.map((step, index) => (
@@ -601,7 +607,7 @@ export default function WhatsAppLeadSystemPage() {
         {/* ── STACK + IMPACT ────────────────────────────── */}
         <section style={section}>
           <div style={container}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div className="mobile-grid-2-even responsive-two-up-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div style={{ ...cardBase, borderRadius: 24, padding: 28 }}>
                 <SectionTitle eyebrow={lang === "fr" ? "Stack technique" : "Tech stack"} title={t.stackTitle} text={t.stackText} />
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 20 }}>
@@ -644,7 +650,7 @@ export default function WhatsAppLeadSystemPage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Cas d'usage" : "Use cases"} title={t.useCasesTitle} text={t.useCasesText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+            <div className="mobile-grid-3 responsive-category-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
               {Object.entries(t.useCases).map(([category, items]) => (
                 <div
                   key={category}
@@ -670,6 +676,7 @@ export default function WhatsAppLeadSystemPage() {
         <section style={{ ...section, paddingTop: 0 }}>
           <div style={container}>
             <div
+              className="responsive-cta-card"
               style={{
                 background: "linear-gradient(135deg, rgba(37,211,102,0.08) 0%, rgba(255,255,255,0.02) 50%, rgba(37,211,102,0.05) 100%)",
                 border: `1px solid ${AC_BORDER}`,
@@ -687,10 +694,10 @@ export default function WhatsAppLeadSystemPage() {
               <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.5rem, 2.5vw, 2.2rem)", fontWeight: 800, color: "#f0f0ef", letterSpacing: "-0.025em", marginBottom: 12 }}>
                 {t.ctaTitle}
               </h2>
-              <p style={{ fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.7, maxWidth: 520, margin: "0 auto 28px" }}>
+              <p className="responsive-body-copy" style={{ fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.7, maxWidth: 520, margin: "0 auto 28px" }}>
                 {t.ctaText}
               </p>
-              <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+              <div className="responsive-cta-actions" style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
                 <a
                   href="#demo"
                   style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "13px 26px", background: "rgba(255,255,255,0.08)", color: "#f0f0ef", fontSize: 14, fontWeight: 600, borderRadius: 999, textDecoration: "none", border: "1px solid rgba(255,255,255,0.16)", transition: "background 150ms" }}

@@ -280,7 +280,7 @@ export default async function RestaurantAnalyticsLocationDetailPage({ params }: 
   const recommendationText = result.recommendation ? formatRecommendation(result.recommendation, recommendationCopy) : null;
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow={tenantCopy?.eyebrow ?? "Location detail"}
         title={result.locationName}
@@ -301,19 +301,23 @@ export default async function RestaurantAnalyticsLocationDetailPage({ params }: 
         </div>
       )}
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
         <AnalyticsKpiCard label={tenantCopy?.calls ?? "Location Calls"} value={formatInteger(totalCalls)} trend={tenantCopy ? copy.dashboard.liveData : "Live"} detail={tenantCopy?.callsDetail ?? "Inbound calls for this restaurant location."} />
         <AnalyticsKpiCard label={tenantCopy?.bookings ?? "Bookings"} value={formatInteger(bookings)} trend={formatPercent(percentOf(bookings, totalCalls))} detail={tenantCopy?.bookingsDetail ?? "Bookings captured or qualified by AI."} tone="good" />
         <AnalyticsKpiCard label={tenantCopy?.handoffs ?? "Handoffs"} value={formatInteger(handoffs)} trend={formatPercent(percentOf(handoffs, totalCalls))} detail={tenantCopy?.handoffsDetail ?? "Calls escalated to staff with context."} tone="warning" />
         <AnalyticsKpiCard label={tenantCopy?.fallbacks ?? "Fallbacks"} value={formatInteger(fallbacks)} trend={formatPercent(percentOf(fallbacks, totalCalls))} detail={tenantCopy?.fallbacksDetail ?? "Fallbacks due to missing data or low confidence."} tone="danger" />
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18 }}>
+      <section className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18 }}>
         <AnalyticsSectionCard title={tenantCopy?.recentCalls ?? "Recent calls"} eyebrow={tenantCopy?.callActivity ?? "Call activity"} description={tenantCopy?.recentDescription ?? "Recent Supabase call or escalation records for this location."}>
           {result.recentCalls.length ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {result.recentCalls.map((call) => (
-                <div key={call.id} style={{ display: "grid", gridTemplateColumns: "1fr 0.8fr 60px", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)" }}>
+                <div
+                  key={call.id}
+                  className="mobile-card-row"
+                  style={{ display: "grid", gridTemplateColumns: "1fr 0.8fr 60px", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)" }}
+                >
                   <div>
                     <p style={{ color: "#f0f0ef", fontSize: 13, fontWeight: 800, marginBottom: 3 }}>{call.intent}</p>
                     <p style={{ color: "rgba(255,255,255,0.42)", fontSize: 12 }}>{call.outcome}</p>

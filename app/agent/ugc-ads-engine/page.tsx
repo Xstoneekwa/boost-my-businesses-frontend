@@ -508,8 +508,8 @@ export default function UGCAdsEnginePage() {
   // ── Preserved: mounted guard ────────────────────────────
   if (!mounted) return null;
 
-  const section: React.CSSProperties = { padding: "64px 0" };
-  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 24px" };
+  const section: React.CSSProperties = { padding: "clamp(42px, 7vw, 64px) 0" };
+  const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 clamp(16px, 3vw, 24px)" };
   const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: 0 };
 
   return (
@@ -519,23 +519,23 @@ export default function UGCAdsEnginePage() {
         {/* ── HERO ────────────────────────────────────── */}
         <section style={{ position: "relative", overflow: "hidden", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse 60% 60% at 0% 50%, rgba(249,115,22,0.09) 0%, transparent 60%), radial-gradient(ellipse 40% 50% at 100% 20%, rgba(249,115,22,0.05) 0%, transparent 55%)", pointerEvents: "none" }} />
-          <div style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 48, alignItems: "center" }}>
+          <div className="responsive-container responsive-hero-shell" style={{ ...container, paddingTop: 64, paddingBottom: 72, position: "relative" }}>
+            <div className="mobile-split-grid-wide" style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 48, alignItems: "center" }}>
               <div>
                 {/* Badge */}
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 13px 5px 8px", background: AC_DIM, border: `1px solid ${AC_BORDER}`, borderRadius: 999, fontSize: 11, fontWeight: 500, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em", marginBottom: 22 }}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: AC, boxShadow: `0 0 10px ${AC}`, flexShrink: 0 }} />
                   {t.badge}
                 </div>
-                <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.8rem, 3.5vw, 3rem)", fontWeight: 800, lineHeight: 1.07, letterSpacing: "-0.03em", color: "#f0f0ef", marginBottom: 18 }}>{t.heroTitle}</h1>
-                <p style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 28, maxWidth: 520 }}>{t.heroSubtitle}</p>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
+                <h1 className="responsive-hero-title" style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.8rem, 3.5vw, 3rem)", fontWeight: 800, lineHeight: 1.07, letterSpacing: "-0.03em", color: "#f0f0ef", marginBottom: 18 }}>{t.heroTitle}</h1>
+                <p className="responsive-body-copy" style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 28, maxWidth: 520 }}>{t.heroSubtitle}</p>
+                <div className="responsive-hero-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
                   <a href="#demo" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "13px 26px", background: AC, color: "#000", fontSize: 14, fontWeight: 700, borderRadius: 999, textDecoration: "none", boxShadow: `0 4px 24px rgba(249,115,22,0.30)`, transition: "opacity 150ms, transform 150ms" }}>{t.primaryCta}</a>
                   <Link href="/" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "12px 22px", background: "transparent", color: "rgba(255,255,255,0.80)", fontSize: 14, fontWeight: 500, borderRadius: 999, textDecoration: "none", border: "1px solid rgba(255,255,255,0.14)", transition: "border-color 150ms, background 150ms" }}>{t.secondaryCta}</Link>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                   {t.stats.map((stat) => (
-                    <div key={stat.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "12px 14px", transition: "border-color 200ms" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; }}>
+                    <div className="responsive-stat-card" key={stat.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "12px 14px", transition: "border-color 200ms" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; }}>
                       <p style={{ fontSize: 10, color: "rgba(255,255,255,0.38)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{stat.label}</p>
                       <p style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700, color: AC }}>{stat.value}</p>
                     </div>
@@ -567,7 +567,7 @@ export default function UGCAdsEnginePage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Problème" : "Problem"} title={t.problemTitle} text={t.problemText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+            <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
               {t.problems.map((item) => (
                 <div key={item} style={cardBase} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.30)"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
                   <p style={{ fontSize: 14, color: "rgba(255,255,255,0.78)", lineHeight: 1.55 }}>{item}</p>
@@ -583,7 +583,7 @@ export default function UGCAdsEnginePage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Solution" : "Solution"} title={t.solutionTitle} text={t.solutionText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+            <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
               {t.solutions.map((item, index) => (
                 <div key={item} style={cardBase} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
                   <div style={{ width: 32, height: 32, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>{index + 1}</div>
@@ -600,7 +600,7 @@ export default function UGCAdsEnginePage() {
         <section id="demo" style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Démo visuelle" : "Visual demo"} title={t.demoTitle} text={t.demoText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32 }}>
+            <div className="mobile-grid-3 responsive-gallery-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32 }}>
               {demoImages.map((img) => (
                 <button key={img.src} type="button" onClick={() => setSelectedImage({ src: img.src, alt: img.alt })} style={{ ...cardBase, textAlign: "left", cursor: "pointer" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
                   <div style={{ overflow: "hidden", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", marginBottom: 14 }}>
@@ -619,7 +619,7 @@ export default function UGCAdsEnginePage() {
         {/* ── WORKFLOW ─────────────────────────────────── */}
         <section style={section}>
           <div style={container}>
-            <div style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 48, alignItems: "start" }}>
+            <div className="mobile-split-grid" style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 48, alignItems: "start" }}>
               <SectionTitle eyebrow="Workflow" title={t.workflowTitle} text={t.workflowText} />
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {t.flowSteps.map((step, index) => (
@@ -638,7 +638,7 @@ export default function UGCAdsEnginePage() {
         {/* ── DIFFERENCE + FUTURE ─────────────────────── */}
         <section style={section}>
           <div style={container}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div className="mobile-grid-2-even responsive-two-up-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div style={{ ...cardBase, borderRadius: 24, padding: 28 }}>
                 <SectionTitle eyebrow={lang === "fr" ? "Différence" : "Difference"} title={t.differenceTitle} text={t.differenceText} />
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 20 }}>
@@ -669,7 +669,7 @@ export default function UGCAdsEnginePage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Cible" : "Target users"} title={t.targetTitle} text={t.targetText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+            <div className="mobile-grid-3 responsive-category-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
               {Object.entries(t.targets).map(([category, items]) => (
                 <div key={category} style={cardBase} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
                   <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 15, fontWeight: 700, color: "#f0f0ef", marginBottom: 14 }}>{category}</h3>
@@ -687,9 +687,9 @@ export default function UGCAdsEnginePage() {
         {/* ── CHAT SECTION — Full logic preserved ─────── */}
         <section style={{ ...section, paddingTop: 0 }}>
           <div style={container}>
-            <div style={{ background: "linear-gradient(135deg, rgba(249,115,22,0.08) 0%, rgba(255,255,255,0.02) 50%, rgba(249,115,22,0.05) 100%)", border: `1px solid ${AC_BORDER}`, borderRadius: 28, padding: "48px 36px", position: "relative", overflow: "hidden" }}>
+            <div className="responsive-cta-card responsive-chat-card" style={{ background: "linear-gradient(135deg, rgba(249,115,22,0.08) 0%, rgba(255,255,255,0.02) 50%, rgba(249,115,22,0.05) 100%)", border: `1px solid ${AC_BORDER}`, borderRadius: 28, padding: "48px 36px", position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent, ${AC}, transparent)` }} />
-              <div style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 40 }}>
+              <div className="mobile-split-grid responsive-chat-layout" style={{ display: "grid", gridTemplateColumns: "0.9fr 1.1fr", gap: 40 }}>
                 {/* Left */}
                 <div>
                   <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, letterSpacing: "0.14em", textTransform: "uppercase", color: AC_TEXT, opacity: 0.75, marginBottom: 10 }}>{t.chatEyebrow}</p>
@@ -717,13 +717,13 @@ export default function UGCAdsEnginePage() {
 
                   {/* ── Preserved chat UI ── */}
                   <section style={{ overflow: "hidden", borderRadius: 20, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(15,23,40,0.90)" }}>
-                    <div style={{ maxHeight: 460, minHeight: 360, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+                    <div className="responsive-chat-box" style={{ maxHeight: 460, minHeight: 360, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                       {messages.map((msg) => {
                         const showPreviewCard = msg.role === "assistant" && msg.actionType === "preview_actions" && !!msg.previewImageUrl;
                         const showVideoCard = msg.role === "assistant" && msg.actionType === "video_completed" && !!msg.videoUrl;
                         return (
                           <div key={msg.id} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-                            <div style={{ maxWidth: "82%" }}>
+                            <div className="responsive-chat-message" style={{ maxWidth: "82%" }}>
                               {msg.imagePreview ? (
                                 <div style={{ marginBottom: 8, overflow: "hidden", borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)" }}>
                                   <Image src={msg.imagePreview} alt="Uploaded preview" width={800} height={800} style={{ display: "block", width: "100%", maxWidth: 240, height: "auto", objectFit: "cover" }} unoptimized />
@@ -832,11 +832,11 @@ export default function UGCAdsEnginePage() {
                         </div>
                       ) : null}
 
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div className="responsive-chat-form" style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} />
                         <button type="button" onClick={() => fileInputRef.current?.click()} style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.55)", fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }} title={t.uploadHint}>+</button>
-                        <input value={input} onChange={(e) => setInput(e.target.value)} onPaste={handlePaste} placeholder={t.placeholder} style={{ flex: 1, height: 44, borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "#f0f0ef", fontSize: 13, padding: "0 14px", outline: "none" }} />
-                        <button type="submit" disabled={loading || (!input.trim() && !imageBase64)} style={{ height: 44, borderRadius: 12, background: AC, color: "#000", fontSize: 13, fontWeight: 700, padding: "0 18px", border: "none", cursor: "pointer", boxShadow: `0 4px 16px rgba(249,115,22,0.28)`, opacity: loading || (!input.trim() && !imageBase64) ? 0.5 : 1, flexShrink: 0 }}>{t.send}</button>
+                        <input className="responsive-chat-input" value={input} onChange={(e) => setInput(e.target.value)} onPaste={handlePaste} placeholder={t.placeholder} style={{ flex: 1, height: 44, borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "#f0f0ef", fontSize: 13, padding: "0 14px", outline: "none" }} />
+                        <button className="responsive-chat-submit" type="submit" disabled={loading || (!input.trim() && !imageBase64)} style={{ height: 44, borderRadius: 12, background: AC, color: "#000", fontSize: 13, fontWeight: 700, padding: "0 18px", border: "none", cursor: "pointer", boxShadow: `0 4px 16px rgba(249,115,22,0.28)`, opacity: loading || (!input.trim() && !imageBase64) ? 0.5 : 1, flexShrink: 0 }}>{t.send}</button>
                       </div>
                     </form>
                   </section>

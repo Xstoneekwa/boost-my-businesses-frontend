@@ -18,6 +18,7 @@ export default function DashboardPageHeader({
 }: DashboardPageHeaderProps) {
   return (
     <header
+      className="dashboard-page"
       style={{
         display: "flex",
         alignItems: "flex-start",
@@ -41,6 +42,7 @@ export default function DashboardPageHeader({
           {eyebrow}
         </p>
         <h1
+          className="dashboard-page-title"
           style={{
             color: "#f0f0ef",
             fontFamily: "'Syne', sans-serif",
@@ -52,15 +54,16 @@ export default function DashboardPageHeader({
         >
           {title}
         </h1>
-        <p style={{ color: "rgba(255,255,255,0.56)", fontSize: 15.5, lineHeight: 1.7 }}>
+        <p className="dashboard-page-copy" style={{ color: "rgba(255,255,255,0.56)", fontSize: 15.5, lineHeight: 1.7 }}>
           {description}
         </p>
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+      <div className="mobile-inline-actions dashboard-header-badges" style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
         {badges.map((badge) => (
           <span
             key={badge}
+            className="dashboard-badge-pill"
             style={{
               border: badge.toLowerCase().includes("live") ? `1px solid ${ANALYTICS_ACCENT_BORDER}` : "1px solid rgba(255,255,255,0.08)",
               background: badge.toLowerCase().includes("live") ? ANALYTICS_ACCENT_DIM : "rgba(255,255,255,0.035)",

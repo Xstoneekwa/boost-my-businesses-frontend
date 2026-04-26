@@ -28,6 +28,7 @@ export default function AnalyticsSectionCard({
 
   return (
     <section
+      className="dashboard-section-card"
       style={{
         border: isAccent ? `1px solid ${ANALYTICS_ACCENT_BORDER}` : "1px solid rgba(255,255,255,0.08)",
         background: isAccent ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.035)",
@@ -38,6 +39,7 @@ export default function AnalyticsSectionCard({
       }}
     >
       <div
+        className="mobile-card-row"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -62,6 +64,7 @@ export default function AnalyticsSectionCard({
             </p>
           )}
           <h2
+            className="dashboard-card-title"
             style={{
               color: "#f0f0ef",
               fontFamily: "'Syne', sans-serif",

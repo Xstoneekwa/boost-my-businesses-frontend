@@ -22,6 +22,7 @@ export function DashboardCard({
 }) {
   return (
     <section
+      className="dashboard-section-card"
       style={{
         border: accent ? `1px solid ${RESTAURANT_ACCENT_BORDER}` : "1px solid rgba(255,255,255,0.08)",
         background: accent ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.035)",
@@ -31,7 +32,7 @@ export function DashboardCard({
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
+      <div className="mobile-card-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
         <div>
           {eyebrow && (
             <p
@@ -47,7 +48,7 @@ export function DashboardCard({
               {eyebrow}
             </p>
           )}
-          <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, color: "#f0f0ef", marginBottom: description ? 6 : 0 }}>
+          <h2 className="dashboard-card-title" style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, color: "#f0f0ef", marginBottom: description ? 6 : 0 }}>
             {title}
           </h2>
           {description && <p style={{ color: "rgba(255,255,255,0.46)", fontSize: 13, lineHeight: 1.55 }}>{description}</p>}
@@ -77,6 +78,7 @@ export function KpiCard({
 
   return (
     <article
+      className="dashboard-summary-card"
       style={{
         border: "1px solid rgba(255,255,255,0.08)",
         background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))",
@@ -98,8 +100,9 @@ export function KpiCard({
       >
         {label}
       </p>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+      <div className="mobile-card-row" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <p
+          className="dashboard-kpi-value"
           style={{
             color: "#f0f0ef",
             fontFamily: "'Syne', sans-serif",
@@ -112,6 +115,7 @@ export function KpiCard({
           {value}
         </p>
         <span
+          className="dashboard-badge-pill"
           style={{
             color: toneColor,
             background: "rgba(255,255,255,0.055)",
@@ -120,7 +124,7 @@ export function KpiCard({
             padding: "4px 8px",
             fontSize: 11,
             fontWeight: 700,
-            whiteSpace: "nowrap",
+            whiteSpace: "normal",
           }}
         >
           {trend}
@@ -184,4 +188,3 @@ export function MiniBarChart({ values }: { values: number[] }) {
     </div>
   );
 }
-

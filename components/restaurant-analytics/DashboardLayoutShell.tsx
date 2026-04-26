@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -35,12 +35,17 @@ export default function DashboardLayoutShell({
   userContext: UserContext;
 }) {
   const pathname = usePathname();
+  const [hydratedPathname, setHydratedPathname] = useState("");
   const router = useRouter();
   const [lang, setLang] = useRestaurantLanguage();
   const tenantCopy = restaurantCommonCopy[lang].dashboard;
   const [isSigningOut, setIsSigningOut] = useState(false);
   const modeLabel = userContext.role === "superadmin" ? "Superadmin Mode" : tenantCopy.mode;
   const visibleNavItems = navItems.filter((item) => item.roles.includes(userContext.role));
+
+  useEffect(() => {
+    setHydratedPathname(pathname ?? "");
+  }, [pathname]);
 
   async function handleLogout() {
     setIsSigningOut(true);
@@ -71,6 +76,7 @@ export default function DashboardLayoutShell({
       }}
     >
       <div
+        className="dashboard-shell-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "260px minmax(0, 1fr)",
@@ -78,6 +84,7 @@ export default function DashboardLayoutShell({
         }}
       >
         <aside
+          className="dashboard-sidebar"
           style={{
             borderRight: "1px solid rgba(255,255,255,0.08)",
             background: "rgba(7,17,31,0.78)",
@@ -171,9 +178,11 @@ export default function DashboardLayoutShell({
             </span>
           </div>
 
-          <nav style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <nav className="dashboard-nav" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {visibleNavItems.map((item) => {
-              const isActive = pathname === item.match || pathname.startsWith(`${item.match}/`);
+              const isActive =
+                hydratedPathname === item.match ||
+                hydratedPathname.startsWith(`${item.match}/`);
               const label =
                 userContext.role === "tenant"
                   ? item.label === "Overview"
@@ -289,7 +298,7 @@ export default function DashboardLayoutShell({
           </div>
         </aside>
 
-        <main style={{ minWidth: 0, padding: "28px clamp(18px, 3vw, 36px) 48px" }}>
+        <main className="dashboard-main" style={{ minWidth: 0, padding: "28px clamp(18px, 3vw, 36px) 48px" }}>
           {children}
         </main>
       </div>

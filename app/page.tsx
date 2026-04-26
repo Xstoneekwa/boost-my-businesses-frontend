@@ -82,15 +82,15 @@ const copy = {
 };
 
 const S = {
-  page: { maxWidth: 1100, margin: "0 auto", padding: "0 24px 80px", fontFamily: "'DM Sans', system-ui, -apple-system, sans-serif" } as React.CSSProperties,
-  hero: { paddingTop: 56, paddingBottom: 0, position: "relative" } as React.CSSProperties,
+  page: { maxWidth: 1100, margin: "0 auto", padding: "0 clamp(16px, 3vw, 24px) 80px", fontFamily: "'DM Sans', system-ui, -apple-system, sans-serif" } as React.CSSProperties,
+  hero: { paddingTop: "clamp(40px, 7vw, 56px)", paddingBottom: 0, position: "relative" } as React.CSSProperties,
   heroBg: { position: "absolute", inset: 0, background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(124,92,255,0.13), transparent 70%)", pointerEvents: "none" } as React.CSSProperties,
   heroBadge: { display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 13px 5px 8px", background: "rgba(124,92,255,0.12)", border: "1px solid rgba(124,92,255,0.24)", borderRadius: 999, fontSize: 11, fontWeight: 500, color: "#a594f9", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em", marginBottom: 24, position: "relative" } as React.CSSProperties,
   badgeDot: { width: 6, height: 6, borderRadius: "50%", background: "#8B7CF6", boxShadow: "0 0 8px #8B7CF6" } as React.CSSProperties,
   heroTitle: { fontFamily: "'Syne', sans-serif", fontSize: "clamp(2rem, 4vw, 3.2rem)", fontWeight: 800, lineHeight: 1.06, letterSpacing: "-0.035em", color: "#f0f0ef", marginBottom: 28, maxWidth: 780, position: "relative" } as React.CSSProperties,
   heroBody: { maxWidth: 660, display: "flex", flexDirection: "column", gap: 14, marginBottom: 28, position: "relative" } as React.CSSProperties,
-  heroLead: { fontSize: 17, fontWeight: 500, color: "#f0f0ef", lineHeight: 1.55, letterSpacing: "-0.01em" } as React.CSSProperties,
-  heroP: { fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.78, fontWeight: 300 } as React.CSSProperties,
+  heroLead: { fontSize: "clamp(15px, 2.8vw, 17px)", fontWeight: 500, color: "#f0f0ef", lineHeight: 1.55, letterSpacing: "-0.01em" } as React.CSSProperties,
+  heroP: { fontSize: "clamp(14px, 2.4vw, 15px)", color: "rgba(255,255,255,0.52)", lineHeight: 1.78, fontWeight: 300 } as React.CSSProperties,
   heroStrong: { color: "rgba(255,255,255,0.82)", fontWeight: 500 } as React.CSSProperties,
   proofWrap: { display: "flex", gap: 8, flexWrap: "wrap" as const, marginBottom: 44, position: "relative" } as React.CSSProperties,
   proofPill: { display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.70)", fontSize: 13 } as React.CSSProperties,
@@ -125,10 +125,10 @@ export default function LandingPage() {
 
   return (
     <NavbarFooter lang={lang} onLangChange={setLang}>
-    <main style={S.page}>
+    <main className="landing-main" style={S.page}>
 
       {/* ── HERO ── */}
-      <section style={S.hero}>
+      <section className="landing-hero" style={S.hero}>
         <div style={S.heroBg} />
 
         <div style={S.heroBadge}>
@@ -136,15 +136,15 @@ export default function LandingPage() {
           {t.badge}
         </div>
 
-        <h1 style={S.heroTitle}>{t.heroTitle}</h1>
+        <h1 className="landing-hero-title" style={S.heroTitle}>{t.heroTitle}</h1>
 
         <div style={S.heroBody}>
-          <p style={S.heroLead}>{t.heroLead}</p>
-          <p style={S.heroP}>
+          <p className="landing-hero-lead" style={S.heroLead}>{t.heroLead}</p>
+          <p className="landing-hero-copy" style={S.heroP}>
             {t.heroP1[0]}<strong style={S.heroStrong}>{t.heroP1[1]}</strong>{t.heroP1[2]}<strong style={S.heroStrong}>{t.heroP1[3]}</strong>{t.heroP1[4]}
           </p>
-          <p style={S.heroP}>{t.heroP2}</p>
-          <p style={S.heroP}>
+          <p className="landing-hero-copy" style={S.heroP}>{t.heroP2}</p>
+          <p className="landing-hero-copy" style={S.heroP}>
             {t.heroP3[0]}<strong style={S.heroStrong}>{t.heroP3[1]}</strong>{t.heroP3[2]}<strong style={S.heroStrong}>{t.heroP3[3]}</strong>{t.heroP3[4]}
           </p>
         </div>
@@ -161,9 +161,13 @@ export default function LandingPage() {
       </section>
 
       {/* ── STAT BANNER ── */}
-      <div style={S.statBanner}>
+      <div className="landing-stat-banner" style={S.statBanner}>
         {t.stats.map((stat, i) => (
-          <div key={stat.sub} style={i === t.stats.length - 1 ? S.statItemLast : S.statItem}>
+          <div
+            key={stat.sub}
+            className={i === t.stats.length - 1 ? "landing-stat-item-last" : "landing-stat-item"}
+            style={i === t.stats.length - 1 ? S.statItemLast : S.statItem}
+          >
             <div style={S.statNum}>
               {stat.num}<span style={S.statSup}>{stat.sup}</span>
             </div>
@@ -177,7 +181,7 @@ export default function LandingPage() {
 
       {/* ── AGENTS ── */}
       <section>
-        <div style={{ marginBottom: 36 }}>
+        <div className="landing-section-intro" style={{ marginBottom: 36 }}>
           <span style={S.eyebrow}>Agents</span>
           <h2 style={S.sectionTitle}>{t.agentsTitle}</h2>
         </div>
@@ -185,6 +189,7 @@ export default function LandingPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
           {t.agents.map((agent) => (
             <div
+              className="landing-card"
               key={agent.title}
               style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: "22px 20px", display: "flex", flexDirection: "column", transition: "border-color 200ms" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = agent.border; }}
@@ -200,8 +205,71 @@ export default function LandingPage() {
                 <span style={{ color: agent.accent, fontWeight: 600, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>{t.outLabel}</span>
                 <br />{agent.result}
               </div>
-              <Link href={agent.href} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: agent.accent, textDecoration: "none", letterSpacing: "-0.01em" }}>
-                {agent.link}
+              <Link
+                href={agent.href}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  width: "100%",
+                  minHeight: 46,
+                  padding: "11px 14px",
+                  borderRadius: 999,
+                  border: `1px solid ${agent.border}`,
+                  background: agent.dim,
+                  color: agent.accent,
+                  textDecoration: "none",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  letterSpacing: "-0.01em",
+                  boxShadow: `0 10px 24px ${agent.dim}`,
+                  transition: "transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease",
+                }}
+                onMouseEnter={(e) => {
+                  const element = e.currentTarget as HTMLElement;
+                  element.style.transform = "translateY(-1px)";
+                  element.style.borderColor = agent.accent;
+                  element.style.background = agent.border;
+                  element.style.boxShadow = `0 14px 30px ${agent.dim}`;
+                  const arrow = element.lastElementChild as HTMLElement | null;
+                  if (arrow) {
+                    arrow.style.transform = "translateX(2px)";
+                    arrow.style.background = "rgba(255,255,255,0.16)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  const element = e.currentTarget as HTMLElement;
+                  element.style.transform = "translateY(0)";
+                  element.style.borderColor = agent.border;
+                  element.style.background = agent.dim;
+                  element.style.boxShadow = `0 10px 24px ${agent.dim}`;
+                  const arrow = element.lastElementChild as HTMLElement | null;
+                  if (arrow) {
+                    arrow.style.transform = "translateX(0)";
+                    arrow.style.background = "rgba(255,255,255,0.08)";
+                  }
+                }}
+              >
+                <span>{agent.link}</span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    background: "rgba(255,255,255,0.08)",
+                    color: agent.accent,
+                    fontSize: 14,
+                    flexShrink: 0,
+                    transition: "transform 180ms ease, background 180ms ease",
+                  }}
+                >
+                  →
+                </span>
               </Link>
             </div>
           ))}
@@ -230,14 +298,14 @@ export default function LandingPage() {
 
       {/* ── PRICING ── */}
       <section id="pricing">
-        <div style={{ marginBottom: 36 }}>
+        <div className="landing-section-intro" style={{ marginBottom: 36 }}>
           <span style={S.eyebrow}>Pricing</span>
           <h2 style={S.sectionTitle}>{t.pricingTitle}</h2>
           <p style={S.sectionSubtitle}>{t.pricingText}</p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, alignItems: "start" }}>
           {t.pricing.map((plan) => (
-            <div key={plan.name} style={{ borderRadius: 20, padding: plan.featured ? "28px 24px" : "24px 20px", background: plan.featured ? "rgba(124,92,255,0.10)" : "rgba(255,255,255,0.025)", border: plan.featured ? "1px solid rgba(124,92,255,0.32)" : "1px solid rgba(255,255,255,0.07)", position: "relative", overflow: "hidden" }}>
+            <div className="landing-pricing-card" key={plan.name} style={{ borderRadius: 20, padding: plan.featured ? "28px 24px" : "24px 20px", background: plan.featured ? "rgba(124,92,255,0.10)" : "rgba(255,255,255,0.025)", border: plan.featured ? "1px solid rgba(124,92,255,0.32)" : "1px solid rgba(255,255,255,0.07)", position: "relative", overflow: "hidden" }}>
               {plan.featured && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg, transparent, #7C5CFF, transparent)" }} />}
               {plan.featured && (
                 <div style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", background: "rgba(124,92,255,0.20)", border: "1px solid rgba(124,92,255,0.35)", borderRadius: 999, fontSize: 10, fontWeight: 600, color: "#a594f9", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 14 }}>
@@ -266,7 +334,7 @@ export default function LandingPage() {
       <section style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: "36px 32px", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse 60% 80% at 100% 50%, rgba(124,92,255,0.07) 0%, transparent 60%)", pointerEvents: "none" }} />
         <h2 style={{ fontSize: "clamp(1.3rem, 2vw, 1.7rem)", fontWeight: 700, color: "#f0f0ef", letterSpacing: "-0.025em", marginBottom: 12, position: "relative", fontFamily: "'Syne', sans-serif" }}>{t.bottomTitle}</h2>
-        <p style={{ fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.7, maxWidth: 560, position: "relative" }}>{t.bottomText}</p>
+        <p className="landing-bottom-copy" style={{ fontSize: 15, color: "rgba(255,255,255,0.52)", lineHeight: 1.7, maxWidth: 560, position: "relative" }}>{t.bottomText}</p>
       </section>
 
     </main>

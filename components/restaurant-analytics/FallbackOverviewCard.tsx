@@ -24,7 +24,7 @@ export default function FallbackOverviewCard({ items }: FallbackOverviewCardProp
 
           return (
             <div key={item.reason}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 7 }}>
+              <div className="dashboard-inline-stat" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 7 }}>
                 <span style={{ color: "rgba(255,255,255,0.72)", fontSize: 13 }}>{item.reason}</span>
                 <span style={{ color: "#f0f0ef", fontSize: 13, fontWeight: 700 }}>
                   {item.count} · {item.share}%

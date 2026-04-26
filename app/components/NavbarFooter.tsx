@@ -90,6 +90,7 @@ export default function NavbarFooter({
   children,
 }: NavbarFooterProps) {
   const pathname = usePathname();
+  const [hydratedPathname, setHydratedPathname] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -103,10 +104,19 @@ export default function NavbarFooter({
     return () => window.removeEventListener("scroll", handler);
   }, []);
 
+  useEffect(() => {
+    setHydratedPathname(pathname ?? "");
+  }, [pathname]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [hydratedPathname]);
+
   return (
     <>
       {/* ── NAVBAR ── */}
       <header
+        className="site-nav-shell"
         style={{
           position: "fixed",
           top: 0,
@@ -129,6 +139,7 @@ export default function NavbarFooter({
         {/* Logo */}
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", flexShrink: 0 }}>
           <span
+            className="site-nav-logo-text"
             style={{
               width: 30,
               height: 30,
@@ -171,10 +182,12 @@ export default function NavbarFooter({
             minWidth: 0,
             justifyContent: "center",
           }}
-          className="nav-links-desktop"
+          className="site-nav-desktop"
         >
           {NAV_LINKS.map((link) => {
-            const isActive = pathname === link.href || pathname?.startsWith(link.href);
+            const isActive =
+              hydratedPathname === link.href ||
+              hydratedPathname.startsWith(`${link.href}/`);
             const linkColor = AGENT_COLORS[link.agent];
             return (
               <Link
@@ -253,6 +266,7 @@ export default function NavbarFooter({
           {/* CTA */}
           <Link
             href="/#pricing"
+            className="site-nav-cta"
             style={{
               padding: "8px 18px",
               background: accentColor,
@@ -285,7 +299,7 @@ export default function NavbarFooter({
               cursor: "pointer",
               padding: 6,
             }}
-            className="nav-hamburger"
+            className="site-nav-hamburger"
           >
             <span style={{ width: 20, height: 1.5, background: "#f0f0ef", borderRadius: 2, display: "block" }} />
             <span style={{ width: 20, height: 1.5, background: "#f0f0ef", borderRadius: 2, display: "block" }} />
@@ -296,6 +310,7 @@ export default function NavbarFooter({
         {/* Mobile menu */}
         {menuOpen && (
           <div
+            className="site-nav-mobile-menu"
             style={{
               position: "absolute",
               top: 60,
@@ -333,7 +348,7 @@ export default function NavbarFooter({
       </header>
 
       {/* ── PAGE CONTENT ── */}
-      <div style={{ paddingTop: 60 }}>
+      <div className="site-page-offset" style={{ paddingTop: 60 }}>
         {children}
       </div>
 
@@ -348,6 +363,7 @@ export default function NavbarFooter({
       >
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>
           <div
+            className="site-footer-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "2fr 1fr 1fr 1fr",
@@ -456,6 +472,7 @@ export default function NavbarFooter({
 
           {/* Bottom bar */}
           <div
+            className="site-footer-bottom"
             style={{
               display: "flex",
               alignItems: "center",

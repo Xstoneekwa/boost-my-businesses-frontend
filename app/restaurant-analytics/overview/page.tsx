@@ -358,10 +358,10 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
   const businessInsights = buildBusinessInsights(result.overview, tenantOverviewCopy ?? undefined);
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardHeader status="Live data" role={userContext.role} dateRange={dateRange} copy={tenantOverviewCopy} />
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 18 }}>
         {kpis.map((kpi) => (
           <AnalyticsKpiCard key={kpi.label} {...kpi} />
         ))}
@@ -376,7 +376,7 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
         <BusinessInsightsGrid insights={businessInsights} />
       </AnalyticsSectionCard>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18, marginTop: 18 }}>
+      <section className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 18, marginTop: 18 }}>
         {!isTenant && (
           <AnalyticsSectionCard
             title="Calls by Tenant"
@@ -422,15 +422,15 @@ function DashboardHeader({
   const isTenant = role === "tenant";
 
   return (
-    <header style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, marginBottom: 28, flexWrap: "wrap" }}>
+    <header className="dashboard-page" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, marginBottom: 28, flexWrap: "wrap" }}>
       <div style={{ maxWidth: 760 }}>
         <p style={{ color: ANALYTICS_ACCENT_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 10 }}>
           {copy?.eyebrow ?? "Restaurant analytics"}
         </p>
-        <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(2rem, 4vw, 3.25rem)", lineHeight: 1.05, letterSpacing: "-0.04em", color: "#f0f0ef", marginBottom: 12 }}>
+        <h1 className="dashboard-page-title" style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(2rem, 4vw, 3.25rem)", lineHeight: 1.05, letterSpacing: "-0.04em", color: "#f0f0ef", marginBottom: 12 }}>
           {copy?.title ?? (isTenant ? "Your restaurant performance" : "Operations overview")}
         </h1>
-        <p style={{ color: "rgba(255,255,255,0.56)", fontSize: 15.5, lineHeight: 1.7 }}>
+        <p className="dashboard-page-copy" style={{ color: "rgba(255,255,255,0.56)", fontSize: 15.5, lineHeight: 1.7 }}>
           {isTenant
             ? (copy?.text ?? "Live your analytics filtered to your restaurant, including call volume, completed calls, escalations, fallbacks, and location-level demand.")
             : "Live your analytics for total calls, completed calls, escalations, fallbacks, tenant performance, and location-level demand."}
@@ -444,7 +444,7 @@ function DashboardHeader({
 
 function BusinessInsightsGrid({ insights }: { insights: BusinessInsight[] }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+    <div className="dashboard-three-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
       {insights.map((insight) => {
         const color =
           insight.tone === "danger"
@@ -457,6 +457,7 @@ function BusinessInsightsGrid({ insights }: { insights: BusinessInsight[] }) {
 
         return (
           <div
+            className="dashboard-mini-kpi"
             key={insight.label}
             style={{
               border: "1px solid rgba(255,255,255,0.08)",

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -119,11 +119,6 @@ function ResetPasswordCardFallback() {
   );
 }
 
-function getHashParams() {
-  if (typeof window === "undefined") return new URLSearchParams();
-  return new URLSearchParams(window.location.hash.replace(/^#/, ""));
-}
-
 function RestaurantResetPasswordContent() {
   const searchParams = useSearchParams();
   const [lang, setLang] = useRestaurantLanguage();
@@ -133,6 +128,12 @@ function RestaurantResetPasswordContent() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hashSearch, setHashSearch] = useState("");
+  const hashParams = useMemo(() => new URLSearchParams(hashSearch), [hashSearch]);
+
+  useEffect(() => {
+    setHashSearch(window.location.hash.replace(/^#/, ""));
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -140,7 +141,6 @@ function RestaurantResetPasswordContent() {
     async function prepareRecoverySession() {
       const supabase = createSupabaseBrowserClient();
       const code = searchParams.get("code");
-      const hashParams = getHashParams();
       const accessToken = hashParams.get("access_token");
       const refreshToken = hashParams.get("refresh_token");
 
@@ -171,7 +171,7 @@ function RestaurantResetPasswordContent() {
     return () => {
       isMounted = false;
     };
-  }, [searchParams]);
+  }, [hashParams, searchParams]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

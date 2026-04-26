@@ -24,7 +24,7 @@ export default async function RestaurantAnalyticsTenantsPage() {
   const totalHandoffs = tenants.reduce((sum, tenant) => sum + tenant.handoffs, 0);
 
   return (
-    <div style={{ maxWidth: 1220, margin: "0 auto" }}>
+    <div className="dashboard-page" style={{ maxWidth: 1220, margin: "0 auto" }}>
       <DashboardPageHeader
         eyebrow="Tenant analytics"
         title="Tenants"
@@ -32,7 +32,7 @@ export default async function RestaurantAnalyticsTenantsPage() {
         badges={["All tenants", "Live soon"]}
       />
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
+      <section className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
         <AnalyticsKpiCard label="Active Tenants" value={tenants.length} trend="Portfolio" detail="Restaurant groups connected to the call assistant." />
         <AnalyticsKpiCard label="Locations" value={totalLocations} trend="Multi-site" detail="Locations represented across the tenant base." tone="good" />
         <AnalyticsKpiCard label="Total Calls" value={totalCalls.toLocaleString()} trend="30 days" detail="Inbound calls processed across tenants." />
@@ -44,11 +44,12 @@ export default async function RestaurantAnalyticsTenantsPage() {
         eyebrow="Groups"
         description="Placeholder tenant list ready to be replaced with Supabase tenant records and aggregate call metrics."
       >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+        <div className="dashboard-two-col" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
           {tenants.map((tenant) => (
             <Link
               key={tenant.id}
               href={`/restaurant-analytics/tenants/${tenant.id}`}
+              className="dashboard-compact-card"
               style={{
                 display: "block",
                 border: "1px solid rgba(255,255,255,0.08)",
@@ -58,7 +59,7 @@ export default async function RestaurantAnalyticsTenantsPage() {
                 textDecoration: "none",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+              <div className="dashboard-inline-stat" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
                 <h2 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 18 }}>{tenant.name}</h2>
                 <span style={{ color: ANALYTICS_ACCENT_TEXT, fontSize: 12, fontWeight: 800 }}>{tenant.health}</span>
               </div>

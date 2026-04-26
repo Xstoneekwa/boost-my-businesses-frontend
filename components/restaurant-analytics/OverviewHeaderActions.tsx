@@ -71,9 +71,10 @@ export default function OverviewHeaderActions({
   const tenantsStyle = hovered === "tenants" ? { ...passivePill, ...hoverPill } : passivePill;
 
   return (
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+    <div className="dashboard-header-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
       <Link
         href={`/restaurant-analytics/overview?range=${dateRangeKey}`}
+        className="dashboard-badge-pill"
         style={dateStyle}
         aria-current="page"
         onMouseEnter={() => setHovered("date")}
@@ -85,6 +86,7 @@ export default function OverviewHeaderActions({
       {!isTenant && (
         <Link
           href="/restaurant-analytics/tenants"
+          className="dashboard-badge-pill"
           style={tenantsStyle}
           onMouseEnter={() => setHovered("tenants")}
           onMouseLeave={() => setHovered(null)}
@@ -93,8 +95,8 @@ export default function OverviewHeaderActions({
         </Link>
       )}
 
-      <span style={activePill}>{modeLabel}</span>
-      <span style={activePill}>{visibleStatus}</span>
+      <span className="dashboard-badge-pill" style={activePill}>{modeLabel}</span>
+      <span className="dashboard-badge-pill" style={activePill}>{visibleStatus}</span>
     </div>
   );
 }
