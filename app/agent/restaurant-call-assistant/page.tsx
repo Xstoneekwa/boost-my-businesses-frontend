@@ -425,6 +425,177 @@ export default function RestaurantCallAssistantPage() {
     { name: "Waterfront", calls: "467", topIntent: "FAQ", quality: "91%" },
     { name: "West End", calls: "389", topIntent: "Private dining", quality: "88%" },
   ];
+  const pricingCopy =
+    lang === "fr"
+      ? {
+          roiEyebrow: "ROI",
+          roiTitle: "Pas seulement un assistant d'appel. Un système de récupération de revenus.",
+          roiText:
+            "Chaque appel manqué peut signifier une table manquée. AI Restaurant Call Assistant répond instantanément, capture les réservations, envoie les confirmations, relance automatiquement et donne une lecture claire des appels, réservations et revenus récupérés.",
+          pricingEyebrow: "Packages",
+          pricingTitle: "Choisis le niveau adapté à ton volume d'appels",
+          pricingText:
+            "Trois plans clairs pour lancer rapidement, absorber les pics d'appels et évoluer vers des opérations multi-sites avec intégrations avancées.",
+          setupLabel: "Setup",
+          includedLabel: "Inclus",
+          popularBadge: "Most Popular",
+          note: "Plans can be adapted depending on call volume, number of locations, and integration needs.",
+          comparisonTitle: "Comparaison des plans",
+          comparisonText: "Une vue simple des capacités clés incluses dans chaque package.",
+          plans: [
+            {
+              name: "Growth",
+              price: "€299",
+              suffix: "/month",
+              setup: "€800",
+              positioning: "Pour les restaurants indépendants sérieux.",
+              cta: "Start with Growth",
+              featured: false,
+              features: [
+                "300 calls/month",
+                "Simple reservation handling",
+                "Basic FAQ answers",
+                "SMS confirmation for customers",
+                "Smart escalation to staff",
+                "Dashboard: calls to recovered reservations",
+                "Automatic CRM update",
+                "Optimized standard script",
+              ],
+            },
+            {
+              name: "Pro",
+              price: "€599",
+              suffix: "/month",
+              setup: "€1200",
+              positioning: "Pour les restaurants occupés avec un fort volume d'appels.",
+              cta: "Choose Pro",
+              featured: true,
+              features: [
+                "Everything in Growth",
+                "1000 calls/month",
+                "Priority handling for VIPs and groups",
+                "Automatic WhatsApp + SMS follow-ups",
+                "Advanced escalation for complex cases",
+                "Advanced analytics and recovered revenue",
+                "Custom restaurant script",
+                "Monthly script optimization",
+                "Priority support",
+              ],
+            },
+            {
+              name: "Premium",
+              price: "€999+",
+              suffix: "/month",
+              setup: "€1500+",
+              positioning: "Pour les chaînes et restaurants multi-sites.",
+              cta: "Book a Premium Demo",
+              featured: false,
+              features: [
+                "Everything in Pro",
+                "3000 calls/month",
+                "Multi-location support",
+                "Custom AI flows for specific cases",
+                "Advanced booking, CRM, and internal integrations",
+                "Custom reporting",
+                "Monthly follow-up and optimization",
+                "Dedicated support",
+              ],
+            },
+          ],
+        }
+      : {
+          roiEyebrow: "ROI",
+          roiTitle: "Not just a call assistant. A revenue recovery system.",
+          roiText:
+            "Every missed call can mean a missed table. The AI Restaurant Call Assistant answers instantly, captures bookings, sends confirmations, follows up automatically, and gives you clear analytics on calls, reservations, and recovered revenue.",
+          pricingEyebrow: "Packages",
+          pricingTitle: "Choose the level that matches your call volume",
+          pricingText:
+            "Three clear plans to launch fast, absorb busy service peaks, and scale into multi-location operations with advanced integrations.",
+          setupLabel: "Setup",
+          includedLabel: "Included",
+          popularBadge: "Most Popular",
+          note: "Plans can be adapted depending on call volume, number of locations, and integration needs.",
+          comparisonTitle: "Plan comparison",
+          comparisonText: "A simple view of the key capabilities included in each package.",
+          plans: [
+            {
+              name: "Growth",
+              price: "€299",
+              suffix: "/month",
+              setup: "€800",
+              positioning: "For serious independent restaurants.",
+              cta: "Start with Growth",
+              featured: false,
+              features: [
+                "300 calls/month",
+                "Simple reservation handling",
+                "Basic FAQ answers: opening hours, address, common questions",
+                "SMS confirmation for customers",
+                "Smart escalation to staff",
+                "Dashboard: calls to recovered reservations",
+                "Automatic CRM update",
+                "Optimized standard script",
+              ],
+            },
+            {
+              name: "Pro",
+              price: "€599",
+              suffix: "/month",
+              setup: "€1200",
+              positioning: "For busy restaurants with high call volume.",
+              cta: "Choose Pro",
+              featured: true,
+              features: [
+                "Everything in Growth",
+                "1000 calls/month",
+                "Priority handling for important calls: VIPs, groups",
+                "Automatic WhatsApp + SMS follow-ups",
+                "Advanced escalation for complex cases",
+                "Advanced analytics: conversion, lost calls, recovered revenue",
+                "Custom script adapted to the restaurant",
+                "Monthly script optimization",
+                "Priority support",
+              ],
+            },
+            {
+              name: "Premium",
+              price: "€999+",
+              suffix: "/month",
+              setup: "€1500+",
+              positioning: "For chains and multi-location restaurants.",
+              cta: "Book a Premium Demo",
+              featured: false,
+              features: [
+                "Everything in Pro",
+                "3000 calls/month",
+                "Multi-location support",
+                "Custom AI flows for specific cases",
+                "Advanced integrations: booking systems, CRM, internal tools",
+                "Custom reporting",
+                "Monthly follow-up and continuous optimization",
+                "Dedicated support",
+              ],
+            },
+          ],
+        };
+  const comparisonRows = [
+    { feature: "Monthly calls", growth: "300", pro: "1000", premium: "3000" },
+    { feature: "Reservation handling", growth: "Yes", pro: "Yes", premium: "Yes" },
+    { feature: "Basic FAQ", growth: "Yes", pro: "Yes", premium: "Yes" },
+    { feature: "SMS confirmation", growth: "Yes", pro: "Yes", premium: "Yes" },
+    { feature: "WhatsApp + SMS follow-up", growth: "No", pro: "Yes", premium: "Yes" },
+    { feature: "Smart escalation", growth: "Yes", pro: "Yes", premium: "Yes" },
+    { feature: "Advanced escalation", growth: "No", pro: "Yes", premium: "Yes" },
+    { feature: "CRM update", growth: "Yes", pro: "Yes", premium: "Yes" },
+    { feature: "Basic dashboard", growth: "Basic", pro: "Advanced", premium: "Advanced + custom" },
+    { feature: "Advanced analytics", growth: "No", pro: "Yes", premium: "Yes" },
+    { feature: "Multi-location", growth: "No", pro: "No", premium: "Yes" },
+    { feature: "Custom AI flows", growth: "No", pro: "No", premium: "Yes" },
+    { feature: "Advanced integrations", growth: "No", pro: "No", premium: "Yes" },
+    { feature: "Custom reporting", growth: "No", pro: "No", premium: "Yes" },
+    { feature: "Support level", growth: "Standard", pro: "Priority", premium: "Dedicated" },
+  ];
   const previewCellStyle: React.CSSProperties = {
     padding: "11px 12px",
     borderBottom: "1px solid rgba(255,255,255,0.06)",
@@ -988,6 +1159,205 @@ export default function RestaurantCallAssistantPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* -- ROI ------------------------------------------------- */}
+        <section style={section}>
+          <div style={container}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+                gap: 18,
+                alignItems: "stretch",
+              }}
+            >
+              <div style={{ ...cardBase, borderRadius: 24, padding: "clamp(24px, 4vw, 34px)", borderColor: AC_BORDER, background: "linear-gradient(135deg, rgba(245,158,11,0.09) 0%, rgba(255,255,255,0.025) 58%, rgba(180,83,9,0.07) 100%)" }}>
+                <SectionTitle eyebrow={pricingCopy.roiEyebrow} title={pricingCopy.roiTitle} text={pricingCopy.roiText} />
+              </div>
+              <div style={{ ...cardBase, borderRadius: 24, padding: "clamp(22px, 3vw, 30px)", background: "rgba(11,22,40,0.58)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                  {[
+                    { label: lang === "fr" ? "Réponse" : "Response", value: "Instant" },
+                    { label: lang === "fr" ? "Réservations" : "Bookings", value: "Captured" },
+                    { label: lang === "fr" ? "Relances" : "Follow-up", value: "Auto" },
+                    { label: lang === "fr" ? "Revenus" : "Revenue", value: "Tracked" },
+                  ].map((item) => (
+                    <div key={item.label} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 16, padding: "16px 14px" }}>
+                      <p style={{ color: "rgba(255,255,255,0.36)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
+                        {item.label}
+                      </p>
+                      <p style={{ color: AC_TEXT, fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.15rem, 2vw, 1.5rem)", fontWeight: 800, letterSpacing: "-0.025em" }}>
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* -- PRICING --------------------------------------------- */}
+        <section id="pricing" style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={pricingCopy.pricingEyebrow} title={pricingCopy.pricingTitle} text={pricingCopy.pricingText} />
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 16, marginTop: 32, alignItems: "stretch" }}>
+              {pricingCopy.plans.map((plan) => (
+                <div
+                  key={plan.name}
+                  style={{
+                    ...cardBase,
+                    borderRadius: 26,
+                    padding: "clamp(20px, 3vw, 26px)",
+                    position: "relative",
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: "100%",
+                    borderColor: plan.featured ? AC_BORDER : "rgba(255,255,255,0.08)",
+                    background: plan.featured
+                      ? "linear-gradient(180deg, rgba(245,158,11,0.14) 0%, rgba(255,255,255,0.035) 42%, rgba(11,22,40,0.72) 100%)"
+                      : "rgba(255,255,255,0.03)",
+                    boxShadow: plan.featured ? "0 26px 90px rgba(0,0,0,0.30)" : "none",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER;
+                    (e.currentTarget as HTMLElement).style.transform = "translateY(-3px)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.borderColor = plan.featured ? AC_BORDER : "rgba(255,255,255,0.08)";
+                    (e.currentTarget as HTMLElement).style.transform = "none";
+                  }}
+                >
+                  {plan.featured && (
+                    <span style={{ position: "absolute", top: 18, right: 18, border: `1px solid ${AC_BORDER}`, background: AC_DIM, color: AC_TEXT, borderRadius: 999, padding: "6px 10px", fontSize: 11, fontWeight: 800 }}>
+                      {pricingCopy.popularBadge}
+                    </span>
+                  )}
+
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: plan.featured ? AC_TEXT : "rgba(255,255,255,0.42)", marginBottom: 12 }}>
+                    {plan.name}
+                  </p>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginBottom: 8 }}>
+                    <span style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(2rem, 4vw, 2.75rem)", lineHeight: 1, fontWeight: 800, letterSpacing: "-0.04em", color: "#f0f0ef" }}>
+                      {plan.price}
+                    </span>
+                    <span style={{ color: "rgba(255,255,255,0.48)", fontSize: 13 }}>{plan.suffix}</span>
+                  </div>
+                  <p style={{ color: AC_TEXT, fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+                    {pricingCopy.setupLabel} {plan.setup}
+                  </p>
+                  <p style={{ color: "rgba(255,255,255,0.58)", fontSize: 14, lineHeight: 1.6, minHeight: 45, marginBottom: 20 }}>
+                    {plan.positioning}
+                  </p>
+
+                  <Link
+                    href="/contact"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: "100%",
+                      padding: "13px 18px",
+                      background: plan.featured ? AC : AC_DIM,
+                      color: plan.featured ? "#160b02" : AC_TEXT,
+                      fontSize: 14,
+                      fontWeight: 800,
+                      borderRadius: 999,
+                      textDecoration: "none",
+                      border: `1px solid ${plan.featured ? AC : AC_BORDER}`,
+                      boxShadow: plan.featured ? `0 5px 26px ${AC_SHADOW}` : "none",
+                      marginBottom: 22,
+                    }}
+                  >
+                    {plan.cta}
+                  </Link>
+
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.34)", marginBottom: 12 }}>
+                    {pricingCopy.includedLabel}
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {plan.features.map((feature) => (
+                      <div key={feature} style={{ display: "flex", gap: 9, alignItems: "flex-start", color: "rgba(255,255,255,0.68)", fontSize: 13, lineHeight: 1.45 }}>
+                        <span style={{ color: AC_TEXT, flexShrink: 0, fontSize: 12, lineHeight: 1.45 }}>✓</span>
+                        <span>{feature}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p style={{ color: "rgba(255,255,255,0.44)", fontSize: 13, lineHeight: 1.6, marginTop: 18 }}>
+              {pricingCopy.note}
+            </p>
+
+            <div style={{ marginTop: 34 }}>
+              <SectionTitle eyebrow="Comparison" title={pricingCopy.comparisonTitle} text={pricingCopy.comparisonText} />
+              <div style={{ marginTop: 20, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 24, background: "rgba(255,255,255,0.025)", overflow: "hidden" }}>
+                <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+                    <thead>
+                      <tr>
+                        {["Feature", "Growth", "Pro", "Premium"].map((heading) => (
+                          <th
+                            key={heading}
+                            style={{
+                              padding: "15px 16px",
+                              borderBottom: "1px solid rgba(255,255,255,0.08)",
+                              background: heading === "Pro" ? "rgba(245,158,11,0.10)" : "rgba(7,17,31,0.58)",
+                              color: heading === "Pro" ? AC_TEXT : "rgba(255,255,255,0.58)",
+                              fontFamily: "'JetBrains Mono', monospace",
+                              fontSize: 10,
+                              letterSpacing: "0.1em",
+                              textTransform: "uppercase",
+                              textAlign: heading === "Feature" ? "left" : "center",
+                            }}
+                          >
+                            {heading}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonRows.map((row) => (
+                        <tr key={row.feature}>
+                          <td style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", color: "#f0f0ef", fontSize: 13.5, fontWeight: 700 }}>
+                            {row.feature}
+                          </td>
+                          {[
+                            { key: "growth", value: row.growth },
+                            { key: "pro", value: row.pro },
+                            { key: "premium", value: row.premium },
+                          ].map((cell) => (
+                            <td
+                              key={cell.key}
+                              style={{
+                                padding: "14px 16px",
+                                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                                background: cell.key === "pro" ? "rgba(245,158,11,0.055)" : "transparent",
+                                color: cell.value === "No" ? "rgba(255,255,255,0.34)" : "rgba(255,255,255,0.68)",
+                                fontSize: 13,
+                                textAlign: "center",
+                                whiteSpace: "normal",
+                              }}
+                            >
+                              {cell.value}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </section>

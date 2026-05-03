@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
   { label: "Handoffs", href: "/restaurant-analytics/handoffs", match: "/restaurant-analytics/handoffs", roles: ["superadmin", "tenant"] },
   { label: "Incidents", href: "/restaurant-analytics/incidents", match: "/restaurant-analytics/incidents", roles: ["superadmin"] },
   { label: "Quality", href: "/restaurant-analytics/quality", match: "/restaurant-analytics/quality", roles: ["superadmin", "tenant"] },
+  { label: "Leads Tracking", href: "/restaurant-analytics/leads-tracking", match: "/restaurant-analytics/leads-tracking", roles: ["superadmin"] },
 ];
 
 export default function DashboardLayoutShell({
