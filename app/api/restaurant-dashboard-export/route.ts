@@ -27,16 +27,6 @@ function readValue(row: AnalyticsRow, key: string) {
   return String(value);
 }
 
-function readNumber(row: AnalyticsRow, key: string) {
-  const value = row[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
 function escapeCsv(value: string) {
   if (!/[",\n\r]/.test(value)) return value;
   return `"${value.replace(/"/g, '""')}"`;
@@ -51,21 +41,25 @@ function toCsv(rows: AnalyticsRow[], headers: string[]) {
 
 function withExportContext(rows: AnalyticsRow[], range: string) {
   return rows.map((row) => {
-    const estimatedEur = readNumber(row, "estimated_revenue_eur");
-    const recoveredEur = readNumber(row, "estimated_followup_recovered_revenue_eur");
-    const sms = readNumber(row, "sms_followups_sent") ?? 0;
-    const whatsapp = readNumber(row, "whatsapp_followups_sent") ?? 0;
+    const sms = readExportNumber(row, "sms_followups_sent") ?? 0;
+    const whatsapp = readExportNumber(row, "whatsapp_followups_sent") ?? 0;
 
     return {
       export_range: range,
       ...row,
       total_followups: sms + whatsapp,
-      estimated_revenue_usd: row.estimated_revenue_usd ?? (estimatedEur !== null ? estimatedEur * 1.08 : undefined),
-      estimated_revenue_zar: row.estimated_revenue_zar ?? (estimatedEur !== null ? estimatedEur * 20.2 : undefined),
-      estimated_followup_recovered_revenue_usd: row.estimated_followup_recovered_revenue_usd ?? (recoveredEur !== null ? recoveredEur * 1.08 : undefined),
-      estimated_followup_recovered_revenue_zar: row.estimated_followup_recovered_revenue_zar ?? (recoveredEur !== null ? recoveredEur * 20.2 : undefined),
     };
   });
+}
+
+function readExportNumber(row: AnalyticsRow, key: string) {
+  const value = row[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 async function getBearerUserContext(request: NextRequest): Promise<UserContext | null> {
@@ -151,10 +145,8 @@ export async function GET(request: NextRequest) {
     "total_followups",
     "failed_followups",
     "estimated_revenue_eur",
-    "estimated_revenue_usd",
     "estimated_revenue_zar",
     "estimated_followup_recovered_revenue_eur",
-    "estimated_followup_recovered_revenue_usd",
     "estimated_followup_recovered_revenue_zar",
   ];
   const csv = toCsv(withExportContext(result.rows, range), headers);

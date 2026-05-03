@@ -9,7 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 
 type AnalyticsRow = Record<string, unknown>;
-type CurrencyCode = "EUR" | "USD" | "ZAR";
+type CurrencyCode = "EUR" | "ZAR";
 type PlanTier = "growth" | "pro" | "premium";
 type Lang = "fr" | "en";
 
@@ -29,6 +29,12 @@ type DashboardMetric = {
   detail: string;
   tone?: "neutral" | "good" | "warning" | "danger";
   kind?: "default" | "revenue";
+};
+
+type BusinessInsight = {
+  title: string;
+  text: string;
+  tone: "good" | "warning" | "neutral";
 };
 
 type LocationMetric = {
@@ -88,6 +94,7 @@ const dashboardText = {
     ranges: { "7d": "7 derniers jours", "30d": "30 derniers jours", "90d": "90 derniers jours" },
     dashboard: "dashboard",
     hello: "Bonjour",
+    greeting: (name: string) => `Bonjour, ${name} 👋`,
     manager: "Manager",
     subtitle: "Voici les performances de votre restaurant aujourd'hui.",
     exportReport: "Exporter le rapport",
@@ -135,28 +142,49 @@ const dashboardText = {
     upcoming: "Prochaines réservations",
     noUpcoming: "Aucune réservation à venir pour le moment. Les réservations connectées au calendrier apparaîtront ici dès que disponibles.",
     quickActions: "Actions rapides",
-    viewCalendar: "Voir le calendrier",
-    manageReservations: "Gérer les réservations",
+    viewCallsReservations: "Voir appels & réservations",
     viewFollowups: "Voir les suivis",
     viewEscalations: "Voir les escalades",
+    openServicePage: "Page service",
+    viewMultiLocationReport: "Voir le rapport multi-sites",
+    growthLockedReason: "WhatsApp + SMS, analytics avancés et revenu récupéré sont disponibles avec Pro.",
+    proLockedReason: "Multi-sites, flows personnalisés et support dédié sont disponibles avec Premium.",
     weekly: "Performance hebdomadaire",
     weeklyTitle: "Performance cette semaine",
     weeklyDetail: "Résumé filtré par plan depuis la vue dashboard restaurant.",
+    aiImpactTitle: "Impact de votre IA",
+    aiImpactText: "Appels traités → réservations capturées → revenu récupéré",
+    callsHandled: "Appels traités",
+    bookingsCapturedShort: "Réservations capturées",
+    revenueRecoveredShort: "Revenu récupéré",
+    lockedRevenueAnalytics: "Analytics revenu verrouillés avec Growth.",
+    businessInsights: "Insights business",
+    insightWatch: "À surveiller",
+    insightOpportunity: "Opportunité",
+    insightPositive: "Signal positif",
+    insightCallsNoBookings: "Votre IA a traité des appels, mais aucune réservation n'a encore été capturée. Vérifiez la qualité des appels ou l'intention de réservation.",
+    insightFollowupRevenue: "Les suivis récupèrent déjà du revenu pour ce restaurant.",
+    insightQuotaHigh: "Vous approchez de votre limite mensuelle d'appels. Pensez à upgrader avant d'être bloqué.",
+    insightHealthy: "Les appels, réservations et escalades sont suivis en temps réel depuis votre vue Supabase.",
+    insightLockedRevenue: "Les insights de revenu sont disponibles avec Pro et Premium.",
     revenueAnalytics: "Analytics revenu",
     upgrade: "Passer à Pro",
     notAvailable: "Indisponible",
     upsell: "Upgrade",
-    upsellTitle: "Augmente tes réservations",
-    growthUpsell: "Débloque les suivis WhatsApp + SMS et les analytics avancés pour récupérer plus de réservations.",
-    proUpsell: "Débloque le reporting multi-sites, les flows personnalisés et le support dédié.",
+    growthUpsellTitle: "Récupérez plus de réservations",
+    growthUpsell: "Débloquez les suivis WhatsApp + SMS, les analytics avancés et les insights de revenu récupéré.",
+    proUpsellTitle: "Passez à l'échelle multi-sites",
+    proUpsell: "Débloquez le reporting multi-sites, les flows IA personnalisés, les intégrations avancées et le support dédié.",
     explorePremium: "Explorer Premium",
+    premiumActiveTitle: "Espace Premium actif",
+    premiumActiveText: "Votre dashboard inclut les analytics avancés, le multi-sites, les flows personnalisés et les intégrations.",
     locked: "Verrouillé",
     lockedWhatsapp: "Suivis WhatsApp + SMS",
     lockedWhatsappText: "Récupère les réservations manquées avec des workflows automatiques WhatsApp et SMS.",
     lockedAnalytics: "Analytics avancés",
     lockedAnalyticsText: "Débloque conversion, échecs de suivis, qualité des escalades et revenu récupéré.",
     lockedRevenue: "Récupération de revenu",
-    lockedRevenueText: "Suis le revenu généré et récupéré en EUR, USD et ZAR.",
+    lockedRevenueText: "Suis le revenu généré et récupéré en EUR et ZAR.",
     lockedMulti: "Reporting multi-sites",
     lockedMultiText: "Compare les sites, quotas, réservations et escalades sur tout le groupe.",
     lockedFlows: "Flows IA personnalisés",
@@ -175,6 +203,7 @@ const dashboardText = {
     ranges: { "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days" },
     dashboard: "dashboard",
     hello: "Hello",
+    greeting: (name: string) => `Hello, ${name} 👋`,
     manager: "Manager",
     subtitle: "Here are your restaurant's performances today.",
     exportReport: "Export report",
@@ -222,28 +251,49 @@ const dashboardText = {
     upcoming: "Upcoming reservations",
     noUpcoming: "No upcoming reservations yet. Calendar-connected reservations will appear here once available.",
     quickActions: "Quick actions",
-    viewCalendar: "View calendar",
-    manageReservations: "Manage reservations",
+    viewCallsReservations: "View calls & reservations",
     viewFollowups: "View follow-ups",
     viewEscalations: "View escalations",
+    openServicePage: "Open service page",
+    viewMultiLocationReport: "View multi-location report",
+    growthLockedReason: "WhatsApp + SMS, advanced analytics, and recovered revenue are available with Pro.",
+    proLockedReason: "Multi-location reporting, custom flows, and dedicated support are available with Premium.",
     weekly: "Weekly performance",
     weeklyTitle: "Performance this week",
     weeklyDetail: "Package-aware summary from your restaurant dashboard view.",
+    aiImpactTitle: "Your AI impact",
+    aiImpactText: "Calls handled → bookings captured → revenue recovered",
+    callsHandled: "Calls handled",
+    bookingsCapturedShort: "Bookings captured",
+    revenueRecoveredShort: "Revenue recovered",
+    lockedRevenueAnalytics: "Revenue analytics are locked on Growth.",
+    businessInsights: "Business insights",
+    insightWatch: "Watch",
+    insightOpportunity: "Opportunity",
+    insightPositive: "Positive signal",
+    insightCallsNoBookings: "Your AI handled calls, but no bookings were captured yet. Review call quality or booking intent.",
+    insightFollowupRevenue: "Follow-ups are already recovering revenue for this restaurant.",
+    insightQuotaHigh: "You are close to your monthly call limit. Consider upgrading before calls are blocked.",
+    insightHealthy: "Calls, reservations, and escalations are being tracked in real time from your Supabase view.",
+    insightLockedRevenue: "Revenue insights are available with Pro and Premium.",
     revenueAnalytics: "Revenue analytics",
     upgrade: "Upgrade to Pro",
     notAvailable: "Not available",
     upsell: "Upgrade",
-    upsellTitle: "Increase your reservations",
-    growthUpsell: "Unlock WhatsApp + SMS follow-ups and advanced analytics to recover more bookings.",
-    proUpsell: "Unlock multi-location reporting, custom flows, and dedicated support.",
+    growthUpsellTitle: "Recover more reservations",
+    growthUpsell: "Unlock WhatsApp + SMS follow-ups, advanced analytics, and revenue recovery insights.",
+    proUpsellTitle: "Scale across locations",
+    proUpsell: "Unlock multi-location reporting, custom AI flows, advanced integrations, and dedicated support.",
     explorePremium: "Explore Premium",
+    premiumActiveTitle: "Premium workspace active",
+    premiumActiveText: "Your dashboard includes advanced analytics, multi-location reporting, custom flows, and integrations.",
     locked: "Locked",
     lockedWhatsapp: "WhatsApp + SMS follow-ups",
     lockedWhatsappText: "Recover missed bookings with automatic WhatsApp and SMS follow-up workflows.",
     lockedAnalytics: "Advanced analytics",
     lockedAnalyticsText: "Unlock conversion, failed follow-ups, escalation quality, and revenue recovery analytics.",
     lockedRevenue: "Revenue recovery",
-    lockedRevenueText: "Track estimated generated revenue and follow-up recovered revenue in EUR, USD, and ZAR.",
+    lockedRevenueText: "Track estimated generated revenue and follow-up recovered revenue in EUR and ZAR.",
     lockedMulti: "Multi-location reporting",
     lockedMultiText: "Compare locations, quota usage, reservations, and escalation patterns across the group.",
     lockedFlows: "Custom AI flows",
@@ -307,13 +357,14 @@ function formatPercent(value: number) {
 
 function formatCurrency(value: number, currency: CurrencyCode) {
   if (currency === "ZAR") {
-    return `R ${value.toLocaleString("en", { maximumFractionDigits: value % 1 === 0 ? 0 : 2 })}`;
+    return `R${value.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   return new Intl.NumberFormat("en", {
     style: "currency",
     currency,
-    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
@@ -393,12 +444,10 @@ function firstNullable(rows: AnalyticsRow[], key: string) {
 
 function pickRevenue(rows: AnalyticsRow[], prefix: string): Partial<Record<CurrencyCode, number>> {
   const eur = sumNullable(rows, `${prefix}_eur`);
-  const usd = sumNullable(rows, `${prefix}_usd`) ?? (eur !== null ? eur * 1.08 : null);
-  const zar = sumNullable(rows, `${prefix}_zar`) ?? (eur !== null ? eur * 20.2 : null);
+  const zar = sumNullable(rows, `${prefix}_zar`);
 
   return {
     EUR: eur ?? undefined,
-    USD: usd ?? undefined,
     ZAR: zar ?? undefined,
   };
 }
@@ -503,6 +552,7 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
   const premiumVisible = canSeePremium(summary.plan);
   const revenueMetrics = buildRevenueMetrics(summary);
   const topMetrics = buildTopMetrics(summary, proVisible, revenueMetrics, t);
+  const businessInsights = buildBusinessInsights(summary, proVisible, revenueMetrics, t);
 
   return (
     <div className="dashboard-page" style={{ maxWidth: 1380, margin: "0 auto" }}>
@@ -514,6 +564,11 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
         ))}
       </section>
 
+      <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.05fr)", gap: 18, marginBottom: 24 }} className="dashboard-two-col">
+        <AIImpactCard summary={summary} revenueMetrics={revenueMetrics} proVisible={proVisible} t={t} />
+        <BusinessInsightsCard insights={businessInsights} t={t} />
+      </section>
+
       <section style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 24, marginBottom: 24, alignItems: "start" }} className="dashboard-main-grid">
         <div style={{ display: "grid", gap: 24, minWidth: 0, gridColumn: "span 8" }} className="dashboard-left-column">
           <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(320px, 0.85fr)", gap: 18 }} className="dashboard-two-col">
@@ -522,14 +577,14 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
           </section>
 
           <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.05fr)", gap: 18 }} className="dashboard-two-col">
-            <TopSourcesCard summary={summary} t={t} />
+            <TopSourcesCard summary={summary} proVisible={proVisible} t={t} />
             <UpcomingReservationsCard t={t} />
           </section>
         </div>
 
         <aside style={{ display: "grid", gap: 18, alignContent: "start", minWidth: 0, gridColumn: "span 4" }} className="dashboard-right-column">
           <RealtimeInteractionsCard t={t} />
-          <QuickActionsCard t={t} range={dateRange.key} lang={lang} />
+          <QuickActionsCard summary={summary} t={t} range={dateRange.key} lang={lang} />
         </aside>
       </section>
 
@@ -543,10 +598,14 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
         }}
         className="dashboard-weekly-upsell-grid"
       >
-        <div style={{ gridColumn: premiumVisible ? "1 / -1" : "span 8", minWidth: 0 }} className="dashboard-weekly-wrap">
+        <div style={{ gridColumn: "span 8", minWidth: 0 }} className="dashboard-weekly-wrap">
           <WeeklySummaryBanner summary={summary} revenueMetrics={revenueMetrics} proVisible={proVisible} t={t} />
         </div>
-        {!premiumVisible && (
+        {premiumVisible ? (
+          <div style={{ gridColumn: "span 4", minWidth: 0 }} className="dashboard-upsell-wrap">
+            <PremiumActiveCard t={t} />
+          </div>
+        ) : (
           <div style={{ gridColumn: "span 4", minWidth: 0 }} className="dashboard-upsell-wrap">
             <UpsellCard plan={summary.plan} compact t={t} />
           </div>
@@ -581,15 +640,46 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
 
 function buildRevenueMetrics(summary: DashboardSummary) {
   return {
-    estimated: (["EUR", "USD", "ZAR"] as CurrencyCode[]).flatMap((currency) => {
+    estimated: (["EUR", "ZAR"] as CurrencyCode[]).flatMap((currency) => {
       const value = summary.estimatedRevenue[currency];
       return typeof value === "number" ? [{ currency, value, formatted: formatCurrency(value, currency) }] : [];
     }),
-    recovered: (["EUR", "USD", "ZAR"] as CurrencyCode[]).flatMap((currency) => {
+    recovered: (["EUR", "ZAR"] as CurrencyCode[]).flatMap((currency) => {
       const value = summary.recoveredRevenue[currency];
       return typeof value === "number" ? [{ currency, value, formatted: formatCurrency(value, currency) }] : [];
     }),
   };
+}
+
+function hasRevenueValue(items: Array<{ currency: CurrencyCode; value: number; formatted: string }>) {
+  return items.some((item) => item.value > 0);
+}
+
+function buildBusinessInsights(summary: DashboardSummary, proVisible: boolean, revenueMetrics: ReturnType<typeof buildRevenueMetrics>, t: (typeof dashboardText)[Lang]): BusinessInsight[] {
+  const insights: BusinessInsight[] = [];
+
+  if (summary.totalCalls > 0 && summary.totalReservations === 0) {
+    insights.push({ title: t.insightWatch, text: t.insightCallsNoBookings, tone: "warning" });
+  }
+
+  if (proVisible && hasRevenueValue(revenueMetrics.recovered)) {
+    insights.push({ title: t.insightPositive, text: t.insightFollowupRevenue, tone: "good" });
+  }
+
+  const quota = summary.quotaUsagePercent > 0 && summary.quotaUsagePercent <= 1 ? summary.quotaUsagePercent * 100 : summary.quotaUsagePercent;
+  if (quota > 80) {
+    insights.push({ title: t.insightOpportunity, text: t.insightQuotaHigh, tone: "warning" });
+  }
+
+  if (!proVisible) {
+    insights.push({ title: t.insightOpportunity, text: t.insightLockedRevenue, tone: "neutral" });
+  }
+
+  if (!insights.length) {
+    insights.push({ title: t.insightPositive, text: t.insightHealthy, tone: "good" });
+  }
+
+  return insights.slice(0, 3);
 }
 
 function buildTopMetrics(summary: DashboardSummary, proVisible: boolean, revenueMetrics: ReturnType<typeof buildRevenueMetrics>, t: (typeof dashboardText)[Lang]): DashboardMetric[] {
@@ -641,7 +731,7 @@ function DashboardTopBar({ summary, dateRange, userContext, lang, t }: { summary
           {planLabel(summary.plan)} {t.dashboard}
         </p>
         <h1 className="dashboard-page-title" style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.9rem, 3vw, 2.7rem)", lineHeight: 1.05, letterSpacing: "-0.04em", marginBottom: 8 }}>
-          {t.hello}, {roleName} 👋
+          {t.greeting(roleName)}
         </h1>
         <p className="dashboard-page-copy" style={{ color: "rgba(255,255,255,0.56)", fontSize: 15, lineHeight: 1.65 }}>
           {t.subtitle}
@@ -711,6 +801,63 @@ function MetricCard({ metric }: { metric: DashboardMetric }) {
   );
 }
 
+function AIImpactCard({ summary, revenueMetrics, proVisible, t }: { summary: DashboardSummary; revenueMetrics: ReturnType<typeof buildRevenueMetrics>; proVisible: boolean; t: (typeof dashboardText)[Lang] }) {
+  const recovered = formatRevenueSet(revenueMetrics.recovered);
+  const items = [
+    { label: t.callsHandled, value: formatInteger(summary.totalCalls), accent: AC_TEXT },
+    { label: t.bookingsCapturedShort, value: formatInteger(summary.totalReservations), accent: "#34D399" },
+    { label: t.conversionRate, value: formatPercent(summary.callToBookingRate), accent: "#93C5FD" },
+    { label: t.revenueRecoveredShort, value: proVisible ? recovered || t.notAvailable : t.upgrade, accent: proVisible && recovered ? "#34D399" : AC_TEXT, locked: !proVisible },
+  ];
+
+  return (
+    <section style={{ ...cardStyle, minWidth: 0 }}>
+      <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>{t.revenueAnalytics}</p>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "start", marginBottom: 16 }}>
+        <div>
+          <h2 className="dashboard-card-title" style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 22, marginBottom: 7 }}>{t.aiImpactTitle}</h2>
+          <p style={{ color: "rgba(255,255,255,0.54)", fontSize: 13, lineHeight: 1.55 }}>{t.aiImpactText}</p>
+        </div>
+        {!proVisible && <span style={{ ...pillStyle, minHeight: 30, padding: "6px 9px", color: AC_TEXT, background: AC_DIM, border: `1px solid ${AC_BORDER}`, fontSize: 10 }}>{t.locked}</span>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }} className="dashboard-three-col">
+        {items.map((item) => (
+          <div key={item.label} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.40)", borderRadius: 15, padding: 13, minWidth: 0 }}>
+            <p style={{ color: "rgba(255,255,255,0.46)", fontSize: 12, lineHeight: 1.4, marginBottom: 8 }}>{item.label}</p>
+            <p style={{ color: item.accent, fontFamily: "'Syne', sans-serif", fontSize: item.value.length > 18 ? 15 : 22, lineHeight: 1.15, fontWeight: 850, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.value}</p>
+            {item.locked && <p style={{ color: "rgba(255,255,255,0.42)", fontSize: 11.5, lineHeight: 1.45, marginTop: 8 }}>{t.lockedRevenueAnalytics}</p>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BusinessInsightsCard({ insights, t }: { insights: BusinessInsight[]; t: (typeof dashboardText)[Lang] }) {
+  const colors: Record<BusinessInsight["tone"], string> = {
+    good: "#34D399",
+    warning: AC_TEXT,
+    neutral: "#93C5FD",
+  };
+
+  return (
+    <section style={{ ...cardStyle, minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <h2 className="dashboard-card-title" style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 22 }}>{t.businessInsights}</h2>
+        <span style={{ color: AC_TEXT, background: AC_DIM, border: `1px solid ${AC_BORDER}`, borderRadius: 999, padding: "5px 9px", fontSize: 11, fontWeight: 800 }}>{t.live}</span>
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        {insights.map((insight) => (
+          <article key={`${insight.title}-${insight.text}`} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.38)", borderRadius: 15, padding: 14 }}>
+            <p style={{ color: colors[insight.tone], fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 7 }}>{insight.title}</p>
+            <p style={{ color: "rgba(255,255,255,0.68)", fontSize: 13, lineHeight: 1.58 }}>{insight.text}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function CallPerformanceCard({ summary, t }: { summary: DashboardSummary; t: (typeof dashboardText)[Lang] }) {
   const max = Math.max(summary.totalCalls, summary.totalReservations, summary.totalEscalations, 1);
   const rows = [
@@ -777,11 +924,11 @@ function RealtimeInteractionsCard({ t }: { t: (typeof dashboardText)[Lang] }) {
   );
 }
 
-function TopSourcesCard({ summary, t }: { summary: DashboardSummary; t: (typeof dashboardText)[Lang] }) {
+function TopSourcesCard({ summary, proVisible, t }: { summary: DashboardSummary; proVisible: boolean; t: (typeof dashboardText)[Lang] }) {
   const followUps = (summary.smsFollowupsSent ?? 0) + (summary.whatsappFollowupsSent ?? 0);
   const rows = [
     { source: t.voiceAiCalls, value: summary.totalReservations, conversion: summary.callToBookingRate },
-    { source: t.followups, value: followUps, conversion: 0 },
+    ...(proVisible ? [{ source: t.followups, value: followUps, conversion: 0 }] : []),
     { source: t.escalationsRecovered, value: summary.totalEscalations, conversion: 0 },
     { source: t.websiteManual, value: 0, conversion: 0 },
   ];
@@ -814,13 +961,18 @@ function UpcomingReservationsCard({ t }: { t: (typeof dashboardText)[Lang] }) {
   );
 }
 
-function QuickActionsCard({ t, range, lang }: { t: (typeof dashboardText)[Lang]; range: string; lang: Lang }) {
-  const actions = [
-    { label: t.viewCalendar, href: "/restaurant-analytics/overview" },
-    { label: t.manageReservations, href: "/restaurant-analytics/overview" },
+function QuickActionsCard({ summary, t, range, lang }: { summary: DashboardSummary; t: (typeof dashboardText)[Lang]; range: string; lang: Lang }) {
+  const proVisible = canSeePro(summary.plan);
+  const premiumVisible = canSeePremium(summary.plan);
+  const actions: Array<{ label: string; href: string }> = [
+    { label: t.viewCallsReservations, href: "/restaurant-analytics/overview" },
     { label: t.viewFollowups, href: "/restaurant-analytics/quality" },
     { label: t.viewEscalations, href: "/restaurant-analytics/handoffs" },
+    { label: t.openServicePage, href: "/agent/restaurant-call-assistant" },
   ];
+  if (premiumVisible && summary.locations.length > 1) {
+    actions.push({ label: t.viewMultiLocationReport, href: "/restaurant-analytics/locations" });
+  }
 
   return (
     <DashboardPanel title={t.quickActions}>
@@ -832,6 +984,14 @@ function QuickActionsCard({ t, range, lang }: { t: (typeof dashboardText)[Lang];
           </Link>
         ))}
         <ExportReportButton label={t.exportReport} range={range} lang={lang} variant="row" />
+        {!premiumVisible && (
+          <div style={{ border: `1px solid ${AC_BORDER}`, background: "rgba(245,158,11,0.07)", borderRadius: 14, padding: 13, marginTop: 2 }}>
+            <p style={{ color: "rgba(255,255,255,0.58)", fontSize: 12.5, lineHeight: 1.5, marginBottom: 10 }}>
+              {proVisible ? t.proLockedReason : t.growthLockedReason}
+            </p>
+            <ActionButton href="/agent/restaurant-call-assistant#pricing" label={proVisible ? t.explorePremium : t.upgrade} />
+          </div>
+        )}
       </div>
     </DashboardPanel>
   );
@@ -877,13 +1037,27 @@ function UpsellCard({ plan, compact = false, t }: { plan: PlanTier; compact?: bo
       <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 9 }}>
         {t.upsell}
       </p>
-      <h3 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 18, marginBottom: 8 }}>{t.upsellTitle}</h3>
+      <h3 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 18, marginBottom: 8 }}>{isGrowth ? t.growthUpsellTitle : t.proUpsellTitle}</h3>
       <p style={{ color: "rgba(255,255,255,0.58)", fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
         {isGrowth
           ? t.growthUpsell
           : t.proUpsell}
       </p>
       <ActionButton href="/agent/restaurant-call-assistant#pricing" label={isGrowth ? t.upgrade : t.explorePremium} />
+    </section>
+  );
+}
+
+function PremiumActiveCard({ t }: { t: (typeof dashboardText)[Lang] }) {
+  return (
+    <section style={{ border: "1px solid rgba(52,211,153,0.22)", background: "linear-gradient(135deg, rgba(52,211,153,0.10), rgba(255,255,255,0.03))", borderRadius: 20, padding: 18, minHeight: "100%", boxSizing: "border-box" }}>
+      <p style={{ color: "#34D399", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 9 }}>
+        {t.premium}
+      </p>
+      <h3 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 18, marginBottom: 8 }}>{t.premiumActiveTitle}</h3>
+      <p style={{ color: "rgba(255,255,255,0.58)", fontSize: 13, lineHeight: 1.6 }}>
+        {t.premiumActiveText}
+      </p>
     </section>
   );
 }
