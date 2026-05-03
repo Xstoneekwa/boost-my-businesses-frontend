@@ -51,7 +51,7 @@ function mapLocationItem(row: Record<string, unknown>): LocationListItem {
     id,
     name,
     calls,
-    bookings: readNumber(row, ["bookings", "total_bookings", "booking_calls", "completed_bookings"]),
+    bookings: readNumber(row, ["total_reservations", "reservations", "bookings", "total_bookings", "booking_calls", "completed_bookings"]),
     handoffs,
   };
 }
@@ -63,7 +63,7 @@ async function getLocationsData(): Promise<LocationsDataResult> {
     const rows = await fetchScopedRows({
       supabase,
       userContext,
-      sources: ["analytics_calls_by_location"],
+      sources: ["restaurant_dashboard_filtered"],
     });
     const enrichedRows = await enrichLocationNames(supabase, rows);
     const locations = groupLocationRows(enrichedRows).map(mapLocationItem).filter((location) => location.id);
