@@ -626,8 +626,17 @@ function DashboardTopBar({ summary, dateRange, userContext, lang, t }: { summary
   const roleName = userContext.role === "superadmin" ? t.manager : summary.tenantName || t.manager;
 
   return (
-    <header style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 20, marginBottom: 22, flexWrap: "wrap" }}>
-      <div style={{ minWidth: 0 }}>
+    <header
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        alignItems: "start",
+        gap: 18,
+        marginBottom: 22,
+      }}
+      className="dashboard-top-header"
+    >
+      <div style={{ minWidth: 0, maxWidth: 760 }}>
         <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
           {planLabel(summary.plan)} {t.dashboard}
         </p>
@@ -639,10 +648,22 @@ function DashboardTopBar({ summary, dateRange, userContext, lang, t }: { summary
         </p>
       </div>
 
-      <div className="dashboard-header-actions" style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+      <div
+        className="dashboard-header-actions"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          justifyContent: "flex-end",
+          flexWrap: "nowrap",
+          justifySelf: "end",
+          alignSelf: "start",
+          whiteSpace: "nowrap",
+        }}
+      >
         <DateRangeSelector activeKey={dateRange.key} t={t} />
-        <ExportReportButton label={t.exportReport} range={dateRange.key} lang={lang} />
-        <span style={{ ...pillStyle, color: "#86EFAC", borderColor: "rgba(34,197,94,0.24)", background: "rgba(34,197,94,0.10)" }}>
+        <ExportReportButton label={t.exportReport} range={dateRange.key} lang={lang} size="compact" />
+        <span style={{ ...pillStyle, minHeight: 32, padding: "7px 10px", fontSize: 11, color: "#86EFAC", borderColor: "rgba(34,197,94,0.24)", background: "rgba(34,197,94,0.10)" }}>
           {t.operational}
         </span>
       </div>
@@ -652,17 +673,17 @@ function DashboardTopBar({ summary, dateRange, userContext, lang, t }: { summary
 
 function DateRangeSelector({ activeKey, t }: { activeKey: DateRangePreset["key"]; t: (typeof dashboardText)[Lang] }) {
   return (
-    <div style={{ display: "flex", gap: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 999, padding: 4 }}>
+    <div style={{ display: "flex", gap: 3, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 999, padding: 3 }}>
       {Object.values(DATE_RANGE_PRESETS).map((option) => (
         <Link
           key={option.key}
           href={`/restaurant-analytics/overview?range=${option.key}`}
           style={{
             borderRadius: 999,
-            padding: "8px 10px",
+            padding: "6px 8px",
             color: activeKey === option.key ? "#160b02" : "rgba(255,255,255,0.62)",
             background: activeKey === option.key ? AC : "transparent",
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 800,
             textDecoration: "none",
           }}

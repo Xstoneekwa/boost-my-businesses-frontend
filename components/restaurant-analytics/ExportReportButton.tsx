@@ -9,6 +9,7 @@ type ExportReportButtonProps = {
   lang?: string;
   fullWidth?: boolean;
   variant?: "primary" | "row";
+  size?: "normal" | "compact";
 };
 
 const AC = "#F59E0B";
@@ -20,6 +21,7 @@ export default function ExportReportButton({
   lang = "en",
   fullWidth = false,
   variant = "primary",
+  size = "normal",
 }: ExportReportButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
 
@@ -101,13 +103,13 @@ export default function ExportReportButton({
         justifyContent: "center",
         width: fullWidth ? "100%" : undefined,
         minHeight: 34,
-        padding: "8px 12px",
+        padding: size === "compact" ? "7px 10px" : "8px 12px",
         border: "none",
         borderRadius: 999,
         background: AC,
         color: "#160b02",
         font: "inherit",
-        fontSize: 12,
+        fontSize: size === "compact" ? 11 : 12,
         fontWeight: 900,
         cursor: isExporting ? "wait" : "pointer",
         boxShadow: "0 8px 28px rgba(245,158,11,0.16)",

@@ -347,6 +347,16 @@ textarea {
     justify-content: flex-start !important;
   }
 
+  .dashboard-top-header {
+    grid-template-columns: 1fr !important;
+  }
+
+  .dashboard-header-actions {
+    justify-self: start !important;
+    flex-wrap: wrap !important;
+    white-space: normal !important;
+  }
+
   .dashboard-kpi-grid,
   .dashboard-two-col,
   .dashboard-three-col,
