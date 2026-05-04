@@ -29,14 +29,6 @@ const AGENT_COLORS: Record<Agent, string> = {
   restaurant: "#F59E0B",
 };
 
-const AGENT_HOVER: Record<Agent, string> = {
-  whatsapp: "rgba(37,211,102,0.10)",
-  assistant: "rgba(139,124,246,0.10)",
-  ugc: "rgba(249,115,22,0.10)",
-  support: "rgba(59,130,246,0.10)",
-  restaurant: "rgba(245,158,11,0.10)",
-};
-
 const NAV_LINKS = [
   { label: { fr: "UGC Ads Engine", en: "UGC Ads Engine" }, href: "/agent/ugc-ads-engine", agent: "ugc" as Agent },
   { label: { fr: "AI Assistant", en: "AI Assistant" }, href: "/agent/general", agent: "assistant" as Agent },
@@ -90,27 +82,22 @@ export default function NavbarFooter({
   children,
 }: NavbarFooterProps) {
   const pathname = usePathname();
-  const [hydratedPathname, setHydratedPathname] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const accentColor = agent ? AGENT_COLORS[agent] : "#f0f0ef";
-  const accentHover = agent ? AGENT_HOVER[agent] : "rgba(255,255,255,0.06)";
   const t = COPY[lang];
+  const isRestaurantPage = pathname?.startsWith("/agent/restaurant-call-assistant") ?? false;
+  const pricingHref = isRestaurantPage ? "#pricing" : "/#pricing";
+  const scrollToPricing = () => {
+    document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", handler, { passive: true });
     return () => window.removeEventListener("scroll", handler);
   }, []);
-
-  useEffect(() => {
-    setHydratedPathname(pathname ?? "");
-  }, [pathname]);
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [hydratedPathname]);
 
   return (
     <>
@@ -185,9 +172,10 @@ export default function NavbarFooter({
           className="site-nav-desktop"
         >
           {NAV_LINKS.map((link) => {
+            const currentPathname = pathname ?? "";
             const isActive =
-              hydratedPathname === link.href ||
-              hydratedPathname.startsWith(`${link.href}/`);
+              currentPathname === link.href ||
+              currentPathname.startsWith(`${link.href}/`);
             const linkColor = AGENT_COLORS[link.agent];
             return (
               <Link
@@ -264,26 +252,52 @@ export default function NavbarFooter({
           </div>
 
           {/* CTA */}
-          <Link
-            href="/#pricing"
-            className="site-nav-cta"
-            style={{
-              padding: "8px 18px",
-              background: accentColor,
-              color: "#000",
-              fontSize: 13,
-              fontWeight: 700,
-              borderRadius: 999,
-              textDecoration: "none",
-              transition: "opacity 150ms, background 300ms ease",
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.88"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
-          >
-            {t.cta}
-          </Link>
+          {isRestaurantPage ? (
+            <button
+              type="button"
+              onClick={scrollToPricing}
+              className="site-nav-cta"
+              style={{
+                padding: "8px 18px",
+                background: accentColor,
+                color: "#000",
+                fontSize: 13,
+                fontWeight: 700,
+                borderRadius: 999,
+                textDecoration: "none",
+                transition: "opacity 150ms, background 300ms ease",
+                display: "inline-flex",
+                alignItems: "center",
+                border: "none",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.88"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+            >
+              {t.cta}
+            </button>
+          ) : (
+            <Link
+              href={pricingHref}
+              className="site-nav-cta"
+              style={{
+                padding: "8px 18px",
+                background: accentColor,
+                color: "#000",
+                fontSize: 13,
+                fontWeight: 700,
+                borderRadius: 999,
+                textDecoration: "none",
+                transition: "opacity 150ms, background 300ms ease",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.88"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+            >
+              {t.cta}
+            </Link>
+          )}
 
           {/* Hamburger — mobile */}
           <button
@@ -428,7 +442,7 @@ export default function NavbarFooter({
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
-                  { label: t.pricing, href: "/#pricing" },
+                  { label: t.pricing, href: pricingHref },
                   { label: t.about, href: "/about" },
                   { label: t.contact, href: "/contact" },
                 ].map((item) => (

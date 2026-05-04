@@ -1,5 +1,6 @@
 import Link from "next/link";
 import ExportReportButton from "@/components/restaurant-analytics/ExportReportButton";
+import { mockRestaurantDashboardExtras, mockRestaurantDashboardRows, type MockRestaurantDashboardExtras } from "../mockRestaurantDashboard";
 import { requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import { getRestaurantServerCopy } from "@/lib/restaurant-language-server";
 import { createSupabaseClient } from "@/lib/supabase";
@@ -46,6 +47,10 @@ type LocationMetric = {
   conversionRate: number;
 };
 
+type RecentInteraction = MockRestaurantDashboardExtras["recentInteractions"][number];
+type UpcomingReservation = MockRestaurantDashboardExtras["upcomingReservations"][number];
+type TopSourceMetric = MockRestaurantDashboardExtras["topSources"][number];
+
 type DashboardSummary = {
   tenantName: string;
   tenantSlug: string;
@@ -67,6 +72,9 @@ type DashboardSummary = {
     cancelled: number;
     noShow: number;
   };
+  recentInteractions: RecentInteraction[];
+  upcomingReservations: UpcomingReservation[];
+  topSources: TopSourceMetric[];
 };
 
 type OverviewDataResult =
@@ -99,6 +107,7 @@ const dashboardText = {
     subtitle: "Voici les performances de votre restaurant aujourd'hui.",
     exportReport: "Exporter le rapport",
     operational: "Système opérationnel",
+    demoData: "Données démo",
     totalCalls: "Appels reçus",
     reservationsRecovered: "Réservations récupérées",
     reservationsConfirmed: "Réservations confirmées",
@@ -208,6 +217,7 @@ const dashboardText = {
     subtitle: "Here are your restaurant's performances today.",
     exportReport: "Export report",
     operational: "System operational",
+    demoData: "Demo data",
     totalCalls: "Calls received",
     reservationsRecovered: "Reservations recovered",
     reservationsConfirmed: "Reservations confirmed",
@@ -452,7 +462,7 @@ function pickRevenue(rows: AnalyticsRow[], prefix: string): Partial<Record<Curre
   };
 }
 
-function buildSummary(rows: AnalyticsRow[], userContext: UserContext): DashboardSummary {
+function buildSummary(rows: AnalyticsRow[], userContext: UserContext, extras?: MockRestaurantDashboardExtras): DashboardSummary {
   const totalCalls = rows.reduce((sum, row) => sum + readNumber(row, ["total_calls"]), 0);
   const totalReservations = rows.reduce((sum, row) => sum + readNumber(row, ["total_reservations"]), 0);
   const totalEscalations = rows.reduce((sum, row) => sum + readNumber(row, ["total_escalations"]), 0);
@@ -494,6 +504,9 @@ function buildSummary(rows: AnalyticsRow[], userContext: UserContext): Dashboard
       cancelled: sumNullable(rows, "cancelled_reservations") ?? 0,
       noShow: sumNullable(rows, "no_show_reservations") ?? 0,
     },
+    recentInteractions: extras?.recentInteractions ?? [],
+    upcomingReservations: extras?.upcomingReservations ?? [],
+    topSources: extras?.topSources ?? [],
   };
 }
 
@@ -521,8 +534,12 @@ async function fetchDashboardRows(supabase: SupabaseClient, userContext: UserCon
   return fallback.data ?? [];
 }
 
-async function getOverviewData(userContext: UserContext, dateRange: DateRangePreset): Promise<OverviewDataResult> {
+async function getOverviewData(userContext: UserContext, dateRange: DateRangePreset, demoMode: boolean): Promise<OverviewDataResult> {
   try {
+    if (demoMode) {
+      return { ok: true, summary: buildSummary(mockRestaurantDashboardRows, userContext, mockRestaurantDashboardExtras) };
+    }
+
     const rows = await fetchDashboardRows(createSupabaseClient(), userContext, dateRange);
     if (!rows.length) return { ok: false, error: "restaurant_dashboard_filtered returned no rows." };
     return { ok: true, summary: buildSummary(rows, userContext) };
@@ -537,7 +554,10 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
   const userContext = await requireDashboardUserContext();
   const { lang } = await getRestaurantServerCopy();
   const t = dashboardText[lang];
-  const result = await getOverviewData(userContext, dateRange);
+  const demoFlag = process.env["NEXT_PUBLIC_RESTAURANT_DASHBOARD_DEMO"];
+  console.log("DEMO MODE:", demoFlag);
+  const isDemoMode = demoFlag?.trim().toLowerCase() === "true";
+  const result = await getOverviewData(userContext, dateRange, isDemoMode);
 
   if (!result.ok) {
     return (
@@ -556,7 +576,7 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
 
   return (
     <div className="dashboard-page" style={{ maxWidth: 1380, margin: "0 auto" }}>
-      <DashboardTopBar summary={summary} dateRange={dateRange} userContext={userContext} lang={lang} t={t} />
+      <DashboardTopBar summary={summary} dateRange={dateRange} userContext={userContext} lang={lang} t={t} demoMode={isDemoMode} />
 
       <section className="dashboard-kpi-grid dashboard-kpi-six" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 14, marginBottom: 18 }}>
         {topMetrics.map((metric) => (
@@ -578,12 +598,12 @@ export default async function RestaurantAnalyticsOverviewPage({ searchParams }: 
 
           <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.05fr)", gap: 18 }} className="dashboard-two-col">
             <TopSourcesCard summary={summary} proVisible={proVisible} t={t} />
-            <UpcomingReservationsCard t={t} />
+            <UpcomingReservationsCard summary={summary} t={t} />
           </section>
         </div>
 
         <aside style={{ display: "grid", gap: 18, alignContent: "start", minWidth: 0, gridColumn: "span 4" }} className="dashboard-right-column">
-          <RealtimeInteractionsCard t={t} />
+          <RealtimeInteractionsCard summary={summary} t={t} />
           <QuickActionsCard summary={summary} t={t} range={dateRange.key} lang={lang} />
         </aside>
       </section>
@@ -712,7 +732,21 @@ function buildTopMetrics(summary: DashboardSummary, proVisible: boolean, revenue
   ];
 }
 
-function DashboardTopBar({ summary, dateRange, userContext, lang, t }: { summary: DashboardSummary; dateRange: DateRangePreset; userContext: UserContext; lang: Lang; t: (typeof dashboardText)[Lang] }) {
+function DashboardTopBar({
+  summary,
+  dateRange,
+  userContext,
+  lang,
+  t,
+  demoMode,
+}: {
+  summary: DashboardSummary;
+  dateRange: DateRangePreset;
+  userContext: UserContext;
+  lang: Lang;
+  t: (typeof dashboardText)[Lang];
+  demoMode: boolean;
+}) {
   const roleName = userContext.role === "superadmin" ? t.manager : summary.tenantName || t.manager;
 
   return (
@@ -753,6 +787,11 @@ function DashboardTopBar({ summary, dateRange, userContext, lang, t }: { summary
       >
         <DateRangeSelector activeKey={dateRange.key} t={t} />
         <ExportReportButton label={t.exportReport} range={dateRange.key} lang={lang} size="compact" />
+        {demoMode && (
+          <span style={{ ...pillStyle, minHeight: 32, padding: "7px 10px", fontSize: 11, color: AC_TEXT, borderColor: AC_BORDER, background: AC_DIM }}>
+            {t.demoData}
+          </span>
+        )}
         <span style={{ ...pillStyle, minHeight: 32, padding: "7px 10px", fontSize: 11, color: "#86EFAC", borderColor: "rgba(34,197,94,0.24)", background: "rgba(34,197,94,0.10)" }}>
           {t.operational}
         </span>
@@ -916,22 +955,38 @@ function ReservationStatusCard({ summary, t }: { summary: DashboardSummary; t: (
   );
 }
 
-function RealtimeInteractionsCard({ t }: { t: (typeof dashboardText)[Lang] }) {
+function RealtimeInteractionsCard({ summary, t }: { summary: DashboardSummary; t: (typeof dashboardText)[Lang] }) {
   return (
     <DashboardPanel title={t.realtime} action={t.live}>
-      <EmptyState text={t.noRecent} />
+      {summary.recentInteractions.length ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          {summary.recentInteractions.map((interaction) => (
+            <div key={`${interaction.time}-${interaction.title}`} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.42)", borderRadius: 14, padding: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 7 }}>
+                <strong style={{ color: "#f0f0ef", fontSize: 13 }}>{interaction.title}</strong>
+                <span style={{ color: interaction.tone === "good" ? "#34D399" : interaction.tone === "warning" ? AC_TEXT : "#93C5FD", fontSize: 12, fontWeight: 800 }}>{interaction.status}</span>
+              </div>
+              <p style={{ color: "rgba(255,255,255,0.56)", fontSize: 12.5, lineHeight: 1.5 }}>{interaction.time} · {interaction.detail}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text={t.noRecent} />
+      )}
     </DashboardPanel>
   );
 }
 
 function TopSourcesCard({ summary, proVisible, t }: { summary: DashboardSummary; proVisible: boolean; t: (typeof dashboardText)[Lang] }) {
   const followUps = (summary.smsFollowupsSent ?? 0) + (summary.whatsappFollowupsSent ?? 0);
-  const rows = [
-    { source: t.voiceAiCalls, value: summary.totalReservations, conversion: summary.callToBookingRate },
-    ...(proVisible ? [{ source: t.followups, value: followUps, conversion: 0 }] : []),
-    { source: t.escalationsRecovered, value: summary.totalEscalations, conversion: 0 },
-    { source: t.websiteManual, value: 0, conversion: 0 },
-  ];
+  const rows = summary.topSources.length
+    ? summary.topSources
+    : [
+        { source: t.voiceAiCalls, value: summary.totalReservations, conversion: summary.callToBookingRate },
+        ...(proVisible ? [{ source: t.followups, value: followUps, conversion: 0 }] : []),
+        { source: t.escalationsRecovered, value: summary.totalEscalations, conversion: 0 },
+        { source: t.websiteManual, value: 0, conversion: 0 },
+      ];
   const max = Math.max(...rows.map((row) => row.value), 1);
 
   return (
@@ -953,10 +1008,25 @@ function TopSourcesCard({ summary, proVisible, t }: { summary: DashboardSummary;
   );
 }
 
-function UpcomingReservationsCard({ t }: { t: (typeof dashboardText)[Lang] }) {
+function UpcomingReservationsCard({ summary, t }: { summary: DashboardSummary; t: (typeof dashboardText)[Lang] }) {
   return (
     <DashboardPanel title={t.upcoming}>
-      <EmptyState text={t.noUpcoming} />
+      {summary.upcomingReservations.length ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          {summary.upcomingReservations.map((reservation) => (
+            <div key={`${reservation.time}-${reservation.guest}`} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 12, alignItems: "center", border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.42)", borderRadius: 14, padding: 13 }}>
+              <span style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 800 }}>{reservation.time}</span>
+              <span style={{ minWidth: 0 }}>
+                <strong style={{ display: "block", color: "#f0f0ef", fontSize: 13, marginBottom: 4 }}>{reservation.guest}</strong>
+                <span style={{ color: "rgba(255,255,255,0.52)", fontSize: 12.5 }}>{reservation.partySize} · {reservation.source}</span>
+              </span>
+              <span style={{ color: "#34D399", fontSize: 12, fontWeight: 800, textAlign: "right" }}>{reservation.status}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text={t.noUpcoming} />
+      )}
     </DashboardPanel>
   );
 }

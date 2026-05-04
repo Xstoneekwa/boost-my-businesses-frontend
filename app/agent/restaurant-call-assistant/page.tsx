@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
+import Script from "next/script";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import NavbarFooter from "../../components/NavbarFooter";
@@ -24,132 +26,130 @@ const CLIENT_DASHBOARD_HREF = "/restaurant-analytics/overview";
 
 const copy = {
   fr: {
-    badge: "AI Restaurant Call Assistant",
-    heroTitle: "Un assistant IA qui répond aux appels, prend les réservations et protège ton service en salle.",
-    heroSubtitle:
-      "Pensé pour les restaurants, groupes multi-sites et concepts hospitality premium, ce système gère les appels entrants, route les intentions, mémorise les préférences client et escalade proprement vers l'humain quand c'est nécessaire.",
+    badge: "Assistant IA Restaurant",
+    heroTitle: "Un assistant IA qui répond aux appels, capture les réservations et protège ton équipe.",
+    heroSubtitle: "Ne rate plus aucun appel. Ne perds plus aucune réservation.",
     testCta: "Tester l'outil",
-    clientLoginCta: "Accès dashboard",
-    primaryCta: "Voir le workflow",
-    secondaryCta: "Retour à l'accueil",
+    clientLoginCta: "Accès tableau de bord",
+    getStartedCta: "Commencer",
+    contactCta: "Réserver une démo / Nous contacter",
     stats: [
       { label: "Disponibilité", value: "24/7" },
-      { label: "Couverture", value: "Calls • Booking • FAQ" },
-      { label: "Pilotage", value: "Par restaurant & location" },
+      { label: "Couverture", value: "Appels • Réservations • FAQ" },
+      { label: "Pilotage", value: "Par restaurant & site" },
     ],
     productBoxTitle: "Expérience d'appel",
     productSteps: [
-      { label: "Appel entrant", text: "Le client appelle pour réserver, modifier ou poser une question." },
-      { label: "Routage d'intention", text: "L'IA identifie réservation, FAQ, privatisation, retard, allergie ou urgence." },
-      { label: "Action structurée", text: "Le système confirme la demande, collecte les détails et met à jour le suivi." },
-      { label: "Handoff humain", text: "Les cas sensibles sont transférés avec contexte, historique et raison d'escalade." },
+      { label: "Le client appelle", text: "Réservation, modification ou question." },
+      { label: "L'IA traite la demande", text: "Intention, détails utiles et réponse claire." },
+      { label: "Action créée", text: "Réservation ou escalade transmise à l'équipe." },
     ],
     problemTitle: "Le problème que ce système résout",
     problemText:
-      "Dans un restaurant, chaque appel arrive au mauvais moment : pendant le rush, pendant le service, ou quand personne n'est disponible. Résultat : réservations perdues, équipe interrompue et aucune visibilité sur ce qui a été manqué.",
+      "Les restaurants perdent des réservations quand les appels arrivent en plein service, après les heures d'ouverture ou quand l'équipe est déjà occupée.",
     problems: [
       "Appels manqués pendant les pics de service",
       "Réservations perdues ou mal qualifiées",
-      "Interruptions constantes de l'équipe en salle",
+      "Équipe constamment interrompue",
       "Gestion fragile des demandes complexes",
-      "Peu de visibilité sur les escalades et handoffs",
-      "Aucune lecture claire par restaurant ou localisation",
     ],
     solutionTitle: "La solution",
     solutionText:
-      "AI Restaurant Call Assistant agit comme une couche opérationnelle entre les clients et l'équipe. Il répond, comprend, collecte, réserve, mémorise et transmet uniquement ce qui mérite une intervention humaine.",
+      "L'IA gère les appels, capture les réservations, répond aux questions fréquentes et escalade seulement quand c'est nécessaire.",
     solutions: [
       "Réponse automatique aux appels entrants, même hors horaires",
-      "Prise de réservation avec collecte des détails utiles",
+      "Capture des réservations avec les bons détails opérationnels",
       "Réponses aux questions fréquentes : horaires, menu, parking, allergies, privatisations",
       "Routage intelligent vers réservation, FAQ, modification, annulation ou escalade",
-      "Mémoire client pour préférences, demandes récurrentes et contexte utile",
-      "Handoffs structurés avec résumé, priorité et raison d'escalade",
-    ],
-    differenceTitle: "Ce qui le rend exceptionnel",
-    differenceText:
-      "Ce n'est pas un simple répondeur vocal. C'est une architecture multi-agent pensée pour la production, avec mémoire, logique métier et analytics exploitables par les équipes opérationnelles.",
-    differentiators: [
-      { title: "Architecture multi-agent", text: "Un agent qualifie l'intention, un autre gère la réservation, un autre prépare le handoff ou les analytics." },
-      { title: "Mémoire client utile", text: "Le système conserve les préférences pertinentes : table calme, allergie, anniversaire, historique de réservation ou VIP." },
-      { title: "Routage intelligent", text: "Chaque appel est dirigé vers le bon flow selon l'intention, le restaurant, la localisation et le niveau d'urgence." },
-      { title: "Approche production-ready", text: "Pensé pour logs, fallback, escalade humaine, monitoring et exploitation réelle, pas seulement pour une démo." },
-    ],
-    workflowTitle: "Comment le système fonctionne",
-    workflowText:
-      "Le client vit une conversation simple. En coulisses, le système orchestre plusieurs décisions pour réduire le bruit et augmenter la qualité de service.",
-    flowSteps: [
-      "Le client appelle le restaurant ou une ligne centralisée",
-      "L'IA identifie l'intention et la localisation concernée",
-      "Le bon agent prend le relais : booking, FAQ, modification, VIP ou escalade",
-      "Les détails utiles sont collectés : date, heure, personnes, allergies, préférence",
-      "La réservation, le reminder ou le suivi est créé dans les outils connectés",
-      "Si besoin, un humain reçoit un handoff avec résumé et contexte complet",
-      "Les analytics alimentent la vue restaurant, groupe et localisation",
-    ],
-    featuresTitle: "Fonctionnalités",
-    featuresText:
-      "Le système couvre les appels du quotidien, les moments de rush et les cas qui demandent une attention humaine sans perdre le contexte.",
-    features: [
-      "Réponse vocale IA aux appels entrants",
-      "Prise de réservation guidée",
-      "FAQ restaurant configurable",
-      "Routage par intention",
-      "Escalade humaine priorisée",
-      "Mémoire client et préférences",
-      "Suivi des handoffs",
-      "Reminders et confirmations",
-      "Vue multi-tenant",
-      "Vue par localisation",
-      "Logs d'appels et raisons d'escalade",
-      "Connecteurs CRM / table booking / ops tools",
-    ],
-    analyticsTitle: "Analytics restaurant & multi-location",
-    analyticsText:
-      "Les managers ne voient pas seulement le volume d'appels. Ils comprennent ce qui se passe : pourquoi les clients appellent, où les handoffs se produisent, quelles locations perdent le plus d'opportunités et quels sujets saturent l'équipe.",
-    analytics: [
-      { label: "Calls handled", value: "1,284", text: "Appels traités automatiquement sur la période." },
-      { label: "Bookings captured", value: "412", text: "Réservations créées ou qualifiées par l'assistant." },
-      { label: "Human handoffs", value: "7.8%", text: "Escalades avec contexte transmis à l'équipe." },
-      { label: "Top intent", value: "Booking", text: "Motif principal par restaurant et localisation." },
-    ],
-    impactTitle: "Impact business",
-    impactText:
-      "La valeur est opérationnelle : moins d'appels perdus, moins d'interruptions, plus de réservations capturées et une meilleure lecture de la demande client.",
-    businessResults: [
-      "Réduction des appels manqués pendant le service",
-      "Plus de réservations capturées hors horaires ou pendant les rushs",
-      "Moins d'interruptions pour l'équipe en salle",
-      "Escalades plus propres, avec contexte et priorité",
-      "Meilleure expérience client avant même l'arrivée au restaurant",
-      "Pilotage centralisé pour groupes, franchises et multi-sites",
     ],
     useCasesTitle: "Cas d'usage",
-    useCasesText:
-      "Le système peut être adapté à plusieurs modèles de restauration et d'hospitality où les appels sont fréquents, répétitifs ou difficiles à gérer pendant le service.",
-    useCases: {
-      "Restaurants premium": ["Réservations", "Demandes VIP", "Allergies", "Anniversaires"],
-      "Groupes multi-sites": ["Vue par location", "Comparaison des handoffs", "Pilotage centralisé"],
-      "Concepts à fort volume": ["Rush du soir", "Takeaway", "Modifications de réservation"],
-      "Hospitality": ["Rooftops", "Bars à cocktails", "Beach clubs", "Private dining"],
-      "Franchises": ["Standardisation des réponses", "Reporting par site", "Qualité opérationnelle"],
-    },
-    ctaEyebrow: "Production-ready",
-    ctaTitle: "Tu veux transformer les appels de ton restaurant en réservations mesurables ?",
-    ctaText:
-      "Cette page présente la structure produit. Le système peut ensuite être connecté à tes outils de réservation, ton CRM, ton Slack ou ton dashboard opérationnel.",
-    ctaPrimary: "Parler du système",
-    ctaSecondary: "Retour à l'acceuil",
+    useCasesText: "Quatre environnements où les appels doivent être gérés vite, clairement et sans interrompre le service.",
+    useCases: [
+      { title: "Restaurants premium", items: ["Réservations", "Demandes VIP", "Allergies", "Anniversaires"] },
+      { title: "Groupes multi-sites", items: ["Vue par site", "Comparaison des escalades", "Pilotage centralisé"] },
+      { title: "Concepts à fort volume", items: ["Rush du soir", "Takeaway", "Modifications de réservation"] },
+      { title: "Hospitality", items: ["Rooftops", "Bars à cocktails", "Beach clubs", "Private dining"] },
+    ],
+    differenceTitle: "Ce qui le rend différent",
+    differenceText: "Un système pensé pour les vraies opérations restaurant, pas seulement pour répondre au téléphone.",
+    differentiators: [
+      { title: "Fonctionne par localisation", text: "Vue claire par restaurant, groupe et site." },
+      { title: "Mémorise le contexte utile", text: "Préférences, allergies, demandes récurrentes et notes importantes." },
+      { title: "Route chaque appel correctement", text: "Réservation, FAQ, modification, annulation ou urgence." },
+      { title: "Conçu pour les opérations", text: "Escalades propres, suivi clair et logique utilisable par l'équipe." },
+    ],
+    workflowTitle: "Comment ça marche",
+    workflowText: "Une expérience simple côté client, avec le bon suivi côté équipe.",
+    flowSteps: [
+      "Le client appelle",
+      "L'IA comprend l'intention",
+      "La réservation ou la réponse est traitée",
+      "Un humain reprend si nécessaire",
+    ],
+    featuresTitle: "Fonctionnalités",
+    featuresText: "Six briques compactes pour couvrir les appels du quotidien et les cas sensibles.",
+    features: [
+      "Gestion des appels",
+      "Automatisation des réservations",
+      "Mémoire client",
+      "Système d'escalade",
+      "Analyses & rapports",
+      "Intégrations",
+    ],
+    analyticsTitle: "Vue temps réel de ta performance",
+    analyticsText:
+      "Vois les appels, réservations, escalades, relances et revenus récupérés par restaurant et localisation.",
+    analytics: [
+      { label: "Appels traités", value: "1,284", text: "Volume suivi par période." },
+      { label: "Réservations", value: "412", text: "Demandes capturées ou qualifiées." },
+      { label: "Escalades", value: "7.8%", text: "Transmises avec contexte." },
+      { label: "Intention clé", value: "Réservation", text: "Motif principal par site." },
+    ],
+    calendlyTitle: "Réserve une démo en 30 secondes",
+    calendlyText: "Découvre combien de réservations ton restaurant perd.",
+    trustBadge: "Systèmes testés en conditions réelles",
+    trustTitle: "Ils nous font confiance pour gérer leurs opérations",
+    trustText:
+      "De la restauration au conseil en passant par les ONG, nos systèmes IA et automatisations sont déjà utilisés dans des environnements exigeants.",
+    testimonials: [
+      {
+        company: "In de Patattezak bij Pee Klak",
+        category: "Restaurant",
+        logo: "/logos/patattezak.png",
+        initials: "IP",
+        quote:
+          "Nous avons utilisé le système pour mieux gérer les demandes pendant les périodes de rush. Cela réduit les opportunités perdues et fluidifie le service.",
+      },
+      {
+        company: "DMT Consulting",
+        category: "Conseil en ingénierie",
+        description: "Fournisseur reconnu de solutions d'ingénierie innovantes et durables.",
+        logo: "/logos/dmt-consulting.png",
+        initials: "DMT",
+        quote:
+          "Nous avons déployé plusieurs automatisations avec Boost My Businesses. L'architecture est fiable, flexible et pensée pour un usage réel.",
+      },
+      {
+        company: "Save Animals",
+        category: "ONG de protection animale",
+        logo: "/logos/save-animals.png",
+        initials: "SA",
+        quote:
+          "Nous avons adapté une version personnalisée du système à nos besoins. Cela nous a permis de gérer les demandes plus efficacement sans alourdir la charge de travail.",
+      },
+    ],
+    ctaEyebrow: "Prochaine étape",
+    ctaTitle: "Prêt à arrêter de perdre des réservations ?",
+    ctaText: "Teste l'assistant IA Restaurant et vois combien d'appels ton équipe peut récupérer.",
   },
   en: {
     badge: "AI Restaurant Call Assistant",
-    heroTitle: "An AI assistant that answers calls, takes bookings, and protects your front-of-house team.",
-    heroSubtitle:
-      "Built for restaurants, multi-location groups, and premium hospitality concepts, this system handles inbound calls, routes intent, remembers useful customer context, and escalates cleanly to humans when needed.",
+    heroTitle: "An AI assistant that answers calls, captures bookings, and protects your team.",
+    heroSubtitle: "Never miss a call. Never lose a booking.",
     testCta: "Test the tool",
     clientLoginCta: "Dashboard access",
-    primaryCta: "View workflow",
-    secondaryCta: "Back to homepage",
+    getStartedCta: "Get started",
+    contactCta: "Book a demo / Contact us",
     stats: [
       { label: "Availability", value: "24/7" },
       { label: "Coverage", value: "Calls • Booking • FAQ" },
@@ -157,107 +157,106 @@ const copy = {
     ],
     productBoxTitle: "Call experience",
     productSteps: [
-      { label: "Incoming call", text: "A guest calls to book, modify, cancel, or ask a question." },
-      { label: "Intent routing", text: "The AI identifies booking, FAQ, private dining, delay, allergy, or urgent intent." },
-      { label: "Structured action", text: "The system confirms the request, collects details, and updates the tracking layer." },
-      { label: "Human handoff", text: "Sensitive cases are transferred with context, history, and escalation reason." },
+      { label: "Guest calls", text: "Booking, change, or question." },
+      { label: "AI handles the request", text: "Intent, useful details, and clear response." },
+      { label: "Action created", text: "Booking or escalation reaches the team." },
     ],
     problemTitle: "The problem this system solves",
     problemText:
-      "In restaurants, calls arrive at the worst possible time: during rush, during service, or when nobody is available. The result is missed bookings, interrupted staff, and no visibility over what was lost.",
+      "Restaurants lose bookings when calls arrive during rush, after hours, or when the team is already busy.",
     problems: [
       "Missed calls during service peaks",
       "Lost or poorly qualified bookings",
       "Constant interruptions for front-of-house staff",
       "Fragile handling of complex requests",
-      "Limited visibility over escalations and handoffs",
-      "No clear reporting by restaurant or location",
     ],
     solutionTitle: "The solution",
-    solutionText:
-      "AI Restaurant Call Assistant acts as an operational layer between guests and the team. It answers, understands, collects, books, remembers, and only escalates what truly needs a human.",
+    solutionText: "AI handles calls, captures bookings, answers common questions, and escalates only when needed.",
     solutions: [
       "Automatic call handling, including after-hours coverage",
       "Booking capture with the right operational details",
       "Answers for common questions: opening hours, menu, parking, allergies, private dining",
       "Smart routing across booking, FAQ, modification, cancellation, or escalation",
-      "Customer memory for preferences, recurring requests, and useful context",
-      "Structured handoffs with summary, priority, and escalation reason",
-    ],
-    differenceTitle: "What makes it exceptional",
-    differenceText:
-      "This is not a basic voice bot. It is a production-minded multi-agent architecture with memory, business logic, and analytics that operators can actually use.",
-    differentiators: [
-      { title: "Multi-agent architecture", text: "One agent qualifies intent, another handles booking, another prepares handoff or analytics." },
-      { title: "Useful customer memory", text: "The system keeps relevant preferences: quiet table, allergy, birthday, booking history, or VIP status." },
-      { title: "Intelligent routing", text: "Each call moves into the right flow based on intent, restaurant, location, and urgency level." },
-      { title: "Production-ready approach", text: "Designed for logs, fallback, human escalation, monitoring, and real operations, not just a demo." },
-    ],
-    workflowTitle: "How the system works",
-    workflowText:
-      "The guest experiences a simple conversation. Behind the scenes, the system orchestrates multiple decisions to reduce noise and improve service quality.",
-    flowSteps: [
-      "The guest calls the restaurant or a centralized number",
-      "The AI identifies the intent and the relevant location",
-      "The right agent takes over: booking, FAQ, modification, VIP, or escalation",
-      "Useful details are collected: date, time, party size, allergies, preferences",
-      "The booking, reminder, or follow-up is created in connected tools",
-      "When needed, a human receives a handoff with summary and full context",
-      "Analytics feed restaurant, group, and location-level reporting",
-    ],
-    featuresTitle: "Features",
-    featuresText:
-      "The system covers everyday calls, peak-time pressure, and human-sensitive cases without dropping context.",
-    features: [
-      "AI voice response for inbound calls",
-      "Guided booking capture",
-      "Configurable restaurant FAQ",
-      "Intent-based routing",
-      "Prioritized human escalation",
-      "Customer memory and preferences",
-      "Handoff tracking",
-      "Reminders and confirmations",
-      "Multi-tenant view",
-      "Location-level view",
-      "Call logs and escalation reasons",
-      "CRM / booking / ops tool connectors",
-    ],
-    analyticsTitle: "Restaurant & multi-location analytics",
-    analyticsText:
-      "Managers do not just see call volume. They understand what happened: why guests called, where handoffs occur, which locations lose the most opportunities, and which topics overload the team.",
-    analytics: [
-      { label: "Calls handled", value: "1,284", text: "Calls automatically handled during the period." },
-      { label: "Bookings captured", value: "412", text: "Bookings created or qualified by the assistant." },
-      { label: "Human handoffs", value: "7.8%", text: "Escalations transferred with context to the team." },
-      { label: "Top intent", value: "Booking", text: "Main reason by restaurant and location." },
-    ],
-    impactTitle: "Business impact",
-    impactText:
-      "The value is operational: fewer missed calls, fewer interruptions, more captured bookings, and a clearer view of guest demand.",
-    businessResults: [
-      "Fewer missed calls during service",
-      "More bookings captured after hours or during rush",
-      "Fewer interruptions for front-of-house teams",
-      "Cleaner escalations with context and priority",
-      "Better guest experience before arrival",
-      "Centralized reporting for groups, franchises, and multi-site operations",
     ],
     useCasesTitle: "Use cases",
-    useCasesText:
-      "The system can be adapted to restaurant and hospitality models where calls are frequent, repetitive, or difficult to handle during service.",
-    useCases: {
-      "Premium restaurants": ["Bookings", "VIP requests", "Allergies", "Birthdays"],
-      "Multi-location groups": ["Location view", "Handoff comparison", "Centralized operations"],
-      "High-volume concepts": ["Dinner rush", "Takeaway", "Booking modifications"],
-      "Hospitality": ["Rooftops", "Cocktail bars", "Beach clubs", "Private dining"],
-      "Franchises": ["Standardized answers", "Site-level reporting", "Operational quality"],
-    },
-    ctaEyebrow: "Production-ready",
-    ctaTitle: "Want to turn restaurant calls into measurable bookings?",
-    ctaText:
-      "This page presents the product structure. The system can then be connected to your booking tools, CRM, Slack, or operations dashboard.",
-    ctaPrimary: "Discuss the system",
-    ctaSecondary: "Back to homepage",
+    useCasesText: "Four environments where calls need to be handled quickly, clearly, and without interrupting service.",
+    useCases: [
+      { title: "Premium restaurants", items: ["Bookings", "VIP requests", "Allergies", "Birthdays"] },
+      { title: "Multi-location groups", items: ["Location view", "Handoff comparison", "Centralized operations"] },
+      { title: "High-volume concepts", items: ["Dinner rush", "Takeaway", "Booking modifications"] },
+      { title: "Hospitality", items: ["Rooftops", "Cocktail bars", "Beach clubs", "Private dining"] },
+    ],
+    differenceTitle: "What makes it different",
+    differenceText: "Built for real restaurant operations, not just answering the phone.",
+    differentiators: [
+      { title: "Works across locations", text: "Clear visibility by restaurant, group, and site." },
+      { title: "Remembers useful customer context", text: "Preferences, allergies, repeat requests, and important notes." },
+      { title: "Routes every call correctly", text: "Booking, FAQ, modification, cancellation, or urgent issue." },
+      { title: "Built for real operations", text: "Clean handoffs, clear tracking, and logic your team can use." },
+    ],
+    workflowTitle: "How it works",
+    workflowText: "A simple guest experience with the right operational follow-through.",
+    flowSteps: [
+      "Guest calls",
+      "AI understands intent",
+      "Booking or answer is handled",
+      "Human takeover if needed",
+    ],
+    featuresTitle: "Features",
+    featuresText: "Six compact categories covering daily calls and sensitive cases.",
+    features: [
+      "Call handling",
+      "Booking automation",
+      "Customer memory",
+      "Escalation system",
+      "Analytics & reporting",
+      "Integrations",
+    ],
+    analyticsTitle: "Real-time view of your performance",
+    analyticsText:
+      "See calls, bookings, escalations, follow-ups, and recovered revenue by restaurant and location.",
+    analytics: [
+      { label: "Calls handled", value: "1,284", text: "Volume tracked by period." },
+      { label: "Bookings", value: "412", text: "Requests captured or qualified." },
+      { label: "Escalations", value: "7.8%", text: "Transferred with context." },
+      { label: "Top intent", value: "Booking", text: "Main reason by site." },
+    ],
+    calendlyTitle: "Book a demo in 30 seconds",
+    calendlyText: "See how many bookings your restaurant is missing.",
+    trustBadge: "Production-tested systems",
+    trustTitle: "They trust us to handle their operations",
+    trustText:
+      "From restaurants to consulting and non-profits, our AI and automation systems are already used in demanding environments.",
+    testimonials: [
+      {
+        company: "In de Patattezak bij Pee Klak",
+        category: "Restaurant",
+        logo: "/logos/patattezak.png",
+        initials: "IP",
+        quote:
+          "We used the system to better handle incoming requests during busy periods. It helps reduce missed opportunities and keeps operations smooth.",
+      },
+      {
+        company: "DMT Consulting",
+        category: "Engineering consulting",
+        description: "Trusted provider of innovative and sustainable engineering solutions.",
+        logo: "/logos/dmt-consulting.png",
+        initials: "DMT",
+        quote:
+          "We've implemented several automation systems from Boost My Businesses. The architecture is reliable, flexible, and built for real-world usage.",
+      },
+      {
+        company: "Save Animals",
+        category: "Animal protection NGO",
+        logo: "/logos/save-animals.png",
+        initials: "SA",
+        quote:
+          "We adapted a custom version of the automation system to fit our needs. It helped us manage requests more efficiently without increasing workload.",
+      },
+    ],
+    ctaEyebrow: "Next step",
+    ctaTitle: "Ready to stop losing bookings?",
+    ctaText: "Test the AI Restaurant Call Assistant and see how many calls your team can recover.",
   },
 };
 
@@ -384,6 +383,69 @@ function SectionTitle({ eyebrow, title, text }: { eyebrow: string; title: string
   );
 }
 
+function TestimonialLogo({
+  src,
+  alt,
+  initials,
+}: {
+  src: string;
+  alt: string;
+  initials: string;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return (
+      <div
+        aria-label={alt}
+        style={{
+          width: 88,
+          height: 72,
+          borderRadius: 16,
+          border: `1px solid ${AC_BORDER}`,
+          background: AC_DIM,
+          color: AC_TEXT,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'Syne', sans-serif",
+          fontSize: 17,
+          fontWeight: 800,
+          letterSpacing: "0.02em",
+        }}
+      >
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: 104,
+        height: 76,
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.92)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 10,
+        overflow: "hidden",
+      }}
+    >
+      <Image
+        src={src}
+        alt={alt}
+        width={150}
+        height={80}
+        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+}
+
 const cardBase: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
   border: "1px solid rgba(255,255,255,0.08)",
@@ -393,12 +455,11 @@ const cardBase: React.CSSProperties = {
 };
 
 export default function RestaurantCallAssistantPage() {
-  const [lang, setLang] = useState<Lang>("en");
-
-  useEffect(() => {
-    const saved = localStorage.getItem(LANG_KEY) as Lang | null;
-    if (saved === "fr" || saved === "en") setLang(saved);
-  }, []);
+  const [lang, setLang] = useState<Lang>(() => {
+    if (typeof window === "undefined") return "en";
+    const saved = window.localStorage.getItem(LANG_KEY) as Lang | null;
+    return saved === "fr" || saved === "en" ? saved : "en";
+  });
 
   useEffect(() => {
     persistRestaurantLang(lang);
@@ -409,96 +470,101 @@ export default function RestaurantCallAssistantPage() {
   const section: React.CSSProperties = { padding: "clamp(42px, 7vw, 64px) 0" };
   const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 clamp(16px, 3vw, 24px)" };
   const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: 0 };
+  const fourCardGrid: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 250px), 1fr))",
+    gap: 14,
+    marginTop: 30,
+  };
   const dashboardPreviewKpis = [
-    { label: "Total Calls", value: "1,284", detail: lang === "fr" ? "Appels entrants traités" : "Inbound calls handled" },
-    { label: "Bookings", value: "412", detail: lang === "fr" ? "Réservations capturées" : "Bookings captured" },
-    { label: "Auto Handled", value: "86%", detail: lang === "fr" ? "Résolus sans intervention" : "Resolved without staff" },
-    { label: "Handoffs", value: "7.8%", detail: lang === "fr" ? "Escalades humaines" : "Human escalations" },
+    { label: lang === "fr" ? "Appels totaux" : "Total Calls", value: "1,284", detail: lang === "fr" ? "Appels entrants traités" : "Inbound calls handled" },
+    { label: lang === "fr" ? "Réservations" : "Bookings", value: "412", detail: lang === "fr" ? "Réservations capturées" : "Bookings captured" },
+    { label: lang === "fr" ? "Traités par l'IA" : "Auto Handled", value: "86%", detail: lang === "fr" ? "Résolus sans intervention" : "Resolved without staff" },
+    { label: lang === "fr" ? "Escalades" : "Handoffs", value: "7.8%", detail: lang === "fr" ? "Escalades humaines" : "Human escalations" },
   ];
   const dashboardTenantRows = [
-    { name: "Maison Group", calls: "684", bookings: "218", handoffs: "6.1%" },
-    { name: "Table & Fire", calls: "438", bookings: "151", handoffs: "4.8%" },
-    { name: "Harbor Dining", calls: "392", bookings: "126", handoffs: "8.3%" },
+    { name: lang === "fr" ? "Groupe A" : "Group A", calls: "684", bookings: "218", handoffs: "6.1%" },
+    { name: lang === "fr" ? "Groupe B" : "Group B", calls: "438", bookings: "151", handoffs: "4.8%" },
+    { name: lang === "fr" ? "Groupe C" : "Group C", calls: "392", bookings: "126", handoffs: "8.3%" },
   ];
   const dashboardLocationRows = [
-    { name: "Downtown", calls: "512", topIntent: "Booking", quality: "94%" },
-    { name: "Waterfront", calls: "467", topIntent: "FAQ", quality: "91%" },
-    { name: "West End", calls: "389", topIntent: "Private dining", quality: "88%" },
+    { name: lang === "fr" ? "Site A" : "Location A", calls: "512", topIntent: "Booking", quality: "94%" },
+    { name: lang === "fr" ? "Site B" : "Location B", calls: "467", topIntent: "FAQ", quality: "91%" },
+    { name: lang === "fr" ? "Site C" : "Location C", calls: "389", topIntent: "Private dining", quality: "88%" },
   ];
   const pricingCopy =
     lang === "fr"
       ? {
           roiEyebrow: "ROI",
           roiTitle: "Pas seulement un assistant d'appel. Un système de récupération de revenus.",
-          roiText:
-            "Chaque appel manqué peut signifier une table manquée. AI Restaurant Call Assistant répond instantanément, capture les réservations, envoie les confirmations, relance automatiquement et donne une lecture claire des appels, réservations et revenus récupérés.",
-          pricingEyebrow: "Packages",
+          roiText: "Chaque appel manqué = revenu perdu.",
+          pricingEyebrow: "Offres",
           pricingTitle: "Choisis le niveau adapté à ton volume d'appels",
           pricingText:
-            "Trois plans clairs pour lancer rapidement, absorber les pics d'appels et évoluer vers des opérations multi-sites avec intégrations avancées.",
-          setupLabel: "Setup",
+            "Démarre simplement, puis évolue vers les relances, analyses, intégrations et opérations multi-sites.",
+          setupLabel: "Frais d'installation",
           includedLabel: "Inclus",
-          popularBadge: "Most Popular",
-          note: "Plans can be adapted depending on call volume, number of locations, and integration needs.",
+          popularBadge: "Le plus choisi",
+          note: "Les plans peuvent être adaptés selon le volume d'appels, le nombre de sites et les intégrations nécessaires.",
           comparisonTitle: "Comparaison des plans",
           comparisonText: "Une vue simple des capacités clés incluses dans chaque package.",
           plans: [
             {
               name: "Growth",
               price: "€299",
-              suffix: "/month",
+              suffix: "/mois",
               setup: "€800",
               positioning: "Pour les restaurants indépendants sérieux.",
-              cta: "Start with Growth",
+              cta: "Commencer avec Growth",
               featured: false,
               features: [
-                "300 calls/month",
-                "Simple reservation handling",
-                "Basic FAQ answers",
-                "SMS confirmation for customers",
-                "Smart escalation to staff",
-                "Dashboard: calls to recovered reservations",
-                "Automatic CRM update",
-                "Optimized standard script",
+                "300 appels/mois",
+                "Gestion simple des réservations",
+                "Réponses FAQ de base",
+                "Confirmation SMS pour les clients",
+                "Escalade intelligente vers l'équipe",
+                "Tableau de bord : appels vers réservations récupérées",
+                "Mise à jour CRM automatique",
+                "Script standard optimisé",
               ],
             },
             {
               name: "Pro",
               price: "€599",
-              suffix: "/month",
+              suffix: "/mois",
               setup: "€1200",
               positioning: "Pour les restaurants occupés avec un fort volume d'appels.",
-              cta: "Choose Pro",
+              cta: "Choisir Pro",
               featured: true,
               features: [
-                "Everything in Growth",
-                "1000 calls/month",
-                "Priority handling for VIPs and groups",
-                "Automatic WhatsApp + SMS follow-ups",
-                "Advanced escalation for complex cases",
-                "Advanced analytics and recovered revenue",
-                "Custom restaurant script",
-                "Monthly script optimization",
-                "Priority support",
+                "Tout Growth",
+                "1000 appels/mois",
+                "Traitement prioritaire VIP et groupes",
+                "Relances WhatsApp + SMS automatiques",
+                "Escalade avancée pour les cas complexes",
+                "Analyses avancées et revenu récupéré",
+                "Script restaurant personnalisé",
+                "Optimisation mensuelle du script",
+                "Support prioritaire",
               ],
             },
             {
               name: "Premium",
               price: "€999+",
-              suffix: "/month",
+              suffix: "/mois",
               setup: "€1500+",
               positioning: "Pour les chaînes et restaurants multi-sites.",
-              cta: "Book a Premium Demo",
+              cta: "Réserver une démo Premium",
               featured: false,
               features: [
-                "Everything in Pro",
-                "3000 calls/month",
-                "Multi-location support",
-                "Custom AI flows for specific cases",
-                "Advanced booking, CRM, and internal integrations",
-                "Custom reporting",
-                "Monthly follow-up and optimization",
-                "Dedicated support",
+                "Tout Pro",
+                "3000 appels/mois",
+                "Support multi-sites",
+                "Flows IA personnalisés pour cas spécifiques",
+                "Intégrations avancées réservation, CRM et outils internes",
+                "Reporting personnalisé",
+                "Suivi et optimisation mensuels",
+                "Support dédié",
               ],
             },
           ],
@@ -506,12 +572,11 @@ export default function RestaurantCallAssistantPage() {
       : {
           roiEyebrow: "ROI",
           roiTitle: "Not just a call assistant. A revenue recovery system.",
-          roiText:
-            "Every missed call can mean a missed table. The AI Restaurant Call Assistant answers instantly, captures bookings, sends confirmations, follows up automatically, and gives you clear analytics on calls, reservations, and recovered revenue.",
+          roiText: "Every missed call = lost revenue.",
           pricingEyebrow: "Packages",
           pricingTitle: "Choose the level that matches your call volume",
           pricingText:
-            "Three clear plans to launch fast, absorb busy service peaks, and scale into multi-location operations with advanced integrations.",
+            "Start simple, then scale into follow-ups, analytics, integrations, and multi-location operations.",
           setupLabel: "Setup",
           includedLabel: "Included",
           popularBadge: "Most Popular",
@@ -579,23 +644,43 @@ export default function RestaurantCallAssistantPage() {
             },
           ],
         };
-  const comparisonRows = [
-    { feature: "Monthly calls", growth: "300", pro: "1000", premium: "3000" },
-    { feature: "Reservation handling", growth: "Yes", pro: "Yes", premium: "Yes" },
-    { feature: "Basic FAQ", growth: "Yes", pro: "Yes", premium: "Yes" },
-    { feature: "SMS confirmation", growth: "Yes", pro: "Yes", premium: "Yes" },
-    { feature: "WhatsApp + SMS follow-up", growth: "No", pro: "Yes", premium: "Yes" },
-    { feature: "Smart escalation", growth: "Yes", pro: "Yes", premium: "Yes" },
-    { feature: "Advanced escalation", growth: "No", pro: "Yes", premium: "Yes" },
-    { feature: "CRM update", growth: "Yes", pro: "Yes", premium: "Yes" },
-    { feature: "Basic dashboard", growth: "Basic", pro: "Advanced", premium: "Advanced + custom" },
-    { feature: "Advanced analytics", growth: "No", pro: "Yes", premium: "Yes" },
-    { feature: "Multi-location", growth: "No", pro: "No", premium: "Yes" },
-    { feature: "Custom AI flows", growth: "No", pro: "No", premium: "Yes" },
-    { feature: "Advanced integrations", growth: "No", pro: "No", premium: "Yes" },
-    { feature: "Custom reporting", growth: "No", pro: "No", premium: "Yes" },
-    { feature: "Support level", growth: "Standard", pro: "Priority", premium: "Dedicated" },
-  ];
+  const yes = lang === "fr" ? "Oui" : "Yes";
+  const no = lang === "fr" ? "Non" : "No";
+  const comparisonRows = lang === "fr"
+    ? [
+        { feature: "Appels mensuels", growth: "300", pro: "1000", premium: "3000" },
+        { feature: "Gestion des réservations", growth: yes, pro: yes, premium: yes },
+        { feature: "FAQ de base", growth: yes, pro: yes, premium: yes },
+        { feature: "Confirmation SMS", growth: yes, pro: yes, premium: yes },
+        { feature: "Relance WhatsApp + SMS", growth: no, pro: yes, premium: yes },
+        { feature: "Escalade intelligente", growth: yes, pro: yes, premium: yes },
+        { feature: "Escalade avancée", growth: no, pro: yes, premium: yes },
+        { feature: "Mise à jour CRM", growth: yes, pro: yes, premium: yes },
+        { feature: "Tableau de bord", growth: "Basique", pro: "Avancé", premium: "Avancé + personnalisé" },
+        { feature: "Analyses avancées", growth: no, pro: yes, premium: yes },
+        { feature: "Multi-sites", growth: no, pro: no, premium: yes },
+        { feature: "Flows IA personnalisés", growth: no, pro: no, premium: yes },
+        { feature: "Intégrations avancées", growth: no, pro: no, premium: yes },
+        { feature: "Reporting personnalisé", growth: no, pro: no, premium: yes },
+        { feature: "Niveau de support", growth: "Standard", pro: "Prioritaire", premium: "Dédié" },
+      ]
+    : [
+        { feature: "Monthly calls", growth: "300", pro: "1000", premium: "3000" },
+        { feature: "Reservation handling", growth: yes, pro: yes, premium: yes },
+        { feature: "Basic FAQ", growth: yes, pro: yes, premium: yes },
+        { feature: "SMS confirmation", growth: yes, pro: yes, premium: yes },
+        { feature: "WhatsApp + SMS follow-up", growth: no, pro: yes, premium: yes },
+        { feature: "Smart escalation", growth: yes, pro: yes, premium: yes },
+        { feature: "Advanced escalation", growth: no, pro: yes, premium: yes },
+        { feature: "CRM update", growth: yes, pro: yes, premium: yes },
+        { feature: "Basic dashboard", growth: "Basic", pro: "Advanced", premium: "Advanced + custom" },
+        { feature: "Advanced analytics", growth: no, pro: yes, premium: yes },
+        { feature: "Multi-location", growth: no, pro: no, premium: yes },
+        { feature: "Custom AI flows", growth: no, pro: no, premium: yes },
+        { feature: "Advanced integrations", growth: no, pro: no, premium: yes },
+        { feature: "Custom reporting", growth: no, pro: no, premium: yes },
+        { feature: "Support level", growth: "Standard", pro: "Priority", premium: "Dedicated" },
+      ];
   const previewCellStyle: React.CSSProperties = {
     padding: "11px 12px",
     borderBottom: "1px solid rgba(255,255,255,0.06)",
@@ -611,7 +696,6 @@ export default function RestaurantCallAssistantPage() {
     letterSpacing: "0.08em",
     textTransform: "uppercase",
   };
-
   return (
     <NavbarFooter agent="restaurant" lang={lang} onLangChange={setLang}>
       <main style={{ background: "#07111f", color: "#f0f0ef" }}>
@@ -693,7 +777,7 @@ export default function RestaurantCallAssistantPage() {
                   {t.heroSubtitle}
                 </p>
 
-                <div className="responsive-hero-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
+                <div className="responsive-hero-actions" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 32 }}>
                   <CallTestButton>
                     {t.testCta}
                   </CallTestButton>
@@ -701,46 +785,6 @@ export default function RestaurantCallAssistantPage() {
                   <ClientLoginButton>
                     {t.clientLoginCta}
                   </ClientLoginButton>
-
-                  <a
-                    href="#workflow"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: "13px 26px",
-                      background: "rgba(255,255,255,0.08)",
-                      color: "#f0f0ef",
-                      fontSize: 14,
-                      fontWeight: 600,
-                      borderRadius: 999,
-                      textDecoration: "none",
-                      border: "1px solid rgba(255,255,255,0.16)",
-                      transition: "background 150ms",
-                    }}
-                  >
-                    {t.primaryCta}
-                  </a>
-
-                  <Link
-                    href="/"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: "12px 22px",
-                      background: "transparent",
-                      color: "rgba(255,255,255,0.80)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      borderRadius: 999,
-                      textDecoration: "none",
-                      border: "1px solid rgba(255,255,255,0.14)",
-                      transition: "border-color 150ms, background 150ms",
-                    }}
-                  >
-                    {t.secondaryCta}
-                  </Link>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
@@ -828,16 +872,16 @@ export default function RestaurantCallAssistantPage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Problème" : "Problem"} title={t.problemTitle} text={t.problemText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, marginTop: 32 }}>
+            <div style={fourCardGrid}>
               {t.problems.map((item) => (
                 <div
                   key={item}
-                  style={cardBase}
+                  style={{ ...cardBase, minHeight: 136 }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.30)"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
                 >
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 8px rgba(239,68,68,0.5)", marginBottom: 14 }} />
-                  <p style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.82)", lineHeight: 1.5 }}>{item}</p>
+                  <p style={{ fontSize: 15.5, fontWeight: 500, color: "rgba(255,255,255,0.82)", lineHeight: 1.5 }}>{item}</p>
                 </div>
               ))}
             </div>
@@ -850,18 +894,48 @@ export default function RestaurantCallAssistantPage() {
         <section style={section}>
           <div style={container}>
             <SectionTitle eyebrow={lang === "fr" ? "Solution" : "Solution"} title={t.solutionTitle} text={t.solutionText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, marginTop: 32 }}>
+            <div style={fourCardGrid}>
               {t.solutions.map((item, index) => (
                 <div
                   key={item}
-                  style={cardBase}
+                  style={{ ...cardBase, minHeight: 172 }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
                 >
                   <div style={{ width: 32, height: 32, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
                     {index + 1}
                   </div>
-                  <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", lineHeight: 1.6 }}>{item}</p>
+                  <p style={{ fontSize: 15, color: "rgba(255,255,255,0.76)", lineHeight: 1.58 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* -- USE CASES ------------------------------------------- */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={lang === "fr" ? "Cas d'usage" : "Use cases"} title={t.useCasesTitle} text={t.useCasesText} />
+            <div style={fourCardGrid}>
+              {t.useCases.map((useCase) => (
+                <div
+                  key={useCase.title}
+                  style={{ ...cardBase, minHeight: 150 }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+                >
+                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700, color: "#f0f0ef", lineHeight: 1.25, marginBottom: 14 }}>
+                    {useCase.title}
+                  </h3>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                    {useCase.items.map((item) => (
+                      <span key={item} style={{ padding: "5px 11px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", fontSize: 12.5, color: "rgba(255,255,255,0.68)", lineHeight: 1.3 }}>
+                        {item}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -940,47 +1014,13 @@ export default function RestaurantCallAssistantPage() {
 
         <hr style={divider} />
 
-        {/* -- ANALYTICS ------------------------------------------- */}
-        <section style={section}>
-          <div style={container}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 28, alignItems: "start" }}>
-              <SectionTitle eyebrow="Analytics" title={t.analyticsTitle} text={t.analyticsText} />
-              <div style={{ ...cardBase, borderRadius: 24, padding: 18, background: "rgba(255,255,255,0.035)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-                  {t.analytics.map((item) => (
-                    <div
-                      key={item.label}
-                      style={{
-                        borderRadius: 16,
-                        padding: "16px 14px",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        background: "rgba(11,22,40,0.76)",
-                      }}
-                    >
-                      <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.36)", marginBottom: 7 }}>{item.label}</p>
-                      <p style={{ fontFamily: "'Syne', sans-serif", fontSize: "1.8rem", lineHeight: 1, fontWeight: 800, color: AC_TEXT, letterSpacing: "-0.035em", marginBottom: 8 }}>{item.value}</p>
-                      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: "rgba(255,255,255,0.55)" }}>{item.text}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <hr style={divider} />
-
         {/* -- DASHBOARD PREVIEW ----------------------------------- */}
         <section style={section}>
           <div style={container}>
             <SectionTitle
-              eyebrow="Dashboard preview"
-              title={lang === "fr" ? "Une vue claire sur les appels, réservations et escalades" : "A clear view of calls, bookings, and escalations"}
-              text={
-                lang === "fr"
-                  ? "Le dashboard donne aux équipes une lecture opérationnelle par groupe, restaurant et localisation, avec les signaux utiles pour piloter la qualité du service."
-                  : "The dashboard gives teams an operational view by group, restaurant, and location, with the right signals to manage service quality."
-              }
+              eyebrow={lang === "fr" ? "Tableau de bord / analyses" : "Dashboard / analytics"}
+              title={t.analyticsTitle}
+              text={t.analyticsText}
             />
 
             <div
@@ -997,20 +1037,20 @@ export default function RestaurantCallAssistantPage() {
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 18, marginBottom: 18, flexWrap: "wrap" }}>
                 <div>
                   <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
-                    AI Restaurant Call Assistant
+                    {lang === "fr" ? "Assistant IA Restaurant" : "AI Restaurant Call Assistant"}
                   </p>
                   <h3 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.25rem, 2vw, 1.8rem)", letterSpacing: "-0.025em", marginBottom: 6 }}>
-                    Restaurant Analytics Overview
+                    {lang === "fr" ? "Vue d'analyse restaurant" : "Restaurant Analytics Overview"}
                   </h3>
                   <p style={{ color: "rgba(255,255,255,0.48)", fontSize: 13.5, lineHeight: 1.6, maxWidth: 620 }}>
                     {lang === "fr"
-                      ? "Aperçu mocké du pilotage multi-tenant : volume d'appels, réservations, handoffs, qualité et performance par localisation."
+                      ? "Aperçu de démonstration : appels, réservations, escalades, qualité et performance par site."
                       : "Mock preview of multi-tenant operations: call volume, bookings, handoffs, quality, and location-level performance."}
                   </p>
                 </div>
 
                 <span style={{ border: `1px solid ${AC_BORDER}`, background: AC_DIM, color: AC_TEXT, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 700 }}>
-                  {lang === "fr" ? "Preview mockée" : "Mock preview"}
+                  {lang === "fr" ? "Aperçu de démonstration" : "Mock preview"}
                 </span>
               </div>
 
@@ -1030,15 +1070,17 @@ export default function RestaurantCallAssistantPage() {
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 14 }}>
                 <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.58)", borderRadius: 20, padding: 16, minWidth: 0 }}>
-                  <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>Calls by Tenant</h4>
+                  <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>
+                    {lang === "fr" ? "Appels par groupe" : "Calls by Tenant"}
+                  </h4>
                   <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
                     <table className="mobile-preview-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 360 }}>
                       <thead>
                         <tr>
-                          <th style={{ ...previewHeadStyle, textAlign: "left" }}>Tenant</th>
-                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>Calls</th>
-                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>Bookings</th>
-                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>Handoff</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "left" }}>{lang === "fr" ? "Groupe" : "Tenant"}</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>{lang === "fr" ? "Appels" : "Calls"}</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>{lang === "fr" ? "Réservations" : "Bookings"}</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>{lang === "fr" ? "Escalade" : "Handoff"}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1056,15 +1098,17 @@ export default function RestaurantCallAssistantPage() {
                 </div>
 
                 <div style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.58)", borderRadius: 20, padding: 16, minWidth: 0 }}>
-                  <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>Calls by Location</h4>
+                  <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>
+                    {lang === "fr" ? "Appels par site" : "Calls by Location"}
+                  </h4>
                   <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
                     <table className="mobile-preview-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 360 }}>
                       <thead>
                         <tr>
-                          <th style={{ ...previewHeadStyle, textAlign: "left" }}>Location</th>
-                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>Calls</th>
-                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>Top intent</th>
-                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>Quality</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "left" }}>{lang === "fr" ? "Site" : "Location"}</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>{lang === "fr" ? "Appels" : "Calls"}</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>{lang === "fr" ? "Intention clé" : "Top intent"}</th>
+                          <th style={{ ...previewHeadStyle, textAlign: "right" }}>{lang === "fr" ? "Qualité" : "Quality"}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1072,7 +1116,9 @@ export default function RestaurantCallAssistantPage() {
                           <tr key={row.name}>
                             <td style={{ ...previewCellStyle, color: "#f0f0ef", fontWeight: 700 }}>{row.name}</td>
                             <td style={{ ...previewCellStyle, textAlign: "right" }}>{row.calls}</td>
-                            <td style={{ ...previewCellStyle, textAlign: "right" }}>{row.topIntent}</td>
+                            <td style={{ ...previewCellStyle, textAlign: "right" }}>
+                              {lang === "fr" && row.topIntent === "Booking" ? "Réservation" : lang === "fr" && row.topIntent === "Private dining" ? "Privatisation" : row.topIntent}
+                            </td>
                             <td style={{ ...previewCellStyle, textAlign: "right", color: "#34D399", fontWeight: 700 }}>{row.quality}</td>
                           </tr>
                         ))}
@@ -1082,12 +1128,14 @@ export default function RestaurantCallAssistantPage() {
                 </div>
 
                 <div style={{ border: `1px solid ${AC_BORDER}`, background: "rgba(245,158,11,0.075)", borderRadius: 20, padding: 16 }}>
-                  <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>Handoffs / Quality</h4>
+                  <h4 style={{ color: "#f0f0ef", fontFamily: "'Syne', sans-serif", fontSize: 16, marginBottom: 12 }}>
+                    {lang === "fr" ? "Escalades / qualité" : "Handoffs / Quality"}
+                  </h4>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {[
-                      { label: "Handoff completeness", value: "98%" },
-                      { label: "Intent accuracy", value: "94%" },
-                      { label: "Fallback rate", value: "3.2%" },
+                      { label: lang === "fr" ? "Escalade complète" : "Handoff completeness", value: "98%" },
+                      { label: lang === "fr" ? "Précision d'intention" : "Intent accuracy", value: "94%" },
+                      { label: lang === "fr" ? "Taux de fallback" : "Fallback rate", value: "3.2%" },
                     ].map((item) => (
                       <div key={item.label} className="mobile-card-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.46)", borderRadius: 14, padding: "12px 13px" }}>
                         <span style={{ color: "rgba(255,255,255,0.62)", fontSize: 13 }}>{item.label}</span>
@@ -1102,63 +1150,6 @@ export default function RestaurantCallAssistantPage() {
                   </p>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <hr style={divider} />
-
-        {/* -- IMPACT ---------------------------------------------- */}
-        <section style={section}>
-          <div style={container}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 16 }}>
-              <div style={{ ...cardBase, borderRadius: 24, padding: 28 }}>
-                <SectionTitle eyebrow={lang === "fr" ? "Impact business" : "Business impact"} title={t.impactTitle} text={t.impactText} />
-              </div>
-
-              <div style={{ ...cardBase, borderRadius: 24, padding: 28 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {t.businessResults.map((item) => (
-                    <div
-                      key={item}
-                      style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "11px 14px", fontSize: 13.5, color: "rgba(255,255,255,0.72)", transition: "border-color 150ms" }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; }}
-                    >
-                      <span style={{ color: AC_TEXT, fontSize: 12, flexShrink: 0 }}>✓</span>
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <hr style={divider} />
-
-        {/* -- USE CASES ------------------------------------------- */}
-        <section style={section}>
-          <div style={container}>
-            <SectionTitle eyebrow={lang === "fr" ? "Cas d'usage" : "Use cases"} title={t.useCasesTitle} text={t.useCasesText} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, marginTop: 32 }}>
-              {Object.entries(t.useCases).map(([category, items]) => (
-                <div
-                  key={category}
-                  style={cardBase}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
-                >
-                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 15, fontWeight: 700, color: "#f0f0ef", marginBottom: 14 }}>{category}</h3>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                    {items.map((item) => (
-                      <span key={item} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", fontSize: 12.5, color: "rgba(255,255,255,0.65)" }}>
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         </section>
@@ -1181,18 +1172,13 @@ export default function RestaurantCallAssistantPage() {
               </div>
               <div style={{ ...cardBase, borderRadius: 24, padding: "clamp(22px, 3vw, 30px)", background: "rgba(11,22,40,0.58)" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  {[
-                    { label: lang === "fr" ? "Réponse" : "Response", value: "Instant" },
-                    { label: lang === "fr" ? "Réservations" : "Bookings", value: "Captured" },
-                    { label: lang === "fr" ? "Relances" : "Follow-up", value: "Auto" },
-                    { label: lang === "fr" ? "Revenus" : "Revenue", value: "Tracked" },
-                  ].map((item) => (
-                    <div key={item.label} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 16, padding: "16px 14px" }}>
-                      <p style={{ color: "rgba(255,255,255,0.36)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
-                        {item.label}
-                      </p>
-                      <p style={{ color: AC_TEXT, fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.15rem, 2vw, 1.5rem)", fontWeight: 800, letterSpacing: "-0.025em" }}>
-                        {item.value}
+                  {(lang === "fr"
+                    ? ["Réponse instantanée", "Réservations capturées", "Relances automatisées", "Revenus suivis"]
+                    : ["Instant response", "Bookings captured", "Follow-ups automated", "Revenue tracked"]
+                  ).map((item) => (
+                    <div key={item} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.035)", borderRadius: 16, padding: "16px 14px" }}>
+                      <p style={{ color: AC_TEXT, fontFamily: "'Syne', sans-serif", fontSize: "clamp(1rem, 1.8vw, 1.25rem)", fontWeight: 800, letterSpacing: "-0.025em", lineHeight: 1.25 }}>
+                        {item}
                       </p>
                     </div>
                   ))}
@@ -1204,8 +1190,112 @@ export default function RestaurantCallAssistantPage() {
 
         <hr style={divider} />
 
+        {/* -- TRUSTED OPERATIONS ---------------------------------- */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow={t.trustBadge} title={t.trustTitle} text={t.trustText} />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+                gap: 16,
+                marginTop: 32,
+                alignItems: "stretch",
+              }}
+            >
+              {t.testimonials.map((item) => (
+                <article
+                  key={item.company}
+                  style={{
+                    ...cardBase,
+                    borderRadius: 24,
+                    padding: "clamp(16px, 2.2vw, 18px)",
+                    minHeight: 256,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.026) 100%)",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+                >
+                  <div>
+                    <TestimonialLogo src={item.logo} alt={`${item.company} logo`} initials={item.initials} />
+                    <div style={{ marginTop: 12 }}>
+                      <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 17, fontWeight: 800, color: "#f0f0ef", lineHeight: 1.2, marginBottom: 5 }}>
+                        {item.company}
+                      </h3>
+                      <p style={{ color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase", lineHeight: 1.35 }}>
+                        {item.category}
+                      </p>
+                      {"description" in item && item.description && (
+                        <p style={{ color: "rgba(255,255,255,0.46)", fontSize: 12.5, lineHeight: 1.42, marginTop: 7 }}>
+                          {item.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <blockquote style={{ margin: "16px 0 0", color: "rgba(255,255,255,0.72)", fontSize: 14.5, lineHeight: 1.52 }}>
+                    &ldquo;{item.quote}&rdquo;
+                  </blockquote>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* -- CALENDLY --------------------------------------------- */}
+        <section style={section}>
+          <div style={{ ...container, maxWidth: 900 }}>
+            <div style={{ textAlign: "center", margin: "0 auto 28px", maxWidth: 680 }}>
+              <h2
+                style={{
+                  fontFamily: "'Syne', sans-serif",
+                  fontSize: "clamp(1.5rem, 2.6vw, 2.15rem)",
+                  fontWeight: 800,
+                  letterSpacing: "-0.025em",
+                  color: "#f0f0ef",
+                  lineHeight: 1.12,
+                  marginBottom: 10,
+                }}
+              >
+                {t.calendlyTitle}
+              </h2>
+              <p style={{ fontSize: 15.5, color: "rgba(255,255,255,0.54)", lineHeight: 1.65 }}>
+                {t.calendlyText}
+              </p>
+            </div>
+
+            <div
+              style={{
+                border: `1px solid ${AC_BORDER}`,
+                background: "linear-gradient(135deg, rgba(245,158,11,0.07) 0%, rgba(255,255,255,0.025) 48%, rgba(11,22,40,0.72) 100%)",
+                borderRadius: 28,
+                padding: "clamp(10px, 2vw, 16px)",
+                boxShadow: "0 26px 80px rgba(0,0,0,0.24)",
+                overflow: "hidden",
+              }}
+            >
+              <Script
+                src="https://assets.calendly.com/assets/external/widget.js"
+                strategy="lazyOnload"
+              />
+              <div
+                className="calendly-inline-widget restaurant-calendly-frame"
+                data-url="https://calendly.com/boostmybusinesses/discovertheassistant"
+                style={{ minWidth: "320px", height: "700px" }}
+              />
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
         {/* -- PRICING --------------------------------------------- */}
-        <section id="pricing" style={section}>
+        <section id="pricing" className="scroll-mt-28" style={{ ...section, scrollMarginTop: 112 }}>
           <div style={container}>
             <SectionTitle eyebrow={pricingCopy.pricingEyebrow} title={pricingCopy.pricingTitle} text={pricingCopy.pricingText} />
 
@@ -1300,13 +1390,18 @@ export default function RestaurantCallAssistantPage() {
             </p>
 
             <div style={{ marginTop: 34 }}>
-              <SectionTitle eyebrow="Comparison" title={pricingCopy.comparisonTitle} text={pricingCopy.comparisonText} />
+              <SectionTitle eyebrow={lang === "fr" ? "Comparaison" : "Comparison"} title={pricingCopy.comparisonTitle} text={pricingCopy.comparisonText} />
               <div style={{ marginTop: 20, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 24, background: "rgba(255,255,255,0.025)", overflow: "hidden" }}>
                 <div className="mobile-table-scroll" style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                     <thead>
                       <tr>
-                        {["Feature", "Growth", "Pro", "Premium"].map((heading) => (
+                        {[
+                          lang === "fr" ? "Fonction" : "Feature",
+                          "Growth",
+                          "Pro",
+                          "Premium",
+                        ].map((heading) => (
                           <th
                             key={heading}
                             style={{
@@ -1318,7 +1413,7 @@ export default function RestaurantCallAssistantPage() {
                               fontSize: 10,
                               letterSpacing: "0.1em",
                               textTransform: "uppercase",
-                              textAlign: heading === "Feature" ? "left" : "center",
+                              textAlign: heading === (lang === "fr" ? "Fonction" : "Feature") ? "left" : "center",
                             }}
                           >
                             {heading}
@@ -1343,7 +1438,7 @@ export default function RestaurantCallAssistantPage() {
                                 padding: "14px 16px",
                                 borderBottom: "1px solid rgba(255,255,255,0.06)",
                                 background: cell.key === "pro" ? "rgba(245,158,11,0.055)" : "transparent",
-                                color: cell.value === "No" ? "rgba(255,255,255,0.34)" : "rgba(255,255,255,0.68)",
+                                color: cell.value === no ? "rgba(255,255,255,0.34)" : "rgba(255,255,255,0.68)",
                                 fontSize: 13,
                                 textAlign: "center",
                                 whiteSpace: "normal",
@@ -1387,24 +1482,25 @@ export default function RestaurantCallAssistantPage() {
               <p className="responsive-body-copy" style={{ fontSize: 15, color: "rgba(255,255,255,0.54)", lineHeight: 1.7, maxWidth: 620, margin: "0 auto 28px" }}>
                 {t.ctaText}
               </p>
-              <div className="responsive-cta-actions" style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
-                <CallTestButton shadow="0 6px 28px">
+              <div className="responsive-cta-actions" style={{ display: "flex", justifyContent: "center" }}>
+                <Link
+                  href={CALL_TEST_HREF}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "16px 34px",
+                    background: AC,
+                    color: "#160b02",
+                    fontSize: 15.5,
+                    fontWeight: 800,
+                    borderRadius: 999,
+                    textDecoration: "none",
+                    boxShadow: `0 8px 34px ${AC_SHADOW}`,
+                    transition: "opacity 150ms, transform 150ms",
+                  }}
+                >
                   {t.testCta}
-                </CallTestButton>
-                <ClientLoginButton>
-                  {t.clientLoginCta}
-                </ClientLoginButton>
-                <Link
-                  href="/contact"
-                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "13px 26px", background: "rgba(255,255,255,0.08)", color: "#f0f0ef", fontSize: 14, fontWeight: 600, borderRadius: 999, textDecoration: "none", border: "1px solid rgba(255,255,255,0.16)", transition: "background 150ms" }}
-                >
-                  {t.ctaPrimary}
-                </Link>
-                <Link
-                  href="/"
-                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "13px 26px", background: "rgba(255,255,255,0.08)", color: "#f0f0ef", fontSize: 14, fontWeight: 600, borderRadius: 999, textDecoration: "none", border: "1px solid rgba(255,255,255,0.16)", transition: "background 150ms" }}
-                >
-                  {t.ctaSecondary}
                 </Link>
               </div>
             </div>

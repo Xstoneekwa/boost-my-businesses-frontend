@@ -17,6 +17,10 @@ body {
   font-family: Inter, Arial, Helvetica, sans-serif;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   min-height: 100vh;
 }
@@ -597,5 +601,11 @@ textarea {
 
   .responsive-compact-text {
     font-size: 13px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .restaurant-calendly-frame {
+    height: 900px !important;
   }
 }
