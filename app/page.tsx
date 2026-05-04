@@ -1,6 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
+import Script from "next/script";
 import { useEffect, useState } from "react";
 import NavbarFooter from "./components/NavbarFooter";
 
@@ -11,28 +13,38 @@ const LANG_KEY = "boost_ai_landing_lang_v1";
 const copy = {
   fr: {
     badge: "SaaS Multi-Agents",
-    heroTitle: "Des agents IA qui font gagner du temps, capturent plus de leads et convertissent mieux.",
+    heroTitle: "Des agents IA pour répondre plus vite, automatiser mieux et convertir plus.",
     heroLead: "Ton business tourne 24h/24. Ton équipe, non.",
-    heroP1: ["Chaque message WhatsApp sans réponse, c'est un ", "lead perdu", ". Chaque support trop lent, c'est un ", "client frustré", ". Chaque heure passée sur des tâches répétitives, c'est une heure de moins pour faire croître ton business."],
-    heroP2: "Le problème, ce n'est pas le manque d'effort — c'est l'échelle. Une personne ne peut pas être partout à la fois. Mais des agents IA, si.",
-    heroP3: ["Nos agents ", "qualifient tes leads instantanément", ", gèrent tes demandes support avant qu'elles s'accumulent, et ", "produisent ton contenu marketing à la demande", ". Zéro burnout. Zéro délai. Zéro opportunité manquée — juste des résultats, en continu."],
+    heroP1: ["Chaque message sans réponse est une ", "opportunité perdue", ". Chaque tâche répétitive ralentit la ", "croissance", "."],
+    heroP2: "Boost My Businesses construit des systèmes IA qui répondent, qualifient, automatisent et transmettent les bons sujets à ton équipe.",
+    heroP3: ["Moins de charge manuelle, ", "plus de suivi instantané", ", et des opérations qui restent fluides ", "même quand ton équipe est occupée", "."],
     proof: ["Réponses instantanées 24/7", "Moins de charge manuelle", "Plus de leads traités sans recruter"],
     stats: [
       { num: "7", sup: "×", label: "Plus de chances de convertir quand le lead reçoit une réponse dans la première heure", sub: "Vitesse de réponse" },
       { num: "60", sup: "%", label: "Du temps d'équipe dépensé sur des tâches ne nécessitant pas de jugement humain", sub: "Potentiel d'automatisation" },
       { num: "24", sup: "/7", label: "Tes agents IA ne dorment jamais, ne ratent aucun message, ne s'épuisent pas", sub: "Toujours disponible" },
     ],
-    agentsTitle: "Des systèmes conçus pour des résultats business",
+    agentsTitle: "Des systèmes IA prêts pour tes opérations",
     agents: [
-      { label: "Agent 01", title: "Assistant Personnel IA", desc: "Centralise les demandes, exécute des actions, aide à traiter les tâches répétitives et fluidifie les opérations du quotidien.", result: "Gagne du temps et automatise les opérations à faible valeur.", href: "/agent/general", link: "Ouvrir la page →", accent: "#8B7CF6", dim: "rgba(139,124,246,0.12)", border: "rgba(139,124,246,0.22)" },
-      { label: "Agent 02", title: "AI WhatsApp Lead Handling System", desc: "Répond instantanément aux leads WhatsApp, détecte l'intention, pousse à la réservation, transfère à un humain si nécessaire et gère les urgences.", result: "Capture plus de leads et augmente la conversion sans ralentir l'équipe.", href: "/agent/whatsapp-lead-system", link: "Ouvrir la page →", accent: "#25D366", dim: "rgba(37,211,102,0.10)", border: "rgba(37,211,102,0.20)" },
-      { label: "Agent 03", title: "UGC Ads Engine", desc: "Transforme une simple idée ou image en vidéo UGC structurée avec script, hook, narration, direction vidéo, contrôle qualité et logique de fallback.", result: "Produit plus vite du contenu marketing prêt à publier et pensé pour convertir.", href: "/agent/ugc-ads-engine", link: "Ouvrir la page →", accent: "#F97316", dim: "rgba(249,115,22,0.10)", border: "rgba(249,115,22,0.20)" },
-      { label: "Agent 04", title: "Agent Support IA", desc: "Gère les demandes fréquentes, automatise les FAQ et absorbe une partie du support avant intervention humaine.", result: "Réduit la charge support et améliore le temps de réponse client.", href: "/agent/support", link: "Ouvrir la page →", accent: "#3B82F6", dim: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.20)" },
-      { label: "Agent 05", title: "AI Restaurant Call Assistant", desc: "Répond automatiquement aux appels du restaurant, prend des réservations, répond aux questions fréquentes, gère les escalades humaines et suit la performance par restaurant et par localisation.", result: "Réduit les appels manqués, améliore la prise en charge client et donne une visibilité claire sur les réservations, escalades et handoffs.", href: "/agent/restaurant-call-assistant", link: "Ouvrir la page →", accent: "#F59E0B", dim: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.22)" },
+      { label: "Agent 01", title: "Assistant Personnel IA", desc: "Centralise les demandes et automatise les tâches récurrentes du quotidien.", result: "Gagne du temps sur les opérations à faible valeur.", href: "/agent/general", link: "Ouvrir la page →", accent: "#8B7CF6", dim: "rgba(139,124,246,0.12)", border: "rgba(139,124,246,0.22)" },
+      { label: "Agent 02", title: "AI WhatsApp Lead Handling System", desc: "Répond aux leads WhatsApp, détecte l'intention et déclenche le bon suivi.", result: "Capture plus de leads sans ralentir l'équipe.", href: "/agent/whatsapp-lead-system", link: "Ouvrir la page →", accent: "#25D366", dim: "rgba(37,211,102,0.10)", border: "rgba(37,211,102,0.20)" },
+      { label: "Agent 03", title: "UGC Ads Engine", desc: "Transforme une idée ou image en vidéo UGC structurée et prête à produire.", result: "Crée plus vite du contenu pensé pour convertir.", href: "/agent/ugc-ads-engine", link: "Ouvrir la page →", accent: "#F97316", dim: "rgba(249,115,22,0.10)", border: "rgba(249,115,22,0.20)" },
+      { label: "Agent 04", title: "Agent Support IA", desc: "Absorbe les demandes fréquentes et prépare les escalades utiles.", result: "Réduit la charge support et accélère les réponses.", href: "/agent/support", link: "Ouvrir la page →", accent: "#3B82F6", dim: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.20)" },
+      { label: "Agent 05", title: "AI Restaurant Call Assistant", desc: "Répond aux appels, capture les réservations et suit les escalades.", result: "Récupère les appels manqués et améliore la prise en charge.", href: "/agent/restaurant-call-assistant", link: "Ouvrir la page →", accent: "#F59E0B", dim: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.22)" },
     ],
     useCasesTitle: "Cas d'usage",
-    useCasesText: "Ces systèmes peuvent être adaptés à plusieurs activités qui ont besoin de répondre vite, qualifier des demandes, automatiser une partie du suivi ou produire du contenu marketing plus rapidement.",
-    useCases: ["Cliniques et cabinets médicaux", "Dentistes et opticiens", "Agences et consultants", "Centres de formation", "Beauty, spa, salons", "Immobilier et services locaux", "E-commerce et marques DTC", "Créateurs et agences ads"],
+    useCasesText: "Pour les équipes qui doivent répondre vite, qualifier mieux et automatiser sans complexité.",
+    useCases: ["Restaurants", "Agences et consultants", "Santé et services", "E-commerce", "Formation", "Créateurs et ads"],
+    trustBadge: "Systèmes testés en conditions réelles",
+    trustTitle: "Ils nous font confiance pour gérer leurs opérations",
+    trustText: "De la restauration au conseil en passant par les ONG, nos systèmes IA et automatisations sont déjà utilisés dans des environnements exigeants.",
+    testimonials: [
+      { company: "In de Patattezak bij Pee Klak", category: "Restaurant", logo: "/logos/patattezak.png", initials: "IP", quote: "Nous avons utilisé le système pour mieux gérer les demandes pendant les périodes de rush. Cela réduit les opportunités perdues et fluidifie le service." },
+      { company: "DMT Consulting", category: "Conseil en ingénierie", description: "Fournisseur reconnu de solutions d'ingénierie innovantes et durables.", logo: "/logos/dmt-consulting.png", initials: "DMT", quote: "Nous avons déployé plusieurs automatisations avec Boost My Businesses. L'architecture est fiable, flexible et pensée pour un usage réel." },
+      { company: "Save Animals", category: "ONG de protection animale", logo: "/logos/save-animals.png", initials: "SA", quote: "Nous avons adapté une version personnalisée du système à nos besoins. Cela nous a permis de gérer les demandes plus efficacement sans alourdir la charge de travail." },
+    ],
+    calendlyTitle: "Réserve une démo en 30 secondes",
+    calendlyText: "Découvre comment l'automatisation IA peut faire gagner du temps et récupérer des opportunités perdues.",
     pricingTitle: "Offres",
     pricingText: "Une manière simple de présenter tes automatisations comme des offres concrètes et vendables.",
     pricing: [
@@ -40,34 +52,44 @@ const copy = {
       { name: "Growth", price: "À partir de 799€", description: "Plus de logique, plus d'intégrations, plus d'impact business.", bullets: ["1 à 2 systèmes IA", "Connexions outils métier", "Optimisé pour conversion / gain de temps"], featured: true },
       { name: "Custom", price: "Sur devis", description: "Architecture sur mesure pour besoin plus avancé.", bullets: ["Multi-flows", "Automatisations métier", "Support et évolution possibles"], featured: false },
     ],
-    bottomTitle: "Pourquoi cette structure est importante",
-    bottomText: "Au lieu de montrer une simple démo générique, tu peux envoyer tes clients directement vers la page qui correspond à leur besoin. Ton offre devient plus claire, plus premium et plus facile à vendre.",
+    bottomTitle: "Prêt à automatiser un vrai workflow ?",
+    bottomText: "Choisis le système qui correspond à ton besoin ou réserve une démo pour identifier l'automatisation la plus rentable.",
     outLabel: "Résultat",
   },
   en: {
     badge: "Multi-Agent SaaS",
-    heroTitle: "AI agents that save time, capture more leads, and help businesses convert faster.",
+    heroTitle: "AI agents that reply faster, automate better, and help businesses convert.",
     heroLead: "Your business runs 24/7. Your team doesn't.",
-    heroP1: ["Every missed WhatsApp message is a ", "lost lead", ". Every slow support reply is a ", "frustrated client", ". Every hour spent on repetitive tasks is an hour not spent growing your business."],
-    heroP2: "The problem isn't effort — it's scale. One person can't be everywhere at once. But AI agents can.",
-    heroP3: ["Our agents ", "qualify your leads instantly", ", handle your support requests before they pile up, and ", "produce your marketing content on demand", ". No burnout. No delays. No missed opportunities — just results, around the clock."],
+    heroP1: ["Every unanswered message is a ", "missed opportunity", ". Every repetitive task slows down ", "growth", "."],
+    heroP2: "Boost My Businesses builds AI systems that reply, qualify, automate, and hand off the right work to your team.",
+    heroP3: ["Less manual work, ", "more instant follow-up", ", and operations that stay smooth ", "even when your team is busy", "."],
     proof: ["Instant replies 24/7", "Less manual workload", "More leads handled without hiring"],
     stats: [
       { num: "7", sup: "×", label: "More likely to convert when replied within the first hour", sub: "Lead response speed" },
       { num: "60", sup: "%", label: "Of team time spent on tasks that don't require human judgment", sub: "Automation potential" },
       { num: "24", sup: "/7", label: "Your AI agents never sleep, never miss a message, never burn out", sub: "Always on" },
     ],
-    agentsTitle: "Systems designed for business outcomes",
+    agentsTitle: "AI systems ready for real operations",
     agents: [
-      { label: "Agent 01", title: "AI Personal Assistant", desc: "Centralizes requests, executes actions, helps with repetitive tasks, and streamlines day-to-day operations.", result: "Save time and automate low-value operations.", href: "/agent/general", link: "Open page →", accent: "#8B7CF6", dim: "rgba(139,124,246,0.12)", border: "rgba(139,124,246,0.22)" },
-      { label: "Agent 02", title: "AI WhatsApp Lead Handling System", desc: "Replies instantly to WhatsApp leads, detects intent, pushes booking, hands off to human staff when needed, and handles urgent cases.", result: "Capture more leads and improve conversion without slowing down your team.", href: "/agent/whatsapp-lead-system", link: "Open page →", accent: "#25D366", dim: "rgba(37,211,102,0.10)", border: "rgba(37,211,102,0.20)" },
-      { label: "Agent 03", title: "UGC Ads Engine", desc: "Turns a simple idea or image into a structured UGC video with script, hook, narrative flow, video direction, quality control, and fallback logic.", result: "Produce ready-to-publish marketing content faster and with more consistency.", href: "/agent/ugc-ads-engine", link: "Open page →", accent: "#F97316", dim: "rgba(249,115,22,0.10)", border: "rgba(249,115,22,0.20)" },
-      { label: "Agent 04", title: "AI Support Agent", desc: "Handles common support requests, automates FAQs, and absorbs part of the support load before human intervention.", result: "Reduce support workload and improve response time.", href: "/agent/support", link: "Open page →", accent: "#3B82F6", dim: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.20)" },
-      { label: "Agent 05", title: "AI Restaurant Call Assistant", desc: "Handles restaurant calls automatically, takes bookings, answers frequent questions, manages human escalation, and tracks performance by restaurant and location.", result: "Reduces missed calls, improves customer handling, and gives clear visibility over bookings, escalations, and handoffs.", href: "/agent/restaurant-call-assistant", link: "Open page →", accent: "#F59E0B", dim: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.22)" },
+      { label: "Agent 01", title: "AI Personal Assistant", desc: "Centralizes requests and automates recurring daily tasks.", result: "Save time on low-value operations.", href: "/agent/general", link: "Open page →", accent: "#8B7CF6", dim: "rgba(139,124,246,0.12)", border: "rgba(139,124,246,0.22)" },
+      { label: "Agent 02", title: "AI WhatsApp Lead Handling System", desc: "Replies to WhatsApp leads, detects intent, and triggers the right follow-up.", result: "Capture more leads without slowing the team.", href: "/agent/whatsapp-lead-system", link: "Open page →", accent: "#25D366", dim: "rgba(37,211,102,0.10)", border: "rgba(37,211,102,0.20)" },
+      { label: "Agent 03", title: "UGC Ads Engine", desc: "Turns an idea or image into a structured UGC video ready for production.", result: "Create conversion-focused content faster.", href: "/agent/ugc-ads-engine", link: "Open page →", accent: "#F97316", dim: "rgba(249,115,22,0.10)", border: "rgba(249,115,22,0.20)" },
+      { label: "Agent 04", title: "AI Support Agent", desc: "Handles frequent requests and prepares useful human escalations.", result: "Reduce support load and speed up replies.", href: "/agent/support", link: "Open page →", accent: "#3B82F6", dim: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.20)" },
+      { label: "Agent 05", title: "AI Restaurant Call Assistant", desc: "Answers calls, captures bookings, and tracks escalations.", result: "Recover missed calls and improve customer handling.", href: "/agent/restaurant-call-assistant", link: "Open page →", accent: "#F59E0B", dim: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.22)" },
     ],
     useCasesTitle: "Use cases",
-    useCasesText: "These systems can be adapted to businesses that need fast replies, lead qualification, structured automation, or faster marketing content production.",
-    useCases: ["Clinics and medical practices", "Dentists and opticians", "Agencies and consultants", "Training centers", "Beauty, spa, salons", "Real estate and local services", "E-commerce and DTC brands", "Creators and ad agencies"],
+    useCasesText: "For teams that need faster replies, better qualification, and automation without complexity.",
+    useCases: ["Restaurants", "Agencies and consultants", "Health and services", "E-commerce", "Training", "Creators and ads"],
+    trustBadge: "Production-tested systems",
+    trustTitle: "They trust us to handle their operations",
+    trustText: "From restaurants to consulting and non-profits, our AI and automation systems are already used in demanding environments.",
+    testimonials: [
+      { company: "In de Patattezak bij Pee Klak", category: "Restaurant", logo: "/logos/patattezak.png", initials: "IP", quote: "We used the system to better handle incoming requests during busy periods. It helps reduce missed opportunities and keeps operations smooth." },
+      { company: "DMT Consulting", category: "Engineering consulting", description: "Trusted provider of innovative and sustainable engineering solutions.", logo: "/logos/dmt-consulting.png", initials: "DMT", quote: "We've implemented several automation systems from Boost My Businesses. The architecture is reliable, flexible, and built for real-world usage." },
+      { company: "Save Animals", category: "Animal protection NGO", logo: "/logos/save-animals.png", initials: "SA", quote: "We adapted a custom version of the automation system to fit our needs. It helped us manage requests more efficiently without increasing workload." },
+    ],
+    calendlyTitle: "Book a demo in 30 seconds",
+    calendlyText: "See how AI automation can save time and recover missed opportunities.",
     pricingTitle: "Pricing",
     pricingText: "A simple way to present your automations as real offers clients can understand and buy.",
     pricing: [
@@ -75,8 +97,8 @@ const copy = {
       { name: "Growth", price: "From €799", description: "More logic, more integrations, more business impact.", bullets: ["1 to 2 AI systems", "Business tool integrations", "Optimized for conversion / time savings"], featured: true },
       { name: "Custom", price: "Custom quote", description: "Tailored architecture for more advanced workflows.", bullets: ["Multi-flow setup", "Business automation logic", "Support and evolution options"], featured: false },
     ],
-    bottomTitle: "Why this structure matters",
-    bottomText: "Instead of showing one generic demo, you can send clients directly to the page that matches their need. That makes your offer clearer, more premium, and easier to sell.",
+    bottomTitle: "Ready to automate a real workflow?",
+    bottomText: "Choose the system that matches your need or book a demo to identify the highest-value automation.",
     outLabel: "Outcome",
   },
 };
@@ -109,13 +131,74 @@ const S = {
   dividerSection: { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "56px 0" } as React.CSSProperties,
 };
 
-export default function LandingPage() {
-  const [lang, setLang] = useState<Lang>("en");
+function TestimonialLogo({
+  src,
+  alt,
+  initials,
+}: {
+  src: string;
+  alt: string;
+  initials: string;
+}) {
+  const [hasError, setHasError] = useState(false);
 
-  useEffect(() => {
-    const saved = localStorage.getItem(LANG_KEY) as Lang | null;
-    if (saved === "fr" || saved === "en") setLang(saved);
-  }, []);
+  if (hasError) {
+    return (
+      <div
+        aria-label={alt}
+        style={{
+          width: 88,
+          height: 72,
+          borderRadius: 16,
+          border: "1px solid rgba(124,92,255,0.26)",
+          background: "rgba(124,92,255,0.12)",
+          color: "#c4b5fd",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'Syne', sans-serif",
+          fontSize: 17,
+          fontWeight: 800,
+        }}
+      >
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: 104,
+        height: 76,
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.92)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 10,
+        overflow: "hidden",
+      }}
+    >
+      <Image
+        src={src}
+        alt={alt}
+        width={150}
+        height={80}
+        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+}
+
+export default function LandingPage() {
+  const [lang, setLang] = useState<Lang>(() => {
+    if (typeof window === "undefined") return "en";
+    const saved = window.localStorage.getItem(LANG_KEY) as Lang | null;
+    return saved === "fr" || saved === "en" ? saved : "en";
+  });
 
   useEffect(() => {
     localStorage.setItem(LANG_KEY, lang);
@@ -291,6 +374,74 @@ export default function LandingPage() {
               {item}
             </span>
           ))}
+        </div>
+      </section>
+
+      <hr style={S.dividerSection} />
+
+      {/* ── SOCIAL PROOF ── */}
+      <section>
+        <div className="landing-section-intro" style={{ marginBottom: 32 }}>
+          <span style={S.eyebrow}>{t.trustBadge}</span>
+          <h2 style={S.sectionTitle}>{t.trustTitle}</h2>
+          <p style={S.sectionSubtitle}>{t.trustText}</p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 16, alignItems: "stretch" }}>
+          {t.testimonials.map((item) => (
+            <article
+              key={item.company}
+              className="landing-card"
+              style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.026) 100%)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: "18px", minHeight: 256, display: "flex", flexDirection: "column", justifyContent: "space-between", transition: "border-color 200ms, transform 200ms" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(124,92,255,0.28)"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+            >
+              <div>
+                <TestimonialLogo src={item.logo} alt={`${item.company} logo`} initials={item.initials} />
+                <div style={{ marginTop: 12 }}>
+                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 17, fontWeight: 800, color: "#f0f0ef", lineHeight: 1.2, marginBottom: 5 }}>
+                    {item.company}
+                  </h3>
+                  <p style={{ color: "#a594f9", fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase", lineHeight: 1.35 }}>
+                    {item.category}
+                  </p>
+                  {"description" in item && item.description && (
+                    <p style={{ color: "rgba(255,255,255,0.46)", fontSize: 12.5, lineHeight: 1.42, marginTop: 7 }}>
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <blockquote style={{ margin: "16px 0 0", color: "rgba(255,255,255,0.72)", fontSize: 14.5, lineHeight: 1.52 }}>
+                &ldquo;{item.quote}&rdquo;
+              </blockquote>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <hr style={S.dividerSection} />
+
+      {/* ── CALENDLY ── */}
+      <section id="book-demo">
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <div style={{ textAlign: "center", margin: "0 auto 28px", maxWidth: 680 }}>
+            <h2 style={S.sectionTitle}>{t.calendlyTitle}</h2>
+            <p style={{ ...S.sectionSubtitle, margin: "0 auto" }}>{t.calendlyText}</p>
+          </div>
+
+          <div style={{ border: "1px solid rgba(124,92,255,0.24)", background: "linear-gradient(135deg, rgba(124,92,255,0.08) 0%, rgba(255,255,255,0.025) 48%, rgba(8,18,38,0.72) 100%)", borderRadius: 24, padding: "clamp(10px, 2vw, 16px)", boxShadow: "0 26px 80px rgba(0,0,0,0.24)", overflow: "hidden" }}>
+            <Script
+              src="https://assets.calendly.com/assets/external/widget.js"
+              strategy="lazyOnload"
+            />
+            <div
+              className="calendly-inline-widget homepage-calendly-frame"
+              data-url="https://calendly.com/boostmybusinesses/discovertheassistant"
+              style={{ minWidth: "320px", height: "700px" }}
+            />
+          </div>
         </div>
       </section>
 

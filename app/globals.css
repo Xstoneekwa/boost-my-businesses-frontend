@@ -605,7 +605,8 @@ textarea {
 }
 
 @media (max-width: 640px) {
-  .restaurant-calendly-frame {
+  .restaurant-calendly-frame,
+  .homepage-calendly-frame {
     height: 900px !important;
   }
 }

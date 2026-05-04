@@ -87,8 +87,8 @@ export default function NavbarFooter({
 
   const accentColor = agent ? AGENT_COLORS[agent] : "#f0f0ef";
   const t = COPY[lang];
-  const isRestaurantPage = pathname?.startsWith("/agent/restaurant-call-assistant") ?? false;
-  const pricingHref = isRestaurantPage ? "#pricing" : "/#pricing";
+  const usesLocalPricing = agent === "restaurant";
+  const pricingHref = usesLocalPricing ? "#pricing" : "/#pricing";
   const scrollToPricing = () => {
     document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -106,16 +106,16 @@ export default function NavbarFooter({
         className="site-nav-shell"
         style={{
           position: "fixed",
-          top: 0,
+          top: "0px",
           left: 0,
           right: 0,
           zIndex: 100,
-          height: 60,
+          height: "60px",
           display: "flex",
           alignItems: "center",
           padding: "0 24px",
           justifyContent: "space-between",
-          gap: 16,
+          gap: "16px",
           background: scrolled ? "rgba(7,17,31,0.90)" : "transparent",
           backdropFilter: scrolled ? "blur(20px) saturate(150%)" : "none",
           WebkitBackdropFilter: scrolled ? "blur(20px) saturate(150%)" : "none",
@@ -124,17 +124,17 @@ export default function NavbarFooter({
         }}
       >
         {/* Logo */}
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", flexShrink: 0 }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: "9px", textDecoration: "none", flexShrink: 0 }}>
           <span
             className="site-nav-logo-text"
             style={{
-              width: 30,
-              height: 30,
-              borderRadius: 6,
+              width: "30px",
+              height: "30px",
+              borderRadius: "6px",
               background: accentColor,
               color: "#000",
               fontFamily: "'Syne', sans-serif",
-              fontSize: 15,
+              fontSize: "15px",
               fontWeight: 800,
               display: "flex",
               alignItems: "center",
@@ -148,7 +148,7 @@ export default function NavbarFooter({
           <span
             style={{
               fontFamily: "'Syne', sans-serif",
-              fontSize: 14,
+              fontSize: "14px",
               fontWeight: 600,
               color: "#f0f0ef",
               letterSpacing: "-0.01em",
@@ -164,7 +164,7 @@ export default function NavbarFooter({
         <nav
           style={{
             display: "flex",
-            gap: 2,
+            gap: "2px",
             flex: 1,
             minWidth: 0,
             justifyContent: "center",
@@ -183,11 +183,11 @@ export default function NavbarFooter({
                 href={link.href}
                 style={{
                   padding: "5px 12px",
-                  fontSize: 13,
+                  fontSize: "13px",
                   fontWeight: 500,
                   color: isActive ? linkColor : "rgba(255,255,255,0.50)",
                   textDecoration: "none",
-                  borderRadius: 999,
+                  borderRadius: "999px",
                   background: isActive ? `rgba(255,255,255,0.06)` : "transparent",
                   transition: "color 150ms, background 150ms",
                   position: "relative",
@@ -212,7 +212,7 @@ export default function NavbarFooter({
         </nav>
 
         {/* Right side */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, position: "relative", zIndex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0, position: "relative", zIndex: 1 }}>
           {/* Lang toggle */}
           <div
             style={{
@@ -221,9 +221,9 @@ export default function NavbarFooter({
               zIndex: 1,
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 999,
-              padding: 3,
-              gap: 2,
+              borderRadius: "999px",
+              padding: "3px",
+              gap: "2px",
             }}
           >
             {(["fr", "en"] as Lang[]).map((l) => (
@@ -232,11 +232,11 @@ export default function NavbarFooter({
                 type="button"
                 onClick={() => onLangChange(l)}
                 style={{
-                  height: 26,
-                  width: 36,
-                  borderRadius: 999,
+                  height: "26px",
+                  width: "36px",
+                  borderRadius: "999px",
                   border: "none",
-                  fontSize: 11,
+                  fontSize: "11px",
                   fontWeight: 600,
                   fontFamily: "'JetBrains Mono', monospace",
                   cursor: "pointer",
@@ -252,52 +252,32 @@ export default function NavbarFooter({
           </div>
 
           {/* CTA */}
-          {isRestaurantPage ? (
-            <button
-              type="button"
-              onClick={scrollToPricing}
-              className="site-nav-cta"
-              style={{
-                padding: "8px 18px",
-                background: accentColor,
-                color: "#000",
-                fontSize: 13,
-                fontWeight: 700,
-                borderRadius: 999,
-                textDecoration: "none",
-                transition: "opacity 150ms, background 300ms ease",
-                display: "inline-flex",
-                alignItems: "center",
-                border: "none",
-                cursor: "pointer",
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.88"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
-            >
-              {t.cta}
-            </button>
-          ) : (
-            <Link
-              href={pricingHref}
-              className="site-nav-cta"
-              style={{
-                padding: "8px 18px",
-                background: accentColor,
-                color: "#000",
-                fontSize: 13,
-                fontWeight: 700,
-                borderRadius: 999,
-                textDecoration: "none",
-                transition: "opacity 150ms, background 300ms ease",
-                display: "inline-flex",
-                alignItems: "center",
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.88"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
-            >
-              {t.cta}
-            </Link>
-          )}
+          <Link
+            href={pricingHref}
+            className="site-nav-cta"
+            style={{
+              padding: "8px 18px",
+              background: accentColor,
+              color: "#000",
+              fontSize: "13px",
+              fontWeight: 700,
+              borderRadius: "999px",
+              textDecoration: "none",
+              transition: "opacity 150ms, background 300ms ease",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+            onClick={(e) => {
+              if (usesLocalPricing) {
+                e.preventDefault();
+                scrollToPricing();
+              }
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.88"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+          >
+            {t.cta}
+          </Link>
 
           {/* Hamburger — mobile */}
           <button
@@ -307,17 +287,17 @@ export default function NavbarFooter({
             style={{
               display: "none", // shown via media query in global CSS
               flexDirection: "column",
-              gap: 5,
+              gap: "5px",
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: 6,
+              padding: "6px",
             }}
             className="site-nav-hamburger"
           >
-            <span style={{ width: 20, height: 1.5, background: "#f0f0ef", borderRadius: 2, display: "block" }} />
-            <span style={{ width: 20, height: 1.5, background: "#f0f0ef", borderRadius: 2, display: "block" }} />
-            <span style={{ width: 20, height: 1.5, background: "#f0f0ef", borderRadius: 2, display: "block" }} />
+            <span style={{ width: "20px", height: "1.5px", background: "#f0f0ef", borderRadius: "2px", display: "block" }} />
+            <span style={{ width: "20px", height: "1.5px", background: "#f0f0ef", borderRadius: "2px", display: "block" }} />
+            <span style={{ width: "20px", height: "1.5px", background: "#f0f0ef", borderRadius: "2px", display: "block" }} />
           </button>
         </div>
 
@@ -327,7 +307,7 @@ export default function NavbarFooter({
             className="site-nav-mobile-menu"
             style={{
               position: "absolute",
-              top: 60,
+              top: "60px",
               left: 0,
               right: 0,
               background: "rgba(7,17,31,0.97)",
@@ -336,7 +316,7 @@ export default function NavbarFooter({
               padding: "12px 16px",
               display: "flex",
               flexDirection: "column",
-              gap: 6,
+              gap: "6px",
             }}
           >
             {NAV_LINKS.map((link) => (
@@ -346,11 +326,11 @@ export default function NavbarFooter({
                 onClick={() => setMenuOpen(false)}
                 style={{
                   padding: "10px 14px",
-                  fontSize: 14,
+                  fontSize: "14px",
                   fontWeight: 500,
                   color: "rgba(255,255,255,0.75)",
                   textDecoration: "none",
-                  borderRadius: 10,
+                  borderRadius: "10px",
                   background: "rgba(255,255,255,0.04)",
                 }}
               >
@@ -362,7 +342,7 @@ export default function NavbarFooter({
       </header>
 
       {/* ── PAGE CONTENT ── */}
-      <div className="site-page-offset" style={{ paddingTop: 60 }}>
+      <div className="site-page-offset" style={{ paddingTop: "60px" }}>
         {children}
       </div>
 
@@ -371,32 +351,32 @@ export default function NavbarFooter({
         style={{
           borderTop: "1px solid rgba(255,255,255,0.07)",
           padding: "48px 24px 28px",
-          marginTop: 0,
+          marginTop: "0px",
           background: "rgba(255,255,255,0.015)",
         }}
       >
-        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+        <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
           <div
             className="site-footer-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "2fr 1fr 1fr 1fr",
-              gap: 48,
-              marginBottom: 40,
+              gap: "48px",
+              marginBottom: "40px",
             }}
           >
             {/* Brand */}
             <div>
-              <Link href="/" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", marginBottom: 14 }}>
+              <Link href="/" style={{ display: "flex", alignItems: "center", gap: "8px", textDecoration: "none", marginBottom: "14px" }}>
                 <span
                   style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 5,
+                    width: "26px",
+                    height: "26px",
+                    borderRadius: "5px",
                     background: accentColor,
                     color: "#000",
                     fontFamily: "'Syne', sans-serif",
-                    fontSize: 13,
+                    fontSize: "13px",
                     fontWeight: 800,
                     display: "flex",
                     alignItems: "center",
@@ -406,26 +386,26 @@ export default function NavbarFooter({
                 >
                   B
                 </span>
-                <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 13, fontWeight: 600, color: "#f0f0ef" }}>
+                <span style={{ fontFamily: "'Syne', sans-serif", fontSize: "13px", fontWeight: 600, color: "#f0f0ef" }}>
                   Boost<span style={{ color: "rgba(255,255,255,0.38)", fontWeight: 400 }}>My</span>Businesses
                 </span>
               </Link>
-              <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.38)", lineHeight: 1.65, maxWidth: 240 }}>
+              <p style={{ fontSize: "12.5px", color: "rgba(255,255,255,0.38)", lineHeight: 1.65, maxWidth: "240px" }}>
                 {t.tagline}
               </p>
             </div>
 
             {/* Agents */}
             <div>
-              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: 14 }}>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: "14px" }}>
                 {t.agents}
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {NAV_LINKS.map((link) => (
                   <Link
                     key={link.href}
                     href={link.href}
-                    style={{ fontSize: 13, color: "rgba(255,255,255,0.48)", textDecoration: "none", transition: "color 150ms" }}
+                    style={{ fontSize: "13px", color: "rgba(255,255,255,0.48)", textDecoration: "none", transition: "color 150ms" }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = AGENT_COLORS[link.agent]; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.48)"; }}
                   >
@@ -437,10 +417,10 @@ export default function NavbarFooter({
 
             {/* Company */}
             <div>
-              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: 14 }}>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: "14px" }}>
                 Company
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
                   { label: t.pricing, href: pricingHref },
                   { label: t.about, href: "/about" },
@@ -449,7 +429,7 @@ export default function NavbarFooter({
                   <Link
                     key={item.href}
                     href={item.href}
-                    style={{ fontSize: 13, color: "rgba(255,255,255,0.48)", textDecoration: "none", transition: "color 150ms" }}
+                    style={{ fontSize: "13px", color: "rgba(255,255,255,0.48)", textDecoration: "none", transition: "color 150ms" }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f0f0ef"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.48)"; }}
                   >
@@ -461,10 +441,10 @@ export default function NavbarFooter({
 
             {/* Legal */}
             <div>
-              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: 14 }}>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: "14px" }}>
                 {t.legal}
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
                   { label: t.privacy, href: "/privacy" },
                   { label: t.terms, href: "/terms" },
@@ -473,7 +453,7 @@ export default function NavbarFooter({
                   <Link
                     key={item.href}
                     href={item.href}
-                    style={{ fontSize: 13, color: "rgba(255,255,255,0.48)", textDecoration: "none", transition: "color 150ms" }}
+                    style={{ fontSize: "13px", color: "rgba(255,255,255,0.48)", textDecoration: "none", transition: "color 150ms" }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f0f0ef"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.48)"; }}
                   >
@@ -491,14 +471,14 @@ export default function NavbarFooter({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              paddingTop: 20,
+              paddingTop: "20px",
               borderTop: "1px solid rgba(255,255,255,0.06)",
             }}
           >
-            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.22)" }}>
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "rgba(255,255,255,0.22)" }}>
               {t.copy}
             </p>
-            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.22)" }}>
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "rgba(255,255,255,0.22)" }}>
               {t.made}
             </p>
           </div>
