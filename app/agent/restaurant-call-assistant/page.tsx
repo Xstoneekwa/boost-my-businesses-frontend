@@ -502,6 +502,32 @@ export default function RestaurantCallAssistantPage() {
           pricingTitle: "Choisis le niveau adapté à ton volume d'appels",
           pricingText:
             "Démarre simplement, puis évolue vers les relances, analyses, intégrations et opérations multi-sites.",
+          howWorksTitle: "How the AI Restaurant Call Assistant works",
+          howWorksText: "The AI Restaurant Call Assistant automatically answers restaurant calls, handles reservations, responds to common customer questions, and helps restaurants reduce missed calls and lost bookings.",
+          howWorksSteps: [
+            { title: "Customer calls the restaurant", text: "The system receives reservation requests, changes, cancellations, or common questions." },
+            { title: "AI assistant answers and handles the interaction", text: "The assistant identifies intent, collects the right details, and responds using the configured restaurant workflow." },
+            { title: "Reservations and customer data are processed automatically", text: "Booking details, confirmations, dashboard records, and escalations are routed to the right place." },
+          ],
+          includedTitle: "What is included",
+          includedItems: [
+            "AI call assistant configuration",
+            "Phone integration setup",
+            "Reservation handling flows",
+            "SMS confirmation system",
+            "Dashboard access",
+            "Support and optimization depending on selected plan",
+          ],
+          setupIncludesTitle: "What the setup fee includes",
+          setupIncludesItems: [
+            "AI assistant onboarding",
+            "Initial business configuration",
+            "Workflow setup",
+            "Phone and automation integration",
+            "Testing and optimization",
+          ],
+          billingNote: "Subscriptions can be cancelled according to the Terms of Service.",
+          trustNote: "Pricing includes setup, onboarding, access to the AI system, and ongoing service depending on the selected plan.",
           setupLabel: "Frais d'installation",
           includedLabel: "Inclus",
           popularBadge: "Le plus choisi",
@@ -514,6 +540,7 @@ export default function RestaurantCallAssistantPage() {
               price: "€299",
               suffix: "/mois",
               setup: "€800",
+              billingDetail: "€800 one-time setup + €299/month subscription",
               positioning: "Pour les restaurants indépendants sérieux.",
               cta: "Commencer avec Growth",
               featured: false,
@@ -533,6 +560,7 @@ export default function RestaurantCallAssistantPage() {
               price: "€599",
               suffix: "/mois",
               setup: "€1200",
+              billingDetail: "€1200 one-time setup + €599/month subscription",
               positioning: "Pour les restaurants occupés avec un fort volume d'appels.",
               cta: "Choisir Pro",
               featured: true,
@@ -553,6 +581,7 @@ export default function RestaurantCallAssistantPage() {
               price: "€999+",
               suffix: "/mois",
               setup: "€1500+",
+              billingDetail: "Custom onboarding + recurring monthly pricing",
               positioning: "Pour les chaînes et restaurants multi-sites.",
               cta: "Réserver une démo Premium",
               featured: false,
@@ -577,6 +606,32 @@ export default function RestaurantCallAssistantPage() {
           pricingTitle: "Choose the level that matches your call volume",
           pricingText:
             "Start simple, then scale into follow-ups, analytics, integrations, and multi-location operations.",
+          howWorksTitle: "How the AI Restaurant Call Assistant works",
+          howWorksText: "The AI Restaurant Call Assistant automatically answers restaurant calls, handles reservations, responds to common customer questions, and helps restaurants reduce missed calls and lost bookings.",
+          howWorksSteps: [
+            { title: "Customer calls the restaurant", text: "The system receives reservation requests, changes, cancellations, or common questions." },
+            { title: "AI assistant answers and handles the interaction", text: "The assistant identifies intent, collects the right details, and responds using the configured restaurant workflow." },
+            { title: "Reservations and customer data are processed automatically", text: "Booking details, confirmations, dashboard records, and escalations are routed to the right place." },
+          ],
+          includedTitle: "What is included",
+          includedItems: [
+            "AI call assistant configuration",
+            "Phone integration setup",
+            "Reservation handling flows",
+            "SMS confirmation system",
+            "Dashboard access",
+            "Support and optimization depending on selected plan",
+          ],
+          setupIncludesTitle: "What the setup fee includes",
+          setupIncludesItems: [
+            "AI assistant onboarding",
+            "Initial business configuration",
+            "Workflow setup",
+            "Phone and automation integration",
+            "Testing and optimization",
+          ],
+          billingNote: "Subscriptions can be cancelled according to the Terms of Service.",
+          trustNote: "Pricing includes setup, onboarding, access to the AI system, and ongoing service depending on the selected plan.",
           setupLabel: "Setup",
           includedLabel: "Included",
           popularBadge: "Most Popular",
@@ -589,6 +644,7 @@ export default function RestaurantCallAssistantPage() {
               price: "€299",
               suffix: "/month",
               setup: "€800",
+              billingDetail: "€800 one-time setup + €299/month subscription",
               positioning: "For serious independent restaurants.",
               cta: "Start with Growth",
               featured: false,
@@ -608,6 +664,7 @@ export default function RestaurantCallAssistantPage() {
               price: "€599",
               suffix: "/month",
               setup: "€1200",
+              billingDetail: "€1200 one-time setup + €599/month subscription",
               positioning: "For busy restaurants with high call volume.",
               cta: "Choose Pro",
               featured: true,
@@ -628,6 +685,7 @@ export default function RestaurantCallAssistantPage() {
               price: "€999+",
               suffix: "/month",
               setup: "€1500+",
+              billingDetail: "Custom onboarding + recurring monthly pricing",
               positioning: "For chains and multi-location restaurants.",
               cta: "Book a Premium Demo",
               featured: false,
@@ -1294,10 +1352,91 @@ export default function RestaurantCallAssistantPage() {
 
         <hr style={divider} />
 
+        {/* -- SERVICE CLARITY ------------------------------------- */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle
+              eyebrow={lang === "fr" ? "Fonctionnement" : "How it works"}
+              title={pricingCopy.howWorksTitle}
+              text={pricingCopy.howWorksText}
+            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 14, marginTop: 30 }}>
+              {pricingCopy.howWorksSteps.map((step, index) => (
+                <article
+                  key={step.title}
+                  style={{ ...cardBase, minHeight: 190, padding: "22px 18px" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+                >
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
+                    {index + 1}
+                  </div>
+                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 800, color: "#f0f0ef", lineHeight: 1.25, marginBottom: 10 }}>
+                    {step.title}
+                  </h3>
+                  <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.56)", lineHeight: 1.62 }}>
+                    {step.text}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* -- INCLUDED -------------------------------------------- */}
+        <section style={section}>
+          <div style={container}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 28, alignItems: "start" }}>
+              <SectionTitle
+                eyebrow={lang === "fr" ? "Inclus" : "Included"}
+                title={pricingCopy.includedTitle}
+                text={lang === "fr" ? "Les éléments principaux livrés avec le service sélectionné." : "The core deliverables included with the selected service."}
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                {pricingCopy.includedItems.map((item) => (
+                  <div key={item} style={{ display: "flex", alignItems: "flex-start", gap: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", borderRadius: 14, padding: "13px 14px" }}>
+                    <span style={{ color: AC_TEXT, flexShrink: 0, fontSize: 12, lineHeight: 1.5 }}>✓</span>
+                    <span style={{ color: "rgba(255,255,255,0.68)", fontSize: 13.5, lineHeight: 1.5 }}>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* -- SETUP FEE ------------------------------------------- */}
+        <section style={section}>
+          <div style={container}>
+            <div style={{ ...cardBase, borderRadius: 24, borderColor: AC_BORDER, background: "linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(255,255,255,0.025) 58%, rgba(11,22,40,0.70) 100%)", padding: "clamp(22px, 3vw, 30px)" }}>
+              <SectionTitle
+                eyebrow={lang === "fr" ? "Frais d'installation" : "Setup fee"}
+                title={pricingCopy.setupIncludesTitle}
+                text={lang === "fr" ? "Le setup couvre la configuration initiale nécessaire pour rendre le système opérationnel." : "The setup fee covers the initial configuration work needed to make the system operational."}
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, marginTop: 24 }}>
+                {pricingCopy.setupIncludesItems.map((item) => (
+                  <div key={item} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(7,17,31,0.52)", borderRadius: 14, padding: "14px 13px" }}>
+                    <p style={{ color: "rgba(255,255,255,0.72)", fontSize: 13.5, lineHeight: 1.5 }}>{item}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
         {/* -- PRICING --------------------------------------------- */}
         <section id="pricing" className="scroll-mt-28" style={{ ...section, scrollMarginTop: 112 }}>
           <div style={container}>
             <SectionTitle eyebrow={pricingCopy.pricingEyebrow} title={pricingCopy.pricingTitle} text={pricingCopy.pricingText} />
+            <p style={{ color: "rgba(255,255,255,0.56)", fontSize: 13.5, lineHeight: 1.65, marginTop: 14, maxWidth: 760 }}>
+              {pricingCopy.trustNote}
+            </p>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 16, marginTop: 32, alignItems: "stretch" }}>
               {pricingCopy.plans.map((plan) => (
@@ -1370,6 +1509,10 @@ export default function RestaurantCallAssistantPage() {
                     {plan.cta}
                   </Link>
 
+                  <p style={{ color: "rgba(255,255,255,0.52)", fontSize: 12.5, lineHeight: 1.55, textAlign: "center", margin: "-10px 0 20px" }}>
+                    {plan.billingDetail}
+                  </p>
+
                   <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.34)", marginBottom: 12 }}>
                     {pricingCopy.includedLabel}
                   </p>
@@ -1387,6 +1530,9 @@ export default function RestaurantCallAssistantPage() {
 
             <p style={{ color: "rgba(255,255,255,0.44)", fontSize: 13, lineHeight: 1.6, marginTop: 18 }}>
               {pricingCopy.note}
+            </p>
+            <p style={{ color: "rgba(255,255,255,0.48)", fontSize: 13, lineHeight: 1.6, marginTop: 8 }}>
+              {pricingCopy.billingNote}
             </p>
 
             <div style={{ marginTop: 34 }}>

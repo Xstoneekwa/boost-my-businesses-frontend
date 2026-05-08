@@ -47,6 +47,15 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function getStringField(record: Record<string, unknown> | null, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -56,13 +65,16 @@ async function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function buildPreviewSrc(data: any): string | null {
-  if (!data || typeof data !== "object") return null;
-  if (typeof data.preview_image_url === "string" && data.preview_image_url.trim()) return data.preview_image_url;
-  if (typeof data.image_url === "string" && data.image_url.trim()) return data.image_url;
-  if (typeof data.preview_image_base64 === "string" && data.preview_image_base64.trim()) {
-    const cleaned = String(data.preview_image_base64).replace(/^data:[^;]+;base64,/, "");
-    const mime = data.preview_mime_type || "image/png";
+function buildPreviewSrc(data: unknown): string | null {
+  const record = asRecord(data);
+  const previewImageUrl = getStringField(record, "preview_image_url");
+  const imageUrl = getStringField(record, "image_url");
+  const previewImageBase64 = getStringField(record, "preview_image_base64");
+  if (previewImageUrl) return previewImageUrl;
+  if (imageUrl) return imageUrl;
+  if (previewImageBase64) {
+    const cleaned = previewImageBase64.replace(/^data:[^;]+;base64,/, "");
+    const mime = getStringField(record, "preview_mime_type") || "image/png";
     return `data:${mime};base64,${cleaned}`;
   }
   return null;
@@ -83,7 +95,7 @@ function sanitizeMessagesForStorage(messages: Message[]): Message[] {
 const copy = {
   fr: {
     badge: "UGC Ads Engine",
-    heroTitle: "Transforme une simple image en vidéo UGC prête à convertir.",
+    heroTitle: "Transforme une simple image en vidéo UGC structurée pour tes campagnes.",
     heroSubtitle: "Ce système automatise la création de vidéos marketing de bout en bout : script, structure hook + narration + CTA, direction vidéo, contrôle qualité et génération finale.",
     primaryCta: "Voir la démo visuelle",
     secondaryCta: "Retour à l'accueil",
@@ -105,6 +117,16 @@ const copy = {
     solutionTitle: "La solution",
     solutionText: "Ici, la valeur n'est pas juste la génération vidéo. C'est le système complet qui transforme une idée en contenu marketing prêt à publier.",
     solutions: ["Génération automatique du script", "Structure marketing intégrée : hook, narration, CTA", "Direction vidéo automatisée", "Contrôle qualité intégré", "Retry et fallback automatiques", "Production plus rapide et plus scalable"],
+    createsTitle: "What the UGC Ads Engine creates",
+    createsText:
+      "The UGC Ads Engine helps businesses generate structured UGC-style ad concepts, creative briefs, image or video prompts, and production-ready assets for marketing campaigns.",
+    createsDeliverables: [
+      "creative brief generation",
+      "UGC ad concept creation",
+      "image/video prompt generation",
+      "content direction and review workflow",
+      "campaign asset preparation",
+    ],
     demoTitle: "Démo visuelle",
     demoText: "Clique sur une capture pour l'ouvrir en grand et mieux visualiser la logique du moteur, les étapes de validation et le rendu du système.",
     workflowTitle: "Comment le moteur fonctionne",
@@ -112,7 +134,7 @@ const copy = {
     flowSteps: ["L'utilisateur envoie une image ou une idée", "Le système génère le script marketing", "Une preview / structure est préparée", "La direction vidéo est construite", "La génération est lancée", "Le QC vérifie le résultat", "Un fallback ou retry peut se déclencher si besoin", "Le rendu final est prêt à publier"],
     differenceTitle: "Pourquoi c'est différent",
     differenceText: "Les outils donnent des capacités. Ce produit donne un vrai système prêt à produire du contenu marketing avec moins de friction.",
-    differences: ["Pas besoin d'expertise en prompting", "Pas de tool switching", "Workflow automatisé de bout en bout", "Sortie plus standardisée", "Production scalable", "Pensé pour la conversion, pas juste la génération"],
+    differences: ["Pas besoin d'expertise en prompting", "Pas de tool switching", "Workflow automatisé de bout en bout", "Sortie plus standardisée", "Production scalable", "Pensé pour la structure de campagne, pas juste la génération"],
     targetTitle: "Pour qui",
     targetText: "Le système s'adresse aux profils qui ont besoin de produire du contenu publicitaire ou UGC rapidement, de manière répétable et exploitable.",
     targets: {
@@ -151,7 +173,7 @@ const copy = {
   },
   en: {
     badge: "UGC Ads Engine",
-    heroTitle: "Turn a simple image into a high-converting UGC video.",
+    heroTitle: "Turn a simple image into a structured UGC-style ad video.",
     heroSubtitle: "This system automates end-to-end video creation: script, hook + narrative + CTA structure, video direction, quality control, and final generation.",
     primaryCta: "Open visual demo",
     secondaryCta: "Back to homepage",
@@ -173,6 +195,16 @@ const copy = {
     solutionTitle: "The solution",
     solutionText: "The value is not just video generation. It is the full system that turns an idea into ready-to-publish marketing content.",
     solutions: ["Automatic script generation", "Built-in marketing structure: hook, narrative, CTA", "Automated video direction", "Built-in quality control", "Automatic retry and fallback logic", "Faster, more scalable production"],
+    createsTitle: "What the UGC Ads Engine creates",
+    createsText:
+      "The UGC Ads Engine helps businesses generate structured UGC-style ad concepts, creative briefs, image or video prompts, and production-ready assets for marketing campaigns.",
+    createsDeliverables: [
+      "creative brief generation",
+      "UGC ad concept creation",
+      "image/video prompt generation",
+      "content direction and review workflow",
+      "campaign asset preparation",
+    ],
     demoTitle: "Visual demo",
     demoText: "Click any screenshot to open it larger and inspect the engine logic, validation flow, and how the system is structured.",
     workflowTitle: "How the engine works",
@@ -180,7 +212,7 @@ const copy = {
     flowSteps: ["The user sends an image or idea", "The system generates the marketing script", "A preview / structure is prepared", "The video direction is built", "Generation is launched", "QC checks the output", "Fallback or retry can trigger if needed", "Final output is ready to publish"],
     differenceTitle: "Why it's different",
     differenceText: "Tools provide capabilities. This product provides a system ready to produce marketing content with less friction.",
-    differences: ["No prompting expertise needed", "No switching between tools", "End-to-end automated workflow", "More standardized output", "Scalable production", "Built for conversion, not just generation"],
+    differences: ["No prompting expertise needed", "No switching between tools", "End-to-end automated workflow", "More standardized output", "Scalable production", "Built for campaign structure, not just generation"],
     targetTitle: "Who it's for",
     targetText: "This system is built for people and teams that need faster, repeatable, usable UGC or ad content production.",
     targets: {
@@ -424,7 +456,7 @@ export default function UGCAdsEnginePage() {
     { src: "/demo/ugc-3.png", alt: lang === "fr" ? "Capture démo UGC 3" : "UGC demo screenshot 3", title: "Output preview", desc: lang === "fr" ? "Aperçu du résultat final ou d'une étape importante du rendu." : "Preview of the final output or an important rendering step." },
   ], [lang]);
 
-  function usePrompt(prompt: string) { setInput(prompt); }
+  function applyPrompt(prompt: string) { setInput(prompt); }
   function typingDots() { return ".".repeat(typingPhase === 0 ? 1 : typingPhase); }
 
   async function applyFile(file: File) {
@@ -454,8 +486,21 @@ export default function UGCAdsEnginePage() {
 
   function clearImage() { setImagePreview(null); setImageBase64(null); }
 
-  function extractTextReply(data: any): string | undefined {
-    return data?.output || data?.response || data?.message || data?.reply || data?.text || data?.body || data?.result || data?.data?.reply || data?.data?.message || data?.data?.text || undefined;
+  function extractTextReply(data: unknown): string | undefined {
+    const record = asRecord(data);
+    const nested = asRecord(record?.data);
+    return (
+      getStringField(record, "output") ||
+      getStringField(record, "response") ||
+      getStringField(record, "message") ||
+      getStringField(record, "reply") ||
+      getStringField(record, "text") ||
+      getStringField(record, "body") ||
+      getStringField(record, "result") ||
+      getStringField(nested, "reply") ||
+      getStringField(nested, "message") ||
+      getStringField(nested, "text")
+    );
   }
 
   function openN8nAction(url?: string | null) {
@@ -486,13 +531,30 @@ export default function UGCAdsEnginePage() {
       const res = await fetch(webhookUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: messageText, user_id: "web-user", chat_id: "web-chat", language: lang, source: "ugc-ads-engine-page", imageBase64 }) });
       const rawText = await res.text();
       if (!res.ok) throw new Error(`Webhook HTTP ${res.status}: ${rawText || "Empty response"}`);
-      let data: any = {};
+      let data: unknown = {};
       try { data = rawText ? JSON.parse(rawText) : {}; } catch { data = rawText; }
+      const dataRecord = asRecord(data);
       const previewSrc = buildPreviewSrc(data);
-      const isPreviewReady = typeof data === "object" && data !== null && data.status === "preview_ready" && !!previewSrc && !!data.approve_url && !!data.modify_url;
+      const isPreviewReady =
+        dataRecord?.status === "preview_ready" &&
+        !!previewSrc &&
+        !!getStringField(dataRecord, "approve_url") &&
+        !!getStringField(dataRecord, "modify_url");
       let assistantMessage: Message;
       if (isPreviewReady) {
-        assistantMessage = { id: uid(), role: "assistant", content: data.reply || data.message || data.text || t.previewLabel, createdAt: Date.now(), previewImageUrl: previewSrc, storagePath: data.storage_path ?? null, fileName: data.file_name ?? null, previewCreatedAt: data.preview_created_at ?? data.created_at ?? new Date().toISOString(), actionType: "preview_actions", approveUrl: data.approve_url ?? null, modifyUrl: data.modify_url ?? null };
+        assistantMessage = {
+          id: uid(),
+          role: "assistant",
+          content: getStringField(dataRecord, "reply") || getStringField(dataRecord, "message") || getStringField(dataRecord, "text") || t.previewLabel,
+          createdAt: Date.now(),
+          previewImageUrl: previewSrc,
+          storagePath: getStringField(dataRecord, "storage_path") ?? null,
+          fileName: getStringField(dataRecord, "file_name") ?? null,
+          previewCreatedAt: getStringField(dataRecord, "preview_created_at") || getStringField(dataRecord, "created_at") || new Date().toISOString(),
+          actionType: "preview_actions",
+          approveUrl: getStringField(dataRecord, "approve_url") ?? null,
+          modifyUrl: getStringField(dataRecord, "modify_url") ?? null,
+        };
       } else {
         const reply = extractTextReply(data) || (typeof data === "string" ? data : "The workflow returned a response, but no readable message was found.");
         assistantMessage = { id: uid(), role: "assistant", content: String(reply), createdAt: Date.now() };
@@ -504,9 +566,6 @@ export default function UGCAdsEnginePage() {
       setMessages([...nextMessages, { id: uid(), role: "assistant", content: fallbackMessage, createdAt: Date.now() }]);
     } finally { setLoading(false); }
   }
-
-  // ── Preserved: mounted guard ────────────────────────────
-  if (!mounted) return null;
 
   const section: React.CSSProperties = { padding: "clamp(42px, 7vw, 64px) 0" };
   const container: React.CSSProperties = { maxWidth: 1100, margin: "0 auto", padding: "0 clamp(16px, 3vw, 24px)" };
@@ -588,6 +647,22 @@ export default function UGCAdsEnginePage() {
                 <div key={item} style={cardBase} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
                   <div style={{ width: 32, height: 32, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>{index + 1}</div>
                   <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", lineHeight: 1.6 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* ── SERVICE OUTPUTS ──────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow="Deliverables" title={t.createsTitle} text={t.createsText} />
+            <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+              {t.createsDeliverables.map((item) => (
+                <div key={item} style={{ ...cardBase, padding: "16px 18px" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
+                  <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.72)", lineHeight: 1.6 }}>{item}</p>
                 </div>
               ))}
             </div>
@@ -708,7 +783,7 @@ export default function UGCAdsEnginePage() {
                     <div style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.60)", marginBottom: 10 }}>{t.suggestionsTitle}</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {t.prompts.map((prompt) => (
-                        <button key={prompt} type="button" onClick={() => usePrompt(prompt)} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 14px", fontSize: 13, color: "rgba(255,255,255,0.72)", textAlign: "left", cursor: "pointer", transition: "border-color 150ms, color 150ms" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.color = AC_TEXT; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.72)"; }}>
+                        <button key={prompt} type="button" onClick={() => applyPrompt(prompt)} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 14px", fontSize: 13, color: "rgba(255,255,255,0.72)", textAlign: "left", cursor: "pointer", transition: "border-color 150ms, color 150ms" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.color = AC_TEXT; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.72)"; }}>
                           {prompt}
                         </button>
                       ))}

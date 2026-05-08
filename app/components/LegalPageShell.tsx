@@ -16,6 +16,7 @@ export interface LegalSection {
 }
 
 interface LegalPageShellProps {
+  eyebrow?: string;
   title: string;
   intro: string;
   sections: LegalSection[];
@@ -99,7 +100,7 @@ const styles = {
   } as React.CSSProperties,
 };
 
-export default function LegalPageShell({ title, intro, sections }: LegalPageShellProps) {
+export default function LegalPageShell({ eyebrow = "Legal", title, intro, sections }: LegalPageShellProps) {
   const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === "undefined") return "en";
     const saved = window.localStorage.getItem(LANG_KEY) as Lang | null;
@@ -114,7 +115,7 @@ export default function LegalPageShell({ title, intro, sections }: LegalPageShel
     <NavbarFooter lang={lang} onLangChange={setLang}>
       <main style={styles.main}>
         <header style={styles.hero}>
-          <span style={styles.eyebrow}>Legal</span>
+          <span style={styles.eyebrow}>{eyebrow}</span>
           <h1 style={styles.title}>{title}</h1>
           <p style={styles.intro}>{intro}</p>
         </header>

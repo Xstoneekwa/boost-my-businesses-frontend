@@ -24,6 +24,14 @@ const copy = {
       { num: "60", sup: "%", label: "Du temps d'équipe dépensé sur des tâches ne nécessitant pas de jugement humain", sub: "Potentiel d'automatisation" },
       { num: "24", sup: "/7", label: "Tes agents IA ne dorment jamais, ne ratent aucun message, ne s'épuisent pas", sub: "Toujours disponible" },
     ],
+    providesTitle: "What BoostMyBusinesses provides",
+    providesText: "BoostMyBusinesses provides AI-powered automation tools for businesses, including AI call assistants, WhatsApp lead automation, customer support automation, and creative workflow automation.",
+    providesCards: [
+      { title: "AI Call Assistants", what: "Answer phone calls, collect customer details, and route requests.", helps: "Built for restaurants, service teams, and appointment-based businesses.", outcome: "Improves response speed and reduces missed calls." },
+      { title: "WhatsApp & Lead Automation", what: "Respond to incoming leads, qualify intent, and trigger follow-up flows.", helps: "Helps teams that receive leads through WhatsApp, forms, or social channels.", outcome: "Improves lead capture and follow-up consistency." },
+      { title: "Customer Support Automation", what: "Handles frequent questions and prepares clean handoffs for complex issues.", helps: "Useful for service businesses, support teams, and online operations.", outcome: "Reduces support load and improves customer communication." },
+      { title: "Business Workflow Automation", what: "Connects tools, dashboards, notifications, and recurring operational tasks.", helps: "Designed for businesses with manual processes across multiple systems.", outcome: "Improves operational speed, tracking, and reliability." },
+    ],
     agentsTitle: "Des systèmes IA prêts pour tes opérations",
     agents: [
       { label: "Agent 01", title: "Assistant Personnel IA", desc: "Centralise les demandes et automatise les tâches récurrentes du quotidien.", result: "Gagne du temps sur les opérations à faible valeur.", href: "/agent/general", link: "Ouvrir la page →", accent: "#8B7CF6", dim: "rgba(139,124,246,0.12)", border: "rgba(139,124,246,0.22)" },
@@ -47,6 +55,7 @@ const copy = {
     calendlyText: "Découvre comment l'automatisation IA peut faire gagner du temps et récupérer des opportunités perdues.",
     pricingTitle: "Offres",
     pricingText: "Une manière simple de présenter tes automatisations comme des offres concrètes et vendables.",
+    planTrustLine: "All plans include onboarding, setup guidance, and access to the selected AI automation services.",
     pricing: [
       { name: "Starter", price: "À partir de 299€", description: "Une automatisation ciblée pour un besoin précis.", bullets: ["1 système IA", "1 cas d'usage principal", "Setup de base"], featured: false },
       { name: "Growth", price: "À partir de 799€", description: "Plus de logique, plus d'intégrations, plus d'impact business.", bullets: ["1 à 2 systèmes IA", "Connexions outils métier", "Optimisé pour conversion / gain de temps"], featured: true },
@@ -54,6 +63,16 @@ const copy = {
     ],
     bottomTitle: "Prêt à automatiser un vrai workflow ?",
     bottomText: "Choisis le système qui correspond à ton besoin ou réserve une démo pour identifier l'automatisation la plus rentable.",
+    receiveTitle: "What customers receive",
+    receiveText: "Each service is delivered as a configured AI automation system, not just advice or a one-time file.",
+    receiveItems: [
+      "AI system setup and onboarding",
+      "Access to automation dashboard",
+      "Monthly support depending on plan",
+      "Ongoing optimization and maintenance",
+      "Business workflow integration",
+      "Customer communication automation",
+    ],
     outLabel: "Résultat",
   },
   en: {
@@ -68,6 +87,14 @@ const copy = {
       { num: "7", sup: "×", label: "More likely to convert when replied within the first hour", sub: "Lead response speed" },
       { num: "60", sup: "%", label: "Of team time spent on tasks that don't require human judgment", sub: "Automation potential" },
       { num: "24", sup: "/7", label: "Your AI agents never sleep, never miss a message, never burn out", sub: "Always on" },
+    ],
+    providesTitle: "What BoostMyBusinesses provides",
+    providesText: "BoostMyBusinesses provides AI-powered automation tools for businesses, including AI call assistants, WhatsApp lead automation, customer support automation, and creative workflow automation.",
+    providesCards: [
+      { title: "AI Call Assistants", what: "Answer phone calls, collect customer details, and route requests.", helps: "Built for restaurants, service teams, and appointment-based businesses.", outcome: "Improves response speed and reduces missed calls." },
+      { title: "WhatsApp & Lead Automation", what: "Respond to incoming leads, qualify intent, and trigger follow-up flows.", helps: "Helps teams that receive leads through WhatsApp, forms, or social channels.", outcome: "Improves lead capture and follow-up consistency." },
+      { title: "Customer Support Automation", what: "Handles frequent questions and prepares clean handoffs for complex issues.", helps: "Useful for service businesses, support teams, and online operations.", outcome: "Reduces support load and improves customer communication." },
+      { title: "Business Workflow Automation", what: "Connects tools, dashboards, notifications, and recurring operational tasks.", helps: "Designed for businesses with manual processes across multiple systems.", outcome: "Improves operational speed, tracking, and reliability." },
     ],
     agentsTitle: "AI systems ready for real operations",
     agents: [
@@ -92,6 +119,7 @@ const copy = {
     calendlyText: "See how AI automation can save time and recover missed opportunities.",
     pricingTitle: "Pricing",
     pricingText: "A simple way to present your automations as real offers clients can understand and buy.",
+    planTrustLine: "All plans include onboarding, setup guidance, and access to the selected AI automation services.",
     pricing: [
       { name: "Starter", price: "From €299", description: "One focused automation for one clear business need.", bullets: ["1 AI system", "1 main use case", "Basic setup"], featured: false },
       { name: "Growth", price: "From €799", description: "More logic, more integrations, more business impact.", bullets: ["1 to 2 AI systems", "Business tool integrations", "Optimized for conversion / time savings"], featured: true },
@@ -99,6 +127,16 @@ const copy = {
     ],
     bottomTitle: "Ready to automate a real workflow?",
     bottomText: "Choose the system that matches your need or book a demo to identify the highest-value automation.",
+    receiveTitle: "What customers receive",
+    receiveText: "Each service is delivered as a configured AI automation system, not just advice or a one-time file.",
+    receiveItems: [
+      "AI system setup and onboarding",
+      "Access to automation dashboard",
+      "Monthly support depending on plan",
+      "Ongoing optimization and maintenance",
+      "Business workflow integration",
+      "Customer communication automation",
+    ],
     outLabel: "Outcome",
   },
 };
@@ -262,6 +300,38 @@ export default function LandingPage() {
 
       <hr style={S.divider} />
 
+      {/* -- WHAT WE PROVIDE -- */}
+      <section>
+        <div className="landing-section-intro" style={{ marginBottom: 30 }}>
+          <span style={S.eyebrow}>Services</span>
+          <h2 style={S.sectionTitle}>{t.providesTitle}</h2>
+          <p style={{ ...S.sectionSubtitle, maxWidth: 760 }}>{t.providesText}</p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+          {t.providesCards.map((item) => (
+            <article
+              key={item.title}
+              className="landing-card"
+              style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: "22px 20px", minHeight: 240, transition: "border-color 200ms, transform 200ms" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(124,92,255,0.26)"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+            >
+              <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 17, fontWeight: 800, color: "#f0f0ef", lineHeight: 1.25, marginBottom: 12 }}>
+                {item.title}
+              </h3>
+              {[item.what, item.helps, item.outcome].map((line) => (
+                <p key={line} style={{ fontSize: 13.5, color: "rgba(255,255,255,0.56)", lineHeight: 1.62, marginBottom: 10 }}>
+                  {line}
+                </p>
+              ))}
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <hr style={S.dividerSection} />
+
       {/* ── AGENTS ── */}
       <section>
         <div className="landing-section-intro" style={{ marginBottom: 36 }}>
@@ -423,6 +493,27 @@ export default function LandingPage() {
 
       <hr style={S.dividerSection} />
 
+      {/* -- CUSTOMER DELIVERABLES -- */}
+      <section>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 22, alignItems: "start" }}>
+          <div>
+            <span style={S.eyebrow}>Transparency</span>
+            <h2 style={S.sectionTitle}>{t.receiveTitle}</h2>
+            <p style={S.sectionSubtitle}>{t.receiveText}</p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            {t.receiveItems.map((item) => (
+              <div key={item} style={{ display: "flex", alignItems: "flex-start", gap: 10, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)", borderRadius: 14, padding: "13px 14px" }}>
+                <span style={{ width: 17, height: 17, borderRadius: "50%", background: "rgba(124,92,255,0.16)", border: "1px solid rgba(124,92,255,0.30)", display: "flex", alignItems: "center", justifyContent: "center", color: "#a594f9", fontSize: 10, flexShrink: 0, marginTop: 2 }}>✓</span>
+                <span style={{ fontSize: 13.5, color: "rgba(255,255,255,0.70)", lineHeight: 1.5 }}>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <hr style={S.dividerSection} />
+
       {/* ── CALENDLY ── */}
       <section id="book-demo">
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -453,6 +544,9 @@ export default function LandingPage() {
           <span style={S.eyebrow}>Pricing</span>
           <h2 style={S.sectionTitle}>{t.pricingTitle}</h2>
           <p style={S.sectionSubtitle}>{t.pricingText}</p>
+          <p style={{ marginTop: 12, fontSize: 13.5, color: "rgba(255,255,255,0.60)", lineHeight: 1.65, maxWidth: 680 }}>
+            {t.planTrustLine}
+          </p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, alignItems: "start" }}>
           {t.pricing.map((plan) => (

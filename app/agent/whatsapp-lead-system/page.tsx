@@ -60,6 +60,16 @@ const copy = {
       "Intégration lien de réservation (Calendly)",
       "Architecture prête pour mémoire",
     ],
+    clarityTitle: "What the WhatsApp Lead System does",
+    clarityText:
+      "The WhatsApp Lead System helps businesses automatically capture, qualify, and respond to inbound leads through WhatsApp. It can route conversations, organize lead data, and support faster follow-up workflows.",
+    clarityDeliverables: [
+      "WhatsApp lead capture flow",
+      "automated qualification logic",
+      "lead routing and notification workflows",
+      "CRM or dashboard integration when applicable",
+      "setup and onboarding support",
+    ],
     demoTitle: "Démo visuelle",
     demoText: "Clique sur une capture pour l\u2019ouvrir en grand et mieux visualiser le workflow, les alertes et l\u2019expérience utilisateur.",
     workflowTitle: "Comment le système fonctionne",
@@ -139,6 +149,16 @@ const copy = {
       "CRM-ready data structure",
       "Booking link integration (Calendly)",
       "Memory-ready architecture",
+    ],
+    clarityTitle: "What the WhatsApp Lead System does",
+    clarityText:
+      "The WhatsApp Lead System helps businesses automatically capture, qualify, and respond to inbound leads through WhatsApp. It can route conversations, organize lead data, and support faster follow-up workflows.",
+    clarityDeliverables: [
+      "WhatsApp lead capture flow",
+      "automated qualification logic",
+      "lead routing and notification workflows",
+      "CRM or dashboard integration when applicable",
+      "setup and onboarding support",
     ],
     demoTitle: "Visual demo",
     demoText: "Click any screenshot to open it larger and inspect the workflow, alerts, and end-user experience.",
@@ -543,6 +563,28 @@ export default function WhatsAppLeadSystemPage() {
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
                 >
                   <p style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55 }}>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <hr style={divider} />
+
+        {/* ── SERVICE CLARITY ───────────────────────────── */}
+        <section style={section}>
+          <div style={container}>
+            <SectionTitle eyebrow="Deliverables" title={t.clarityTitle} text={t.clarityText} />
+            <div className="mobile-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 32 }}>
+              {t.clarityDeliverables.map((item) => (
+                <div
+                  className="responsive-info-card"
+                  key={item}
+                  style={{ ...cardBase, padding: "16px 18px" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}
+                >
+                  <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.72)", lineHeight: 1.6 }}>{item}</p>
                 </div>
               ))}
             </div>

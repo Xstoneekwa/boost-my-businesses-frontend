@@ -45,7 +45,7 @@ const COPY = {
     legal: "Légal",
     privacy: "Politique de confidentialité",
     terms: "Conditions d'utilisation",
-    mentions: "Mentions légales",
+    refund: "Refund policy",
     copy: "© 2025 BoostMyBusinesses. Tous droits réservés.",
     made: "Fait avec IA — conçu pour les humains.",
     pricing: "Tarifs",
@@ -59,7 +59,7 @@ const COPY = {
     legal: "Legal",
     privacy: "Privacy policy",
     terms: "Terms of service",
-    mentions: "Mentions légales",
+    refund: "Refund policy",
     copy: "© 2025 BoostMyBusinesses. All rights reserved.",
     made: "Made with AI — built for humans.",
     pricing: "Pricing",
@@ -95,6 +95,7 @@ export default function NavbarFooter({
   const t = COPY[displayLang];
   const usesLocalPricing = agent === "restaurant";
   const pricingHref = usesLocalPricing ? "#pricing" : "/#pricing";
+  const footerPricingHref = "/#pricing";
   const scrollToPricing = () => {
     document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -419,7 +420,7 @@ export default function NavbarFooter({
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
-                  { label: t.pricing, href: pricingHref },
+                  { label: t.pricing, href: footerPricingHref },
                   { label: t.about, href: "/about" },
                   { label: t.contact, href: "/contact" },
                 ].map((item) => (
@@ -445,7 +446,7 @@ export default function NavbarFooter({
                 {[
                   { label: t.privacy, href: "/privacy-policy" },
                   { label: t.terms, href: "/terms-and-conditions" },
-                  { label: "Refund policy", href: "/refund-policy" },
+                  { label: t.refund, href: "/refund-policy" },
                 ].map((item) => (
                   <Link
                     key={item.href}

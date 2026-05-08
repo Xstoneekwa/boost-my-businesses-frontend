@@ -66,6 +66,31 @@ const copy = {
     thinking: "L'assistant réfléchit...",
     emptyState: "Commence une conversation, choisis un agent et envoie une demande.",
     suggestionsTitle: "Suggestions rapides",
+    productTitle: "What the General AI Assistant does",
+    productText:
+      "The General AI Assistant helps businesses automate repetitive communication, internal workflows, customer requests, and operational tasks using AI-powered automation workflows tailored to the business use case.",
+    productSupportText:
+      "This solution can be adapted for different operational needs, including customer support, internal assistance, workflow routing, lead handling, and business process automation.",
+    receiveTitle: "What customers receive",
+    receiveItems: [
+      "AI workflow configuration",
+      "Business process automation setup",
+      "Customer communication automation",
+      "Internal workflow assistance",
+      "Dashboard or workflow access depending on use case",
+      "Onboarding and testing support",
+      "Ongoing optimization depending on plan",
+    ],
+    onboardingTitle: "How onboarding works",
+    onboardingText:
+      "Each implementation is configured based on the business workflow and operational needs. Setup includes onboarding, workflow configuration, testing, and optimization.",
+    onboardingSteps: [
+      { title: "Business workflow analysis", text: "We identify the repetitive tasks, routing rules, and operational handoffs the assistant should support." },
+      { title: "AI workflow configuration", text: "The assistant logic, prompts, workflows, and integrations are configured around the selected business use case." },
+      { title: "Deployment and optimization", text: "The workflow is tested, deployed, and refined so it can support day-to-day business operations." },
+    ],
+    trustNote: "BoostMyBusinesses provides AI-powered automation tools for business operations and customer communication workflows.",
+    serviceNote: "Services may include setup, onboarding, workflow configuration, and recurring support depending on the selected solution.",
     conversations: "Conversations",
     noConversations: "Aucune conversation pour le moment",
     agentLabel: "Navigation agents",
@@ -95,10 +120,14 @@ const copy = {
     },
     footerTagline: "Des agents IA pour de vrais workflows business.",
     footerAgents: "Agents",
+    footerCompany: "Company",
+    footerPricing: "Pricing",
+    footerAbout: "About",
+    footerContact: "Contact",
     footerLegal: "Légal",
     footerPrivacy: "Politique de confidentialité",
     footerTerms: "Conditions d'utilisation",
-    footerMentions: "Mentions légales",
+    footerRefund: "Refund policy",
     footerCopy: "© 2025 BoostMyBusinesses. Tous droits réservés.",
     footerMade: "Fait avec IA — conçu pour les humains.",
   },
@@ -121,6 +150,31 @@ const copy = {
     thinking: "The assistant is thinking...",
     emptyState: "Start a conversation, choose an agent, and send a request.",
     suggestionsTitle: "Quick suggestions",
+    productTitle: "What the General AI Assistant does",
+    productText:
+      "The General AI Assistant helps businesses automate repetitive communication, internal workflows, customer requests, and operational tasks using AI-powered automation workflows tailored to the business use case.",
+    productSupportText:
+      "This solution can be adapted for different operational needs, including customer support, internal assistance, workflow routing, lead handling, and business process automation.",
+    receiveTitle: "What customers receive",
+    receiveItems: [
+      "AI workflow configuration",
+      "Business process automation setup",
+      "Customer communication automation",
+      "Internal workflow assistance",
+      "Dashboard or workflow access depending on use case",
+      "Onboarding and testing support",
+      "Ongoing optimization depending on plan",
+    ],
+    onboardingTitle: "How onboarding works",
+    onboardingText:
+      "Each implementation is configured based on the business workflow and operational needs. Setup includes onboarding, workflow configuration, testing, and optimization.",
+    onboardingSteps: [
+      { title: "Business workflow analysis", text: "We identify the repetitive tasks, routing rules, and operational handoffs the assistant should support." },
+      { title: "AI workflow configuration", text: "The assistant logic, prompts, workflows, and integrations are configured around the selected business use case." },
+      { title: "Deployment and optimization", text: "The workflow is tested, deployed, and refined so it can support day-to-day business operations." },
+    ],
+    trustNote: "BoostMyBusinesses provides AI-powered automation tools for business operations and customer communication workflows.",
+    serviceNote: "Services may include setup, onboarding, workflow configuration, and recurring support depending on the selected solution.",
     conversations: "Conversations",
     noConversations: "No conversations yet",
     agentLabel: "Agent navigation",
@@ -150,10 +204,14 @@ const copy = {
     },
     footerTagline: "AI agents built for real business workflows.",
     footerAgents: "Agents",
+    footerCompany: "Company",
+    footerPricing: "Pricing",
+    footerAbout: "About",
+    footerContact: "Contact",
     footerLegal: "Legal",
     footerPrivacy: "Privacy policy",
     footerTerms: "Terms of service",
-    footerMentions: "Mentions légales",
+    footerRefund: "Refund policy",
     footerCopy: "© 2025 BoostMyBusinesses. All rights reserved.",
     footerMade: "Made with AI — built for humans.",
   },
@@ -198,7 +256,15 @@ export default function Page() {
         }
       } catch {}
     }
-    const first = createConversation("general", copy[storedLang === "fr" ? "fr" : "en"].welcome);
+    const initialLang = storedLang === "fr" ? "fr" : "en";
+    const first: Conversation = {
+      id: uid(),
+      title: initialLang === "fr" ? "Nouvelle conversation" : "New conversation",
+      agent: "general",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [{ id: uid(), role: "assistant", content: copy[initialLang].welcome, createdAt: Date.now() }],
+    };
     setConversations([first]);
     setActiveId(first.id);
   }, []);
@@ -294,7 +360,7 @@ export default function Page() {
     }
   }
 
-  function usePrompt(prompt: string) { setInput(prompt); }
+  function applyPrompt(prompt: string) { setInput(prompt); }
   function typingDots() { return ".".repeat(typingPhase === 0 ? 1 : typingPhase); }
 
   return (
@@ -429,6 +495,22 @@ export default function Page() {
               </p>
             </div>
 
+            {/* Product explanation */}
+            <section style={{ maxWidth: 820, margin: "0 auto", width: "100%", border: `1px solid ${AC_BORDER}`, borderRadius: 20, background: "linear-gradient(135deg, rgba(139,124,246,0.08), rgba(255,255,255,0.025))", padding: "20px 22px" }}>
+              <div style={{ color: AC_TEXT, fontSize: 10, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 8 }}>
+                Product
+              </div>
+              <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.25rem, 2.3vw, 1.75rem)", fontWeight: 800, color: "#f0f0ef", marginBottom: 10, lineHeight: 1.18 }}>
+                {t.productTitle}
+              </h2>
+              <p style={{ color: "#b5c1df", fontSize: 14, lineHeight: 1.7, maxWidth: 720, marginBottom: 10 }}>
+                {t.productText}
+              </p>
+              <p style={{ color: "#8B9BC4", fontSize: 13.5, lineHeight: 1.7, maxWidth: 720 }}>
+                {t.productSupportText}
+              </p>
+            </section>
+
             {/* Stats */}
             <div className="assistant-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 820, margin: "0 auto", width: "100%" }}>
               {t.stats.map((stat) => (
@@ -441,12 +523,66 @@ export default function Page() {
               ))}
             </div>
 
+            {/* Customer deliverables */}
+            <section style={{ maxWidth: 820, margin: "0 auto", width: "100%", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, background: "rgba(255,255,255,0.025)", padding: "18px 20px" }}>
+              <div style={{ color: AC_TEXT, fontSize: 10, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 8 }}>
+                Deliverables
+              </div>
+              <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.2rem, 2.2vw, 1.6rem)", fontWeight: 800, color: "#f0f0ef", marginBottom: 14 }}>
+                {t.receiveTitle}
+              </h2>
+              <div className="assistant-prompts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                {t.receiveItems.map((item) => (
+                  <div key={item} style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.72)", borderRadius: 14, padding: "12px 13px", lineHeight: 1.5, fontSize: 12.5, minHeight: 58 }}>
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Onboarding */}
+            <section style={{ maxWidth: 820, margin: "0 auto", width: "100%", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, background: "rgba(255,255,255,0.025)", padding: "18px 20px" }}>
+              <div style={{ color: AC_TEXT, fontSize: 10, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 8 }}>
+                Setup
+              </div>
+              <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: "clamp(1.2rem, 2.2vw, 1.6rem)", fontWeight: 800, color: "#f0f0ef", marginBottom: 8 }}>
+                {t.onboardingTitle}
+              </h2>
+              <p style={{ color: "#8B9BC4", fontSize: 13.5, lineHeight: 1.7, maxWidth: 700, marginBottom: 16 }}>
+                {t.onboardingText}
+              </p>
+              <div className="assistant-prompts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                {t.onboardingSteps.map((step, index) => (
+                  <div key={step.title} style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", borderRadius: 14, padding: "13px 14px", minHeight: 112 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: AC_DIM, border: `1px solid ${AC_BORDER}`, color: AC_TEXT, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
+                      {index + 1}
+                    </div>
+                    <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 13.5, fontWeight: 800, color: "#f0f0ef", lineHeight: 1.25, marginBottom: 7 }}>
+                      {step.title}
+                    </h3>
+                    <p style={{ color: "rgba(255,255,255,0.56)", fontSize: 12.5, lineHeight: 1.55 }}>
+                      {step.text}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Trust notes */}
+            <section style={{ maxWidth: 820, margin: "0 auto", width: "100%", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, background: "rgba(255,255,255,0.02)", padding: "14px 16px" }}>
+              {[t.trustNote, t.serviceNote].map((note) => (
+                <p key={note} style={{ color: "rgba(255,255,255,0.58)", fontSize: 12.8, lineHeight: 1.65, marginBottom: note === t.trustNote ? 6 : 0 }}>
+                  {note}
+                </p>
+              ))}
+            </section>
+
             {/* Suggestions */}
             <div style={{ maxWidth: 820, margin: "0 auto", width: "100%" }}>
               <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 10, fontWeight: 500, marginBottom: 9, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.09em" }}>{t.suggestionsTitle}</div>
               <div className="assistant-prompts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
                 {t.prompts[activeConversation?.agent ?? "general"].map((prompt) => (
-                  <button key={prompt} onClick={() => usePrompt(prompt)} style={{ textAlign: "left", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", color: "#edf2ff", borderRadius: 14, padding: "12px 13px", cursor: "pointer", lineHeight: 1.45, fontSize: 12.5, transition: "all 150ms", minHeight: 68 }}
+                  <button key={prompt} onClick={() => applyPrompt(prompt)} style={{ textAlign: "left", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", color: "#edf2ff", borderRadius: 14, padding: "12px 13px", cursor: "pointer", lineHeight: 1.45, fontSize: 12.5, transition: "all 150ms", minHeight: 68 }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = AC_DIM; (e.currentTarget as HTMLElement).style.borderColor = AC_BORDER; (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.03)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; (e.currentTarget as HTMLElement).style.transform = "none"; }}>
                     {prompt}
@@ -490,7 +626,7 @@ export default function Page() {
 
           {/* ── FOOTER ── */}
           <footer style={{ borderTop: "1px solid rgba(255,255,255,0.07)", padding: "24px 28px 18px", background: "rgba(255,255,255,0.01)" }}>
-            <div className="assistant-footer-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 32, marginBottom: 20 }}>
+            <div className="assistant-footer-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 32, marginBottom: 20 }}>
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
                   <span style={{ width: 22, height: 22, borderRadius: 4, background: AC, color: "#000", fontFamily: "'Syne', sans-serif", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>B</span>
@@ -511,14 +647,34 @@ export default function Page() {
                 </div>
               </div>
               <div>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "rgba(255,255,255,0.24)", marginBottom: 12 }}>{t.footerLegal}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "rgba(255,255,255,0.24)", marginBottom: 12 }}>{t.footerCompany}</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {[t.footerPrivacy, t.footerTerms, t.footerMentions].map((item) => (
-                    <span key={item} style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", cursor: "pointer", transition: "color 150ms" }}
+                  {[
+                    { label: t.footerPricing, href: "/#pricing" },
+                    { label: t.footerAbout, href: "/about" },
+                    { label: t.footerContact, href: "/contact" },
+                  ].map((item) => (
+                    <Link key={item.href} href={item.href} style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", textDecoration: "none", transition: "color 150ms" }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f0f0ef"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.45)"; }}>
-                      {item}
-                    </span>
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "rgba(255,255,255,0.24)", marginBottom: 12 }}>{t.footerLegal}</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {[
+                    { label: t.footerPrivacy, href: "/privacy-policy" },
+                    { label: t.footerTerms, href: "/terms-and-conditions" },
+                    { label: t.footerRefund, href: "/refund-policy" },
+                  ].map((item) => (
+                    <Link key={item.href} href={item.href} style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", textDecoration: "none", transition: "color 150ms" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f0f0ef"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.45)"; }}>
+                      {item.label}
+                    </Link>
                   ))}
                 </div>
               </div>
