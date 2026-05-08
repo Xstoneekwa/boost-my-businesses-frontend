@@ -1,0 +1,2087 @@
+"use client";
+
+import type { FormEvent } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
+
+type InstagramDashboardButtonsProps = {
+  accountId: string;
+  username: string;
+  mode?: "active" | "archived" | "trashed";
+};
+
+type ConfigValue = string | number | boolean;
+type InstagramSettings = Record<string, ConfigValue> & { account_id: string };
+type InstagramFilters = Record<string, ConfigValue> & { account_id: string };
+type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
+type AccountTemplate = Record<string, unknown> & {
+  id: string;
+  name: string;
+  description?: string | null;
+  template_type: "settings" | "filters" | "full";
+  is_default?: boolean;
+};
+
+type StatsRow = {
+  id: string;
+  worker_type?: string;
+  status?: string;
+  created_at?: string;
+  last_run_at?: string;
+  latest_target_username?: string;
+  session_time: string;
+  followers: number;
+  followings: number;
+  follow_back_enabled: boolean;
+  like_back_enabled: boolean;
+  follow: number;
+  unfollow: number;
+  like: number;
+  comment: number;
+  dm: number;
+  watch: number;
+  total_interactions: number;
+  total_ms?: number;
+  typing_command_ms?: number;
+  row_detect_ms?: number;
+  row_tap_command_ms?: number;
+  profile_transition_wait_ms?: number;
+  profile_verify_ms?: number;
+  warm_session_used?: boolean;
+  force_stop_used?: boolean;
+  xml_fetches?: number;
+  recovery_used?: boolean;
+  exit_code?: string;
+};
+
+type LogRow = {
+  id: string;
+  account_id: string;
+  created_at: string;
+  run_id: string;
+  target_username: string;
+  action_type: string;
+  status: string;
+  message: string;
+  worker_type?: string;
+  payload?: unknown;
+  performance_summary?: unknown;
+  metadata?: unknown;
+};
+
+type Panel = "settings" | "stats" | "logs" | "filters" | null;
+type SettingsTab = "General" | "Schedule" | "Actions" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Device" | "Advanced";
+type FieldType = "text" | "password" | "time" | "date" | "number" | "toggle" | "textarea" | "select";
+type FieldSpec = {
+  key: string;
+  label: string;
+  type: FieldType;
+  helper?: string;
+  options?: string[];
+  min?: number;
+  step?: number;
+};
+
+type AccountTool = {
+  label:
+    | "Stats"
+    | "Logs"
+    | "Run manually"
+    | "Stop run"
+    | "Settings"
+    | "Filters"
+    | "Targets"
+    | "Archive"
+    | "Move to trash"
+    | "Restore account"
+    | "Permanent delete";
+  Icon: LucideIcon;
+  tone?: "success" | "neutral" | "danger";
+  disabled?: boolean;
+};
+
+type Confirmation = {
+  title: string;
+  description: string;
+  confirmTone: "primary" | "danger";
+  onConfirm: () => void | Promise<void>;
+};
+type TemplateDialog = { kind: "save" | "apply"; source: "settings" | "filters" } | null;
+type ExportMenu = "stats" | "logs" | null;
+type LogExportScope = "all" | "latest-run" | "latest-python-run";
+
+const activeAccountTools: AccountTool[] = [
+  { label: "Stats", Icon: BarChart3 },
+  { label: "Logs", Icon: FileText },
+  { label: "Run manually", Icon: Play, tone: "success" },
+  { label: "Stop run", Icon: Square, tone: "danger" },
+  { label: "Settings", Icon: Settings, tone: "neutral" },
+  { label: "Filters", Icon: Funnel },
+  { label: "Targets", Icon: Users, tone: "neutral" },
+  { label: "Archive", Icon: Archive },
+  { label: "Move to trash", Icon: Trash2, tone: "danger" },
+];
+
+const archivedAccountTools: AccountTool[] = [
+  { label: "Stats", Icon: BarChart3 },
+  { label: "Logs", Icon: FileText },
+  { label: "Settings", Icon: Settings, tone: "neutral" },
+  { label: "Targets", Icon: Users, tone: "neutral" },
+  { label: "Restore account", Icon: RotateCcw, tone: "success" },
+  { label: "Move to trash", Icon: Trash2, tone: "danger" },
+];
+
+const trashedAccountTools: AccountTool[] = [
+  { label: "Stats", Icon: BarChart3 },
+  { label: "Logs", Icon: FileText },
+  { label: "Targets", Icon: Users, tone: "neutral" },
+  { label: "Restore account", Icon: RotateCcw, tone: "success" },
+  { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
+];
+
+const settingsTabs: SettingsTab[] = ["General", "Schedule", "Actions", "DM", "Followback", "Sources", "Filters", "Safety", "Device", "Advanced"];
+
+const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
+  General: [
+    { key: "username", label: "Username", type: "text" },
+    { key: "display_name", label: "Display name", type: "text" },
+    { key: "device_name", label: "Device name", type: "text" },
+    { key: "device_udid", label: "Device UDID", type: "text" },
+    { key: "email", label: "Email", type: "text" },
+    { key: "password", label: "Password", type: "password" },
+    { key: "two_fa_enabled", label: "Two-factor enabled", type: "toggle" },
+    { key: "app_package", label: "App package", type: "text" },
+    { key: "cloned_app_mode", label: "Cloned app mode", type: "toggle" },
+    { key: "account_status", label: "Account status", type: "select", options: ["active", "paused", "review", "disabled"] },
+    { key: "campaign_name", label: "Campaign name", type: "text" },
+  ],
+  Schedule: [
+    { key: "timeslot_start", label: "Timeslot start", type: "time" },
+    { key: "timeslot_end", label: "Timeslot end", type: "time" },
+    { key: "total_sessions", label: "Total sessions", type: "number", min: 0 },
+    { key: "stop_interactions_after_minutes", label: "Stop after minutes", type: "number", min: 0 },
+    { key: "timeout_startup_seconds", label: "Startup timeout seconds", type: "number", min: 0 },
+    { key: "pause_account_days", label: "Pause account days", type: "number", min: 0 },
+    { key: "pause_account_until", label: "Pause account until", type: "date" },
+    { key: "randomize_start_enabled", label: "Randomize start", type: "toggle" },
+    { key: "speed_multiplier", label: "Speed multiplier", type: "number", min: 0, step: 0.1 },
+  ],
+  Actions: [
+    { key: "follow_enabled", label: "Follow enabled", type: "toggle" },
+    { key: "follow_limit", label: "Follow limit", type: "number", min: 0 },
+    { key: "total_follows_limit", label: "Total follows limit", type: "number", min: 0 },
+    { key: "follow_percentage", label: "Follow percentage", type: "number", min: 0 },
+    { key: "unfollow_enabled", label: "Unfollow enabled", type: "toggle" },
+    { key: "total_unfollows_limit", label: "Total unfollows limit", type: "number", min: 0 },
+    { key: "unfollow_delay_days", label: "Unfollow delay days", type: "number", min: 0 },
+    { key: "like_enabled", label: "Like enabled", type: "toggle" },
+    { key: "total_likes_limit", label: "Total likes limit", type: "number", min: 0 },
+    { key: "likes_per_follow_min", label: "Likes per follow min", type: "number", min: 0 },
+    { key: "likes_per_follow_max", label: "Likes per follow max", type: "number", min: 0 },
+    { key: "likes_percentage", label: "Likes percentage", type: "number", min: 0 },
+    { key: "story_watch_enabled", label: "Story watch enabled", type: "toggle" },
+    { key: "watch_photo_time_min", label: "Watch photo time min", type: "number", min: 0 },
+    { key: "watch_photo_time_max", label: "Watch photo time max", type: "number", min: 0 },
+    { key: "watch_video_time_min", label: "Watch video time min", type: "number", min: 0 },
+    { key: "watch_video_time_max", label: "Watch video time max", type: "number", min: 0 },
+  ],
+  DM: [
+    { key: "welcome_dm_enabled", label: "Welcome DM enabled", type: "toggle" },
+    { key: "welcome_dm_message", label: "Welcome DM message", type: "textarea" },
+    { key: "cold_dm_enabled", label: "Cold DM enabled", type: "toggle" },
+    { key: "cold_dm_message", label: "Cold DM message", type: "textarea" },
+    { key: "max_dm_per_run", label: "Max DMs per run", type: "number", min: 0 },
+    { key: "max_consecutive_dms", label: "Max consecutive DMs", type: "number", min: 0 },
+    { key: "check_chat_before_welcoming", label: "Check chat before welcoming", type: "toggle" },
+    { key: "send_enabled", label: "Send enabled", type: "toggle" },
+    { key: "safe_review_mode", label: "Safe review mode", type: "toggle" },
+  ],
+  Followback: [
+    { key: "followback_on_followers", label: "Followback on followers", type: "toggle" },
+    { key: "max_followback_skips", label: "Max followback skips", type: "number", min: 0 },
+    { key: "max_followback_ignore", label: "Max followback ignore", type: "number", min: 0 },
+    { key: "sort_followers_mode", label: "Sort followers mode", type: "select", options: ["recent", "oldest", "random"] },
+    { key: "unfollow_non_followers", label: "Unfollow non-followers", type: "toggle" },
+    { key: "unfollow_any", label: "Unfollow any", type: "toggle" },
+    { key: "unfollow_skip_limit", label: "Unfollow skip limit", type: "number", min: 0 },
+    { key: "mute_posts_after_follow", label: "Mute posts after follow", type: "toggle" },
+    { key: "mute_stories_after_follow", label: "Mute stories after follow", type: "toggle" },
+    { key: "do_follows_first", label: "Do follows first", type: "toggle" },
+  ],
+  Sources: [
+    { key: "source_accounts", label: "Source accounts", type: "textarea" },
+    { key: "truncate_sources_min", label: "Truncate sources min", type: "number", min: 0 },
+    { key: "truncate_sources_max", label: "Truncate sources max", type: "number", min: 0 },
+    { key: "delete_interacted_users", label: "Delete interacted users", type: "toggle" },
+    { key: "change_source_if_crash", label: "Change source if crash", type: "toggle" },
+    { key: "skipped_posts_limit", label: "Skipped posts limit", type: "number", min: 0 },
+    { key: "fling_when_skipped", label: "Fling when skipped", type: "toggle" },
+  ],
+  Safety: [
+    {
+      key: "dry_run_enabled",
+      label: "Dry run enabled",
+      type: "toggle",
+      helper: "Enabled runs are safe dry runs only. Disabled allows real Appium actions later.",
+    },
+    { key: "total_interactions_limit", label: "Total interactions limit", type: "number", min: 0 },
+    { key: "total_successful_interactions_limit", label: "Total successful interactions limit", type: "number", min: 0 },
+    { key: "interactions_count", label: "Interactions count", type: "number", min: 0 },
+    { key: "interact_percentage", label: "Interact percentage", type: "number", min: 0 },
+    { key: "end_if_follow_limit_reached", label: "End if follow limit reached", type: "toggle" },
+    { key: "end_if_dm_limit_reached", label: "End if DM limit reached", type: "toggle" },
+    { key: "end_if_likes_limit_reached", label: "End if likes limit reached", type: "toggle" },
+    { key: "max_actions_per_hour", label: "Max actions per hour", type: "number", min: 0 },
+    { key: "max_actions_per_day", label: "Max actions per day", type: "number", min: 0 },
+    { key: "random_delay_min_seconds", label: "Random delay min seconds", type: "number", min: 0 },
+    { key: "random_delay_max_seconds", label: "Random delay max seconds", type: "number", min: 0 },
+    { key: "random_pause_every_actions", label: "Random pause every actions", type: "number", min: 0 },
+    { key: "long_break_after_interactions", label: "Long break after interactions", type: "number", min: 0 },
+    { key: "long_break_min_minutes", label: "Long break min minutes", type: "number", min: 0 },
+    { key: "long_break_max_minutes", label: "Long break max minutes", type: "number", min: 0 },
+    { key: "warmup_mode", label: "Warmup mode", type: "toggle" },
+    { key: "stop_on_suspicious_screen", label: "Stop on suspicious screen", type: "toggle" },
+    { key: "stop_on_login_challenge", label: "Stop on login challenge", type: "toggle" },
+    { key: "stop_on_checkpoint", label: "Stop on checkpoint", type: "toggle" },
+    { key: "stop_on_repeated_navigation_failure", label: "Stop on repeated navigation failure", type: "toggle" },
+    { key: "max_repeated_errors", label: "Max repeated errors", type: "number", min: 0 },
+  ],
+  Device: [
+    { key: "disable_block_detection", label: "Disable block detection", type: "toggle" },
+    { key: "relog_after_block", label: "Relog after block", type: "toggle" },
+    { key: "relog_delay_seconds", label: "Relog delay seconds", type: "number", min: 0 },
+    { key: "rotate_ip", label: "Rotate IP", type: "toggle" },
+    { key: "restart_uiautomator2", label: "Restart UIAutomator2", type: "toggle" },
+    { key: "close_apps", label: "Close apps", type: "toggle" },
+    { key: "close_apps_device", label: "Close apps device", type: "toggle" },
+    { key: "log_out_all_before_session", label: "Log out all before session", type: "toggle" },
+    { key: "total_crashes_limit", label: "Total crashes limit", type: "number", min: 0 },
+    { key: "screen_sleep", label: "Screen sleep", type: "toggle" },
+    { key: "screen_record", label: "Screen record", type: "toggle" },
+    { key: "debug_mode", label: "Debug mode", type: "toggle" },
+  ],
+  Advanced: [
+    { key: "current_run_status", label: "Current run status", type: "select", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
+    { key: "last_error", label: "Last error", type: "textarea" },
+    { key: "last_successful_action", label: "Last successful action", type: "text" },
+    { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle" },
+  ],
+};
+
+const filterFields: FieldSpec[] = [
+  { key: "disable_filters", label: "Disable filters", type: "toggle" },
+  { key: "skip_followers", label: "Skip followers", type: "toggle" },
+  { key: "skip_following", label: "Skip following", type: "toggle" },
+  { key: "skip_business_profiles", label: "Skip business profiles", type: "toggle" },
+  { key: "skip_non_business_profiles", label: "Skip non-business profiles", type: "toggle" },
+  { key: "follow_private_profiles", label: "Follow private profiles", type: "toggle" },
+  { key: "follow_only_private_profiles", label: "Follow only private profiles", type: "toggle" },
+  { key: "dm_private_profiles", label: "DM private profiles", type: "toggle" },
+  { key: "min_followers", label: "Minimum followers", type: "number", min: 0 },
+  { key: "max_followers", label: "Maximum followers", type: "number", min: 0 },
+  { key: "min_following", label: "Minimum following", type: "number", min: 0 },
+  { key: "max_following", label: "Maximum following", type: "number", min: 0 },
+  { key: "min_posts", label: "Minimum posts", type: "number", min: 0 },
+  { key: "blacklisted_words", label: "Blacklisted words", type: "textarea" },
+  { key: "mandatory_words", label: "Mandatory words", type: "textarea" },
+  { key: "whitelist_words", label: "Whitelist words", type: "textarea" },
+  { key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea" },
+];
+
+async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
+  const text = await response.text();
+  let payload: ApiEnvelope<T> | { error?: string } | T | null = null;
+  const trimmedText = text.trim();
+
+  if (trimmedText.includes("NEXT_REDIRECT")) {
+    throw new Error("Authentication required. Please sign in again.");
+  }
+
+  if (trimmedText) {
+    try {
+      payload = JSON.parse(trimmedText) as ApiEnvelope<T> | { error?: string } | T;
+    } catch {
+      throw new Error(response.ok ? fallback : `Request failed (${response.status}). ${fallback}`);
+    }
+  }
+
+  if (!payload) {
+    throw new Error(response.ok ? fallback : `Request failed (${response.status}). ${fallback}`);
+  }
+
+  if (typeof payload === "object" && "ok" in payload) {
+    if (payload.ok) return payload.data;
+    throw new Error(payload.error || fallback);
+  }
+
+  if (!response.ok) {
+    const message = payload && typeof payload === "object" && "error" in payload ? payload.error : "";
+    throw new Error(message || `Request failed (${response.status}). ${fallback}`);
+  }
+
+  return payload as T;
+}
+
+function boolText(value: boolean) {
+  return value ? "Enabled" : "Disabled";
+}
+
+function yesNo(value: boolean) {
+  return value ? "Yes" : "No";
+}
+
+function formatMs(value: number | undefined) {
+  const ms = value ?? 0;
+  if (!ms) return "0 ms";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
+  return `${ms} ms`;
+}
+
+function exportTimestamp() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "").replace(/[:T]/g, "-");
+}
+
+function formatExportDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "";
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}`;
+}
+
+function safeFilenamePart(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "account";
+}
+
+function downloadUtf8File(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type: `${type};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function formatMetadata(metadata: unknown) {
+  if (metadata === null || typeof metadata === "undefined" || metadata === "") return "";
+  if (typeof metadata === "string") return metadata;
+  return JSON.stringify(metadata, null, 2);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function logExportMetadata(log: LogRow) {
+  if (log.metadata !== null && typeof log.metadata !== "undefined" && log.metadata !== "") return log.metadata;
+  return log.payload ?? null;
+}
+
+function logPerformanceSummary(log: LogRow) {
+  if (log.performance_summary !== null && typeof log.performance_summary !== "undefined") return log.performance_summary;
+  if (isRecord(log.payload) && isRecord(log.payload.performance_summary)) return log.payload.performance_summary;
+  return null;
+}
+
+function compactMetadata(metadata: unknown) {
+  const formatted = formatMetadata(metadata).replace(/\s+/g, " ").trim();
+  if (!formatted) return "—";
+  return formatted.length > 180 ? `${formatted.slice(0, 180)}...` : formatted;
+}
+
+function workerSourceLabel(workerType?: string) {
+  return workerType === "python_uiautomator" ? "Python uiautomator" : workerType || "Node/Appium";
+}
+
+function logsToText(logs: LogRow[]) {
+  return logs
+    .map((log) => {
+      const metadata = formatMetadata(logExportMetadata(log));
+      const performanceSummary = formatMetadata(logPerformanceSummary(log));
+      return [
+        `[${formatExportDate(log.created_at)}]`,
+        `ID: ${log.id}`,
+        `ACCOUNT: ${log.account_id}`,
+        `RUN: ${log.run_id}`,
+        `SOURCE: ${workerSourceLabel(log.worker_type)}`,
+        `ACTION: ${log.action_type}`,
+        `STATUS: ${log.status}`,
+        `TARGET: ${log.target_username}`,
+        `MESSAGE: ${log.message}`,
+        performanceSummary ? `PERFORMANCE SUMMARY:\n${performanceSummary}` : "",
+        metadata ? `METADATA:\n${metadata}` : "",
+        "----------------------------------------",
+      ].filter(Boolean).join("\n");
+    })
+    .join("\n\n");
+}
+
+function logsToJson(logs: LogRow[]) {
+  return logs.map((log) => ({
+    id: log.id,
+    run_id: log.run_id,
+    account_id: log.account_id,
+    target_username: log.target_username,
+    action_type: log.action_type,
+    status: log.status,
+    message: log.message,
+    worker_type: log.worker_type || "",
+    payload: log.payload ?? null,
+    performance_summary: logPerformanceSummary(log),
+    metadata: logExportMetadata(log),
+    created_at: log.created_at,
+  }));
+}
+
+function statsSummary(username: string, rows: StatsRow[]) {
+  const statusText = (row: StatsRow) => `${row.status ?? ""}`.toLowerCase();
+  const failedRuns = rows.filter((row) => ["fail", "error", "blocked"].some((term) => statusText(row).includes(term))).length;
+  const successfulRuns = rows.filter((row) => ["success", "completed", "done"].some((term) => statusText(row).includes(term))).length;
+  const oldestRow = rows[rows.length - 1];
+  const latestPerformanceRow = rows.find((row) => row.worker_type === "python_uiautomator" || row.total_ms || row.xml_fetches);
+
+  return {
+    username,
+    total_runs: rows.length,
+    successful_runs: successfulRuns,
+    failed_runs: failedRuns,
+    total_dms: rows.reduce((total, row) => total + (row.dm ?? 0), 0),
+    total_follows: rows.reduce((total, row) => total + (row.follow ?? 0), 0),
+    total_story_views: rows.reduce((total, row) => total + (row.watch ?? 0), 0),
+    created_at: oldestRow?.created_at || oldestRow?.session_time || "",
+    last_run_at: rows[0]?.last_run_at || rows[0]?.session_time || "",
+    latest_worker_type: latestPerformanceRow?.worker_type || "",
+    latest_total_ms: latestPerformanceRow?.total_ms ?? 0,
+    latest_typing_command_ms: latestPerformanceRow?.typing_command_ms ?? 0,
+    latest_row_detect_ms: latestPerformanceRow?.row_detect_ms ?? 0,
+    latest_row_tap_command_ms: latestPerformanceRow?.row_tap_command_ms ?? 0,
+    latest_profile_transition_wait_ms: latestPerformanceRow?.profile_transition_wait_ms ?? 0,
+    latest_profile_verify_ms: latestPerformanceRow?.profile_verify_ms ?? 0,
+    latest_warm_session_used: latestPerformanceRow?.warm_session_used ?? false,
+    latest_force_stop_used: latestPerformanceRow?.force_stop_used ?? false,
+    latest_xml_fetches: latestPerformanceRow?.xml_fetches ?? 0,
+    latest_recovery_used: latestPerformanceRow?.recovery_used ?? false,
+    latest_exit_code: latestPerformanceRow?.exit_code ?? "",
+  };
+}
+
+function csvEscape(value: string | number | boolean) {
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function statsToCsv(username: string, rows: StatsRow[]) {
+  const summary = statsSummary(username, rows);
+  const columns = ["username", "total_runs", "successful_runs", "failed_runs", "total_dms", "total_follows", "total_story_views", "created_at", "last_run_at", "latest_worker_type", "latest_total_ms", "latest_typing_command_ms", "latest_row_detect_ms", "latest_row_tap_command_ms", "latest_profile_transition_wait_ms", "latest_profile_verify_ms", "latest_warm_session_used", "latest_force_stop_used", "latest_xml_fetches", "latest_recovery_used", "latest_exit_code"] as const;
+  return [
+    columns.join(","),
+    columns.map((column) => csvEscape(summary[column])).join(","),
+  ].join("\n");
+}
+
+export default function InstagramDashboardButtons({ accountId, username, mode = "active" }: InstagramDashboardButtonsProps) {
+  const router = useRouter();
+  const [panel, setPanel] = useState<Panel>(null);
+  const [settings, setSettings] = useState<InstagramSettings | null>(null);
+  const [filters, setFilters] = useState<InstagramFilters | null>(null);
+  const [templates, setTemplates] = useState<AccountTemplate[]>([]);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("General");
+  const [statsRows, setStatsRows] = useState<StatsRow[]>([]);
+  const [logs, setLogs] = useState<LogRow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportMenu, setExportMenu] = useState<ExportMenu>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [templateDialog, setTemplateDialog] = useState<TemplateDialog>(null);
+  const [targetsOpen, setTargetsOpen] = useState(false);
+  const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
+
+  function requestConfirmation(confirmationConfig: Confirmation) {
+    setConfirmation(confirmationConfig);
+  }
+
+  async function runExport(action: () => void | Promise<void>, successMessage: string) {
+    setIsExporting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await action();
+      setSuccess(successMessage);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Could not export data.");
+    } finally {
+      setExportMenu(null);
+      setIsExporting(false);
+    }
+  }
+
+  async function fetchLogsForExport(scope: LogExportScope) {
+    return readApiResponse<LogRow[]>(
+      await fetch(`/api/instagram-dashboard/logs?account_id=${encodeURIComponent(accountId)}&scope=${encodeURIComponent(scope)}`, { headers: { Accept: "application/json" } }),
+      "Could not load account logs for export."
+    );
+  }
+
+  function exportLogs(format: "txt" | "json", scope: LogExportScope) {
+    void runExport(async () => {
+      const exportRows = await fetchLogsForExport(scope);
+      const filenameScope = scope === "all" ? "all" : scope === "latest-python-run" ? "latest-python-run" : "latest-run";
+      const filename = `logs-${filenameScope}-${safeFilenamePart(username)}-${exportTimestamp()}.${format}`;
+      const content = format === "txt" ? logsToText(exportRows) : JSON.stringify(logsToJson(exportRows), null, 2);
+      downloadUtf8File(filename, content, format === "txt" ? "text/plain" : "application/json");
+    }, scope === "all" ? "All logs exported successfully" : scope === "latest-python-run" ? "Latest Python run logs exported successfully" : "Latest run logs exported successfully");
+  }
+
+  function exportStats(format: "csv" | "json") {
+    void runExport(() => {
+      const filename = `stats-${safeFilenamePart(username)}-${exportTimestamp()}.${format}`;
+      const content = format === "csv" ? statsToCsv(username, statsRows) : JSON.stringify([statsSummary(username, statsRows)], null, 2);
+      downloadUtf8File(filename, content, format === "csv" ? "text/csv" : "application/json");
+    }, "Stats exported successfully");
+  }
+
+  function copyLogs() {
+    void runExport(async () => {
+      if (!navigator.clipboard) throw new Error("Clipboard is unavailable in this browser.");
+      await navigator.clipboard.writeText(logsToText(logs));
+    }, "Logs copied to clipboard");
+  }
+
+  function closeConfirmation() {
+    if (isSaving) return;
+    setConfirmation(null);
+  }
+
+  async function confirmAction() {
+    const pendingConfirmation = confirmation;
+    if (!pendingConfirmation) return;
+
+    setConfirmation(null);
+    await pendingConfirmation.onConfirm();
+  }
+
+  async function loadPanel(nextPanel: Exclude<Panel, null>) {
+    setPanel(nextPanel);
+    if (nextPanel === "settings") setSettingsTab("General");
+    if (nextPanel === "filters") setSettingsTab("Filters");
+    setIsLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      if (nextPanel === "settings" || nextPanel === "filters") {
+        const [settingsPayload, filtersPayload, templatePayload] = await Promise.all([
+          readApiResponse<InstagramSettings>(
+            await fetch(`/api/instagram-dashboard/settings?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+            "Could not load account settings."
+          ),
+          readApiResponse<InstagramFilters>(
+            await fetch(`/api/instagram-dashboard/filters?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+            "Could not load account filters."
+          ),
+          readApiResponse<AccountTemplate[]>(
+            await fetch("/api/instagram-dashboard/templates", { headers: { Accept: "application/json" } }),
+            "Could not load account templates."
+          ),
+        ]);
+        setSettings(settingsPayload);
+        setFilters(filtersPayload);
+        setTemplates(templatePayload);
+      }
+
+      if (nextPanel === "stats") {
+        const rows = await readApiResponse<StatsRow[]>(
+          await fetch(`/api/instagram-dashboard/stats?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+          "Could not load account statistics."
+        );
+        setStatsRows(rows ?? []);
+      }
+
+      if (nextPanel === "logs") {
+        const rows = await readApiResponse<LogRow[]>(
+          await fetch(`/api/instagram-dashboard/logs?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+          "Could not load account logs."
+        );
+        setLogs(rows ?? []);
+      }
+
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load account data.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function closePanel() {
+    if (isSaving) return;
+    setPanel(null);
+    setError("");
+    setSuccess("");
+    setSettings(null);
+    setFilters(null);
+    setTemplates([]);
+    setTemplateDialog(null);
+    setSettingsTab("General");
+    setStatsRows([]);
+    setLogs([]);
+  }
+
+  function updateSetting(key: string, value: ConfigValue) {
+    setSettings((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function updateFilter(key: string, value: ConfigValue) {
+    setFilters((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  async function refreshAccountConfig() {
+    const [settingsPayload, filtersPayload, templatePayload] = await Promise.all([
+      readApiResponse<InstagramSettings>(
+        await fetch(`/api/instagram-dashboard/settings?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+        "Could not load account settings."
+      ),
+      readApiResponse<InstagramFilters>(
+        await fetch(`/api/instagram-dashboard/filters?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+        "Could not load account filters."
+      ),
+      readApiResponse<AccountTemplate[]>(
+        await fetch("/api/instagram-dashboard/templates", { headers: { Accept: "application/json" } }),
+        "Could not load account templates."
+      ),
+    ]);
+    setSettings(settingsPayload);
+    setFilters(filtersPayload);
+    setTemplates(templatePayload);
+  }
+
+  async function saveTemplate(name: string, description: string, templateType: "settings" | "filters" | "full") {
+    if (!settings || !filters || !templateDialog) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const savedTemplate = await readApiResponse<AccountTemplate>(
+        await fetch("/api/instagram-dashboard/templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            name,
+            description,
+            template_type: templateType,
+            settings_payload: templateDialog.source === "settings" || templateType === "full" ? settings : {},
+            filters_payload: templateDialog.source === "filters" || templateType === "full" ? filters : {},
+          }),
+        }),
+        "Could not save account template."
+      );
+      setTemplates((current) => [savedTemplate, ...current]);
+      setTemplateDialog(null);
+      setSuccess("Template saved.");
+    } catch (templateError) {
+      setError(templateError instanceof Error ? templateError.message : "Could not save account template.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function requestApplyTemplate(templateId: string) {
+    setTemplateDialog(null);
+    requestConfirmation({
+      title: "🚨 Apply this template to this account? ⚠️",
+      description: "The selected template will update this Account settings and/or filters. No worker action will run.",
+      confirmTone: "primary",
+      onConfirm: () => applyTemplate(templateId),
+    });
+  }
+
+  async function applyTemplate(templateId: string) {
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await readApiResponse(
+        await fetch("/api/instagram-dashboard/templates/apply", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId, template_id: templateId }),
+        }),
+        "Could not apply account template."
+      );
+      await refreshAccountConfig();
+      setSuccess("Template applied.");
+      router.refresh();
+    } catch (templateError) {
+      setError(templateError instanceof Error ? templateError.message : "Could not apply account template.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!settings) return;
+
+    requestConfirmation({
+      title: "🚨 Save account settings? ⚠️",
+      description: "These settings will be used by the next worker runs.",
+      confirmTone: "primary",
+      onConfirm: performSaveSettings,
+    });
+  }
+
+  async function performSaveSettings() {
+    if (!settings) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const savedSettings = await readApiResponse<InstagramSettings>(
+        await fetch("/api/instagram-dashboard/settings", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(settings),
+        }),
+        "Could not save account settings."
+      );
+      setSettings(savedSettings);
+      setSuccess("Settings saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save account settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function saveFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!filters) return;
+
+    requestConfirmation({
+      title: "🚨 Save account filters? ⚠️",
+      description: "These filters will be used by the next worker runs.",
+      confirmTone: "primary",
+      onConfirm: performSaveFilters,
+    });
+  }
+
+  async function performSaveFilters() {
+    if (!filters) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const savedFilters = await readApiResponse<InstagramFilters>(
+        await fetch("/api/instagram-dashboard/filters", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(filters),
+        }),
+        "Could not save account filters."
+      );
+      setFilters(savedFilters);
+      setSuccess("Filters saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save account filters.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function stopRun() {
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = await readApiResponse<{ stopped: boolean; message: string }>(
+        await fetch("/api/instagram-dashboard/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        }),
+        "Could not stop the run."
+      );
+      setSuccess(payload.message || "Stop request sent.");
+      router.refresh();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : "Could not stop the run.");
+    }
+  }
+
+  function requestStopRun() {
+    requestConfirmation({
+      title: "🚨 Stop current run? ⚠️",
+      description: "The current run will be marked as stopped.",
+      confirmTone: "danger",
+      onConfirm: stopRun,
+    });
+  }
+
+  function requestManualRun() {
+    requestConfirmation({
+      title: "🚨 Start manual run? ⚠️",
+      description: "A new manual run will be requested for this account.",
+      confirmTone: "primary",
+      onConfirm: () => {
+        console.log("Instagram dashboard placeholder", { accountId, username, intent: "Run manually" });
+        setError("");
+        setSuccess("Manual run request noted.");
+      },
+    });
+  }
+
+  async function updateLifecycle(action: "archive" | "trash" | "restore") {
+    setError("");
+    setSuccess("");
+
+    try {
+      await readApiResponse<Record<string, ConfigValue>>(
+        await fetch("/api/instagram-dashboard/accounts/lifecycle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId, action }),
+        }),
+        "Could not update account lifecycle."
+      );
+
+      setSuccess(
+        action === "archive"
+          ? "Account archived."
+          : action === "trash"
+            ? "Account moved to trash."
+            : "Account restored."
+      );
+      router.refresh();
+    } catch (lifecycleError) {
+      setError(lifecycleError instanceof Error ? lifecycleError.message : "Could not update account lifecycle.");
+    }
+  }
+
+  function requestLifecycle(action: "archive" | "trash" | "restore") {
+    requestConfirmation({
+      title:
+        action === "archive"
+          ? "🚨 Confirm archive account? ⚠️"
+          : action === "trash"
+            ? "🚨 Confirm move account to trash? ⚠️"
+            : "🚨 Confirm restore account? ⚠️",
+      description:
+        action === "archive"
+          ? "This account will be moved to Archives and scheduled to move to Trash after 30 days."
+          : action === "trash"
+            ? "This account will be moved to Trash and scheduled for permanent deletion after 30 days."
+            : "This account will be restored to Active accounts.",
+      confirmTone: action === "restore" ? "primary" : "danger",
+      onConfirm: () => updateLifecycle(action),
+    });
+  }
+
+  const panelTitle =
+    panel === "stats"
+      ? `Statistics — ${username}`
+      : panel === "logs"
+        ? `Logs — ${username}`
+        : panel === "filters"
+          ? `Filters — ${username}`
+          : `Settings — ${username}`;
+
+  return (
+    <>
+      <div className="ig-dashboard-row-tools" aria-label={`Controls for ${username}`}>
+        {(mode === "archived" ? archivedAccountTools : mode === "trashed" ? trashedAccountTools : activeAccountTools).map((tool) => (
+          <ActionButton
+            key={tool.label}
+            tool={tool}
+            username={username}
+            onClick={() => {
+              if (tool.disabled) return;
+              if (tool.label === "Settings") void loadPanel("settings");
+              else if (tool.label === "Stats") void loadPanel("stats");
+              else if (tool.label === "Logs") void loadPanel("logs");
+              else if (tool.label === "Filters") void loadPanel("filters");
+              else if (tool.label === "Targets") setTargetsOpen(true);
+              else if (tool.label === "Stop run") requestStopRun();
+              else if (tool.label === "Run manually") requestManualRun();
+              else if (tool.label === "Archive") requestLifecycle("archive");
+              else if (tool.label === "Move to trash") requestLifecycle("trash");
+              else if (tool.label === "Restore account") requestLifecycle("restore");
+            }}
+          />
+        ))}
+      </div>
+
+      {(error || success) && !panel && (
+        <p className={error ? "ig-action-inline ig-action-inline-error" : "ig-action-inline ig-action-inline-success"}>
+          {error || success}
+        </p>
+      )}
+
+      {panel && (
+        <div className="ig-settings-overlay" role="presentation" onMouseDown={closePanel}>
+          <aside className="ig-settings-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
+            <div className="ig-settings-header">
+              <div>
+                <span>Profile controls</span>
+                <h2 id={titleId}>{panelTitle}</h2>
+              </div>
+              <button type="button" className="ig-settings-icon-button" aria-label="Close panel" onClick={closePanel}>x</button>
+            </div>
+
+            {isLoading ? <div className="ig-settings-loading">Loading account data...</div> : null}
+            {!isLoading && (panel === "settings" || panel === "filters") && settings && filters
+              ? renderSettingsTabs({
+                  settings,
+                  filters,
+                  settingsTab,
+                  setSettingsTab,
+                  updateSetting,
+                  updateFilter,
+                  saveSettings,
+                  saveFilters,
+                  openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
+                  openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
+                  closePanel,
+                  isSaving,
+                  error,
+                  success,
+                })
+              : null}
+            {!isLoading && panel === "stats" ? renderStats({
+              rows: statsRows,
+              error,
+              success,
+              isExporting,
+              isMenuOpen: exportMenu === "stats",
+              toggleMenu: () => setExportMenu((current) => current === "stats" ? null : "stats"),
+              exportStats,
+            }) : null}
+            {!isLoading && panel === "logs" ? renderLogs({
+              logs,
+              error,
+              success,
+              isExporting,
+              isMenuOpen: exportMenu === "logs",
+              toggleMenu: () => setExportMenu((current) => current === "logs" ? null : "logs"),
+              exportLogs,
+              copyLogs,
+            }) : null}
+            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !filters) ? (
+              <div className="ig-settings-loading">
+                <p className="ig-settings-message ig-settings-error">{error}</p>
+                <button type="button" className="ig-settings-secondary" onClick={closePanel}>Cancel</button>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      )}
+
+      <InstagramAccountTargetsPanel
+        accountId={accountId}
+        accountUsername={username}
+        open={targetsOpen}
+        onClose={() => setTargetsOpen(false)}
+      />
+
+      {confirmation ? (
+        <ConfirmationModal
+          title={confirmation.title}
+          description={confirmation.description}
+          confirmTone={confirmation.confirmTone}
+          isBusy={isSaving}
+          onCancel={closeConfirmation}
+          onConfirm={() => void confirmAction()}
+        />
+      ) : null}
+
+      {templateDialog ? (
+        <TemplateDialogModal
+          dialog={templateDialog}
+          templates={templates}
+          isSaving={isSaving}
+          onCancel={() => setTemplateDialog(null)}
+          onSave={saveTemplate}
+          onApply={requestApplyTemplate}
+        />
+      ) : null}
+
+      <style>{`
+        .ig-action-inline {
+          width: 100%;
+          margin: 8px 0 0;
+          border-radius: 10px;
+          padding: 8px 10px;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .ig-action-inline-success {
+          border: 1px solid rgba(52,211,153,0.24);
+          background: rgba(52,211,153,0.08);
+          color: #86EFAC;
+        }
+
+        .ig-action-inline-error {
+          border: 1px solid rgba(248,113,113,0.28);
+          background: rgba(248,113,113,0.08);
+          color: #FCA5A5;
+        }
+
+        .ig-settings-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 120;
+          display: flex;
+          justify-content: flex-end;
+          background: rgba(2, 6, 23, 0.58);
+          backdrop-filter: blur(10px);
+        }
+
+        .ig-settings-panel {
+          width: min(100%, 760px);
+          height: 100vh;
+          overflow-y: auto;
+          border-left: 1px solid rgba(255,255,255,0.10);
+          background: #07111f;
+          box-shadow: -24px 0 80px rgba(0,0,0,0.36);
+          color: #f0f0ef;
+          padding: 24px;
+        }
+
+        .ig-settings-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 22px;
+        }
+
+        .ig-settings-header span,
+        .ig-settings-field span {
+          display: block;
+          color: rgba(255,255,255,0.42);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .ig-settings-header h2 {
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: clamp(1.35rem, 4vw, 2rem);
+          line-height: 1.1;
+          margin: 8px 0 0;
+        }
+
+        .ig-settings-icon-button {
+          width: 36px;
+          height: 36px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 10px;
+          background: rgba(255,255,255,0.05);
+          color: rgba(255,255,255,0.72);
+          cursor: pointer;
+          font-size: 22px;
+          line-height: 1;
+        }
+
+        .ig-settings-form {
+          display: grid;
+          gap: 16px;
+        }
+
+        .ig-settings-tabs {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          margin-bottom: 16px;
+        }
+
+        .ig-settings-tab {
+          min-height: 32px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 999px;
+          background: rgba(255,255,255,0.035);
+          color: rgba(255,255,255,0.58);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 800;
+          padding: 0 11px;
+        }
+
+        .ig-settings-tab-active {
+          border-color: rgba(245,158,11,0.40);
+          background: rgba(245,158,11,0.14);
+          color: #FBBF24;
+        }
+
+        .ig-settings-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .ig-settings-field {
+          display: grid;
+          gap: 8px;
+        }
+
+        .ig-settings-field-wide {
+          grid-column: 1 / -1;
+        }
+
+        .ig-settings-field input,
+        .ig-settings-field textarea,
+        .ig-settings-field select {
+          width: 100%;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.045);
+          color: #f0f0ef;
+          font: inherit;
+          outline: none;
+          padding: 12px;
+        }
+
+        .ig-settings-field textarea {
+          resize: vertical;
+          line-height: 1.55;
+        }
+
+        .ig-settings-toggle-grid,
+        .ig-settings-number-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .ig-settings-toggle {
+          position: relative;
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 4px 10px;
+          min-height: 76px;
+          padding: 12px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 14px;
+          background: rgba(255,255,255,0.03);
+          cursor: pointer;
+        }
+
+        .ig-settings-toggle input {
+          position: absolute;
+          opacity: 0;
+          pointer-events: none;
+        }
+
+        .ig-settings-toggle span {
+          grid-row: span 2;
+          width: 42px;
+          height: 24px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,0.10);
+          transition: background 150ms, border-color 150ms;
+        }
+
+        .ig-settings-toggle span::after {
+          content: "";
+          display: block;
+          width: 18px;
+          height: 18px;
+          margin: 2px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.70);
+          transition: transform 150ms, background 150ms;
+        }
+
+        .ig-settings-toggle input:checked + span {
+          background: rgba(245,158,11,0.32);
+          border-color: rgba(245,158,11,0.45);
+        }
+
+        .ig-settings-toggle input:checked + span::after {
+          transform: translateX(18px);
+          background: #FBBF24;
+        }
+
+        .ig-settings-toggle strong {
+          color: #f0f0ef;
+          font-size: 13px;
+          line-height: 1.25;
+        }
+
+        .ig-settings-toggle small {
+          color: rgba(255,255,255,0.46);
+          font-size: 11.5px;
+          line-height: 1.35;
+        }
+
+        .ig-settings-message {
+          border-radius: 12px;
+          font-size: 13px;
+          font-weight: 700;
+          margin: 0;
+          padding: 11px 12px;
+        }
+
+        .ig-settings-success {
+          border: 1px solid rgba(52,211,153,0.24);
+          background: rgba(52,211,153,0.08);
+          color: #86EFAC;
+        }
+
+        .ig-settings-error {
+          border: 1px solid rgba(248,113,113,0.28);
+          background: rgba(248,113,113,0.08);
+          color: #FCA5A5;
+        }
+
+        .ig-settings-loading {
+          display: grid;
+          gap: 14px;
+          min-height: 180px;
+          place-items: center;
+          color: rgba(255,255,255,0.62);
+          text-align: center;
+        }
+
+        .ig-settings-actions {
+          position: sticky;
+          bottom: -24px;
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          margin: 6px -24px -24px;
+          padding: 16px 24px 24px;
+          border-top: 1px solid rgba(255,255,255,0.08);
+          background: rgba(7,17,31,0.92);
+          backdrop-filter: blur(14px);
+        }
+
+        .ig-template-actions {
+          display: flex;
+          justify-content: flex-start;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .ig-settings-primary,
+        .ig-settings-secondary {
+          min-height: 40px;
+          border-radius: 999px;
+          padding: 0 16px;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 900;
+        }
+
+        .ig-settings-primary {
+          border: 1px solid rgba(245,158,11,0.50);
+          background: #F59E0B;
+          color: #160b02;
+        }
+
+        .ig-settings-secondary {
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.045);
+          color: rgba(255,255,255,0.76);
+        }
+
+        .ig-settings-primary:disabled,
+        .ig-settings-secondary:disabled {
+          cursor: wait;
+          opacity: 0.64;
+        }
+
+        .ig-confirm-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 180;
+          display: grid;
+          place-items: center;
+          padding: 18px;
+          background: rgba(2,6,23,0.72);
+          backdrop-filter: blur(12px);
+        }
+
+        .ig-confirm-modal {
+          width: min(100%, 440px);
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 16px;
+          background: #07111f;
+          box-shadow: 0 24px 90px rgba(0,0,0,0.46);
+          color: #f0f0ef;
+          padding: 20px;
+        }
+
+        .ig-confirm-modal h3 {
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 1.22rem;
+          line-height: 1.25;
+          margin: 0 0 10px;
+        }
+
+        .ig-confirm-modal p {
+          color: rgba(255,255,255,0.62);
+          font-size: 13px;
+          line-height: 1.6;
+          margin: 0;
+        }
+
+        .ig-confirm-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          margin-top: 20px;
+        }
+
+        .ig-confirm-danger {
+          border-color: rgba(248,113,113,0.48);
+          background: #DC2626;
+          color: #fff7f7;
+        }
+
+        .ig-template-field {
+          display: grid;
+          gap: 8px;
+          margin-top: 14px;
+        }
+
+        .ig-template-field span {
+          color: rgba(255,255,255,0.42);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .ig-template-field input,
+        .ig-template-field textarea,
+        .ig-template-field select {
+          width: 100%;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.045);
+          color: #f0f0ef;
+          font: inherit;
+          outline: none;
+          padding: 12px;
+        }
+
+        .ig-export-bar {
+          display: flex;
+          justify-content: flex-end;
+          margin-bottom: 12px;
+        }
+
+        .ig-export-menu-wrap {
+          position: relative;
+        }
+
+        .ig-export-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          min-height: 38px;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 999px;
+          background: rgba(255,255,255,0.055);
+          color: rgba(255,255,255,0.82);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 900;
+          padding: 0 14px;
+        }
+
+        .ig-export-button:disabled {
+          cursor: wait;
+          opacity: 0.66;
+        }
+
+        .ig-export-menu {
+          position: absolute;
+          top: calc(100% + 8px);
+          right: 0;
+          z-index: 5;
+          min-width: 180px;
+          overflow: hidden;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 12px;
+          background: #0b1727;
+          box-shadow: 0 18px 46px rgba(0,0,0,0.35);
+          padding: 6px;
+        }
+
+        .ig-export-menu button {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          min-height: 34px;
+          border: 0;
+          border-radius: 8px;
+          background: transparent;
+          color: rgba(255,255,255,0.74);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 800;
+          padding: 0 9px;
+          text-align: left;
+        }
+
+        .ig-export-menu button:hover {
+          background: rgba(245,158,11,0.12);
+          color: #FBBF24;
+        }
+
+        .ig-export-menu button:disabled {
+          cursor: wait;
+          opacity: 0.58;
+        }
+
+        .ig-panel-table-wrap {
+          overflow-x: auto;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(255,255,255,0.025);
+        }
+
+        .ig-python-live-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+          margin: 0 0 12px;
+        }
+
+        .ig-python-live-item {
+          min-height: 70px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 8px;
+          padding: 10px;
+          background: rgba(255,255,255,0.025);
+        }
+
+        .ig-python-live-item span {
+          display: block;
+          color: rgba(255,255,255,0.42);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 800;
+          line-height: 1.35;
+          text-transform: uppercase;
+        }
+
+        .ig-python-live-item strong {
+          display: block;
+          margin-top: 8px;
+          color: rgba(255,255,255,0.84);
+          font-size: 14px;
+          font-weight: 900;
+          line-height: 1.3;
+          overflow-wrap: anywhere;
+        }
+
+        .ig-panel-table {
+          width: 100%;
+          min-width: 1180px;
+          border-collapse: collapse;
+        }
+
+        .ig-panel-table th,
+        .ig-panel-table td {
+          padding: 12px 10px;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          text-align: left;
+          vertical-align: top;
+          font-size: 12px;
+        }
+
+        .ig-panel-table th {
+          color: rgba(255,255,255,0.42);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .ig-panel-table td {
+          color: rgba(255,255,255,0.66);
+        }
+
+        .ig-source-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 22px;
+          border: 1px solid rgba(251,191,36,0.24);
+          border-radius: 999px;
+          padding: 3px 8px;
+          background: rgba(251,191,36,0.08);
+          color: #FDE68A;
+          font-size: 11px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .ig-metadata-cell {
+          max-width: 320px;
+          font-family: 'JetBrains Mono', monospace;
+          line-height: 1.45;
+        }
+
+        .ig-panel-empty {
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(255,255,255,0.025);
+          color: rgba(255,255,255,0.54);
+          padding: 28px;
+          text-align: center;
+        }
+
+        @media (max-width: 680px) {
+          .ig-settings-panel {
+            padding: 18px;
+          }
+
+          .ig-python-live-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .ig-settings-toggle-grid,
+          .ig-settings-number-grid,
+          .ig-settings-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .ig-settings-actions {
+            margin: 6px -18px -18px;
+            padding: 14px 18px 18px;
+          }
+        }
+      `}</style>
+    </>
+  );
+}
+
+function ActionButton({ tool, username, onClick }: { tool: AccountTool; username: string; onClick: () => void }) {
+  const Icon = tool.Icon;
+  const toneClass = tool.tone ? `ig-dashboard-tool-${tool.tone}` : "";
+
+  return (
+    <button
+      type="button"
+      className={`ig-dashboard-tool ${toneClass}`.trim()}
+      aria-label={`${tool.label} for ${username}`}
+      data-tooltip={tool.disabled ? `${tool.label} is not available yet` : tool.label}
+      onClick={onClick}
+      disabled={tool.disabled}
+    >
+      <Icon aria-hidden="true" size={16} strokeWidth={2.2} />
+    </button>
+  );
+}
+
+function ConfirmationModal({
+  title,
+  description,
+  confirmTone,
+  isBusy,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  confirmTone: "primary" | "danger";
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="ig-confirm-overlay" role="presentation" onMouseDown={onCancel}>
+      <section className="ig-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="ig-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+        <h3 id="ig-confirm-title">{title}</h3>
+        <p>{description}</p>
+        <div className="ig-confirm-actions">
+          <button type="button" className="ig-settings-secondary" onClick={onCancel} disabled={isBusy}>Cancel</button>
+          <button
+            type="button"
+            className={confirmTone === "danger" ? "ig-settings-primary ig-confirm-danger" : "ig-settings-primary"}
+            onClick={onConfirm}
+            disabled={isBusy}
+          >
+            Confirm action
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TemplateDialogModal({
+  dialog,
+  templates,
+  isSaving,
+  onCancel,
+  onSave,
+  onApply,
+}: {
+  dialog: Exclude<TemplateDialog, null>;
+  templates: AccountTemplate[];
+  isSaving: boolean;
+  onCancel: () => void;
+  onSave: (name: string, description: string, templateType: "settings" | "filters" | "full") => void;
+  onApply: (templateId: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [templateType, setTemplateType] = useState<"settings" | "filters" | "full">(dialog.source === "settings" ? "settings" : "filters");
+  const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
+
+  return (
+    <div className="ig-confirm-overlay" role="presentation" onMouseDown={onCancel}>
+      <section className="ig-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="ig-template-title" onMouseDown={(event) => event.stopPropagation()}>
+        <h3 id="ig-template-title">{dialog.kind === "save" ? "Save as Template" : "Apply Template"}</h3>
+        <p>
+          {dialog.kind === "save"
+            ? "Save this Account configuration for reuse."
+            : "Choose a reusable template to apply to this Account."}
+        </p>
+
+        {dialog.kind === "save" ? (
+          <>
+            <label className="ig-template-field">
+              <span>Template name</span>
+              <input value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <label className="ig-template-field">
+              <span>Description</span>
+              <textarea value={description} rows={3} onChange={(event) => setDescription(event.target.value)} />
+            </label>
+            <label className="ig-template-field">
+              <span>Template type</span>
+              <select value={templateType} onChange={(event) => setTemplateType(event.target.value as "settings" | "filters" | "full")}>
+                <option value={dialog.source}>{dialog.source}</option>
+                <option value="full">full</option>
+              </select>
+            </label>
+          </>
+        ) : (
+          <label className="ig-template-field">
+            <span>Template</span>
+            <select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>{template.name} · {template.template_type}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="ig-confirm-actions">
+          <button type="button" className="ig-settings-secondary" onClick={onCancel} disabled={isSaving}>Cancel</button>
+          {dialog.kind === "save" ? (
+            <button type="button" className="ig-settings-primary" onClick={() => onSave(name.trim(), description.trim(), templateType)} disabled={isSaving || !name.trim()}>
+              Save Template
+            </button>
+          ) : (
+            <button type="button" className="ig-settings-primary" onClick={() => onApply(templateId)} disabled={isSaving || !templateId}>
+              Apply Template
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ExportBar({
+  label,
+  isExporting,
+  isMenuOpen,
+  toggleMenu,
+  items,
+}: {
+  label: string;
+  isExporting: boolean;
+  isMenuOpen: boolean;
+  toggleMenu: () => void;
+  items: Array<{ label: string; onClick: () => void; Icon?: LucideIcon }>;
+}) {
+  return (
+    <div className="ig-export-bar">
+      <div className="ig-export-menu-wrap">
+        <button type="button" className="ig-export-button" onClick={toggleMenu} disabled={isExporting}>
+          <Download aria-hidden="true" size={15} strokeWidth={2.2} />
+          {isExporting ? "Preparing..." : label}
+        </button>
+        {isMenuOpen ? (
+          <div className="ig-export-menu" role="menu">
+            {items.map((item) => {
+              const Icon = item.Icon ?? Download;
+              return (
+                <button key={item.label} type="button" role="menuitem" onClick={item.onClick} disabled={isExporting}>
+                  <Icon aria-hidden="true" size={14} strokeWidth={2.2} />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function renderSettingsTabs({
+  settings,
+  filters,
+  settingsTab,
+  setSettingsTab,
+  updateSetting,
+  updateFilter,
+  saveSettings,
+  saveFilters,
+  openSaveTemplate,
+  openApplyTemplate,
+  closePanel,
+  isSaving,
+  error,
+  success,
+}: {
+  settings: InstagramSettings;
+  filters: InstagramFilters;
+  settingsTab: SettingsTab;
+  setSettingsTab: (tab: SettingsTab) => void;
+  updateSetting: (key: string, value: ConfigValue) => void;
+  updateFilter: (key: string, value: ConfigValue) => void;
+  saveSettings: (event: FormEvent<HTMLFormElement>) => void;
+  saveFilters: (event: FormEvent<HTMLFormElement>) => void;
+  openSaveTemplate: (source: "settings" | "filters") => void;
+  openApplyTemplate: (source: "settings" | "filters") => void;
+  closePanel: () => void;
+  isSaving: boolean;
+  error: string;
+  success: string;
+}) {
+  const isFiltersTab = settingsTab === "Filters";
+  const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
+
+  return (
+    <form className="ig-settings-form" onSubmit={isFiltersTab ? saveFilters : saveSettings}>
+      <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
+        {settingsTabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={settingsTab === tab}
+            className={settingsTab === tab ? "ig-settings-tab ig-settings-tab-active" : "ig-settings-tab"}
+            onClick={() => setSettingsTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      <div className="ig-settings-grid">
+        {fields.map((field) => (
+          <ConfigField
+            key={field.key}
+            field={field}
+            value={isFiltersTab ? filters[field.key] : settings[field.key]}
+            onChange={(value) => (isFiltersTab ? updateFilter(field.key, value) : updateSetting(field.key, value))}
+          />
+        ))}
+      </div>
+
+      <FormMessages error={error} success={success} />
+      <div className="ig-template-actions">
+        <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
+          Save as Template
+        </button>
+        <button type="button" className="ig-settings-secondary" onClick={() => openApplyTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
+          Apply Template
+        </button>
+      </div>
+      <FormActions isSaving={isSaving} closePanel={closePanel} />
+    </form>
+  );
+}
+
+function renderStats({
+  rows,
+  error,
+  success,
+  isExporting,
+  isMenuOpen,
+  toggleMenu,
+  exportStats,
+}: {
+  rows: StatsRow[];
+  error: string;
+  success: string;
+  isExporting: boolean;
+  isMenuOpen: boolean;
+  toggleMenu: () => void;
+  exportStats: (format: "csv" | "json") => void;
+}) {
+  if (error) return <p className="ig-settings-message ig-settings-error">{error}</p>;
+  const latestPythonRun = rows.find((row) => row.worker_type === "python_uiautomator");
+
+  return (
+    <>
+      <ExportBar
+        label="Export Stats"
+        isExporting={isExporting}
+        isMenuOpen={isMenuOpen}
+        toggleMenu={toggleMenu}
+        items={[
+          { label: "CSV", onClick: () => exportStats("csv") },
+          { label: "JSON", onClick: () => exportStats("json") },
+        ]}
+      />
+      {success ? <p className="ig-settings-message ig-settings-success">{success}</p> : null}
+      {latestPythonRun ? (
+        <div className="ig-python-live-grid" aria-label="Latest Python worker analytics">
+          {[
+            ["Latest Python run status", latestPythonRun.status || "—"],
+            ["Latest target processed", latestPythonRun.latest_target_username || "—"],
+            ["Total duration", formatMs(latestPythonRun.total_ms)],
+            ["Row detection time", formatMs(latestPythonRun.row_detect_ms)],
+            ["Profile verification time", formatMs(latestPythonRun.profile_verify_ms)],
+            ["Warm session", yesNo(Boolean(latestPythonRun.warm_session_used))],
+            ["XML fetches", `${latestPythonRun.xml_fetches ?? 0}`],
+            ["Worker type", workerSourceLabel(latestPythonRun.worker_type)],
+          ].map(([label, value]) => (
+            <div className="ig-python-live-item" key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {!rows.length ? <div className="ig-panel-empty">No statistics found.</div> : (
+      <div className="ig-panel-table-wrap">
+        <table className="ig-panel-table">
+          <thead>
+            <tr>
+              {["Session time", "Source", "Status", "Latest target", "Followers", "Followings", "Follow back enabled", "Like back enabled", "Follow", "Unfollow", "Like", "Comment", "DM", "Watch", "Total interactions", "Total ms", "Typing ms", "Row detect ms", "Row tap ms", "Profile wait ms", "Profile verify ms", "Warm session", "Force stop", "XML fetches", "Recovery", "Exit code"].map((heading) => (
+                <th key={heading}>{heading}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>{row.session_time || "—"}</td>
+                <td><span className="ig-source-badge">{workerSourceLabel(row.worker_type)}</span></td>
+                <td>{row.status || "—"}</td>
+                <td>{row.latest_target_username || "—"}</td>
+                <td>{row.followers ?? 0}</td>
+                <td>{row.followings ?? 0}</td>
+                <td>{boolText(row.follow_back_enabled)}</td>
+                <td>{boolText(row.like_back_enabled)}</td>
+                <td>{row.follow ?? 0}</td>
+                <td>{row.unfollow ?? 0}</td>
+                <td>{row.like ?? 0}</td>
+                <td>{row.comment ?? 0}</td>
+                <td>{row.dm ?? 0}</td>
+                <td>{row.watch ?? 0}</td>
+                <td>{row.total_interactions ?? 0}</td>
+                <td>{row.total_ms ?? 0}</td>
+                <td>{row.typing_command_ms ?? 0}</td>
+                <td>{row.row_detect_ms ?? 0}</td>
+                <td>{row.row_tap_command_ms ?? 0}</td>
+                <td>{row.profile_transition_wait_ms ?? 0}</td>
+                <td>{row.profile_verify_ms ?? 0}</td>
+                <td>{yesNo(Boolean(row.warm_session_used))}</td>
+                <td>{yesNo(Boolean(row.force_stop_used))}</td>
+                <td>{row.xml_fetches ?? 0}</td>
+                <td>{yesNo(Boolean(row.recovery_used))}</td>
+                <td>{row.exit_code || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      )}
+    </>
+  );
+}
+
+function renderLogs({
+  logs,
+  error,
+  success,
+  isExporting,
+  isMenuOpen,
+  toggleMenu,
+  exportLogs,
+  copyLogs,
+}: {
+  logs: LogRow[];
+  error: string;
+  success: string;
+  isExporting: boolean;
+  isMenuOpen: boolean;
+  toggleMenu: () => void;
+  exportLogs: (format: "txt" | "json", scope: LogExportScope) => void;
+  copyLogs: () => void;
+}) {
+  if (error) return <p className="ig-settings-message ig-settings-error">{error}</p>;
+
+  return (
+    <>
+      <ExportBar
+        label="Export Logs"
+        isExporting={isExporting}
+        isMenuOpen={isMenuOpen}
+        toggleMenu={toggleMenu}
+        items={[
+          { label: "Export all logs TXT", onClick: () => exportLogs("txt", "all") },
+          { label: "Export all logs JSON", onClick: () => exportLogs("json", "all") },
+          { label: "Export latest run TXT", onClick: () => exportLogs("txt", "latest-run") },
+          { label: "Export latest run JSON", onClick: () => exportLogs("json", "latest-run") },
+          { label: "Export latest Python run TXT", onClick: () => exportLogs("txt", "latest-python-run") },
+          { label: "Export latest Python run JSON", onClick: () => exportLogs("json", "latest-python-run") },
+          { label: "Copy to clipboard", onClick: copyLogs, Icon: Clipboard },
+        ]}
+      />
+      {success ? <p className="ig-settings-message ig-settings-success">{success}</p> : null}
+      {!logs.length ? <div className="ig-panel-empty">No logs found.</div> : (
+      <div className="ig-panel-table-wrap">
+        <table className="ig-panel-table">
+          <thead>
+            <tr>
+              {["Created at", "Run ID", "Source", "Target username", "Action type", "Status", "Message", "Metadata"].map((heading) => (
+                <th key={heading}>{heading}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((log) => (
+              <tr key={log.id}>
+                <td>{log.created_at}</td>
+                <td>{log.run_id}</td>
+                <td><span className="ig-source-badge">{workerSourceLabel(log.worker_type)}</span></td>
+                <td>{log.target_username}</td>
+                <td>{log.action_type}</td>
+                <td>{log.status}</td>
+                <td>{log.message}</td>
+                <td className="ig-metadata-cell">{compactMetadata(logPerformanceSummary(log) ?? logExportMetadata(log))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      )}
+    </>
+  );
+}
+
+function ConfigField({ field, value, onChange }: { field: FieldSpec; value: ConfigValue | undefined; onChange: (value: ConfigValue) => void }) {
+  if (field.type === "toggle") {
+    const checked = Boolean(value);
+    return (
+      <label className="ig-settings-toggle">
+        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+        <span aria-hidden="true" />
+        <strong>{field.label}</strong>
+        <small>{field.helper ?? (checked ? "Enabled" : "Disabled")}</small>
+      </label>
+    );
+  }
+
+  if (field.type === "textarea") {
+    return (
+      <label className="ig-settings-field ig-settings-field-wide">
+        <span>{field.label}</span>
+        <textarea value={String(value ?? "")} rows={4} onChange={(event) => onChange(event.target.value)} />
+      </label>
+    );
+  }
+
+  if (field.type === "select") {
+    return (
+      <label className="ig-settings-field">
+        <span>{field.label}</span>
+        <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
+          {(field.options ?? []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  if (field.type === "number") {
+    return (
+      <label className="ig-settings-field">
+        <span>{field.label}</span>
+        <input
+          type="number"
+          min={field.min ?? 0}
+          step={field.step ?? 1}
+          value={Number(value ?? 0)}
+          onChange={(event) => onChange(Number(event.target.value))}
+        />
+      </label>
+    );
+  }
+
+  return (
+    <label className="ig-settings-field">
+      <span>{field.label}</span>
+      <input
+        type={field.type === "password" ? "password" : field.type === "time" ? "time" : field.type === "date" ? "date" : "text"}
+        value={String(value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function FormMessages({ error, success }: { error: string; success: string }) {
+  return (
+    <>
+      {error ? <p className="ig-settings-message ig-settings-error">{error}</p> : null}
+      {success ? <p className="ig-settings-message ig-settings-success">{success}</p> : null}
+    </>
+  );
+}
+
+function FormActions({ isSaving, closePanel }: { isSaving: boolean; closePanel: () => void }) {
+  return (
+    <div className="ig-settings-actions">
+      <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>Cancel</button>
+      <button type="submit" className="ig-settings-primary" disabled={isSaving}>{isSaving ? "Saving..." : "Save"}</button>
+    </div>
+  );
+}

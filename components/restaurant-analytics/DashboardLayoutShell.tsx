@@ -35,6 +35,7 @@ const navItems: NavItem[] = [
   { label: "Reports & Analytics", href: "/restaurant-analytics/locations", match: "/restaurant-analytics/locations", roles: ["superadmin", "tenant"] },
   { label: "Tenants", href: "/restaurant-analytics/tenants", match: "/restaurant-analytics/tenants", roles: ["superadmin"] },
   { label: "Prospecting ROI", href: "/restaurant-analytics/prospecting-roi", match: "/restaurant-analytics/prospecting-roi", roles: ["superadmin"] },
+  { label: "Instagram Automation", href: "/instagram-dashboard", match: "/instagram-dashboard", roles: ["superadmin"] },
 ];
 
 const sidebarCopy = {
@@ -47,6 +48,7 @@ const sidebarCopy = {
       "Reports & Analytics": "Rapports & analytics",
       Tenants: "Clients",
       "Prospecting ROI": "Prospecting ROI",
+      "Instagram Automation": "Instagram Automation",
     },
     workspace: "Espace restaurant",
     location: "Site",
@@ -72,6 +74,7 @@ const sidebarCopy = {
       "Reports & Analytics": "Reports & Analytics",
       Tenants: "Tenants",
       "Prospecting ROI": "Prospecting ROI",
+      "Instagram Automation": "Instagram Automation",
     },
     workspace: "Restaurant workspace",
     location: "Location",

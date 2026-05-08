@@ -16,7 +16,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 type Agent = "whatsapp" | "assistant" | "ugc" | "support" | "restaurant";
 type Lang = "fr" | "en";
@@ -82,11 +82,17 @@ export default function NavbarFooter({
   children,
 }: NavbarFooterProps) {
   const pathname = usePathname();
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const accentColor = agent ? AGENT_COLORS[agent] : "#f0f0ef";
-  const t = COPY[lang];
+  const displayLang = mounted ? lang : "en";
+  const t = COPY[displayLang];
   const usesLocalPricing = agent === "restaurant";
   const pricingHref = usesLocalPricing ? "#pricing" : "/#pricing";
   const scrollToPricing = () => {
@@ -95,6 +101,7 @@ export default function NavbarFooter({
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
+    handler();
     window.addEventListener("scroll", handler, { passive: true });
     return () => window.removeEventListener("scroll", handler);
   }, []);
@@ -126,20 +133,14 @@ export default function NavbarFooter({
         {/* Logo */}
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: "9px", textDecoration: "none", flexShrink: 0 }}>
           <span
-            className="site-nav-logo-text"
+            className="site-nav-logo-text flex h-[30px] w-[30px] shrink-0 items-center justify-center"
             style={{
-              width: "30px",
-              height: "30px",
               borderRadius: "6px",
               background: accentColor,
               color: "#000",
               fontFamily: "'Syne', sans-serif",
               fontSize: "15px",
               fontWeight: 800,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
               transition: "background 300ms ease",
             }}
           >
@@ -172,7 +173,7 @@ export default function NavbarFooter({
           className="site-nav-desktop"
         >
           {NAV_LINKS.map((link) => {
-            const currentPathname = pathname ?? "";
+            const currentPathname = mounted ? pathname ?? "" : "";
             const isActive =
               currentPathname === link.href ||
               currentPathname.startsWith(`${link.href}/`);
@@ -205,7 +206,7 @@ export default function NavbarFooter({
                   }
                 }}
               >
-                {link.label[lang]}
+                {link.label[displayLang]}
               </Link>
             );
           })}
@@ -241,8 +242,8 @@ export default function NavbarFooter({
                   fontFamily: "'JetBrains Mono', monospace",
                   cursor: "pointer",
                   letterSpacing: "0.04em",
-                  background: lang === l ? "rgba(255,255,255,0.10)" : "transparent",
-                  color: lang === l ? "#f0f0ef" : "rgba(255,255,255,0.35)",
+                  background: displayLang === l ? "rgba(255,255,255,0.10)" : "transparent",
+                  color: displayLang === l ? "#f0f0ef" : "rgba(255,255,255,0.35)",
                   transition: "all 150ms",
                 }}
               >
@@ -295,9 +296,9 @@ export default function NavbarFooter({
             }}
             className="site-nav-hamburger"
           >
-            <span style={{ width: "20px", height: "1.5px", background: "#f0f0ef", borderRadius: "2px", display: "block" }} />
-            <span style={{ width: "20px", height: "1.5px", background: "#f0f0ef", borderRadius: "2px", display: "block" }} />
-            <span style={{ width: "20px", height: "1.5px", background: "#f0f0ef", borderRadius: "2px", display: "block" }} />
+            <span className="block h-[1.5px] w-5 rounded-[2px] bg-[#f0f0ef]" />
+            <span className="block h-[1.5px] w-5 rounded-[2px] bg-[#f0f0ef]" />
+            <span className="block h-[1.5px] w-5 rounded-[2px] bg-[#f0f0ef]" />
           </button>
         </div>
 
@@ -334,7 +335,7 @@ export default function NavbarFooter({
                   background: "rgba(255,255,255,0.04)",
                 }}
               >
-                {link.label[lang]}
+                {link.label[displayLang]}
               </Link>
             ))}
           </div>
@@ -369,18 +370,14 @@ export default function NavbarFooter({
             <div>
               <Link href="/" style={{ display: "flex", alignItems: "center", gap: "8px", textDecoration: "none", marginBottom: "14px" }}>
                 <span
+                  className="flex h-[26px] w-[26px] items-center justify-center"
                   style={{
-                    width: "26px",
-                    height: "26px",
                     borderRadius: "5px",
                     background: accentColor,
                     color: "#000",
                     fontFamily: "'Syne', sans-serif",
                     fontSize: "13px",
                     fontWeight: 800,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
                     transition: "background 300ms ease",
                   }}
                 >
@@ -409,7 +406,7 @@ export default function NavbarFooter({
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = AGENT_COLORS[link.agent]; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.48)"; }}
                   >
-                    {link.label[lang]}
+                    {link.label[displayLang]}
                   </Link>
                 ))}
               </div>
@@ -446,9 +443,9 @@ export default function NavbarFooter({
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
-                  { label: t.privacy, href: "/privacy" },
-                  { label: t.terms, href: "/terms" },
-                  { label: t.mentions, href: "/mentions" },
+                  { label: t.privacy, href: "/privacy-policy" },
+                  { label: t.terms, href: "/terms-and-conditions" },
+                  { label: "Refund policy", href: "/refund-policy" },
                 ].map((item) => (
                   <Link
                     key={item.href}
