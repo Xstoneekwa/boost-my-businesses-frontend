@@ -8,6 +8,7 @@ import {
   formatInteger,
   getRadarData,
   statusTone,
+  type RadarSourceStatus,
   type ServerCheckItem,
 } from "../radar-data";
 
@@ -29,7 +30,7 @@ export default async function InstagramServerCheckPage() {
         eyebrow="Daily worklist"
         title="Instagram Server Check"
         description="Read-only worklist for accounts that need operator review. No worker, phone, or settings actions run from this view."
-        action={<InstagramDashboardViewNav active="server-check" />}
+        action={<InstagramDashboardViewNav active="server-check" badges={{ radar: data.notificationSummary.radarBadgeCount, "server-check": data.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: data.notificationItems.radar, "server-check": data.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (
@@ -39,11 +40,19 @@ export default async function InstagramServerCheckPage() {
         </section>
       )}
 
+      <section className="ig-server-check-source-strip" aria-label="Server Check data source status">
+        <SourcePill label="Backend API" source={data.summary.sourceStatus.backendApi} />
+        <SourcePill label="Accounts" source={data.summary.sourceStatus.accounts} />
+        <SourcePill label="Runs" source={data.summary.sourceStatus.runs} />
+        <SourcePill label="Warnings" source={data.summary.sourceStatus.warnings} />
+        <SourcePill label="Devices" source={data.summary.sourceStatus.devices} />
+      </section>
+
       <section className="ig-server-check-summary" aria-label="Server Check summary">
         <article>
           <span>Worklist items</span>
           <strong>{formatInteger(serverCheckItems.length)}</strong>
-          <small>Problem, monitor, or unlinked warning signals</small>
+          <small>Problem, monitor, linked warning, or unlinked warning signals</small>
         </article>
         <article>
           <span>Critical/warning</span>
@@ -97,6 +106,23 @@ export default async function InstagramServerCheckPage() {
           margin-bottom: 18px;
         }
 
+        .ig-server-check-source-strip {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 14px;
+          margin-bottom: 14px;
+        }
+
+        .ig-server-check-source-pill {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.026);
+          padding: 10px 12px;
+        }
+
         .ig-server-check-summary article,
         .ig-server-check-empty {
           border: 1px solid rgba(255,255,255,0.08);
@@ -106,6 +132,7 @@ export default async function InstagramServerCheckPage() {
         }
 
         .ig-server-check-summary span,
+        .ig-server-check-source-pill span,
         .ig-server-check-table th,
         .ig-server-check-empty span {
           color: rgba(255,255,255,0.36);
@@ -125,6 +152,7 @@ export default async function InstagramServerCheckPage() {
         }
 
         .ig-server-check-summary small,
+        .ig-server-check-source-pill strong,
         .ig-server-check-table td {
           color: rgba(255,255,255,0.60);
           font-size: 12px;
@@ -183,9 +211,22 @@ export default async function InstagramServerCheckPage() {
           .ig-server-check-summary {
             grid-template-columns: 1fr;
           }
+
+          .ig-server-check-source-strip {
+            grid-template-columns: 1fr;
+          }
         }
       `}</style>
     </main>
+  );
+}
+
+function SourcePill({ label, source }: { label: string; source: RadarSourceStatus }) {
+  return (
+    <div className="ig-server-check-source-pill" title={source.description}>
+      <span>{label}</span>
+      <strong>{source.label}</strong>
+    </div>
   );
 }
 
@@ -210,18 +251,20 @@ function ServerCheckList({ items }: { items: ServerCheckItem[] }) {
             <th>Severity</th>
             <th>Phone</th>
             <th>Mac/host</th>
+            <th>Source</th>
             <th>Last update</th>
             <th>Recommended action</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.id}>
+            <tr id={`server-check-item-${encodeURIComponent(item.id)}`} key={item.id}>
               <td>{item.username ?? "account unknown"}</td>
               <td>{item.reason}</td>
               <td style={{ color: statusTone(item.healthStatus), fontWeight: 900 }}>{item.severity}</td>
               <td>{item.phoneName}</td>
               <td>{item.macHostName}</td>
+              <td>{item.sourceLabel}</td>
               <td>{formatDateTime(item.lastUpdate)}</td>
               <td>{item.recommendedAction}</td>
             </tr>

@@ -2,217 +2,22 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
-import { createSupabaseClient } from "@/lib/supabase";
 import AddProfileWizard from "./AddProfileWizard";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
 import InstagramDashboardViewNav from "./InstagramDashboardViewNav";
+import {
+  buildManageKpis,
+  formatDateTime,
+  formatInteger,
+  getManageData,
+  manageKpiTone,
+  statusTone,
+  type ManageAccount,
+  type ManageOverview,
+  type ManageSourceStatus,
+} from "./manage-data";
 
 export const dynamic = "force-dynamic";
-
-type SupabaseRecord = Record<string, unknown>;
-
-type InstagramAccountRow = {
-  id: string;
-  username: string;
-  displayName: string;
-  status: string;
-  archivedAt: string;
-  trashedAt: string;
-  scheduledTrashAt: string;
-  scheduledDeleteAt: string;
-  restoredAt: string;
-  deviceName: string;
-  deviceUdid: string;
-  campaign: string;
-  lastRunStatus: string;
-  totalDms: number;
-  totalStoriesViewed: number;
-  totalFollows: number;
-  createdAt: string;
-};
-
-type DashboardData = {
-  accounts: InstagramAccountRow[];
-  activeAccounts: InstagramAccountRow[];
-  archivedAccounts: InstagramAccountRow[];
-  trashedAccounts: InstagramAccountRow[];
-  recentRuns: SupabaseRecord[];
-  error: string | null;
-};
-
-const emptyMarker = "—";
-
-function readString(row: SupabaseRecord | undefined, keys: string[], fallback = emptyMarker) {
-  if (!row) return fallback;
-
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
-    if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
-  }
-
-  return fallback;
-}
-
-function readNumber(row: SupabaseRecord | undefined, keys: string[], fallback = 0) {
-  if (!row) return fallback;
-
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string") {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-
-  return fallback;
-}
-
-function readDate(row: SupabaseRecord | undefined, keys: string[]) {
-  const raw = readString(row, keys, "");
-  if (!raw) return emptyMarker;
-
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return raw;
-
-  return new Intl.DateTimeFormat("en", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function keyForAccount(row: SupabaseRecord | undefined) {
-  if (!row) return "";
-  return readString(row, ["account_id", "ig_account_id", "instagram_account_id", "id"], "");
-}
-
-function countLogs(logs: SupabaseRecord[], accountId: string, names: string[]) {
-  return logs.reduce((total, log) => {
-    if (keyForAccount(log) !== accountId) return total;
-
-    const type = readString(log, ["action_type", "action", "event_type", "type"], "").toLowerCase();
-    const status = readString(log, ["status", "result"], "").toLowerCase();
-    const count = readNumber(log, ["count", "quantity"], 1);
-
-    if (!names.some((name) => type.includes(name))) return total;
-    if (status && ["failed", "error", "skipped"].some((blocked) => status.includes(blocked))) return total;
-
-    return total + count;
-  }, 0);
-}
-
-function latestRunForAccount(runs: SupabaseRecord[], accountId: string) {
-  return runs
-    .filter((run) => keyForAccount(run) === accountId)
-    .sort((a, b) => {
-      const aDate = new Date(readString(a, ["started_at", "created_at", "updated_at"], "")).getTime();
-      const bDate = new Date(readString(b, ["started_at", "created_at", "updated_at"], "")).getTime();
-      return (Number.isFinite(bDate) ? bDate : 0) - (Number.isFinite(aDate) ? aDate : 0);
-    })[0];
-}
-
-async function fetchInstagramDashboardData(): Promise<DashboardData> {
-  const supabase = createSupabaseClient();
-
-  const [accountsResult, settingsResult, runsResult, logsResult, targetsResult] = await Promise.all([
-    supabase.from("ig_accounts").select("*").order("created_at", { ascending: false }).limit(100),
-    supabase.from("ig_account_settings").select("*").limit(500),
-    supabase.from("ig_runs").select("*").order("created_at", { ascending: false }).limit(250),
-    supabase.from("ig_action_logs").select("*").order("created_at", { ascending: false }).limit(1000),
-    supabase.from("ig_targets").select("*").limit(500),
-  ]);
-
-  const firstError =
-    accountsResult.error ?? settingsResult.error ?? runsResult.error ?? logsResult.error ?? targetsResult.error;
-
-  if (firstError) {
-    return {
-      accounts: [],
-      activeAccounts: [],
-      archivedAccounts: [],
-      trashedAccounts: [],
-      recentRuns: [],
-      error: firstError.message,
-    };
-  }
-
-  const accounts = (accountsResult.data ?? []) as SupabaseRecord[];
-  const settings = (settingsResult.data ?? []) as SupabaseRecord[];
-  const runs = (runsResult.data ?? []) as SupabaseRecord[];
-  const logs = (logsResult.data ?? []) as SupabaseRecord[];
-  const targets = (targetsResult.data ?? []) as SupabaseRecord[];
-
-  const normalizedAccounts = accounts.map((account) => {
-    const accountId = readString(account, ["id"], "");
-    const accountSettings = settings.find((setting) => keyForAccount(setting) === accountId);
-    const target = targets.find((item) => keyForAccount(item) === accountId);
-    const latestRun = latestRunForAccount(runs, accountId);
-
-    return {
-      id: accountId,
-      username: readString(account, ["username", "ig_username", "handle"], "Unknown"),
-      displayName: readString(account, ["display_name", "name", "full_name"]),
-      status: readString(account, ["status", "state"], "active"),
-      archivedAt: readDate(account, ["archived_at"]),
-      trashedAt: readDate(account, ["trashed_at"]),
-      scheduledTrashAt: readDate(account, ["scheduled_trash_at"]),
-      scheduledDeleteAt: readDate(account, ["scheduled_delete_at"]),
-      restoredAt: readDate(account, ["restored_at"]),
-      deviceName: readString(account, ["device_name", "device", "phone_name"], readString(accountSettings, ["device_name", "device", "phone_name"])),
-      deviceUdid: readString(account, ["device_udid", "udid"], readString(accountSettings, ["device_udid", "udid"])),
-      campaign: readString(account, ["campaign", "campaign_name"], readString(target, ["campaign", "campaign_name", "target_name", "name"])),
-      lastRunStatus: readString(latestRun, ["status", "run_status", "state"], "No recent runs found."),
-      totalDms:
-        readNumber(account, ["total_dms", "dm_count"]) ||
-        countLogs(logs, accountId, ["dm", "message"]),
-      totalStoriesViewed:
-        readNumber(account, ["total_stories_viewed", "stories_viewed", "story_views"]) ||
-        countLogs(logs, accountId, ["story"]),
-      totalFollows:
-        readNumber(account, ["total_follows", "follow_count"]) ||
-        countLogs(logs, accountId, ["follow"]),
-      createdAt: readDate(account, ["created_at", "inserted_at"]),
-    };
-  });
-  const activeAccounts = normalizedAccounts.filter((account) => {
-    const status = normalizeStatus(account.status);
-    return status !== "archived" && status !== "trashed";
-  });
-  const archivedAccounts = normalizedAccounts.filter((account) => normalizeStatus(account.status) === "archived");
-  const trashedAccounts = normalizedAccounts.filter((account) => normalizeStatus(account.status) === "trashed");
-
-  return {
-    accounts: normalizedAccounts,
-    activeAccounts,
-    archivedAccounts,
-    trashedAccounts,
-    recentRuns: runs.slice(0, 5),
-    error: null,
-  };
-}
-
-function formatInteger(value: number) {
-  return new Intl.NumberFormat("en").format(value);
-}
-
-function normalizeStatus(status: string) {
-  return status.trim().toLowerCase();
-}
-
-function statusTone(status: string) {
-  const normalized = status.toLowerCase();
-  if (normalized.includes("archived")) return "#93C5FD";
-  if (normalized.includes("trashed")) return "#FCA5A5";
-  if (normalized.includes("active") || normalized.includes("success") || normalized.includes("completed")) return "#34D399";
-  if (normalized.includes("paused") || normalized.includes("pending") || normalized.includes("running")) return "#FBBF24";
-  if (normalized.includes("error") || normalized.includes("fail") || normalized.includes("blocked")) return "#F87171";
-  return "rgba(255,255,255,0.66)";
-}
 
 export default async function InstagramAutomationDashboardPage() {
   const userContext = await requireDashboardUserContext();
@@ -221,15 +26,8 @@ export default async function InstagramAutomationDashboardPage() {
     notFound();
   }
 
-  const data = await fetchInstagramDashboardData();
-  const totals = data.accounts.reduce(
-    (sum, account) => ({
-      dms: sum.dms + account.totalDms,
-      stories: sum.stories + account.totalStoriesViewed,
-      follows: sum.follows + account.totalFollows,
-    }),
-    { dms: 0, stories: 0, follows: 0 },
-  );
+  const data = await getManageData();
+  const manageKpis = buildManageKpis(data);
 
   return (
     <main className="dashboard-page ig-dashboard-page">
@@ -240,64 +38,36 @@ export default async function InstagramAutomationDashboardPage() {
         action={<InstagramDashboardViewNav active="manage" />}
       />
 
-      {data.error && (
+      {data.errors.length > 0 && (
         <section className="ig-dashboard-alert" role="alert">
-          <strong>Data unavailable</strong>
-          <span>{data.error}</span>
+          <strong>Manage data partially unavailable</strong>
+          <span>{data.errors.join(" · ")}</span>
         </section>
       )}
 
+      <section className="ig-dashboard-source-strip" aria-label="Manage data source status">
+        <SourcePill label="Backend API" source={data.summary.sourceStatus.backendApi} />
+        <SourcePill label="Accounts" source={data.summary.sourceStatus.accounts} />
+        <SourcePill label="Credentials" source={data.summary.sourceStatus.credentials} />
+        <SourcePill label="Automation" source={data.summary.sourceStatus.automation} />
+      </section>
+
       <section className="ig-dashboard-kpis" aria-label="Instagram account totals">
-        <article>
-          <span>Active accounts</span>
-          <strong>{formatInteger(data.activeAccounts.length)}</strong>
-          <small>Visible in main list</small>
-        </article>
-        <article>
-          <span>Total DMs</span>
-          <strong>{formatInteger(totals.dms)}</strong>
-          <small>Logged outreach volume</small>
-        </article>
-        <article>
-          <span>Total stories viewed</span>
-          <strong>{formatInteger(totals.stories)}</strong>
-          <small>Story activity</small>
-        </article>
-        <article>
-          <span>Total follows</span>
-          <strong>{formatInteger(totals.follows)}</strong>
-          <small>Follow activity</small>
-        </article>
+        {manageKpis.map((kpi) => (
+          <article key={kpi.label}>
+            <span>{kpi.label}</span>
+            <strong style={{ color: manageKpiTone(kpi) }}>{kpi.value}</strong>
+            <small>{kpi.detail}</small>
+          </article>
+        ))}
       </section>
 
       <AnalyticsSectionCard
         eyebrow="Accounts"
         title="Instagram Accounts"
-        description="Server-rendered account inventory from Supabase with safe archive, trash, and restore lifecycle controls."
+        description="Server-rendered account inventory with safe archive, trash, restore, and per-account control drawers."
       >
         <AccountLifecycleTabs data={data} />
-      </AnalyticsSectionCard>
-
-      <AnalyticsSectionCard
-        eyebrow="Runs"
-        title="Recent runs"
-        description="Latest automation run records from Supabase for quick operational context."
-      >
-        {data.recentRuns.length === 0 ? (
-          <EmptyState title="No recent runs found." text="Run records will appear here once automation history exists." />
-        ) : (
-          <div className="ig-dashboard-runs">
-            {data.recentRuns.map((run, index) => (
-              <div key={`${readString(run, ["id"], String(index))}-${index}`} className="ig-dashboard-run-row">
-                <span>{readString(run, ["username", "account_username", "ig_username"], readString(run, ["account_id", "ig_account_id"], "Instagram account"))}</span>
-                <strong style={{ color: statusTone(readString(run, ["status", "run_status", "state"], "Unknown")) }}>
-                  {readString(run, ["status", "run_status", "state"], "Unknown")}
-                </strong>
-                <small>{readDate(run, ["started_at", "created_at", "updated_at"])}</small>
-              </div>
-            ))}
-          </div>
-        )}
       </AnalyticsSectionCard>
 
       <style>{`
@@ -332,10 +102,26 @@ export default async function InstagramAutomationDashboardPage() {
           margin-bottom: 18px;
         }
 
+        .ig-dashboard-source-strip {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
+          margin-bottom: 14px;
+        }
+
+        .ig-dashboard-source-pill {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.026);
+          padding: 10px 12px;
+        }
+
         .ig-dashboard-kpis article,
         .ig-dashboard-mobile-card,
-        .ig-dashboard-empty,
-        .ig-dashboard-run-row {
+        .ig-dashboard-empty {
           border: 1px solid rgba(255,255,255,0.08);
           background: rgba(255,255,255,0.028);
           border-radius: 16px;
@@ -347,6 +133,7 @@ export default async function InstagramAutomationDashboardPage() {
         }
 
         .ig-dashboard-kpis span,
+        .ig-dashboard-source-pill span,
         .ig-dashboard-table th,
         .ig-dashboard-mobile-card dt,
         .ig-dashboard-empty span {
@@ -367,9 +154,9 @@ export default async function InstagramAutomationDashboardPage() {
         }
 
         .ig-dashboard-kpis small,
+        .ig-dashboard-source-pill strong,
         .ig-dashboard-table td,
-        .ig-dashboard-mobile-card dd,
-        .ig-dashboard-run-row small {
+        .ig-dashboard-mobile-card dd {
           color: rgba(255,255,255,0.60);
           font-size: 12px;
         }
@@ -477,8 +264,7 @@ export default async function InstagramAutomationDashboardPage() {
         }
 
         .ig-dashboard-table strong,
-        .ig-dashboard-mobile-card strong,
-        .ig-dashboard-run-row span {
+        .ig-dashboard-mobile-card strong {
           color: #f0f0ef;
           font-weight: 800;
         }
@@ -686,21 +472,12 @@ export default async function InstagramAutomationDashboardPage() {
           max-width: 420px;
         }
 
-        .ig-dashboard-runs {
-          display: grid;
-          gap: 8px;
-        }
-
-        .ig-dashboard-run-row {
-          display: grid;
-          grid-template-columns: 1fr auto auto;
-          align-items: center;
-          gap: 12px;
-          padding: 12px 14px;
-        }
-
         @media (max-width: 1120px) {
           .ig-dashboard-kpis {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .ig-dashboard-source-strip {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
@@ -714,6 +491,10 @@ export default async function InstagramAutomationDashboardPage() {
             grid-template-columns: 1fr;
           }
 
+          .ig-dashboard-source-strip {
+            grid-template-columns: 1fr;
+          }
+
           .ig-dashboard-table-wrap {
             display: none;
           }
@@ -723,8 +504,7 @@ export default async function InstagramAutomationDashboardPage() {
             gap: 12px;
           }
 
-          .ig-dashboard-mobile-card dl,
-          .ig-dashboard-run-row {
+          .ig-dashboard-mobile-card dl {
             grid-template-columns: 1fr;
           }
 
@@ -752,7 +532,16 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   );
 }
 
-function AccountLifecycleTabs({ data }: { data: DashboardData }) {
+function SourcePill({ label, source }: { label: string; source: ManageSourceStatus }) {
+  return (
+    <div className="ig-dashboard-source-pill" title={source.description}>
+      <span>{label}</span>
+      <strong>{source.label}</strong>
+    </div>
+  );
+}
+
+function AccountLifecycleTabs({ data }: { data: ManageOverview }) {
   const tabs = [
     {
       id: "active",
@@ -777,7 +566,7 @@ function AccountLifecycleTabs({ data }: { data: DashboardData }) {
     },
   ] as const;
 
-  if (data.accounts.length === 0) {
+  if (data.allAccounts.length === 0) {
     return <EmptyState title="No Instagram accounts found." text="Add account records in Supabase to populate this admin dashboard." />;
   }
 
@@ -824,7 +613,7 @@ function AccountList({
   emptyTitle,
   emptyText,
 }: {
-  accounts: InstagramAccountRow[];
+  accounts: ManageAccount[];
   mode: "active" | "archived" | "trashed";
   emptyTitle: string;
   emptyText: string;
@@ -840,45 +629,45 @@ function AccountList({
           <thead>
             <tr>
               <th>Username</th>
-              <th>Display name</th>
-              <th>Status</th>
-              <th>Device name</th>
-              <th>Device UDID</th>
-              <th>Campaign</th>
-              <th>Last run status</th>
-              <th>Total DMs</th>
-              <th>Total stories viewed</th>
-              <th>Total follows</th>
+              <th>Client</th>
+              <th>Admin status</th>
+              <th>Customer</th>
+              <th>Subscription</th>
+              <th>Package</th>
+              <th>Credentials</th>
+              <th>Login</th>
+              <th>Phone</th>
+              <th>Mac/host</th>
               <th>{mode === "archived" ? "Scheduled trash" : mode === "trashed" ? "Scheduled delete" : "Created at"}</th>
               <th>Controls</th>
             </tr>
           </thead>
           <tbody>
             {accounts.map((account) => (
-              <tr key={account.id || account.username}>
+              <tr key={account.accountId || account.username}>
                 <td>
                   <strong>{account.username}</strong>
                 </td>
-                <td>{account.displayName}</td>
+                <td>{account.clientName ?? account.emailDisplay}</td>
                 <td>
-                  <span className="ig-dashboard-status" style={{ color: statusTone(account.status) }}>
-                    {account.status}
+                  <span className="ig-dashboard-status" style={{ color: statusTone(account.adminStatus) }}>
+                    {account.adminStatus}
                   </span>
                 </td>
-                <td>{account.deviceName}</td>
-                <td>{account.deviceUdid}</td>
-                <td>{account.campaign}</td>
+                <td>{account.customerStatus}</td>
+                <td>{account.subscriptionStatus}</td>
+                <td>{account.packageLabel}</td>
+                <td style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</td>
                 <td>
-                  <span className="ig-dashboard-status" style={{ color: statusTone(account.lastRunStatus) }}>
-                    {account.lastRunStatus}
+                  <span className="ig-dashboard-status" style={{ color: statusTone(account.loginStatus) }}>
+                    {account.loginStatus}
                   </span>
                 </td>
-                <td>{formatInteger(account.totalDms)}</td>
-                <td>{formatInteger(account.totalStoriesViewed)}</td>
-                <td>{formatInteger(account.totalFollows)}</td>
-                <td>{mode === "archived" ? account.scheduledTrashAt : mode === "trashed" ? account.scheduledDeleteAt : account.createdAt}</td>
+                <td>{account.phoneName}</td>
+                <td>{account.macHostName}</td>
+                <td>{mode === "archived" ? formatDateTime(account.scheduledTrashAt) : mode === "trashed" ? formatDateTime(account.scheduledDeleteAt) : formatDateTime(account.createdAt)}</td>
                 <td>
-                  <InstagramDashboardButtons accountId={account.id || account.username} username={account.username} mode={mode} />
+                  <InstagramDashboardButtons accountId={account.accountId || account.username} username={account.username} mode={mode} />
                 </td>
               </tr>
             ))}
@@ -888,49 +677,49 @@ function AccountList({
 
       <div className="ig-dashboard-mobile-list">
         {accounts.map((account) => (
-          <article className="ig-dashboard-mobile-card" key={`${account.id || account.username}-mobile`}>
+          <article className="ig-dashboard-mobile-card" key={`${account.accountId || account.username}-mobile`}>
             <div className="ig-dashboard-mobile-card-head">
               <div>
                 <strong>{account.username}</strong>
-                <span>{account.displayName}</span>
+                <span>{account.clientName ?? account.emailDisplay}</span>
               </div>
-              <span style={{ color: statusTone(account.status) }}>{account.status}</span>
+              <span style={{ color: statusTone(account.adminStatus) }}>{account.adminStatus}</span>
             </div>
             <dl>
               <div>
-                <dt>Device name</dt>
-                <dd>{account.deviceName}</dd>
+                <dt>Customer</dt>
+                <dd>{account.customerStatus}</dd>
               </div>
               <div>
-                <dt>Device UDID</dt>
-                <dd>{account.deviceUdid}</dd>
+                <dt>Subscription</dt>
+                <dd>{account.subscriptionStatus}</dd>
               </div>
               <div>
-                <dt>Campaign</dt>
-                <dd>{account.campaign}</dd>
+                <dt>Package</dt>
+                <dd>{account.packageLabel}</dd>
               </div>
               <div>
-                <dt>Last run status</dt>
-                <dd style={{ color: statusTone(account.lastRunStatus) }}>{account.lastRunStatus}</dd>
+                <dt>Credentials</dt>
+                <dd style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</dd>
               </div>
               <div>
-                <dt>Total DMs</dt>
-                <dd>{formatInteger(account.totalDms)}</dd>
+                <dt>Login</dt>
+                <dd style={{ color: statusTone(account.loginStatus) }}>{account.loginStatus}</dd>
               </div>
               <div>
-                <dt>Total stories viewed</dt>
-                <dd>{formatInteger(account.totalStoriesViewed)}</dd>
+                <dt>Phone</dt>
+                <dd>{account.phoneName}</dd>
               </div>
               <div>
-                <dt>Total follows</dt>
-                <dd>{formatInteger(account.totalFollows)}</dd>
+                <dt>Mac/host</dt>
+                <dd>{account.macHostName}</dd>
               </div>
               <div>
                 <dt>{mode === "archived" ? "Scheduled trash" : mode === "trashed" ? "Scheduled delete" : "Created at"}</dt>
-                <dd>{mode === "archived" ? account.scheduledTrashAt : mode === "trashed" ? account.scheduledDeleteAt : account.createdAt}</dd>
+                <dd>{mode === "archived" ? formatDateTime(account.scheduledTrashAt) : mode === "trashed" ? formatDateTime(account.scheduledDeleteAt) : formatDateTime(account.createdAt)}</dd>
               </div>
             </dl>
-            <InstagramDashboardButtons accountId={account.id || account.username} username={account.username} mode={mode} />
+            <InstagramDashboardButtons accountId={account.accountId || account.username} username={account.username} mode={mode} />
           </article>
         ))}
       </div>

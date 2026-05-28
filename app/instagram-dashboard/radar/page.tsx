@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
@@ -11,12 +12,33 @@ import {
   type RadarAccount,
   type RadarDevice,
   type RadarRun,
+  type RadarSourceStatus,
   type RadarWarning,
 } from "../radar-data";
 
 export const dynamic = "force-dynamic";
 
-export default async function InstagramRadarPage() {
+type AccountFilter = "all" | "ok" | "monitor" | "problem" | "risk";
+
+const accountFilterLabels: Record<AccountFilter, string> = {
+  all: "Accounts watched",
+  ok: "OK accounts",
+  monitor: "Monitor accounts",
+  problem: "Problem accounts",
+  risk: "Risk accounts",
+};
+
+function parseAccountFilter(value: string | string[] | undefined): AccountFilter | null {
+  const filter = Array.isArray(value) ? value[0] : value;
+  if (filter === "all" || filter === "ok" || filter === "monitor" || filter === "problem" || filter === "risk") return filter;
+  return null;
+}
+
+export default async function InstagramRadarPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ accountFilter?: string | string[] }>;
+}) {
   const userContext = await requireDashboardUserContext();
 
   if (!canAccessTenantPages(userContext)) {
@@ -25,14 +47,27 @@ export default async function InstagramRadarPage() {
 
   const data = await getRadarData();
   const { summary } = data;
+  const activeAccountFilter = parseAccountFilter((await searchParams)?.accountFilter);
+  const filteredAccounts =
+    activeAccountFilter === "ok"
+      ? data.accountBreakdown.okAccounts
+      : activeAccountFilter === "monitor"
+        ? data.accountBreakdown.monitorAccounts
+        : activeAccountFilter === "problem"
+          ? data.accountBreakdown.problemAccounts
+          : activeAccountFilter === "risk"
+            ? data.accountBreakdown.riskAccounts
+            : activeAccountFilter === "all"
+              ? data.accounts
+              : [];
 
   return (
-    <main className="dashboard-page ig-radar-page">
+    <main id="radar-top" className="dashboard-page ig-radar-page">
       <DashboardPageHeader
         eyebrow="Admin radar"
         title="Instagram Radar"
         description="Traceable diagnostic view for run health, account risk, device readiness, and recent automation warnings."
-        action={<InstagramDashboardViewNav active="radar" />}
+        action={<InstagramDashboardViewNav active="radar" badges={{ radar: data.notificationSummary.radarBadgeCount, "server-check": data.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: data.notificationItems.radar, "server-check": data.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (
@@ -43,71 +78,92 @@ export default async function InstagramRadarPage() {
       )}
 
       <section className="ig-radar-source-strip" aria-label="Radar data source status">
-        <SourcePill label="Accounts" value={summary.sourceStatus.accounts} />
-        <SourcePill label="Runs" value={summary.sourceStatus.runs} />
-        <SourcePill label="Warnings" value={summary.sourceStatus.warnings} />
-        <SourcePill label="Devices" value={summary.sourceStatus.devices} />
+        <SourcePill label="Backend API" source={summary.sourceStatus.backendApi} />
+        <SourcePill label="Accounts" source={summary.sourceStatus.accounts} />
+        <SourcePill label="Runs" source={summary.sourceStatus.runs} />
+        <SourcePill label="Warnings" source={summary.sourceStatus.warnings} />
+        <SourcePill label="Devices" source={summary.sourceStatus.devices} />
+      </section>
+
+      <section className="ig-radar-api-note" aria-label="Backend API readiness">
+        <span>Backend API</span>
+        <strong>{summary.sourceStatus.backendApi.label}</strong>
+        <small>{summary.sourceStatus.backendApi.description}</small>
       </section>
 
       <section className="ig-radar-kpis" aria-label="Instagram radar summary">
-        <RadarKpi label="Accounts watched" value={summary.totalAccounts} detail={`OK ${formatInteger(summary.okCount)} · Monitor ${formatInteger(summary.monitorCount)} · Problem ${formatInteger(summary.problemCount)}`} />
-        <RadarKpi
-          label="Running or queued"
-          value={summary.runningCount + (summary.queuedCount ?? 0)}
-          detail={`Running ${formatInteger(summary.runningCount)} · ${summary.queuedCount === null ? `Queued source ${summary.queuedSourceStatus}` : `Queued ${formatInteger(summary.queuedCount)}`}`}
-          tone={summary.runningCount || summary.queuedCount ? "warning" : "neutral"}
-        />
-        <RadarKpi
-          label="Run warnings"
-          value={summary.runWarningsCount}
-          detail={`Source: ${summary.sourceStatus.warnings}`}
-          tone={summary.runWarningsCount ? "danger" : "good"}
-        />
+        <AccountsWatchedKpi summary={summary} activeFilter={activeAccountFilter} />
         <RadarKpi
           label="Risk accounts"
           value={summary.riskAccountsCount}
           detail={summary.riskAccountsCount ? "Click to inspect accounts" : "No risk accounts found"}
           tone={summary.riskAccountsCount ? "danger" : "good"}
-          href="#risk-accounts"
+          href="/instagram-dashboard/radar?accountFilter=risk#account-drilldown"
+          active={activeAccountFilter === "risk"}
         />
+        <RadarKpi
+          label="Running or queued"
+          value={summary.runningCount + (summary.queuedCount ?? 0)}
+          detail={`Running: ${formatInteger(summary.runningCount)} · Queued: ${summary.queuedCount === null ? "pending source" : formatInteger(summary.queuedCount)}`}
+          tone={summary.runningCount || summary.queuedCount ? "warning" : "neutral"}
+        />
+        <RadarKpi
+          label="Run warnings"
+          value={summary.runWarningsCount}
+          detail={summary.sourceStatus.warnings.description}
+          tone={summary.runWarningsCount ? "danger" : "good"}
+        />
+      </section>
+
+      {activeAccountFilter ? (
+        <section id="account-drilldown">
+          <AnalyticsSectionCard
+            eyebrow="Account drilldown"
+            title={accountFilterLabels[activeAccountFilter]}
+            description={`${formatInteger(filteredAccounts.length)} accounts in current filter. Warnings not linked to an account remain visible in Recent warning signals.`}
+          >
+            <AccountDrilldown filter={activeAccountFilter} accounts={filteredAccounts} />
+          </AnalyticsSectionCard>
+        </section>
+      ) : null}
+
+      <section id="accounts-needing-attention" className="ig-radar-grid">
+        <AnalyticsSectionCard
+          eyebrow="Accounts"
+          title="Accounts needing attention"
+          description="Daily worklist from RadarAccount and ServerCheckItem signals: problem, monitor, linked warnings, and unlinked warnings."
+        >
+          <RiskAccountList accounts={data.riskAccounts} warningCount={data.warnings.length} />
+        </AnalyticsSectionCard>
+
+        <AnalyticsSectionCard
+          eyebrow="Runs"
+          title="Run radar"
+          description={summary.sourceStatus.runs.description}
+        >
+          <RunTable runs={data.runs.slice(0, 10)} emptyText="No runs found from current run source." />
+        </AnalyticsSectionCard>
       </section>
 
       <section className="ig-radar-grid">
         <AnalyticsSectionCard
-          eyebrow="Runs"
-          title="Run radar"
-          description="Latest run states from the stable Radar data contract. Queued is shown only when the source is connected."
-        >
-          <RunTable runs={data.runs.slice(0, 10)} emptyText="No runs found from current source." />
-        </AnalyticsSectionCard>
-
-        <AnalyticsSectionCard
           eyebrow="Warnings"
           title="Recent warning signals"
-          description="Warnings consume the stable RadarWarning contract. Current source may still be legacy logs until incidents/runtime events are connected."
+          description={summary.sourceStatus.warnings.description}
         >
-          <WarningList warnings={data.warnings.slice(0, 10)} />
-        </AnalyticsSectionCard>
-      </section>
-
-      <section id="risk-accounts" className="ig-radar-grid">
-        <AnalyticsSectionCard
-          eyebrow="Accounts"
-          title="Accounts needing attention"
-          description="Risk list uses RadarAccount fields: health, phone, Mac host, source, and latest safe update."
-        >
-          <RiskAccountList accounts={data.riskAccounts} />
+          <div id="recent-warning-signals">
+            <WarningList warnings={data.warnings.slice(0, 10)} />
+          </div>
         </AnalyticsSectionCard>
 
         <AnalyticsSectionCard
           eyebrow="Devices"
           title="Device readiness"
-          description={data.devices.length ? "Read-only phone/device readiness from the RadarDevice contract." : "Device source pending. No devices found from current source."}
+          description={summary.sourceStatus.devices.description}
         >
           <DeviceTable devices={data.devices} />
         </AnalyticsSectionCard>
       </section>
-
       <style>{`
         .ig-radar-page {
           max-width: 1440px;
@@ -142,8 +198,20 @@ export default async function InstagramRadarPage() {
         }
 
         .ig-radar-source-strip {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           margin-bottom: 14px;
+        }
+
+        .ig-radar-api-note {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          flex-wrap: wrap;
+          margin-bottom: 14px;
+          border: 1px solid rgba(251,191,36,0.22);
+          border-radius: 12px;
+          background: rgba(251,191,36,0.055);
+          padding: 10px 12px;
         }
 
         .ig-radar-source-pill {
@@ -176,6 +244,11 @@ export default async function InstagramRadarPage() {
           text-decoration: none;
         }
 
+        .ig-radar-account-kpi {
+          display: grid;
+          gap: 12px;
+        }
+
         .ig-radar-kpi-link {
           cursor: pointer;
           transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
@@ -189,7 +262,46 @@ export default async function InstagramRadarPage() {
           transform: translateY(-1px);
         }
 
+        .ig-radar-kpi-active {
+          border-color: rgba(245,158,11,0.46);
+          background: rgba(245,158,11,0.08);
+        }
+
+        .ig-radar-account-total {
+          text-decoration: none;
+        }
+
+        .ig-radar-account-pills {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .ig-radar-account-pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 28px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 999px;
+          color: rgba(255,255,255,0.68);
+          font-size: 11px;
+          font-weight: 900;
+          padding: 0 10px;
+          text-decoration: none;
+        }
+
+        .ig-radar-account-pill:hover,
+        .ig-radar-account-pill:focus-visible,
+        .ig-radar-account-pill-active {
+          border-color: rgba(245,158,11,0.42);
+          background: rgba(245,158,11,0.10);
+          color: #FBBF24;
+          outline: none;
+        }
+
         .ig-radar-kpi span,
+        .ig-radar-api-note span,
         .ig-radar-source-pill span,
         .ig-radar-table th,
         .ig-radar-empty span,
@@ -212,6 +324,7 @@ export default async function InstagramRadarPage() {
         }
 
         .ig-radar-kpi small,
+        .ig-radar-api-note small,
         .ig-radar-source-pill strong,
         .ig-radar-table td,
         .ig-radar-list p,
@@ -220,10 +333,51 @@ export default async function InstagramRadarPage() {
           font-size: 12px;
         }
 
+        .ig-radar-api-note strong {
+          color: #FBBF24;
+          font-size: 12px;
+          text-transform: uppercase;
+        }
+
         .ig-radar-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
           margin-bottom: 18px;
           align-items: start;
+        }
+
+        #account-drilldown {
+          margin-bottom: 18px;
+          scroll-margin-top: 20px;
+        }
+
+        .ig-radar-drilldown-header {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: center;
+          flex-wrap: wrap;
+          margin-bottom: 12px;
+        }
+
+        .ig-radar-back-link {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 32px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 999px;
+          color: rgba(255,255,255,0.72);
+          font-size: 12px;
+          font-weight: 900;
+          padding: 0 12px;
+          text-decoration: none;
+        }
+
+        .ig-radar-back-link:hover,
+        .ig-radar-back-link:focus-visible {
+          border-color: rgba(245,158,11,0.42);
+          color: #FBBF24;
+          outline: none;
         }
 
         .ig-radar-table-wrap {
@@ -339,12 +493,50 @@ export default async function InstagramRadarPage() {
   );
 }
 
-function SourcePill({ label, value }: { label: string; value: string }) {
+function SourcePill({ label, source }: { label: string; source: RadarSourceStatus }) {
   return (
-    <div className="ig-radar-source-pill">
+    <div className="ig-radar-source-pill" title={source.description}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>{source.label}</strong>
     </div>
+  );
+}
+
+function AccountsWatchedKpi({
+  summary,
+  activeFilter,
+}: {
+  summary: {
+    totalAccounts: number;
+    okCount: number;
+    monitorCount: number;
+    problemCount: number;
+  };
+  activeFilter: AccountFilter | null;
+}) {
+  return (
+    <article className={activeFilter === "all" ? "ig-radar-kpi ig-radar-account-kpi ig-radar-kpi-active" : "ig-radar-kpi ig-radar-account-kpi"}>
+      <Link className="ig-radar-account-total" href="/instagram-dashboard/radar?accountFilter=all#account-drilldown">
+        <span>Accounts watched</span>
+        <strong>{formatInteger(summary.totalAccounts)}</strong>
+      </Link>
+      <div className="ig-radar-account-pills" aria-label="Account status filters">
+        <AccountPill label="OK" value={summary.okCount} filter="ok" activeFilter={activeFilter} />
+        <AccountPill label="Monitor" value={summary.monitorCount} filter="monitor" activeFilter={activeFilter} />
+        <AccountPill label="Problem" value={summary.problemCount} filter="problem" activeFilter={activeFilter} />
+      </div>
+    </article>
+  );
+}
+
+function AccountPill({ label, value, filter, activeFilter }: { label: string; value: number; filter: AccountFilter; activeFilter: AccountFilter | null }) {
+  return (
+    <Link
+      className={activeFilter === filter ? "ig-radar-account-pill ig-radar-account-pill-active" : "ig-radar-account-pill"}
+      href={`/instagram-dashboard/radar?accountFilter=${filter}#account-drilldown`}
+    >
+      {label} {formatInteger(value)}
+    </Link>
   );
 }
 
@@ -354,12 +546,14 @@ function RadarKpi({
   detail,
   tone = "neutral",
   href,
+  active = false,
 }: {
   label: string;
   value: number;
   detail: string;
   tone?: "neutral" | "good" | "warning" | "danger";
   href?: string;
+  active?: boolean;
 }) {
   const color = tone === "good" ? "#34D399" : tone === "warning" ? "#FBBF24" : tone === "danger" ? "#F87171" : "#f0f0ef";
   const content = (
@@ -372,13 +566,70 @@ function RadarKpi({
 
   if (href) {
     return (
-      <a className="ig-radar-kpi ig-radar-kpi-link" href={href}>
+      <Link className={active ? "ig-radar-kpi ig-radar-kpi-link ig-radar-kpi-active" : "ig-radar-kpi ig-radar-kpi-link"} href={href}>
         {content}
-      </a>
+      </Link>
     );
   }
 
   return <article className="ig-radar-kpi">{content}</article>;
+}
+
+function AccountDrilldown({ filter, accounts }: { filter: AccountFilter; accounts: RadarAccount[] }) {
+  return (
+    <div>
+      <div className="ig-radar-drilldown-header">
+        <span className="ig-radar-field-label">Active filter: {accountFilterLabels[filter]}</span>
+        <Link className="ig-radar-back-link" href="/instagram-dashboard/radar#radar-top">
+          Back to Radar
+        </Link>
+      </div>
+      <AccountDrilldownTable accounts={accounts} emptyTitle={`No ${accountFilterLabels[filter].toLowerCase()} found`} />
+    </div>
+  );
+}
+
+function AccountDrilldownTable({ accounts, emptyTitle }: { accounts: RadarAccount[]; emptyTitle: string }) {
+  if (!accounts.length) {
+    return <EmptyState title={emptyTitle} text="No accounts found for this filter. Unlinked warnings remain visible in Recent warning signals." />;
+  }
+
+  return (
+    <div className="ig-radar-table-wrap">
+      <table className="ig-radar-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Health</th>
+            <th>Reason</th>
+            <th>Problem type</th>
+            <th>Latest warning</th>
+            <th>Phone</th>
+            <th>Mac/host</th>
+            <th>Last update</th>
+            <th>Source</th>
+            <th>Recommended action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {accounts.map((account) => (
+            <tr key={account.accountId || account.username}>
+              <td>{account.username}</td>
+              <td style={{ color: statusTone(account.healthStatus), fontWeight: 900 }}>{account.healthStatus}</td>
+              <td>{account.healthReason}</td>
+              <td>{account.latestWarning?.warningType ?? account.latestIncidentSeverity}</td>
+              <td>{account.latestWarning ? `${account.latestWarning.message} · ${formatDateTime(account.latestWarning.timestamp)}` : "none from current source"}</td>
+              <td>{account.phoneName}</td>
+              <td>{account.macHostName}</td>
+              <td>{formatDateTime(account.lastSafeUpdate)}</td>
+              <td>{account.sourceLabel}</td>
+              <td>{account.recommendedAction}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function RunTable({ runs, emptyText }: { runs: RadarRun[]; emptyText: string }) {
@@ -447,9 +698,9 @@ function WarningList({ warnings }: { warnings: RadarWarning[] }) {
   );
 }
 
-function RiskAccountList({ accounts }: { accounts: RadarAccount[] }) {
+function RiskAccountList({ accounts, warningCount }: { accounts: RadarAccount[]; warningCount: number }) {
   if (!accounts.length) {
-    return <EmptyState title="No risk accounts found" text="No problem, monitor, or unlinked warning accounts found from current sources." />;
+    return <EmptyState title="No risk accounts found" text={warningCount ? "No linked risk accounts found. Unlinked warnings remain visible in Recent warning signals." : "No problem, monitor, or linked warning accounts found from current sources."} />;
   }
 
   return (
