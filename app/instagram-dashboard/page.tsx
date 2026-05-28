@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
-import AnalyticsSectionCard, { ANALYTICS_ACCENT_TEXT } from "@/components/restaurant-analytics/AnalyticsSectionCard";
+import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
 import AddProfileWizard from "./AddProfileWizard";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
+import InstagramDashboardViewNav from "./InstagramDashboardViewNav";
 
 export const dynamic = "force-dynamic";
 
@@ -236,7 +237,7 @@ export default async function InstagramAutomationDashboardPage() {
         eyebrow="Admin only"
         title="Instagram Automation Dashboard"
         description="Manage internal Instagram Accounts, device assignments, campaigns, recent run health, and automation activity from one private workspace."
-        badges={["Instagram Accounts", "Comptes Instagram"]}
+        action={<InstagramDashboardViewNav active="manage" />}
       />
 
       {data.error && (
