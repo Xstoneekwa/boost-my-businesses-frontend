@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
@@ -267,6 +268,26 @@ export default async function InstagramAutomationDashboardPage() {
         .ig-dashboard-mobile-card strong {
           color: #f0f0ef;
           font-weight: 800;
+        }
+
+        .ig-dashboard-account-link,
+        .ig-dashboard-mobile-detail-link {
+          color: #f0f0ef;
+          font-weight: 900;
+          text-decoration: none;
+        }
+
+        .ig-dashboard-account-link:hover,
+        .ig-dashboard-account-link:focus-visible,
+        .ig-dashboard-mobile-detail-link:hover,
+        .ig-dashboard-mobile-detail-link:focus-visible {
+          color: #FBBF24;
+          outline: none;
+        }
+
+        .ig-dashboard-mobile-detail-link {
+          color: rgba(251,191,36,0.92);
+          font-size: 12px;
         }
 
         .ig-dashboard-status {
@@ -541,6 +562,10 @@ function SourcePill({ label, source }: { label: string; source: ManageSourceStat
   );
 }
 
+function accountDetailHref(account: ManageAccount) {
+  return `/instagram-dashboard/accounts/${encodeURIComponent(account.accountId || account.username)}`;
+}
+
 function AccountLifecycleTabs({ data }: { data: ManageOverview }) {
   const tabs = [
     {
@@ -646,7 +671,9 @@ function AccountList({
             {accounts.map((account) => (
               <tr key={account.accountId || account.username}>
                 <td>
-                  <strong>{account.username}</strong>
+                  <Link className="ig-dashboard-account-link" href={accountDetailHref(account)}>
+                    {account.username}
+                  </Link>
                 </td>
                 <td>{account.clientName ?? account.emailDisplay}</td>
                 <td>
@@ -681,6 +708,9 @@ function AccountList({
             <div className="ig-dashboard-mobile-card-head">
               <div>
                 <strong>{account.username}</strong>
+                <Link className="ig-dashboard-mobile-detail-link" href={accountDetailHref(account)}>
+                  Details
+                </Link>
                 <span>{account.clientName ?? account.emailDisplay}</span>
               </div>
               <span style={{ color: statusTone(account.adminStatus) }}>{account.adminStatus}</span>

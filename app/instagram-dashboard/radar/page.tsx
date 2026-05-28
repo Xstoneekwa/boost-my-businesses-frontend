@@ -440,6 +440,18 @@ export default async function InstagramRadarPage({
           font-weight: 900;
         }
 
+        .ig-radar-account-link {
+          color: #f0f0ef;
+          font-weight: 900;
+          text-decoration: none;
+        }
+
+        .ig-radar-account-link:hover,
+        .ig-radar-account-link:focus-visible {
+          color: #FBBF24;
+          outline: none;
+        }
+
         .ig-radar-list p {
           margin: 0;
           line-height: 1.5;
@@ -614,7 +626,11 @@ function AccountDrilldownTable({ accounts, emptyTitle }: { accounts: RadarAccoun
         <tbody>
           {accounts.map((account) => (
             <tr key={account.accountId || account.username}>
-              <td>{account.username}</td>
+              <td>
+                <Link className="ig-radar-account-link" href={`/instagram-dashboard/accounts/${encodeURIComponent(account.accountId || account.username)}?from=radar`}>
+                  {account.username}
+                </Link>
+              </td>
               <td style={{ color: statusTone(account.healthStatus), fontWeight: 900 }}>{account.healthStatus}</td>
               <td>{account.healthReason}</td>
               <td>{account.latestWarning?.warningType ?? account.latestIncidentSeverity}</td>
@@ -710,6 +726,9 @@ function RiskAccountList({ accounts, warningCount }: { accounts: RadarAccount[];
           <header>
             <div>
               <strong>{account.username}</strong>
+              <Link className="ig-radar-account-link" href={`/instagram-dashboard/accounts/${encodeURIComponent(account.accountId || account.username)}?from=radar`}>
+                Details
+              </Link>
               <span>{account.sourceLabel}</span>
             </div>
             <small style={{ color: statusTone(account.healthStatus) }}>{account.healthStatus}</small>

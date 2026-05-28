@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
@@ -181,6 +182,18 @@ export default async function InstagramServerCheckPage() {
           font-weight: 900;
         }
 
+        .ig-server-check-account-link {
+          color: #f0f0ef;
+          font-weight: 900;
+          text-decoration: none;
+        }
+
+        .ig-server-check-account-link:hover,
+        .ig-server-check-account-link:focus-visible {
+          color: #FBBF24;
+          outline: none;
+        }
+
         .ig-server-check-empty {
           display: grid;
           gap: 8px;
@@ -259,7 +272,15 @@ function ServerCheckList({ items }: { items: ServerCheckItem[] }) {
         <tbody>
           {items.map((item) => (
             <tr id={`server-check-item-${encodeURIComponent(item.id)}`} key={item.id}>
-              <td>{item.username ?? "account unknown"}</td>
+              <td>
+                {item.accountId || item.username ? (
+                  <Link className="ig-server-check-account-link" href={`/instagram-dashboard/accounts/${encodeURIComponent(item.accountId || item.username || "")}?from=server-check`}>
+                    {item.username ?? "account unknown"}
+                  </Link>
+                ) : (
+                  "account unknown"
+                )}
+              </td>
               <td>{item.reason}</td>
               <td style={{ color: statusTone(item.healthStatus), fontWeight: 900 }}>{item.severity}</td>
               <td>{item.phoneName}</td>
