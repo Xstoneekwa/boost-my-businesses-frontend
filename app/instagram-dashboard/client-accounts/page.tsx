@@ -594,6 +594,9 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
                       {item.username}
                     </Link>
                     <small>{item.clientName ?? "Client pending"} · {item.lifecycleStatus}</small>
+                    <small style={{ color: statusTone(item.instagramVerificationStatus ?? "pending") }}>
+                      username {item.instagramVerificationStatus ?? "pending"}
+                    </small>
                   </div>
                 </div>
               </td>

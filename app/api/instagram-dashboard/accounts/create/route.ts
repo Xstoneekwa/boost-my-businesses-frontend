@@ -47,6 +47,7 @@ const supportRequiredStatus = "support_required";
 const addProfileOperation = "add_profile";
 const addProfileSourceSurface = "admin_dashboard";
 const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
+const instagramUsernamePattern = /^[a-z0-9._]{1,30}$/;
 const sensitivePayloadKeys = new Set([
   "password",
   "email",
@@ -80,6 +81,35 @@ function truncateSafe(value: string, maxLength = 120) {
 function safeFailureReason(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_:-]/g, "_");
   return normalized.slice(0, 120) || "unknown";
+}
+
+function normalizeInstagramUsername(value: string) {
+  return value.trim().replace(/^@+/, "").toLowerCase();
+}
+
+function isPlausibleInstagramUsername(username: string) {
+  return (
+    instagramUsernamePattern.test(username) &&
+    !username.includes("..") &&
+    !username.startsWith(".") &&
+    !username.endsWith(".")
+  );
+}
+
+function unavailableProfileVerificationMetadata() {
+  return {
+    username_verification_status: "verification_unavailable",
+    username_verified_at: null,
+    username_verification_reason: "public_lookup_not_configured",
+    avatar_url: null,
+    avatar_checked_at: null,
+    public_profile_metadata: {
+      source: addProfileOperation,
+      source_surface: addProfileSourceSurface,
+      verification_status: "verification_unavailable",
+      reason: "public_lookup_not_configured",
+    },
+  };
 }
 
 function redactTemplatePayload(payload: Record<string, string | number | boolean>) {
@@ -433,8 +463,9 @@ export async function POST(request: Request) {
     const body = await readJsonBody<CreateProfilePayload>(request);
     if (!body) return jsonError("Invalid profile payload.", 400);
 
-    const username = readString(body.username, "").trim();
+    const username = normalizeInstagramUsername(readString(body.username, ""));
     if (!username) return jsonError("Instagram username is required.", 400);
+    if (!isPlausibleInstagramUsername(username)) return jsonError("username_verification_failed", 400);
     const password = readString(body.password, "");
     if (!password) return jsonError("Instagram password is required for secure credential setup.", 400);
     if (!credentialsConfig()) return jsonError("credentials_api_not_configured", 500);
@@ -464,6 +495,7 @@ export async function POST(request: Request) {
       login_method: loginMethod,
       internal_label: readString(body.internal_label, "").trim() || null,
       notes: readString(body.notes, "").trim() || null,
+      ...unavailableProfileVerificationMetadata(),
     };
 
     const { data: account, error: accountError } = await supabase

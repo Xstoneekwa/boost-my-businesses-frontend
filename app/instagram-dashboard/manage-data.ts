@@ -39,6 +39,11 @@ export type ManageAccount = {
   lastSafeUpdate: string | null;
   phoneName: string;
   macHostName: string;
+  profileImageUrl?: string | null;
+  profileImageSource?: string | null;
+  instagramVerificationStatus?: string | null;
+  instagramCanonicalUsername?: string | null;
+  usernameVerificationReason?: string | null;
   sourceLabel: string;
   archivedAt: string | null;
   trashedAt: string | null;
@@ -139,6 +144,26 @@ function readString(row: SupabaseRecord | undefined, keys: string[], fallback = 
   }
 
   return fallback;
+}
+
+function readOptionalString(row: SupabaseRecord | undefined, keys: string[]) {
+  const value = readString(row, keys, "");
+  return value || null;
+}
+
+function safeProfileImageUrlFromRow(row: SupabaseRecord | undefined) {
+  const rawUrl = readString(row, ["avatar_url", "profile_image_url", "profile_picture_url", "instagram_profile_picture_url"], "");
+  if (!rawUrl) return null;
+
+  try {
+    const url = new URL(rawUrl);
+    const unsafeText = `${url.search} ${url.hash}`.toLowerCase();
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (["token", "secret", "signature", "x-amz", "authorization", "service_role"].some((term) => unsafeText.includes(term))) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function readNumber(row: SupabaseRecord | undefined, keys: string[], fallback = 0) {
@@ -279,6 +304,51 @@ function sourceStatusWithBackend(backendApi: ManageSourceStatus, overview: Manag
   };
 }
 
+async function enrichWithPublicProfileMetadata(overview: ManageOverview): Promise<ManageOverview> {
+  const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return overview;
+
+  try {
+    const supabase = createSupabaseClient();
+    const { data, error } = await supabase
+      .from("ig_accounts")
+      .select("id,username,username_verification_status,username_verification_reason,avatar_url")
+      .in("id", accountIds);
+
+    if (error || !Array.isArray(data)) {
+      return { ...overview, errors: ["Public profile metadata unavailable.", ...overview.errors] };
+    }
+
+    const metadataById = new Map((data as SupabaseRecord[]).map((row) => [readString(row, ["id"], ""), row]));
+    const enrich = (account: ManageAccount): ManageAccount => {
+      const row = metadataById.get(account.accountId);
+      if (!row) return account;
+      const profileImageUrl = safeProfileImageUrlFromRow(row);
+      return {
+        ...account,
+        profileImageUrl,
+        profileImageSource: profileImageUrl ? "ig_accounts" : account.profileImageSource ?? "pending",
+        instagramVerificationStatus: readOptionalString(row, ["username_verification_status"]) ?? account.instagramVerificationStatus ?? "pending",
+        instagramCanonicalUsername: readOptionalString(row, ["username"]) ?? account.instagramCanonicalUsername ?? account.username,
+        usernameVerificationReason: readOptionalString(row, ["username_verification_reason"]) ?? account.usernameVerificationReason ?? null,
+      };
+    };
+
+    const activeAccounts = overview.activeAccounts.map(enrich);
+    const archivedAccounts = overview.archivedAccounts.map(enrich);
+    const trashedAccounts = overview.trashedAccounts.map(enrich);
+    return {
+      ...overview,
+      activeAccounts,
+      archivedAccounts,
+      trashedAccounts,
+      allAccounts: [...activeAccounts, ...archivedAccounts, ...trashedAccounts],
+    };
+  } catch {
+    return { ...overview, errors: ["Public profile metadata unavailable.", ...overview.errors] };
+  }
+}
+
 function adminDashboardConfig() {
   const url = process.env.ADMIN_DASHBOARD_API_URL?.trim();
   const token = process.env.ADMIN_DASHBOARD_INTERNAL_API_TOKEN?.trim();
@@ -338,6 +408,11 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
     lastSafeUpdate: readIso(account, ["last_safe_update", "last_seen_at", "updated_at", "created_at"]),
     phoneName: readString(account, ["device_name", "device", "phone_name"], readString(accountSettings, ["device_name", "device", "phone_name"], unknownPhone)),
     macHostName: readString(account, ["host_name", "mac_host", "mac_name", "server_name", "worker_host"], localMac),
+    profileImageUrl: safeProfileImageUrlFromRow(account),
+    profileImageSource: safeProfileImageUrlFromRow(account) ? "ig_accounts" : "pending",
+    instagramVerificationStatus: readOptionalString(account, ["username_verification_status", "instagram_verification_status", "verification_status"]) ?? "pending",
+    instagramCanonicalUsername: readOptionalString(account, ["username", "instagram_canonical_username", "canonical_username"]),
+    usernameVerificationReason: readOptionalString(account, ["username_verification_reason"]),
     sourceLabel: legacyAccountsSource,
     archivedAt: readIso(account, ["archived_at"]),
     trashedAt: readIso(account, ["trashed_at"]),
@@ -381,6 +456,11 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     lastSafeUpdate: readIso(row, ["last_safe_update"]),
     phoneName: readString(row, ["phone_name", "device_name"], unknownPhone),
     macHostName: readString(row, ["mac_host_name", "host_name", "mac_host"], localMac),
+    profileImageUrl: safeProfileImageUrlFromRow(row),
+    profileImageSource: safeProfileImageUrlFromRow(row) ? "admin-dashboard" : "pending",
+    instagramVerificationStatus: readOptionalString(row, ["username_verification_status", "instagram_verification_status", "verification_status"]) ?? "pending",
+    instagramCanonicalUsername: readOptionalString(row, ["instagram_canonical_username", "canonical_username", "username"]),
+    usernameVerificationReason: readOptionalString(row, ["username_verification_reason"]),
     sourceLabel: adminDashboardSource,
     archivedAt: readIso(row, ["archived_at"]),
     trashedAt: readIso(row, ["trashed_at"]),
@@ -583,18 +663,21 @@ export async function getManageDataFromAdminDashboardApi(): Promise<ManageOvervi
 }
 
 export async function getManageData() {
+  let overview: ManageOverview;
   if (!adminDashboardConfig()) {
     const fallback = await getManageDataFromLegacyTables();
-    return sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
+    overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
+    return await enrichWithPublicProfileMetadata(overview);
   }
 
   try {
-    return await getManageDataFromAdminDashboardApi();
+    overview = await getManageDataFromAdminDashboardApi();
   } catch {
     const fallback = await getManageDataFromLegacyTables();
-    return sourceStatusWithBackend(backendApiFallbackStatus, {
+    overview = sourceStatusWithBackend(backendApiFallbackStatus, {
       ...fallback,
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
+  return await enrichWithPublicProfileMetadata(overview);
 }

@@ -290,6 +290,12 @@ export default async function InstagramAutomationDashboardPage() {
           font-size: 12px;
         }
 
+        .ig-dashboard-username-verification {
+          margin-top: 4px;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
         .ig-dashboard-status {
           font-weight: 800;
           white-space: nowrap;
@@ -674,6 +680,9 @@ function AccountList({
                   <Link className="ig-dashboard-account-link" href={accountDetailHref(account)}>
                     {account.username}
                   </Link>
+                  <div className="ig-dashboard-username-verification" style={{ color: statusTone(account.instagramVerificationStatus ?? "pending") }}>
+                    username {account.instagramVerificationStatus ?? "pending"}
+                  </div>
                 </td>
                 <td>{account.clientName ?? account.emailDisplay}</td>
                 <td>

@@ -7,7 +7,7 @@ export type ClientAccountLifecycleStatus = "active" | "archived" | "trashed";
 export type ClientAccountBackendStatus = "pending_backend" | "connected" | "disabled";
 export type ClientAccountsSourceStatusCode = "connected" | "pending" | "unknown" | "disabled";
 export type ClientAccountProfileImageSource = "admin_dashboard" | "supabase" | "legacy" | "pending" | "unknown";
-export type InstagramVerificationStatus = "verified" | "not_found" | "private_or_limited" | "rate_limited" | "provider_error" | "pending" | "unknown";
+export type InstagramVerificationStatus = "verified" | "not_found" | "username_changed" | "private_or_limited" | "inaccessible" | "rate_limited" | "provider_error" | "verification_unavailable" | "invalid_format" | "pending" | "unknown";
 
 export type ClientAccountStatusTransition = {
   from: ClientAccountOperationsStatus;
@@ -86,9 +86,9 @@ export type ClientAccountsOperationsOverview = {
 };
 
 const transitionStatuses: Array<Exclude<ClientAccountOperationsStatus, "unknown">> = ["active", "pending", "onboarding", "paused", "cancelled"];
-const profileImageKeys = ["profile_image_url", "profile_picture_url", "avatar_url", "instagram_profile_picture_url", "picture_url", "image_url"] as const;
-const verificationStatusKeys = ["instagram_verification_status", "verification_status"] as const;
-const canonicalUsernameKeys = ["instagram_canonical_username", "canonical_username"] as const;
+const profileImageKeys = ["profileImageUrl", "profile_image_url", "profile_picture_url", "avatar_url", "instagram_profile_picture_url", "picture_url", "image_url"] as const;
+const verificationStatusKeys = ["instagramVerificationStatus", "username_verification_status", "instagram_verification_status", "verification_status"] as const;
+const canonicalUsernameKeys = ["instagramCanonicalUsername", "instagram_canonical_username", "canonical_username"] as const;
 
 function normalize(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
@@ -139,9 +139,13 @@ function instagramVerificationStatus(account: ManageAccount): InstagramVerificat
   if (!status) return "pending";
   if (status === "verified") return "verified";
   if (status === "not_found") return "not_found";
+  if (status === "username_changed") return "username_changed";
   if (status === "private_or_limited") return "private_or_limited";
+  if (status === "inaccessible") return "inaccessible";
   if (status === "rate_limited") return "rate_limited";
   if (status === "provider_error") return "provider_error";
+  if (status === "verification_unavailable") return "verification_unavailable";
+  if (status === "invalid_format") return "invalid_format";
   if (status === "pending") return "pending";
   return "unknown";
 }

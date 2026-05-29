@@ -121,6 +121,21 @@ export default async function InstagramAccountDetailPage({
 
       <section className="ig-account-detail-grid">
         <AnalyticsSectionCard
+          eyebrow="Profile"
+          title="Instagram profile"
+          description="Safe public profile metadata only. Avatar and username verification are optional and never include raw provider metadata."
+        >
+          <FieldGrid
+            fields={[
+              ["Username verification", account.instagramVerificationStatus ?? "pending"],
+              ["Verification reason", account.usernameVerificationReason ?? "pending source"],
+              ["Canonical username", account.instagramCanonicalUsername ?? account.username],
+              ["Avatar", account.profileImageUrl ? "available" : "pending"],
+            ]}
+          />
+        </AnalyticsSectionCard>
+
+        <AnalyticsSectionCard
           eyebrow="Status"
           title="Operational status"
           description="Read-only account health and workflow status. Actions remain in the Manage row controls."
