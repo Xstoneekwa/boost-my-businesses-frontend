@@ -131,6 +131,14 @@ function readBoolean(row: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function readRecord(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  }
+  return null;
+}
+
 function readMockBoolean(value: string | undefined) {
   if (value === "true") return true;
   if (value === "false") return false;
@@ -212,6 +220,59 @@ function fromProviderPayload(
   });
 }
 
+function notFoundReason(value: unknown) {
+  if (typeof value !== "string") return false;
+  const normalized = value.toLowerCase();
+  return normalized.includes("not_found") || normalized.includes("not found") || normalized.includes("does not exist");
+}
+
+function fromSearchApiPayload(
+  inputUsername: string,
+  payload: Record<string, unknown>,
+  options: InstagramPublicProfileLookupOptions,
+) {
+  const explicitStatus = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+  const error = readString(payload, ["error", "message", "reason"]);
+  if (explicitStatus === "not_found" || notFoundReason(error)) {
+    return result(inputUsername, "not_found", options, {
+      reason: "not_found",
+      metadata: { provider_mode: "searchapi", provider_status: "not_found" },
+    });
+  }
+
+  const profile = readRecord(payload, ["profile", "user", "instagram_profile", "data"]) ?? payload;
+  const username = readString(profile, ["username", "user_name", "handle"]);
+  const id = readString(profile, ["id", "user_id", "instagram_user_id", "pk"]);
+  const avatarUrl = safeInstagramPublicAvatarUrl(
+    profile.avatar_url ?? profile.profile_pic_url ?? profile.profile_picture_url ?? profile.thumbnail,
+  );
+  const followersCount = readFollowersCount({
+    followers_count: profile.followers_count ?? profile.followers ?? profile.follower_count,
+  });
+
+  if (!username && followersCount === null && !avatarUrl && !id) {
+    return result(inputUsername, "provider_error", options, {
+      reason: "provider_invalid_response",
+      metadata: { provider_mode: "searchapi", provider_status: "provider_error" },
+    });
+  }
+
+  return result(inputUsername, "found", options, {
+    canonical_username: normalizeInstagramPublicUsername(username || inputUsername),
+    external_profile_id: id || null,
+    avatar_url: avatarUrl,
+    is_private: readBoolean(profile, ["is_private", "private"]),
+    is_verified: readBoolean(profile, ["is_verified", "verified"]),
+    followers_count: followersCount,
+    reason: "found",
+    metadata: {
+      provider_mode: "searchapi",
+      provider_status: "found",
+      provider_engine: "instagram_profile",
+    },
+  });
+}
+
 function mockLookup(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
   const status = mapProviderStatus(process.env.INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MOCK_STATUS ?? "provider_not_configured");
   const canonical = normalizeInstagramPublicUsername(
@@ -270,6 +331,49 @@ async function httpLookup(inputUsername: string, options: InstagramPublicProfile
   }
 }
 
+async function searchApiLookup(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
+  const endpoint = process.env.INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL?.trim();
+  const apiKey = process.env.INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY?.trim();
+  if (!endpoint || !apiKey) {
+    return result(inputUsername, "provider_not_configured", options, {
+      reason: "provider_not_configured",
+      metadata: { provider_mode: "searchapi" },
+    });
+  }
+
+  const fetcher = options.fetcher ?? fetch;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 3000);
+
+  try {
+    const url = new URL(endpoint);
+    if (!url.searchParams.has("engine")) url.searchParams.set("engine", "instagram_profile");
+    url.searchParams.set("username", inputUsername);
+    url.searchParams.set("api_key", apiKey);
+    const response = await fetcher(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (response.status === 404) return result(inputUsername, "not_found", options, { reason: "not_found" });
+    if (response.status === 429) return result(inputUsername, "rate_limited", options, { reason: "rate_limited" });
+    if (response.status >= 500) return result(inputUsername, "unavailable", options, { reason: "provider_unavailable" });
+    if (!response.ok) return result(inputUsername, "provider_error", options, { reason: "provider_http_error" });
+
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return result(inputUsername, "provider_error", options, { reason: "provider_invalid_response" });
+    }
+    return fromSearchApiPayload(inputUsername, payload as Record<string, unknown>, options);
+  } catch (error) {
+    const reason = error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_error";
+    return result(inputUsername, reason === "provider_timeout" ? "unavailable" : "provider_error", options, { reason });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function lookupInstagramPublicProfile(
   username: string,
   options: InstagramPublicProfileLookupOptions = {},
@@ -282,6 +386,7 @@ export async function lookupInstagramPublicProfile(
   const provider = providerMode(options);
   if (provider === "mock") return mockLookup(inputUsername, options);
   if (provider === "http") return await httpLookup(inputUsername, options);
+  if (provider === "searchapi") return await searchApiLookup(inputUsername, options);
 
   return result(inputUsername, "provider_not_configured", options, {
     reason: "provider_not_configured",
