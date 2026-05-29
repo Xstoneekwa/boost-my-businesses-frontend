@@ -1,6 +1,7 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { defaultInstagramFilters, defaultInstagramSettings } from "@/lib/instagram-dashboard/defaults";
-import { jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
+import { canAccessTenantPages, getDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { jsonError, jsonOk, readJsonBody, readString, type SupabaseRecord } from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,9 @@ type AddProfileCredentialsInput = {
 const credentialsTimeoutMs = 9000;
 const activeAccountStatus = "active";
 const supportRequiredStatus = "support_required";
+const addProfileOperation = "add_profile";
+const addProfileSourceSurface = "admin_dashboard";
+const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
 const sensitivePayloadKeys = new Set([
   "password",
   "email",
@@ -67,6 +71,15 @@ function isUuid(value: string) {
 
 function isRecord(value: unknown): value is Record<string, string | number | boolean> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function truncateSafe(value: string, maxLength = 120) {
+  return value.trim().slice(0, maxLength);
+}
+
+function safeFailureReason(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_:-]/g, "_");
+  return normalized.slice(0, 120) || "unknown";
 }
 
 function redactTemplatePayload(payload: Record<string, string | number | boolean>) {
@@ -199,22 +212,32 @@ async function createCredentialSupportAction(
   accountId: string,
   reason: string,
   externalRequestId: string,
+  actorId: string | null,
 ) {
-  await supabase.rpc("create_credential_dashboard_action", {
+  await supabase.rpc("upsert_account_dashboard_action", {
     p_account_id: accountId,
+    p_client_id: null,
+    p_incident_id: null,
     p_action_type: "review_credentials",
+    p_status: "pending",
+    p_title: "Review Instagram credentials",
+    p_dedupe_key: `account:${accountId}:dashboard_action:review_credentials`,
     p_safe_client_message: "Instagram credentials need review before this profile can run.",
     p_admin_message: "Add Profile credential ingestion did not complete.",
+    p_assistant_message: null,
+    p_action_label: "Review",
     p_action_deep_link: "/instagram-dashboard/credentials-actions",
     p_severity: "warning",
+    p_audience: "admin",
     p_requires_client_action: false,
     p_blocking_campaign: true,
-    p_actor_type: "admin",
-    p_metadata_safe: {
-      source: "add_profile",
+    p_metadata: {
+      source: addProfileOperation,
       phase: "credentials_ingestion",
-      reason,
-      external_request_id: externalRequestId,
+      reason: safeFailureReason(reason),
+      source_surface: addProfileSourceSurface,
+      external_request_id: truncateSafe(externalRequestId),
+      ...(actorId ? { actor_type: "admin", actor_id: actorId } : {}),
     },
   });
 }
@@ -224,10 +247,11 @@ async function markCredentialFailureWithSupportAction(
   accountId: string,
   reason: string,
   externalRequestId: string,
+  actorId: string | null,
 ) {
   await markCredentialFailure(supabase, accountId);
   try {
-    await createCredentialSupportAction(supabase, accountId, reason, externalRequestId);
+    await createCredentialSupportAction(supabase, accountId, reason, externalRequestId, actorId);
   } catch {
     // Status is the safety boundary; support action creation is best-effort.
   }
@@ -260,6 +284,84 @@ async function finalizeActiveProfile(
   ]);
 
   return !accountResult.error && !settingsResult.error;
+}
+
+async function resolveCredentialDashboardActions(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  externalRequestId: string,
+  actorId: string | null,
+) {
+  const { data } = await supabase
+    .from("account_dashboard_actions")
+    .select("id")
+    .eq("account_id", accountId)
+    .in("action_type", ["submit_instagram_credentials", "review_credentials"])
+    .in("status", activeDashboardActionStatuses);
+
+  const rows = Array.isArray(data) ? data : [];
+  await Promise.all(rows.map((row) => {
+    const actionId = readString((row as SupabaseRecord).id, "");
+    if (!actionId) return Promise.resolve();
+    return supabase.rpc("transition_account_dashboard_action", {
+      p_action_id: actionId,
+      p_new_status: "resolved",
+      p_actor_type: "admin",
+      p_actor_id: actorId || null,
+      p_reason: "add_profile_success",
+      p_metadata: {
+        source: addProfileOperation,
+        phase: "finalize_active",
+        source_surface: addProfileSourceSurface,
+        external_request_id: truncateSafe(externalRequestId),
+      },
+    });
+  }));
+}
+
+async function recordAddProfileAudit(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: {
+    accountId?: string | null;
+    username: string;
+    externalRequestId: string;
+    credentialRequestId?: string | null;
+    actorId?: string | null;
+    resultStatus: "success" | "failed" | "compensated" | "duplicate";
+    failureReason?: string | null;
+    metadataSafe?: Record<string, string | number | boolean | null>;
+  },
+) {
+  await supabase.from("add_profile_audit_events").insert({
+    account_id: input.accountId || null,
+    username: truncateSafe(input.username.toLowerCase(), 120),
+    request_id: truncateSafe(input.externalRequestId, 120),
+    credential_request_id: input.credentialRequestId ? truncateSafe(input.credentialRequestId, 120) : null,
+    source_surface: addProfileSourceSurface,
+    operation: addProfileOperation,
+    result_status: input.resultStatus,
+    failure_reason: input.failureReason ? safeFailureReason(input.failureReason) : null,
+    actor_type: "admin",
+    actor_id: input.actorId || null,
+    metadata_safe: {
+      source: addProfileOperation,
+      source_surface: addProfileSourceSurface,
+      result_status: input.resultStatus,
+      ...(input.failureReason ? { failure_reason: safeFailureReason(input.failureReason) } : {}),
+      ...(input.metadataSafe ?? {}),
+    },
+  });
+}
+
+async function tryRecordAddProfileAudit(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: Parameters<typeof recordAddProfileAudit>[1],
+) {
+  try {
+    await recordAddProfileAudit(supabase, input);
+  } catch {
+    // Audit must never leak or change the user-facing Add Profile error path.
+  }
 }
 
 async function fetchTemplate(
@@ -322,8 +424,11 @@ function safeCreateResponse(account: SupabaseRecord, credentials: AddProfileCred
 
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
-    if (unauthorizedResponse) return unauthorizedResponse;
+    const adminContext = await getDashboardUserContext();
+    if (!adminContext) return jsonError("Authentication required.", 401);
+    if (!canAccessTenantPages(adminContext)) {
+      return jsonError("You are not authorized to access the Instagram dashboard.", 403);
+    }
 
     const body = await readJsonBody<CreateProfilePayload>(request);
     if (!body) return jsonError("Invalid profile payload.", 400);
@@ -368,7 +473,23 @@ export async function POST(request: Request) {
       .single<SupabaseRecord>();
 
     if (accountError) {
-      if (isDuplicateAccountError(accountError)) return jsonError("account_already_exists", 409);
+      if (isDuplicateAccountError(accountError)) {
+        await tryRecordAddProfileAudit(supabase, {
+          username,
+          externalRequestId,
+          actorId: adminContext.userId,
+          resultStatus: "duplicate",
+          failureReason: "account_already_exists",
+        });
+        return jsonError("account_already_exists", 409);
+      }
+      await tryRecordAddProfileAudit(supabase, {
+        username,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: "failed",
+        failureReason: "account_create_failed",
+      });
       return jsonError("account_create_failed", 500);
     }
 
@@ -400,7 +521,18 @@ export async function POST(request: Request) {
       .single<SupabaseRecord>();
 
     if (settingsResult.error) {
-      await compensateNewProfile(supabase, accountId);
+      const compensated = await compensateNewProfile(supabase, accountId);
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: compensated ? "compensated" : "failed",
+        failureReason: compensated ? "profile_settings_create_failed" : "profile_settings_compensation_failed",
+      });
+      if (!compensated) {
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_settings_compensation_failed", externalRequestId, adminContext.userId);
+      }
       return jsonError("profile_setup_failed", 500);
     }
 
@@ -411,7 +543,18 @@ export async function POST(request: Request) {
       .single<SupabaseRecord>();
 
     if (filtersResult.error) {
-      await compensateNewProfile(supabase, accountId);
+      const compensated = await compensateNewProfile(supabase, accountId);
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: compensated ? "compensated" : "failed",
+        failureReason: compensated ? "profile_filters_create_failed" : "profile_filters_compensation_failed",
+      });
+      if (!compensated) {
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_filters_compensation_failed", externalRequestId, adminContext.userId);
+      }
       return jsonError("profile_setup_failed", 500);
     }
 
@@ -425,22 +568,61 @@ export async function POST(request: Request) {
       });
 
       if (!isActiveCredentials(credentials)) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId);
+        await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId, adminContext.userId);
+        await tryRecordAddProfileAudit(supabase, {
+          accountId,
+          username,
+          externalRequestId,
+          credentialRequestId: credentials.request_id,
+          actorId: adminContext.userId,
+          resultStatus: "failed",
+          failureReason: "credentials_not_active",
+        });
         return jsonError("credentials_ingestion_failed", 502);
       }
 
       const finalized = await finalizeActiveProfile(supabase, accountId);
       if (!finalized) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_status_finalize_failed", externalRequestId);
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_status_finalize_failed", externalRequestId, adminContext.userId);
+        await tryRecordAddProfileAudit(supabase, {
+          accountId,
+          username,
+          externalRequestId,
+          credentialRequestId: credentials.request_id,
+          actorId: adminContext.userId,
+          resultStatus: "failed",
+          failureReason: "profile_status_finalize_failed",
+        });
         return jsonError("profile_status_finalize_failed", 502);
       }
 
+      try {
+        await resolveCredentialDashboardActions(supabase, accountId, externalRequestId, adminContext.userId);
+      } catch {
+        // Credential state is authoritative; dashboard actions can be reconciled later.
+      }
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username,
+        externalRequestId,
+        credentialRequestId: credentials.request_id,
+        actorId: adminContext.userId,
+        resultStatus: "success",
+      });
       return jsonOk(safeCreateResponse({ ...account, status: activeAccountStatus }, credentials), 201);
     } catch (credentialsError) {
       const reason = credentialsError instanceof Error && credentialsError.message === "credentials_ingestion_timeout"
         ? "credentials_ingestion_timeout"
         : "credentials_ingestion_failed";
-      await markCredentialFailureWithSupportAction(supabase, accountId, reason, externalRequestId);
+      await markCredentialFailureWithSupportAction(supabase, accountId, reason, externalRequestId, adminContext.userId);
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: "failed",
+        failureReason: reason,
+      });
       return jsonError(reason, 502);
     }
   } catch {

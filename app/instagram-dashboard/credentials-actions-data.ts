@@ -1,5 +1,6 @@
 import { getManageData, type ManageAccount, type ManageSourceStatus } from "./manage-data";
 import { getRadarData, type RadarOverview } from "./radar-data";
+import { createSupabaseClient } from "@/lib/supabase";
 
 export type CredentialsActionType =
   | "submit_instagram_credentials"
@@ -12,9 +13,9 @@ export type CredentialsActionType =
   | "review_credentials"
   | "unknown";
 
-export type DashboardActionSeverity = "info" | "warning" | "critical" | "unknown";
-export type DashboardActionStatus = "pending" | "acknowledged" | "resolved" | "dismissed" | "unknown";
-export type DashboardActionAudience = "client" | "admin" | "internal" | "unknown";
+export type DashboardActionSeverity = "info" | "warning" | "error" | "critical" | "unknown";
+export type DashboardActionStatus = "pending" | "acknowledged" | "pending_verification" | "resolved" | "dismissed" | "ignored" | "unknown";
+export type DashboardActionAudience = "client" | "admin" | "assistant" | "ops" | "internal" | "unknown";
 export type BackendMutationStatus = "pending_backend" | "connected" | "disabled";
 export type CredentialsSourceStatus = "connected" | "pending" | "unknown" | "disabled";
 
@@ -120,6 +121,22 @@ export type CredentialsActionsOverview = {
 };
 
 const derivedSourceLabel = "derived from dashboard overview";
+const persistedSourceLabel = "account_dashboard_actions";
+const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
+
+type PersistedDashboardActionRow = {
+  id?: unknown;
+  account_id?: unknown;
+  action_type?: unknown;
+  status?: unknown;
+  severity?: unknown;
+  audience?: unknown;
+  requires_client_action?: unknown;
+  blocking_campaign?: unknown;
+  title?: unknown;
+  safe_client_message?: unknown;
+  action_deep_link?: unknown;
+};
 
 function normalize(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
@@ -128,6 +145,61 @@ function normalize(value: string | null | undefined) {
 function includesAny(value: string | null | undefined, terms: string[]) {
   const normalized = normalize(value);
   return terms.some((term) => normalized.includes(term));
+}
+
+function asActionType(value: unknown): CredentialsActionType {
+  const normalized = normalize(typeof value === "string" ? value : "");
+  if (
+    normalized === "submit_instagram_credentials" ||
+    normalized === "update_instagram_password" ||
+    normalized === "reconnect_instagram" ||
+    normalized === "complete_two_factor" ||
+    normalized === "resolve_checkpoint" ||
+    normalized === "review_login_failure" ||
+    normalized === "review_account_mismatch" ||
+    normalized === "review_credentials"
+  ) {
+    return normalized;
+  }
+  return "unknown";
+}
+
+function asSeverity(value: unknown): DashboardActionSeverity {
+  const normalized = normalize(typeof value === "string" ? value : "");
+  if (normalized === "info" || normalized === "warning" || normalized === "error" || normalized === "critical") {
+    return normalized;
+  }
+  return "unknown";
+}
+
+function asStatus(value: unknown): DashboardActionStatus {
+  const normalized = normalize(typeof value === "string" ? value : "");
+  if (
+    normalized === "pending" ||
+    normalized === "acknowledged" ||
+    normalized === "pending_verification" ||
+    normalized === "resolved" ||
+    normalized === "dismissed" ||
+    normalized === "ignored"
+  ) {
+    return normalized;
+  }
+  return "unknown";
+}
+
+function asAudience(value: unknown): DashboardActionAudience {
+  const normalized = normalize(typeof value === "string" ? value : "");
+  if (normalized === "client" || normalized === "admin" || normalized === "assistant" || normalized === "ops") {
+    return normalized;
+  }
+  return "unknown";
+}
+
+function readText(value: unknown, fallback = "") {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return fallback;
 }
 
 function sourceStatusFromManage(status: ManageSourceStatus): CredentialsSourceStatus {
@@ -244,6 +316,58 @@ function buildActionsForAccount(account: CredentialsActionAccount): DashboardAct
   return actions;
 }
 
+async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[]): Promise<{
+  actions: DashboardActionItem[];
+  connected: boolean;
+  error: string | null;
+}> {
+  const accountIds = accounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return { actions: [], connected: true, error: null };
+
+  try {
+    const supabase = createSupabaseClient();
+    const { data, error } = await supabase
+      .from("account_dashboard_actions")
+      .select("id,account_id,action_type,status,severity,audience,requires_client_action,blocking_campaign,title,safe_client_message,action_deep_link")
+      .in("account_id", accountIds)
+      .in("status", activeDashboardActionStatuses)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (error) return { actions: [], connected: false, error: "dashboard_actions_unavailable" };
+
+    const byAccount = new Map(accounts.map((account) => [account.accountId, account]));
+    const actions = (Array.isArray(data) ? data : [])
+      .map((row: PersistedDashboardActionRow): DashboardActionItem | null => {
+        const accountId = readText(row.account_id);
+        const account = byAccount.get(accountId);
+        if (!account) return null;
+
+        return {
+          id: readText(row.id, `${accountId}-${readText(row.action_type, "dashboard_action")}`),
+          accountId,
+          username: account.username,
+          actionType: asActionType(row.action_type),
+          title: readText(row.title, "Dashboard action"),
+          description: readText(row.safe_client_message, "Safe dashboard action requires review."),
+          severity: asSeverity(row.severity),
+          status: asStatus(row.status),
+          requiresClientAction: row.requires_client_action === true,
+          blockingCampaign: row.blocking_campaign === true,
+          audience: asAudience(row.audience),
+          sourceLabel: persistedSourceLabel,
+          deepLink: readText(row.action_deep_link) || `/instagram-dashboard/accounts/${encodeURIComponent(accountId)}`,
+          backendMutationStatus: "connected",
+        };
+      })
+      .filter((action): action is DashboardActionItem => Boolean(action));
+
+    return { actions, connected: true, error: null };
+  } catch {
+    return { actions: [], connected: false, error: "dashboard_actions_unavailable" };
+  }
+}
+
 function uniqueActions(items: DashboardActionItem[]) {
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -256,9 +380,10 @@ function uniqueActions(items: DashboardActionItem[]) {
 
 const severityRank: Record<DashboardActionSeverity, number> = {
   critical: 0,
-  warning: 1,
-  info: 2,
-  unknown: 3,
+  error: 1,
+  warning: 2,
+  info: 3,
+  unknown: 4,
 };
 
 function chooseSeverity(actions: DashboardActionItem[]): DashboardActionSeverity {
@@ -360,7 +485,8 @@ function buildSummary(accounts: CredentialsActionAccount[], groups: DashboardAct
 export async function getCredentialsActionsData(): Promise<CredentialsActionsOverview> {
   const [manageData, radarData] = await Promise.all([getManageData(), getRadarData()]);
   const accounts = manageData.allAccounts.map(mapAccount);
-  const actions = uniqueActions(accounts.flatMap(buildActionsForAccount));
+  const persistedDashboardActions = await loadPersistedDashboardActions(accounts);
+  const actions = uniqueActions([...persistedDashboardActions.actions, ...accounts.flatMap(buildActionsForAccount)]);
   const actionGroups = buildActionGroups(accounts, actions);
 
   // TODO: Replace derived actions with account_dashboard_actions once available.
@@ -378,7 +504,7 @@ export async function getCredentialsActionsData(): Promise<CredentialsActionsOve
       manageOverview: sourceStatusFromManage(manageData.summary.sourceStatus.backendApi),
       radarOverview: sourceStatusFromRadar(radarData),
       accountCredentials: "pending",
-      dashboardActions: "pending",
+      dashboardActions: persistedDashboardActions.connected ? "connected" : "pending",
       mutations: "disabled",
     },
     sourceDetails: {
@@ -395,14 +521,16 @@ export async function getCredentialsActionsData(): Promise<CredentialsActionsOve
         description: "account_credentials is not consumed by this frontend view yet.",
       },
       dashboardActions: {
-        label: "Dashboard actions pending backend",
-        description: "account_dashboard_actions is not connected yet; V1 actions are derived and read-only.",
+        label: persistedDashboardActions.connected ? "Dashboard actions connected" : "Dashboard actions unavailable",
+        description: persistedDashboardActions.connected
+          ? "Open account_dashboard_actions are merged with derived read-only signals. Metadata is not rendered."
+          : "Falling back to derived read-only signals because account_dashboard_actions could not be loaded.",
       },
       mutations: {
         label: "Mutations disabled V1",
         description: "Resolve, acknowledge, dismiss, credentials submit, 2FA, and reconnect workflows require backend approval.",
       },
     },
-    errors: [...manageData.errors, ...radarData.errors],
+    errors: [...manageData.errors, ...radarData.errors, ...(persistedDashboardActions.error ? [persistedDashboardActions.error] : [])],
   };
 }
