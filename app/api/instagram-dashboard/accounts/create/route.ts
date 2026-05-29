@@ -41,6 +41,8 @@ type AddProfileCredentialsInput = {
 };
 
 const credentialsTimeoutMs = 9000;
+const activeAccountStatus = "active";
+const supportRequiredStatus = "support_required";
 const sensitivePayloadKeys = new Set([
   "password",
   "email",
@@ -110,6 +112,15 @@ function safeCredentialsResponse(value: unknown): AddProfileCredentialsResponse 
   };
 }
 
+function isActiveCredentials(credentials: AddProfileCredentialsResponse) {
+  return credentials.credentials_status === "active" && credentials.status === "active";
+}
+
+function isDuplicateAccountError(error: { code?: string; message?: string; details?: string } | null) {
+  const combined = `${error?.code ?? ""} ${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
+  return combined.includes("23505") || combined.includes("ig_accounts_username_lower_unique");
+}
+
 async function callSubmitAddProfileCredentials(input: AddProfileCredentialsInput) {
   const config = credentialsConfig();
   if (!config) {
@@ -171,10 +182,84 @@ async function markCredentialFailure(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
 ) {
-  await supabase
+  await Promise.all([
+    supabase
+      .from("ig_accounts")
+      .update({ status: supportRequiredStatus })
+      .eq("id", accountId),
+    supabase
+      .from("ig_account_settings")
+      .update({ account_status: supportRequiredStatus, password: "" })
+      .eq("account_id", accountId),
+  ]);
+}
+
+async function createCredentialSupportAction(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  reason: string,
+  externalRequestId: string,
+) {
+  await supabase.rpc("create_credential_dashboard_action", {
+    p_account_id: accountId,
+    p_action_type: "review_credentials",
+    p_safe_client_message: "Instagram credentials need review before this profile can run.",
+    p_admin_message: "Add Profile credential ingestion did not complete.",
+    p_action_deep_link: "/instagram-dashboard/credentials-actions",
+    p_severity: "warning",
+    p_requires_client_action: false,
+    p_blocking_campaign: true,
+    p_actor_type: "admin",
+    p_metadata_safe: {
+      source: "add_profile",
+      phase: "credentials_ingestion",
+      reason,
+      external_request_id: externalRequestId,
+    },
+  });
+}
+
+async function markCredentialFailureWithSupportAction(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  reason: string,
+  externalRequestId: string,
+) {
+  await markCredentialFailure(supabase, accountId);
+  try {
+    await createCredentialSupportAction(supabase, accountId, reason, externalRequestId);
+  } catch {
+    // Status is the safety boundary; support action creation is best-effort.
+  }
+}
+
+async function compensateNewProfile(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const { error } = await supabase
     .from("ig_accounts")
-    .update({ status: "support_required" })
+    .delete()
     .eq("id", accountId);
+  return !error;
+}
+
+async function finalizeActiveProfile(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const [accountResult, settingsResult] = await Promise.all([
+    supabase
+      .from("ig_accounts")
+      .update({ status: activeAccountStatus })
+      .eq("id", accountId),
+    supabase
+      .from("ig_account_settings")
+      .update({ account_status: activeAccountStatus, password: "" })
+      .eq("account_id", accountId),
+  ]);
+
+  return !accountResult.error && !settingsResult.error;
 }
 
 async function fetchTemplate(
@@ -256,6 +341,7 @@ export async function POST(request: Request) {
     const loginMethod = readString(body.login_method, "manual").trim();
     const templateMode = readString(body.template_mode, "default").trim();
     const templateId = readString(body.template_id, "").trim();
+    const externalRequestId = crypto.randomUUID();
     const supabase = createSupabaseClient();
     const template = await fetchTemplate(supabase, templateMode, templateId);
     const deviceUdid = await fetchDeviceUdid(supabase, deviceId);
@@ -265,7 +351,7 @@ export async function POST(request: Request) {
     const accountPayload = {
       username,
       display_name: displayName,
-      status: "active",
+      status: supportRequiredStatus,
       device_id: isUuid(deviceId) ? deviceId : null,
       device_name: deviceName,
       device_udid: deviceUdid,
@@ -282,7 +368,8 @@ export async function POST(request: Request) {
       .single<SupabaseRecord>();
 
     if (accountError) {
-      return jsonError(`${accountError.message} Apply lib/instagram-dashboard/ig-account-templates-devices.sql migration.`, 500);
+      if (isDuplicateAccountError(accountError)) return jsonError("account_already_exists", 409);
+      return jsonError("account_create_failed", 500);
     }
 
     const accountId = readString(account.id, "");
@@ -296,6 +383,7 @@ export async function POST(request: Request) {
       device_udid: deviceUdid,
       email: readString(body.email, "").trim(),
       password: "",
+      account_status: supportRequiredStatus,
       cloned_app_mode: cloneMode !== "off",
       dry_run_enabled: true,
     };
@@ -305,13 +393,27 @@ export async function POST(request: Request) {
       account_id: accountId,
     };
 
-    const [settingsResult, filtersResult] = await Promise.all([
-      supabase.from("ig_account_settings").insert(settings).select("*").single<SupabaseRecord>(),
-      supabase.from("ig_account_filters").insert(filters).select("*").single<SupabaseRecord>(),
-    ]);
+    const settingsResult = await supabase
+      .from("ig_account_settings")
+      .insert(settings)
+      .select("*")
+      .single<SupabaseRecord>();
 
-    if (settingsResult.error) return jsonError(settingsResult.error.message, 500);
-    if (filtersResult.error) return jsonError(filtersResult.error.message, 500);
+    if (settingsResult.error) {
+      await compensateNewProfile(supabase, accountId);
+      return jsonError("profile_setup_failed", 500);
+    }
+
+    const filtersResult = await supabase
+      .from("ig_account_filters")
+      .insert(filters)
+      .select("*")
+      .single<SupabaseRecord>();
+
+    if (filtersResult.error) {
+      await compensateNewProfile(supabase, accountId);
+      return jsonError("profile_setup_failed", 500);
+    }
 
     try {
       const credentials = await callSubmitAddProfileCredentials({
@@ -319,17 +421,29 @@ export async function POST(request: Request) {
         expectedUsername: username,
         password,
         actorType: "admin",
-        externalRequestId: crypto.randomUUID(),
+        externalRequestId,
       });
 
-      return jsonOk(safeCreateResponse(account, credentials), 201);
+      if (!isActiveCredentials(credentials)) {
+        await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId);
+        return jsonError("credentials_ingestion_failed", 502);
+      }
+
+      const finalized = await finalizeActiveProfile(supabase, accountId);
+      if (!finalized) {
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_status_finalize_failed", externalRequestId);
+        return jsonError("profile_status_finalize_failed", 502);
+      }
+
+      return jsonOk(safeCreateResponse({ ...account, status: activeAccountStatus }, credentials), 201);
     } catch (credentialsError) {
-      await markCredentialFailure(supabase, accountId);
-      const message = credentialsError instanceof Error ? credentialsError.message : "credentials_ingestion_failed";
-      return jsonError(message, 502);
+      const reason = credentialsError instanceof Error && credentialsError.message === "credentials_ingestion_timeout"
+        ? "credentials_ingestion_timeout"
+        : "credentials_ingestion_failed";
+      await markCredentialFailureWithSupportAction(supabase, accountId, reason, externalRequestId);
+      return jsonError(reason, 502);
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not create profile.";
-    return jsonError(message, 500);
+  } catch {
+    return jsonError("Could not create profile.", 500);
   }
 }
