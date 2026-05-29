@@ -28,6 +28,7 @@ export type InstagramPublicProfileLookupOptions = {
   fetcher?: typeof fetch;
   now?: () => Date;
   timeoutMs?: number;
+  disableCache?: boolean;
 };
 
 const instagramUsernamePattern = /^[a-z0-9._]{1,30}$/;
@@ -55,9 +56,149 @@ const unsafeUrlFragments = [
   "service_role",
   "supabase_vault://",
 ];
+const defaultSearchApiFoundTtlSeconds = 86400;
+const defaultSearchApiNotFoundTtlSeconds = 3600;
+const defaultSearchApiErrorTtlSeconds = 600;
+const defaultSearchApiMinIntervalMs = 1000;
+const defaultSearchApiMaxPerMinute = 20;
+const searchApiCache = new Map<string, { result: InstagramPublicProfileLookupResult; expiresAtMs: number }>();
+let searchApiCallTimestampsMs: number[] = [];
+let searchApiLastCallAtMs = 0;
+let searchApiQueue: Promise<void> = Promise.resolve();
 
 function safeNow(options: InstagramPublicProfileLookupOptions) {
   return (options.now?.() ?? new Date()).toISOString();
+}
+
+function safeNowMs(options: InstagramPublicProfileLookupOptions) {
+  return (options.now?.() ?? new Date()).getTime();
+}
+
+function readNonNegativeIntegerEnv(key: string, fallback: number) {
+  const value = process.env[key]?.trim();
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function searchApiCacheTtlSeconds(status: InstagramPublicProfileLookupStatus) {
+  if (status === "found") {
+    return readNonNegativeIntegerEnv(
+      "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_FOUND_SECONDS",
+      defaultSearchApiFoundTtlSeconds,
+    );
+  }
+  if (status === "not_found") {
+    return readNonNegativeIntegerEnv(
+      "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_NOT_FOUND_SECONDS",
+      defaultSearchApiNotFoundTtlSeconds,
+    );
+  }
+  if (status === "rate_limited" || status === "unavailable" || status === "provider_error") {
+    return readNonNegativeIntegerEnv(
+      "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_ERROR_SECONDS",
+      defaultSearchApiErrorTtlSeconds,
+    );
+  }
+  return 0;
+}
+
+function withLookupMetadata(
+  lookup: InstagramPublicProfileLookupResult,
+  metadata: Record<string, string | number | boolean | null>,
+) {
+  return {
+    ...lookup,
+    metadata: safeInstagramPublicMetadata({
+      ...lookup.metadata,
+      ...metadata,
+    }),
+  };
+}
+
+function searchApiCacheKey(inputUsername: string) {
+  return `searchapi:${inputUsername}`;
+}
+
+function readSearchApiCache(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
+  if (options.disableCache) return null;
+  const cached = searchApiCache.get(searchApiCacheKey(inputUsername));
+  const nowMs = safeNowMs(options);
+  if (!cached || cached.expiresAtMs <= nowMs) {
+    if (cached) searchApiCache.delete(searchApiCacheKey(inputUsername));
+    return null;
+  }
+  return withLookupMetadata(cached.result, {
+    cache_hit: true,
+    throttle_hit: false,
+    rate_limited: cached.result.status === "rate_limited",
+  });
+}
+
+function writeSearchApiCache(inputUsername: string, lookup: InstagramPublicProfileLookupResult, options: InstagramPublicProfileLookupOptions) {
+  if (options.disableCache) return;
+  const ttlSeconds = searchApiCacheTtlSeconds(lookup.status);
+  if (ttlSeconds <= 0) return;
+  searchApiCache.set(searchApiCacheKey(inputUsername), {
+    result: lookup,
+    expiresAtMs: safeNowMs(options) + ttlSeconds * 1000,
+  });
+}
+
+function searchApiThrottleResult(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
+  return result(inputUsername, "rate_limited", options, {
+    reason: "provider_throttled",
+    metadata: {
+      provider_mode: "searchapi",
+      provider_status: "rate_limited",
+      cache_hit: false,
+      throttle_hit: true,
+      rate_limited: true,
+    },
+  });
+}
+
+function checkSearchApiThrottle(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
+  const nowMs = safeNowMs(options);
+  const minIntervalMs = readNonNegativeIntegerEnv(
+    "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS",
+    defaultSearchApiMinIntervalMs,
+  );
+  const maxPerMinute = readNonNegativeIntegerEnv(
+    "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MAX_PER_MINUTE",
+    defaultSearchApiMaxPerMinute,
+  );
+  searchApiCallTimestampsMs = searchApiCallTimestampsMs.filter((timestamp) => nowMs - timestamp < 60000);
+  if (maxPerMinute > 0 && searchApiCallTimestampsMs.length >= maxPerMinute) {
+    return searchApiThrottleResult(inputUsername, options);
+  }
+  if (minIntervalMs > 0 && searchApiLastCallAtMs > 0 && nowMs - searchApiLastCallAtMs < minIntervalMs) {
+    return searchApiThrottleResult(inputUsername, options);
+  }
+  searchApiCallTimestampsMs.push(nowMs);
+  searchApiLastCallAtMs = nowMs;
+  return null;
+}
+
+async function runSearchApiSerialized<T>(operation: () => Promise<T>) {
+  const previous = searchApiQueue.catch(() => undefined);
+  let release = () => {};
+  searchApiQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+export function resetInstagramPublicProfileLookupGuardsForTests() {
+  searchApiCache.clear();
+  searchApiCallTimestampsMs = [];
+  searchApiLastCallAtMs = 0;
+  searchApiQueue = Promise.resolve();
 }
 
 export function normalizeInstagramPublicUsername(value: string) {
@@ -346,37 +487,62 @@ async function searchApiLookup(inputUsername: string, options: InstagramPublicPr
     });
   }
 
-  const fetcher = options.fetcher ?? fetch;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 7000);
+  const cached = readSearchApiCache(inputUsername, options);
+  if (cached) return cached;
 
-  try {
-    const url = new URL(endpoint);
-    if (!url.searchParams.has("engine")) url.searchParams.set("engine", "instagram_profile");
-    url.searchParams.set("username", inputUsername);
-    url.searchParams.set("api_key", apiKey);
-    const response = await fetcher(url.toString(), {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal,
-    });
+  return await runSearchApiSerialized(async () => {
+    const queuedCached = readSearchApiCache(inputUsername, options);
+    if (queuedCached) return queuedCached;
 
-    if (response.status === 404) return result(inputUsername, "not_found", options, { reason: "not_found" });
-    if (response.status === 429) return result(inputUsername, "rate_limited", options, { reason: "rate_limited" });
-    if (response.status >= 500) return result(inputUsername, "unavailable", options, { reason: "provider_unavailable" });
-    if (!response.ok) return result(inputUsername, "provider_error", options, { reason: "provider_http_error" });
-
-    const payload = await response.json();
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      return result(inputUsername, "provider_error", options, { reason: "provider_invalid_response" });
+    const throttled = checkSearchApiThrottle(inputUsername, options);
+    if (throttled) {
+      writeSearchApiCache(inputUsername, throttled, options);
+      return throttled;
     }
-    return fromSearchApiPayload(inputUsername, payload as Record<string, unknown>, options);
-  } catch (error) {
-    const reason = error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_error";
-    return result(inputUsername, reason === "provider_timeout" ? "unavailable" : "provider_error", options, { reason });
-  } finally {
-    clearTimeout(timeout);
-  }
+
+    const fetcher = options.fetcher ?? fetch;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 7000);
+    const startedAtMs = Date.now();
+    const finalize = (lookup: InstagramPublicProfileLookupResult) => {
+      const safeLookup = withLookupMetadata(lookup, {
+        cache_hit: false,
+        throttle_hit: false,
+        rate_limited: lookup.status === "rate_limited",
+        latency_ms: Math.max(Date.now() - startedAtMs, 0),
+      });
+      writeSearchApiCache(inputUsername, safeLookup, options);
+      return safeLookup;
+    };
+
+    try {
+      const url = new URL(endpoint);
+      if (!url.searchParams.has("engine")) url.searchParams.set("engine", "instagram_profile");
+      url.searchParams.set("username", inputUsername);
+      url.searchParams.set("api_key", apiKey);
+      const response = await fetcher(url.toString(), {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      if (response.status === 404) return finalize(result(inputUsername, "not_found", options, { reason: "not_found" }));
+      if (response.status === 429) return finalize(result(inputUsername, "rate_limited", options, { reason: "rate_limited" }));
+      if (response.status >= 500) return finalize(result(inputUsername, "unavailable", options, { reason: "provider_unavailable" }));
+      if (!response.ok) return finalize(result(inputUsername, "provider_error", options, { reason: "provider_http_error" }));
+
+      const payload = await response.json();
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        return finalize(result(inputUsername, "provider_error", options, { reason: "provider_invalid_response" }));
+      }
+      return finalize(fromSearchApiPayload(inputUsername, payload as Record<string, unknown>, options));
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_error";
+      return finalize(result(inputUsername, reason === "provider_timeout" ? "unavailable" : "provider_error", options, { reason }));
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
 }
 
 export async function lookupInstagramPublicProfile(

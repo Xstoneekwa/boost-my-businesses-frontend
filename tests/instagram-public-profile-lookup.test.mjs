@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   lookupInstagramPublicProfile,
+  resetInstagramPublicProfileLookupGuardsForTests,
   safeInstagramPublicAvatarUrl,
   safeInstagramPublicMetadata,
 } from "../lib/instagram-public-profile-lookup.ts";
@@ -11,6 +12,11 @@ const envKeys = [
   "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER",
   "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL",
   "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY",
+  "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS",
+  "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MAX_PER_MINUTE",
+  "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_FOUND_SECONDS",
+  "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_NOT_FOUND_SECONDS",
+  "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_ERROR_SECONDS",
   "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MOCK_STATUS",
   "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MOCK_CANONICAL_USERNAME",
   "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MOCK_INSTAGRAM_USER_ID",
@@ -23,6 +29,7 @@ const envKeys = [
 ];
 
 async function withEnv(values, fn) {
+  resetInstagramPublicProfileLookupGuardsForTests();
   const previous = new Map();
   for (const key of envKeys) previous.set(key, process.env[key]);
   for (const [key, value] of Object.entries(values)) {
@@ -37,6 +44,7 @@ async function withEnv(values, fn) {
       if (typeof value === "undefined") delete process.env[key];
       else process.env[key] = value;
     }
+    resetInstagramPublicProfileLookupGuardsForTests();
   }
 }
 
@@ -117,6 +125,7 @@ test("searchapi provider returns safe found profile", async () => {
     INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
     INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
     INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
   }, async () => {
     const result = await lookupInstagramPublicProfile("@cinema_catchup", {
       now: fixedNow,
@@ -151,7 +160,12 @@ test("searchapi provider returns safe found profile", async () => {
       provider_mode: "searchapi",
       provider_status: "found",
       provider_engine: "instagram_profile",
+      cache_hit: false,
+      throttle_hit: false,
+      rate_limited: false,
+      latency_ms: result.metadata.latency_ms,
     });
+    assert.equal(typeof result.metadata.latency_ms, "number");
   });
 });
 
@@ -194,6 +208,8 @@ test("searchapi provider maps 5xx and timeout to unavailable", async () => {
     INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
     INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
     INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_ERROR_SECONDS: "0",
   }, async () => {
     const serverError = await lookupInstagramPublicProfile("maybe_user", {
       now: fixedNow,
@@ -273,6 +289,177 @@ test("searchapi provider requires a server API key", async () => {
     assert.equal(result.ok, false);
     assert.equal(result.status, "provider_not_configured");
     assert.equal(result.reason, "provider_not_configured");
+  });
+});
+
+test("searchapi cache hit avoids external provider call", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+  }, async () => {
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return jsonResponse({ profile: { username: "cache_user", followers: 10 } });
+    };
+
+    const first = await lookupInstagramPublicProfile("cache_user", { now: fixedNow, fetcher });
+    const second = await lookupInstagramPublicProfile("cache_user", { now: fixedNow, fetcher });
+
+    assert.equal(calls, 1);
+    assert.equal(first.status, "found");
+    assert.equal(second.status, "found");
+    assert.equal(first.metadata.cache_hit, false);
+    assert.equal(second.metadata.cache_hit, true);
+  });
+});
+
+test("searchapi cache miss calls provider for different usernames", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+  }, async () => {
+    let calls = 0;
+    const fetcher = async (url) => {
+      calls += 1;
+      const username = new URL(url).searchParams.get("username");
+      return jsonResponse({ profile: { username, followers: 10 } });
+    };
+
+    await lookupInstagramPublicProfile("cache_user_a", { now: fixedNow, fetcher });
+    await lookupInstagramPublicProfile("cache_user_b", { now: fixedNow, fetcher });
+
+    assert.equal(calls, 2);
+  });
+});
+
+test("searchapi found cache respects TTL", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_FOUND_SECONDS: "1",
+  }, async () => {
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return jsonResponse({ profile: { username: "ttl_user", followers: 10 } });
+    };
+    const at = (ms) => () => new Date(fixedNow().getTime() + ms);
+
+    await lookupInstagramPublicProfile("ttl_user", { now: at(0), fetcher });
+    const cached = await lookupInstagramPublicProfile("ttl_user", { now: at(500), fetcher });
+    const refreshed = await lookupInstagramPublicProfile("ttl_user", { now: at(1500), fetcher });
+
+    assert.equal(cached.metadata.cache_hit, true);
+    assert.equal(refreshed.metadata.cache_hit, false);
+    assert.equal(calls, 2);
+  });
+});
+
+test("searchapi not_found cache uses shorter TTL", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_NOT_FOUND_SECONDS: "1",
+  }, async () => {
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return jsonResponse({ status: "not_found", reason: "not found" });
+    };
+    const at = (ms) => () => new Date(fixedNow().getTime() + ms);
+
+    await lookupInstagramPublicProfile("missing_ttl_user", { now: at(0), fetcher });
+    const cached = await lookupInstagramPublicProfile("missing_ttl_user", { now: at(500), fetcher });
+    const refreshed = await lookupInstagramPublicProfile("missing_ttl_user", { now: at(1500), fetcher });
+
+    assert.equal(cached.status, "not_found");
+    assert.equal(cached.metadata.cache_hit, true);
+    assert.equal(refreshed.metadata.cache_hit, false);
+    assert.equal(calls, 2);
+  });
+});
+
+test("searchapi rate_limited is cached briefly and safely", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_CACHE_TTL_ERROR_SECONDS: "60",
+  }, async () => {
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return jsonResponse({ error: "rate limited" }, 429);
+    };
+
+    const first = await lookupInstagramPublicProfile("limited_user", { now: fixedNow, fetcher });
+    const second = await lookupInstagramPublicProfile("limited_user", { now: fixedNow, fetcher });
+
+    assert.equal(calls, 1);
+    assert.equal(first.status, "rate_limited");
+    assert.equal(second.status, "rate_limited");
+    assert.equal(second.metadata.cache_hit, true);
+    assert.notEqual(second.status, "not_found");
+  });
+});
+
+test("searchapi internal throttle prevents burst without external call", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "10000",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MAX_PER_MINUTE: "1000",
+  }, async () => {
+    let calls = 0;
+    const fetcher = async (url) => {
+      calls += 1;
+      const username = new URL(url).searchParams.get("username");
+      return jsonResponse({ profile: { username, followers: 10 } });
+    };
+
+    const first = await lookupInstagramPublicProfile("throttle_user_a", { now: fixedNow, fetcher, disableCache: true });
+    const second = await lookupInstagramPublicProfile("throttle_user_b", { now: fixedNow, fetcher, disableCache: true });
+
+    assert.equal(calls, 1);
+    assert.equal(first.status, "found");
+    assert.equal(second.status, "rate_limited");
+    assert.equal(second.reason, "provider_throttled");
+    assert.equal(second.metadata.throttle_hit, true);
+  });
+});
+
+test("searchapi result metadata does not contain raw response or provider key", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+  }, async () => {
+    const result = await lookupInstagramPublicProfile("safe_metadata_user", {
+      now: fixedNow,
+      fetcher: async () => jsonResponse({
+        profile: { username: "safe_metadata_user", followers: 10 },
+        raw_html: "blocked",
+        request_url: "blocked",
+      }),
+    });
+    const metadataText = JSON.stringify(result.metadata);
+
+    assert.equal(result.status, "found");
+    assert.equal(metadataText.includes("test-provider-key"), false);
+    assert.equal(metadataText.includes("raw_html"), false);
+    assert.equal(metadataText.includes("request_url"), false);
   });
 });
 
