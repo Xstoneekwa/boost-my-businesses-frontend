@@ -130,7 +130,7 @@ test("searchapi provider returns safe found profile", async () => {
           profile: {
             username: "Cinema_Catchup",
             id: "12345",
-            profile_pic_url: "https://cdn.example.test/avatar.jpg",
+            avatar: "https://cdn.example.test/avatar.jpg",
             followers: 4321,
             is_private: false,
             is_verified: true,

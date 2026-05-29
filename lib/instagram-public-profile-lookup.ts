@@ -244,7 +244,12 @@ function fromSearchApiPayload(
   const username = readString(profile, ["username", "user_name", "handle"]);
   const id = readString(profile, ["id", "user_id", "instagram_user_id", "pk"]);
   const avatarUrl = safeInstagramPublicAvatarUrl(
-    profile.avatar_url ?? profile.profile_pic_url ?? profile.profile_picture_url ?? profile.thumbnail,
+    profile.avatar_url ??
+      profile.avatar_hd ??
+      profile.avatar ??
+      profile.profile_pic_url ??
+      profile.profile_picture_url ??
+      profile.thumbnail,
   );
   const followersCount = readFollowersCount({
     followers_count: profile.followers_count ?? profile.followers ?? profile.follower_count,
@@ -343,7 +348,7 @@ async function searchApiLookup(inputUsername: string, options: InstagramPublicPr
 
   const fetcher = options.fetcher ?? fetch;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 3000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 7000);
 
   try {
     const url = new URL(endpoint);
