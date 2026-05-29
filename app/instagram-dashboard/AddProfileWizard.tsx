@@ -155,7 +155,7 @@ export default function AddProfileWizard() {
         }),
         "Could not create profile.",
       );
-      setSuccess("Profile created.");
+      setSuccess("Profile created. Credentials securely submitted.");
       router.refresh();
       setTimeout(closeWizard, 650);
     } catch (createError) {
