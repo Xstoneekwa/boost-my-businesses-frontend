@@ -3,16 +3,15 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Plus, RefreshCw, RotateCcw, Search, Trash2, Users, X } from "lucide-react";
-
-type IgTargetRow = {
-  id: string;
-  account_id: string;
-  target_username: string;
-  status: string;
-  source: string;
-  created_at: string;
-  updated_at: string;
-};
+import {
+  buildTargetsOverview,
+  safeTargetExportRows,
+  targetHealthHelper,
+  targetHealthLabel,
+  type TargetQualityStatus,
+  type TargetSafeRow,
+  type TargetsOverview,
+} from "./targets-data";
 
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -60,13 +59,30 @@ function formatWhen(iso: string) {
   }).format(date);
 }
 
-function statusBadgeClass(status: string) {
-  const s = status.toLowerCase();
-  if (s === "pending") return "border-amber-400/35 bg-amber-400/15 text-amber-300";
-  if (s === "completed") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-300";
-  if (s === "failed") return "border-red-400/35 bg-red-400/12 text-red-300";
-  if (s === "skipped") return "border-slate-400/35 bg-slate-400/14 text-slate-300";
-  return "border-white/15 bg-white/6 text-slate-200";
+function healthBadgeClass(status: TargetQualityStatus) {
+  if (status === "poor") return "border-red-400/35 bg-red-400/12 text-red-200";
+  if (status === "monitor") return "border-amber-400/35 bg-amber-400/15 text-amber-200";
+  if (status === "good") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
+  return "border-slate-400/25 bg-slate-400/10 text-slate-300";
+}
+
+function healthDotClass(status: TargetQualityStatus) {
+  if (status === "poor") return "bg-red-400";
+  if (status === "monitor") return "bg-amber-400";
+  if (status === "good") return "bg-emerald-400";
+  return "bg-slate-500";
+}
+
+function HealthBadge({ status }: { status: TargetQualityStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${healthBadgeClass(status)}`}
+      title={targetHealthHelper(status)}
+    >
+      <span className={`size-1.5 rounded-full ${healthDotClass(status)}`} aria-hidden />
+      {targetHealthLabel(status)}
+    </span>
+  );
 }
 
 function exportTimestamp() {
@@ -93,13 +109,77 @@ function csvEscape(value: string) {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
+function metricText(value: number | null, suffix = "") {
+  if (value === null) return "pending source";
+  return `${new Intl.NumberFormat("en").format(value)}${suffix}`;
+}
+
+function emptyOverview(): TargetsOverview {
+  return buildTargetsOverview([]);
+}
+
+function EmptyTargetsState({ hasRows }: { hasRows: boolean }) {
+  return (
+    <div className="grid min-h-[180px] place-items-center rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center">
+      <div className="max-w-sm">
+        <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-500">
+          {hasRows ? "Empty filter" : "Empty state"}
+        </span>
+        <strong className="mt-2 block text-base font-extrabold text-slate-100">
+          {hasRows ? "No targets match this filter" : "No target accounts yet"}
+        </strong>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+          {hasRows
+            ? "Clear filters or refresh."
+            : "Add usernames manually or bulk import one per line."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PendingSourcePanel({ overview }: { overview: TargetsOverview }) {
+  const pendingCards = [
+    {
+      title: "Source quality metrics pending",
+      text: "Follower validation, FBR, follows sent, followbacks, follower counts, and poor-performance detection will appear after a real Instagram validation source is connected.",
+      meta: `Quality pending: ${overview.summary.qualityPending}`,
+    },
+    {
+      title: "Cross-surface sync pending",
+      text: "Future CT changes must sync across backend DB, admin dashboard, client dashboard, BotApp and Mac app.",
+      meta: `Sync pending: ${overview.summary.syncPendingCount}`,
+    },
+    {
+      title: "Archive/delete model pending",
+      text: "Archive will preserve history; delete will require audited backend support unless hard-delete remains explicitly approved.",
+      meta: `Archive/delete: ${overview.sourceStatus.archiveDeleteModel}`,
+    },
+  ];
+
+  return (
+    <div className="grid shrink-0 gap-2.5 px-5 md:grid-cols-3">
+      {pendingCards.map((card) => (
+        <article key={card.title} className="rounded-xl border border-white/8 bg-white/[0.025] p-3">
+          <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-500">
+            Pending source
+          </span>
+          <strong className="mt-1.5 block text-sm font-extrabold text-slate-100">{card.title}</strong>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{card.text}</p>
+          <small className="mt-2 block text-[11px] font-bold text-slate-500">{card.meta}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export default function InstagramAccountTargetsPanel({
   accountId,
   accountUsername,
   open,
   onClose,
 }: InstagramAccountTargetsPanelProps) {
-  const [rows, setRows] = useState<IgTargetRow[]>([]);
+  const [overview, setOverview] = useState<TargetsOverview>(() => emptyOverview());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -120,16 +200,16 @@ export default function InstagramAccountTargetsPanel({
     setLoading(true);
     setError("");
     try {
-      const data = await readApiResponse<IgTargetRow[]>(
+      const data = await readApiResponse<TargetSafeRow[]>(
         await fetch(`/api/instagram-dashboard/targets?account_id=${encodeURIComponent(accountId)}`, {
           headers: { Accept: "application/json" },
         }),
         "Could not load targets.",
       );
-      setRows(Array.isArray(data) ? data : []);
+      setOverview(buildTargetsOverview(Array.isArray(data) ? data : []));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load targets.");
-      setRows([]);
+      setOverview(emptyOverview());
     } finally {
       setLoading(false);
     }
@@ -147,30 +227,19 @@ export default function InstagramAccountTargetsPanel({
     }
   }, [open, loadTargets]);
 
-  const counts = useMemo(() => {
-    const total = rows.length;
-    let pending = 0;
-    let completed = 0;
-    let failed = 0;
-    let skipped = 0;
-    for (const r of rows) {
-      const s = r.status.toLowerCase();
-      if (s === "pending") pending++;
-      else if (s === "completed") completed++;
-      else if (s === "failed") failed++;
-      else if (s === "skipped") skipped++;
-    }
-    return { total, pending, completed, failed, skipped };
-  }, [rows]);
+  const rows = overview.items;
+  const counts = overview.summary;
 
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(
       (r) =>
-        r.target_username.toLowerCase().includes(q) ||
+        r.targetUsername.toLowerCase().includes(q) ||
         r.status.toLowerCase().includes(q) ||
-        r.source.toLowerCase().includes(q),
+        r.source.toLowerCase().includes(q) ||
+        r.statusLabel.toLowerCase().includes(q) ||
+        r.sourceLabel.toLowerCase().includes(q),
     );
   }, [rows, filter]);
 
@@ -198,7 +267,7 @@ export default function InstagramAccountTargetsPanel({
     setError("");
     setSuccess("");
     try {
-      await readApiResponse(
+      const result = await readApiResponse<{ validation_pending?: boolean }>(
         await fetch("/api/instagram-dashboard/targets", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -207,7 +276,11 @@ export default function InstagramAccountTargetsPanel({
         "Could not add target.",
       );
       setSingleUsername("");
-      setSuccess("Target added.");
+      setSuccess(
+        result.validation_pending
+          ? "Target added. Follower validation pending source. This CT has not been validated against the 500-50,000 followers rule yet."
+          : "Target added.",
+      );
       await loadTargets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add target.");
@@ -225,7 +298,13 @@ export default function InstagramAccountTargetsPanel({
     setError("");
     setSuccess("");
     try {
-      const result = await readApiResponse<{ inserted: number; skipped_duplicates: number }>(
+      const result = await readApiResponse<{
+        inserted: number;
+        skipped_duplicates: number;
+        skipped_deleted?: number;
+        skipped_invalid?: number;
+        validation_pending?: number;
+      }>(
         await fetch("/api/instagram-dashboard/targets", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -234,7 +313,17 @@ export default function InstagramAccountTargetsPanel({
         "Could not bulk import targets.",
       );
       setBulkText("");
-      setSuccess(`Imported ${result.inserted} target(s). Skipped duplicates: ${result.skipped_duplicates}.`);
+      setSuccess(
+        [
+          `Imported ${result.inserted} target(s).`,
+          `Skipped duplicates: ${result.skipped_duplicates}.`,
+          result.skipped_deleted ? `Previously deleted blocked: ${result.skipped_deleted}.` : "",
+          result.skipped_invalid ? `Invalid usernames blocked: ${result.skipped_invalid}.` : "",
+          result.validation_pending
+            ? `Follower validation pending source: ${result.validation_pending}. These CTs have not been validated against the 500-50,000 followers rule yet.`
+            : "",
+        ].filter(Boolean).join(" "),
+      );
       await loadTargets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not bulk import.");
@@ -244,11 +333,18 @@ export default function InstagramAccountTargetsPanel({
   }
 
   function exportCsv() {
-    const header = ["username", "status", "source", "created_at"];
+    const exportRows = safeTargetExportRows(rows);
+    const header = ["target_username", "health", "followers_count", "followback_ratio", "added_at"];
     const lines = [
       header.join(","),
-      ...rows.map((r) =>
-        [r.target_username, r.status, r.source, r.created_at].map(csvEscape).join(","),
+      ...exportRows.map((r) =>
+        [
+          r.target_username,
+          r.health,
+          r.followers_count === null ? "pending source" : String(r.followers_count),
+          r.followback_ratio === null ? "pending source" : String(r.followback_ratio),
+          r.added_at,
+        ].map(csvEscape).join(","),
       ),
     ];
     const filename = `targets-${safeFilenamePart(accountUsername)}-${exportTimestamp()}.csv`;
@@ -258,9 +354,10 @@ export default function InstagramAccountTargetsPanel({
   }
 
   function exportJson() {
+    const exportRows = safeTargetExportRows(rows);
     const filename = `targets-${safeFilenamePart(accountUsername)}-${exportTimestamp()}.json`;
-    downloadUtf8File(filename, JSON.stringify(rows, null, 2), "application/json");
-    setSuccess("JSON exported.");
+    downloadUtf8File(filename, JSON.stringify(exportRows, null, 2), "application/json");
+    setSuccess("Safe JSON export created.");
     setExportOpen(false);
   }
 
@@ -325,13 +422,13 @@ export default function InstagramAccountTargetsPanel({
         onMouseDown={onClose}
       >
         <aside
-          className="my-auto flex max-h-[min(92vh,900px)] w-full max-w-[920px] flex-col gap-3.5 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-950 shadow-[0_28px_80px_rgba(0,0,0,0.45)]"
+          className="my-auto flex max-h-[min(92vh,900px)] min-h-0 w-full max-w-[920px] flex-col gap-3.5 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-950 shadow-[0_28px_80px_rgba(0,0,0,0.45)]"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <header className="flex items-start justify-between gap-3 px-5 pt-5">
+          <header className="shrink-0 flex items-start justify-between gap-3 px-5 pt-5">
             <div className="flex items-center gap-3 text-slate-100">
               <Users className="shrink-0 text-slate-300" size={22} aria-hidden />
               <div>
@@ -353,13 +450,11 @@ export default function InstagramAccountTargetsPanel({
             </button>
           </header>
 
-          <div className="grid grid-cols-2 gap-2.5 px-5 sm:grid-cols-5">
+          <div className="grid shrink-0 grid-cols-1 gap-2.5 px-5 sm:grid-cols-3">
             {[
               { label: "Total", value: counts.total, color: "text-slate-50" },
-              { label: "Pending", value: counts.pending, color: "text-amber-300" },
-              { label: "Completed", value: counts.completed, color: "text-emerald-300" },
-              { label: "Failed", value: counts.failed, color: "text-red-300" },
-              { label: "Skipped", value: counts.skipped, color: "text-slate-300" },
+              { label: "Deleted", value: counts.deletedCount, color: "text-red-300" },
+              { label: "Archived", value: counts.archivedCount, color: "text-sky-300" },
             ].map((c) => (
               <div
                 key={c.label}
@@ -373,12 +468,12 @@ export default function InstagramAccountTargetsPanel({
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 px-5">
+          <div className="shrink-0 flex flex-wrap items-center gap-2.5 px-5">
             <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-slate-400">
               <Search size={14} aria-hidden />
               <input
                 type="search"
-                placeholder="Filter by username, status, source…"
+                placeholder="Filter by username, health, status…"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 className="min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-50 outline-none placeholder:text-slate-500"
@@ -431,7 +526,7 @@ export default function InstagramAccountTargetsPanel({
                 onClick={() =>
                   setConfirm({
                     title: "Delete selected targets?",
-                    description: `${selected.size} target(s) will be removed for this account.`,
+                    description: `${selected.size} target(s) will be removed from ig_targets for this account. Archive mode with audit and cross-surface sync is planned, but not active yet.`,
                     danger: true,
                     onConfirm: () => void deleteIds([...selected]),
                   })
@@ -455,7 +550,9 @@ export default function InstagramAccountTargetsPanel({
             </div>
           )}
 
-          <div className="grid gap-3 px-5 md:grid-cols-2">
+          <PendingSourcePanel overview={overview} />
+
+          <div className="grid shrink-0 gap-3 px-5 md:grid-cols-2">
             <form
               onSubmit={addSingle}
               className="flex flex-col gap-2.5 rounded-xl border border-white/8 bg-white/[0.02] p-3.5"
@@ -472,7 +569,7 @@ export default function InstagramAccountTargetsPanel({
                 />
                 <button
                   type="submit"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-2 text-xs font-extrabold text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-45"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/18 px-3 py-2 text-xs font-extrabold text-amber-100 hover:bg-amber-500/28 disabled:opacity-45"
                   disabled={saving || !singleUsername.trim()}
                 >
                   <Plus size={14} aria-hidden />
@@ -496,7 +593,7 @@ export default function InstagramAccountTargetsPanel({
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-2 text-xs font-extrabold text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-45"
+                className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/18 px-3 py-2 text-xs font-extrabold text-amber-100 hover:bg-amber-500/28 disabled:opacity-45"
                 disabled={saving || !bulkText.trim()}
               >
                 Import
@@ -504,13 +601,13 @@ export default function InstagramAccountTargetsPanel({
             </form>
           </div>
 
-          <div className="min-h-[200px] flex-1 overflow-auto px-5 pb-5">
+          <div className="min-h-0 flex-1 overflow-auto overscroll-contain px-5 pb-5">
             {loading ? (
               <p className="py-10 text-center text-sm text-slate-400">Loading targets…</p>
             ) : filteredRows.length === 0 ? (
-              <p className="py-10 text-center text-sm text-slate-400">No targets match this filter.</p>
+              <EmptyTargetsState hasRows={rows.length > 0} />
             ) : (
-              <table className="w-full border-separate border-spacing-y-1.5 text-sm">
+              <table className="min-w-[820px] w-full border-separate border-spacing-y-1.5 text-sm">
                 <thead>
                   <tr>
                     <th className="sticky top-0 z-[1] w-10 bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
@@ -528,13 +625,16 @@ export default function InstagramAccountTargetsPanel({
                       Username
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Status
+                      Health
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Source
+                      Followers
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Created
+                      Followback ratio
+                    </th>
+                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                      Added at
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Actions
@@ -549,25 +649,24 @@ export default function InstagramAccountTargetsPanel({
                           type="checkbox"
                           checked={selected.has(row.id)}
                           onChange={() => toggleSelect(row.id)}
-                          aria-label={`Select ${row.target_username}`}
+                          aria-label={`Select ${row.targetUsername}`}
                           className="accent-emerald-500"
                         />
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <strong className="font-extrabold text-slate-100">@{row.target_username}</strong>
+                        <strong className="font-extrabold text-slate-100">@{row.targetUsername}</strong>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-extrabold lowercase ${statusBadgeClass(row.status)}`}
-                        >
-                          {row.status}
-                        </span>
+                        <HealthBadge status={row.healthStatus} />
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
-                        {row.source}
+                        {metricText(row.followersCount)}
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
-                        {formatWhen(row.created_at)}
+                        {metricText(row.fbrPercent, "%")}
+                      </td>
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
+                        {formatWhen(row.createdAt)}
                       </td>
                       <td className="rounded-r-lg border-y border-r border-white/6 bg-white/[0.03] px-2 py-2.5">
                         <div className="flex flex-wrap gap-1.5">
@@ -578,7 +677,7 @@ export default function InstagramAccountTargetsPanel({
                             onClick={() =>
                               setConfirm({
                                 title: "Reset target to pending?",
-                                description: `@${row.target_username} will be set back to pending.`,
+                                description: `@${row.targetUsername} will be set back to pending.`,
                                 onConfirm: () => void resetIds([row.id]),
                               })
                             }
@@ -593,7 +692,7 @@ export default function InstagramAccountTargetsPanel({
                             onClick={() =>
                               setConfirm({
                                 title: "Delete this target?",
-                                description: `@${row.target_username} will be removed.`,
+                                description: `@${row.targetUsername} will be removed from ig_targets. Archive mode with audit and cross-surface sync is planned, but not active yet.`,
                                 danger: true,
                                 onConfirm: () => void deleteIds([row.id]),
                               })
