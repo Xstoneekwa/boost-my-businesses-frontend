@@ -1,5 +1,11 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { defaultInstagramFilters, defaultInstagramSettings } from "@/lib/instagram-dashboard/defaults";
+import {
+  isPlausibleInstagramPublicUsername,
+  lookupInstagramPublicProfile,
+  normalizeInstagramPublicUsername,
+  type InstagramPublicProfileLookupResult,
+} from "@/lib/instagram-public-profile-lookup";
 import { canAccessTenantPages, getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import { jsonError, jsonOk, readJsonBody, readString, type SupabaseRecord } from "../../_utils";
 
@@ -47,7 +53,6 @@ const supportRequiredStatus = "support_required";
 const addProfileOperation = "add_profile";
 const addProfileSourceSurface = "admin_dashboard";
 const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
-const instagramUsernamePattern = /^[a-z0-9._]{1,30}$/;
 const sensitivePayloadKeys = new Set([
   "password",
   "email",
@@ -81,35 +86,6 @@ function truncateSafe(value: string, maxLength = 120) {
 function safeFailureReason(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_:-]/g, "_");
   return normalized.slice(0, 120) || "unknown";
-}
-
-function normalizeInstagramUsername(value: string) {
-  return value.trim().replace(/^@+/, "").toLowerCase();
-}
-
-function isPlausibleInstagramUsername(username: string) {
-  return (
-    instagramUsernamePattern.test(username) &&
-    !username.includes("..") &&
-    !username.startsWith(".") &&
-    !username.endsWith(".")
-  );
-}
-
-function unavailableProfileVerificationMetadata() {
-  return {
-    username_verification_status: "verification_unavailable",
-    username_verified_at: null,
-    username_verification_reason: "public_lookup_not_configured",
-    avatar_url: null,
-    avatar_checked_at: null,
-    public_profile_metadata: {
-      source: addProfileOperation,
-      source_surface: addProfileSourceSurface,
-      verification_status: "verification_unavailable",
-      reason: "public_lookup_not_configured",
-    },
-  };
 }
 
 function redactTemplatePayload(payload: Record<string, string | number | boolean>) {
@@ -162,6 +138,52 @@ function isActiveCredentials(credentials: AddProfileCredentialsResponse) {
 function isDuplicateAccountError(error: { code?: string; message?: string; details?: string } | null) {
   const combined = `${error?.code ?? ""} ${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
   return combined.includes("23505") || combined.includes("ig_accounts_username_lower_unique");
+}
+
+function verificationStatusForLookup(lookup: InstagramPublicProfileLookupResult) {
+  if (lookup.status === "found") return "verified";
+  if (lookup.status === "username_invalid") return "invalid_format";
+  if (lookup.status === "provider_error" || lookup.status === "rate_limited") return "provider_error";
+  return "verification_unavailable";
+}
+
+function verificationReasonForLookup(lookup: InstagramPublicProfileLookupResult) {
+  if (lookup.status === "found") return "found";
+  if (lookup.status === "provider_not_configured") return "provider_not_configured";
+  if (lookup.status === "rate_limited") return "rate_limited";
+  return lookup.reason || lookup.status;
+}
+
+function publicProfileMetadataForLookup(lookup: InstagramPublicProfileLookupResult) {
+  const metadata: Record<string, string | number | boolean | null> = {
+    source: addProfileOperation,
+    source_surface: addProfileSourceSurface,
+    provider_status: lookup.status,
+    reason: verificationReasonForLookup(lookup),
+    input_username: lookup.input_username,
+  };
+  if (lookup.canonical_username) metadata.canonical_username = lookup.canonical_username;
+  for (const [key, value] of Object.entries(lookup.metadata)) {
+    metadata[`provider_${key}`] = value;
+  }
+  return metadata;
+}
+
+function profileVerificationPayload(lookup: InstagramPublicProfileLookupResult) {
+  const verified = lookup.status === "found";
+  return {
+    username_verification_status: verificationStatusForLookup(lookup),
+    username_verified_at: verified ? lookup.checked_at : null,
+    username_verification_reason: verificationReasonForLookup(lookup),
+    instagram_user_id: lookup.instagram_user_id,
+    external_profile_id: lookup.external_profile_id,
+    is_private: lookup.is_private,
+    is_verified: lookup.is_verified,
+    followers_count: lookup.followers_count,
+    avatar_url: lookup.avatar_url,
+    avatar_checked_at: lookup.avatar_url ? lookup.checked_at : null,
+    public_profile_metadata: publicProfileMetadataForLookup(lookup),
+  };
 }
 
 async function callSubmitAddProfileCredentials(input: AddProfileCredentialsInput) {
@@ -463,13 +485,42 @@ export async function POST(request: Request) {
     const body = await readJsonBody<CreateProfilePayload>(request);
     if (!body) return jsonError("Invalid profile payload.", 400);
 
-    const username = normalizeInstagramUsername(readString(body.username, ""));
+    const username = normalizeInstagramPublicUsername(readString(body.username, ""));
     if (!username) return jsonError("Instagram username is required.", 400);
-    if (!isPlausibleInstagramUsername(username)) return jsonError("username_verification_failed", 400);
+    if (!isPlausibleInstagramPublicUsername(username)) return jsonError("username_verification_failed", 400);
     const password = readString(body.password, "");
     if (!password) return jsonError("Instagram password is required for secure credential setup.", 400);
     if (!credentialsConfig()) return jsonError("credentials_api_not_configured", 500);
 
+    const externalRequestId = crypto.randomUUID();
+    const supabase = createSupabaseClient();
+    const profileLookup = await lookupInstagramPublicProfile(username);
+    if (profileLookup.status === "username_invalid") {
+      await tryRecordAddProfileAudit(supabase, {
+        username,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: "failed",
+        failureReason: "username_verification_failed",
+      });
+      return jsonError("username_verification_failed", 400);
+    }
+    if (profileLookup.status === "not_found") {
+      await tryRecordAddProfileAudit(supabase, {
+        username,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: "failed",
+        failureReason: "username_not_found",
+      });
+      return jsonError("username_not_found", 400);
+    }
+
+    const accountUsername = profileLookup.status === "found" &&
+      profileLookup.canonical_username &&
+      isPlausibleInstagramPublicUsername(profileLookup.canonical_username)
+      ? profileLookup.canonical_username
+      : username;
     const displayName = readString(body.display_name, "").trim();
     const deviceId = readString(body.device_id, "").trim();
     const deviceName = readString(body.device_name, "Local Android Emulator").trim();
@@ -477,15 +528,13 @@ export async function POST(request: Request) {
     const loginMethod = readString(body.login_method, "manual").trim();
     const templateMode = readString(body.template_mode, "default").trim();
     const templateId = readString(body.template_id, "").trim();
-    const externalRequestId = crypto.randomUUID();
-    const supabase = createSupabaseClient();
     const template = await fetchTemplate(supabase, templateMode, templateId);
     const deviceUdid = await fetchDeviceUdid(supabase, deviceId);
     const settingsPayload = isRecord(template?.settings_payload) ? redactTemplatePayload(template.settings_payload) : {};
     const filtersPayload = isRecord(template?.filters_payload) ? redactTemplatePayload(template.filters_payload) : {};
 
     const accountPayload = {
-      username,
+      username: accountUsername,
       display_name: displayName,
       status: supportRequiredStatus,
       device_id: isUuid(deviceId) ? deviceId : null,
@@ -495,7 +544,7 @@ export async function POST(request: Request) {
       login_method: loginMethod,
       internal_label: readString(body.internal_label, "").trim() || null,
       notes: readString(body.notes, "").trim() || null,
-      ...unavailableProfileVerificationMetadata(),
+      ...profileVerificationPayload(profileLookup),
     };
 
     const { data: account, error: accountError } = await supabase
@@ -507,7 +556,7 @@ export async function POST(request: Request) {
     if (accountError) {
       if (isDuplicateAccountError(accountError)) {
         await tryRecordAddProfileAudit(supabase, {
-          username,
+          username: accountUsername,
           externalRequestId,
           actorId: adminContext.userId,
           resultStatus: "duplicate",
@@ -516,7 +565,7 @@ export async function POST(request: Request) {
         return jsonError("account_already_exists", 409);
       }
       await tryRecordAddProfileAudit(supabase, {
-        username,
+        username: accountUsername,
         externalRequestId,
         actorId: adminContext.userId,
         resultStatus: "failed",
@@ -530,7 +579,7 @@ export async function POST(request: Request) {
       ...defaultInstagramSettings,
       ...settingsPayload,
       account_id: accountId,
-      username,
+      username: accountUsername,
       display_name: displayName,
       device_name: deviceName,
       device_udid: deviceUdid,
@@ -556,7 +605,7 @@ export async function POST(request: Request) {
       const compensated = await compensateNewProfile(supabase, accountId);
       await tryRecordAddProfileAudit(supabase, {
         accountId,
-        username,
+        username: accountUsername,
         externalRequestId,
         actorId: adminContext.userId,
         resultStatus: compensated ? "compensated" : "failed",
@@ -578,7 +627,7 @@ export async function POST(request: Request) {
       const compensated = await compensateNewProfile(supabase, accountId);
       await tryRecordAddProfileAudit(supabase, {
         accountId,
-        username,
+        username: accountUsername,
         externalRequestId,
         actorId: adminContext.userId,
         resultStatus: compensated ? "compensated" : "failed",
@@ -593,7 +642,7 @@ export async function POST(request: Request) {
     try {
       const credentials = await callSubmitAddProfileCredentials({
         accountId,
-        expectedUsername: username,
+        expectedUsername: accountUsername,
         password,
         actorType: "admin",
         externalRequestId,
@@ -603,7 +652,7 @@ export async function POST(request: Request) {
         await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId, adminContext.userId);
         await tryRecordAddProfileAudit(supabase, {
           accountId,
-          username,
+          username: accountUsername,
           externalRequestId,
           credentialRequestId: credentials.request_id,
           actorId: adminContext.userId,
@@ -618,7 +667,7 @@ export async function POST(request: Request) {
         await markCredentialFailureWithSupportAction(supabase, accountId, "profile_status_finalize_failed", externalRequestId, adminContext.userId);
         await tryRecordAddProfileAudit(supabase, {
           accountId,
-          username,
+          username: accountUsername,
           externalRequestId,
           credentialRequestId: credentials.request_id,
           actorId: adminContext.userId,
@@ -635,7 +684,7 @@ export async function POST(request: Request) {
       }
       await tryRecordAddProfileAudit(supabase, {
         accountId,
-        username,
+        username: accountUsername,
         externalRequestId,
         credentialRequestId: credentials.request_id,
         actorId: adminContext.userId,
@@ -649,7 +698,7 @@ export async function POST(request: Request) {
       await markCredentialFailureWithSupportAction(supabase, accountId, reason, externalRequestId, adminContext.userId);
       await tryRecordAddProfileAudit(supabase, {
         accountId,
-        username,
+        username: accountUsername,
         externalRequestId,
         actorId: adminContext.userId,
         resultStatus: "failed",
