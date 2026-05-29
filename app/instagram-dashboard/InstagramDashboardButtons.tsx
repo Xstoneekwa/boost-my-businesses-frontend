@@ -148,12 +148,12 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "username", label: "Username", type: "text" },
     { key: "display_name", label: "Display name", type: "text" },
     { key: "device_name", label: "Device name", type: "text" },
-    { key: "device_udid", label: "Device UDID", type: "text" },
-    { key: "email", label: "Email", type: "text" },
-    { key: "password", label: "Password", type: "password" },
+    { key: "email_display", label: "Email display", type: "text", helper: "Safe masked email projection. Credential email is write-only." },
+    { key: "password_status", label: "Password status", type: "text", helper: "Safe status only. Real password is never returned to the browser." },
     { key: "two_fa_enabled", label: "Two-factor enabled", type: "toggle" },
-    { key: "app_package", label: "App package", type: "text" },
-    { key: "cloned_app_mode", label: "Cloned app mode", type: "toggle" },
+    { key: "device_assignment", label: "Device assignment", type: "text", helper: "Safe phone/host label. Device internals stay hidden." },
+    { key: "app_package_status", label: "App package status", type: "text", helper: "Clone/app package internals are hidden." },
+    { key: "clone_assignment_status", label: "Clone assignment", type: "text", helper: "Safe clone status only." },
     { key: "account_status", label: "Account status", type: "select", options: ["active", "paused", "review", "disabled"] },
     { key: "campaign_name", label: "Campaign name", type: "text" },
   ],
@@ -386,11 +386,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function logExportMetadata(log: LogRow) {
-  if (log.metadata !== null && typeof log.metadata !== "undefined" && log.metadata !== "") return log.metadata;
-  return log.payload ?? null;
-}
-
 function logPerformanceSummary(log: LogRow) {
   if (log.performance_summary !== null && typeof log.performance_summary !== "undefined") return log.performance_summary;
   if (isRecord(log.payload) && isRecord(log.payload.performance_summary)) return log.payload.performance_summary;
@@ -403,6 +398,16 @@ function compactMetadata(metadata: unknown) {
   return formatted.length > 180 ? `${formatted.slice(0, 180)}...` : formatted;
 }
 
+function templateSafeSettings(settings: InstagramSettings) {
+  const { password, email, device_udid, app_package, cloned_app_mode, ...safeSettings } = settings;
+  void password;
+  void email;
+  void device_udid;
+  void app_package;
+  void cloned_app_mode;
+  return safeSettings;
+}
+
 function workerSourceLabel(workerType?: string) {
   return workerType === "python_uiautomator" ? "Python uiautomator" : workerType || "Node/Appium";
 }
@@ -410,7 +415,6 @@ function workerSourceLabel(workerType?: string) {
 function logsToText(logs: LogRow[]) {
   return logs
     .map((log) => {
-      const metadata = formatMetadata(logExportMetadata(log));
       const performanceSummary = formatMetadata(logPerformanceSummary(log));
       return [
         `[${formatExportDate(log.created_at)}]`,
@@ -423,7 +427,6 @@ function logsToText(logs: LogRow[]) {
         `TARGET: ${log.target_username}`,
         `MESSAGE: ${log.message}`,
         performanceSummary ? `PERFORMANCE SUMMARY:\n${performanceSummary}` : "",
-        metadata ? `METADATA:\n${metadata}` : "",
         "----------------------------------------",
       ].filter(Boolean).join("\n");
     })
@@ -440,9 +443,8 @@ function logsToJson(logs: LogRow[]) {
     status: log.status,
     message: log.message,
     worker_type: log.worker_type || "",
-    payload: log.payload ?? null,
     performance_summary: logPerformanceSummary(log),
-    metadata: logExportMetadata(log),
+    metadata_status: "redacted",
     created_at: log.created_at,
   }));
 }
@@ -688,7 +690,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
             name,
             description,
             template_type: templateType,
-            settings_payload: templateDialog.source === "settings" || templateType === "full" ? settings : {},
+            settings_payload: templateDialog.source === "settings" || templateType === "full" ? templateSafeSettings(settings) : {},
             filters_payload: templateDialog.source === "filters" || templateType === "full" ? filters : {},
           }),
         }),
@@ -1995,7 +1997,7 @@ function renderLogs({
                 <td>{log.action_type}</td>
                 <td>{log.status}</td>
                 <td>{log.message}</td>
-                <td className="ig-metadata-cell">{compactMetadata(logPerformanceSummary(log) ?? logExportMetadata(log))}</td>
+                <td className="ig-metadata-cell">{compactMetadata(logPerformanceSummary(log))}</td>
               </tr>
             ))}
           </tbody>

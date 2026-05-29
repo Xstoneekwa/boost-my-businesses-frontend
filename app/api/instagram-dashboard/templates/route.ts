@@ -14,9 +14,30 @@ type TemplatePayload = {
 };
 
 const templateTypes = new Set(["settings", "filters", "full"]);
+const sensitivePayloadKeys = new Set(["password", "email", "device_udid", "app_package", "secret_ref", "vault_id", "token", "authorization", "service_role"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeTemplate(row: SupabaseRecord) {
+  return {
+    id: readString(row.id, ""),
+    name: readString(row.name, "Untitled template"),
+    description: readString(row.description, ""),
+    template_type: readString(row.template_type, "full"),
+    is_default: readBoolean(row.is_default, false),
+    created_at: readString(row.created_at, ""),
+    updated_at: readString(row.updated_at, ""),
+    payload_status: "redacted",
+  };
+}
+
+function redactPayload(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !sensitivePayloadKeys.has(key.toLowerCase())),
+  );
 }
 
 async function ensureDefaultTemplate(supabase: ReturnType<typeof createSupabaseClient>) {
@@ -57,7 +78,7 @@ export async function GET() {
       return jsonError(`${error.message} Apply lib/instagram-dashboard/ig-account-templates-devices.sql migration.`, 500);
     }
 
-    return jsonOk(data ?? []);
+    return jsonOk((data ?? []).map(safeTemplate));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load account templates.";
     return jsonError(message, 500);
@@ -83,8 +104,8 @@ export async function POST(request: Request) {
       name,
       description: description || null,
       template_type: templateType,
-      settings_payload: isRecord(body.settings_payload) ? body.settings_payload : {},
-      filters_payload: isRecord(body.filters_payload) ? body.filters_payload : {},
+      settings_payload: redactPayload(body.settings_payload),
+      filters_payload: redactPayload(body.filters_payload),
       is_default: readBoolean(body.is_default, false),
       updated_at: new Date().toISOString(),
     };
@@ -100,7 +121,7 @@ export async function POST(request: Request) {
       return jsonError(`${error.message} Apply lib/instagram-dashboard/ig-account-templates-devices.sql migration.`, 500);
     }
 
-    return jsonOk(data, 201);
+    return jsonOk(safeTemplate(data), 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not save account template.";
     return jsonError(message, 500);

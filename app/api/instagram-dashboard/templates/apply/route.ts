@@ -13,6 +13,14 @@ function isRecord(value: unknown): value is Record<string, string | number | boo
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+const sensitivePayloadKeys = new Set(["password", "email", "device_udid", "app_package", "secret_ref", "vault_id", "token", "authorization", "service_role"]);
+
+function redactPayload(payload: Record<string, string | number | boolean>) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !sensitivePayloadKeys.has(key.toLowerCase())),
+  ) as Record<string, string | number | boolean>;
+}
+
 async function upsertAccountSettings(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
@@ -74,20 +82,20 @@ export async function PATCH(request: Request) {
     if (!template) return jsonError("Template not found.", 404);
 
     const templateType = readString(template.template_type, "full");
-    const settingsPayload = isRecord(template.settings_payload) ? template.settings_payload : {};
-    const filtersPayload = isRecord(template.filters_payload) ? template.filters_payload : {};
-    const result: Record<string, unknown> = { template };
+    const settingsPayload = isRecord(template.settings_payload) ? redactPayload(template.settings_payload) : {};
+    const filtersPayload = isRecord(template.filters_payload) ? redactPayload(template.filters_payload) : {};
+    const result: Record<string, unknown> = { template: { id: templateId, payload_status: "redacted" } };
 
     if ((templateType === "settings" || templateType === "full") && Object.keys(settingsPayload).length) {
       const { data, error } = await upsertAccountSettings(supabase, accountId, settingsPayload);
       if (error) return jsonError(error.message, 500);
-      result.settings = data;
+      result.settings = { account_id: readString(data.account_id, accountId), status: "applied" };
     }
 
     if ((templateType === "filters" || templateType === "full") && Object.keys(filtersPayload).length) {
       const { data, error } = await upsertAccountFilters(supabase, accountId, filtersPayload);
       if (error) return jsonError(error.message, 500);
-      result.filters = data;
+      result.filters = { account_id: readString(data.account_id, accountId), status: "applied" };
     }
 
     return jsonOk(result);

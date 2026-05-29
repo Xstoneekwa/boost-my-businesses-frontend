@@ -86,6 +86,45 @@ function isRecord(value: unknown): value is SupabaseRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+const sensitiveTextPatterns = [
+  /password["'\s:=]+[^"',\s}]+/gi,
+  /token["'\s:=]+[^"',\s}]+/gi,
+  /authorization["'\s:=]+[^"',\s}]+/gi,
+  /secret[_-]?ref["'\s:=]+[^"',\s}]+/gi,
+  /vault[_-]?id["'\s:=]+[^"',\s}]+/gi,
+  /device[_-]?udid["'\s:=]+[^"',\s}]+/gi,
+  /adb[_-]?serial["'\s:=]+[^"',\s}]+/gi,
+  /usb[_-]?port["'\s:=]+[^"',\s}]+/gi,
+  /hub[_-]?port["'\s:=]+[^"',\s}]+/gi,
+  /screenshot[_-]?path["'\s:=]+[^"',\s}]+/gi,
+];
+
+function redactText(value: string) {
+  return sensitiveTextPatterns.reduce((text, pattern) => text.replace(pattern, "[redacted]"), value);
+}
+
+function safePerformanceSummary(value: unknown) {
+  if (!isRecord(value)) return null;
+  const allowedKeys = [
+    "total_ms",
+    "typing_command_ms",
+    "row_detect_ms",
+    "row_tap_command_ms",
+    "profile_transition_wait_ms",
+    "profile_verify_ms",
+    "warm_session_used",
+    "xml_fetches",
+    "recovery_used",
+    "exit_code",
+  ];
+
+  return Object.fromEntries(
+    allowedKeys
+      .filter((key) => Object.prototype.hasOwnProperty.call(value, key))
+      .map((key) => [key, value[key]]),
+  );
+}
+
 function readPayloadRecord(row: SupabaseRecord) {
   return isRecord(row.payload) ? row.payload : {};
 }
@@ -163,11 +202,11 @@ function mapLogRow(row: SupabaseRecord, index: number, runsById: Map<string, Sup
     target_username: readString(row.target_username, readString(row.username, readString(row.target, "—"))) || "—",
     action_type: readString(row.action_type, readString(row.action, "—")) || "—",
     status: readString(row.status, readString(row.result, "—")) || "—",
-    message: readString(row.message, readString(row.error_message, "—")) || "—",
+    message: redactText(readString(row.message, readString(row.error_message, "—")) || "—"),
     worker_type: workerType,
-    payload,
-    performance_summary: payloadRecord.performance_summary ?? runPerformanceSummary,
-    metadata: row.metadata ?? row.meta ?? row.details ?? null,
+    payload: null,
+    performance_summary: safePerformanceSummary(payloadRecord.performance_summary ?? runPerformanceSummary),
+    metadata: null,
     created_at: readDate(row.created_at),
   };
 }

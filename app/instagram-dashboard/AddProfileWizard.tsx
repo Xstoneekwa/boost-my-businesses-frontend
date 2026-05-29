@@ -2,14 +2,15 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
 type Device = Record<string, string | number | boolean | null> & {
   id: string;
   device_name: string;
-  device_udid?: string | null;
+  phone_name?: string | null;
+  host_name?: string | null;
   status?: string | null;
 };
 type Template = Record<string, unknown> & {
@@ -59,7 +60,6 @@ export default function AddProfileWizard() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({
     device_id: "",
     username: "",
@@ -151,7 +151,6 @@ export default function AddProfileWizard() {
           body: JSON.stringify({
             ...form,
             device_name: selectedDevice.device_name,
-            device_udid: selectedDevice.device_udid ?? "",
           }),
         }),
         "Could not create profile.",
@@ -206,7 +205,7 @@ export default function AddProfileWizard() {
                         onClick={() => updateField("device_id", device.id)}
                       >
                         <strong>{device.device_name}</strong>
-                        <span>{device.device_udid || "No UDID"} · {device.status || "offline"}</span>
+                        <span>{device.phone_name || device.host_name || "Device assignment"} · {device.status || "offline"}</span>
                       </button>
                     ))}
                   </div>
@@ -217,19 +216,9 @@ export default function AddProfileWizard() {
                     <ProfileField label="Instagram username" value={form.username} onChange={(value) => updateField("username", value)} />
                     <ProfileField
                       label="Password"
-                      type={showPassword ? "text" : "password"}
+                      type="password"
                       value={form.password}
                       onChange={(value) => updateField("password", value)}
-                      trailingAction={
-                        <button
-                          type="button"
-                          className="ig-profile-password-toggle"
-                          aria-label={showPassword ? "Hide password" : "Show password"}
-                          onClick={() => setShowPassword((current) => !current)}
-                        >
-                          {showPassword ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />}
-                        </button>
-                      }
                     />
                     <ProfileField label="Email optional" value={form.email} onChange={(value) => updateField("email", value)} />
                     <ProfileField label="Display name optional" value={form.display_name} onChange={(value) => updateField("display_name", value)} />
@@ -496,33 +485,6 @@ export default function AddProfileWizard() {
 
         .ig-profile-input-wrap {
           position: relative;
-        }
-
-        .ig-profile-input-wrap input {
-          padding-right: 46px;
-        }
-
-        .ig-profile-password-toggle {
-          position: absolute;
-          top: 50%;
-          right: 8px;
-          display: inline-grid;
-          place-items: center;
-          width: 32px;
-          height: 32px;
-          border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 10px;
-          background: rgba(7,17,31,0.68);
-          color: rgba(255,255,255,0.66);
-          cursor: pointer;
-          transform: translateY(-50%);
-        }
-
-        .ig-profile-password-toggle:hover,
-        .ig-profile-password-toggle:focus-visible {
-          border-color: rgba(245,158,11,0.36);
-          color: #FBBF24;
-          outline: none;
         }
 
         .ig-profile-field-wide {

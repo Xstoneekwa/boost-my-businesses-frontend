@@ -9,8 +9,10 @@ type SettingsPayload = Record<string, SettingsValue> & { account_id: string };
 type SettingsRecord = Partial<SettingsPayload> & SupabaseRecord;
 type SettingsResponse = {
   ok: true;
-  data: SettingsPayload;
+  data: Record<string, SettingsValue>;
 };
+
+const protectedSettingsKeys = ["password", "email", "device_udid", "app_package", "cloned_app_mode"] as const;
 
 const stringDefaults = {
   username: "",
@@ -161,13 +163,51 @@ function withAccountDefaults(settings: SettingsPayload, account: SupabaseRecord 
   };
 }
 
+function maskEmail(value: string) {
+  const [name, domain] = value.split("@");
+  if (!name || !domain) return value ? "configured" : "missing";
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function safeSettingsForClient(settings: SettingsPayload): Record<string, SettingsValue> {
+  const safeSettings: Record<string, SettingsValue> = { ...settings };
+  const password = readString(settings.password, "");
+  const email = readString(settings.email, "");
+
+  for (const key of protectedSettingsKeys) {
+    delete safeSettings[key];
+  }
+
+  safeSettings.password_status = password ? "configured" : "missing";
+  safeSettings.email_display = maskEmail(email);
+  safeSettings.device_assignment = settings.device_name || "pending source";
+  safeSettings.app_package_status = "hidden";
+  safeSettings.clone_assignment_status = settings.cloned_app_mode ? "clone assigned" : "standard app";
+
+  return safeSettings;
+}
+
+function preserveProtectedSettings(settings: SettingsPayload, existing: SettingsRecord | null | undefined) {
+  if (!existing) return settings;
+  const existingSettings = normalizeSettings(existing, settings.account_id);
+
+  return {
+    ...settings,
+    password: existingSettings.password,
+    email: existingSettings.email,
+    device_udid: existingSettings.device_udid,
+    app_package: existingSettings.app_package,
+    cloned_app_mode: existingSettings.cloned_app_mode,
+  };
+}
+
 async function fetchAccount(accountId: string, supabase = createSupabaseClient()) {
   const { data } = await supabase.from("ig_accounts").select("*").eq("id", accountId).maybeSingle<SupabaseRecord>();
   return data;
 }
 
 function jsonSuccess(settings: SettingsPayload, status = 200) {
-  return NextResponse.json({ ok: true, data: settings } satisfies SettingsResponse, { status });
+  return NextResponse.json({ ok: true, data: safeSettingsForClient(settings) } satisfies SettingsResponse, { status });
 }
 
 function jsonError(message: string, status = 500) {
@@ -258,10 +298,18 @@ async function saveSettings(request: Request) {
     const accountIdError = validateSettingsAccountId(accountId);
     if (accountIdError) return accountIdError;
 
-    const settings = normalizeSettings(body, accountId);
     const supabase = createSupabaseClient();
     const dryRunColumnError = await ensureDryRunColumn(supabase);
     if (dryRunColumnError) return dryRunColumnError;
+    const { data: existing, error: existingError } = await supabase
+      .from("ig_account_settings")
+      .select("*")
+      .eq("account_id", accountId)
+      .maybeSingle<SettingsRecord>();
+
+    if (existingError) return migrationError(existingError.message);
+
+    const settings = preserveProtectedSettings(normalizeSettings(body, accountId), existing);
 
     const { data, error } = await supabase
       .from("ig_account_settings")
