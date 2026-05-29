@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { NotificationItem } from "./radar-data";
 
-type ViewKey = "manage" | "radar" | "server-check" | "devices" | "activity-log" | "dm-templates" | "credentials" | "growth";
+type ViewKey = "manage" | "radar" | "server-check" | "devices" | "activity-log" | "dm-templates" | "credentials" | "growth" | "client-accounts";
 
 type InstagramDashboardViewNavProps = {
   active: ViewKey;
@@ -27,6 +27,7 @@ const navItems = [
   { key: "dm-templates", label: "DM Templates", href: "/instagram-dashboard/dm-templates" },
   { key: "credentials", label: "Credentials", href: "/instagram-dashboard/credentials-actions" },
   { key: "growth", label: "Growth", href: "/instagram-dashboard/growth-settings" },
+  { key: "client-accounts", label: "Accounts", href: "/instagram-dashboard/client-accounts" },
 ] as const;
 
 export default function InstagramDashboardViewNav({ active, badges = {}, notificationItems = {} }: InstagramDashboardViewNavProps) {
