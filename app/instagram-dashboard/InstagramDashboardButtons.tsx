@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { Archive, BarChart3, Clipboard, Download, FileText, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
 
 type InstagramDashboardButtonsProps = {
@@ -91,7 +91,6 @@ type AccountTool = {
     | "Logs"
     | "Stop run"
     | "Settings"
-    | "Filters"
     | "Targets"
     | "Archive"
     | "Move to trash"
@@ -117,7 +116,6 @@ const activeAccountTools: AccountTool[] = [
   { label: "Logs", Icon: FileText },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
-  { label: "Filters", Icon: Funnel },
   { label: "Targets", Icon: Users, tone: "neutral" },
   { label: "Archive", Icon: Archive },
   { label: "Move to trash", Icon: Trash2, tone: "danger" },
@@ -140,21 +138,19 @@ const trashedAccountTools: AccountTool[] = [
   { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
 ];
 
-const settingsTabs: SettingsTab[] = ["General", "Schedule", "Actions", "DM", "Followback", "Sources", "Filters", "Safety", "Advanced"];
+const settingsTabs: SettingsTab[] = ["General", "Advanced"];
 
 const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   General: [
-    { key: "username", label: "Username", type: "text" },
-    { key: "display_name", label: "Display name", type: "text" },
-    { key: "device_name", label: "Device name", type: "text" },
+    { key: "username", label: "Username", type: "text", readOnly: true, helper: "Account identity projection. Edit through a future account identity API." },
+    { key: "display_name", label: "Display name", type: "text", readOnly: true, helper: "Profile projection only; not a runtime worker setting." },
+    { key: "device_name", label: "Device name", type: "text", readOnly: true, helper: "Device assignment projection. Runtime assignment uses domain tables/config." },
     { key: "email_display", label: "Email display", type: "text", readOnly: true, helper: "Safe masked email projection. Credential email is write-only." },
     { key: "password_status", label: "Password status", type: "text", readOnly: true, helper: "Safe status only. Real password is never returned to the browser." },
-    { key: "two_fa_enabled", label: "Two-factor enabled", type: "toggle" },
     { key: "device_assignment", label: "Device assignment", type: "text", readOnly: true, helper: "Safe phone/host label. Device internals stay hidden." },
     { key: "app_package_status", label: "App package status", type: "text", readOnly: true, helper: "Clone/app package internals are hidden." },
     { key: "clone_assignment_status", label: "Clone assignment", type: "text", readOnly: true, helper: "Safe clone status only." },
     { key: "account_status", label: "Account status", type: "select", readOnly: true, helper: "Legacy status projection. Use lifecycle actions for changes.", options: ["active", "paused", "review", "disabled"] },
-    { key: "campaign_name", label: "Campaign name", type: "text" },
   ],
   Schedule: [
     { key: "timeslot_start", label: "Timeslot start", type: "time" },
@@ -225,7 +221,7 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   Advanced: [
     { key: "current_run_status", label: "Current run status", type: "select", readOnly: true, helper: "Runtime status projection. Use run actions for changes.", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
     { key: "last_error", label: "Last error", type: "textarea", readOnly: true, helper: "Read-only sanitized status from the current projection." },
-    { key: "last_successful_action", label: "Last successful action", type: "text" },
+    { key: "last_successful_action", label: "Last successful action", type: "text", readOnly: true, helper: "Audit projection only. Runtime actions are sourced from logs/events, not this legacy field." },
     { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle", readOnly: true, helper: "Use the Stop run action instead of editing this legacy flag." },
   ],
 };
@@ -919,7 +915,6 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
               if (tool.label === "Settings") void loadPanel("settings");
               else if (tool.label === "Stats") void loadPanel("stats");
               else if (tool.label === "Logs") void loadPanel("logs");
-              else if (tool.label === "Filters") void loadPanel("filters");
               else if (tool.label === "Targets") setTargetsOpen(true);
               else if (tool.label === "Stop run") requestStopRun();
               else if (tool.label === "Archive") requestLifecycle("archive");
@@ -1786,6 +1781,7 @@ function renderSettingsTabs({
 }) {
   const isFiltersTab = settingsTab === "Filters";
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
+  const hasEditableFields = fields.some((field) => !field.readOnly);
 
   return (
     <form className="ig-settings-form" onSubmit={isFiltersTab ? saveFilters : saveSettings}>
@@ -1804,6 +1800,12 @@ function renderSettingsTabs({
         ))}
       </div>
 
+      {!hasEditableFields ? (
+        <p className="ig-settings-message">
+          Read-only projection. Legacy runtime controls are hidden until domain APIs prove their worker effect.
+        </p>
+      ) : null}
+
       <div className="ig-settings-grid">
         {fields.map((field) => (
           <ConfigField
@@ -1816,15 +1818,17 @@ function renderSettingsTabs({
       </div>
 
       <FormMessages error={error} success={success} />
-      <div className="ig-template-actions">
-        <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
-          Save as Template
-        </button>
-        <button type="button" className="ig-settings-secondary" onClick={() => openApplyTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
-          Apply Template
-        </button>
-      </div>
-      <FormActions isSaving={isSaving} closePanel={closePanel} />
+      {hasEditableFields ? (
+        <div className="ig-template-actions">
+          <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
+            Save as Template
+          </button>
+          <button type="button" className="ig-settings-secondary" onClick={() => openApplyTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
+            Apply Template
+          </button>
+        </div>
+      ) : null}
+      <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields} />
     </form>
   );
 }
@@ -2079,11 +2083,11 @@ function FormMessages({ error, success }: { error: string; success: string }) {
   );
 }
 
-function FormActions({ isSaving, closePanel }: { isSaving: boolean; closePanel: () => void }) {
+function FormActions({ isSaving, closePanel, canSubmit = true }: { isSaving: boolean; closePanel: () => void; canSubmit?: boolean }) {
   return (
     <div className="ig-settings-actions">
-      <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>Cancel</button>
-      <button type="submit" className="ig-settings-primary" disabled={isSaving}>{isSaving ? "Saving..." : "Save"}</button>
+      <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>{canSubmit ? "Cancel" : "Close"}</button>
+      {canSubmit ? <button type="submit" className="ig-settings-primary" disabled={isSaving}>{isSaving ? "Saving..." : "Save"}</button> : null}
     </div>
   );
 }
