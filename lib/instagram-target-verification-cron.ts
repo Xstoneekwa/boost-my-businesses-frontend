@@ -13,7 +13,8 @@ import {
 export type TargetVerificationCronSkipReason =
   | "cron_disabled"
   | "cron_token_not_configured"
-  | "scheduler_lock_busy";
+  | "scheduler_lock_busy"
+  | "no_jobs";
 
 export type TargetVerificationCronAuthReason =
   | "missing_caller_token"
@@ -225,6 +226,24 @@ export async function runTargetVerificationCron(
       workerId: cronEnv.workerId,
       maxDurationMs: cronEnv.maxDurationMs,
     });
+
+    if (batchResult.summary.claimed_count === 0) {
+      return {
+        status: 200,
+        result: {
+          enabled: true,
+          dry_run: batchResult.dry_run,
+          limit: batchResult.limit,
+          worker_id: batchResult.worker_id,
+          max_duration_ms: batchResult.max_duration_ms,
+          lock_acquired: true,
+          skipped: true,
+          reason: "no_jobs",
+          stopped_early_reason: batchResult.stopped_early_reason,
+          summary: batchResult.summary,
+        },
+      };
+    }
 
     return {
       status: 200,

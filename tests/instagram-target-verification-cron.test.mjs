@@ -23,7 +23,7 @@ function makeRequest(headers = {}) {
 
 function makeSupabase(lockAcquired = true) {
   return {
-    rpc(name, args) {
+    rpc(name) {
       if (name === "claim_ct_target_verification_scheduler_lock") {
         return Promise.resolve({ data: lockAcquired, error: null });
       }
@@ -184,6 +184,26 @@ test("runTargetVerificationCron calls processor with dry_run when enabled", asyn
   assert.equal(capturedOptions?.dryRun, true);
   assert.equal(capturedOptions?.workerId, "ct_verify_cron");
   assert.equal(capturedOptions?.limit, 5);
+});
+
+test("runTargetVerificationCron returns no_jobs when the processor claims nothing", async () => {
+  const run = await runTargetVerificationCron(makeSupabase(true), {
+    env: {
+      ...baseEnv,
+      CT_TARGET_VERIFICATION_CRON_DRY_RUN: "false",
+    },
+    callerToken: "cron-secret-token",
+    processBatch: async () => ({
+      ...emptyBatchResult,
+      dry_run: false,
+    }),
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.skipped, true);
+  assert.equal(run.result.reason, "no_jobs");
+  assert.equal(run.result.dry_run, false);
+  assert.equal(run.result.summary.claimed_count, 0);
 });
 
 test("runTargetVerificationCron serialized response excludes forbidden strings", async () => {
