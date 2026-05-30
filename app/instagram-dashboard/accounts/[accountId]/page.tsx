@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { createSupabaseClient } from "@/lib/supabase";
 import InstagramDashboardViewNav from "../../InstagramDashboardViewNav";
 import {
   formatDateTime,
@@ -14,6 +15,11 @@ import {
   getRadarData,
   type RadarWarning,
 } from "../../radar-data";
+import {
+  buildTargetsOverview,
+  type TargetSafeRow,
+  type TargetsOverview,
+} from "../../targets-data";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +55,76 @@ function returnLabel(source: DetailSource) {
   return "Back to Manage";
 }
 
+function readString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readNumberNullable(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBooleanNullable(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function mapSafeTargetRow(row: Record<string, unknown>): TargetSafeRow {
+  const id = readString(row.id ?? row.target_id);
+  const createdAt = readString(row.created_at);
+  const targetUsername = readString(row.normalized_username, readString(row.target_username, readString(row.input_username)));
+
+  return {
+    target_id: id,
+    id,
+    account_id: readString(row.account_id),
+    input_username: readString(row.input_username) || null,
+    normalized_username: targetUsername || null,
+    canonical_username: readString(row.canonical_username) || null,
+    target_username: targetUsername,
+    status: readString(row.status, "unknown"),
+    verification_status: readString(row.verification_status, "pending"),
+    verification_reason: readString(row.verification_reason) || null,
+    quality_status: readString(row.quality_status, "unknown"),
+    avatar_url: null,
+    source: readString(row.source, "unknown"),
+    actor_type: readString(row.actor_type) || null,
+    rejected_reason: readString(row.rejected_reason) || null,
+    batch_id: readString(row.batch_id) || null,
+    provider_checked_at: readString(row.provider_checked_at) || null,
+    created_at: createdAt,
+    updated_at: readString(row.updated_at, createdAt),
+    followers_count: readNumberNullable(row.followers_count),
+    is_verified: readBooleanNullable(row.is_verified),
+    is_private: readBooleanNullable(row.is_private),
+    followback_ratio: readNumberNullable(row.followback_ratio ?? row.fbr_percent),
+    added_at: readString(row.added_at) || null,
+    deleted_at: readString(row.deleted_at) || null,
+    archived_at: readString(row.archived_at) || null,
+  };
+}
+
+async function getAccountTargetsOverview(accountId: string): Promise<{ overview: TargetsOverview; unavailable: boolean }> {
+  try {
+    const supabase = createSupabaseClient();
+    const { data, error } = await supabase
+      .from("ig_targets")
+      .select("id, account_id, input_username, normalized_username, canonical_username, target_username, status, verification_status, verification_reason, quality_status, source, actor_type, rejected_reason, batch_id, provider_checked_at, created_at, updated_at, followers_count, is_verified, is_private, deleted_at, archived_at")
+      .eq("account_id", accountId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      return { overview: buildTargetsOverview([]), unavailable: true };
+    }
+
+    return {
+      overview: buildTargetsOverview(((data ?? []) as Record<string, unknown>[]).map(mapSafeTargetRow)),
+      unavailable: false,
+    };
+  } catch {
+    return { overview: buildTargetsOverview([]), unavailable: true };
+  }
+}
+
 export default async function InstagramAccountDetailPage({
   params,
   searchParams,
@@ -72,6 +148,7 @@ export default async function InstagramAccountDetailPage({
   }
 
   const warnings = linkedWarnings(account, radarData.warnings);
+  const targets = await getAccountTargetsOverview(account.accountId);
 
   return (
     <main className="dashboard-page ig-account-detail-page">
@@ -194,9 +271,9 @@ export default async function InstagramAccountDetailPage({
         <AnalyticsSectionCard
           eyebrow="Targets"
           title="Targets / CT summary"
-          description="Read-only placeholder until target account quality and CT summaries are connected to the detail contract."
+          description="Read-only CT quality V1 summary. FBR remains a future performance metric after CT usage."
         >
-          <PendingState title="Targets source pending" text="Target account and CT summary data is not connected to Account Detail yet." />
+          <TargetsSummaryCard overview={targets.overview} unavailable={targets.unavailable} />
         </AnalyticsSectionCard>
 
         <AnalyticsSectionCard
@@ -322,6 +399,70 @@ export default async function InstagramAccountDetailPage({
           padding: 14px;
         }
 
+        .ig-account-detail-target-summary {
+          display: grid;
+          gap: 12px;
+        }
+
+        .ig-account-detail-target-kpis {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .ig-account-detail-target-kpis article,
+        .ig-account-detail-target-row,
+        .ig-account-detail-target-note {
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 14px;
+          background: rgba(255,255,255,0.028);
+          padding: 12px;
+        }
+
+        .ig-account-detail-target-kpis span,
+        .ig-account-detail-target-row span,
+        .ig-account-detail-target-note span {
+          color: rgba(255,255,255,0.36);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .ig-account-detail-target-kpis strong,
+        .ig-account-detail-target-row strong {
+          display: block;
+          color: rgba(255,255,255,0.82);
+          font-size: 1rem;
+          margin-top: 6px;
+        }
+
+        .ig-account-detail-target-list {
+          display: grid;
+          gap: 8px;
+        }
+
+        .ig-account-detail-target-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .ig-account-detail-target-row small,
+        .ig-account-detail-target-note p {
+          color: rgba(255,255,255,0.55);
+          font-size: 12px;
+          line-height: 1.45;
+          margin: 4px 0 0;
+        }
+
+        .ig-account-detail-target-note a {
+          color: #FBBF24;
+          font-weight: 900;
+          text-decoration: none;
+        }
+
         .ig-account-detail-field strong,
         .ig-account-detail-warning strong,
         .ig-account-detail-pending strong {
@@ -366,7 +507,8 @@ export default async function InstagramAccountDetailPage({
 
           .ig-account-detail-hero,
           .ig-account-detail-grid,
-          .ig-account-detail-field-grid {
+          .ig-account-detail-field-grid,
+          .ig-account-detail-target-kpis {
             grid-template-columns: 1fr;
           }
         }
@@ -404,6 +546,57 @@ function WarningList({ warnings }: { warnings: RadarWarning[] }) {
           <p>{warning.phoneName} · {warning.macHostName}</p>
         </article>
       ))}
+    </div>
+  );
+}
+
+function TargetsSummaryCard({ overview, unavailable }: { overview: TargetsOverview; unavailable: boolean }) {
+  const summary = overview.summary;
+  const latestTargets = overview.items.slice(0, 3);
+
+  return (
+    <div className="ig-account-detail-target-summary">
+      <div className="ig-account-detail-target-kpis">
+        {[
+          ["Total CT", String(summary.total)],
+          ["Valid / eligible", String(summary.validEligible)],
+          ["Pending / review", String(summary.pendingReview)],
+          ["Rejected", String(summary.rejected)],
+          ["Archived", String(summary.archivedCount + summary.deletedCount)],
+        ].map(([label, value]) => (
+          <article key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </article>
+        ))}
+      </div>
+
+      {latestTargets.length > 0 ? (
+        <div className="ig-account-detail-target-list" aria-label="Latest safe targets">
+          {latestTargets.map((target) => (
+            <article key={target.id} className="ig-account-detail-target-row">
+              <div>
+                <span>{target.qualityLabel}</span>
+                <strong>@{target.targetUsername}</strong>
+                <small>{target.verificationStatus} · {target.sourceLabel}</small>
+              </div>
+              <small>{formatDateTime(target.createdAt)}</small>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <PendingState
+          title={unavailable ? "Targets source unavailable" : "No target accounts yet"}
+          text={unavailable ? "CT summary could not be loaded without exposing raw database errors." : "Manage target accounts from the Targets modal in Manage."}
+        />
+      )}
+
+      <div className="ig-account-detail-target-note">
+        <span>Manage</span>
+        <p>
+          Use the <Link href="/instagram-dashboard">Targets modal in Manage</Link> for add, bulk import, reset, export, and soft archive. FBR is future performance, not followers_count.
+        </p>
+      </div>
     </div>
   );
 }

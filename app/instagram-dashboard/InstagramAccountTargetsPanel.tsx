@@ -6,9 +6,13 @@ import { Download, Plus, RefreshCw, RotateCcw, Search, Trash2, Users, X } from "
 import {
   buildTargetsOverview,
   safeTargetExportRows,
+  targetFbrHelper,
+  targetFbrLabel,
   targetHealthHelper,
   targetHealthLabel,
-  type TargetHealthStatus,
+  targetMatchesListFilter,
+  type TargetListFilter,
+  type TargetQualityStatus,
   type TargetSafeRow,
   type TargetsOverview,
 } from "./targets-data";
@@ -59,27 +63,35 @@ function formatWhen(iso: string) {
   }).format(date);
 }
 
-function healthBadgeClass(status: TargetHealthStatus) {
-  if (status === "poor") return "border-red-400/35 bg-red-400/12 text-red-200";
-  if (status === "monitor") return "border-amber-400/35 bg-amber-400/15 text-amber-200";
-  if (status === "good") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
+const targetFilters: Array<{ key: TargetListFilter; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active / valid" },
+  { key: "pending", label: "Pending / review" },
+  { key: "rejected", label: "Rejected" },
+  { key: "archived", label: "Archived / deleted" },
+];
+
+function qualityBadgeClass(status: TargetQualityStatus) {
+  if (status === "eligible") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
+  if (status.startsWith("rejected_")) return "border-red-400/35 bg-red-400/12 text-red-200";
+  if (status.startsWith("review_")) return "border-amber-400/35 bg-amber-400/15 text-amber-200";
   return "border-slate-400/25 bg-slate-400/10 text-slate-300";
 }
 
-function healthDotClass(status: TargetHealthStatus) {
-  if (status === "poor") return "bg-red-400";
-  if (status === "monitor") return "bg-amber-400";
-  if (status === "good") return "bg-emerald-400";
+function qualityDotClass(status: TargetQualityStatus) {
+  if (status === "eligible") return "bg-emerald-400";
+  if (status.startsWith("rejected_")) return "bg-red-400";
+  if (status.startsWith("review_")) return "bg-amber-400";
   return "bg-slate-500";
 }
 
-function HealthBadge({ status }: { status: TargetHealthStatus }) {
+function QualityBadge({ status }: { status: TargetQualityStatus }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${healthBadgeClass(status)}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${qualityBadgeClass(status)}`}
       title={targetHealthHelper(status)}
     >
-      <span className={`size-1.5 rounded-full ${healthDotClass(status)}`} aria-hidden />
+      <span className={`size-1.5 rounded-full ${qualityDotClass(status)}`} aria-hidden />
       {targetHealthLabel(status)}
     </span>
   );
@@ -147,7 +159,7 @@ function PendingSourcePanel({ overview }: { overview: TargetsOverview }) {
   const pendingCards = [
     {
       title: "Source quality metrics pending",
-      text: "Follower validation, FBR, follows sent, followbacks, follower counts, and poor-performance detection will appear after a real Instagram validation source is connected.",
+      text: "FBR, follows sent, followbacks, and poor-performance detection will appear after CT usage metrics are connected. FBR is performance, not the CT follower count.",
       meta: `Quality pending: ${overview.summary.qualityPending}`,
     },
     {
@@ -190,6 +202,7 @@ export default function InstagramAccountTargetsPanel({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [filter, setFilter] = useState("");
+  const [listFilter, setListFilter] = useState<TargetListFilter>("all");
   const [singleUsername, setSingleUsername] = useState("");
   const [bulkText, setBulkText] = useState("");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -224,6 +237,7 @@ export default function InstagramAccountTargetsPanel({
     if (open) {
       void loadTargets();
       setFilter("");
+      setListFilter("all");
       setSingleUsername("");
       setBulkText("");
       setSelected(new Set());
@@ -237,16 +251,19 @@ export default function InstagramAccountTargetsPanel({
 
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
+    const byStatus = rows.filter((r) => targetMatchesListFilter(r, listFilter));
+    if (!q) return byStatus;
+    return byStatus.filter(
       (r) =>
         r.targetUsername.toLowerCase().includes(q) ||
         r.status.toLowerCase().includes(q) ||
+        r.qualityLabel.toLowerCase().includes(q) ||
+        r.verificationStatus.toLowerCase().includes(q) ||
         r.source.toLowerCase().includes(q) ||
         r.statusLabel.toLowerCase().includes(q) ||
         r.sourceLabel.toLowerCase().includes(q),
     );
-  }, [rows, filter]);
+  }, [rows, filter, listFilter]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -272,7 +289,11 @@ export default function InstagramAccountTargetsPanel({
     setError("");
     setSuccess("");
     try {
-      const result = await readApiResponse<{ validation_pending?: boolean }>(
+      const result = await readApiResponse<{
+        validation_pending?: boolean;
+        verification_status?: string;
+        quality_status?: TargetQualityStatus;
+      }>(
         await fetch("/api/instagram-dashboard/targets", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -281,10 +302,11 @@ export default function InstagramAccountTargetsPanel({
         "Could not add target.",
       );
       setSingleUsername("");
+      const qualityLabel = result.quality_status ? targetHealthLabel(result.quality_status) : "Quality pending";
       setSuccess(
         result.validation_pending
-          ? "Target added. Follower validation pending source. This CT has not been validated against the 500-50,000 followers rule yet."
-          : "Target added.",
+          ? "Target queued for verification. Quality V1 is pending until a provider result is available."
+          : `Target added. Quality V1: ${qualityLabel}.`,
       );
       await loadTargets();
     } catch (e) {
@@ -327,12 +349,12 @@ export default function InstagramAccountTargetsPanel({
       setBulkText("");
       setSuccess(
         [
-          `Imported ${result.inserted} target(s).`,
+          `Queued ${result.inserted} target(s) for future verification.`,
           `Skipped duplicates: ${result.summary ? result.summary.duplicates + result.summary.already_existing : result.skipped_duplicates}.`,
           result.skipped_deleted ? `Previously deleted blocked: ${result.skipped_deleted}.` : "",
           result.summary?.invalid || result.skipped_invalid ? `Invalid usernames blocked: ${result.summary?.invalid ?? result.skipped_invalid}.` : "",
           result.validation_pending
-            ? `Follower validation pending source: ${result.validation_pending}. These CTs have not been validated against the 500-50,000 followers rule yet.`
+            ? `Bulk import does not validate followers immediately; pending verification: ${result.validation_pending}.`
             : "",
         ].filter(Boolean).join(" "),
       );
@@ -465,7 +487,7 @@ export default function InstagramAccountTargetsPanel({
           <div className="grid shrink-0 grid-cols-1 gap-2.5 px-5 sm:grid-cols-3">
             {[
               { label: "Total", value: counts.total, color: "text-slate-50" },
-              { label: "Deleted", value: counts.deletedCount, color: "text-red-300" },
+              { label: "Valid / eligible", value: counts.validEligible, color: "text-emerald-300" },
               { label: "Archived", value: counts.archivedCount, color: "text-sky-300" },
             ].map((c) => (
               <div
@@ -492,6 +514,22 @@ export default function InstagramAccountTargetsPanel({
                 aria-label="Filter targets"
               />
             </label>
+            <div className="flex flex-wrap gap-1.5" aria-label="Target status filters">
+              {targetFilters.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={
+                    listFilter === item.key
+                      ? "rounded-lg border border-amber-400/45 bg-amber-500/18 px-2.5 py-1.5 text-[11px] font-extrabold text-amber-100"
+                      : "rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-extrabold text-slate-300 hover:bg-white/10"
+                  }
+                  onClick={() => setListFilter(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -646,7 +684,7 @@ export default function InstagramAccountTargetsPanel({
                       Followers
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Followback ratio
+                      FBR performance
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Added at
@@ -689,16 +727,17 @@ export default function InstagramAccountTargetsPanel({
                         </small>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <HealthBadge status={row.healthStatus} />
+                        <QualityBadge status={row.qualityStatus} />
                         <small className="mt-1 block max-w-[140px] truncate text-[11px] text-slate-500" title={row.reason || undefined}>
-                          {row.qualityLabel}
+                          {row.reason || row.statusLabel}
                         </small>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
                         {metricText(row.followersCount)}
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
-                        {metricText(row.fbrPercent, "%")}
+                        <span title={targetFbrHelper(row.fbrPercent)}>{targetFbrLabel(row.fbrPercent)}</span>
+                        <small className="block text-[11px] text-slate-500">future performance</small>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
                         <span className="block">{formatWhen(row.createdAt)}</span>

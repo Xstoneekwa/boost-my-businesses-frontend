@@ -40,6 +40,8 @@ export type TargetSafeRow = {
   archived_at?: string | null;
 };
 
+export type TargetListFilter = "all" | "active" | "pending" | "rejected" | "archived";
+
 export type TargetAccountItem = {
   id: string;
   accountId: string;
@@ -80,6 +82,9 @@ export type TargetAccountItem = {
 
 export type TargetsSummary = {
   total: number;
+  validEligible: number;
+  pendingReview: number;
+  rejected: number;
   pending: number;
   completed: number;
   failed: number;
@@ -114,6 +119,43 @@ export type TargetExportRow = {
   followback_ratio: number | null;
   added_at: string;
 };
+
+export function isArchivedOrDeletedTarget(item: Pick<TargetAccountItem, "status" | "archivedAt" | "deletedAt">) {
+  const status = item.status.toLowerCase();
+  return status === "archived" || status === "deleted" || Boolean(item.archivedAt || item.deletedAt);
+}
+
+export function isValidEligibleTarget(item: Pick<TargetAccountItem, "status" | "qualityStatus" | "archivedAt" | "deletedAt">) {
+  if (isArchivedOrDeletedTarget(item)) return false;
+  const status = item.status.toLowerCase();
+  return status === "valid" || status === "active" || item.qualityStatus === "eligible";
+}
+
+export function isPendingReviewTarget(item: Pick<TargetAccountItem, "status" | "qualityStatus" | "archivedAt" | "deletedAt">) {
+  if (isArchivedOrDeletedTarget(item)) return false;
+  const status = item.status.toLowerCase();
+  return (
+    status === "pending" ||
+    status === "pending_verification" ||
+    status === "review" ||
+    item.qualityStatus === "unknown" ||
+    item.qualityStatus.startsWith("review_")
+  );
+}
+
+export function isRejectedTarget(item: Pick<TargetAccountItem, "status" | "qualityStatus" | "archivedAt" | "deletedAt">) {
+  if (isArchivedOrDeletedTarget(item)) return false;
+  const status = item.status.toLowerCase();
+  return status === "rejected" || item.qualityStatus.startsWith("rejected_");
+}
+
+export function targetMatchesListFilter(item: TargetAccountItem, filter: TargetListFilter) {
+  if (filter === "all") return true;
+  if (filter === "active") return isValidEligibleTarget(item);
+  if (filter === "pending") return isPendingReviewTarget(item);
+  if (filter === "rejected") return isRejectedTarget(item);
+  return isArchivedOrDeletedTarget(item);
+}
 
 export function targetStatusLabel(status: string) {
   const normalized = status.trim().toLowerCase();
@@ -169,12 +211,12 @@ export function targetHealthLabel(healthStatus: TargetQualityStatus | TargetHeal
   if (healthStatus === "rejected_verified") return "Verified";
   if (healthStatus === "rejected_private") return "Private";
   if (healthStatus === "rejected_not_found") return "Not found";
-  if (healthStatus === "review_provider_unavailable") return "Provider review";
+  if (healthStatus === "review_provider_unavailable") return "Review provider";
   if (healthStatus === "review_username_changed") return "Username changed";
   if (healthStatus === "poor") return "Poor";
   if (healthStatus === "monitor") return "Monitor";
   if (healthStatus === "good") return "Good";
-  return "Pending source";
+  return "Quality pending";
 }
 
 export function targetHealthHelper(healthStatus: TargetQualityStatus | TargetHealthStatus) {
@@ -188,7 +230,17 @@ export function targetHealthHelper(healthStatus: TargetQualityStatus | TargetHea
   if (healthStatus === "poor") return "Followback ratio below 8%";
   if (healthStatus === "monitor") return "Followback ratio between 8% and 12%";
   if (healthStatus === "good") return "Followback ratio 13% or higher";
-  return "Followback ratio source is not connected yet";
+  return "Quality V1 pending. FBR remains a future performance metric after CT usage.";
+}
+
+export function targetFbrLabel(fbrPercent: number | null) {
+  if (fbrPercent === null) return "Performance pending";
+  return `${new Intl.NumberFormat("en").format(fbrPercent)}%`;
+}
+
+export function targetFbrHelper(fbrPercent: number | null) {
+  if (fbrPercent === null) return "FBR is future performance: followers gained divided by follows sent from this CT.";
+  return "FBR performance after this CT has been used.";
 }
 
 export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
@@ -241,6 +293,11 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
 
 export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
   const items = rows.map(mapTargetRow);
+  const validEligible = items.filter(isValidEligibleTarget).length;
+  const pendingReview = items.filter(isPendingReviewTarget).length;
+  const rejected = items.filter(isRejectedTarget).length;
+  const archivedCount = items.filter((item) => item.archivedAt || item.status === "archived").length;
+  const deletedCount = items.filter((item) => item.deletedAt || item.status === "deleted").length;
 
   // TODO: Future CT sync model must keep backend DB, admin dashboard, client dashboard,
   // and BotApp/Mac app consistent for add, archive, delete, restore, pause, reactivate,
@@ -259,14 +316,17 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
     items,
     summary: {
       total: items.length,
+      validEligible,
+      pendingReview,
+      rejected,
       pending: countByStatus(items, "pending") + countByStatus(items, "pending_verification"),
       completed: countByStatus(items, "completed"),
       failed: countByStatus(items, "failed") + countByStatus(items, "rejected"),
       skipped: countByStatus(items, "skipped"),
       qualityPending: items.filter((item) => item.isFutureMetricPending).length,
       poorPerformanceCount: items.filter((item) => item.healthStatus === "poor").length,
-      archivedCount: items.filter((item) => item.archivedAt || item.status === "archived").length,
-      deletedCount: items.filter((item) => item.deletedAt || item.status === "deleted").length,
+      archivedCount,
+      deletedCount,
       syncPendingCount: items.filter((item) => item.isSyncPending).length,
     },
     sourceStatus: {

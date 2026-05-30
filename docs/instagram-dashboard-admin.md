@@ -401,12 +401,14 @@ Source de donnees:
 Etat actuel:
 
 - Liste CT par compte.
-- Colonnes: Username/avatar safe, verification, quality, followers, followback ratio,
+- Colonnes: Username/avatar safe, verification, quality V1, followers_count CT, FBR performance,
   Added at/source/batch, Actions.
 - KPI: Total, Deleted, Archived.
 - Add / Import en jaune-orange.
 - Table scrollable avec header sticky.
-- Followers/FBR peuvent etre `pending source`.
+- `followers_count` est le nombre de followers du CT. FBR est une metrique future
+  de performance apres usage du CT: followers gagnes / follows envoyes depuis ce CT.
+  FBR peut rester `pending source` sans bloquer CT quality V1.
 - Add single passe par la verification publique safe si le provider est active
   local/staging. `not_found` clair devient `rejected_not_found`; les limites ou
   erreurs provider restent `review_provider_unavailable` et ne rejettent jamais
@@ -427,7 +429,7 @@ Pending:
 
 - Backend Target Discovery Service.
 - Queue durable CT bulk + cache durable.
-- FBR <= 8% apres volume suffisant.
+- FBR <= 8% apres volume suffisant, uniquement comme metrique performance future.
 - No followable profiles after X scrolls.
 - Auto-archive avec raison.
 - Source quality/FBR future.
@@ -436,7 +438,7 @@ Pending:
 
 Ne pas casser:
 
-- Ne pas presenter followers/FBR comme verified si source pending.
+- Ne pas presenter FBR comme followers_count ni comme critere CT quality V1.
 - Ne pas confondre delete target et delete account.
 
 ### Settings drawer legacy durci no-leak
@@ -857,7 +859,7 @@ Role:
 Mutations:
 
 - Insert `ig_targets`.
-- Delete `ig_targets`.
+- Soft archive `ig_targets` (`status = archived`, `archived_at`, `archive_reason`).
 
 D donnees sensibles interdites:
 
@@ -1081,11 +1083,12 @@ Regle importante:
 Etat actuel:
 
 - Liste CT par compte.
-- Colonnes: Username, Health, Followers, Followback ratio, Added at, Actions.
-- KPI: Total, Deleted, Archived.
+- Colonnes: Username, Verification, Quality V1, Followers, FBR performance, Added at, Actions.
+- KPI: Total, Valid/eligible, Archived.
 - Add / Import en jaune-orange.
 - Table scrollable avec header sticky.
-- Followers/FBR pending source si pas de vraie donnee.
+- `followers_count` peut etre connu via verification provider. FBR reste pending source
+  tant que les follows envoyes et followers gagnes depuis ce CT ne sont pas connectes.
 - Pas encore de vraie verification Instagram backend.
 - Pas encore de vraie recherche CT Pro/Premium.
 
@@ -1096,9 +1099,9 @@ Roadmap:
 - Canonical username.
 - Avatar.
 - `followers_count`.
-- Regle CT 500-50000 followers.
+- Regle CT quality V1: not_found, followers_count < 500, verified, private.
 - Duplicate/deleted/archived handling.
-- Source quality/FBR future.
+- FBR future comme metrique de performance, pas comme equivalent de followers_count.
 - Sync admin/client/BotApp/backend.
 - Activity Log pour add/import/delete/archive/restore.
 
