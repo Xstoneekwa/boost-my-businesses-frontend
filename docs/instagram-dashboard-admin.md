@@ -939,6 +939,74 @@ Etat:
   externe avec petit `limit`, spacing explicite, logs sans secret et monitoring
   sur counts/duration/rate limits.
 
+#### `/api/instagram-dashboard/targets/verify-cron`
+
+Methode: `GET` ou `POST`
+
+Role:
+
+- Entree interne token-protegee pour declencher le processor CT en petits lots
+  depuis un scheduler externe (Vercel Cron, Supabase scheduled function, cron
+  ops). Distinct du scheduler Instagram bot / phone runtime.
+- Desactive par defaut via env. N'active pas SearchApi production.
+
+Auth:
+
+- `CT_TARGET_VERIFICATION_CRON_TOKEN` cote serveur uniquement.
+- Accepte `Authorization: Bearer <token>` ou header
+  `x-ct-target-verification-cron-token`.
+- Token appelant manquant -> `401`.
+- Token appelant invalide -> `403`.
+- Token serveur non configure -> reponse bloquee safe, pas d'appel processor.
+- Token valide mais cron desactive -> `200` skip `reason=cron_disabled`.
+
+Env safe (defaults):
+
+- `CT_TARGET_VERIFICATION_CRON_ENABLED=false`
+- `CT_TARGET_VERIFICATION_CRON_DRY_RUN=true`
+- `CT_TARGET_VERIFICATION_CRON_LIMIT=5` (borne 1..10 via processor)
+- `CT_TARGET_VERIFICATION_CRON_MAX_DURATION_MS` optionnel (borne processor)
+- `CT_TARGET_VERIFICATION_CRON_LOCK_TTL_SECONDS=120` (30..600)
+- `CT_TARGET_VERIFICATION_CRON_WORKER_ID=ct_verify_cron` optionnel
+
+Concurrency:
+
+- Lock expirant Supabase via
+  `claim_ct_target_verification_scheduler_lock` /
+  `release_ct_target_verification_scheduler_lock`.
+- Lock occupe -> `200` skip `reason=scheduler_lock_busy`, sans appel processor.
+
+Mutations:
+
+- Reutilise `processTargetVerificationBatch` comme `verify-batch`.
+- Claim jobs, update `ig_targets`, update jobs, audit `target_verify` quand
+  `dry_run=false` et enabled.
+
+Projection safe:
+
+- Envelope: `enabled`, `dry_run`, `limit`, `worker_id`, `lock_acquired`,
+  `skipped`, `reason`, `stopped_early_reason`, `summary.*`.
+- Aucun token, secret, raw provider payload, URL avec key, cookie, session ou
+  Vault id.
+
+Etat:
+
+- Route presente, disabled-by-default.
+- Aucun `vercel.json` cron actif dans le repo.
+- Template scheduler externe documente ci-dessous.
+
+Template scheduler externe (exemple, non actif):
+
+```bash
+# Exemple ops — adapter l'URL de deploiement. Ne jamais logger le token.
+curl -sS -X POST "$APP_URL/api/instagram-dashboard/targets/verify-cron" \
+  -H "Authorization: Bearer $CT_TARGET_VERIFICATION_CRON_TOKEN"
+```
+
+Pour activer en staging/prod: definir le token serveur, passer
+`CT_TARGET_VERIFICATION_CRON_ENABLED=true`, conserver `DRY_RUN=true` jusqu'au GO
+operateur SearchApi, puis activer `DRY_RUN=false` avec petit `limit`.
+
 ### CT Quality V1 Engine
 
 Source de verite:
@@ -1235,7 +1303,8 @@ Etat actuel:
 - `followers_count` peut etre connu via verification provider. FBR reste pending source
   tant que les follows envoyes et followers gagnes depuis ce CT ne sont pas connectes.
 - Bulk import cree des jobs durables `ct_target_verification_jobs`; la verification
-  est traitee ensuite par `verify-batch` en petits lots.
+  est traitee ensuite par `verify-batch` en petits lots ou par `verify-cron`
+  (disabled-by-default, token-protege).
 - CT smoke cleanup ne doit jamais supprimer `ct_target_audit_events` par
   `metadata_safe.source` seul. Les valeurs `target_add_bulk` et
   `target_verify_batch` sont des sources fonctionnelles partagees, pas des ids
@@ -1255,7 +1324,6 @@ Etat actuel:
 Roadmap:
 
 - Backend Target Discovery Service.
-- Planification/cron admin de `verify-batch`.
 - Canonical username.
 - Avatar.
 - `followers_count`.
