@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
@@ -120,15 +120,19 @@ type TemplateDialog = { kind: "save" | "apply"; source: "settings" | "filters" }
 type ExportMenu = "stats" | "logs" | null;
 type LogExportScope = "all" | "latest-run" | "latest-python-run";
 
-const activeAccountTools: AccountTool[] = [
+type RunControlHealth = {
+  healthy: boolean;
+  playEnabled: boolean;
+  reason: string;
+};
+
+const baseActiveAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
   {
     label: "Run manually",
     Icon: Play,
     tone: "success",
-    disabled: true,
-    disabledReason: "Manual run requires runtime queue wiring",
   },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
@@ -137,6 +141,26 @@ const activeAccountTools: AccountTool[] = [
   { label: "Archive", Icon: Archive },
   { label: "Move to trash", Icon: Trash2, tone: "danger" },
 ];
+
+function buildActiveAccountTools(health: RunControlHealth | null, isStartingRun: boolean): AccountTool[] {
+  const playDisabled = isStartingRun || !health?.playEnabled || !health?.healthy;
+  const playDisabledReason = isStartingRun
+    ? "Starting run..."
+    : !health?.playEnabled
+      ? "Manual run requires runtime consumer."
+      : !health?.healthy
+        ? "Manual run requires a healthy runtime dispatcher."
+        : undefined;
+
+  return baseActiveAccountTools.map((tool) => {
+    if (tool.label !== "Run manually") return tool;
+    return {
+      ...tool,
+      disabled: playDisabled,
+      disabledReason: playDisabledReason,
+    };
+  });
+}
 
 const archivedAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
@@ -555,7 +579,36 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [templateDialog, setTemplateDialog] = useState<TemplateDialog>(null);
   const [targetsOpen, setTargetsOpen] = useState(false);
+  const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
+  const [isStartingRun, setIsStartingRun] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRunControlHealth() {
+      try {
+        const payload = await readApiResponse<RunControlHealth>(
+          await fetch("/api/instagram-dashboard/runs/health", { headers: { Accept: "application/json" } }),
+          "Could not load run control health."
+        );
+        if (!cancelled) setRunControlHealth(payload);
+      } catch {
+        if (!cancelled) {
+          setRunControlHealth({
+            healthy: false,
+            playEnabled: false,
+            reason: "dispatcher_unhealthy",
+          });
+        }
+      }
+    }
+
+    void loadRunControlHealth();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function requestConfirmation(confirmationConfig: Confirmation) {
     setConfirmation(confirmationConfig);
@@ -863,7 +916,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
     setSuccess("");
 
     try {
-      const payload = await readApiResponse<{ stopped: boolean; message: string }>(
+      const payload = await readApiResponse<{ stopped: boolean; canceled_request?: boolean; message: string }>(
         await fetch("/api/instagram-dashboard/stop", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -878,14 +931,48 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
     }
   }
 
+  async function startRun() {
+    setIsStartingRun(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = await readApiResponse<{ message: string; started?: boolean }>(
+        await fetch("/api/instagram-dashboard/runs/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId, requested_run_type: "account_session" }),
+        }),
+        "Could not start the run."
+      );
+      setSuccess(payload.message || "Run starting.");
+      router.refresh();
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "Could not start the run.");
+    } finally {
+      setIsStartingRun(false);
+    }
+  }
+
+  function requestStartRun() {
+    requestConfirmation({
+      title: "Start manual run?",
+      description: "This will request a real worker run through the supervised runtime dispatcher.",
+      confirmTone: "primary",
+      onConfirm: startRun,
+    });
+  }
+
   function requestStopRun() {
     requestConfirmation({
       title: "🚨 Stop current run? ⚠️",
-      description: "The current run will be marked as stopped.",
+      description: "This will cancel queued run requests and request stop for any active run.",
       confirmTone: "danger",
       onConfirm: stopRun,
     });
   }
+
+  const activeAccountTools = buildActiveAccountTools(runControlHealth, isStartingRun);
 
   async function updateLifecycle(action: "archive" | "trash" | "restore") {
     setError("");
@@ -958,6 +1045,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
               else if (tool.label === "Filters") void loadPanel("filters");
               else if (tool.label === "Targets") setTargetsOpen(true);
               else if (tool.label === "Stop run") requestStopRun();
+              else if (tool.label === "Run manually") requestStartRun();
               else if (tool.label === "Archive") requestLifecycle("archive");
               else if (tool.label === "Move to trash") requestLifecycle("trash");
               else if (tool.label === "Restore account") requestLifecycle("restore");

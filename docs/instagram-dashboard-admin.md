@@ -826,18 +826,64 @@ Etat:
 - A garder compatible avec les vues existantes.
 - Verifier avant refactor car il peut servir de contrat historique.
 
+#### `/api/instagram-dashboard/runs/health`
+
+Methode: `GET`
+
+Role:
+
+- Read dispatcher readiness for guarded Play activation.
+
+Projection safe:
+
+- `healthy`, `playEnabled`, `dispatcherWorkerId`, `dispatcherStatus`, `lastSeenAt`, `reason`
+
+Etat:
+
+- Play reste disabled tant que `healthy=false` ou `playEnabled=false`.
+
+#### `/api/instagram-dashboard/runs/start`
+
+Methode: `POST`
+
+Role:
+
+- Creer une demande de run production-ready via `create_account_run_request` RPC.
+
+Gates:
+
+- Admin auth
+- Account eligibility (archived/trashed/credentials/reauth/support)
+- No active `ig_runs`
+- No active `account_run_requests`
+- Dispatcher health gate
+
+Mutations:
+
+- Insert `account_run_requests` via RPC
+- Audit `manual_run_requested` / `manual_run_blocked`
+
+Projection safe:
+
+- `started`, `message`, `request_id`, `status`, `requested_run_type`
+
+Etat:
+
+- Retourne `Run starting.` uniquement si le chemin dispatcher est healthy.
+
 #### `/api/instagram-dashboard/stop`
 
 Methode: `POST`
 
 Role:
 
-- Stopper un run actif.
+- Stopper un run actif et/ou annuler une demande de run en attente.
 
 Mutations:
 
-- Update `ig_runs.status = "stopped"`.
-- Insert possible dans `ig_action_logs`.
+- Cancel active `account_run_requests` via RPC when queued/claimed/starting/running
+- Update `ig_runs.status = "stopped"` when active run exists
+- Insert audit `manual_run_canceled` and `run_stopped`
 
 D donnees sensibles interdites:
 

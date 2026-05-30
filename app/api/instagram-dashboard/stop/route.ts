@@ -1,9 +1,16 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import {
+  ACTIVE_IG_RUN_STATUSES,
+  getActiveRunRequest,
+  insertManualRunAudit,
+  reconcileLinkedIgRunTerminal,
+  sanitizeRunControlReason,
+} from "@/lib/instagram-dashboard/run-control";
 import { getAccountId, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_STATUSES = ["running", "queued", "pending", "in_progress", "active"];
+const ACTIVE_STATUSES = [...ACTIVE_IG_RUN_STATUSES];
 
 export async function POST(request: Request) {
   try {
@@ -16,30 +23,93 @@ export async function POST(request: Request) {
     if (accountIdError) return accountIdError;
 
     const supabase = createSupabaseClient();
-    const { data: activeRuns, error: runError } = await supabase
-      .from("ig_runs")
-      .select("*")
-      .eq("account_id", accountId)
-      .in("status", ACTIVE_STATUSES)
-      .order("created_at", { ascending: false })
-      .limit(1);
+    const canceledRequest = await getActiveRunRequest(accountId);
+    let canceledRequestId: string | null = null;
+    let canceledRequestStatus: string | null = null;
+    let linkedRunId: string | null = null;
 
-    if (runError) {
-      return jsonError(runError.message, 500);
+    if (canceledRequest) {
+      const { data: cancelData, error: cancelError } = await supabase.rpc("cancel_account_run_request", {
+        p_account_id: accountId,
+        p_reason: "manual_stop",
+      });
+
+      if (cancelError) {
+        return jsonError(sanitizeRunControlReason(cancelError.message, "Could not cancel run request."), 500);
+      }
+
+      const cancelRow = (Array.isArray(cancelData) ? cancelData[0] : cancelData) as SupabaseRecord | null;
+      canceledRequestId = readString(cancelRow?.id, "") || readString(canceledRequest.id, "") || null;
+      canceledRequestStatus = readString(cancelRow?.status, readString(canceledRequest.status, ""));
+      linkedRunId =
+        readString(cancelRow?.run_id, "") || readString(canceledRequest.run_id, "") || null;
+
+      await insertManualRunAudit(
+        accountId,
+        "manual_run_canceled",
+        "success",
+        "Manual run request canceled from dashboard stop.",
+        {
+          request_id: canceledRequestId,
+          request_status: canceledRequestStatus,
+        },
+        linkedRunId,
+      ).catch(() => undefined);
     }
 
-    const activeRun = ((activeRuns ?? []) as SupabaseRecord[])[0];
-    const runRowId = activeRun ? readString(activeRun.id, "") : "";
-    const runId = activeRun ? runRowId || readString(activeRun.run_id, "") : "";
+    let runId = linkedRunId;
+    let runStopped = false;
+    let orphanReconciled = false;
 
-    if (runId) {
-      const updateQuery = supabase
+    if (linkedRunId) {
+      const reconcileResult = await reconcileLinkedIgRunTerminal(linkedRunId, "stopped");
+      runStopped = reconcileResult.reconciled;
+      orphanReconciled = reconcileResult.reconciled;
+      if (reconcileResult.reconciled) {
+        await insertManualRunAudit(
+          accountId,
+          "orphan_running_run_reconciled",
+          "success",
+          "Linked ig_runs row reconciled from dashboard stop.",
+          {
+            request_id: canceledRequestId,
+            previous_status: reconcileResult.previousStatus,
+            terminal_status: reconcileResult.terminalStatus,
+          },
+          linkedRunId,
+        ).catch(() => undefined);
+      }
+    } else {
+      const { data: activeRuns, error: runError } = await supabase
         .from("ig_runs")
-        .update({ status: "stopped", finished_at: new Date().toISOString() });
-      const { error: updateError } = await (runRowId ? updateQuery.eq("id", runRowId) : updateQuery.eq("run_id", runId));
+        .select("id,status")
+        .eq("account_id", accountId)
+        .in("status", ACTIVE_STATUSES)
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-      if (updateError) {
-        return jsonError(updateError.message, 500);
+      if (runError) {
+        return jsonError(runError.message, 500);
+      }
+
+      const activeRun = ((activeRuns ?? []) as SupabaseRecord[])[0];
+      const runRowId = activeRun ? readString(activeRun.id, "") : "";
+      runId = activeRun ? runRowId : "";
+
+      if (runId) {
+        const reconcileResult = await reconcileLinkedIgRunTerminal(runId, "stopped");
+        runStopped = reconcileResult.reconciled;
+        orphanReconciled = reconcileResult.reconciled;
+      }
+    }
+
+    if (canceledRequestId && linkedRunId) {
+      const { error: cancelRunningError } = await supabase.rpc("cancel_account_run_request", {
+        p_request_id: canceledRequestId,
+        p_reason: "manual_stop_running",
+      });
+      if (cancelRunningError) {
+        return jsonError(sanitizeRunControlReason(cancelRunningError.message, "Could not cancel running request."), 500);
       }
     }
 
@@ -48,7 +118,11 @@ export async function POST(request: Request) {
       run_id: runId || null,
       action_type: "run_stopped",
       status: "success",
-      message: "Run stopped manually from dashboard",
+      message: runId
+        ? "Run stop requested from dashboard."
+        : canceledRequestId
+          ? "Queued run request canceled from dashboard."
+          : "No active run found. Stop log added.",
       created_at: new Date().toISOString(),
     });
 
@@ -57,11 +131,18 @@ export async function POST(request: Request) {
     }
 
     return jsonOk({
-      stopped: Boolean(runId),
-      message: runId ? "Run stopped." : "No active run found. Stop log added.",
+      stopped: runStopped || Boolean(runId),
+      canceled_request: Boolean(canceledRequestId),
+      request_status: canceledRequestStatus,
+      orphan_reconciled: orphanReconciled,
+      message: runStopped
+        ? "Run stop requested."
+        : canceledRequestId
+          ? "Queued run request canceled."
+          : "No active run found. Stop log added.",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not stop the run.";
-    return jsonError(message, 500);
+    return jsonError(sanitizeRunControlReason(message, "Could not stop the run."), 500);
   }
 }
