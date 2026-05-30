@@ -126,6 +126,22 @@ type RunControlHealth = {
   reason: string;
 };
 
+type RunStartResponse = {
+  started?: boolean;
+  idempotent?: boolean;
+  message?: string;
+  account_id?: string;
+  request_id?: string;
+  status?: string;
+};
+
+export function runStartSuccessMessage(payload: RunStartResponse) {
+  if (!payload.request_id || !payload.status) {
+    throw new Error("Run start did not return a request id.");
+  }
+  return payload.message || `Run request ${payload.request_id.slice(0, 8)} queued (${payload.status}).`;
+}
+
 const baseActiveAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
@@ -288,7 +304,7 @@ const filterFields: FieldSpec[] = [
   { key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea", runtimeStatus: "needs-routing" },
 ];
 
-async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
+export async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
   let payload: ApiEnvelope<T> | { error?: string } | T | null = null;
   const trimmedText = text.trim();
@@ -593,12 +609,14 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
           "Could not load run control health."
         );
         if (!cancelled) setRunControlHealth(payload);
-      } catch {
+      } catch (healthError) {
         if (!cancelled) {
           setRunControlHealth({
             healthy: false,
             playEnabled: false,
-            reason: "dispatcher_unhealthy",
+            reason: healthError instanceof Error && /auth/i.test(healthError.message)
+              ? "admin_session_required"
+              : "dispatcher_unhealthy",
           });
         }
       }
@@ -937,7 +955,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
     setSuccess("");
 
     try {
-      const payload = await readApiResponse<{ message: string; started?: boolean }>(
+      const payload = await readApiResponse<RunStartResponse>(
         await fetch("/api/instagram-dashboard/runs/start", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -945,7 +963,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
         }),
         "Could not start the run."
       );
-      setSuccess(payload.message || "Run starting.");
+      setSuccess(runStartSuccessMessage(payload));
       router.refresh();
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "Could not start the run.");

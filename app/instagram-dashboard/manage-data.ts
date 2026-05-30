@@ -560,6 +560,11 @@ export function manageKpiTone(kpi: ManageKpi) {
   return "#f0f0ef";
 }
 
+function kpiSourceDetail(source: ManageSourceStatus, fallback: string) {
+  if (source.label === "Admin API") return fallback;
+  return source.label;
+}
+
 export function buildManageKpis(data: ManageOverview): ManageKpi[] {
   const credentialsValue = data.summary.credentialsAttentionCount === null ? "pending source" : formatInteger(data.summary.credentialsAttentionCount);
 
@@ -567,25 +572,25 @@ export function buildManageKpis(data: ManageOverview): ManageKpi[] {
     {
       label: "Active accounts",
       value: formatInteger(data.summary.activeAccounts),
-      detail: data.summary.sourceStatus.accounts.label,
+      detail: kpiSourceDetail(data.summary.sourceStatus.accounts, "Connected"),
       tone: "neutral",
     },
     {
       label: "Needs attention",
       value: formatInteger(data.summary.needsAttentionCount),
-      detail: data.summary.needsAttentionCount ? "Pending action, blocked, credentials, or incident signals" : data.summary.sourceStatus.accounts.label,
+      detail: data.summary.needsAttentionCount ? "Pending action, blocked, credentials, or incident signals" : kpiSourceDetail(data.summary.sourceStatus.accounts, "Connected"),
       tone: data.summary.needsAttentionCount ? "warning" : "good",
     },
     {
       label: "Credentials / Reauth",
       value: credentialsValue,
-      detail: data.summary.sourceStatus.credentials.label,
+      detail: kpiSourceDetail(data.summary.sourceStatus.credentials, "Credential status connected"),
       tone: data.summary.credentialsAttentionCount ? "danger" : data.summary.credentialsAttentionCount === null ? "warning" : "good",
     },
     {
       label: "Automation health",
       value: data.summary.automationHealthSummary,
-      detail: data.summary.sourceStatus.automation.label,
+      detail: kpiSourceDetail(data.summary.sourceStatus.automation, "Automation signals connected"),
       tone: data.summary.automationHealthSummary === "OK" ? "good" : "warning",
     },
   ];

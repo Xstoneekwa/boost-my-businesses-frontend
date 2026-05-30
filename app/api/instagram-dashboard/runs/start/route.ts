@@ -2,6 +2,7 @@ import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import {
   DEFAULT_ALLOWED_RUN_TYPES,
   evaluateRunStartEligibility,
+  getActiveRunRequest,
   insertManualRunAudit,
   runStartBlockMessage,
   sanitizeRunControlReason,
@@ -15,6 +16,36 @@ type StartBody = {
   requested_run_type?: unknown;
   idempotency_key?: unknown;
 };
+
+function shortRequestId(requestId: string) {
+  return requestId ? requestId.slice(0, 8) : "";
+}
+
+export function runStartSuccessPayload({
+  accountId,
+  requestId,
+  requestStatus,
+  requestedRunType,
+  idempotent = false,
+}: {
+  accountId: string;
+  requestId: string;
+  requestStatus: string;
+  requestedRunType: string;
+  idempotent?: boolean;
+}) {
+  return {
+    started: !idempotent,
+    idempotent,
+    message: idempotent
+      ? `Manual run already requested (${shortRequestId(requestId)} · ${requestStatus}).`
+      : `Run request ${shortRequestId(requestId)} queued (${requestStatus}).`,
+    account_id: accountId,
+    request_id: requestId,
+    status: requestStatus,
+    requested_run_type: requestedRunType,
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -31,6 +62,21 @@ export async function POST(request: Request) {
     const eligibility = await evaluateRunStartEligibility(accountId, requestedRunType);
 
     if (!eligibility.ok) {
+      if (eligibility.reason === "already_requested") {
+        const activeRequest = eligibility.activeRequest ?? await getActiveRunRequest(accountId);
+        const requestId = readString(activeRequest?.id, "");
+        const requestStatus = readString(activeRequest?.status, "");
+        if (requestId && requestStatus) {
+          return jsonOk(runStartSuccessPayload({
+            accountId,
+            requestId,
+            requestStatus,
+            requestedRunType,
+            idempotent: true,
+          }));
+        }
+      }
+
       await insertManualRunAudit(
         accountId,
         "manual_run_blocked",
@@ -81,6 +127,9 @@ export async function POST(request: Request) {
     const requestRow = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
     const requestId = readString(requestRow?.id, "");
     const requestStatus = readString(requestRow?.status, "queued");
+    if (!requestId) {
+      return jsonError("Run request was not created.", 500);
+    }
 
     await insertManualRunAudit(
       accountId,
@@ -94,13 +143,12 @@ export async function POST(request: Request) {
       },
     ).catch(() => undefined);
 
-    return jsonOk({
-      started: true,
-      message: "Run starting.",
-      request_id: requestId,
-      status: requestStatus,
-      requested_run_type: eligibility.normalizedRunType,
-    });
+    return jsonOk(runStartSuccessPayload({
+      accountId,
+      requestId,
+      requestStatus,
+      requestedRunType: eligibility.normalizedRunType,
+    }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start the run.";
     return jsonError(sanitizeRunControlReason(message, "Could not start the run."), 500);

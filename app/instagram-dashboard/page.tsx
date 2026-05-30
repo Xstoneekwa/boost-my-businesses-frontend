@@ -15,7 +15,6 @@ import {
   statusTone,
   type ManageAccount,
   type ManageOverview,
-  type ManageSourceStatus,
 } from "./manage-data";
 
 export const dynamic = "force-dynamic";
@@ -45,13 +44,6 @@ export default async function InstagramAutomationDashboardPage() {
           <span>{data.errors.join(" · ")}</span>
         </section>
       )}
-
-      <section className="ig-dashboard-source-strip" aria-label="Manage data source status">
-        <SourcePill label="Backend API" source={data.summary.sourceStatus.backendApi} />
-        <SourcePill label="Accounts" source={data.summary.sourceStatus.accounts} />
-        <SourcePill label="Credentials" source={data.summary.sourceStatus.credentials} />
-        <SourcePill label="Automation" source={data.summary.sourceStatus.automation} />
-      </section>
 
       <section className="ig-dashboard-kpis" aria-label="Instagram account totals">
         {manageKpis.map((kpi) => (
@@ -103,23 +95,6 @@ export default async function InstagramAutomationDashboardPage() {
           margin-bottom: 18px;
         }
 
-        .ig-dashboard-source-strip {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 14px;
-        }
-
-        .ig-dashboard-source-pill {
-          display: flex;
-          justify-content: space-between;
-          gap: 10px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.026);
-          padding: 10px 12px;
-        }
-
         .ig-dashboard-kpis article,
         .ig-dashboard-mobile-card,
         .ig-dashboard-empty {
@@ -134,7 +109,6 @@ export default async function InstagramAutomationDashboardPage() {
         }
 
         .ig-dashboard-kpis span,
-        .ig-dashboard-source-pill span,
         .ig-dashboard-table th,
         .ig-dashboard-mobile-card dt,
         .ig-dashboard-empty span {
@@ -155,7 +129,6 @@ export default async function InstagramAutomationDashboardPage() {
         }
 
         .ig-dashboard-kpis small,
-        .ig-dashboard-source-pill strong,
         .ig-dashboard-table td,
         .ig-dashboard-mobile-card dd {
           color: rgba(255,255,255,0.60);
@@ -504,9 +477,6 @@ export default async function InstagramAutomationDashboardPage() {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .ig-dashboard-source-strip {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
         }
 
         @media (max-width: 760px) {
@@ -515,10 +485,6 @@ export default async function InstagramAutomationDashboardPage() {
           }
 
           .ig-dashboard-kpis {
-            grid-template-columns: 1fr;
-          }
-
-          .ig-dashboard-source-strip {
             grid-template-columns: 1fr;
           }
 
@@ -555,15 +521,6 @@ function EmptyState({ title, text }: { title: string; text: string }) {
       <span>Empty state</span>
       <strong>{title}</strong>
       <p>{text}</p>
-    </div>
-  );
-}
-
-function SourcePill({ label, source }: { label: string; source: ManageSourceStatus }) {
-  return (
-    <div className="ig-dashboard-source-pill" title={source.description}>
-      <span>{label}</span>
-      <strong>{source.label}</strong>
     </div>
   );
 }
@@ -680,9 +637,7 @@ function AccountList({
                   <Link className="ig-dashboard-account-link" href={accountDetailHref(account)}>
                     {account.username}
                   </Link>
-                  <div className="ig-dashboard-username-verification" style={{ color: statusTone(account.instagramVerificationStatus ?? "pending") }}>
-                    username {account.instagramVerificationStatus ?? "pending"}
-                  </div>
+                  <UsernameVerificationStatus account={account} />
                 </td>
                 <td>{account.clientName ?? account.emailDisplay}</td>
                 <td>
@@ -763,5 +718,22 @@ function AccountList({
         ))}
       </div>
     </>
+  );
+}
+
+function UsernameVerificationStatus({ account }: { account: ManageAccount }) {
+  const status = (account.instagramVerificationStatus ?? "").trim().toLowerCase();
+  if (!status || status === "pending") return null;
+
+  const label = status === "verified" || status === "matched"
+    ? "username verified"
+    : status === "mismatch"
+      ? "username mismatch"
+      : `username ${status}`;
+
+  return (
+    <div className="ig-dashboard-username-verification" style={{ color: statusTone(status) }}>
+      {label}
+    </div>
   );
 }
