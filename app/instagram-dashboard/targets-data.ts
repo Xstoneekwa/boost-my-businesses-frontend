@@ -1,4 +1,5 @@
 export type TargetHealthStatus = "good" | "monitor" | "poor" | "unknown" | "pending_source";
+export type TargetPerformanceStatus = "good" | "avg" | "poor" | "pending" | "not_applicable";
 export type TargetQualityStatus =
   | "unknown"
   | "eligible"
@@ -59,6 +60,8 @@ export type TargetAccountItem = {
   statusLabel: string;
   qualityStatus: TargetQualityStatus;
   qualityLabel: string;
+  performanceStatus: TargetPerformanceStatus;
+  performanceLabel: string;
   fbrPercent: number | null;
   followsSent: number | null;
   followbacks: number | null;
@@ -114,7 +117,8 @@ export type TargetsOverview = {
 
 export type TargetExportRow = {
   target_username: string;
-  health: string;
+  eligibility: string;
+  performance: string;
   followers_count: number | null;
   followback_ratio: number | null;
   added_at: string;
@@ -128,7 +132,7 @@ export function isArchivedOrDeletedTarget(item: Pick<TargetAccountItem, "status"
 export function isValidEligibleTarget(item: Pick<TargetAccountItem, "status" | "qualityStatus" | "archivedAt" | "deletedAt">) {
   if (isArchivedOrDeletedTarget(item)) return false;
   const status = item.status.toLowerCase();
-  return status === "valid" || status === "active" || item.qualityStatus === "eligible";
+  return item.qualityStatus === "eligible" && (status === "valid" || status === "active");
 }
 
 export function isPendingReviewTarget(item: Pick<TargetAccountItem, "status" | "qualityStatus" | "archivedAt" | "deletedAt">) {
@@ -207,40 +211,67 @@ export function targetHealthFromFbr(fbrPercent: number | null): TargetHealthStat
 
 export function targetHealthLabel(healthStatus: TargetQualityStatus | TargetHealthStatus) {
   if (healthStatus === "eligible") return "Eligible";
-  if (healthStatus === "rejected_low_followers") return "Low followers";
+  if (healthStatus === "rejected_low_followers") return "Low";
   if (healthStatus === "rejected_verified") return "Verified";
   if (healthStatus === "rejected_private") return "Private";
   if (healthStatus === "rejected_not_found") return "Not found";
-  if (healthStatus === "review_provider_unavailable") return "Review provider";
-  if (healthStatus === "review_username_changed") return "Username changed";
+  if (healthStatus === "review_provider_unavailable") return "Review";
+  if (healthStatus === "review_username_changed") return "Review";
   if (healthStatus === "poor") return "Poor";
-  if (healthStatus === "monitor") return "Monitor";
+  if (healthStatus === "monitor") return "Avg";
   if (healthStatus === "good") return "Good";
-  return "Quality pending";
+  return "Pending";
 }
 
 export function targetHealthHelper(healthStatus: TargetQualityStatus | TargetHealthStatus) {
-  if (healthStatus === "eligible") return "Target passed CT quality V1";
+  if (healthStatus === "eligible") return "Initial CT eligibility passed.";
   if (healthStatus === "rejected_low_followers") return "Follower count is below 500";
-  if (healthStatus === "rejected_verified") return "Verified profiles are rejected in CT quality V1";
-  if (healthStatus === "rejected_private") return "Private profiles are rejected in CT quality V1";
+  if (healthStatus === "rejected_verified") return "Verified profiles are not eligible CTs.";
+  if (healthStatus === "rejected_private") return "Private profiles are not eligible CTs.";
   if (healthStatus === "rejected_not_found") return "Provider returned a clear not_found";
   if (healthStatus === "review_provider_unavailable") return "Provider was unavailable or rate limited; never permanently reject";
   if (healthStatus === "review_username_changed") return "Canonical username differs from submitted username";
-  if (healthStatus === "poor") return "Followback ratio below 8%";
-  if (healthStatus === "monitor") return "Followback ratio between 8% and 12%";
-  if (healthStatus === "good") return "Followback ratio 13% or higher";
-  return "Quality V1 pending. FBR remains a future performance metric after CT usage.";
+  if (healthStatus === "poor") return "Poor performance after enough CT usage.";
+  if (healthStatus === "monitor") return "Average performance after enough CT usage.";
+  if (healthStatus === "good") return "Good performance after enough CT usage.";
+  return "Initial eligibility is pending verification.";
+}
+
+export function targetPerformanceFromFbr(
+  qualityStatus: TargetQualityStatus,
+  fbrPercent: number | null,
+): TargetPerformanceStatus {
+  if (qualityStatus !== "eligible") return "not_applicable";
+  if (fbrPercent === null) return "pending";
+  if (fbrPercent <= 8) return "poor";
+  if (fbrPercent < 13) return "avg";
+  return "good";
+}
+
+export function targetPerformanceLabel(status: TargetPerformanceStatus) {
+  if (status === "good") return "Good";
+  if (status === "avg") return "Avg";
+  if (status === "poor") return "Poor";
+  if (status === "pending") return "Pending";
+  return "—";
+}
+
+export function targetPerformanceHelper(status: TargetPerformanceStatus) {
+  if (status === "not_applicable") return "Performance applies only to eligible active CTs.";
+  if (status === "pending") return "Waiting for enough runtime follow data from this CT.";
+  if (status === "poor") return "Low followback ratio after enough CT usage.";
+  if (status === "avg") return "Average followback ratio after enough CT usage.";
+  return "Good followback ratio after enough CT usage.";
 }
 
 export function targetFbrLabel(fbrPercent: number | null) {
-  if (fbrPercent === null) return "Performance pending";
-  return `${new Intl.NumberFormat("en").format(fbrPercent)}%`;
+  if (fbrPercent === null) return "—";
+  return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(fbrPercent)}%`;
 }
 
 export function targetFbrHelper(fbrPercent: number | null) {
-  if (fbrPercent === null) return "FBR is future performance: followers gained divided by follows sent from this CT.";
-  return "FBR performance after this CT has been used.";
+  if (fbrPercent === null) return "FBR is followers gained divided by follows sent from this CT. No runtime data yet.";
+  return "Exact followback ratio from runtime CT usage.";
 }
 
 export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
@@ -251,6 +282,7 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const archivedAt = row.archived_at ?? null;
   const qualityStatus = (row.quality_status || "unknown") as TargetQualityStatus;
   const healthStatus = qualityStatus !== "unknown" ? (qualityStatus === "eligible" ? "good" : qualityStatus.startsWith("review_") ? "monitor" : "poor") : targetHealthFromFbr(fbrPercent);
+  const performanceStatus = targetPerformanceFromFbr(qualityStatus, fbrPercent);
   const sourceSurface = row.source === "manual_single" || row.source === "manual_bulk" || row.source === "admin"
     ? "admin_dashboard"
     : row.source === "client"
@@ -278,6 +310,8 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
     statusLabel: targetStatusLabel(row.status || "unknown"),
     qualityStatus,
     qualityLabel: targetHealthLabel(qualityStatus),
+    performanceStatus,
+    performanceLabel: targetPerformanceLabel(performanceStatus),
     fbrPercent,
     followsSent: null,
     followbacks: null,
@@ -333,7 +367,7 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
       failed: countByStatus(items, "failed") + countByStatus(items, "rejected"),
       skipped: countByStatus(items, "skipped"),
       qualityPending: items.filter((item) => item.isFutureMetricPending).length,
-      poorPerformanceCount: items.filter((item) => item.healthStatus === "poor").length,
+      poorPerformanceCount: items.filter((item) => item.performanceStatus === "poor").length,
       archivedCount,
       deletedCount,
       syncPendingCount: items.filter((item) => item.isSyncPending).length,
@@ -353,7 +387,8 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
 export function safeTargetExportRows(items: TargetAccountItem[]): TargetExportRow[] {
   return items.map((item) => ({
     target_username: item.targetUsername,
-    health: item.qualityLabel,
+    eligibility: item.qualityLabel,
+    performance: item.performanceLabel,
     followers_count: item.followersCount,
     followback_ratio: item.fbrPercent,
     added_at: item.createdAt,

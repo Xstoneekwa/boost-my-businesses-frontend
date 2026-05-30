@@ -11,7 +11,9 @@ import {
   targetHealthHelper,
   targetHealthLabel,
   targetMatchesListFilter,
+  targetPerformanceHelper,
   type TargetListFilter,
+  type TargetPerformanceStatus,
   type TargetQualityStatus,
   type TargetSafeRow,
   type TargetsOverview,
@@ -51,15 +53,12 @@ async function readApiResponse<T>(response: Response, fallback: string): Promise
   throw new Error(payload.error || fallback);
 }
 
-function formatWhen(iso: string) {
+function formatAddedDate(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso || "—";
   return new Intl.DateTimeFormat("en", {
-    year: "numeric",
     month: "short",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
   }).format(date);
 }
 
@@ -85,7 +84,7 @@ function qualityDotClass(status: TargetQualityStatus) {
   return "bg-slate-500";
 }
 
-function QualityBadge({ status }: { status: TargetQualityStatus }) {
+function EligibilityBadge({ status }: { status: TargetQualityStatus }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${qualityBadgeClass(status)}`}
@@ -93,6 +92,25 @@ function QualityBadge({ status }: { status: TargetQualityStatus }) {
     >
       <span className={`size-1.5 rounded-full ${qualityDotClass(status)}`} aria-hidden />
       {targetHealthLabel(status)}
+    </span>
+  );
+}
+
+function performanceBadgeClass(status: TargetPerformanceStatus) {
+  if (status === "good") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
+  if (status === "avg") return "border-amber-400/35 bg-amber-400/15 text-amber-200";
+  if (status === "poor") return "border-red-400/35 bg-red-400/12 text-red-200";
+  if (status === "pending") return "border-slate-400/25 bg-slate-400/10 text-slate-300";
+  return "border-transparent bg-transparent text-slate-500";
+}
+
+function PerformanceBadge({ row }: { row: TargetsOverview["items"][number] }) {
+  return (
+    <span
+      className={`inline-flex min-w-[58px] justify-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${performanceBadgeClass(row.performanceStatus)}`}
+      title={targetPerformanceHelper(row.performanceStatus)}
+    >
+      {row.performanceLabel}
     </span>
   );
 }
@@ -122,7 +140,7 @@ function csvEscape(value: string) {
 }
 
 function metricText(value: number | null, suffix = "") {
-  if (value === null) return "pending source";
+  if (value === null) return "—";
   return `${new Intl.NumberFormat("en").format(value)}${suffix}`;
 }
 
@@ -140,6 +158,33 @@ function bulkUsernamesFromText(value: string) {
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^@+/, "").toLowerCase())
     .filter(Boolean);
+}
+
+function addTargetSuccessMessage(result: {
+  validation_pending?: boolean;
+  verification_status?: string;
+  quality_status?: TargetQualityStatus;
+}) {
+  if (result.validation_pending) return "Target queued for verification.";
+
+  if (result.quality_status === "eligible") return "Target added. Eligibility: Eligible.";
+  if (result.quality_status === "rejected_low_followers") return "Target rejected: Low.";
+  if (result.quality_status === "rejected_verified") return "Target rejected: Verified account.";
+  if (result.quality_status === "rejected_private") return "Target rejected: Private account.";
+  if (result.quality_status === "rejected_not_found") return "Target rejected: Not found.";
+  if (result.quality_status?.startsWith("review_")) return "Target added for review.";
+  if (result.verification_status === "pending") return "Target queued for verification.";
+
+  return "Target added for review.";
+}
+
+function compactSourceLabel(value: string) {
+  if (value.toLowerCase().includes("bulk")) return "Bulk";
+  if (value.toLowerCase().includes("manual")) return "Manual";
+  if (value.toLowerCase().includes("client")) return "Client";
+  if (value.toLowerCase().includes("botapp")) return "BotApp";
+  if (value.toLowerCase().includes("automation")) return "Auto";
+  return value;
 }
 
 function EmptyTargetsState({ hasRows }: { hasRows: boolean }) {
@@ -275,12 +320,7 @@ export default function InstagramAccountTargetsPanel({
         "Could not add target.",
       );
       setSingleUsername("");
-      const qualityLabel = result.quality_status ? targetHealthLabel(result.quality_status) : "Quality pending";
-      setSuccess(
-        result.validation_pending
-          ? "Target queued for verification. Quality V1 is pending until a provider result is available."
-          : `Target added. Quality V1: ${qualityLabel}.`,
-      );
+      setSuccess(addTargetSuccessMessage(result));
       await loadTargets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add target.");
@@ -338,7 +378,7 @@ export default function InstagramAccountTargetsPanel({
           summary ? `Duplicate in batch: ${summary.duplicates}.` : "",
           summary ? `Duplicate existing: ${summary.already_existing}.` : `Duplicates skipped: ${duplicateCount}.`,
           result.skipped_deleted ? `Previously deleted blocked: ${result.skipped_deleted}.` : "",
-          "Bulk import queues targets only; Quality V1 is resolved by verification.",
+          "Bulk import queues targets for eligibility verification.",
         ].filter(Boolean).join(" "),
       );
       await loadTargets();
@@ -351,15 +391,16 @@ export default function InstagramAccountTargetsPanel({
 
   function exportCsv() {
     const exportRows = safeTargetExportRows(rows);
-    const header = ["target_username", "quality", "followers_count", "followback_ratio", "added_at"];
+    const header = ["target_username", "eligibility", "performance", "followers_count", "followback_ratio", "added_at"];
     const lines = [
       header.join(","),
       ...exportRows.map((r) =>
         [
           r.target_username,
-          r.health,
-          r.followers_count === null ? "pending source" : String(r.followers_count),
-          r.followback_ratio === null ? "pending source" : String(r.followback_ratio),
+          r.eligibility,
+          r.performance,
+          r.followers_count === null ? "—" : String(r.followers_count),
+          r.followback_ratio === null ? "—" : String(r.followback_ratio),
           r.added_at,
         ].map(csvEscape).join(","),
       ),
@@ -665,10 +706,10 @@ export default function InstagramAccountTargetsPanel({
             ) : filteredRows.length === 0 ? (
               <EmptyTargetsState hasRows={rows.length > 0} />
             ) : (
-              <table className="min-w-[820px] w-full border-separate border-spacing-y-1.5 text-sm">
+              <table className="min-w-[900px] w-full border-separate border-spacing-y-1.5 text-sm">
                 <thead>
                   <tr>
-                    <th className="sticky top-0 z-[1] w-10 bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] w-10 bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Select">
                       <input
                         type="checkbox"
                         checked={
@@ -686,16 +727,19 @@ export default function InstagramAccountTargetsPanel({
                       Verification
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Quality
+                      Eligibility
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Followers
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      FBR performance
+                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Performance after CT usage">
+                      Perf
+                    </th>
+                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Followback Ratio: followers gained / follows sent from this CT">
+                      FBR
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Added at
+                      Added
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Actions
@@ -731,28 +775,24 @@ export default function InstagramAccountTargetsPanel({
                         </div>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <span className="block text-xs font-bold text-slate-200">{row.verificationStatus}</span>
-                        <small className="block max-w-[140px] truncate text-[11px] text-slate-500" title={row.verificationReason || undefined}>
-                          {row.verificationReason || "—"}
-                        </small>
+                        <span className="block text-xs font-bold text-slate-200" title={row.verificationReason || undefined}>{row.verificationStatus}</span>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <QualityBadge status={row.qualityStatus} />
-                        <small className="mt-1 block max-w-[140px] truncate text-[11px] text-slate-500" title={row.reason || undefined}>
-                          {row.reason || row.statusLabel}
-                        </small>
+                        <EligibilityBadge status={row.qualityStatus} />
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs font-semibold text-slate-300">
                         {metricText(row.followersCount)}
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
-                        <span title={targetFbrHelper(row.fbrPercent)}>{targetFbrLabel(row.fbrPercent)}</span>
-                        <small className="block text-[11px] text-slate-500">future performance</small>
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center">
+                        <PerformanceBadge row={row} />
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
-                        <span className="block">{formatWhen(row.createdAt)}</span>
-                        <small className="block text-[11px] text-slate-500">
-                          {row.sourceLabel}{row.batchId ? ` · batch ${shortId(row.batchId)}` : ""}
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
+                        <span title={targetFbrHelper(row.fbrPercent)}>{targetFbrLabel(row.fbrPercent)}</span>
+                      </td>
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs text-slate-400">
+                        <span className="block font-semibold text-slate-300">{formatAddedDate(row.createdAt)}</span>
+                        <small className="block text-[10px] text-slate-500" title={row.batchId ? `Batch ${shortId(row.batchId)}` : row.sourceLabel}>
+                          {compactSourceLabel(row.sourceLabel)}{row.batchId ? ` · ${shortId(row.batchId)}` : ""}
                         </small>
                       </td>
                       <td className="rounded-r-lg border-y border-r border-white/6 bg-white/[0.03] px-2 py-2.5">
