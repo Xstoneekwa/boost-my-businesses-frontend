@@ -414,8 +414,11 @@ Etat actuel:
   erreurs provider restent `review_provider_unavailable` et ne rejettent jamais
   definitivement.
 - Bulk import normalise/deduplique et cree des lignes `pending_verification`.
-  Il ne lance pas de verification provider massive; la future CT queue durable
-  devra consommer ces lignes.
+  Il ne lance pas de verification provider massive pendant le formulaire. CT-2
+  cree des jobs durables qui sont verifies ensuite par petits lots.
+- `POST /api/instagram-dashboard/targets/verify-batch` traite un petit lot de
+  jobs `ct_target_verification_jobs` avec cache/throttle provider existants,
+  met a jour `ig_targets`, puis ecrit un audit safe.
 - Delete UI est mappe en archive/soft state pour garder l'historique et eviter
   une divergence silencieuse backend/frontend.
 
@@ -428,7 +431,7 @@ Safe:
 Pending:
 
 - Backend Target Discovery Service.
-- Queue durable CT bulk + cache durable.
+- Cache durable provider / quota tracking long terme.
 - FBR <= 8% apres volume suffisant, uniquement comme metrique performance future.
 - No followable profiles after X scrolls.
 - Auto-archive avec raison.
@@ -898,6 +901,32 @@ Etat:
 
 - Actif pour targets.
 
+#### `/api/instagram-dashboard/targets/verify-batch`
+
+Methode: `POST`
+
+Role:
+
+- Traiter un petit lot de jobs durables de verification CT bulk.
+
+Mutations:
+
+- Claim atomique via `claim_ct_target_verification_jobs`.
+- Update `ig_targets` avec verification/status/quality V1.
+- Update `ct_target_verification_jobs`.
+- Insert audit safe `ct_target_audit_events`.
+
+Projection safe:
+
+- Summary agregé: jobs processed, succeeded, rejected, review,
+  retry_scheduled, skipped, provider counts.
+- Aucun raw provider payload, full URL, header, key, cookie, session ou token.
+
+Etat:
+
+- Actif pour verification par lots.
+- SearchApi production reste desactive tant qu'il n'y a pas GO operateur/env.
+
 ## 4. Add Profile Patch 2B
 
 ### Avant Patch 2B
@@ -1089,18 +1118,33 @@ Etat actuel:
 - Table scrollable avec header sticky.
 - `followers_count` peut etre connu via verification provider. FBR reste pending source
   tant que les follows envoyes et followers gagnes depuis ce CT ne sont pas connectes.
-- Pas encore de vraie verification Instagram backend.
+- Bulk import cree des jobs durables `ct_target_verification_jobs`; la verification
+  est traitee ensuite par `verify-batch` en petits lots.
+- CT smoke cleanup ne doit jamais supprimer `ct_target_audit_events` par
+  `metadata_safe.source` seul. Les valeurs `target_add_bulk` et
+  `target_verify_batch` sont des sources fonctionnelles partagees, pas des ids
+  uniques de smoke. Collecter explicitement `account_id`, `target_id`, `job_id`
+  et `batch_id` pendant le smoke, puis nettoyer seulement ces ids plus le
+  username/account smoke strict avec `created_at` comme garde secondaire. Si
+  l'audit doit rester immuable, laisser les lignes d'audit smoke plutot que
+  supprimer large.
+- Incident CT-2 staging: le premier cleanup audit a utilise un predicate trop
+  large base sur `metadata_safe.source`. Impact probable: audit-only, environ 25
+  rows `ct_target_audit_events` bulk/verify supprimees. Les postchecks n'ont pas
+  montre de suppression/modification de targets/jobs reels non-smoke. Les
+  identites exactes des rows audit supprimees ne sont pas recuperables depuis la
+  DB courante sans PITR/logs.
 - Pas encore de vraie recherche CT Pro/Premium.
 
 Roadmap:
 
 - Backend Target Discovery Service.
-- Verification existence Instagram.
+- Planification/cron admin de `verify-batch`.
 - Canonical username.
 - Avatar.
 - `followers_count`.
 - Regle CT quality V1: not_found, followers_count < 500, verified, private.
-- Duplicate/deleted/archived handling.
+- Restore/unarchive CT et reconciliation archived/deleted.
 - FBR future comme metrique de performance, pas comme equivalent de followers_count.
 - Sync admin/client/BotApp/backend.
 - Activity Log pour add/import/delete/archive/restore.

@@ -3,6 +3,9 @@ import {
   safeInstagramPublicAvatarUrl,
 } from "@/lib/instagram-public-profile-lookup";
 import {
+  buildTargetVerificationJobPayloads,
+} from "@/lib/instagram-target-verification-jobs";
+import {
   classifyBulkTargetLines,
   isValidTargetUsername,
   normalizeTargetUsername,
@@ -197,6 +200,27 @@ async function tryRecordTargetAudit(
   }
 }
 
+async function tryEnqueueTargetVerificationJobs(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  rows: SupabaseRecord[],
+) {
+  const jobRows = buildTargetVerificationJobPayloads(rows.map((row) => ({
+    id: readString(row.id, ""),
+    account_id: readString(row.account_id, ""),
+    batch_id: readString(row.batch_id, "") || null,
+    normalized_username: readString(row.normalized_username, readString(row.target_username, "")),
+    target_username: readString(row.target_username, ""),
+  })));
+
+  if (jobRows.length === 0) return { queued: 0, error: null as string | null };
+
+  const { error } = await supabase
+    .from("ct_target_verification_jobs")
+    .upsert(jobRows, { onConflict: "target_id", ignoreDuplicates: true });
+
+  return { queued: error ? 0 : jobRows.length, error: error?.message ?? null };
+}
+
 export async function GET(request: Request) {
   try {
     const unauthorized = await requireInstagramAdmin();
@@ -292,6 +316,23 @@ export async function POST(request: Request) {
         return jsonError(insertResult.error.message, 500);
       }
 
+      const jobResult = await tryEnqueueTargetVerificationJobs(
+        supabase,
+        (insertResult.data ?? []) as SupabaseRecord[],
+      );
+      if (jobResult.error) {
+        await tryRecordTargetAudit(supabase, {
+          accountId,
+          operation: "target_add_bulk",
+          result: "failed",
+          reason: "target_verification_job_enqueue_failed",
+          actorType,
+          batchId,
+          counts: summary,
+        });
+        return jsonError("Targets were inserted, but verification jobs could not be queued.", 500);
+      }
+
       await tryRecordTargetAudit(supabase, {
         accountId,
         operation: "target_add_bulk",
@@ -309,6 +350,7 @@ export async function POST(request: Request) {
         skipped_deleted: 0,
         skipped_invalid: summary.invalid,
         validation_pending: insertResult.data?.length ?? 0,
+        jobs_queued: jobResult.queued,
         summary,
         lines: classified,
         rows: ((insertResult.data ?? []) as SupabaseRecord[]).map(safeTargetRow),
