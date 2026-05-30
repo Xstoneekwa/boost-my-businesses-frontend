@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BarChart3, Clipboard, Download, FileText, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
 
 type InstagramDashboardButtonsProps = {
@@ -74,12 +74,15 @@ type LogRow = {
 type Panel = "settings" | "stats" | "logs" | "filters" | null;
 type SettingsTab = "General" | "Schedule" | "Actions" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Advanced";
 type FieldType = "text" | "password" | "time" | "date" | "number" | "toggle" | "textarea" | "select";
+type RuntimeStatus = "active" | "needs-routing" | "read-only" | "ops-only" | "deprecated";
+
 type FieldSpec = {
   key: string;
   label: string;
   type: FieldType;
   helper?: string;
   readOnly?: boolean;
+  runtimeStatus?: RuntimeStatus;
   options?: string[];
   min?: number;
   step?: number;
@@ -89,8 +92,10 @@ type AccountTool = {
   label:
     | "Stats"
     | "Logs"
+    | "Run manually"
     | "Stop run"
     | "Settings"
+    | "Filters"
     | "Targets"
     | "Archive"
     | "Move to trash"
@@ -99,7 +104,11 @@ type AccountTool = {
   Icon: LucideIcon;
   tone?: "success" | "neutral" | "danger";
   disabled?: boolean;
+  disabledReason?: string;
 };
+
+const DRAFT_SETTINGS_BANNER =
+  "Dashboard draft settings. Saved values persist to the dashboard DB; fields marked Needs routing are not runtime-active until Phone Farm domain wiring is complete.";
 
 type Confirmation = {
   title: string;
@@ -114,8 +123,16 @@ type LogExportScope = "all" | "latest-run" | "latest-python-run";
 const activeAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
+  {
+    label: "Run manually",
+    Icon: Play,
+    tone: "success",
+    disabled: true,
+    disabledReason: "Manual run requires runtime queue wiring",
+  },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
+  { label: "Filters", Icon: Funnel },
   { label: "Targets", Icon: Users, tone: "neutral" },
   { label: "Archive", Icon: Archive },
   { label: "Move to trash", Icon: Trash2, tone: "danger" },
@@ -138,112 +155,113 @@ const trashedAccountTools: AccountTool[] = [
   { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
 ];
 
-const settingsTabs: SettingsTab[] = ["General", "Advanced"];
+const settingsTabs: SettingsTab[] = ["General", "Schedule", "Actions", "DM", "Followback", "Sources", "Filters", "Safety", "Advanced"];
 
 const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   General: [
-    { key: "username", label: "Username", type: "text", readOnly: true, helper: "Account identity projection. Edit through a future account identity API." },
-    { key: "display_name", label: "Display name", type: "text", readOnly: true, helper: "Profile projection only; not a runtime worker setting." },
-    { key: "device_name", label: "Device name", type: "text", readOnly: true, helper: "Device assignment projection. Runtime assignment uses domain tables/config." },
-    { key: "email_display", label: "Email display", type: "text", readOnly: true, helper: "Safe masked email projection. Credential email is write-only." },
-    { key: "password_status", label: "Password status", type: "text", readOnly: true, helper: "Safe status only. Real password is never returned to the browser." },
-    { key: "device_assignment", label: "Device assignment", type: "text", readOnly: true, helper: "Safe phone/host label. Device internals stay hidden." },
-    { key: "app_package_status", label: "App package status", type: "text", readOnly: true, helper: "Clone/app package internals are hidden." },
-    { key: "clone_assignment_status", label: "Clone assignment", type: "text", readOnly: true, helper: "Safe clone status only." },
-    { key: "account_status", label: "Account status", type: "select", readOnly: true, helper: "Legacy status projection. Use lifecycle actions for changes.", options: ["active", "paused", "review", "disabled"] },
+    { key: "username", label: "Username", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Account identity projection. Edit through a future account identity API." },
+    { key: "display_name", label: "Display name", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Profile projection only; not a runtime worker setting." },
+    { key: "device_name", label: "Device name", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Device assignment projection. Runtime assignment uses domain tables/config." },
+    { key: "email_display", label: "Email display", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe masked email projection. Credential email is write-only." },
+    { key: "password_status", label: "Password status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe status only. Real password is never returned to the browser." },
+    { key: "two_fa_enabled", label: "Two-factor enabled", type: "toggle", runtimeStatus: "needs-routing", helper: "Planned login-status signal. Target: account identity/status API." },
+    { key: "device_assignment", label: "Device assignment", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe phone/host label. Device internals stay hidden." },
+    { key: "app_package_status", label: "App package status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Clone/app package internals are hidden." },
+    { key: "clone_assignment_status", label: "Clone assignment", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe clone status only." },
+    { key: "account_status", label: "Account status", type: "select", readOnly: true, runtimeStatus: "read-only", helper: "Legacy status projection. Use lifecycle actions for changes.", options: ["active", "paused", "review", "disabled"] },
+    { key: "campaign_name", label: "Campaign name", type: "text", runtimeStatus: "needs-routing", helper: "Admin label only until campaign/domain policy API exists." },
   ],
   Schedule: [
-    { key: "timeslot_start", label: "Timeslot start", type: "time" },
-    { key: "timeslot_end", label: "Timeslot end", type: "time" },
-    { key: "total_sessions", label: "Total sessions", type: "number", min: 0 },
-    { key: "stop_interactions_after_minutes", label: "Stop after minutes", type: "number", min: 0 },
-    { key: "pause_account_days", label: "Pause account days", type: "number", min: 0 },
-    { key: "pause_account_until", label: "Pause account until", type: "date" },
-    { key: "randomize_start_enabled", label: "Randomize start", type: "toggle" },
+    { key: "timeslot_start", label: "Timeslot start", type: "time", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
+    { key: "timeslot_end", label: "Timeslot end", type: "time", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
+    { key: "total_sessions", label: "Total sessions", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: session/package cap resolver." },
+    { key: "stop_interactions_after_minutes", label: "Stop after minutes", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: session scheduler / domain caps." },
+    { key: "pause_account_days", label: "Pause account days", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: lifecycle pause action API (not legacy settings alone)." },
+    { key: "pause_account_until", label: "Pause account until", type: "date", runtimeStatus: "needs-routing", helper: "Target: lifecycle pause action API." },
+    { key: "randomize_start_enabled", label: "Randomize start", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
   ],
   Actions: [
-    { key: "follow_limit", label: "Follow limit", type: "number", min: 0 },
-    { key: "total_follows_limit", label: "Total follows limit", type: "number", min: 0 },
-    { key: "total_unfollows_limit", label: "Total unfollows limit", type: "number", min: 0 },
-    { key: "unfollow_delay_days", label: "Unfollow delay days", type: "number", min: 0 },
-    { key: "total_likes_limit", label: "Total likes limit", type: "number", min: 0 },
-    { key: "likes_per_follow_min", label: "Likes per follow min", type: "number", min: 0 },
-    { key: "likes_per_follow_max", label: "Likes per follow max", type: "number", min: 0 },
+    { key: "follow_limit", label: "Follow limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: ig_account_follow_settings / package cap resolver." },
+    { key: "total_follows_limit", label: "Total follows limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: follow policy API with min(package, DB, env)." },
+    { key: "total_unfollows_limit", label: "Total unfollows limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_per_day_limit." },
+    { key: "unfollow_delay_days", label: "Unfollow delay days", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_after_days." },
+    { key: "total_likes_limit", label: "Total likes limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
+    { key: "likes_per_follow_min", label: "Likes per follow min", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
+    { key: "likes_per_follow_max", label: "Likes per follow max", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
   ],
   DM: [
-    { key: "welcome_dm_enabled", label: "Welcome DM enabled", type: "toggle" },
-    { key: "welcome_dm_message", label: "Welcome DM message", type: "textarea" },
-    { key: "cold_dm_enabled", label: "Cold DM enabled", type: "toggle" },
-    { key: "cold_dm_message", label: "Cold DM message", type: "textarea" },
-    { key: "max_dm_per_run", label: "Max DMs per run", type: "number", min: 0 },
-    { key: "max_consecutive_dms", label: "Max consecutive DMs", type: "number", min: 0 },
-    { key: "check_chat_before_welcoming", label: "Check chat before welcoming", type: "toggle" },
-    { key: "safe_review_mode", label: "Safe review mode", type: "toggle" },
+    { key: "welcome_dm_enabled", label: "Welcome DM enabled", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_dm_settings.welcome_enabled." },
+    { key: "welcome_dm_message", label: "Welcome DM message", type: "textarea", runtimeStatus: "needs-routing", helper: "Target: versioned DM template API." },
+    { key: "cold_dm_enabled", label: "Cold DM enabled", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_dm_settings.outreach_enabled." },
+    { key: "cold_dm_message", label: "Cold DM message", type: "textarea", runtimeStatus: "needs-routing", helper: "Target: versioned outreach template API." },
+    { key: "max_dm_per_run", label: "Max DMs per run", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: welcome/outreach per-session limits with hard caps." },
+    { key: "max_consecutive_dms", label: "Max consecutive DMs", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: DM pacing domain policy." },
+    { key: "check_chat_before_welcoming", label: "Check chat before welcoming", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_dm_settings.check_chat_before_welcome." },
+    { key: "safe_review_mode", label: "Safe review mode", type: "toggle", runtimeStatus: "needs-routing", helper: "Admin review flag only. Does not gate real send — env/domain gates required." },
   ],
   Followback: [
-    { key: "followback_on_followers", label: "Followback on followers", type: "toggle" },
-    { key: "max_followback_skips", label: "Max followback skips", type: "number", min: 0 },
-    { key: "max_followback_ignore", label: "Max followback ignore", type: "number", min: 0 },
-    { key: "sort_followers_mode", label: "Sort followers mode", type: "select", options: ["recent", "oldest", "random"] },
-    { key: "unfollow_non_followers", label: "Unfollow non-followers", type: "toggle" },
-    { key: "unfollow_any", label: "Unfollow any", type: "toggle" },
-    { key: "unfollow_skip_limit", label: "Unfollow skip limit", type: "number", min: 0 },
-    { key: "mute_posts_after_follow", label: "Mute posts after follow", type: "toggle" },
-    { key: "mute_stories_after_follow", label: "Mute stories after follow", type: "toggle" },
-    { key: "do_follows_first", label: "Do follows first", type: "toggle" },
+    { key: "followback_on_followers", label: "Followback on followers", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: followback/unfollow domain policy." },
+    { key: "max_followback_skips", label: "Max followback skips", type: "number", min: 0, runtimeStatus: "needs-routing" },
+    { key: "max_followback_ignore", label: "Max followback ignore", type: "number", min: 0, runtimeStatus: "needs-routing" },
+    { key: "sort_followers_mode", label: "Sort followers mode", type: "select", runtimeStatus: "needs-routing", options: ["recent", "oldest", "random"] },
+    { key: "unfollow_non_followers", label: "Unfollow non-followers", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_mode." },
+    { key: "unfollow_any", label: "Unfollow any", type: "toggle", runtimeStatus: "needs-routing", helper: "Destructive. Target: unfollow domain API + env kill switch." },
+    { key: "unfollow_skip_limit", label: "Unfollow skip limit", type: "number", min: 0, runtimeStatus: "needs-routing" },
+    { key: "mute_posts_after_follow", label: "Mute posts after follow", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: post-follow mute policy API." },
+    { key: "mute_stories_after_follow", label: "Mute stories after follow", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: post-follow mute policy API." },
+    { key: "do_follows_first", label: "Do follows first", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: account session phase ordering policy." },
   ],
   Sources: [
-    { key: "truncate_sources_min", label: "Truncate sources min", type: "number", min: 0 },
-    { key: "truncate_sources_max", label: "Truncate sources max", type: "number", min: 0 },
-    { key: "delete_interacted_users", label: "Delete interacted users", type: "toggle" },
-    { key: "change_source_if_crash", label: "Change source if crash", type: "toggle" },
-    { key: "skipped_posts_limit", label: "Skipped posts limit", type: "number", min: 0 },
-    { key: "fling_when_skipped", label: "Fling when skipped", type: "toggle" },
+    { key: "truncate_sources_min", label: "Truncate sources min", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Source list policy draft. CT targets are managed in the Targets panel." },
+    { key: "truncate_sources_max", label: "Truncate sources max", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Source list policy draft. CT targets are managed in the Targets panel." },
+    { key: "change_source_if_crash", label: "Change source if crash", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/source policy API." },
+    { key: "skipped_posts_limit", label: "Skipped posts limit", type: "number", min: 0, runtimeStatus: "needs-routing" },
+    { key: "fling_when_skipped", label: "Fling when skipped", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: navigation heuristic policy API." },
   ],
   Safety: [
-    { key: "total_interactions_limit", label: "Total interactions limit", type: "number", min: 0 },
-    { key: "total_successful_interactions_limit", label: "Total successful interactions limit", type: "number", min: 0 },
-    { key: "interactions_count", label: "Interactions count", type: "number", min: 0 },
-    { key: "end_if_follow_limit_reached", label: "End if follow limit reached", type: "toggle" },
-    { key: "end_if_dm_limit_reached", label: "End if DM limit reached", type: "toggle" },
-    { key: "end_if_likes_limit_reached", label: "End if likes limit reached", type: "toggle" },
-    { key: "max_actions_per_hour", label: "Max actions per hour", type: "number", min: 0 },
-    { key: "max_actions_per_day", label: "Max actions per day", type: "number", min: 0 },
-    { key: "random_delay_min_seconds", label: "Random delay min seconds", type: "number", min: 0 },
-    { key: "random_delay_max_seconds", label: "Random delay max seconds", type: "number", min: 0 },
-    { key: "warmup_mode", label: "Warmup mode", type: "toggle" },
-    { key: "stop_on_suspicious_screen", label: "Stop on suspicious screen", type: "toggle" },
-    { key: "stop_on_login_challenge", label: "Stop on login challenge", type: "toggle" },
-    { key: "stop_on_checkpoint", label: "Stop on checkpoint", type: "toggle" },
-    { key: "stop_on_repeated_navigation_failure", label: "Stop on repeated navigation failure", type: "toggle" },
-    { key: "max_repeated_errors", label: "Max repeated errors", type: "number", min: 0 },
+    { key: "total_interactions_limit", label: "Total interactions limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Does not protect runtime until domain caps are wired." },
+    { key: "total_successful_interactions_limit", label: "Total successful interactions limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Does not protect runtime until domain caps are wired." },
+    { key: "interactions_count", label: "Interactions count", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Counter projection only. Runtime counters come from logs/domain tables." },
+    { key: "end_if_follow_limit_reached", label: "End if follow limit reached", type: "toggle", runtimeStatus: "needs-routing" },
+    { key: "end_if_dm_limit_reached", label: "End if DM limit reached", type: "toggle", runtimeStatus: "needs-routing" },
+    { key: "end_if_likes_limit_reached", label: "End if likes limit reached", type: "toggle", runtimeStatus: "needs-routing" },
+    { key: "max_actions_per_hour", label: "Max actions per hour", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: package/safety cap resolver." },
+    { key: "max_actions_per_day", label: "Max actions per day", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: package/safety cap resolver." },
+    { key: "random_delay_min_seconds", label: "Random delay min seconds", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: pacing domain policy." },
+    { key: "random_delay_max_seconds", label: "Random delay max seconds", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: pacing domain policy." },
+    { key: "warmup_mode", label: "Warmup mode", type: "toggle", runtimeStatus: "needs-routing" },
+    { key: "stop_on_suspicious_screen", label: "Stop on suspicious screen", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/incident policy API." },
+    { key: "stop_on_login_challenge", label: "Stop on login challenge", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/incident policy API." },
+    { key: "stop_on_checkpoint", label: "Stop on checkpoint", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/incident policy API." },
+    { key: "stop_on_repeated_navigation_failure", label: "Stop on repeated navigation failure", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery engine policy API." },
+    { key: "max_repeated_errors", label: "Max repeated errors", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: recovery engine policy API." },
   ],
   Advanced: [
-    { key: "current_run_status", label: "Current run status", type: "select", readOnly: true, helper: "Runtime status projection. Use run actions for changes.", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
-    { key: "last_error", label: "Last error", type: "textarea", readOnly: true, helper: "Read-only sanitized status from the current projection." },
-    { key: "last_successful_action", label: "Last successful action", type: "text", readOnly: true, helper: "Audit projection only. Runtime actions are sourced from logs/events, not this legacy field." },
-    { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle", readOnly: true, helper: "Use the Stop run action instead of editing this legacy flag." },
+    { key: "current_run_status", label: "Current run status", type: "select", readOnly: true, runtimeStatus: "read-only", helper: "Runtime status projection. Use run actions for changes.", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
+    { key: "last_error", label: "Last error", type: "textarea", readOnly: true, runtimeStatus: "read-only", helper: "Read-only sanitized status from the current projection." },
+    { key: "last_successful_action", label: "Last successful action", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Audit projection only. Runtime actions are sourced from logs/events." },
+    { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle", readOnly: true, runtimeStatus: "read-only", helper: "Use the Stop run action instead of editing this legacy flag." },
   ],
 };
 
 const filterFields: FieldSpec[] = [
-  { key: "disable_filters", label: "Disable filters", type: "toggle" },
-  { key: "skip_followers", label: "Skip followers", type: "toggle" },
-  { key: "skip_following", label: "Skip following", type: "toggle" },
-  { key: "skip_business_profiles", label: "Skip business profiles", type: "toggle" },
-  { key: "skip_non_business_profiles", label: "Skip non-business profiles", type: "toggle" },
-  { key: "follow_private_profiles", label: "Follow private profiles", type: "toggle" },
-  { key: "follow_only_private_profiles", label: "Follow only private profiles", type: "toggle" },
-  { key: "dm_private_profiles", label: "DM private profiles", type: "toggle" },
-  { key: "min_followers", label: "Minimum followers", type: "number", min: 0 },
-  { key: "max_followers", label: "Maximum followers", type: "number", min: 0 },
-  { key: "min_following", label: "Minimum following", type: "number", min: 0 },
-  { key: "max_following", label: "Maximum following", type: "number", min: 0 },
-  { key: "min_posts", label: "Minimum posts", type: "number", min: 0 },
-  { key: "blacklisted_words", label: "Blacklisted words", type: "textarea" },
-  { key: "mandatory_words", label: "Mandatory words", type: "textarea" },
-  { key: "whitelist_words", label: "Whitelist words", type: "textarea" },
-  { key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea" },
+  { key: "disable_filters", label: "Disable filters", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: filter eligibility policy API." },
+  { key: "skip_followers", label: "Skip followers", type: "toggle", runtimeStatus: "needs-routing" },
+  { key: "skip_following", label: "Skip following", type: "toggle", runtimeStatus: "needs-routing" },
+  { key: "skip_business_profiles", label: "Skip business profiles", type: "toggle", runtimeStatus: "needs-routing" },
+  { key: "skip_non_business_profiles", label: "Skip non-business profiles", type: "toggle", runtimeStatus: "needs-routing" },
+  { key: "follow_private_profiles", label: "Follow private profiles", type: "toggle", runtimeStatus: "needs-routing", helper: "Semantic conflict with dont_follow_private_accounts — reconcile before routing." },
+  { key: "follow_only_private_profiles", label: "Follow only private profiles", type: "toggle", runtimeStatus: "needs-routing" },
+  { key: "dm_private_profiles", label: "DM private profiles", type: "toggle", runtimeStatus: "needs-routing" },
+  { key: "min_followers", label: "Minimum followers", type: "number", min: 0, runtimeStatus: "needs-routing" },
+  { key: "max_followers", label: "Maximum followers", type: "number", min: 0, runtimeStatus: "needs-routing" },
+  { key: "min_following", label: "Minimum following", type: "number", min: 0, runtimeStatus: "needs-routing" },
+  { key: "max_following", label: "Maximum following", type: "number", min: 0, runtimeStatus: "needs-routing" },
+  { key: "min_posts", label: "Minimum posts", type: "number", min: 0, runtimeStatus: "needs-routing" },
+  { key: "blacklisted_words", label: "Blacklisted words", type: "textarea", runtimeStatus: "needs-routing" },
+  { key: "mandatory_words", label: "Mandatory words", type: "textarea", runtimeStatus: "needs-routing" },
+  { key: "whitelist_words", label: "Whitelist words", type: "textarea", runtimeStatus: "needs-routing" },
+  { key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea", runtimeStatus: "needs-routing" },
 ];
 
 async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
@@ -282,6 +300,28 @@ async function readApiResponse<T>(response: Response, fallback: string): Promise
 
 function boolText(value: boolean) {
   return value ? "Enabled" : "Disabled";
+}
+
+function runtimeStatusPrefix(status?: RuntimeStatus) {
+  switch (status) {
+    case "active":
+      return "Active / routed";
+    case "needs-routing":
+      return "Needs routing · Draft only — not runtime-active yet";
+    case "read-only":
+      return "Read-only";
+    case "ops-only":
+      return "Ops-only";
+    case "deprecated":
+      return "Deprecated";
+    default:
+      return null;
+  }
+}
+
+function buildFieldHelper(field: FieldSpec) {
+  const parts = [runtimeStatusPrefix(field.runtimeStatus), field.helper, field.readOnly && !field.runtimeStatus ? "Read-only projection." : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : undefined;
 }
 
 function yesNo(value: boolean) {
@@ -733,7 +773,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
         "Could not apply account template."
       );
       await refreshAccountConfig();
-      setSuccess("Template applied.");
+      setSuccess("Dashboard draft template applied. Runtime wiring is still pending for fields marked Needs routing.");
       router.refresh();
     } catch (templateError) {
       setError(templateError instanceof Error ? templateError.message : "Could not apply account template.");
@@ -747,8 +787,8 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
     if (!settings) return;
 
     requestConfirmation({
-      title: "🚨 Save account settings? ⚠️",
-      description: "These settings will be used by the next worker runs.",
+      title: "Save dashboard draft settings?",
+      description: "These values will be saved as dashboard draft settings. Fields marked Needs routing are not runtime-active until domain wiring is complete.",
       confirmTone: "primary",
       onConfirm: performSaveSettings,
     });
@@ -771,7 +811,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
         "Could not save account settings."
       );
       setSettings(savedSettings);
-      setSuccess("Settings saved.");
+      setSuccess("Dashboard draft settings saved. Runtime wiring is still pending for fields marked Needs routing.");
       router.refresh();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save account settings.");
@@ -785,8 +825,8 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
     if (!filters) return;
 
     requestConfirmation({
-      title: "🚨 Save account filters? ⚠️",
-      description: "These filters will be used by the next worker runs.",
+      title: "Save dashboard draft filters?",
+      description: "These values will be saved as dashboard draft filters. Fields marked Needs routing are not runtime-active until filter domain wiring is complete.",
       confirmTone: "primary",
       onConfirm: performSaveFilters,
     });
@@ -809,7 +849,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
         "Could not save account filters."
       );
       setFilters(savedFilters);
-      setSuccess("Filters saved.");
+      setSuccess("Dashboard draft filters saved. Runtime wiring is still pending for fields marked Needs routing.");
       router.refresh();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save account filters.");
@@ -915,6 +955,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
               if (tool.label === "Settings") void loadPanel("settings");
               else if (tool.label === "Stats") void loadPanel("stats");
               else if (tool.label === "Logs") void loadPanel("logs");
+              else if (tool.label === "Filters") void loadPanel("filters");
               else if (tool.label === "Targets") setTargetsOpen(true);
               else if (tool.label === "Stop run") requestStopRun();
               else if (tool.label === "Archive") requestLifecycle("archive");
@@ -1589,7 +1630,7 @@ function ActionButton({ tool, username, onClick }: { tool: AccountTool; username
       type="button"
       className={`ig-dashboard-tool ${toneClass}`.trim()}
       aria-label={`${tool.label} for ${username}`}
-      data-tooltip={tool.disabled ? `${tool.label} is not available yet` : tool.label}
+      data-tooltip={tool.disabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : tool.label}
       onClick={onClick}
       disabled={tool.disabled}
     >
@@ -1660,8 +1701,8 @@ function TemplateDialogModal({
         <h3 id="ig-template-title">{dialog.kind === "save" ? "Save as Template" : "Apply Template"}</h3>
         <p>
           {dialog.kind === "save"
-            ? "Save this Account configuration for reuse."
-            : "Choose a reusable template to apply to this Account."}
+            ? "Save this account configuration as a reusable dashboard draft template. Templates replay draft settings, not proven runtime defaults."
+            : "Apply a reusable dashboard draft template to this account. Runtime wiring is still pending for fields marked Needs routing."}
         </p>
 
         {dialog.kind === "save" ? (
@@ -1782,6 +1823,7 @@ function renderSettingsTabs({
   const isFiltersTab = settingsTab === "Filters";
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
   const hasEditableFields = fields.some((field) => !field.readOnly);
+  const showDraftBanner = hasEditableFields || isFiltersTab;
 
   return (
     <form className="ig-settings-form" onSubmit={isFiltersTab ? saveFilters : saveSettings}>
@@ -1800,10 +1842,12 @@ function renderSettingsTabs({
         ))}
       </div>
 
-      {!hasEditableFields ? (
-        <p className="ig-settings-message">
-          Read-only projection. Legacy runtime controls are hidden until domain APIs prove their worker effect.
-        </p>
+      {showDraftBanner ? <p className="ig-settings-message">{DRAFT_SETTINGS_BANNER}</p> : null}
+      {settingsTab === "Sources" ? (
+        <p className="ig-settings-message">CT targets are managed in the Targets panel. Source policy fields here are draft settings for future Phone Farm routing.</p>
+      ) : null}
+      {!hasEditableFields && settingsTab === "Advanced" ? (
+        <p className="ig-settings-message">Read-only runtime projections. Use Stop run, lifecycle actions, and logs for operational changes.</p>
       ) : null}
 
       <div className="ig-settings-grid">
@@ -1818,7 +1862,7 @@ function renderSettingsTabs({
       </div>
 
       <FormMessages error={error} success={success} />
-      {hasEditableFields ? (
+      {hasEditableFields || isFiltersTab ? (
         <div className="ig-template-actions">
           <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
             Save as Template
@@ -1828,7 +1872,7 @@ function renderSettingsTabs({
           </button>
         </div>
       ) : null}
-      <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields} />
+      <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields || isFiltersTab} />
     </form>
   );
 }
@@ -2005,7 +2049,7 @@ function renderLogs({
 }
 
 function ConfigField({ field, value, onChange }: { field: FieldSpec; value: ConfigValue | undefined; onChange: (value: ConfigValue) => void }) {
-  const helper = field.readOnly ? field.helper ?? "Read-only projection." : field.helper;
+  const helper = buildFieldHelper(field);
 
   if (field.type === "toggle") {
     const checked = Boolean(value);
