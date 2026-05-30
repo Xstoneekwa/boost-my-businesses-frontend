@@ -27,7 +27,6 @@ const cloneOptions = [
   { value: "dual_app_normal", label: "Dual App Normal" },
   { value: "dual_app_popup", label: "Dual App Popup" },
   { value: "dual_app_no_popup", label: "Dual App No Popup" },
-  { value: "custom_package_later", label: "Custom package later placeholder" },
 ];
 
 async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {

@@ -29,7 +29,7 @@ export default async function InstagramGrowthSettingsPage() {
       <DashboardPageHeader
         eyebrow="Growth"
         title="Growth Settings"
-        description="Package, limits and client-safe growth configuration overview."
+        description="Read-only settings audit. Runtime wiring and client-safe defaults are not connected here."
         action={<InstagramDashboardViewNav active="growth" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
@@ -45,26 +45,21 @@ export default async function InstagramGrowthSettingsPage() {
         <SourcePill label="Account settings" detail={data.sourceDetails.accountSettings} />
         <SourcePill label="Filters" detail={data.sourceDetails.filters} />
         <SourcePill label="Package model" detail={data.sourceDetails.packageModel} />
-        <SourcePill label="Runtime proof" detail={data.sourceDetails.runtimeProof} />
+        <SourcePill label="Runtime review" detail={data.sourceDetails.runtimeProof} />
       </section>
 
       <section className="ig-growth-kpis" aria-label="Growth Settings summary">
         <Kpi label="Accounts" value={String(data.summary.accountsCount)} detail="Accounts from Manage contract" />
-        <Kpi label="Client-safe ready" value={String(data.summary.clientSafeReadyCount)} detail="Requires runtime proof first" tone="warning" />
+        <Kpi label="Verified settings" value={String(data.summary.clientSafeReadyCount)} detail="Client-safe settings currently verified" tone={data.summary.clientSafeReadyCount ? "neutral" : "warning"} />
         <Kpi label="Admin-only settings" value={String(data.summary.adminOnlyCount)} detail="Visible only to admin/operators" />
-        <Kpi label="Runtime unverified" value={String(data.summary.runtimeUnverifiedCount)} detail="Not pricing/client-ready" tone="warning" />
+        <Kpi label="Needs review" value={String(data.summary.runtimeUnverifiedCount)} detail="Settings requiring operator review" tone="warning" />
         <Kpi label="Pending review" value={String(data.summary.pendingReviewCount)} detail="Needs operator/product validation" tone="warning" />
-      </section>
-
-      <section className="ig-growth-helper" aria-label="Growth Settings runtime proof note">
-        <strong>Runtime proof rule</strong>
-        <p>A setting is client/pricing-ready only after runtime application is verified. V1 is read-only and does not create new settings mutations.</p>
       </section>
 
       <AnalyticsSectionCard
         eyebrow="Accounts"
         title="Growth settings by account"
-        description="Compact safe projection. Use the existing Settings drawer for technical edits."
+        description="Compact safe projection. Read-only until runtime proof is complete."
       >
         {data.groupsByAccount.length === 0 ? (
           <EmptyState />
@@ -449,12 +444,12 @@ function AccountAccordion({ entry }: { entry: GrowthAccountOverview }) {
           </div>
           <SummaryMetric label="Package" value={entry.account.packageLabel ?? "unknown"} />
           <SummaryMetric label="Subscription" value={entry.account.subscriptionStatus ?? "unknown"} />
-          <StatusPill label={entry.runtimeProofStatus === "verified" ? "Runtime verified" : "Runtime pending"} tone="warning" />
+          <StatusPill label={entry.runtimeProofStatus === "verified" ? "Runtime verified" : "Needs review"} tone={entry.runtimeProofStatus === "verified" ? "good" : "warning"} />
           <StatusPill label={visibilityLabel(entry.clientVisibilityStatus)} tone="warning" />
           <SummaryMetric label="Warnings" value={String(entry.warningCount)} />
           <div className="ig-growth-link-row">
             <Link href={entry.account.accountDetailHref}>Account Detail</Link>
-            <span className="ig-growth-edit-disabled" title="Open Manage then Settings drawer for V1 edits">{entry.account.editSettingsLabel}</span>
+            <span className="ig-growth-edit-disabled" title="Read-only until runtime proof is complete.">Runtime proof required</span>
           </div>
         </div>
       </summary>
@@ -462,8 +457,8 @@ function AccountAccordion({ entry }: { entry: GrowthAccountOverview }) {
         <div className="ig-growth-package-grid">
           <SummaryCard label="Package" value={entry.packageSummary.packageLabel} />
           <SummaryCard label="Entitlement" value={entry.packageSummary.entitlementSummary} />
-          <SummaryCard label="Runtime proof" value={entry.packageSummary.runtimeProofStatus} />
-          <SummaryCard label="Pricing ready" value={entry.packageSummary.pricingReadyStatus} />
+          <SummaryCard label="Runtime status" value={entry.packageSummary.runtimeProofStatus} />
+          <SummaryCard label="Readiness" value={entry.packageSummary.pricingReadyStatus} />
         </div>
         <div className="ig-growth-groups-grid">
           {entry.groups.map((group) => (
@@ -543,13 +538,13 @@ function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutra
 
 function runtimeLabel(value: string) {
   if (value === "verified") return "Runtime verified";
-  if (value === "unverified") return "Runtime unverified";
-  if (value === "pending") return "Pending proof";
+  if (value === "unverified") return "Needs review";
+  if (value === "pending") return "Needs review";
   return "Runtime unknown";
 }
 
 function visibilityLabel(value: string) {
-  if (value === "client_safe") return "Client-safe future";
+  if (value === "client_safe") return "Client-safe";
   if (value === "admin_only") return "Admin-only";
   if (value === "ops_only") return "Ops-only hidden";
   return "Pending review";

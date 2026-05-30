@@ -33,9 +33,6 @@ export default async function InstagramDmTemplatesPage() {
 
       <section className="ig-dm-source-strip" aria-label="DM Templates source status">
         <SourcePill label="Account settings" value={data.sourceDetails.accountSettings.label} detail={data.sourceDetails.accountSettings.description} />
-        <SourcePill label="Account-scoped messages" value={data.sourceDetails.accountScopedModel.label} detail={data.sourceDetails.accountScopedModel.description} />
-        <SourcePill label="Client approval" value={data.sourceDetails.clientApproval.label} detail={data.sourceDetails.clientApproval.description} />
-        <SourcePill label="Activity audit" value={data.sourceDetails.activityAudit.label} detail={data.sourceDetails.activityAudit.description} />
       </section>
 
       <section className="ig-dm-kpis" aria-label="DM Templates summary">
@@ -43,7 +40,6 @@ export default async function InstagramDmTemplatesPage() {
         <Kpi label="Welcome enabled" value={String(data.summary.welcomeEnabledCount)} detail="Welcome DM enabled from account settings" />
         <Kpi label="Cold DM enabled" value={String(data.summary.outreachEnabledCount)} detail="Cold/outreach DM enabled from account settings" />
         <Kpi label="Missing messages" value={String(data.summary.missingMessageCount)} detail="Enabled templates without message text" tone="warning" />
-        <Kpi label="Pending backend model" value={String(data.summary.pendingBackendModelCount)} detail="Account/client-scoped DM backend pending" tone="warning" />
       </section>
 
       <AnalyticsSectionCard
@@ -86,12 +82,12 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-source-strip {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: minmax(0, 1fr);
           margin-bottom: 14px;
         }
 
         .ig-dm-kpis {
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           margin-bottom: 18px;
         }
 
@@ -166,7 +162,7 @@ export default async function InstagramDmTemplatesPage() {
 
         .ig-dm-account-row {
           display: grid;
-          grid-template-columns: 20px minmax(150px, 1.25fr) minmax(120px, 0.8fr) minmax(110px, 0.7fr) repeat(4, minmax(104px, auto));
+          grid-template-columns: 20px minmax(150px, 1.25fr) minmax(120px, 0.8fr) minmax(110px, 0.7fr) repeat(2, minmax(104px, auto));
           gap: 10px;
           align-items: center;
           padding: 10px 12px;
@@ -211,7 +207,7 @@ export default async function InstagramDmTemplatesPage() {
 
         .ig-dm-accordion-summary {
           display: grid;
-          grid-template-columns: 20px minmax(150px, 1.2fr) minmax(120px, 0.75fr) minmax(100px, 0.65fr) repeat(5, minmax(96px, auto));
+          grid-template-columns: 20px minmax(150px, 1.2fr) minmax(120px, 0.75fr) minmax(100px, 0.65fr) repeat(3, minmax(96px, auto));
           gap: 10px;
           align-items: center;
           padding: 10px 12px;
@@ -417,11 +413,7 @@ function AccountAccordion({ account, templates }: { account: DmTemplateAccount; 
           <span>Messages</span>
           <StatusPill status={missing ? "warning" : "good"} label={missing ? "Missing" : "Configured"} />
         </div>
-        <div>
-          <span>Approval</span>
-          <StatusPill status="warning" label="Pending" />
-        </div>
-        <Link href="/instagram-dashboard">Edit in Settings</Link>
+        <Link href="/instagram-dashboard">Review in Manage</Link>
         <Link href={`/instagram-dashboard/accounts/${account.accountId}`}>Account Detail</Link>
       </summary>
       <div className="ig-dm-accordion-panel">
@@ -437,7 +429,7 @@ function AccountAccordion({ account, templates }: { account: DmTemplateAccount; 
 
 function TemplateCard({ template }: { template: DmTemplateItem }) {
   const message = template.message.trim() || "No message configured.";
-  const preview = template.previewMessage.trim() || "Preview pending message source.";
+  const preview = template.previewMessage.trim() || "No preview available.";
 
   return (
     <article className="ig-dm-template-card">
@@ -496,10 +488,7 @@ function MetaPanel({ templates }: { templates: DmTemplateItem[] }) {
       <div className="ig-dm-meta">
         <code>Source: {sourceLabel}</code>
         <code>Variables: {variableStatus}</code>
-        <code>Editable: Settings drawer</code>
-        <code>Client future: own accounts only</code>
-        <code>Approval: pending_backend</code>
-        <code>Account-scoped backend pending</code>
+        <code>Admin edit: Settings drawer</code>
       </div>
     </aside>
   );

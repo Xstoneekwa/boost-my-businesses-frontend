@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
 
 type InstagramDashboardButtonsProps = {
@@ -72,13 +72,14 @@ type LogRow = {
 };
 
 type Panel = "settings" | "stats" | "logs" | "filters" | null;
-type SettingsTab = "General" | "Schedule" | "Actions" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Device" | "Advanced";
+type SettingsTab = "General" | "Schedule" | "Actions" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Advanced";
 type FieldType = "text" | "password" | "time" | "date" | "number" | "toggle" | "textarea" | "select";
 type FieldSpec = {
   key: string;
   label: string;
   type: FieldType;
   helper?: string;
+  readOnly?: boolean;
   options?: string[];
   min?: number;
   step?: number;
@@ -88,7 +89,6 @@ type AccountTool = {
   label:
     | "Stats"
     | "Logs"
-    | "Run manually"
     | "Stop run"
     | "Settings"
     | "Filters"
@@ -115,7 +115,6 @@ type LogExportScope = "all" | "latest-run" | "latest-python-run";
 const activeAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
-  { label: "Run manually", Icon: Play, tone: "success" },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
   { label: "Filters", Icon: Funnel },
@@ -141,20 +140,20 @@ const trashedAccountTools: AccountTool[] = [
   { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
 ];
 
-const settingsTabs: SettingsTab[] = ["General", "Schedule", "Actions", "DM", "Followback", "Sources", "Filters", "Safety", "Device", "Advanced"];
+const settingsTabs: SettingsTab[] = ["General", "Schedule", "Actions", "DM", "Followback", "Sources", "Filters", "Safety", "Advanced"];
 
 const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   General: [
     { key: "username", label: "Username", type: "text" },
     { key: "display_name", label: "Display name", type: "text" },
     { key: "device_name", label: "Device name", type: "text" },
-    { key: "email_display", label: "Email display", type: "text", helper: "Safe masked email projection. Credential email is write-only." },
-    { key: "password_status", label: "Password status", type: "text", helper: "Safe status only. Real password is never returned to the browser." },
+    { key: "email_display", label: "Email display", type: "text", readOnly: true, helper: "Safe masked email projection. Credential email is write-only." },
+    { key: "password_status", label: "Password status", type: "text", readOnly: true, helper: "Safe status only. Real password is never returned to the browser." },
     { key: "two_fa_enabled", label: "Two-factor enabled", type: "toggle" },
-    { key: "device_assignment", label: "Device assignment", type: "text", helper: "Safe phone/host label. Device internals stay hidden." },
-    { key: "app_package_status", label: "App package status", type: "text", helper: "Clone/app package internals are hidden." },
-    { key: "clone_assignment_status", label: "Clone assignment", type: "text", helper: "Safe clone status only." },
-    { key: "account_status", label: "Account status", type: "select", options: ["active", "paused", "review", "disabled"] },
+    { key: "device_assignment", label: "Device assignment", type: "text", readOnly: true, helper: "Safe phone/host label. Device internals stay hidden." },
+    { key: "app_package_status", label: "App package status", type: "text", readOnly: true, helper: "Clone/app package internals are hidden." },
+    { key: "clone_assignment_status", label: "Clone assignment", type: "text", readOnly: true, helper: "Safe clone status only." },
+    { key: "account_status", label: "Account status", type: "select", readOnly: true, helper: "Legacy status projection. Use lifecycle actions for changes.", options: ["active", "paused", "review", "disabled"] },
     { key: "campaign_name", label: "Campaign name", type: "text" },
   ],
   Schedule: [
@@ -162,30 +161,18 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "timeslot_end", label: "Timeslot end", type: "time" },
     { key: "total_sessions", label: "Total sessions", type: "number", min: 0 },
     { key: "stop_interactions_after_minutes", label: "Stop after minutes", type: "number", min: 0 },
-    { key: "timeout_startup_seconds", label: "Startup timeout seconds", type: "number", min: 0 },
     { key: "pause_account_days", label: "Pause account days", type: "number", min: 0 },
     { key: "pause_account_until", label: "Pause account until", type: "date" },
     { key: "randomize_start_enabled", label: "Randomize start", type: "toggle" },
-    { key: "speed_multiplier", label: "Speed multiplier", type: "number", min: 0, step: 0.1 },
   ],
   Actions: [
-    { key: "follow_enabled", label: "Follow enabled", type: "toggle" },
     { key: "follow_limit", label: "Follow limit", type: "number", min: 0 },
     { key: "total_follows_limit", label: "Total follows limit", type: "number", min: 0 },
-    { key: "follow_percentage", label: "Follow percentage", type: "number", min: 0 },
-    { key: "unfollow_enabled", label: "Unfollow enabled", type: "toggle" },
     { key: "total_unfollows_limit", label: "Total unfollows limit", type: "number", min: 0 },
     { key: "unfollow_delay_days", label: "Unfollow delay days", type: "number", min: 0 },
-    { key: "like_enabled", label: "Like enabled", type: "toggle" },
     { key: "total_likes_limit", label: "Total likes limit", type: "number", min: 0 },
     { key: "likes_per_follow_min", label: "Likes per follow min", type: "number", min: 0 },
     { key: "likes_per_follow_max", label: "Likes per follow max", type: "number", min: 0 },
-    { key: "likes_percentage", label: "Likes percentage", type: "number", min: 0 },
-    { key: "story_watch_enabled", label: "Story watch enabled", type: "toggle" },
-    { key: "watch_photo_time_min", label: "Watch photo time min", type: "number", min: 0 },
-    { key: "watch_photo_time_max", label: "Watch photo time max", type: "number", min: 0 },
-    { key: "watch_video_time_min", label: "Watch video time min", type: "number", min: 0 },
-    { key: "watch_video_time_max", label: "Watch video time max", type: "number", min: 0 },
   ],
   DM: [
     { key: "welcome_dm_enabled", label: "Welcome DM enabled", type: "toggle" },
@@ -195,7 +182,6 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "max_dm_per_run", label: "Max DMs per run", type: "number", min: 0 },
     { key: "max_consecutive_dms", label: "Max consecutive DMs", type: "number", min: 0 },
     { key: "check_chat_before_welcoming", label: "Check chat before welcoming", type: "toggle" },
-    { key: "send_enabled", label: "Send enabled", type: "toggle" },
     { key: "safe_review_mode", label: "Safe review mode", type: "toggle" },
   ],
   Followback: [
@@ -211,7 +197,6 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "do_follows_first", label: "Do follows first", type: "toggle" },
   ],
   Sources: [
-    { key: "source_accounts", label: "Source accounts", type: "textarea" },
     { key: "truncate_sources_min", label: "Truncate sources min", type: "number", min: 0 },
     { key: "truncate_sources_max", label: "Truncate sources max", type: "number", min: 0 },
     { key: "delete_interacted_users", label: "Delete interacted users", type: "toggle" },
@@ -220,16 +205,9 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "fling_when_skipped", label: "Fling when skipped", type: "toggle" },
   ],
   Safety: [
-    {
-      key: "dry_run_enabled",
-      label: "Dry run enabled",
-      type: "toggle",
-      helper: "Enabled runs are safe dry runs only. Disabled allows real Appium actions later.",
-    },
     { key: "total_interactions_limit", label: "Total interactions limit", type: "number", min: 0 },
     { key: "total_successful_interactions_limit", label: "Total successful interactions limit", type: "number", min: 0 },
     { key: "interactions_count", label: "Interactions count", type: "number", min: 0 },
-    { key: "interact_percentage", label: "Interact percentage", type: "number", min: 0 },
     { key: "end_if_follow_limit_reached", label: "End if follow limit reached", type: "toggle" },
     { key: "end_if_dm_limit_reached", label: "End if DM limit reached", type: "toggle" },
     { key: "end_if_likes_limit_reached", label: "End if likes limit reached", type: "toggle" },
@@ -237,10 +215,6 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "max_actions_per_day", label: "Max actions per day", type: "number", min: 0 },
     { key: "random_delay_min_seconds", label: "Random delay min seconds", type: "number", min: 0 },
     { key: "random_delay_max_seconds", label: "Random delay max seconds", type: "number", min: 0 },
-    { key: "random_pause_every_actions", label: "Random pause every actions", type: "number", min: 0 },
-    { key: "long_break_after_interactions", label: "Long break after interactions", type: "number", min: 0 },
-    { key: "long_break_min_minutes", label: "Long break min minutes", type: "number", min: 0 },
-    { key: "long_break_max_minutes", label: "Long break max minutes", type: "number", min: 0 },
     { key: "warmup_mode", label: "Warmup mode", type: "toggle" },
     { key: "stop_on_suspicious_screen", label: "Stop on suspicious screen", type: "toggle" },
     { key: "stop_on_login_challenge", label: "Stop on login challenge", type: "toggle" },
@@ -248,25 +222,11 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "stop_on_repeated_navigation_failure", label: "Stop on repeated navigation failure", type: "toggle" },
     { key: "max_repeated_errors", label: "Max repeated errors", type: "number", min: 0 },
   ],
-  Device: [
-    { key: "disable_block_detection", label: "Disable block detection", type: "toggle" },
-    { key: "relog_after_block", label: "Relog after block", type: "toggle" },
-    { key: "relog_delay_seconds", label: "Relog delay seconds", type: "number", min: 0 },
-    { key: "rotate_ip", label: "Rotate IP", type: "toggle" },
-    { key: "restart_uiautomator2", label: "Restart UIAutomator2", type: "toggle" },
-    { key: "close_apps", label: "Close apps", type: "toggle" },
-    { key: "close_apps_device", label: "Close apps device", type: "toggle" },
-    { key: "log_out_all_before_session", label: "Log out all before session", type: "toggle" },
-    { key: "total_crashes_limit", label: "Total crashes limit", type: "number", min: 0 },
-    { key: "screen_sleep", label: "Screen sleep", type: "toggle" },
-    { key: "screen_record", label: "Screen record", type: "toggle" },
-    { key: "debug_mode", label: "Debug mode", type: "toggle" },
-  ],
   Advanced: [
-    { key: "current_run_status", label: "Current run status", type: "select", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
-    { key: "last_error", label: "Last error", type: "textarea" },
+    { key: "current_run_status", label: "Current run status", type: "select", readOnly: true, helper: "Runtime status projection. Use run actions for changes.", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
+    { key: "last_error", label: "Last error", type: "textarea", readOnly: true, helper: "Read-only sanitized status from the current projection." },
     { key: "last_successful_action", label: "Last successful action", type: "text" },
-    { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle" },
+    { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle", readOnly: true, helper: "Use the Stop run action instead of editing this legacy flag." },
   ],
 };
 
@@ -405,6 +365,52 @@ function templateSafeSettings(settings: InstagramSettings) {
   void device_udid;
   void app_package;
   void cloned_app_mode;
+  [
+    "dry_run_enabled",
+    "send_enabled",
+    "follow_enabled",
+    "unfollow_enabled",
+    "like_enabled",
+    "source_accounts",
+    "follow_percentage",
+    "likes_percentage",
+    "interact_percentage",
+    "story_watch_enabled",
+    "watch_photo_time_min",
+    "watch_photo_time_max",
+    "watch_video_time_min",
+    "watch_video_time_max",
+    "timeout_startup_seconds",
+    "speed_multiplier",
+    "random_pause_every_actions",
+    "long_break_after_interactions",
+    "long_break_min_minutes",
+    "long_break_max_minutes",
+    "disable_block_detection",
+    "relog_after_block",
+    "relog_delay_seconds",
+    "rotate_ip",
+    "restart_uiautomator2",
+    "close_apps",
+    "close_apps_device",
+    "log_out_all_before_session",
+    "total_crashes_limit",
+    "screen_sleep",
+    "screen_record",
+    "debug_mode",
+    "email_display",
+    "password_status",
+    "device_assignment",
+    "app_package_status",
+    "clone_assignment_status",
+    "account_status",
+    "current_run_status",
+    "last_error",
+    "last_successful_action",
+    "manual_stop_requested",
+  ].forEach((key) => {
+    delete safeSettings[key];
+  });
   return safeSettings;
 }
 
@@ -845,19 +851,6 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
     });
   }
 
-  function requestManualRun() {
-    requestConfirmation({
-      title: "🚨 Start manual run? ⚠️",
-      description: "A new manual run will be requested for this account.",
-      confirmTone: "primary",
-      onConfirm: () => {
-        console.log("Instagram dashboard placeholder", { accountId, username, intent: "Run manually" });
-        setError("");
-        setSuccess("Manual run request noted.");
-      },
-    });
-  }
-
   async function updateLifecycle(action: "archive" | "trash" | "restore") {
     setError("");
     setSuccess("");
@@ -929,7 +922,6 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
               else if (tool.label === "Filters") void loadPanel("filters");
               else if (tool.label === "Targets") setTargetsOpen(true);
               else if (tool.label === "Stop run") requestStopRun();
-              else if (tool.label === "Run manually") requestManualRun();
               else if (tool.label === "Archive") requestLifecycle("archive");
               else if (tool.label === "Move to trash") requestLifecycle("trash");
               else if (tool.label === "Restore account") requestLifecycle("restore");
@@ -2009,14 +2001,16 @@ function renderLogs({
 }
 
 function ConfigField({ field, value, onChange }: { field: FieldSpec; value: ConfigValue | undefined; onChange: (value: ConfigValue) => void }) {
+  const helper = field.readOnly ? field.helper ?? "Read-only projection." : field.helper;
+
   if (field.type === "toggle") {
     const checked = Boolean(value);
     return (
       <label className="ig-settings-toggle">
-        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+        <input type="checkbox" checked={checked} disabled={field.readOnly} onChange={(event) => onChange(event.target.checked)} />
         <span aria-hidden="true" />
         <strong>{field.label}</strong>
-        <small>{field.helper ?? (checked ? "Enabled" : "Disabled")}</small>
+        <small>{helper ?? (checked ? "Enabled" : "Disabled")}</small>
       </label>
     );
   }
@@ -2025,7 +2019,8 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
     return (
       <label className="ig-settings-field ig-settings-field-wide">
         <span>{field.label}</span>
-        <textarea value={String(value ?? "")} rows={4} onChange={(event) => onChange(event.target.value)} />
+        <textarea value={String(value ?? "")} rows={4} readOnly={field.readOnly} onChange={(event) => onChange(event.target.value)} />
+        {helper ? <small>{helper}</small> : null}
       </label>
     );
   }
@@ -2034,11 +2029,12 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
     return (
       <label className="ig-settings-field">
         <span>{field.label}</span>
-        <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
+        <select value={String(value ?? "")} disabled={field.readOnly} onChange={(event) => onChange(event.target.value)}>
           {(field.options ?? []).map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
+        {helper ? <small>{helper}</small> : null}
       </label>
     );
   }
@@ -2052,8 +2048,10 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
           min={field.min ?? 0}
           step={field.step ?? 1}
           value={Number(value ?? 0)}
+          readOnly={field.readOnly}
           onChange={(event) => onChange(Number(event.target.value))}
         />
+        {helper ? <small>{helper}</small> : null}
       </label>
     );
   }
@@ -2064,8 +2062,10 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
       <input
         type={field.type === "password" ? "password" : field.type === "time" ? "time" : field.type === "date" ? "date" : "text"}
         value={String(value ?? "")}
+        readOnly={field.readOnly}
         onChange={(event) => onChange(event.target.value)}
       />
+      {helper ? <small>{helper}</small> : null}
     </label>
   );
 }
