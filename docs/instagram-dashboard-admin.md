@@ -908,6 +908,8 @@ Methode: `POST`
 Role:
 
 - Traiter un petit lot de jobs durables de verification CT bulk.
+- Servir de processor backend manuel/admin-safe, reutilisable plus tard par un
+  scheduler externe sans activer de cron maintenant.
 
 Mutations:
 
@@ -915,17 +917,27 @@ Mutations:
 - Update `ig_targets` avec verification/status/quality V1.
 - Update `ct_target_verification_jobs`.
 - Insert audit safe `ct_target_audit_events`.
+- `dry_run=true` preview les jobs claimables sans RPC claim, provider call,
+  update target/job ou audit insert.
 
 Projection safe:
 
-- Summary agregé: jobs processed, succeeded, rejected, review,
-  retry_scheduled, skipped, provider counts.
+- Summary agrege: `claimed_count`, `processed_count`, `succeeded_count`,
+  `rejected_count`, `review_count`, `retry_scheduled_count`, `skipped_count`,
+  `rate_limited_count`, `provider_error_count`, `duration_ms`.
+- `limit` borne a 10, `worker_id` nettoye, `max_duration_ms` borne.
+- Si un job renvoie `rate_limited`, le processor stoppe le batch et remet les
+  jobs deja claim mais non traites en `retry_scheduled` avec raison safe afin de
+  ne pas hammer le provider.
 - Aucun raw provider payload, full URL, header, key, cookie, session ou token.
 
 Etat:
 
 - Actif pour verification par lots.
 - SearchApi production reste desactive tant qu'il n'y a pas GO operateur/env.
+- Cron futur possible via Vercel Cron, Supabase scheduled function ou scheduler
+  externe avec petit `limit`, spacing explicite, logs sans secret et monitoring
+  sur counts/duration/rate limits.
 
 ## 4. Add Profile Patch 2B
 
