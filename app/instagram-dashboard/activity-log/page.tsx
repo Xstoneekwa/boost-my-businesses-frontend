@@ -22,36 +22,21 @@ export default async function InstagramActivityLogPage() {
       <DashboardPageHeader
         eyebrow="Audit"
         title="Activity Log"
-        description="Traceable admin and system activity across dashboard actions."
+        description="Safe target audit activity for admin review."
         action={<InstagramDashboardViewNav active="activity-log" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
-
-      <section className="ig-activity-source-strip" aria-label="Activity Log source status">
-        <SourcePill label="Activity Log backend" value={data.sourceDetails.activityLog.label} detail={data.sourceDetails.activityLog.description} />
-        <SourcePill label="Technical logs" value={data.sourceDetails.technicalLogs.label} detail={data.sourceDetails.technicalLogs.description} />
-        <SourcePill label="Admin audit" value={data.sourceDetails.auditBackend.label} detail={data.sourceDetails.auditBackend.description} />
-      </section>
 
       <section className="ig-activity-kpis" aria-label="Activity Log summary">
         <Kpi label="Total CT events" value={String(data.summary.totalItems)} detail={data.sourceDetails.activityLog.label} />
         <Kpi label="Admin actions" value={String(data.summary.adminActionsCount)} detail="Target add, verify, archive, restore and reset events" />
         <Kpi label="System events" value={String(data.summary.systemActionsCount)} detail="System-written CT audit events when present" />
         <Kpi label="Failed / rejected" value={String(data.summary.failedActionsCount)} detail="Failed or rejected CT audit results" tone="warning" />
-        <Kpi label="Source status" value={data.sourceStatus.auditBackend} detail={data.sourceDetails.auditBackend.description} />
       </section>
-
-      <AnalyticsSectionCard
-        eyebrow="Filters"
-        title="Prepared filters"
-        description="CT audit events are sorted newest first. Dedicated interactive filters can be added later without changing the safe projection."
-      >
-        <FilterPreview />
-      </AnalyticsSectionCard>
 
       <AnalyticsSectionCard
         eyebrow="Activity"
         title="Target activity"
-        description="Read-only CT audit visibility from ct_target_audit_events. Raw metadata and provider payloads are never rendered."
+        description="Newest CT audit events first. Raw metadata and provider payloads are never rendered."
       >
         <ActivityList items={data.items} />
       </AnalyticsSectionCard>
@@ -63,34 +48,20 @@ export default async function InstagramActivityLogPage() {
           padding: 28px clamp(16px, 3vw, 36px) 48px;
         }
 
-        .ig-activity-source-strip,
-        .ig-activity-kpis,
-        .ig-activity-filters {
-          display: grid;
-          gap: 14px;
-        }
-
-        .ig-activity-source-strip {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          margin-bottom: 14px;
-        }
-
         .ig-activity-kpis {
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
           margin-bottom: 18px;
         }
 
-        .ig-activity-source-pill,
         .ig-activity-kpi,
-        .ig-activity-filter,
         .ig-activity-empty {
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: 16px;
           background: rgba(255,255,255,0.028);
         }
 
-        .ig-activity-source-pill,
-        .ig-activity-filter,
         .ig-activity-empty {
           display: grid;
           gap: 8px;
@@ -102,9 +73,7 @@ export default async function InstagramActivityLogPage() {
           padding: 16px;
         }
 
-        .ig-activity-source-pill span,
         .ig-activity-kpi span,
-        .ig-activity-filter span,
         .ig-activity-table th,
         .ig-activity-empty span {
           color: rgba(255,255,255,0.36);
@@ -114,16 +83,12 @@ export default async function InstagramActivityLogPage() {
           text-transform: uppercase;
         }
 
-        .ig-activity-source-pill strong,
-        .ig-activity-filter strong,
         .ig-activity-empty strong {
           color: #f0f0ef;
           font-size: 15px;
         }
 
-        .ig-activity-source-pill small,
         .ig-activity-kpi small,
-        .ig-activity-filter p,
         .ig-activity-empty p,
         .ig-activity-table td {
           color: rgba(255,255,255,0.60);
@@ -139,23 +104,6 @@ export default async function InstagramActivityLogPage() {
           line-height: 1;
           margin: 16px 0 10px;
           overflow-wrap: anywhere;
-        }
-
-        .ig-activity-filters {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-
-        .ig-activity-filter button {
-          justify-self: start;
-          min-height: 32px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 999px;
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.42);
-          cursor: not-allowed;
-          font-size: 12px;
-          font-weight: 900;
-          padding: 0 12px;
         }
 
         .ig-activity-table-wrap {
@@ -198,9 +146,7 @@ export default async function InstagramActivityLogPage() {
         }
 
         @media (max-width: 1120px) {
-          .ig-activity-source-strip,
-          .ig-activity-kpis,
-          .ig-activity-filters {
+          .ig-activity-kpis {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
@@ -210,24 +156,12 @@ export default async function InstagramActivityLogPage() {
             padding: 22px 14px 40px;
           }
 
-          .ig-activity-source-strip,
-          .ig-activity-kpis,
-          .ig-activity-filters {
+          .ig-activity-kpis {
             grid-template-columns: 1fr;
           }
         }
       `}</style>
     </main>
-  );
-}
-
-function SourcePill({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <article className="ig-activity-source-pill" title={detail}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </article>
   );
 }
 
@@ -243,37 +177,13 @@ function Kpi({ label, value, detail, tone = "neutral" }: { label: string; value:
   );
 }
 
-function FilterPreview() {
-  const filters = [
-    ["Domain", "Targets"],
-    ["Actions", "Add, bulk add, verify, archive, restore, reset"],
-    ["Actor", "admin, client, system when present"],
-    ["Result", "accepted, archived, restored, review, failed"],
-  ];
-
-  return (
-    <div className="ig-activity-filters" aria-label="Prepared Activity Log filters">
-      {filters.map(([label, text]) => (
-        <article className="ig-activity-filter" key={label}>
-          <span>{label}</span>
-          <strong>{text}</strong>
-          <p>Read-only projection. Interactive filtering remains future work.</p>
-          <button type="button" disabled>
-            View only
-          </button>
-        </article>
-      ))}
-    </div>
-  );
-}
-
 function ActivityList({ items }: { items: ActivityLogItem[] }) {
   if (!items.length) {
     return (
       <div className="ig-activity-empty">
         <span>No CT events</span>
         <strong>No target audit events found.</strong>
-        <p>Target add, bulk add, verify, archive, restore and reset events will appear here once written to ct_target_audit_events.</p>
+        <p>No target audit events are available from the safe CT audit source.</p>
       </div>
     );
   }
