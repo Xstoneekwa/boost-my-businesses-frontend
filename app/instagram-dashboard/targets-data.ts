@@ -251,6 +251,15 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const archivedAt = row.archived_at ?? null;
   const qualityStatus = (row.quality_status || "unknown") as TargetQualityStatus;
   const healthStatus = qualityStatus !== "unknown" ? (qualityStatus === "eligible" ? "good" : qualityStatus.startsWith("review_") ? "monitor" : "poor") : targetHealthFromFbr(fbrPercent);
+  const sourceSurface = row.source === "manual_single" || row.source === "manual_bulk" || row.source === "admin"
+    ? "admin_dashboard"
+    : row.source === "client"
+      ? "client_dashboard"
+      : row.source === "botapp"
+        ? "botapp"
+        : row.source === "future_discovery"
+          ? "automation"
+          : null;
 
   return {
     id: row.target_id || row.id,
@@ -279,8 +288,8 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
     providerCheckedAt: row.provider_checked_at ?? null,
     lastUsedAt: null,
     actor: null,
-    actorType: null,
-    sourceSurface: null,
+    actorType: row.actor_type === "admin" || row.actor_type === "client" || row.actor_type === "system" ? row.actor_type : null,
+    sourceSurface,
     reason: row.rejected_reason || row.verification_reason || null,
     syncStatus: "unknown",
     archivedAt,
@@ -333,10 +342,10 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
       targetsTable: "connected",
       qualityMetrics: "pending",
       validationSource: "pending",
-      activityAudit: "pending",
+      activityAudit: "connected",
       clientSync: "pending",
       botAppSync: "pending",
-      archiveDeleteModel: "pending",
+      archiveDeleteModel: "connected",
     },
   };
 }

@@ -6,7 +6,42 @@ export const dynamic = "force-dynamic";
 type PatchBody = {
   account_id?: string;
   ids?: string[];
+  actor_type?: "admin" | "client" | "system";
 };
+
+function isArchivedOrDeleted(row: SupabaseRecord) {
+  const status = readString(row.status, "").toLowerCase();
+  return status === "archived" || status === "deleted" || Boolean(readString(row.archived_at, "") || readString(row.deleted_at, ""));
+}
+
+async function tryRecordTargetResetAudit(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: {
+    accountId: string;
+    targetId: string;
+    actorType: "admin" | "client" | "system";
+    previousStatus: string;
+  },
+) {
+  try {
+    await supabase.from("ct_target_audit_events").insert({
+      account_id: input.accountId,
+      target_id: input.targetId,
+      operation: "target_reset",
+      result: "accepted",
+      reason: "manual_reset",
+      actor_type: input.actorType,
+      metadata_safe: {
+        source: "target_reset",
+        source_surface: "admin_dashboard",
+        previous_status: input.previousStatus,
+        next_status: "pending_verification",
+      },
+    });
+  } catch {
+    // CT audit is best-effort until every environment has the CT-4 migration.
+  }
+}
 
 export async function PATCH(request: Request) {
   try {
@@ -18,6 +53,7 @@ export async function PATCH(request: Request) {
 
     const accountId = readString(body.account_id, "").trim();
     if (!accountId) return jsonError("Missing account_id.", 400);
+    const actorType = body.actor_type === "client" ? "client" : "admin";
 
     const ids = Array.isArray(body.ids)
       ? body.ids.map((id) => readString(id, "").trim()).filter(Boolean)
@@ -29,7 +65,7 @@ export async function PATCH(request: Request) {
 
     const { data: owned, error: selError } = await supabase
       .from("ig_targets")
-      .select("id")
+      .select("id, status, archived_at, deleted_at")
       .eq("account_id", accountId)
       .in("id", ids);
 
@@ -41,9 +77,12 @@ export async function PATCH(request: Request) {
         return jsonError("One or more targets do not belong to this account.", 400);
       }
     }
+    if (((owned ?? []) as SupabaseRecord[]).some(isArchivedOrDeleted)) {
+      return jsonError("Archived or deleted targets must be restored before reset.", 409);
+    }
 
     const now = new Date().toISOString();
-    const { error } = await supabase
+    const { data: resetRows, error } = await supabase
       .from("ig_targets")
       .update({
         status: "pending_verification",
@@ -54,9 +93,19 @@ export async function PATCH(request: Request) {
         updated_at: now,
       })
       .eq("account_id", accountId)
-      .in("id", ids);
+      .in("id", ids)
+      .select("id, status");
 
     if (error) return jsonError(error.message, 500);
+    await Promise.all(((resetRows ?? []) as SupabaseRecord[]).map((row) => {
+      const original = ((owned ?? []) as SupabaseRecord[]).find((candidate) => readString(candidate.id, "") === readString(row.id, ""));
+      return tryRecordTargetResetAudit(supabase, {
+        accountId,
+        targetId: readString(row.id, ""),
+        actorType,
+        previousStatus: readString(original?.status, "unknown"),
+      });
+    }));
     return jsonOk({ reset: ids.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to reset targets.";

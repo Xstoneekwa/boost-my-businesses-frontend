@@ -10,6 +10,12 @@ import {
   CT_QUALITY_MIN_FOLLOWERS,
 } from "@/lib/instagram-target-quality";
 import {
+  buildRestoreLifecycleDecision,
+  hasActiveDuplicateForRestore,
+  isArchivedTargetLifecycle,
+  isDeletedTargetLifecycle,
+} from "@/lib/instagram-target-lifecycle";
+import {
   classifyBulkTargetLines,
   isValidTargetUsername,
   normalizeTargetUsername,
@@ -178,13 +184,16 @@ async function tryRecordTargetAudit(
   supabase: ReturnType<typeof createSupabaseClient>,
   input: {
     accountId: string;
-    operation: "target_add_single" | "target_add_bulk" | "target_verify";
-    result: "accepted" | "duplicate" | "rejected" | "review" | "failed";
+    operation: "target_add_single" | "target_add_bulk" | "target_verify" | "target_archive" | "target_restore";
+    result: "accepted" | "duplicate" | "rejected" | "review" | "failed" | "archived" | "restored";
     reason: string;
     actorType: TargetActorType;
+    sourceSurface?: "admin_dashboard" | "client_dashboard" | "botapp" | "backend" | "automation";
     batchId?: string | null;
     targetId?: string | null;
     counts?: BulkTargetSummary;
+    previousStatus?: string | null;
+    nextStatus?: string | null;
   },
 ) {
   try {
@@ -197,7 +206,13 @@ async function tryRecordTargetAudit(
       actor_type: input.actorType,
       batch_id: input.batchId ?? null,
       counts: input.counts ?? null,
-      metadata_safe: input.counts ? { source: input.operation, ...input.counts } : { source: input.operation },
+      metadata_safe: {
+        source: input.operation,
+        source_surface: input.sourceSurface ?? "admin_dashboard",
+        previous_status: input.previousStatus ?? null,
+        next_status: input.nextStatus ?? null,
+        ...(input.counts ?? {}),
+      },
     });
   } catch {
     // CT audit is best-effort until every environment has the CT-1 migration.
@@ -448,6 +463,7 @@ export async function POST(request: Request) {
 type DeleteBody = {
   account_id?: string;
   ids?: string[];
+  actor_type?: TargetActorType;
 };
 
 export async function DELETE(request: Request) {
@@ -460,6 +476,7 @@ export async function DELETE(request: Request) {
 
     const accountId = readString(body.account_id, "").trim();
     if (!accountId) return jsonError("Missing account_id.", 400);
+    const actorType: TargetActorType = body.actor_type === "client" ? "client" : "admin";
 
     const ids = Array.isArray(body.ids)
       ? body.ids.map((id) => readString(id, "").trim()).filter(Boolean)
@@ -471,7 +488,7 @@ export async function DELETE(request: Request) {
 
     const { data: owned, error: selError } = await supabase
       .from("ig_targets")
-      .select("id")
+      .select("id, status")
       .eq("account_id", accountId)
       .in("id", ids);
 
@@ -485,7 +502,7 @@ export async function DELETE(request: Request) {
     }
 
     const now = new Date().toISOString();
-    const { error } = await supabase
+    const { data: archivedRows, error } = await supabase
       .from("ig_targets")
       .update({
         status: "archived",
@@ -494,12 +511,121 @@ export async function DELETE(request: Request) {
         updated_at: now,
       })
       .eq("account_id", accountId)
-      .in("id", ids);
+      .in("id", ids)
+      .select("id, status");
 
     if (error) return jsonError(error.message, 500);
+    await Promise.all(((archivedRows ?? []) as SupabaseRecord[]).map((row) => tryRecordTargetAudit(supabase, {
+      accountId,
+      operation: "target_archive",
+      result: "archived",
+      reason: "dashboard_archive",
+      actorType,
+      sourceSurface: "admin_dashboard",
+      targetId: readString(row.id, ""),
+      previousStatus: readString(((owned ?? []) as SupabaseRecord[]).find((candidate) => readString(candidate.id, "") === readString(row.id, ""))?.status, "unknown"),
+      nextStatus: "archived",
+    })));
     return jsonOk({ archived: ids.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to archive targets.";
+    return jsonError(message, 500);
+  }
+}
+
+type PatchBody = {
+  account_id?: string;
+  id?: string;
+  ids?: string[];
+  action?: "restore" | "unarchive";
+  actor_type?: TargetActorType;
+};
+
+export async function PATCH(request: Request) {
+  try {
+    const unauthorized = await requireInstagramAdmin();
+    if (unauthorized) return unauthorized;
+
+    const body = await readJsonBody<PatchBody>(request);
+    if (!body) return jsonError("Invalid JSON body.", 400);
+
+    const accountId = readString(body.account_id, "").trim();
+    if (!accountId) return jsonError("Missing account_id.", 400);
+    const action = readString(body.action, "").toLowerCase();
+    if (action !== "restore" && action !== "unarchive") return jsonError("Unsupported target lifecycle action.", 400);
+    const actorType: TargetActorType = body.actor_type === "client" ? "client" : "admin";
+
+    const ids = Array.isArray(body.ids)
+      ? body.ids.map((id) => readString(id, "").trim()).filter(Boolean)
+      : [readString(body.id, "").trim()].filter(Boolean);
+    if (ids.length !== 1) return jsonError("Restore expects exactly one target id.", 400);
+
+    const supabase = createSupabaseClient();
+    const { data: accountRows, error: selError } = await supabase
+      .from("ig_targets")
+      .select("*")
+      .eq("account_id", accountId);
+
+    if (selError) return jsonError(selError.message, 500);
+
+    const rows = (accountRows ?? []) as SupabaseRecord[];
+    const row = rows.find((candidate) => readString(candidate.id, "") === ids[0]);
+    if (!row) return jsonError("Target does not belong to this account.", 400);
+    if (isDeletedTargetLifecycle(row)) return jsonError("Deleted targets cannot be restored from this action.", 409);
+    if (!isArchivedTargetLifecycle(row)) return jsonError("Only archived targets can be restored.", 409);
+    if (hasActiveDuplicateForRestore(row, rows)) return jsonError("duplicate_existing_active", 409);
+
+    const previousStatus = readString(row.status, "unknown");
+    const decision = buildRestoreLifecycleDecision(row, new Date());
+    let jobsQueued = 0;
+    if (decision.shouldQueueVerification) {
+      const { error: jobError } = await supabase
+        .from("ct_target_verification_jobs")
+        .upsert({
+          target_id: ids[0],
+          account_id: accountId,
+          batch_id: readString(row.batch_id, "") || null,
+          normalized_username: normalizeTargetUsername(readString(row.normalized_username, readString(row.target_username, ""))),
+          status: "pending",
+          attempt_count: 0,
+          next_attempt_at: null,
+          locked_at: null,
+          locked_by: null,
+          last_error_code: null,
+          last_error_message: null,
+          provider_status: "pending",
+          metadata_safe: { source: "target_restore" },
+        }, { onConflict: "target_id" });
+      if (jobError) return jsonError("Verification could not be queued for restore.", 500);
+      jobsQueued = 1;
+    }
+
+    const { data: restoredRow, error: updateError } = await supabase
+      .from("ig_targets")
+      .update(decision.targetPatch)
+      .eq("account_id", accountId)
+      .eq("id", ids[0])
+      .select("*")
+      .single();
+
+    if (updateError) return jsonError(updateError.message, 500);
+
+    const safeRow = safeTargetRow(restoredRow as SupabaseRecord);
+    await tryRecordTargetAudit(supabase, {
+      accountId,
+      operation: "target_restore",
+      result: "restored",
+      reason: decision.auditReason,
+      actorType,
+      sourceSurface: "admin_dashboard",
+      targetId: safeRow.id,
+      previousStatus,
+      nextStatus: safeRow.status,
+    });
+
+    return jsonOk({ row: safeRow, restored: 1, jobs_queued: jobsQueued, reason: decision.auditReason });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to restore target.";
     return jsonError(message, 500);
   }
 }

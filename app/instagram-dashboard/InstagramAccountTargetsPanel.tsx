@@ -427,6 +427,33 @@ export default function InstagramAccountTargetsPanel({
     }
   }
 
+  async function restoreId(id: string) {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await readApiResponse<{ jobs_queued?: number; reason?: string }>(
+        await fetch("/api/instagram-dashboard/targets", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId, id, action: "restore" }),
+        }),
+        "Could not restore target.",
+      );
+      setSuccess(
+        result.jobs_queued
+          ? "Target restored and queued for verification."
+          : "Target restored with fresh eligible quality.",
+      );
+      await loadTargets();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not restore target.");
+    } finally {
+      setSaving(false);
+      setConfirm(null);
+    }
+  }
+
   if (!open) return null;
 
   const titleId = `ig-targets-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -676,7 +703,9 @@ export default function InstagramAccountTargetsPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => (
+                  {filteredRows.map((row) => {
+                    const isArchived = Boolean(row.archivedAt || row.deletedAt || row.status === "archived" || row.status === "deleted");
+                    return (
                     <tr key={row.id}>
                       <td className="rounded-l-lg border-y border-l border-white/6 bg-white/[0.03] px-2 py-2.5">
                         <input
@@ -731,7 +760,7 @@ export default function InstagramAccountTargetsPanel({
                           <button
                             type="button"
                             className="inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/5 px-2 py-1 text-[11px] font-bold text-slate-200 hover:bg-white/10 disabled:opacity-45"
-                            disabled={saving}
+                            disabled={saving || isArchived}
                             onClick={() =>
                               setConfirm({
                                 title: "Reset target to pending?",
@@ -743,6 +772,22 @@ export default function InstagramAccountTargetsPanel({
                             <RotateCcw size={12} aria-hidden />
                             Reset
                           </button>
+                          {isArchived ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-45"
+                              disabled={saving}
+                              onClick={() =>
+                                setConfirm({
+                                  title: "Restore this target?",
+                                  description: `@${row.targetUsername} will be unarchived. If quality is stale or unknown, it will return to pending verification.`,
+                                  onConfirm: () => void restoreId(row.id),
+                                })
+                              }
+                            >
+                              Restore
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="inline-flex items-center gap-1 rounded-md border border-red-400/35 bg-red-950/30 px-2 py-1 text-[11px] font-bold text-red-200 hover:bg-red-950/50 disabled:opacity-45"
@@ -761,7 +806,8 @@ export default function InstagramAccountTargetsPanel({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             )}

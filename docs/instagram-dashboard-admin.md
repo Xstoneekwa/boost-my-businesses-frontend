@@ -972,6 +972,49 @@ Sync surfaces:
 - `archived` / `deleted`: doivent rester des soft states synchronisables entre
   admin, client et BotApp quand ces surfaces existent.
 
+### CT Lifecycle Sync
+
+Source de verite:
+
+- `ig_targets` porte le lifecycle partage: `status`, `archived_at`,
+  `deleted_at`, `archive_reason`, `quality_status`, `verification_status`,
+  raisons safe, `source` et `actor_type`.
+- Quality V1 decide `eligible` / `rejected_*` / `review_*`.
+- Lifecycle decide si le CT est utilisable ou non: un CT `archived` conserve sa
+  quality connue mais ne doit pas etre utilise par campagne, runtime ou BotApp.
+
+Actions actuelles:
+
+- Delete CT reste un soft archive: `status = archived`, `archived_at = now`,
+  `archive_reason = dashboard_archive`.
+- Restore / unarchive est explicite via l'action `restore`; il ne cree pas de
+  nouveau CT, ne modifie pas FBR/performance et bloque un doublon actif du meme
+  `normalized_username` sur le meme `account_id` avec `duplicate_existing_active`.
+- Restore remet directement `valid` seulement si le CT archive a encore
+  `quality_status = eligible`, `verification_status = found` et une verification
+  provider recente. Sinon il passe en `pending_verification` et relance la queue.
+- Reset reste une re-verification technique: il ne restore pas un CT archive et
+  ne doit pas etre utilise pour changer le lifecycle.
+
+Audit safe:
+
+- `target_archive`, `target_restore` et `target_reset` sont audites dans
+  `ct_target_audit_events` avec `actor_type`, `source_surface`, raison safe,
+  `previous_status`, `next_status`, `target_id` et `account_id`.
+- Les cleanups de smoke doivent toujours viser des IDs explicites
+  (`account_id`, `target_id`, `job_id`, `batch_id`) et jamais un `source` seul.
+
+Mapping admin/client/BotApp:
+
+- Admin dashboard peut archive, restore et reset.
+- Client dashboard et BotApp n'ont pas encore de surface CT complete dans ce
+  patch; quand elles consommeront les CT, elles devront lire la meme source
+  `ig_targets` ou une projection derivee safe.
+- BotApp ne doit pas selectionner `archived`, `deleted`, `rejected_*`,
+  `pending_verification` ou `review_*` comme CT actifs.
+- Toute action client future autorisee doit apparaitre cote admin/BotApp avec le
+  meme audit safe et sans divergence silencieuse.
+
 ## 4. Add Profile Patch 2B
 
 ### Avant Patch 2B
