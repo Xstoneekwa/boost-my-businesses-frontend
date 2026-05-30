@@ -45,7 +45,14 @@ export async function PATCH(request: Request) {
     const now = new Date().toISOString();
     const { error } = await supabase
       .from("ig_targets")
-      .update({ status: "pending", updated_at: now })
+      .update({
+        status: "pending_verification",
+        verification_status: "pending",
+        verification_reason: "manual_reset",
+        quality_status: "unknown",
+        rejected_reason: null,
+        updated_at: now,
+      })
       .eq("account_id", accountId)
       .in("id", ids);
 

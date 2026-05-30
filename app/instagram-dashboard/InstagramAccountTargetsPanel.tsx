@@ -8,7 +8,7 @@ import {
   safeTargetExportRows,
   targetHealthHelper,
   targetHealthLabel,
-  type TargetQualityStatus,
+  type TargetHealthStatus,
   type TargetSafeRow,
   type TargetsOverview,
 } from "./targets-data";
@@ -59,21 +59,21 @@ function formatWhen(iso: string) {
   }).format(date);
 }
 
-function healthBadgeClass(status: TargetQualityStatus) {
+function healthBadgeClass(status: TargetHealthStatus) {
   if (status === "poor") return "border-red-400/35 bg-red-400/12 text-red-200";
   if (status === "monitor") return "border-amber-400/35 bg-amber-400/15 text-amber-200";
   if (status === "good") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
   return "border-slate-400/25 bg-slate-400/10 text-slate-300";
 }
 
-function healthDotClass(status: TargetQualityStatus) {
+function healthDotClass(status: TargetHealthStatus) {
   if (status === "poor") return "bg-red-400";
   if (status === "monitor") return "bg-amber-400";
   if (status === "good") return "bg-emerald-400";
   return "bg-slate-500";
 }
 
-function HealthBadge({ status }: { status: TargetQualityStatus }) {
+function HealthBadge({ status }: { status: TargetHealthStatus }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${healthBadgeClass(status)}`}
@@ -112,6 +112,11 @@ function csvEscape(value: string) {
 function metricText(value: number | null, suffix = "") {
   if (value === null) return "pending source";
   return `${new Intl.NumberFormat("en").format(value)}${suffix}`;
+}
+
+function shortId(value: string | null) {
+  if (!value) return "—";
+  return value.slice(0, 8);
 }
 
 function emptyOverview(): TargetsOverview {
@@ -304,6 +309,13 @@ export default function InstagramAccountTargetsPanel({
         skipped_deleted?: number;
         skipped_invalid?: number;
         validation_pending?: number;
+        summary?: {
+          total_submitted: number;
+          accepted_for_verification: number;
+          invalid: number;
+          duplicates: number;
+          already_existing: number;
+        };
       }>(
         await fetch("/api/instagram-dashboard/targets", {
           method: "POST",
@@ -316,9 +328,9 @@ export default function InstagramAccountTargetsPanel({
       setSuccess(
         [
           `Imported ${result.inserted} target(s).`,
-          `Skipped duplicates: ${result.skipped_duplicates}.`,
+          `Skipped duplicates: ${result.summary ? result.summary.duplicates + result.summary.already_existing : result.skipped_duplicates}.`,
           result.skipped_deleted ? `Previously deleted blocked: ${result.skipped_deleted}.` : "",
-          result.skipped_invalid ? `Invalid usernames blocked: ${result.skipped_invalid}.` : "",
+          result.summary?.invalid || result.skipped_invalid ? `Invalid usernames blocked: ${result.summary?.invalid ?? result.skipped_invalid}.` : "",
           result.validation_pending
             ? `Follower validation pending source: ${result.validation_pending}. These CTs have not been validated against the 500-50,000 followers rule yet.`
             : "",
@@ -334,7 +346,7 @@ export default function InstagramAccountTargetsPanel({
 
   function exportCsv() {
     const exportRows = safeTargetExportRows(rows);
-    const header = ["target_username", "health", "followers_count", "followback_ratio", "added_at"];
+    const header = ["target_username", "quality", "followers_count", "followback_ratio", "added_at"];
     const lines = [
       header.join(","),
       ...exportRows.map((r) =>
@@ -376,7 +388,7 @@ export default function InstagramAccountTargetsPanel({
         "Could not delete targets.",
       );
       setSelected(new Set());
-      setSuccess(ids.length === 1 ? "Target deleted." : `${ids.length} targets deleted.`);
+      setSuccess(ids.length === 1 ? "Target archived." : `${ids.length} targets archived.`);
       await loadTargets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete.");
@@ -526,7 +538,7 @@ export default function InstagramAccountTargetsPanel({
                 onClick={() =>
                   setConfirm({
                     title: "Delete selected targets?",
-                    description: `${selected.size} target(s) will be removed from ig_targets for this account. Archive mode with audit and cross-surface sync is planned, but not active yet.`,
+                    description: `${selected.size} target(s) will be archived for this account. History is preserved for backend/frontend sync.`,
                     danger: true,
                     onConfirm: () => void deleteIds([...selected]),
                   })
@@ -625,7 +637,10 @@ export default function InstagramAccountTargetsPanel({
                       Username
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Health
+                      Verification
+                    </th>
+                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                      Quality
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Followers
@@ -654,10 +669,30 @@ export default function InstagramAccountTargetsPanel({
                         />
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <strong className="font-extrabold text-slate-100">@{row.targetUsername}</strong>
+                        <div className="flex items-center gap-2">
+                          {row.avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={row.avatarUrl} alt="" className="size-7 rounded-full border border-white/10 object-cover" />
+                          ) : null}
+                          <div>
+                            <strong className="block font-extrabold text-slate-100">@{row.targetUsername}</strong>
+                            {row.canonicalUsername && row.canonicalUsername !== row.targetUsername ? (
+                              <small className="block text-[11px] text-amber-200">canonical @{row.canonicalUsername}</small>
+                            ) : null}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
+                        <span className="block text-xs font-bold text-slate-200">{row.verificationStatus}</span>
+                        <small className="block max-w-[140px] truncate text-[11px] text-slate-500" title={row.verificationReason || undefined}>
+                          {row.verificationReason || "—"}
+                        </small>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
                         <HealthBadge status={row.healthStatus} />
+                        <small className="mt-1 block max-w-[140px] truncate text-[11px] text-slate-500" title={row.reason || undefined}>
+                          {row.qualityLabel}
+                        </small>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
                         {metricText(row.followersCount)}
@@ -666,7 +701,10 @@ export default function InstagramAccountTargetsPanel({
                         {metricText(row.fbrPercent, "%")}
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-slate-400">
-                        {formatWhen(row.createdAt)}
+                        <span className="block">{formatWhen(row.createdAt)}</span>
+                        <small className="block text-[11px] text-slate-500">
+                          {row.sourceLabel}{row.batchId ? ` · batch ${shortId(row.batchId)}` : ""}
+                        </small>
                       </td>
                       <td className="rounded-r-lg border-y border-r border-white/6 bg-white/[0.03] px-2 py-2.5">
                         <div className="flex flex-wrap gap-1.5">
@@ -692,7 +730,7 @@ export default function InstagramAccountTargetsPanel({
                             onClick={() =>
                               setConfirm({
                                 title: "Delete this target?",
-                                description: `@${row.targetUsername} will be removed from ig_targets. Archive mode with audit and cross-surface sync is planned, but not active yet.`,
+                                description: `@${row.targetUsername} will be archived. History is preserved for backend/frontend sync.`,
                                 danger: true,
                                 onConfirm: () => void deleteIds([row.id]),
                               })

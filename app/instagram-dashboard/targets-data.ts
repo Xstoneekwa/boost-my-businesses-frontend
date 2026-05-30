@@ -1,16 +1,39 @@
-export type TargetQualityStatus = "good" | "monitor" | "poor" | "unknown" | "pending_source";
+export type TargetHealthStatus = "good" | "monitor" | "poor" | "unknown" | "pending_source";
+export type TargetQualityStatus =
+  | "unknown"
+  | "eligible"
+  | "rejected_low_followers"
+  | "rejected_verified"
+  | "rejected_private"
+  | "rejected_not_found"
+  | "review_provider_unavailable"
+  | "review_username_changed";
 export type TargetSyncStatus = "synced" | "pending" | "failed" | "unknown";
 export type TargetSourceStatusCode = "connected" | "pending" | "unknown";
 
 export type TargetSafeRow = {
+  target_id?: string;
   id: string;
   account_id: string;
+  input_username?: string | null;
+  normalized_username?: string | null;
+  canonical_username?: string | null;
   target_username: string;
   status: string;
+  verification_status?: string | null;
+  verification_reason?: string | null;
+  quality_status?: string | null;
+  avatar_url?: string | null;
   source: string;
+  actor_type?: string | null;
+  rejected_reason?: string | null;
+  batch_id?: string | null;
+  provider_checked_at?: string | null;
   created_at: string;
   updated_at: string;
   followers_count?: number | null;
+  is_verified?: boolean | null;
+  is_private?: boolean | null;
   followback_ratio?: number | null;
   added_at?: string | null;
   deleted_at?: string | null;
@@ -21,18 +44,27 @@ export type TargetAccountItem = {
   id: string;
   accountId: string;
   targetUsername: string;
+  canonicalUsername: string | null;
   status: string;
-  healthStatus: TargetQualityStatus;
+  verificationStatus: string;
+  verificationReason: string | null;
+  healthStatus: TargetHealthStatus;
   source: string;
+  avatarUrl: string | null;
   createdAt: string;
   updatedAt: string;
   sourceLabel: string;
   statusLabel: string;
   qualityStatus: TargetQualityStatus;
+  qualityLabel: string;
   fbrPercent: number | null;
   followsSent: number | null;
   followbacks: number | null;
   followersCount: number | null;
+  isVerified: boolean | null;
+  isPrivate: boolean | null;
+  batchId: string | null;
+  providerCheckedAt: string | null;
   lastUsedAt: string | null;
   actor: string | null;
   actorType: "client" | "admin" | "botapp" | "automation" | "system" | null;
@@ -85,6 +117,11 @@ export type TargetExportRow = {
 
 export function targetStatusLabel(status: string) {
   const normalized = status.trim().toLowerCase();
+  if (normalized === "pending_verification") return "Pending verification";
+  if (normalized === "valid") return "Valid";
+  if (normalized === "rejected") return "Rejected";
+  if (normalized === "review") return "Review";
+  if (normalized === "duplicate") return "Duplicate";
   if (normalized === "pending") return "Pending";
   if (normalized === "completed") return "Completed";
   if (normalized === "failed") return "Failed";
@@ -100,6 +137,11 @@ export function targetStatusLabel(status: string) {
 
 export function targetSourceLabel(source: string) {
   const normalized = source.trim().toLowerCase();
+  if (normalized === "manual_single") return "Manual single";
+  if (normalized === "manual_bulk") return "Manual bulk";
+  if (normalized === "admin") return "Admin";
+  if (normalized === "client") return "Client";
+  if (normalized === "future_discovery") return "Future discovery";
   if (normalized === "dashboard_manual") return "Manual add";
   if (normalized === "dashboard_bulk") return "Bulk import";
   if (normalized === "client_dashboard") return "Client dashboard";
@@ -114,21 +156,35 @@ function countByStatus(items: TargetAccountItem[], status: string) {
   return items.filter((item) => item.status.toLowerCase() === status).length;
 }
 
-export function targetHealthFromFbr(fbrPercent: number | null): TargetQualityStatus {
+export function targetHealthFromFbr(fbrPercent: number | null): TargetHealthStatus {
   if (fbrPercent === null) return "pending_source";
   if (fbrPercent < 8) return "poor";
   if (fbrPercent < 13) return "monitor";
   return "good";
 }
 
-export function targetHealthLabel(healthStatus: TargetQualityStatus) {
+export function targetHealthLabel(healthStatus: TargetQualityStatus | TargetHealthStatus) {
+  if (healthStatus === "eligible") return "Eligible";
+  if (healthStatus === "rejected_low_followers") return "Low followers";
+  if (healthStatus === "rejected_verified") return "Verified";
+  if (healthStatus === "rejected_private") return "Private";
+  if (healthStatus === "rejected_not_found") return "Not found";
+  if (healthStatus === "review_provider_unavailable") return "Provider review";
+  if (healthStatus === "review_username_changed") return "Username changed";
   if (healthStatus === "poor") return "Poor";
   if (healthStatus === "monitor") return "Monitor";
   if (healthStatus === "good") return "Good";
   return "Pending source";
 }
 
-export function targetHealthHelper(healthStatus: TargetQualityStatus) {
+export function targetHealthHelper(healthStatus: TargetQualityStatus | TargetHealthStatus) {
+  if (healthStatus === "eligible") return "Target passed CT quality V1";
+  if (healthStatus === "rejected_low_followers") return "Follower count is below 500";
+  if (healthStatus === "rejected_verified") return "Verified profiles are rejected in CT quality V1";
+  if (healthStatus === "rejected_private") return "Private profiles are rejected in CT quality V1";
+  if (healthStatus === "rejected_not_found") return "Provider returned a clear not_found";
+  if (healthStatus === "review_provider_unavailable") return "Provider was unavailable or rate limited; never permanently reject";
+  if (healthStatus === "review_username_changed") return "Canonical username differs from submitted username";
   if (healthStatus === "poor") return "Followback ratio below 8%";
   if (healthStatus === "monitor") return "Followback ratio between 8% and 12%";
   if (healthStatus === "good") return "Followback ratio 13% or higher";
@@ -141,35 +197,45 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const addedAt = row.added_at || row.created_at;
   const deletedAt = row.deleted_at ?? null;
   const archivedAt = row.archived_at ?? null;
-  const healthStatus = targetHealthFromFbr(fbrPercent);
+  const qualityStatus = (row.quality_status || "unknown") as TargetQualityStatus;
+  const healthStatus = qualityStatus !== "unknown" ? (qualityStatus === "eligible" ? "good" : qualityStatus.startsWith("review_") ? "monitor" : "poor") : targetHealthFromFbr(fbrPercent);
 
   return {
-    id: row.id,
+    id: row.target_id || row.id,
     accountId: row.account_id,
-    targetUsername: row.target_username,
+    targetUsername: row.normalized_username || row.target_username,
+    canonicalUsername: row.canonical_username ?? null,
     status: row.status || "unknown",
+    verificationStatus: row.verification_status || "pending",
+    verificationReason: row.verification_reason ?? null,
     healthStatus,
     source: row.source || "unknown",
+    avatarUrl: row.avatar_url ?? null,
     createdAt: addedAt,
     updatedAt: row.updated_at,
     sourceLabel: targetSourceLabel(row.source || "unknown"),
     statusLabel: targetStatusLabel(row.status || "unknown"),
-    qualityStatus: healthStatus,
+    qualityStatus,
+    qualityLabel: targetHealthLabel(qualityStatus),
     fbrPercent,
     followsSent: null,
     followbacks: null,
     followersCount,
+    isVerified: typeof row.is_verified === "boolean" ? row.is_verified : null,
+    isPrivate: typeof row.is_private === "boolean" ? row.is_private : null,
+    batchId: row.batch_id ?? null,
+    providerCheckedAt: row.provider_checked_at ?? null,
     lastUsedAt: null,
     actor: null,
     actorType: null,
     sourceSurface: null,
-    reason: null,
+    reason: row.rejected_reason || row.verification_reason || null,
     syncStatus: "unknown",
     archivedAt,
     deletedAt,
     auditEventId: null,
-    isFutureMetricPending: followersCount === null || fbrPercent === null,
-    isSyncPending: true,
+    isFutureMetricPending: row.verification_status !== "found" || fbrPercent === null,
+    isSyncPending: row.status === "pending_verification",
   };
 }
 
@@ -193,12 +259,12 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
     items,
     summary: {
       total: items.length,
-      pending: countByStatus(items, "pending"),
+      pending: countByStatus(items, "pending") + countByStatus(items, "pending_verification"),
       completed: countByStatus(items, "completed"),
-      failed: countByStatus(items, "failed"),
+      failed: countByStatus(items, "failed") + countByStatus(items, "rejected"),
       skipped: countByStatus(items, "skipped"),
       qualityPending: items.filter((item) => item.isFutureMetricPending).length,
-      poorPerformanceCount: items.filter((item) => item.qualityStatus === "poor").length,
+      poorPerformanceCount: items.filter((item) => item.healthStatus === "poor").length,
       archivedCount: items.filter((item) => item.archivedAt || item.status === "archived").length,
       deletedCount: items.filter((item) => item.deletedAt || item.status === "deleted").length,
       syncPendingCount: items.filter((item) => item.isSyncPending).length,
@@ -218,7 +284,7 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
 export function safeTargetExportRows(items: TargetAccountItem[]): TargetExportRow[] {
   return items.map((item) => ({
     target_username: item.targetUsername,
-    health: targetHealthLabel(item.healthStatus),
+    health: item.qualityLabel,
     followers_count: item.followersCount,
     followback_ratio: item.fbrPercent,
     added_at: item.createdAt,
