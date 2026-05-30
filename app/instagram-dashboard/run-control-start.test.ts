@@ -4,6 +4,7 @@ import { readApiResponse, runStartSuccessMessage } from "./InstagramDashboardBut
 import { runStartSuccessPayload } from "../api/instagram-dashboard/runs/start/route";
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
+  evaluateMiniRunCapsPreflight,
   runStartBlockMessage,
 } from "../../lib/instagram-dashboard/run-control";
 
@@ -80,4 +81,79 @@ test("account_session is blocked when Welcome requires disabled real send", () =
     false,
   );
   assert.match(runStartBlockMessage("welcome_real_send_disabled"), /Welcome DM real send is disabled/);
+});
+
+test("mini-run preflight blocks when Welcome cap is not proven to be one", () => {
+  assert.equal(
+    evaluateMiniRunCapsPreflight({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeRealSendEnabled: true,
+      outreachEnabled: false,
+      env: {
+        INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
+        FOLLOW_MAX_PER_RUN: "1",
+        FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN: "1",
+        RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES: "account_session",
+      },
+    }),
+    "mini_run_welcome_cap_unproven",
+  );
+});
+
+test("mini-run preflight blocks when Follow caps are not proven to be one", () => {
+  assert.equal(
+    evaluateMiniRunCapsPreflight({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeRealSendEnabled: true,
+      outreachEnabled: false,
+      env: {
+        INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
+        WELCOME_SESSION_SEND_MAX_JOBS: "1",
+        FOLLOW_MAX_PER_RUN: "2",
+        FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN: "1",
+        RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES: "account_session",
+      },
+    }),
+    "mini_run_follow_cap_unproven",
+  );
+});
+
+test("mini-run preflight blocks when Outreach isolation is not proven", () => {
+  assert.equal(
+    evaluateMiniRunCapsPreflight({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeRealSendEnabled: true,
+      outreachEnabled: true,
+      env: {
+        INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
+        WELCOME_SESSION_SEND_MAX_JOBS: "1",
+        FOLLOW_MAX_PER_RUN: "1",
+        FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN: "1",
+        RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES: "account_session,outreach_session",
+      },
+    }),
+    "mini_run_outreach_off_unproven",
+  );
+});
+
+test("mini-run preflight allows capped account session with dispatcher isolated", () => {
+  assert.equal(
+    evaluateMiniRunCapsPreflight({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeRealSendEnabled: true,
+      outreachEnabled: true,
+      env: {
+        INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
+        WELCOME_SESSION_SEND_MAX_JOBS: "1",
+        FOLLOW_MAX_PER_RUN: "1",
+        FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN: "1",
+        RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES: "account_session",
+      },
+    }),
+    null,
+  );
 });

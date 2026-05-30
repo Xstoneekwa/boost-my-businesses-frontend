@@ -35,6 +35,9 @@ export type RunStartBlockReason =
   | "credentials_review_required"
   | "reauth_required"
   | "welcome_real_send_disabled"
+  | "mini_run_welcome_cap_unproven"
+  | "mini_run_follow_cap_unproven"
+  | "mini_run_outreach_off_unproven"
   | "already_running"
   | "already_requested"
   | "invalid_run_type";
@@ -61,6 +64,90 @@ export function runControlWelcomeRealSendEnabled() {
     process.env.INSTAGRAM_RUN_CONTROL_WELCOME_REAL_SEND_ENABLED === "true" ||
     process.env.DM_SENDER_REAL_SEND_ENABLED === "true"
   );
+}
+
+export function runControlMiniRunCapsRequired() {
+  return process.env.INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED === "true";
+}
+
+type MiniRunEnv = Record<string, string | undefined>;
+
+function readPositiveInteger(value: unknown) {
+  const raw = readString(value, "").trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+export function readMiniRunCap(names: string[], env: MiniRunEnv = process.env) {
+  for (const name of names) {
+    const value = readPositiveInteger(env[name]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function capProvesAtMostOne(value: number | null) {
+  return value !== null && value <= 1;
+}
+
+export function runControlDispatcherAllowedRunTypes(env: MiniRunEnv = process.env) {
+  const raw = readString(
+    env.INSTAGRAM_RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES ?? env.RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES,
+    "",
+  );
+  if (!raw) return null;
+  return raw
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function dispatcherAllowsOnlyAccountSession(env: MiniRunEnv = process.env) {
+  const allowed = runControlDispatcherAllowedRunTypes(env);
+  return Boolean(allowed && allowed.length === 1 && allowed[0] === "account_session");
+}
+
+export function evaluateMiniRunCapsPreflight({
+  requestedRunType,
+  welcomeEnabled,
+  welcomeRealSendEnabled,
+  outreachEnabled,
+  env = process.env,
+}: {
+  requestedRunType: string;
+  welcomeEnabled: boolean;
+  welcomeRealSendEnabled: boolean;
+  outreachEnabled: boolean;
+  env?: MiniRunEnv;
+}): RunStartBlockReason | null {
+  if (requestedRunType !== "account_session" || env.INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED !== "true") {
+    return null;
+  }
+
+  const welcomeHardCap = readMiniRunCap(
+    ["INSTAGRAM_RUN_CONTROL_WELCOME_SESSION_SEND_MAX_JOBS", "WELCOME_SESSION_SEND_MAX_JOBS"],
+    env,
+  );
+  if (welcomeEnabled && !capProvesAtMostOne(welcomeHardCap)) {
+    return "mini_run_welcome_cap_unproven";
+  }
+
+  const followMax = readMiniRunCap(["INSTAGRAM_RUN_CONTROL_FOLLOW_MAX_PER_RUN", "FOLLOW_MAX_PER_RUN"], env);
+  const iterationsMax = readMiniRunCap(
+    ["INSTAGRAM_RUN_CONTROL_FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN", "FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN"],
+    env,
+  );
+  if (!capProvesAtMostOne(followMax) || !capProvesAtMostOne(iterationsMax)) {
+    return "mini_run_follow_cap_unproven";
+  }
+
+  if (welcomeRealSendEnabled && outreachEnabled && !dispatcherAllowsOnlyAccountSession(env)) {
+    return "mini_run_outreach_off_unproven";
+  }
+
+  return null;
 }
 
 export function accountSessionBlockedByWelcomeRealSendDisabled({
@@ -317,7 +404,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   if (normalizedRunType === "account_session") {
     const { data: dmSettings, error: dmSettingsError } = await supabase
       .from("ig_account_dm_settings")
-      .select("welcome_enabled")
+      .select("welcome_enabled,outreach_enabled")
       .eq("account_id", accountId)
       .limit(1)
       .maybeSingle();
@@ -332,6 +419,16 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
       welcomeRealSendEnabled: runControlWelcomeRealSendEnabled(),
     })) {
       return { ok: false as const, reason: "welcome_real_send_disabled" as RunStartBlockReason, health };
+    }
+
+    const miniRunBlock = evaluateMiniRunCapsPreflight({
+      requestedRunType: normalizedRunType,
+      welcomeEnabled: dmSettings?.welcome_enabled === true,
+      welcomeRealSendEnabled: runControlWelcomeRealSendEnabled(),
+      outreachEnabled: dmSettings?.outreach_enabled === true,
+    });
+    if (miniRunBlock) {
+      return { ok: false as const, reason: miniRunBlock, health };
     }
   }
 
@@ -431,6 +528,12 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Credential re-authentication is required before manual run.";
     case "welcome_real_send_disabled":
       return "Manual run is blocked because Welcome DM real send is disabled.";
+    case "mini_run_welcome_cap_unproven":
+      return "Manual mini-run is blocked because Welcome DM cap is not proven to be at most 1.";
+    case "mini_run_follow_cap_unproven":
+      return "Manual mini-run is blocked because Follow caps are not proven to be at most 1.";
+    case "mini_run_outreach_off_unproven":
+      return "Manual mini-run is blocked because Outreach isolation is not proven.";
     case "already_running":
       return "A run is already active for this account.";
     case "already_requested":
