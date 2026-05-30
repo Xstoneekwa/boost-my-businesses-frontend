@@ -135,6 +135,13 @@ function emptyOverview(): TargetsOverview {
   return buildTargetsOverview([]);
 }
 
+function bulkUsernamesFromText(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^@+/, "").toLowerCase())
+    .filter(Boolean);
+}
+
 function EmptyTargetsState({ hasRows }: { hasRows: boolean }) {
   return (
     <div className="grid min-h-[180px] place-items-center rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center">
@@ -151,41 +158,6 @@ function EmptyTargetsState({ hasRows }: { hasRows: boolean }) {
             : "Add usernames manually or bulk import one per line."}
         </p>
       </div>
-    </div>
-  );
-}
-
-function PendingSourcePanel({ overview }: { overview: TargetsOverview }) {
-  const pendingCards = [
-    {
-      title: "Source quality metrics pending",
-      text: "FBR, follows sent, followbacks, and poor-performance detection will appear after CT usage metrics are connected. FBR is performance, not the CT follower count.",
-      meta: `Quality pending: ${overview.summary.qualityPending}`,
-    },
-    {
-      title: "Cross-surface sync pending",
-      text: "Future CT changes must sync across backend DB, admin dashboard, client dashboard, BotApp and Mac app.",
-      meta: `Sync pending: ${overview.summary.syncPendingCount}`,
-    },
-    {
-      title: "Archive/delete model pending",
-      text: "Archive will preserve history; delete will require audited backend support unless hard-delete remains explicitly approved.",
-      meta: `Archive/delete: ${overview.sourceStatus.archiveDeleteModel}`,
-    },
-  ];
-
-  return (
-    <div className="grid shrink-0 gap-2.5 px-5 md:grid-cols-3">
-      {pendingCards.map((card) => (
-        <article key={card.title} className="rounded-xl border border-white/8 bg-white/[0.025] p-3">
-          <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-500">
-            Pending source
-          </span>
-          <strong className="mt-1.5 block text-sm font-extrabold text-slate-100">{card.title}</strong>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{card.text}</p>
-          <small className="mt-2 block text-[11px] font-bold text-slate-500">{card.meta}</small>
-        </article>
-      ))}
     </div>
   );
 }
@@ -248,6 +220,7 @@ export default function InstagramAccountTargetsPanel({
 
   const rows = overview.items;
   const counts = overview.summary;
+  const bulkUsernames = useMemo(() => bulkUsernamesFromText(bulkText), [bulkText]);
 
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -318,14 +291,19 @@ export default function InstagramAccountTargetsPanel({
 
   async function addBulk(event: FormEvent) {
     event.preventDefault();
-    const lines = bulkText.split(/\r?\n/);
-    const usernames = lines.map((l) => l.trim().replace(/^@+/, "").toLowerCase()).filter(Boolean);
+    const usernames = bulkUsernames;
+
+    if (usernames.length === 0) {
+      setError("Add one Instagram username per line before importing.");
+      return;
+    }
 
     setSaving(true);
     setError("");
     setSuccess("");
     try {
       const result = await readApiResponse<{
+        batch_id?: string | null;
         inserted: number;
         skipped_duplicates: number;
         skipped_deleted?: number;
@@ -347,15 +325,20 @@ export default function InstagramAccountTargetsPanel({
         "Could not bulk import targets.",
       );
       setBulkText("");
+      const summary = result.summary;
+      const duplicateCount = summary ? summary.duplicates + summary.already_existing : result.skipped_duplicates;
+      const batchLabel = result.batch_id ? ` Batch ${shortId(result.batch_id)}.` : "";
       setSuccess(
         [
-          `Queued ${result.inserted} target(s) for future verification.`,
-          `Skipped duplicates: ${result.summary ? result.summary.duplicates + result.summary.already_existing : result.skipped_duplicates}.`,
+          `${result.inserted} target(s) queued for verification.${batchLabel}`,
+          summary ? `Total submitted: ${summary.total_submitted}.` : "",
+          summary ? `Accepted for verification: ${summary.accepted_for_verification}.` : "",
+          result.validation_pending ? `Pending verification: ${result.validation_pending}.` : "",
+          summary ? `Invalid: ${summary.invalid}.` : result.skipped_invalid ? `Invalid: ${result.skipped_invalid}.` : "",
+          summary ? `Duplicate in batch: ${summary.duplicates}.` : "",
+          summary ? `Duplicate existing: ${summary.already_existing}.` : `Duplicates skipped: ${duplicateCount}.`,
           result.skipped_deleted ? `Previously deleted blocked: ${result.skipped_deleted}.` : "",
-          result.summary?.invalid || result.skipped_invalid ? `Invalid usernames blocked: ${result.summary?.invalid ?? result.skipped_invalid}.` : "",
-          result.validation_pending
-            ? `Bulk import does not validate followers immediately; pending verification: ${result.validation_pending}.`
-            : "",
+          "Bulk import queues targets only; Quality V1 is resolved by verification.",
         ].filter(Boolean).join(" "),
       );
       await loadTargets();
@@ -600,8 +583,6 @@ export default function InstagramAccountTargetsPanel({
             </div>
           )}
 
-          <PendingSourcePanel overview={overview} />
-
           <div className="grid shrink-0 gap-3 px-5 md:grid-cols-2">
             <form
               onSubmit={addSingle}
@@ -644,9 +625,9 @@ export default function InstagramAccountTargetsPanel({
               <button
                 type="submit"
                 className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/18 px-3 py-2 text-xs font-extrabold text-amber-100 hover:bg-amber-500/28 disabled:opacity-45"
-                disabled={saving || !bulkText.trim()}
+                disabled={saving || bulkUsernames.length === 0}
               >
-                Import
+                {saving ? "Importing…" : "Import"}
               </button>
             </form>
           </div>
