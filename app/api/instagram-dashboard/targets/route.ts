@@ -6,6 +6,10 @@ import {
   buildTargetVerificationJobPayloads,
 } from "@/lib/instagram-target-verification-jobs";
 import {
+  CT_MANUAL_FOLLOWERS_MAX_GUARD,
+  CT_QUALITY_MIN_FOLLOWERS,
+} from "@/lib/instagram-target-quality";
+import {
   classifyBulkTargetLines,
   isValidTargetUsername,
   normalizeTargetUsername,
@@ -121,11 +125,11 @@ function isArchivedTarget(row: SupabaseRecord) {
 
 function validateKnownFollowersCount(followersCount: number | null) {
   if (followersCount === null) return null;
-  if (followersCount < 500) {
-    return "This target account cannot be added because it has fewer than 500 followers.";
+  if (followersCount < CT_QUALITY_MIN_FOLLOWERS) {
+    return `This target account cannot be added because it has fewer than ${CT_QUALITY_MIN_FOLLOWERS} followers.`;
   }
-  if (followersCount > 50000) {
-    return "This target account cannot be added because it has more than 50,000 followers.";
+  if (followersCount > CT_MANUAL_FOLLOWERS_MAX_GUARD) {
+    return `This target account cannot be added because it has more than ${new Intl.NumberFormat("en").format(CT_MANUAL_FOLLOWERS_MAX_GUARD)} followers.`;
   }
   return null;
 }

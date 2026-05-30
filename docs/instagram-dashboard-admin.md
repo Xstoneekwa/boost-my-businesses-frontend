@@ -939,6 +939,39 @@ Etat:
   externe avec petit `limit`, spacing explicite, logs sans secret et monitoring
   sur counts/duration/rate limits.
 
+### CT Quality V1 Engine
+
+Source de verite:
+
+- `lib/instagram-target-quality.ts` centralise la decision Quality V1.
+- `ig_targets` reste la source de verite partagee admin / client / BotApp pour
+  `status`, `quality_status`, `verification_status`, `verification_reason`,
+  `rejected_reason`, `source`, `actor_type`, archive/delete soft state et audit.
+
+Regles V1:
+
+- `not_found` clair -> `rejected` / `rejected_not_found`.
+- `followers_count < 500` -> `rejected_low_followers`.
+- `is_verified=true` -> `rejected_verified`.
+- `is_private=true` -> `rejected_private`.
+- canonical username different -> `review_username_changed`, sans suppression
+  ni rejet brutal.
+- `rate_limited`, `unavailable`, `provider_error` et provider-not-configured ne
+  deviennent jamais `rejected_not_found`; ils restent pending/review puis
+  `review_provider_unavailable` apres max attempts.
+- Avatar manquant est un warning seulement; pas un rejet V1.
+- FBR reste hors scope: performance future apres usage reel du CT, distincte de
+  `followers_count`.
+
+Sync surfaces:
+
+- `valid` / `eligible`: visible admin + client + BotApp comme utilisable.
+- `rejected_*`: visible avec raison safe, audit obligatoire pour add/verify.
+- `review_*`: visible admin; client/BotApp peuvent recevoir un message safe sans
+  raw provider data.
+- `archived` / `deleted`: doivent rester des soft states synchronisables entre
+  admin, client et BotApp quand ces surfaces existent.
+
 ## 4. Add Profile Patch 2B
 
 ### Avant Patch 2B
