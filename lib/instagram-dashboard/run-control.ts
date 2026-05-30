@@ -21,12 +21,14 @@ export type RunControlHealth = {
   playEnabled: boolean;
   dispatcherWorkerId: string | null;
   dispatcherStatus: string | null;
+  dispatcherLaunchEnabled?: boolean | null;
   lastSeenAt: string | null;
   reason: string;
 };
 
 export type RunStartBlockReason =
   | "dispatcher_unhealthy"
+  | "dispatcher_launch_disabled"
   | "play_disabled"
   | "account_archived"
   | "account_trashed"
@@ -216,7 +218,7 @@ export async function getRunControlHealth(): Promise<RunControlHealth> {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase
     .from("worker_heartbeats")
-    .select("worker_id,status,last_seen_at")
+    .select("worker_id,status,last_seen_at,metadata")
     .eq("worker_id", dispatcherWorkerId)
     .limit(1);
 
@@ -244,6 +246,9 @@ export async function getRunControlHealth(): Promise<RunControlHealth> {
   }
 
   const dispatcherStatus = readString(row.status, "unknown");
+  const metadata = (row.metadata && typeof row.metadata === "object" ? row.metadata : null) as SupabaseRecord | null;
+  const dispatcherLaunchEnabled =
+    typeof metadata?.launch_enabled === "boolean" ? metadata.launch_enabled : null;
   const lastSeenAt = readString(row.last_seen_at, "");
   const lastSeenMs = lastSeenAt ? Date.parse(lastSeenAt) : Number.NaN;
   const ageSeconds = Number.isFinite(lastSeenMs) ? (Date.now() - lastSeenMs) / 1000 : Number.POSITIVE_INFINITY;
@@ -256,6 +261,7 @@ export async function getRunControlHealth(): Promise<RunControlHealth> {
     playEnabled,
     dispatcherWorkerId,
     dispatcherStatus,
+    dispatcherLaunchEnabled,
     lastSeenAt: lastSeenAt || null,
     reason: healthy ? "ready" : "dispatcher_unhealthy",
   };
@@ -392,6 +398,9 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   const health = await getRunControlHealth();
   if (!health.playEnabled || !health.healthy) {
     return { ok: false as const, reason: "dispatcher_unhealthy" as RunStartBlockReason, health };
+  }
+  if (health.dispatcherLaunchEnabled === false) {
+    return { ok: false as const, reason: "dispatcher_launch_disabled" as RunStartBlockReason, health };
   }
 
   const supabase = createSupabaseClient();
@@ -540,6 +549,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
   switch (reason) {
     case "dispatcher_unhealthy":
       return "Manual run requires a healthy runtime dispatcher.";
+    case "dispatcher_launch_disabled":
+      return "Manual run is blocked because dispatcher launch is disabled.";
     case "play_disabled":
       return "Manual run is not enabled for this environment.";
     case "account_archived":

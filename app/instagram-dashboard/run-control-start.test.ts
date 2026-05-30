@@ -86,6 +86,10 @@ test("account_session is blocked when Welcome requires disabled real send", () =
   assert.match(runStartBlockMessage("welcome_real_send_disabled"), /Welcome DM real send is disabled/);
 });
 
+test("dispatcher launch disabled has a safe block message", () => {
+  assert.match(runStartBlockMessage("dispatcher_launch_disabled"), /dispatcher launch is disabled/);
+});
+
 test("domain real-send flags isolate Welcome from Outreach and legacy global", () => {
   const env = {
     WELCOME_DM_REAL_SEND_ENABLED: "true",
