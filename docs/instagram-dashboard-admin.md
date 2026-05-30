@@ -1015,6 +1015,34 @@ Mapping admin/client/BotApp:
 - Toute action client future autorisee doit apparaitre cote admin/BotApp avec le
   meme audit safe et sans divergence silencieuse.
 
+### CT Activity Log
+
+Source:
+
+- Activity Log admin lit une projection safe de `ct_target_audit_events`.
+- Les events affiches couvrent `target_add_single`, `target_add_bulk`,
+  `target_verify`, `target_archive`, `target_restore` et `target_reset`.
+- `metadata_safe` n'est jamais rendu brut. Seuls `source_surface`,
+  `previous_status` et `next_status` sont projetes quand disponibles.
+
+Champs affiches:
+
+- timestamp;
+- actor type;
+- action label;
+- account username ou account id court;
+- target username ou target id court;
+- result/status;
+- reason safe;
+- batch id court si present;
+- source surface.
+
+Hors scope:
+
+- client dashboard CT Activity Log;
+- BotApp Activity Log;
+- FBR runtime, auto-archive performance, raw provider metadata.
+
 ## 4. Add Profile Patch 2B
 
 ### Avant Patch 2B

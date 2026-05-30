@@ -33,25 +33,25 @@ export default async function InstagramActivityLogPage() {
       </section>
 
       <section className="ig-activity-kpis" aria-label="Activity Log summary">
-        <Kpi label="Total events" value={String(data.summary.totalItems || "pending source")} detail={data.sourceDetails.activityLog.label} />
-        <Kpi label="Admin actions" value={String(data.summary.adminActionsCount || "pending source")} detail="Controls, settings, targets, lifecycle actions pending audit backend" />
-        <Kpi label="System events" value={String(data.summary.systemActionsCount || "pending source")} detail="System audit projection pending source" />
-        <Kpi label="Failed / attention" value={String(data.summary.failedActionsCount || "pending source")} detail="Failed dashboard actions pending audit backend" tone="warning" />
-        <Kpi label="Pending source" value={String(data.summary.pendingSourceCount)} detail="Dedicated admin activity source not connected" tone="warning" />
+        <Kpi label="Total CT events" value={String(data.summary.totalItems)} detail={data.sourceDetails.activityLog.label} />
+        <Kpi label="Admin actions" value={String(data.summary.adminActionsCount)} detail="Target add, verify, archive, restore and reset events" />
+        <Kpi label="System events" value={String(data.summary.systemActionsCount)} detail="System-written CT audit events when present" />
+        <Kpi label="Failed / rejected" value={String(data.summary.failedActionsCount)} detail="Failed or rejected CT audit results" tone="warning" />
+        <Kpi label="Source status" value={data.sourceStatus.auditBackend} detail={data.sourceDetails.auditBackend.description} />
       </section>
 
       <AnalyticsSectionCard
         eyebrow="Filters"
         title="Prepared filters"
-        description="Read-only placeholders for future audit source filtering. No client-side fake state or hidden persistence is used."
+        description="CT audit events are sorted newest first. Dedicated interactive filters can be added later without changing the safe projection."
       >
         <FilterPreview />
       </AnalyticsSectionCard>
 
       <AnalyticsSectionCard
         eyebrow="Activity"
-        title="Dashboard activity"
-        description="Admin audit events will appear here once a dedicated safe backend source is connected. Technical worker logs stay in per-account Logs."
+        title="Target activity"
+        description="Read-only CT audit visibility from ct_target_audit_events. Raw metadata and provider payloads are never rendered."
       >
         <ActivityList items={data.items} />
       </AnalyticsSectionCard>
@@ -176,6 +176,16 @@ export default async function InstagramActivityLogPage() {
           vertical-align: top;
         }
 
+        .ig-activity-table td strong,
+        .ig-activity-table td small {
+          display: block;
+        }
+
+        .ig-activity-table td strong {
+          color: rgba(255,255,255,0.82);
+          font-size: 12px;
+        }
+
         .ig-activity-empty {
           place-items: center;
           min-height: 210px;
@@ -235,10 +245,10 @@ function Kpi({ label, value, detail, tone = "neutral" }: { label: string; value:
 
 function FilterPreview() {
   const filters = [
-    ["Actor", "User/admin filter pending source"],
-    ["Period", "Date range filter pending source"],
-    ["Domain", "Settings, Targets, Lifecycle, Device, Credentials"],
-    ["Result", "Success, failed, pending, unknown"],
+    ["Domain", "Targets"],
+    ["Actions", "Add, bulk add, verify, archive, restore, reset"],
+    ["Actor", "admin, client, system when present"],
+    ["Result", "accepted, archived, restored, review, failed"],
   ];
 
   return (
@@ -247,9 +257,9 @@ function FilterPreview() {
         <article className="ig-activity-filter" key={label}>
           <span>{label}</span>
           <strong>{text}</strong>
-          <p>Requires dedicated audit backend.</p>
+          <p>Read-only projection. Interactive filtering remains future work.</p>
           <button type="button" disabled>
-            Disabled
+            View only
           </button>
         </article>
       ))}
@@ -261,9 +271,9 @@ function ActivityList({ items }: { items: ActivityLogItem[] }) {
   if (!items.length) {
     return (
       <div className="ig-activity-empty">
-        <span>Pending source</span>
-        <strong>No admin activity source connected yet.</strong>
-        <p>Future actions from Controls, Settings, Targets, Devices, Incidents, Credentials, Archive, Trash, Restore, and Add Profile will appear here as safe audit events.</p>
+        <span>No CT events</span>
+        <strong>No target audit events found.</strong>
+        <p>Target add, bulk add, verify, archive, restore and reset events will appear here once written to ct_target_audit_events.</p>
       </div>
     );
   }
@@ -275,10 +285,10 @@ function ActivityList({ items }: { items: ActivityLogItem[] }) {
           <tr>
             <th>Timestamp</th>
             <th>Actor</th>
-            <th>Domain</th>
             <th>Action</th>
             <th>Account / target</th>
             <th>Result</th>
+            <th>Reason</th>
             <th>Safe summary</th>
             <th>Source</th>
           </tr>
@@ -287,13 +297,16 @@ function ActivityList({ items }: { items: ActivityLogItem[] }) {
           {items.map((item) => (
             <tr key={item.id}>
               <td>{item.timestamp ?? "unknown"}</td>
-              <td>{item.actor} · {item.actorType}</td>
-              <td>{item.domain}</td>
+              <td>{item.actorType}</td>
               <td>{item.action}</td>
-              <td>{item.username ?? item.targetLabel ?? "unknown"}</td>
+              <td>
+                <strong>{item.username ?? "unknown account"}</strong>
+                <small>{item.targetLabel ?? item.targetIdShort ?? "target unknown"}{item.batchIdShort ? ` · batch ${item.batchIdShort}` : ""}</small>
+              </td>
               <td>{item.result}</td>
+              <td>{item.reason ?? "—"}</td>
               <td>{item.safeSummary}</td>
-              <td>{item.sourceLabel} · {item.metadataStatus}</td>
+              <td>{item.sourceSurface ?? "unknown"} · {item.metadataStatus}</td>
             </tr>
           ))}
         </tbody>
