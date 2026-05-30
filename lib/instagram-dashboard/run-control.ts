@@ -34,6 +34,7 @@ export type RunStartBlockReason =
   | "support_required"
   | "credentials_review_required"
   | "reauth_required"
+  | "welcome_real_send_disabled"
   | "already_running"
   | "already_requested"
   | "invalid_run_type";
@@ -53,6 +54,25 @@ export function runControlDispatcherWorkerId() {
 export function runControlDispatcherHealthMaxAgeSeconds() {
   const parsed = Number(process.env.INSTAGRAM_RUN_CONTROL_DISPATCHER_HEALTH_MAX_AGE_SECONDS ?? "60");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+}
+
+export function runControlWelcomeRealSendEnabled() {
+  return (
+    process.env.INSTAGRAM_RUN_CONTROL_WELCOME_REAL_SEND_ENABLED === "true" ||
+    process.env.DM_SENDER_REAL_SEND_ENABLED === "true"
+  );
+}
+
+export function accountSessionBlockedByWelcomeRealSendDisabled({
+  requestedRunType,
+  welcomeEnabled,
+  welcomeRealSendEnabled,
+}: {
+  requestedRunType: string;
+  welcomeEnabled: boolean;
+  welcomeRealSendEnabled: boolean;
+}) {
+  return requestedRunType === "account_session" && welcomeEnabled && !welcomeRealSendEnabled;
 }
 
 export function sanitizeRunControlReason(value: unknown, fallback = "blocked") {
@@ -294,6 +314,27 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     return { ok: false as const, reason: "account_canceled" as RunStartBlockReason, health };
   }
 
+  if (normalizedRunType === "account_session") {
+    const { data: dmSettings, error: dmSettingsError } = await supabase
+      .from("ig_account_dm_settings")
+      .select("welcome_enabled")
+      .eq("account_id", accountId)
+      .limit(1)
+      .maybeSingle();
+
+    if (dmSettingsError) {
+      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    }
+
+    if (accountSessionBlockedByWelcomeRealSendDisabled({
+      requestedRunType: normalizedRunType,
+      welcomeEnabled: dmSettings?.welcome_enabled === true,
+      welcomeRealSendEnabled: runControlWelcomeRealSendEnabled(),
+    })) {
+      return { ok: false as const, reason: "welcome_real_send_disabled" as RunStartBlockReason, health };
+    }
+  }
+
   const { data: openActions, error: actionsError } = await supabase
     .from("account_dashboard_actions")
     .select("action_type,status,safe_client_message")
@@ -388,6 +429,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Credentials review is required before manual run.";
     case "reauth_required":
       return "Credential re-authentication is required before manual run.";
+    case "welcome_real_send_disabled":
+      return "Manual run is blocked because Welcome DM real send is disabled.";
     case "already_running":
       return "A run is already active for this account.";
     case "already_requested":
