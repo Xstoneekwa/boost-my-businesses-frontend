@@ -5,6 +5,9 @@ import { runStartSuccessPayload } from "../api/instagram-dashboard/runs/start/ro
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
   evaluateMiniRunCapsPreflight,
+  outreachSessionBlockedByOutreachRealSendDisabled,
+  runControlOutreachRealSendEnabled,
+  runControlWelcomeRealSendEnabled,
   runStartBlockMessage,
 } from "../../lib/instagram-dashboard/run-control";
 
@@ -83,12 +86,41 @@ test("account_session is blocked when Welcome requires disabled real send", () =
   assert.match(runStartBlockMessage("welcome_real_send_disabled"), /Welcome DM real send is disabled/);
 });
 
+test("domain real-send flags isolate Welcome from Outreach and legacy global", () => {
+  const env = {
+    WELCOME_DM_REAL_SEND_ENABLED: "true",
+    OUTREACH_DM_REAL_SEND_ENABLED: "false",
+    DM_SENDER_REAL_SEND_ENABLED: "true",
+  };
+
+  assert.equal(runControlWelcomeRealSendEnabled(env), true);
+  assert.equal(runControlOutreachRealSendEnabled(env), false);
+  assert.equal(
+    accountSessionBlockedByWelcomeRealSendDisabled({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeRealSendEnabled: runControlWelcomeRealSendEnabled(env),
+    }),
+    false,
+  );
+  assert.equal(
+    outreachSessionBlockedByOutreachRealSendDisabled({
+      requestedRunType: "outreach_session",
+      outreachEnabled: true,
+      outreachRealSendEnabled: runControlOutreachRealSendEnabled(env),
+    }),
+    true,
+  );
+  assert.match(runStartBlockMessage("outreach_real_send_disabled"), /Outreach DM real send is disabled/);
+});
+
 test("mini-run preflight blocks when Welcome cap is not proven to be one", () => {
   assert.equal(
     evaluateMiniRunCapsPreflight({
       requestedRunType: "account_session",
       welcomeEnabled: true,
       welcomeRealSendEnabled: true,
+      outreachRealSendEnabled: false,
       outreachEnabled: false,
       env: {
         INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
@@ -107,6 +139,7 @@ test("mini-run preflight blocks when Follow caps are not proven to be one", () =
       requestedRunType: "account_session",
       welcomeEnabled: true,
       welcomeRealSendEnabled: true,
+      outreachRealSendEnabled: false,
       outreachEnabled: false,
       env: {
         INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
@@ -126,6 +159,7 @@ test("mini-run preflight blocks when Outreach isolation is not proven", () => {
       requestedRunType: "account_session",
       welcomeEnabled: true,
       welcomeRealSendEnabled: true,
+      outreachRealSendEnabled: true,
       outreachEnabled: true,
       env: {
         INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
@@ -139,12 +173,33 @@ test("mini-run preflight blocks when Outreach isolation is not proven", () => {
   );
 });
 
+test("mini-run preflight allows account session when Outreach real send is off", () => {
+  assert.equal(
+    evaluateMiniRunCapsPreflight({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeRealSendEnabled: true,
+      outreachRealSendEnabled: false,
+      outreachEnabled: true,
+      env: {
+        INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
+        WELCOME_SESSION_SEND_MAX_JOBS: "1",
+        FOLLOW_MAX_PER_RUN: "1",
+        FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN: "1",
+        RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES: "account_session,outreach_session",
+      },
+    }),
+    null,
+  );
+});
+
 test("mini-run preflight allows capped account session with dispatcher isolated", () => {
   assert.equal(
     evaluateMiniRunCapsPreflight({
       requestedRunType: "account_session",
       welcomeEnabled: true,
       welcomeRealSendEnabled: true,
+      outreachRealSendEnabled: true,
       outreachEnabled: true,
       env: {
         INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",

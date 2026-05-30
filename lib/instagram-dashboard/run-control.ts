@@ -35,6 +35,7 @@ export type RunStartBlockReason =
   | "credentials_review_required"
   | "reauth_required"
   | "welcome_real_send_disabled"
+  | "outreach_real_send_disabled"
   | "mini_run_welcome_cap_unproven"
   | "mini_run_follow_cap_unproven"
   | "mini_run_outreach_off_unproven"
@@ -59,11 +60,12 @@ export function runControlDispatcherHealthMaxAgeSeconds() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 
-export function runControlWelcomeRealSendEnabled() {
-  return (
-    process.env.INSTAGRAM_RUN_CONTROL_WELCOME_REAL_SEND_ENABLED === "true" ||
-    process.env.DM_SENDER_REAL_SEND_ENABLED === "true"
-  );
+export function runControlWelcomeRealSendEnabled(env: MiniRunEnv = process.env) {
+  return env.WELCOME_DM_REAL_SEND_ENABLED === "true";
+}
+
+export function runControlOutreachRealSendEnabled(env: MiniRunEnv = process.env) {
+  return env.OUTREACH_DM_REAL_SEND_ENABLED === "true";
 }
 
 export function runControlMiniRunCapsRequired() {
@@ -113,12 +115,14 @@ export function evaluateMiniRunCapsPreflight({
   requestedRunType,
   welcomeEnabled,
   welcomeRealSendEnabled,
+  outreachRealSendEnabled,
   outreachEnabled,
   env = process.env,
 }: {
   requestedRunType: string;
   welcomeEnabled: boolean;
   welcomeRealSendEnabled: boolean;
+  outreachRealSendEnabled: boolean;
   outreachEnabled: boolean;
   env?: MiniRunEnv;
 }): RunStartBlockReason | null {
@@ -143,7 +147,7 @@ export function evaluateMiniRunCapsPreflight({
     return "mini_run_follow_cap_unproven";
   }
 
-  if (welcomeRealSendEnabled && outreachEnabled && !dispatcherAllowsOnlyAccountSession(env)) {
+  if (welcomeRealSendEnabled && outreachEnabled && outreachRealSendEnabled && !dispatcherAllowsOnlyAccountSession(env)) {
     return "mini_run_outreach_off_unproven";
   }
 
@@ -160,6 +164,18 @@ export function accountSessionBlockedByWelcomeRealSendDisabled({
   welcomeRealSendEnabled: boolean;
 }) {
   return requestedRunType === "account_session" && welcomeEnabled && !welcomeRealSendEnabled;
+}
+
+export function outreachSessionBlockedByOutreachRealSendDisabled({
+  requestedRunType,
+  outreachEnabled,
+  outreachRealSendEnabled,
+}: {
+  requestedRunType: string;
+  outreachEnabled: boolean;
+  outreachRealSendEnabled: boolean;
+}) {
+  return requestedRunType === "outreach_session" && outreachEnabled && !outreachRealSendEnabled;
 }
 
 export function sanitizeRunControlReason(value: unknown, fallback = "blocked") {
@@ -401,7 +417,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     return { ok: false as const, reason: "account_canceled" as RunStartBlockReason, health };
   }
 
-  if (normalizedRunType === "account_session") {
+  if (normalizedRunType === "account_session" || normalizedRunType === "outreach_session") {
     const { data: dmSettings, error: dmSettingsError } = await supabase
       .from("ig_account_dm_settings")
       .select("welcome_enabled,outreach_enabled")
@@ -413,18 +429,30 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
       return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
     }
 
+    const welcomeRealSendEnabled = runControlWelcomeRealSendEnabled();
+    const outreachRealSendEnabled = runControlOutreachRealSendEnabled();
+
     if (accountSessionBlockedByWelcomeRealSendDisabled({
       requestedRunType: normalizedRunType,
       welcomeEnabled: dmSettings?.welcome_enabled === true,
-      welcomeRealSendEnabled: runControlWelcomeRealSendEnabled(),
+      welcomeRealSendEnabled,
     })) {
       return { ok: false as const, reason: "welcome_real_send_disabled" as RunStartBlockReason, health };
+    }
+
+    if (outreachSessionBlockedByOutreachRealSendDisabled({
+      requestedRunType: normalizedRunType,
+      outreachEnabled: dmSettings?.outreach_enabled === true,
+      outreachRealSendEnabled,
+    })) {
+      return { ok: false as const, reason: "outreach_real_send_disabled" as RunStartBlockReason, health };
     }
 
     const miniRunBlock = evaluateMiniRunCapsPreflight({
       requestedRunType: normalizedRunType,
       welcomeEnabled: dmSettings?.welcome_enabled === true,
-      welcomeRealSendEnabled: runControlWelcomeRealSendEnabled(),
+      welcomeRealSendEnabled,
+      outreachRealSendEnabled,
       outreachEnabled: dmSettings?.outreach_enabled === true,
     });
     if (miniRunBlock) {
@@ -528,6 +556,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Credential re-authentication is required before manual run.";
     case "welcome_real_send_disabled":
       return "Manual run is blocked because Welcome DM real send is disabled.";
+    case "outreach_real_send_disabled":
+      return "Manual run is blocked because Outreach DM real send is disabled.";
     case "mini_run_welcome_cap_unproven":
       return "Manual mini-run is blocked because Welcome DM cap is not proven to be at most 1.";
     case "mini_run_follow_cap_unproven":
