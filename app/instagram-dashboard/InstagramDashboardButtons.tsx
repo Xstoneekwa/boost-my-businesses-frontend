@@ -179,6 +179,9 @@ type AccountTool = {
 const DRAFT_SETTINGS_BANNER =
   "Dashboard draft settings. Saved values persist to the dashboard DB; fields marked Needs routing are not runtime-active until Phone Farm domain wiring is complete.";
 
+const FILTERS_LEGACY_BANNER =
+  "Legacy filter values stored in ig_account_filters. They are not used by /runs/start, Auto Restart preview, or the Phone Farm worker. Editing is disabled until filter domain wiring is complete.";
+
 type Confirmation = {
   title: string;
   description: string;
@@ -400,25 +403,81 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   ],
 };
 
-const filterFields: FieldSpec[] = [
-  { key: "disable_filters", label: "Disable filters", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: filter eligibility policy API." },
-  { key: "skip_followers", label: "Skip followers", type: "toggle", runtimeStatus: "needs-routing" },
-  { key: "skip_following", label: "Skip following", type: "toggle", runtimeStatus: "needs-routing" },
-  { key: "skip_business_profiles", label: "Skip business profiles", type: "toggle", runtimeStatus: "needs-routing" },
-  { key: "skip_non_business_profiles", label: "Skip non-business profiles", type: "toggle", runtimeStatus: "needs-routing" },
-  { key: "follow_private_profiles", label: "Follow private profiles", type: "toggle", runtimeStatus: "needs-routing", helper: "Semantic conflict with dont_follow_private_accounts — reconcile before routing." },
-  { key: "follow_only_private_profiles", label: "Follow only private profiles", type: "toggle", runtimeStatus: "needs-routing" },
-  { key: "dm_private_profiles", label: "DM private profiles", type: "toggle", runtimeStatus: "needs-routing" },
-  { key: "min_followers", label: "Minimum followers", type: "number", min: 0, runtimeStatus: "needs-routing" },
-  { key: "max_followers", label: "Maximum followers", type: "number", min: 0, runtimeStatus: "needs-routing" },
-  { key: "min_following", label: "Minimum following", type: "number", min: 0, runtimeStatus: "needs-routing" },
-  { key: "max_following", label: "Maximum following", type: "number", min: 0, runtimeStatus: "needs-routing" },
-  { key: "min_posts", label: "Minimum posts", type: "number", min: 0, runtimeStatus: "needs-routing" },
-  { key: "blacklisted_words", label: "Blacklisted words", type: "textarea", runtimeStatus: "needs-routing" },
-  { key: "mandatory_words", label: "Mandatory words", type: "textarea", runtimeStatus: "needs-routing" },
-  { key: "whitelist_words", label: "Whitelist words", type: "textarea", runtimeStatus: "needs-routing" },
-  { key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea", runtimeStatus: "needs-routing" },
+type FilterSectionSpec = {
+  title: string;
+  description: string;
+  fields: FieldSpec[];
+};
+
+function legacyFilterField(field: FieldSpec): FieldSpec {
+  return {
+    readOnly: true,
+    disabled: true,
+    runtimeStatus: "read-only",
+    ...field,
+  };
+}
+
+const filterSections: FilterSectionSpec[] = [
+  {
+    title: "Runtime-ready filters",
+    description: "No follow filter fields are runtime-active yet. Private-profile follow policy will live in Follow settings via ig_account_follow_settings when wired.",
+    fields: [],
+  },
+  {
+    title: "Follow filters (planned)",
+    description: "Relationship, business-type, and profile-threshold filters. Worker wiring pending.",
+    fields: [
+      legacyFilterField({ key: "skip_followers", label: "Skip followers", type: "toggle", helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "skip_following", label: "Skip following", type: "toggle", helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "skip_business_profiles", label: "Skip business profiles", type: "toggle", helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "skip_non_business_profiles", label: "Skip non-business profiles", type: "toggle", helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "follow_only_private_profiles", label: "Follow only private profiles", type: "toggle", helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "min_following", label: "Minimum following", type: "number", min: 0, helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "max_following", label: "Maximum following", type: "number", min: 0, helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "min_posts", label: "Minimum posts", type: "number", min: 0, helper: "Planned · Not consumed by worker." }),
+      legacyFilterField({ key: "blacklisted_words", label: "Blacklisted words", type: "textarea", helper: "Planned · Normalized policy table preferred." }),
+      legacyFilterField({ key: "mandatory_words", label: "Mandatory words", type: "textarea", helper: "Planned · Normalized policy table preferred." }),
+      legacyFilterField({ key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea", helper: "Planned · Runtime blacklist uses interaction rows, not this textarea." }),
+    ],
+  },
+  {
+    title: "Outreach filters (planned)",
+    description: "DM eligibility belongs in the DM tab and ig_account_dm_settings when wired.",
+    fields: [
+      legacyFilterField({ key: "dm_private_profiles", label: "DM private profiles", type: "toggle", helper: "Planned · Use DM domain settings when wired." }),
+    ],
+  },
+  {
+    title: "CT quality filters (planned)",
+    description: "CT follower thresholds and verification rules are managed in the Targets panel and ig_targets quality_status.",
+    fields: [
+      legacyFilterField({ key: "min_followers", label: "Minimum followers", type: "number", min: 0, helper: "Planned · CT/target quality wiring pending." }),
+      legacyFilterField({ key: "max_followers", label: "Maximum followers", type: "number", min: 0, helper: "Planned · CT/target quality wiring pending." }),
+    ],
+  },
+  {
+    title: "Legacy draft values",
+    description: "Stored legacy values kept for inspection only. Unfollow whitelist uses ig_interacted_users.whitelist_protected, not whitelist_words.",
+    fields: [
+      legacyFilterField({ key: "disable_filters", label: "Disable filters", type: "toggle", helper: "Legacy global toggle · Not consumed by runtime." }),
+      legacyFilterField({
+        key: "follow_private_profiles",
+        label: "Follow private profiles",
+        type: "toggle",
+        helper: "Legacy · Conflicts with ig_account_follow_settings.dont_follow_private_accounts.",
+      }),
+      legacyFilterField({
+        key: "whitelist_words",
+        label: "Whitelist words",
+        type: "textarea",
+        helper: "Legacy ambiguous field · Not the unfollow whitelist_protected flag.",
+      }),
+    ],
+  },
 ];
+
+const filterFields: FieldSpec[] = filterSections.flatMap((section) => section.fields);
 
 export async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
@@ -1153,10 +1212,6 @@ export default function InstagramDashboardButtons({
     setSettings((current) => (current ? { ...current, [key]: value } : current));
   }
 
-  function updateFilter(key: string, value: ConfigValue) {
-    setFilters((current) => (current ? { ...current, [key]: value } : current));
-  }
-
   async function loadDmDomainSettings() {
     try {
       const projection = await readApiResponse<DmDomainProjection>(
@@ -1387,44 +1442,6 @@ export default function InstagramDashboardButtons({
     }
   }
 
-  function saveFilters(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!filters) return;
-
-    requestConfirmation({
-      title: "Save dashboard draft filters?",
-      description: "These values will be saved as dashboard draft filters. Fields marked Needs routing are not runtime-active until filter domain wiring is complete.",
-      confirmTone: "primary",
-      onConfirm: performSaveFilters,
-    });
-  }
-
-  async function performSaveFilters() {
-    if (!filters) return;
-
-    setIsSaving(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const savedFilters = await readApiResponse<InstagramFilters>(
-        await fetch("/api/instagram-dashboard/filters", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(filters),
-        }),
-        "Could not save account filters."
-      );
-      setFilters(savedFilters);
-      setSuccess("Dashboard draft filters saved. Runtime wiring is still pending for fields marked Needs routing.");
-      router.refresh();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save account filters.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
   async function stopRun() {
     setError("");
     setSuccess("");
@@ -1594,11 +1611,9 @@ export default function InstagramDashboardButtons({
                   settingsTab,
                   selectSettingsTab,
                   updateSetting,
-                  updateFilter,
                   saveSettings,
                   saveDmSettings,
                   saveUnfollowSettings,
-                  saveFilters,
                   openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
                   openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
                   closePanel,
@@ -1898,6 +1913,32 @@ export default function InstagramDashboardButtons({
         .ig-dm-target-panel {
           display: grid;
           gap: 14px;
+        }
+
+        .ig-filters-target-panel {
+          display: grid;
+          gap: 14px;
+        }
+
+        .ig-filters-section {
+          border: 1px solid rgba(255,255,255,0.09);
+          border-radius: 18px;
+          background: rgba(255,255,255,0.03);
+          padding: 14px;
+        }
+
+        .ig-filters-section-head h3 {
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 1.02rem;
+          margin: 0 0 6px;
+        }
+
+        .ig-filters-section-head p {
+          color: rgba(255,255,255,0.50);
+          font-size: 12px;
+          line-height: 1.4;
+          margin: 0 0 12px;
         }
 
         .ig-dm-card {
@@ -2542,11 +2583,9 @@ function renderSettingsTabs({
   settingsTab,
   selectSettingsTab,
   updateSetting,
-  updateFilter,
   saveSettings,
   saveDmSettings,
   saveUnfollowSettings,
-  saveFilters,
   openSaveTemplate,
   openApplyTemplate,
   closePanel,
@@ -2562,11 +2601,9 @@ function renderSettingsTabs({
   settingsTab: SettingsTab;
   selectSettingsTab: (tab: SettingsTab) => void | Promise<void>;
   updateSetting: (key: string, value: ConfigValue) => void;
-  updateFilter: (key: string, value: ConfigValue) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveUnfollowSettings: (event: FormEvent<HTMLFormElement>) => void;
-  saveFilters: (event: FormEvent<HTMLFormElement>) => void;
   openSaveTemplate: (source: "settings" | "filters") => void;
   openApplyTemplate: (source: "settings" | "filters") => void;
   closePanel: () => void;
@@ -2578,20 +2615,32 @@ function renderSettingsTabs({
 }) {
   const isFiltersTab = settingsTab === "Filters";
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
-  const hasEditableFields = fields.some((field) => !field.readOnly);
+  const hasEditableFields = fields.some((field) => !field.readOnly && !field.disabled);
   const isDmTab = settingsTab === "DM";
   const isFollowTab = settingsTab === "Follow";
   const isFollowbackTab = settingsTab === "Followback";
-  const showDraftBanner = (hasEditableFields || isFiltersTab) && !isDmTab && !isFollowTab && !isFollowbackTab;
+  const showDraftBanner = hasEditableFields && !isDmTab && !isFollowTab && !isFollowbackTab && !isFiltersTab;
   const dmDirty = isDmTab && !sameDmPayload(settings, settingsBaseline);
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
   const unfollowDirty = isFollowbackTab && !sameUnfollowPayload(settings, settingsBaseline);
   const unfollowValidationError = isFollowbackTab ? unfollowClientValidationError(settings) : "";
 
+  function preventFiltersSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+  }
+
   return (
     <form
       className="ig-settings-form"
-      onSubmit={isDmTab ? saveDmSettings : isFollowbackTab ? saveUnfollowSettings : isFiltersTab ? saveFilters : saveSettings}
+      onSubmit={
+        isDmTab
+          ? saveDmSettings
+          : isFollowbackTab
+            ? saveUnfollowSettings
+            : isFiltersTab
+              ? preventFiltersSubmit
+              : saveSettings
+      }
     >
       <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
         {settingsTabs.map((tab) => (
@@ -2609,6 +2658,7 @@ function renderSettingsTabs({
       </div>
 
       {showDraftBanner ? <p className="ig-settings-message">{DRAFT_SETTINGS_BANNER}</p> : null}
+      {isFiltersTab ? <p className="ig-settings-message">{FILTERS_LEGACY_BANNER}</p> : null}
       {settingsTab === "Sources" ? (
         <p className="ig-settings-message">CT targets are managed in the Targets panel. Source policy fields here are draft settings for future Phone Farm routing.</p>
       ) : null}
@@ -2637,26 +2687,28 @@ function renderSettingsTabs({
             ))}
           </div>
         </>
+      ) : isFiltersTab ? (
+        <FiltersTargetPanel filters={filters} />
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
             <ConfigField
               key={field.key}
               field={field}
-              value={isFiltersTab ? filters[field.key] : settings[field.key]}
-              onChange={(value) => (isFiltersTab ? updateFilter(field.key, value) : updateSetting(field.key, value))}
+              value={settings[field.key]}
+              onChange={(value) => updateSetting(field.key, value)}
             />
           ))}
         </div>
       )}
 
       <FormMessages error={error} success={success} />
-      {!isDmTab && !isFollowTab && !isFollowbackTab && (hasEditableFields || isFiltersTab) ? (
+      {!isDmTab && !isFollowTab && !isFollowbackTab && !isFiltersTab && hasEditableFields ? (
         <div className="ig-template-actions">
-          <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
+          <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate("settings")} disabled={isSaving}>
             Save as Template
           </button>
-          <button type="button" className="ig-settings-secondary" onClick={() => openApplyTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
+          <button type="button" className="ig-settings-secondary" onClick={() => openApplyTemplate("settings")} disabled={isSaving}>
             Apply Template
           </button>
         </div>
@@ -2676,10 +2728,39 @@ function renderSettingsTabs({
           isSaving={isSaving}
           label="Save Unfollow settings"
         />
+      ) : isFiltersTab ? (
+        <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={false} />
       ) : (
-        <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields || isFiltersTab} />
+        <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields} />
       )}
     </form>
+  );
+}
+
+function FiltersTargetPanel({ filters }: { filters: InstagramFilters }) {
+  return (
+    <div className="ig-filters-target-panel">
+      {filterSections.map((section) => (
+        <section key={section.title} className="ig-filters-section">
+          <div className="ig-filters-section-head">
+            <h3>{section.title}</h3>
+            <p>{section.description}</p>
+          </div>
+          {section.fields.length > 0 ? (
+            <div className="ig-settings-grid">
+              {section.fields.map((field) => (
+                <ConfigField
+                  key={field.key}
+                  field={field}
+                  value={filters[field.key]}
+                  onChange={() => undefined}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ))}
+    </div>
   );
 }
 
