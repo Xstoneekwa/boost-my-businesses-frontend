@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { getAccountPackageSummaries } from "./package-summary-data";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -20,6 +21,9 @@ export type ManageAccount = {
   customerStatus: string;
   subscriptionStatus: string;
   packageLabel: string;
+  commercialAddonsLabel: string;
+  outreachSourceLabel: string;
+  runtimeProfilesLabel: string;
   entitlementSummary: string;
   credentialsConfigured: boolean | null;
   credentialsStatus: string;
@@ -95,6 +99,10 @@ const emptyMarker = "—";
 const legacyAccountsSource = "legacy ig_accounts";
 const adminDashboardSource = "admin-dashboard manage_overview";
 const adminDashboardTimeoutMs = 9000;
+const packagePending = "Package pending";
+const noCommercialAddons = "No add-ons";
+const outreachPending = "pending_source_classification";
+const runtimeProfilePending = "Runtime profile pending";
 
 class ManageApiError extends Error {
   constructor(message: string) {
@@ -149,6 +157,20 @@ function readString(row: SupabaseRecord | undefined, keys: string[], fallback = 
 function readOptionalString(row: SupabaseRecord | undefined, keys: string[]) {
   const value = readString(row, keys, "");
   return value || null;
+}
+
+function readStringList(row: SupabaseRecord | undefined, keys: string[], fallback = "unknown") {
+  if (!row) return fallback;
+  for (const key of keys) {
+    const value = row[key];
+    if (Array.isArray(value)) {
+      const items = value.map((item) => readString({ item }, ["item"], "")).filter(Boolean);
+      if (items.length) return items.join(", ");
+    }
+    const text = readString(row, [key], "");
+    if (text) return text;
+  }
+  return fallback;
 }
 
 function safeProfileImageUrlFromRow(row: SupabaseRecord | undefined) {
@@ -349,6 +371,51 @@ async function enrichWithPublicProfileMetadata(overview: ManageOverview): Promis
   }
 }
 
+async function enrichWithCommercialPackageSummaries(overview: ManageOverview): Promise<ManageOverview> {
+  const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return overview;
+
+  try {
+    const summaryByAccount = await getAccountPackageSummaries(accountIds);
+    const enrich = (account: ManageAccount): ManageAccount => {
+      const summary = summaryByAccount.get(account.accountId);
+      if (!summary) {
+        return {
+          ...account,
+          packageLabel: packagePending,
+          commercialAddonsLabel: noCommercialAddons,
+          outreachSourceLabel: outreachPending,
+          runtimeProfilesLabel: runtimeProfilePending,
+        };
+      }
+      return {
+        ...account,
+        packageLabel: summary.commercialPackageLabel,
+        commercialAddonsLabel: summary.commercialAddonsLabel,
+        outreachSourceLabel: summary.outreachSourceLabel,
+        runtimeProfilesLabel: summary.runtimeProfilesLabel,
+        entitlementSummary: summary.entitlementSummary === "unknown" ? account.entitlementSummary : summary.entitlementSummary,
+      };
+    };
+
+    const activeAccounts = overview.activeAccounts.map(enrich);
+    const archivedAccounts = overview.archivedAccounts.map(enrich);
+    const trashedAccounts = overview.trashedAccounts.map(enrich);
+    return {
+      ...overview,
+      activeAccounts,
+      archivedAccounts,
+      trashedAccounts,
+      allAccounts: [...activeAccounts, ...archivedAccounts, ...trashedAccounts],
+    };
+  } catch {
+    return {
+      ...overview,
+      errors: ["Commercial package summary unavailable.", ...overview.errors],
+    };
+  }
+}
+
 function adminDashboardConfig() {
   const url = process.env.ADMIN_DASHBOARD_API_URL?.trim();
   const token = process.env.ADMIN_DASHBOARD_INTERNAL_API_TOKEN?.trim();
@@ -377,7 +444,7 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
   const credentialsStatus = readString(account, ["credentials_status", "credential_status"], readString(accountSettings, ["credentials_status", "credential_status"], "unknown"));
   const latestRunStatus = readString(latestRun, ["status", "run_status", "state"], "unknown");
   const pendingActionsCount = isAttentionStatus(`${adminStatus} ${latestRunStatus} ${loginStatus} ${credentialsStatus}`) ? 1 : 0;
-  const campaign = readString(account, ["campaign", "campaign_name"], readString(target, ["campaign", "campaign_name", "target_name", "name"], "unknown"));
+  void target;
 
   return {
     accountId,
@@ -388,7 +455,10 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
     adminStatus,
     customerStatus: "unknown",
     subscriptionStatus: "unknown",
-    packageLabel: campaign,
+    packageLabel: packagePending,
+    commercialAddonsLabel: noCommercialAddons,
+    outreachSourceLabel: outreachPending,
+    runtimeProfilesLabel: runtimeProfilePending,
     entitlementSummary: "Legacy source",
     credentialsConfigured: credentialsStatus === "configured" ? true : null,
     credentialsStatus,
@@ -436,8 +506,11 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     adminStatus: readString(row, ["admin_status"], "unknown"),
     customerStatus: readString(row, ["customer_status"], "unknown"),
     subscriptionStatus: readString(row, ["subscription_status"], "unknown"),
-    packageLabel: readString(row, ["package_label"], "unknown"),
-    entitlementSummary: readString(row, ["entitlement_summary"], "unknown"),
+    packageLabel: packagePending,
+    commercialAddonsLabel: noCommercialAddons,
+    outreachSourceLabel: outreachPending,
+    runtimeProfilesLabel: readString(row, ["runtime_profiles", "runtime_profile"], runtimeProfilePending),
+    entitlementSummary: readStringList(row, ["entitlement_summary"], "unknown"),
     credentialsConfigured: readNullableBoolean(row, ["credentials_configured"]),
     credentialsStatus,
     reauthRequired,
@@ -672,7 +745,7 @@ export async function getManageData() {
   if (!adminDashboardConfig()) {
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    return await enrichWithPublicProfileMetadata(overview);
+    return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(overview));
   }
 
   try {
@@ -684,5 +757,5 @@ export async function getManageData() {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  return await enrichWithPublicProfileMetadata(overview);
+  return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(overview));
 }

@@ -123,7 +123,7 @@ type LogRow = {
 };
 
 type Panel = "settings" | "stats" | "logs" | "filters" | null;
-type SettingsTab = "General" | "Schedule" | "Actions" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Advanced";
+type SettingsTab = "General" | "Schedule" | "Follow" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Advanced";
 type FieldType = "text" | "password" | "time" | "date" | "number" | "toggle" | "textarea" | "select";
 type RuntimeStatus = "active" | "needs-routing" | "read-only" | "ops-only" | "deprecated";
 
@@ -269,7 +269,7 @@ const trashedAccountTools: AccountTool[] = [
   { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
 ];
 
-const settingsTabs: SettingsTab[] = ["General", "Schedule", "Actions", "DM", "Followback", "Sources", "Filters", "Safety", "Advanced"];
+const settingsTabs: SettingsTab[] = ["General", "Schedule", "Follow", "DM", "Followback", "Sources", "Filters", "Safety", "Advanced"];
 
 const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   General: [
@@ -294,14 +294,22 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "pause_account_until", label: "Pause account until", type: "date", runtimeStatus: "needs-routing", helper: "Target: lifecycle pause action API." },
     { key: "randomize_start_enabled", label: "Randomize start", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
   ],
-  Actions: [
-    { key: "follow_limit", label: "Follow limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: ig_account_follow_settings / package cap resolver." },
-    { key: "total_follows_limit", label: "Total follows limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: follow policy API with min(package, DB, env)." },
-    { key: "total_unfollows_limit", label: "Total unfollows limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_per_day_limit." },
-    { key: "unfollow_delay_days", label: "Unfollow delay days", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_after_days." },
-    { key: "total_likes_limit", label: "Total likes limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
-    { key: "likes_per_follow_min", label: "Likes per follow min", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
-    { key: "likes_per_follow_max", label: "Likes per follow max", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
+  Follow: [
+    { key: "commercial_package_label", label: "Commercial package", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: account_package_summary.commercial_package_label." },
+    { key: "package_follow_day_cap", label: "Package follow cap/day", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Strict package ceiling from commercial_packages." },
+    { key: "manual_follow_day_cap", label: "Manual follow cap/day", type: "number", min: 0, runtimeStatus: "active", helper: "Saved to Supabase. Effective cap uses min(package, warmup, manual, remaining today)." },
+    { key: "manual_follow_session_cap", label: "Manual follow cap/session", type: "number", min: 0, runtimeStatus: "active", helper: "Saved to Supabase. Worker uses this as the Follow per-run ceiling when runtime wiring is available." },
+    { key: "effective_follow_cap_today", label: "Effective follow cap today", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Preview: min(package cap, warmup cap, manual day/session caps, remaining today)." },
+    { key: "follow_limiting_reason", label: "Limiting reason", type: "text", readOnly: true, runtimeStatus: "read-only" },
+    { key: "warmup_enabled", label: "Warmup enabled", type: "toggle", runtimeStatus: "active", helper: "Saved in account_warmup_settings. Requires package/service start date to apply a ramp." },
+    { key: "warmup_status", label: "Warmup status", type: "text", readOnly: true, runtimeStatus: "read-only" },
+    { key: "warmup_day", label: "Current warmup day", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only" },
+    { key: "package_started_at", label: "Package/service start date", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Pending until an operator sets the package/service start date. No silent warmup reset." },
+    { key: "day_1_follow_cap", label: "Day 1 follow cap", type: "number", min: 0, runtimeStatus: "active", helper: "Strict maximum: 10. Save refuses higher values." },
+    { key: "day_2_follow_cap", label: "Day 2 follow cap", type: "number", min: 0, runtimeStatus: "active", helper: "Strict maximum: 20. Save refuses higher values." },
+    { key: "day_3_follow_cap", label: "Day 3 follow cap", type: "number", min: 0, runtimeStatus: "active", helper: "Strict maximum: 40. Save refuses higher values." },
+    { key: "day_4_plus_follow_cap", label: "Day 4+ follow cap", type: "number", min: 0, runtimeStatus: "active", helper: "Strict maximum: package Follow cap." },
+    { key: "effective_warmup_cap_today", label: "Effective warmup cap today", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only" },
   ],
   DM: [
     { key: "welcome_dm_runtime_enabled", label: "Welcome enabled", type: "toggle", readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.welcome_enabled." },
@@ -377,7 +385,7 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "max_actions_per_day", label: "Max actions per day", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: package/safety cap resolver." },
     { key: "random_delay_min_seconds", label: "Random delay min seconds", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: pacing domain policy." },
     { key: "random_delay_max_seconds", label: "Random delay max seconds", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: pacing domain policy." },
-    { key: "warmup_mode", label: "Warmup mode", type: "toggle", runtimeStatus: "needs-routing" },
+    { key: "warmup_mode", label: "Legacy warmup mode", type: "toggle", readOnly: true, runtimeStatus: "deprecated", helper: "Superseded by Follow tab account_warmup_settings." },
     { key: "stop_on_suspicious_screen", label: "Stop on suspicious screen", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/incident policy API." },
     { key: "stop_on_login_challenge", label: "Stop on login challenge", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/incident policy API." },
     { key: "stop_on_checkpoint", label: "Stop on checkpoint", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/incident policy API." },
@@ -746,7 +754,10 @@ export function getDmServiceAvailability({
 }): DmServiceAvailability {
   const packageText = packageLabel ?? "";
   const entitlementText = entitlementSummary ?? "";
-  const packageKnown = Boolean(packageText.trim() || entitlementText.trim());
+  const normalizedPackageText = packageText.trim().toLowerCase();
+  const packageKnown = Boolean(
+    (packageText.trim() && normalizedPackageText !== "package pending") || entitlementText.trim(),
+  );
   const welcomeStatus = (welcomeEntitlementStatus ?? "").trim().toLowerCase();
   const outreachStatus = (outreachEntitlementStatus ?? "").trim().toLowerCase();
   const welcomeTemplate = (welcomeTemplateStatus ?? "").trim().toLowerCase();
@@ -756,7 +767,7 @@ export function getDmServiceAvailability({
   const hasOutreachRuntimeSignal =
     typeof outreachEnabled === "boolean" || Boolean(outreachEntitlementStatus?.trim() || outreachTemplateStatus?.trim());
   const welcomePackageFallback = normalizedContainsAny(packageText, ["pro", "premium"]);
-  const outreachPackageFallback = normalizedContainsAny(packageText, ["addon", "add-on", "standalone"]);
+  const outreachPackageFallback = normalizedContainsAny(packageText, ["outreach standalone"]);
 
   const welcomeServiceActive =
     ["active", "enabled", "ready", "included"].includes(welcomeStatus) ||
@@ -2569,8 +2580,9 @@ function renderSettingsTabs({
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
   const hasEditableFields = fields.some((field) => !field.readOnly);
   const isDmTab = settingsTab === "DM";
+  const isFollowTab = settingsTab === "Follow";
   const isFollowbackTab = settingsTab === "Followback";
-  const showDraftBanner = (hasEditableFields || isFiltersTab) && !isDmTab && !isFollowbackTab;
+  const showDraftBanner = (hasEditableFields || isFiltersTab) && !isDmTab && !isFollowTab && !isFollowbackTab;
   const dmDirty = isDmTab && !sameDmPayload(settings, settingsBaseline);
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
   const unfollowDirty = isFollowbackTab && !sameUnfollowPayload(settings, settingsBaseline);
@@ -2639,7 +2651,7 @@ function renderSettingsTabs({
       )}
 
       <FormMessages error={error} success={success} />
-      {!isDmTab && !isFollowbackTab && (hasEditableFields || isFiltersTab) ? (
+      {!isDmTab && !isFollowTab && !isFollowbackTab && (hasEditableFields || isFiltersTab) ? (
         <div className="ig-template-actions">
           <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
             Save as Template

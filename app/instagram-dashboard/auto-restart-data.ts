@@ -39,6 +39,9 @@ export type AutoRestartCandidate = {
   accountId: string;
   username: string;
   packageLabel: string;
+  commercialAddonsLabel: string;
+  outreachSourceLabel: string;
+  runtimeProfilesLabel: string;
   enabledServices: string[];
   phoneName: string;
   phoneRestStatus: string;
@@ -163,12 +166,13 @@ function defaultRules(): AutoRestartRulePreview {
 function inferPackageDefaults(account: ManageAccount) {
   const label = account.packageLabel || "Unknown package";
   const normalized = label.toLowerCase();
-  const entitlementText = account.entitlementSummary.toLowerCase();
   const isGrowth = normalized.includes("growth");
-  const isPro = normalized.includes("pro") || (!isGrowth && entitlementText.includes("follow") && entitlementText.includes("unfollow"));
-  const outreachEnabled = entitlementText.includes("outreach");
-  const welcomeEnabled = isPro || normalized.includes("premium") || entitlementText.includes("welcome");
-  const followCap = isGrowth ? 80 : isPro || normalized.includes("premium") ? 120 : 0;
+  const isPro = normalized.includes("pro");
+  const isPremium = normalized.includes("premium");
+  const isOutreachStandalone = normalized.includes("outreach standalone");
+  const hasOutreachAddon = account.commercialAddonsLabel.toLowerCase().includes("outreach");
+  const welcomeEnabled = isPro || isPremium;
+  const followCap = isGrowth ? 80 : isPro || isPremium ? 120 : 0;
   const unfollowCap = followCap;
 
   return {
@@ -176,7 +180,7 @@ function inferPackageDefaults(account: ManageAccount) {
     followCap,
     unfollowCap,
     welcomeCap: welcomeEnabled ? 10 : 0,
-    outreachCap: outreachEnabled ? 30 : 0,
+    outreachCap: isOutreachStandalone || hasOutreachAddon ? 30 : 0,
   };
 }
 
@@ -223,6 +227,7 @@ function planCandidate({
   settings,
   unfollowSettings,
   dmSettings,
+  packageSummary,
   interactions,
   activeRun,
   activeRequest,
@@ -232,6 +237,7 @@ function planCandidate({
   settings: SupabaseRecord | undefined;
   unfollowSettings: SupabaseRecord | undefined;
   dmSettings: SupabaseRecord | undefined;
+  packageSummary: SupabaseRecord | undefined;
   interactions: SupabaseRecord[];
   activeRun: SupabaseRecord | undefined;
   activeRequest: SupabaseRecord | undefined;
@@ -239,7 +245,10 @@ function planCandidate({
 }): AutoRestartCandidate {
   const packageDefaults = inferPackageDefaults(account);
   const followEnabled = readBoolean(settings?.follow_enabled, false);
-  const followDayCap = readNumber(settings?.total_follows_limit, packageDefaults.followCap);
+  const effectiveCapsPreview = typeof packageSummary?.effective_caps_preview === "object" && packageSummary.effective_caps_preview && !Array.isArray(packageSummary.effective_caps_preview)
+    ? packageSummary.effective_caps_preview as SupabaseRecord
+    : undefined;
+  const followDayCap = readNumber(effectiveCapsPreview?.follow_day, readNumber(settings?.max_actions_per_day, packageDefaults.followCap));
   const followSessionCap = readNumber(settings?.follow_limit, followDayCap);
   const unfollowEnabled = readBoolean(unfollowSettings?.unfollow_enabled, false);
   const unfollowDayCap = readNumber(unfollowSettings?.unfollow_per_day_limit, packageDefaults.unfollowCap);
@@ -257,7 +266,7 @@ function planCandidate({
     capDay: followDayCap,
     sessionCap: followSessionCap,
     enabled: followEnabled,
-    sourceLabel: "ig_account_settings + ig_interacted_users.followed_at",
+    sourceLabel: "account_package_summary warmup preview + ig_interacted_users.followed_at",
   });
   const unfollow = quota({
     doneToday: countToday(interactions, (row) => rowDateToday(row, "unfollowed_at", since) && readString(row.unfollow_result) === "success"),
@@ -305,6 +314,9 @@ function planCandidate({
     accountId: account.accountId,
     username: account.username,
     packageLabel: packageDefaults.label,
+    commercialAddonsLabel: account.commercialAddonsLabel,
+    outreachSourceLabel: account.outreachSourceLabel,
+    runtimeProfilesLabel: account.runtimeProfilesLabel,
     enabledServices: [
       followEnabled ? "Follow" : "",
       unfollowEnabled ? "Unfollow" : "",
@@ -355,8 +367,9 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     runtimeEventsResult,
     workerHeartbeatsResult,
     deviceHeartbeatsResult,
+    packageSummaryResult,
   ] = await Promise.all([
-    supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
+    supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_dm_settings").select("account_id,welcome_enabled,outreach_enabled,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit").in("account_id", accountIds).limit(500),
     supabase.from("ig_interacted_users").select("account_id,followed_at,unfollowed_at,unfollow_result,was_successful,welcome_dm_sent,dm_sent,updated_at").in("account_id", accountIds).or(`followed_at.gte.${since},unfollowed_at.gte.${since},updated_at.gte.${since}`).limit(5000),
@@ -365,6 +378,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("runtime_events").select("id,created_at,event_type,reason,source,job_id,metadata").ilike("event_type", "%restart%").order("created_at", { ascending: false }).limit(10),
     supabase.from("worker_heartbeats").select("worker_id,status,last_seen_at").order("last_seen_at", { ascending: false }).limit(20),
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
+    supabase.from("account_package_summary").select("account_id,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
   ]);
 
   const errors = [
@@ -377,6 +391,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     runtimeEventsResult.error,
     workerHeartbeatsResult.error,
     deviceHeartbeatsResult.error,
+    packageSummaryResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -387,6 +402,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const interactionsByAccount = groupByAccount((interactionsResult.data ?? []) as SupabaseRecord[]);
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
+  const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
 
   const candidates = manageData.activeAccounts
     .map((account) => planCandidate({
@@ -394,6 +410,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       settings: settingsByAccount.get(account.accountId),
       unfollowSettings: unfollowByAccount.get(account.accountId),
       dmSettings: dmByAccount.get(account.accountId),
+      packageSummary: packageSummaryByAccount.get(account.accountId),
       interactions: interactionsByAccount.get(account.accountId) ?? [],
       activeRun: activeRunsByAccount.get(account.accountId),
       activeRequest: activeRequestsByAccount.get(account.accountId),
@@ -427,7 +444,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       { label: "Phone rest", status: "pending", detail: "No dedicated phone-rest settings table is wired yet." },
       { label: "6h session window", status: "pending", detail: "Session window enforcement is not wired to scheduler settings yet." },
       { label: "Active run/request protection", status: "connected", detail: "Preview blocks accounts with active ig_runs or account_run_requests." },
-      { label: "Package cap alignment", status: "partial", detail: "Uses dashboard package labels and domain caps; explicit package preset table is still recommended." },
+      { label: "Package cap alignment", status: "partial", detail: "Uses account_package_summary when available plus domain caps; runtime profiles are displayed separately." },
     ],
     sourceStatus: [
       { label: "Auto Restart settings", status: "pending", detail: "No auto_restart_settings table or PATCH API yet; preview defaults are read-only." },

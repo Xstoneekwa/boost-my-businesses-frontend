@@ -72,6 +72,11 @@ const stringDefaults = {
   limiting_reason: "Unknown",
   runtime_cap_mode: "prod_normal",
   runtime_cap_source: "supabase_domain_caps",
+  commercial_package_label: "Package pending",
+  warmup_status: "pending_package_start",
+  warmup_profile_code: "follow_default_v1",
+  package_started_at: "",
+  follow_limiting_reason: "Unknown",
 } satisfies Record<string, string>;
 
 const booleanDefaults = {
@@ -91,6 +96,7 @@ const booleanDefaults = {
   safe_review_mode: true,
   welcome_dm_runtime_enabled: false,
   outreach_dm_runtime_enabled: false,
+  warmup_enabled: true,
   followback_on_followers: false,
   unfollow_non_followers: false,
   unfollow_any: false,
@@ -130,6 +136,17 @@ const numberDefaults = {
   speed_multiplier: 1,
   follow_limit: 20,
   total_follows_limit: 100,
+  manual_follow_day_cap: 120,
+  manual_follow_session_cap: 20,
+  package_follow_day_cap: 0,
+  effective_follow_cap_today: 0,
+  effective_warmup_cap_today: 0,
+  follow_day_remaining: 0,
+  warmup_day: 0,
+  day_1_follow_cap: 10,
+  day_2_follow_cap: 20,
+  day_3_follow_cap: 40,
+  day_4_plus_follow_cap: 120,
   follow_percentage: 100,
   total_unfollows_limit: 0,
   unfollow_delay_days: 7,
@@ -220,6 +237,23 @@ const runtimeProjectionKeys = [
   "runtime_hard_cap",
   "unfollow_day_remaining",
   "do_unfollow_first",
+  "commercial_package_label",
+  "package_follow_day_cap",
+  "manual_follow_day_cap",
+  "manual_follow_session_cap",
+  "effective_follow_cap_today",
+  "effective_warmup_cap_today",
+  "follow_day_remaining",
+  "follow_limiting_reason",
+  "warmup_enabled",
+  "warmup_status",
+  "warmup_day",
+  "warmup_profile_code",
+  "package_started_at",
+  "day_1_follow_cap",
+  "day_2_follow_cap",
+  "day_3_follow_cap",
+  "day_4_plus_follow_cap",
 ] as const;
 
 function persistableSettings(settings: SettingsPayload): SettingsPayload {
@@ -302,6 +336,20 @@ async function countSuccessfulUnfollowsToday(
     .eq("account_id", accountId)
     .eq("unfollow_result", "success")
     .gte("unfollowed_at", since);
+  if (error) return null;
+  return count ?? 0;
+}
+
+async function countSuccessfulFollowsToday(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const since = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+  const { count, error } = await supabase
+    .from("ig_interacted_users")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId)
+    .gte("followed_at", since);
   if (error) return null;
   return count ?? 0;
 }
@@ -550,6 +598,139 @@ async function withUnfollowRuntimeStatus(
   };
 }
 
+function readJsonNumber(row: SupabaseRecord | null | undefined, key: string, fallback = 0) {
+  if (!row || typeof row !== "object") return fallback;
+  return readNumber(row[key], fallback);
+}
+
+function readJsonBoolean(row: SupabaseRecord | null | undefined, key: string, fallback = false) {
+  if (!row || typeof row !== "object") return fallback;
+  return readBoolean(row[key], fallback);
+}
+
+function resolveWarmupFollowCap({
+  warmupEnabled,
+  warmupDay,
+  day1,
+  day2,
+  day3,
+  day4Plus,
+  packageCap,
+}: {
+  warmupEnabled: boolean;
+  warmupDay: number | null;
+  day1: number;
+  day2: number;
+  day3: number;
+  day4Plus: number;
+  packageCap: number;
+}) {
+  if (!warmupEnabled) return packageCap;
+  if (warmupDay === null) return packageCap;
+  if (warmupDay <= 1) return day1;
+  if (warmupDay === 2) return day2;
+  if (warmupDay === 3) return day3;
+  return Math.min(day4Plus, packageCap);
+}
+
+function followLimitingReason({
+  effective,
+  packageCap,
+  manualDayCap,
+  warmupCap,
+  remaining,
+  warmupStatus,
+}: {
+  effective: number;
+  packageCap: number;
+  manualDayCap: number;
+  warmupCap: number;
+  remaining: number;
+  warmupStatus: string;
+}) {
+  if (effective <= 0 && remaining <= 0) return "limited_by_daily_remaining";
+  if (warmupStatus === "pending_package_start") return "warmup_pending_package_start";
+  if (effective === remaining && remaining < Math.min(packageCap, manualDayCap, warmupCap)) return "limited_by_daily_remaining";
+  if (effective === warmupCap && warmupCap < Math.min(packageCap, manualDayCap)) return "limited_by_warmup";
+  if (effective === manualDayCap && manualDayCap < Math.min(packageCap, warmupCap)) return "limited_by_manual_cap";
+  if (effective === packageCap && packageCap < Math.min(manualDayCap, warmupCap)) return "limited_by_package_cap";
+  return "ready";
+}
+
+async function withFollowRuntimeStatus(
+  settings: SettingsPayload,
+  supabase: ReturnType<typeof createSupabaseClient>,
+) {
+  const { data: summary } = await supabase
+    .from("account_package_summary")
+    .select("commercial_package_label,warmup_status,warmup_day,package_started_at,package_caps,effective_caps_preview")
+    .eq("account_id", settings.account_id)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  const packageCaps = (summary?.package_caps && typeof summary.package_caps === "object" && !Array.isArray(summary.package_caps))
+    ? summary.package_caps as SupabaseRecord
+    : null;
+  const preview = (summary?.effective_caps_preview && typeof summary.effective_caps_preview === "object" && !Array.isArray(summary.effective_caps_preview))
+    ? summary.effective_caps_preview as SupabaseRecord
+    : null;
+  const packageFollowCap = readJsonNumber(packageCaps, "follow_day", 0);
+  const manualDayCap = readNumber(settings.max_actions_per_day, packageFollowCap);
+  const manualSessionCap = readNumber(settings.follow_limit, Math.min(packageFollowCap || 20, 20));
+  const warmupEnabled = readJsonBoolean(preview, "warmup_enabled", readBoolean(settings.warmup_mode, true));
+  const day1 = readJsonNumber(preview, "day_1_follow_cap", 10);
+  const day2 = readJsonNumber(preview, "day_2_follow_cap", 20);
+  const day3 = readJsonNumber(preview, "day_3_follow_cap", 40);
+  const day4Plus = readJsonNumber(preview, "day_4_plus_follow_cap", packageFollowCap);
+  const rawWarmupDay = readNumber(summary?.warmup_day, 0);
+  const warmupDay = rawWarmupDay > 0 ? rawWarmupDay : null;
+  const warmupCap = resolveWarmupFollowCap({
+    warmupEnabled,
+    warmupDay,
+    day1,
+    day2,
+    day3,
+    day4Plus,
+    packageCap: packageFollowCap,
+  });
+  const followsDoneToday = await countSuccessfulFollowsToday(supabase, settings.account_id);
+  const remaining = followsDoneToday === null ? manualDayCap : Math.max(0, manualDayCap - followsDoneToday);
+  const effective = Math.max(0, Math.min(
+    packageFollowCap || manualDayCap,
+    manualDayCap,
+    manualSessionCap,
+    warmupCap || manualDayCap,
+    remaining,
+  ));
+  const warmupStatus = readString(summary?.warmup_status, "pending_package_start");
+
+  return {
+    ...settings,
+    commercial_package_label: readString(summary?.commercial_package_label, "Package pending"),
+    package_follow_day_cap: packageFollowCap,
+    manual_follow_day_cap: manualDayCap,
+    manual_follow_session_cap: manualSessionCap,
+    effective_follow_cap_today: effective,
+    follow_day_remaining: remaining,
+    follow_limiting_reason: followLimitingReason({
+      effective,
+      packageCap: packageFollowCap || manualDayCap,
+      manualDayCap,
+      warmupCap: warmupCap || manualDayCap,
+      remaining,
+      warmupStatus,
+    }),
+    warmup_enabled: warmupEnabled,
+    warmup_status: warmupStatus,
+    warmup_day: warmupDay ?? 0,
+    warmup_profile_code: "follow_default_v1",
+    package_started_at: readString(summary?.package_started_at, ""),
+    day_1_follow_cap: day1,
+    day_2_follow_cap: day2,
+    day_3_follow_cap: day3,
+    day_4_plus_follow_cap: day4Plus || packageFollowCap,
+  };
+}
+
 function preserveProtectedSettings(settings: SettingsPayload, existing: SettingsRecord | null | undefined) {
   if (!existing) return settings;
   const existingSettings = normalizeSettings(existing, settings.account_id);
@@ -562,6 +743,151 @@ function preserveProtectedSettings(settings: SettingsPayload, existing: Settings
     app_package: existingSettings.app_package,
     cloned_app_mode: existingSettings.cloned_app_mode,
   };
+}
+
+function withFollowManualAliases(settings: SettingsPayload) {
+  return {
+    ...settings,
+    max_actions_per_day: readNumber(settings.manual_follow_day_cap, readNumber(settings.max_actions_per_day, 120)),
+    follow_limit: readNumber(settings.manual_follow_session_cap, readNumber(settings.follow_limit, 20)),
+  };
+}
+
+function warmupAuditSummary(row: SupabaseRecord | null | undefined) {
+  if (!row) return {};
+  return {
+    warmup_enabled: readBoolean(row.warmup_enabled, true),
+    package_started_at: readString(row.package_started_at, ""),
+    warmup_profile_code: readString(row.warmup_profile_code, "follow_default_v1"),
+    day_1_follow_cap: readNumber(row.day_1_follow_cap, 10),
+    day_2_follow_cap: readNumber(row.day_2_follow_cap, 20),
+    day_3_follow_cap: readNumber(row.day_3_follow_cap, 40),
+    day_4_plus_follow_cap: readNumber(row.day_4_plus_follow_cap, 0),
+    status: readString(row.status, "pending_package_start"),
+  };
+}
+
+function changedWarmupFields(oldSummary: Record<string, unknown>, newSummary: Record<string, unknown>) {
+  return Object.keys(newSummary).filter((key) => oldSummary[key] !== newSummary[key]);
+}
+
+async function recordFollowWarmupAudit(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: {
+    accountId: string;
+    fieldsChanged: string[];
+    oldSummary: Record<string, unknown>;
+    newSummary: Record<string, unknown>;
+  },
+) {
+  await supabase.from("ig_action_logs").insert({
+    account_id: input.accountId,
+    run_id: null,
+    target_username: null,
+    action_type: "follow_warmup_settings_saved",
+    status: "success",
+    message: "Follow warmup settings saved from admin dashboard.",
+    payload: {
+      actor_type: "admin",
+      source_surface: "admin_dashboard",
+      domain: "follow_warmup",
+      fields_changed: input.fieldsChanged,
+      old_summary: input.oldSummary,
+      new_summary: input.newSummary,
+    },
+    created_at: new Date().toISOString(),
+  });
+}
+
+async function packageFollowCapForAccount(supabase: ReturnType<typeof createSupabaseClient>, accountId: string) {
+  const { data, error } = await supabase
+    .from("account_package_summary")
+    .select("package_caps")
+    .eq("account_id", accountId)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (error) return null;
+  const caps = data?.package_caps;
+  if (!caps || typeof caps !== "object" || Array.isArray(caps)) return null;
+  return readNumber((caps as SupabaseRecord).follow_day, Number.NaN);
+}
+
+async function saveWarmupSettings(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  settings: SettingsPayload,
+) {
+  const packageFollowCap = await packageFollowCapForAccount(supabase, settings.account_id);
+  if (packageFollowCap === null || !Number.isFinite(packageFollowCap) || packageFollowCap < 1) {
+    return "Cannot save Follow warmup: commercial package Follow cap is unavailable.";
+  }
+  const packageCap = Number(packageFollowCap);
+
+  const day1 = readNumber(settings.day_1_follow_cap, 10);
+  const day2 = readNumber(settings.day_2_follow_cap, 20);
+  const day3 = readNumber(settings.day_3_follow_cap, 40);
+  const day4 = readNumber(settings.day_4_plus_follow_cap, packageCap);
+  if (!Number.isInteger(day1) || day1 < 0 || day1 > 10) return "Day 1 Follow warmup cap must be between 0 and 10.";
+  if (!Number.isInteger(day2) || day2 < 0 || day2 > 20) return "Day 2 Follow warmup cap must be between 0 and 20.";
+  if (!Number.isInteger(day3) || day3 < 0 || day3 > 40) return "Day 3 Follow warmup cap must be between 0 and 40.";
+  if (!Number.isInteger(day4) || day4 < 0 || day4 > packageCap) {
+    return `Day 4+ Follow warmup cap cannot exceed the package Follow cap (${packageCap}).`;
+  }
+
+  const { data: existing } = await supabase
+    .from("account_warmup_settings")
+    .select("warmup_enabled,package_started_at,warmup_profile_code,day_1_follow_cap,day_2_follow_cap,day_3_follow_cap,day_4_plus_follow_cap,status")
+    .eq("account_id", settings.account_id)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  const status = existing?.package_started_at ? "active" : "pending_package_start";
+  const newSummary = {
+    warmup_enabled: readBoolean(settings.warmup_enabled, true),
+    package_started_at: readString(existing?.package_started_at, ""),
+    warmup_profile_code: "follow_default_v1",
+    day_1_follow_cap: day1,
+    day_2_follow_cap: day2,
+    day_3_follow_cap: day3,
+    day_4_plus_follow_cap: day4,
+    status,
+  };
+  const { error } = await supabase
+    .from("account_warmup_settings")
+    .upsert({
+      account_id: settings.account_id,
+      warmup_enabled: readBoolean(settings.warmup_enabled, true),
+      warmup_profile_code: "follow_default_v1",
+      day_1_follow_cap: day1,
+      day_2_follow_cap: day2,
+      day_3_follow_cap: day3,
+      day_4_plus_follow_cap: day4,
+      status,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "account_id" });
+  if (error) return `Could not save Follow warmup settings: ${error.message}`;
+  const oldSummary = warmupAuditSummary(existing);
+  const fieldsChanged = changedWarmupFields(oldSummary, newSummary);
+  if (fieldsChanged.length) {
+    await recordFollowWarmupAudit(supabase, {
+      accountId: settings.account_id,
+      fieldsChanged,
+      oldSummary,
+      newSummary,
+    }).catch(() => undefined);
+  }
+  return null;
+}
+
+async function withRuntimeStatuses(
+  settings: SettingsPayload,
+  supabase: ReturnType<typeof createSupabaseClient>,
+) {
+  return await withUnfollowRuntimeStatus(
+    await withFollowRuntimeStatus(
+      await withDmRuntimeStatus(settings, supabase),
+      supabase,
+    ),
+    supabase,
+  );
 }
 
 async function fetchAccount(accountId: string, supabase = createSupabaseClient()) {
@@ -628,10 +954,7 @@ export async function GET(request: Request) {
     const account = await fetchAccount(accountId, supabase);
 
     if (data) {
-      const settings = await withUnfollowRuntimeStatus(
-        await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(data, accountId), account), supabase),
-        supabase,
-      );
+      const settings = await withRuntimeStatuses(withAccountDefaults(normalizeSettings(data, accountId), account), supabase);
       return jsonSuccess(settings);
     }
 
@@ -644,10 +967,7 @@ export async function GET(request: Request) {
 
     if (insertError) return migrationError(insertError.message);
 
-    const settings = await withUnfollowRuntimeStatus(
-      await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(inserted, accountId), account), supabase),
-      supabase,
-    );
+    const settings = await withRuntimeStatuses(withAccountDefaults(normalizeSettings(inserted, accountId), account), supabase);
     return jsonSuccess(settings, 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load account settings.";
@@ -680,7 +1000,9 @@ async function saveSettings(request: Request) {
 
     if (existingError) return migrationError(existingError.message);
 
-    const settings = preserveProtectedSettings(normalizeSettings(body, accountId), existing);
+    const settings = withFollowManualAliases(preserveProtectedSettings(normalizeSettings(body, accountId), existing));
+    const warmupError = await saveWarmupSettings(supabase, settings);
+    if (warmupError) return jsonError(warmupError, 400);
 
     const persistable = persistableSettings(settings);
     const { data, error } = await supabase
@@ -702,18 +1024,12 @@ async function saveSettings(request: Request) {
       if (insertError) return migrationError(insertError.message);
 
       const account = await fetchAccount(accountId, supabase);
-      const responseSettings = await withUnfollowRuntimeStatus(
-        await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(inserted, accountId), account), supabase),
-        supabase,
-      );
+      const responseSettings = await withRuntimeStatuses(withAccountDefaults(normalizeSettings(inserted, accountId), account), supabase);
       return jsonSuccess(responseSettings, 201);
     }
 
     const account = await fetchAccount(accountId, supabase);
-    const responseSettings = await withUnfollowRuntimeStatus(
-      await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(data, accountId), account), supabase),
-      supabase,
-    );
+    const responseSettings = await withRuntimeStatuses(withAccountDefaults(normalizeSettings(data, accountId), account), supabase);
     return jsonSuccess(responseSettings);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not save account settings.";

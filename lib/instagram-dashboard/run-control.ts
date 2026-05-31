@@ -50,6 +50,8 @@ export type RunStartBlockReason =
   | "dm_legacy_gate_mismatch"
   | "mini_run_welcome_cap_unproven"
   | "mini_run_follow_cap_unproven"
+  | "follow_day_quota_exhausted"
+  | "follow_warmup_pending"
   | "mini_run_outreach_off_unproven"
   | "unfollow_entitlement_missing"
   | "unfollow_disabled"
@@ -695,6 +697,52 @@ async function countUnfollowsToday(accountId: string) {
   return count ?? 0;
 }
 
+async function countFollowsToday(accountId: string) {
+  const since = `${utcDateString()}T00:00:00.000Z`;
+  const { count, error } = await createSupabaseClient()
+    .from("ig_interacted_users")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId)
+    .gte("followed_at", since);
+  if (error) {
+    throw new Error("Could not verify Follow day quota.");
+  }
+  return count ?? 0;
+}
+
+function readJsonNumber(row: SupabaseRecord | null | undefined, key: string, fallback = 0) {
+  if (!row || typeof row !== "object") return fallback;
+  return readPositiveInteger(row[key]) ?? fallback;
+}
+
+function readJsonBoolean(row: SupabaseRecord | null | undefined, key: string, fallback = false) {
+  if (!row || typeof row !== "object") return fallback;
+  const raw = readString(row[key], "").trim().toLowerCase();
+  if (["true", "1", "yes", "enabled"].includes(raw)) return true;
+  if (["false", "0", "no", "disabled"].includes(raw)) return false;
+  return fallback;
+}
+
+function resolveFollowCapPreview(row: SupabaseRecord | null | undefined) {
+  const caps = row?.package_caps && typeof row.package_caps === "object" && !Array.isArray(row.package_caps)
+    ? row.package_caps as SupabaseRecord
+    : null;
+  const preview = row?.effective_caps_preview && typeof row.effective_caps_preview === "object" && !Array.isArray(row.effective_caps_preview)
+    ? row.effective_caps_preview as SupabaseRecord
+    : null;
+  const packageCap = readJsonNumber(caps, "follow_day", 0);
+  const warmupApplied = readJsonBoolean(preview, "warmup_applied", false);
+  const followDay = readJsonNumber(preview, "follow_day", packageCap);
+  const followSession = readJsonNumber(preview, "follow_session", followDay);
+  return {
+    packageCap,
+    followDay,
+    followSession,
+    warmupApplied,
+    warmupStatus: readString(row?.warmup_status, "pending_package_start"),
+  };
+}
+
 export function sanitizeRunControlReason(value: unknown, fallback = "blocked") {
   const raw = readString(value, fallback).slice(0, 500);
   if (!raw) return fallback;
@@ -1059,6 +1107,33 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     }
 
     if (normalizedRunType === "account_session") {
+      const { data: packageSummary, error: packageSummaryError } = await supabase
+        .from("account_package_summary")
+        .select("warmup_status,package_caps,effective_caps_preview")
+        .eq("account_id", accountId)
+        .limit(1)
+        .maybeSingle<SupabaseRecord>();
+      if (packageSummaryError) {
+        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      }
+      const followCaps = resolveFollowCapPreview(packageSummary);
+      if (followCaps.packageCap > 0) {
+        let followsDoneToday = 0;
+        try {
+          followsDoneToday = await countFollowsToday(accountId);
+        } catch {
+          return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+        }
+        const remaining = Math.max(0, followCaps.followDay - followsDoneToday);
+        const effectiveFollowCap = Math.min(followCaps.followSession, remaining);
+        if (effectiveFollowCap < 1 && followCaps.followDay > 0) {
+          return { ok: false as const, reason: "follow_day_quota_exhausted" as RunStartBlockReason, health };
+        }
+        if (followCaps.warmupStatus === "pending_package_start" && followCaps.warmupApplied) {
+          return { ok: false as const, reason: "follow_warmup_pending" as RunStartBlockReason, health };
+        }
+      }
+
       const { data: unfollowSettings, error: unfollowSettingsError } = await supabase
         .from("ig_account_unfollow_settings")
         .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap")
@@ -1236,6 +1311,10 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual mini-run is blocked because Welcome DM cap is not proven to be at most 1.";
     case "mini_run_follow_cap_unproven":
       return "Manual mini-run is blocked because Follow caps are not proven to be at most 1.";
+    case "follow_day_quota_exhausted":
+      return "Manual run is blocked because the effective Follow day quota is exhausted.";
+    case "follow_warmup_pending":
+      return "Manual run is blocked because Follow warmup is missing a package/service start date.";
     case "mini_run_outreach_off_unproven":
       return "Manual mini-run is blocked because Outreach isolation is not proven.";
     case "unfollow_entitlement_missing":
