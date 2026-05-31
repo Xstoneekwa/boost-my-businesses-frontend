@@ -1,11 +1,12 @@
 import {
   evaluateUnfollowStartGate,
-  runControlFollowToUnfollowRealEnabled,
-  runControlFollowToUnfollowRealHardMax,
-  runControlFollowToUnfollowRealMaxActions,
+  normalizeUnfollowRuntimeCapMode,
+  resolveFollowToUnfollowHandoffEnabled,
+  resolveUnfollowRuntimeCap,
   runControlUnfollowAnyH3RealSupported,
   runControlUnfollowAnySafeStrategyProven,
   sanitizeRunControlReason,
+  type UnfollowRuntimeCapMode,
 } from "@/lib/instagram-dashboard/run-control";
 import { createSupabaseClient } from "@/lib/supabase";
 import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
@@ -39,6 +40,8 @@ export type UnfollowDomainPatchPayload = {
   unfollow_per_session_limit?: unknown;
   unfollow_per_day_limit?: unknown;
   unfollow_after_days?: unknown;
+  runtime_cap_mode?: unknown;
+  runtime_safety_cap?: unknown;
 };
 
 export type UnfollowDomainInput = {
@@ -47,10 +50,18 @@ export type UnfollowDomainInput = {
   unfollowPerSessionLimit: number;
   unfollowPerDayLimit: number;
   unfollowAfterDays: number;
+  runtimeCapMode: UnfollowRuntimeCapMode;
+  runtimeSafetyCap: number | null;
 };
 
 function readNonNegativeInteger(value: unknown, fallback: number) {
   const parsed = readNumber(value, fallback);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function readOptionalNonNegativeInteger(value: unknown, fallback: number | null) {
+  if (value === null || value === undefined || readString(value, "").trim() === "") return fallback;
+  const parsed = readNumber(value, Number.NaN);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
@@ -71,6 +82,13 @@ export function validateUnfollowDomainInput(input: UnfollowDomainInput) {
   if (input.unfollowEnabled && input.unfollowPerDayLimit < 1) {
     return "unfollow_cap_unproven";
   }
+  if (
+    input.unfollowEnabled &&
+    input.runtimeCapMode !== "prod_normal" &&
+    (input.runtimeSafetyCap === null || input.runtimeSafetyCap < 1)
+  ) {
+    return "unfollow_cap_unproven";
+  }
   if (input.unfollowEnabled && input.unfollowPerSessionLimit > input.unfollowPerDayLimit) {
     return "session_cap_exceeds_day_cap";
   }
@@ -84,6 +102,8 @@ export function unfollowChangedFields(before: UnfollowDomainInput, after: Unfoll
   if (before.unfollowPerSessionLimit !== after.unfollowPerSessionLimit) fields.push("unfollow_per_session_limit");
   if (before.unfollowPerDayLimit !== after.unfollowPerDayLimit) fields.push("unfollow_per_day_limit");
   if (before.unfollowAfterDays !== after.unfollowAfterDays) fields.push("unfollow_after_days");
+  if (before.runtimeCapMode !== after.runtimeCapMode) fields.push("runtime_cap_mode");
+  if (before.runtimeSafetyCap !== after.runtimeSafetyCap) fields.push("runtime_safety_cap");
   return fields;
 }
 
@@ -94,6 +114,8 @@ function redactedSummary(input: UnfollowDomainInput) {
     unfollow_per_session_limit: input.unfollowPerSessionLimit,
     unfollow_per_day_limit: input.unfollowPerDayLimit,
     unfollow_after_days: input.unfollowAfterDays,
+    runtime_cap_mode: input.runtimeCapMode,
+    runtime_safety_cap: input.runtimeSafetyCap,
   };
 }
 
@@ -137,6 +159,7 @@ async function countUnfollowsToday(
     .from("ig_interacted_users")
     .select("id", { count: "exact", head: true })
     .eq("account_id", accountId)
+    .eq("unfollow_result", "success")
     .gte("unfollowed_at", since);
   if (error) return null;
   return count ?? 0;
@@ -149,6 +172,8 @@ function inputFromRow(row: SupabaseRecord | null | undefined): UnfollowDomainInp
     unfollowPerSessionLimit: readNonNegativeInteger(row?.unfollow_per_session_limit, DEFAULT_UNFOLLOW_SESSION_CAP),
     unfollowPerDayLimit: readNonNegativeInteger(row?.unfollow_per_day_limit, DEFAULT_UNFOLLOW_DAY_CAP),
     unfollowAfterDays: readNonNegativeInteger(row?.unfollow_after_days, DEFAULT_UNFOLLOW_AFTER_DAYS),
+    runtimeCapMode: normalizeUnfollowRuntimeCapMode(row?.runtime_cap_mode),
+    runtimeSafetyCap: readOptionalNonNegativeInteger(row?.runtime_safety_cap, null),
   };
 }
 
@@ -157,31 +182,28 @@ function limitingReason({
   effectiveCap,
   unfollowDayRemaining,
   runtimeSafetyCap,
+  runtimeCapMode,
   blockReason,
 }: {
   input: UnfollowDomainInput;
   effectiveCap: number;
   unfollowDayRemaining: number | null;
-  runtimeSafetyCap: number;
+  runtimeSafetyCap: number | null;
+  runtimeCapMode: UnfollowRuntimeCapMode;
   blockReason: string;
 }) {
   if (blockReason === "unfollow_entitlement_missing") return "limited_by_entitlement";
   if (blockReason === "unfollow_disabled") return "unfollow_disabled";
+  if (blockReason === "unfollow_handoff_disabled") return "limited_by_handoff_disabled";
   if (blockReason === "unfollow_no_safe_candidate_strategy") return "limited_by_no_safe_candidate";
   if (blockReason) return "limited_by_runtime_gate";
   if (unfollowDayRemaining !== null && unfollowDayRemaining <= effectiveCap && unfollowDayRemaining < input.unfollowPerSessionLimit) {
     return "limited_by_daily_remaining";
   }
-  if (runtimeSafetyCap <= effectiveCap && runtimeSafetyCap < input.unfollowPerSessionLimit) {
-    return runtimeSafetyCap <= 1 ? "limited_by_mini_run_mode" : "limited_by_safety_cap";
+  if (runtimeSafetyCap !== null && runtimeSafetyCap <= effectiveCap && runtimeSafetyCap < input.unfollowPerSessionLimit) {
+    return runtimeCapMode === "mini_run" ? "limited_by_mini_run_mode" : "limited_by_safety_cap";
   }
   return "ready";
-}
-
-function runtimeCapMode(runtimeSafetyCap: number, sessionCap: number) {
-  if (runtimeSafetyCap <= 1 && sessionCap > 1) return "mini-run/safety";
-  if (runtimeSafetyCap < sessionCap) return "safety-limited";
-  return "prod-aligned";
 }
 
 async function fetchUnfollowRow(
@@ -190,7 +212,7 @@ async function fetchUnfollowRow(
 ) {
   const { data, error } = await supabase
     .from("ig_account_unfollow_settings")
-    .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,unfollow_after_days,do_unfollow_first,unfollow_only")
+    .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,unfollow_after_days,do_unfollow_first,unfollow_only,runtime_cap_mode,runtime_safety_cap")
     .eq("account_id", accountId)
     .limit(1)
     .maybeSingle<SupabaseRecord>();
@@ -209,9 +231,16 @@ async function buildUnfollowProjection(
   const unfollowsDoneToday = await countUnfollowsToday(supabase, accountId);
   const unfollowDayRemaining =
     unfollowsDoneToday === null ? null : Math.max(0, input.unfollowPerDayLimit - unfollowsDoneToday);
-  const runtimeRequestedCap = runControlFollowToUnfollowRealMaxActions();
-  const runtimeHardCap = runControlFollowToUnfollowRealHardMax();
-  const runtimeSafetyCap = Math.min(runtimeRequestedCap, runtimeHardCap);
+  const runtimeCap = resolveUnfollowRuntimeCap({
+    unfollowPerSessionLimit: input.unfollowPerSessionLimit,
+    runtimeCapMode: input.runtimeCapMode,
+    runtimeSafetyCap: input.runtimeSafetyCap,
+  });
+  const handoffEnabled = resolveFollowToUnfollowHandoffEnabled({
+    unfollowEnabled: input.unfollowEnabled,
+    unfollowMode: input.unfollowMode,
+    runtimeCapMode: runtimeCap.mode,
+  });
   const blockReason = evaluateUnfollowStartGate({
     requestedRunType: "account_session",
     unfollowEntitlementActive: unfollowEntitlementActive === true,
@@ -220,16 +249,16 @@ async function buildUnfollowProjection(
     unfollowPerSessionLimit: input.unfollowPerSessionLimit,
     unfollowPerDayLimit: input.unfollowPerDayLimit,
     unfollowDayRemaining,
-    realHandoffEnabled: runControlFollowToUnfollowRealEnabled(),
-    realMaxActions: runtimeRequestedCap,
-    realHardMax: runtimeHardCap,
+    realHandoffEnabled: handoffEnabled,
+    realMaxActions: runtimeCap.cap,
+    realHardMax: runtimeCap.hardCap,
     h3RealSupported: runControlUnfollowAnyH3RealSupported(),
     safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
   });
   const rawEffectiveCap = Math.min(
     input.unfollowPerSessionLimit,
     input.unfollowPerDayLimit,
-    runtimeSafetyCap,
+    runtimeCap.cap ?? input.unfollowPerSessionLimit,
     unfollowDayRemaining ?? input.unfollowPerDayLimit,
   );
   const effectiveCap = blockReason ? 0 : Math.max(0, rawEffectiveCap);
@@ -241,22 +270,23 @@ async function buildUnfollowProjection(
     unfollow_per_session_limit: input.unfollowPerSessionLimit,
     unfollow_per_day_limit: input.unfollowPerDayLimit,
     unfollow_after_days: input.unfollowAfterDays,
+    runtime_cap_mode: runtimeCap.mode,
     effective_unfollow_cap: effectiveCap,
-    runtime_safety_cap: runtimeSafetyCap,
-    runtime_hard_cap: runtimeHardCap,
-    runtime_cap_mode: runtimeCapMode(runtimeSafetyCap, input.unfollowPerSessionLimit),
-    runtime_cap_source: "account_session_h3_ops_cap",
+    runtime_safety_cap: runtimeCap.mode === "prod_normal" ? null : input.runtimeSafetyCap ?? 0,
+    runtime_hard_cap: runtimeCap.hardCap ?? 0,
+    runtime_cap_source: runtimeCap.source,
     unfollow_day_remaining: unfollowDayRemaining,
     limiting_reason: limitingReason({
       input,
       effectiveCap,
       unfollowDayRemaining,
-      runtimeSafetyCap,
+      runtimeSafetyCap: runtimeCap.limitedByRuntimeCap ? runtimeCap.cap : null,
+      runtimeCapMode: runtimeCap.mode,
       blockReason: blockReason ?? "",
     }),
     follow_entitlement_status: followEntitlementActive === null ? "Unknown" : followEntitlementActive ? "Active" : "Missing",
     unfollow_entitlement_status: unfollowEntitlementActive === null ? "Unknown" : unfollowEntitlementActive ? "Active" : "Missing",
-    handoff_real_status: runControlFollowToUnfollowRealEnabled() ? "Enabled" : "Disabled",
+    handoff_real_status: handoffEnabled ? "Enabled" : "Disabled",
     current_runtime_mode: input.unfollowMode,
     block_reason: blockReason ?? "",
     safe_candidate_strategy_status: runControlUnfollowAnySafeStrategyProven() ? "Ready" : "Unknown",
@@ -333,6 +363,11 @@ export async function PATCH(request: Request) {
       unfollowPerSessionLimit: readNonNegativeInteger(body.unfollow_per_session_limit, before.unfollowPerSessionLimit),
       unfollowPerDayLimit: readNonNegativeInteger(body.unfollow_per_day_limit, before.unfollowPerDayLimit),
       unfollowAfterDays: readNonNegativeInteger(body.unfollow_after_days, before.unfollowAfterDays),
+      runtimeCapMode: normalizeUnfollowRuntimeCapMode(body.runtime_cap_mode ?? before.runtimeCapMode),
+      runtimeSafetyCap:
+        normalizeUnfollowRuntimeCapMode(body.runtime_cap_mode ?? before.runtimeCapMode) === "prod_normal"
+          ? null
+          : readOptionalNonNegativeInteger(body.runtime_safety_cap, before.runtimeSafetyCap),
     };
 
     const validationError = validateUnfollowDomainInput(after);
@@ -351,6 +386,8 @@ export async function PATCH(request: Request) {
         unfollow_per_session_limit: after.unfollowPerSessionLimit,
         unfollow_per_day_limit: after.unfollowPerDayLimit,
         unfollow_after_days: after.unfollowAfterDays,
+        runtime_cap_mode: after.runtimeCapMode,
+        runtime_safety_cap: after.runtimeSafetyCap,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "account_id" },

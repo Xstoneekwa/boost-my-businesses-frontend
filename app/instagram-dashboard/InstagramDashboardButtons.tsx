@@ -59,7 +59,7 @@ type UnfollowDomainProjection = {
   unfollow_per_day_limit: number;
   unfollow_after_days: number;
   effective_unfollow_cap: number;
-  runtime_safety_cap: number;
+  runtime_safety_cap: number | null;
   runtime_hard_cap: number;
   unfollow_day_remaining: number | null;
   limiting_reason: string;
@@ -336,10 +336,21 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "unfollow_per_session_limit", label: "Unfollow cap/session", type: "number", min: 0, hideHelper: true },
     { key: "unfollow_per_day_limit", label: "Unfollow cap/day", type: "number", min: 0, hideHelper: true },
     { key: "unfollow_after_days", label: "Unfollow delay days", type: "number", min: 0, hideHelper: true },
+    {
+      key: "runtime_cap_mode",
+      label: "Runtime cap mode",
+      type: "select",
+      options: ["prod_normal", "mini_run", "incident_safety"],
+      optionLabels: {
+        prod_normal: "Production normal",
+        mini_run: "Mini-run",
+        incident_safety: "Incident safety",
+      },
+      helper: "prod_normal follows Supabase caps; mini/safety can intentionally lower the runtime cap.",
+    },
+    { key: "runtime_safety_cap", label: "Runtime safety cap", type: "number", min: 0, helper: "Not active in Production normal. Used only in mini_run or incident_safety; use 1 for test mini-runs." },
     { key: "effective_unfollow_cap", label: "Effective cap now", type: "number", min: 0, readOnly: true, helper: "Lowest active limit for the next run" },
     { key: "limiting_reason", label: "Limiting reason", type: "text", readOnly: true, hideHelper: true },
-    { key: "runtime_safety_cap", label: "Runtime safety cap", type: "number", min: 0, readOnly: true, hideHelper: true },
-    { key: "runtime_cap_mode", label: "Runtime cap mode", type: "text", readOnly: true, hideHelper: true },
     { key: "runtime_cap_source", label: "Runtime cap source", type: "text", readOnly: true, hideHelper: true },
     { key: "follow_entitlement_status", label: "Follow entitlement", type: "text", readOnly: true, hideHelper: true },
     { key: "unfollow_entitlement_status", label: "Unfollow entitlement", type: "text", readOnly: true, hideHelper: true },
@@ -585,12 +596,12 @@ function withUnfollowDomainProjection(settings: InstagramSettings, projection: U
     unfollow_per_session_limit: projection.unfollow_per_session_limit,
     unfollow_per_day_limit: projection.unfollow_per_day_limit,
     unfollow_after_days: projection.unfollow_after_days,
+    runtime_cap_mode: projection.runtime_cap_mode,
+    runtime_safety_cap: projection.runtime_safety_cap ?? 0,
     effective_unfollow_cap: projection.effective_unfollow_cap,
-    runtime_safety_cap: projection.runtime_safety_cap,
     runtime_hard_cap: projection.runtime_hard_cap,
     unfollow_day_remaining: projection.unfollow_day_remaining ?? "",
     limiting_reason: projection.limiting_reason,
-    runtime_cap_mode: projection.runtime_cap_mode,
     runtime_cap_source: projection.runtime_cap_source,
     follow_entitlement_status: projection.follow_entitlement_status,
     unfollow_entitlement_status: projection.unfollow_entitlement_status,
@@ -606,9 +617,20 @@ function withUnfollowDomainProjection(settings: InstagramSettings, projection: U
           ? "Configured but blocked by runtime gate"
           : "Ready"
         : "Disabled",
-    unfollow_any_runtime_block_reason: projection.block_reason,
+    unfollow_any_runtime_block_reason: humanizeUnfollowBlockReason(projection.block_reason),
     do_unfollow_first: false,
   };
+}
+
+function humanizeUnfollowBlockReason(reason: string) {
+  if (!reason) return "";
+  if (reason === "unfollow_handoff_disabled") return "Follow-to-Unfollow handoff is disabled";
+  if (reason === "unfollow_no_safe_candidate_strategy") return "No safe candidate strategy is ready";
+  if (reason === "unfollow_day_quota_exhausted") return "Daily Unfollow quota is exhausted";
+  if (reason === "unfollow_entitlement_missing") return "Unfollow entitlement is missing";
+  if (reason === "unfollow_cap_unproven") return "Effective Unfollow cap is not ready";
+  if (reason === "unfollow_mode_not_supported") return "Selected Unfollow mode is not supported";
+  return reason.replaceAll("_", " ");
 }
 
 export function dmDomainPayload(settings: InstagramSettings) {
@@ -638,6 +660,11 @@ export function unfollowDomainPayload(settings: InstagramSettings) {
     unfollow_per_session_limit: settingNumber(settings, "unfollow_per_session_limit", 0),
     unfollow_per_day_limit: settingNumber(settings, "unfollow_per_day_limit", 0),
     unfollow_after_days: settingNumber(settings, "unfollow_after_days", 3),
+    runtime_cap_mode: settingString(settings, "runtime_cap_mode", "prod_normal"),
+    runtime_safety_cap:
+      settingString(settings, "runtime_cap_mode", "prod_normal") === "prod_normal"
+        ? null
+        : settingNumber(settings, "runtime_safety_cap", 0),
   };
 }
 
@@ -649,11 +676,15 @@ function sameUnfollowPayload(left: InstagramSettings | null, right: InstagramSet
 export function unfollowClientValidationError(settings: InstagramSettings) {
   const enabled = settingBoolean(settings, "unfollow_enabled", false);
   const mode = settingString(settings, "unfollow_mode", "unfollow").trim().toLowerCase();
+  const runtimeCapMode = settingString(settings, "runtime_cap_mode", "prod_normal").trim().toLowerCase();
   const sessionCap = settingNumber(settings, "unfollow_per_session_limit", 0);
   const dayCap = settingNumber(settings, "unfollow_per_day_limit", 0);
+  const runtimeSafetyCap = settingNumber(settings, "runtime_safety_cap", 0);
   if (mode === "unfollow-non-followers") return "unfollow_non_followers_planned";
   if (mode !== "unfollow" && mode !== "unfollow-any") return "unfollow_mode_not_supported";
+  if (!["prod_normal", "mini_run", "incident_safety"].includes(runtimeCapMode)) return "runtime_cap_mode_not_supported";
   if (enabled && (sessionCap < 1 || dayCap < 1)) return "unfollow_cap_unproven";
+  if (enabled && runtimeCapMode !== "prod_normal" && runtimeSafetyCap < 1) return "unfollow_cap_unproven";
   if (enabled && sessionCap > dayCap) return "session_cap_exceeds_day_cap";
   return "";
 }

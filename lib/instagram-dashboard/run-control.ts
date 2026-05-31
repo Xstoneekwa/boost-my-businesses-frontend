@@ -101,6 +101,24 @@ export function runControlFollowToUnfollowRealEnabled(env: MiniRunEnv = process.
   ) === "true";
 }
 
+export function resolveFollowToUnfollowHandoffEnabled({
+  unfollowEnabled,
+  unfollowMode,
+  runtimeCapMode,
+  env = process.env,
+}: {
+  unfollowEnabled: boolean;
+  unfollowMode: string;
+  runtimeCapMode?: unknown;
+  env?: MiniRunEnv;
+}) {
+  const mode = normalizeUnfollowRuntimeCapMode(runtimeCapMode ?? runControlDefaultUnfollowRuntimeCapMode(env));
+  if (mode === "prod_normal") {
+    return unfollowEnabled && isSupportedHandoffUnfollowMode(unfollowMode);
+  }
+  return runControlFollowToUnfollowRealEnabled(env);
+}
+
 export function runControlUnfollowAnyH3RealSupported(env: MiniRunEnv = process.env) {
   return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_H3_REAL_SUPPORTED !== "false";
 }
@@ -135,6 +153,59 @@ export function runControlMiniRunCapsRequired() {
 }
 
 type MiniRunEnv = Record<string, string | undefined>;
+export type UnfollowRuntimeCapMode = "mini_run" | "prod_normal" | "incident_safety";
+
+export function normalizeUnfollowRuntimeCapMode(value: unknown): UnfollowRuntimeCapMode {
+  const mode = readString(value, "prod_normal").trim().toLowerCase().replace(/-/g, "_");
+  if (mode === "mini_run" || mode === "incident_safety") return mode;
+  return "prod_normal";
+}
+
+export function runControlDefaultUnfollowRuntimeCapMode(env: MiniRunEnv = process.env): UnfollowRuntimeCapMode {
+  return normalizeUnfollowRuntimeCapMode(
+    env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_RUNTIME_CAP_MODE ?? env.UNFOLLOW_RUNTIME_CAP_MODE ?? "prod_normal",
+  );
+}
+
+export function resolveUnfollowRuntimeCap({
+  unfollowPerSessionLimit,
+  runtimeCapMode,
+  runtimeSafetyCap,
+  env = process.env,
+}: {
+  unfollowPerSessionLimit: number | null;
+  runtimeCapMode?: unknown;
+  runtimeSafetyCap?: number | null;
+  env?: MiniRunEnv;
+}) {
+  const sessionCap = unfollowPerSessionLimit === null ? null : Math.max(0, unfollowPerSessionLimit);
+  const mode = normalizeUnfollowRuntimeCapMode(runtimeCapMode ?? runControlDefaultUnfollowRuntimeCapMode(env));
+
+  if (mode === "prod_normal") {
+    return {
+      mode,
+      cap: sessionCap,
+      hardCap: sessionCap,
+      limitedByRuntimeCap: false,
+      source: "supabase_domain_caps",
+      envFallbackUsed: false,
+    };
+  }
+
+  const dbSafetyCap = runtimeSafetyCap === null || runtimeSafetyCap === undefined ? null : Math.max(0, runtimeSafetyCap);
+  const envCap = Math.min(runControlFollowToUnfollowRealMaxActions(env), runControlFollowToUnfollowRealHardMax(env));
+  const modeCap = dbSafetyCap ?? envCap;
+  const cap = minKnownCaps([sessionCap, modeCap]);
+
+  return {
+    mode,
+    cap,
+    hardCap: modeCap,
+    limitedByRuntimeCap: cap !== null && sessionCap !== null && cap < sessionCap,
+    source: dbSafetyCap === null ? "env_fallback_unfollow_runtime_cap" : "ig_account_unfollow_settings.runtime_safety_cap",
+    envFallbackUsed: dbSafetyCap === null,
+  };
+}
 
 function readPositiveInteger(value: unknown) {
   const raw = readString(value, "").trim();
@@ -616,6 +687,7 @@ async function countUnfollowsToday(accountId: string) {
     .from("ig_interacted_users")
     .select("id", { count: "exact", head: true })
     .eq("account_id", accountId)
+    .eq("unfollow_result", "success")
     .gte("unfollowed_at", since);
   if (error) {
     throw new Error("Could not verify Unfollow day quota.");
@@ -989,7 +1061,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     if (normalizedRunType === "account_session") {
       const { data: unfollowSettings, error: unfollowSettingsError } = await supabase
         .from("ig_account_unfollow_settings")
-        .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit")
+        .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap")
         .eq("account_id", accountId)
         .limit(1)
         .maybeSingle();
@@ -999,6 +1071,17 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
       }
 
       const unfollowDayLimit = readPositiveInteger(unfollowSettings?.unfollow_per_day_limit);
+      const unfollowSessionLimit = readPositiveInteger(unfollowSettings?.unfollow_per_session_limit);
+      const runtimeCap = resolveUnfollowRuntimeCap({
+        unfollowPerSessionLimit: unfollowSessionLimit,
+        runtimeCapMode: unfollowSettings?.runtime_cap_mode,
+        runtimeSafetyCap: readPositiveInteger(unfollowSettings?.runtime_safety_cap),
+      });
+      const handoffEnabled = resolveFollowToUnfollowHandoffEnabled({
+        unfollowEnabled: unfollowSettings?.unfollow_enabled === true,
+        unfollowMode: readString(unfollowSettings?.unfollow_mode, ""),
+        runtimeCapMode: runtimeCap.mode,
+      });
       let unfollowEntitlementActive = false;
       let unfollowsDoneToday = 0;
       try {
@@ -1013,13 +1096,13 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         unfollowEntitlementActive,
         unfollowEnabled: unfollowSettings?.unfollow_enabled === true,
         unfollowMode: readString(unfollowSettings?.unfollow_mode, ""),
-        unfollowPerSessionLimit: readPositiveInteger(unfollowSettings?.unfollow_per_session_limit),
+        unfollowPerSessionLimit: unfollowSessionLimit,
         unfollowPerDayLimit: unfollowDayLimit,
         unfollowDayRemaining:
           unfollowDayLimit === null ? null : Math.max(0, unfollowDayLimit - unfollowsDoneToday),
-        realHandoffEnabled: runControlFollowToUnfollowRealEnabled(),
-        realMaxActions: runControlFollowToUnfollowRealMaxActions(),
-        realHardMax: runControlFollowToUnfollowRealHardMax(),
+        realHandoffEnabled: handoffEnabled,
+        realMaxActions: runtimeCap.cap,
+        realHardMax: runtimeCap.hardCap,
         h3RealSupported: runControlUnfollowAnyH3RealSupported(),
         safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
       });
@@ -1162,7 +1245,7 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
     case "unfollow_mode_not_supported":
       return "Manual run is blocked because the selected Unfollow mode is not supported by the runtime handoff.";
     case "unfollow_handoff_disabled":
-      return "Manual run is blocked because Unfollow real handoff is disabled.";
+      return "Manual run is blocked because Follow-to-Unfollow handoff is disabled.";
     case "unfollow_cap_unproven":
       return "Manual run is blocked because the effective Unfollow cap is not proven to allow at least 1 action.";
     case "unfollow_day_quota_exhausted":

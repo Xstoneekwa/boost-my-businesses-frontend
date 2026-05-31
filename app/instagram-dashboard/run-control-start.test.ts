@@ -13,6 +13,8 @@ import {
   evaluateUnfollowAnyStartGate,
   outreachSessionBlockedByOutreachRealSendDisabled,
   resolveOutreachPreflightCap,
+  resolveFollowToUnfollowHandoffEnabled,
+  resolveUnfollowRuntimeCap,
   resolveWelcomePreflightCap,
   runControlOutreachRealSendEnabled,
   runControlWelcomeRealSendEnabled,
@@ -980,6 +982,54 @@ test("unfollow-any blocks account start when real handoff is off", () => {
   assert.match(runStartBlockMessage("unfollow_handoff_disabled"), /Unfollow real handoff is disabled/);
 });
 
+test("unfollow runtime cap prod_normal follows Supabase session cap despite mini-run env fallback", () => {
+  const cap = resolveUnfollowRuntimeCap({
+    unfollowPerSessionLimit: 120,
+    runtimeCapMode: "prod_normal",
+    runtimeSafetyCap: null,
+    env: {
+      INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS: "1",
+      INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX: "3",
+    },
+  });
+
+  assert.equal(cap.mode, "prod_normal");
+  assert.equal(cap.cap, 120);
+  assert.equal(cap.source, "supabase_domain_caps");
+  assert.equal(cap.limitedByRuntimeCap, false);
+});
+
+test("prod_normal handoff is enabled from valid Unfollow domain settings despite env off", () => {
+  assert.equal(
+    resolveFollowToUnfollowHandoffEnabled({
+      unfollowEnabled: true,
+      unfollowMode: "unfollow-any",
+      runtimeCapMode: "prod_normal",
+      env: {
+        INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_ENABLED: "false",
+      },
+    }),
+    true,
+  );
+});
+
+test("unfollow runtime cap mini_run can intentionally lower effective cap to one", () => {
+  const cap = resolveUnfollowRuntimeCap({
+    unfollowPerSessionLimit: 120,
+    runtimeCapMode: "mini_run",
+    runtimeSafetyCap: 1,
+    env: {
+      INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS: "120",
+      INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX: "120",
+    },
+  });
+
+  assert.equal(cap.mode, "mini_run");
+  assert.equal(cap.cap, 1);
+  assert.equal(cap.source, "ig_account_unfollow_settings.runtime_safety_cap");
+  assert.equal(cap.limitedByRuntimeCap, true);
+});
+
 test("unfollow-any blocks account start when H3 real support is not proven", () => {
   assert.equal(
     evaluateUnfollowAnyStartGate({
@@ -1099,6 +1149,8 @@ test("unfollow domain payload writes runtime source only", () => {
     unfollow_per_session_limit: 1,
     unfollow_per_day_limit: 200,
     unfollow_after_days: 3,
+    runtime_cap_mode: "prod_normal",
+    runtime_safety_cap: 0,
     unfollow_any: false,
     unfollow_non_followers: false,
     do_follows_first: true,
@@ -1111,6 +1163,8 @@ test("unfollow domain payload writes runtime source only", () => {
     unfollow_per_session_limit: 1,
     unfollow_per_day_limit: 200,
     unfollow_after_days: 3,
+    runtime_cap_mode: "prod_normal",
+    runtime_safety_cap: null,
   });
 });
 
@@ -1122,6 +1176,8 @@ test("unfollow domain validation rejects planned non-followers and invalid caps"
       unfollowPerSessionLimit: 1,
       unfollowPerDayLimit: 200,
       unfollowAfterDays: 3,
+      runtimeCapMode: "prod_normal",
+      runtimeSafetyCap: null,
     }),
     "unfollow_non_followers_planned",
   );
@@ -1132,6 +1188,8 @@ test("unfollow domain validation rejects planned non-followers and invalid caps"
       unfollowPerSessionLimit: 2,
       unfollowPerDayLimit: 1,
       unfollowAfterDays: 3,
+      runtimeCapMode: "prod_normal",
+      runtimeSafetyCap: null,
     }),
     "session_cap_exceeds_day_cap",
   );
