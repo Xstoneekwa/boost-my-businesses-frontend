@@ -6,6 +6,7 @@ import {
   sanitizeRunControlReason,
 } from "@/lib/instagram-dashboard/run-control";
 import { dmTemplateLengthError, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
+import { dmTemplateHasBody, dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 import { createSupabaseClient } from "@/lib/supabase";
 import { getAccountId, jsonError, jsonOk, readBoolean, readJsonBody, readNumber, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../../_utils";
 
@@ -61,11 +62,11 @@ export function readProductDefaultDayCap(value: unknown, productDefault: number)
 }
 
 function hasBody(value: string) {
-  return value.trim().length > 0;
+  return dmTemplateHasBody(value);
 }
 
 function templateStatus(body: string) {
-  return hasBody(body) ? "Ready" : "Missing";
+  return dmTemplateStatusLabel(body);
 }
 
 function changed<T>(before: T, after: T) {
@@ -210,24 +211,7 @@ async function getTemplate(
   templateType: "welcome" | "outreach",
   templateId: unknown,
 ) {
-  const configuredTemplateId = readString(templateId, "").trim();
-  let query = supabase
-    .from("ig_dm_templates")
-    .select("id,body,active,is_default")
-    .eq("account_id", accountId)
-    .eq("template_type", templateType)
-    .eq("active", true)
-    .order("is_default", { ascending: false })
-    .order("updated_at", { ascending: false })
-    .limit(1);
-
-  if (configuredTemplateId) {
-    query = query.eq("id", configuredTemplateId);
-  }
-
-  const { data, error } = await query.maybeSingle<SupabaseRecord>();
-  if (error) throw new Error(error.message);
-  return data;
+  return fetchActiveDmTemplate(supabase, accountId, templateType, templateId);
 }
 
 async function upsertTemplate(

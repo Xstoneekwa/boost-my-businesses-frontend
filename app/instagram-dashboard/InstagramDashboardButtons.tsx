@@ -156,6 +156,8 @@ type Confirmation = {
   title: string;
   description: string;
   confirmTone: "primary" | "danger";
+  confirmLabel?: string;
+  cancelLabel?: string;
   onConfirm: () => void | Promise<void>;
 };
 type TemplateDialog = { kind: "save" | "apply"; source: "settings" | "filters" } | null;
@@ -1008,6 +1010,28 @@ export default function InstagramDashboardButtons({
     setFilters((current) => (current ? { ...current, [key]: value } : current));
   }
 
+  async function loadDmDomainSettings() {
+    try {
+      const projection = await readApiResponse<DmDomainProjection>(
+        await fetch(`/api/instagram-dashboard/settings/dm?account_id=${encodeURIComponent(accountId)}`, {
+          headers: { Accept: "application/json" },
+        }),
+        "Could not load DM domain settings.",
+      );
+      setSettings((current) => (current ? withDmDomainProjection(current, projection) : current));
+      setSettingsBaseline((current) => (current ? withDmDomainProjection(current, projection) : current));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load DM domain settings.");
+    }
+  }
+
+  async function selectSettingsTab(tab: SettingsTab) {
+    setSettingsTab(tab);
+    if (tab === "DM") {
+      await loadDmDomainSettings();
+    }
+  }
+
   async function refreshAccountConfig() {
     const [settingsPayload, filtersPayload, templatePayload] = await Promise.all([
       readApiResponse<InstagramSettings>(
@@ -1139,9 +1163,10 @@ export default function InstagramDashboardButtons({
     if (!settings || sameDmPayload(settings, settingsBaseline)) return;
 
     requestConfirmation({
-      title: "Save DM domain settings?",
-      description: "This saves Welcome and Outreach DM values to the runtime DM domain tables. It does not change real-send ops flags or start a run.",
+      title: "Save DM settings?",
+      description: "This will update the Welcome DM and Outreach DM settings in the runtime domain tables.\nIt will not start a run or send any messages.",
       confirmTone: "primary",
+      confirmLabel: "Save settings",
       onConfirm: performSaveDmSettings,
     });
   }
@@ -1379,7 +1404,7 @@ export default function InstagramDashboardButtons({
                   settingsBaseline,
                   filters,
                   settingsTab,
-                  setSettingsTab,
+                  selectSettingsTab,
                   updateSetting,
                   updateFilter,
                   saveSettings,
@@ -1436,6 +1461,8 @@ export default function InstagramDashboardButtons({
           title={confirmation.title}
           description={confirmation.description}
           confirmTone={confirmation.confirmTone}
+          confirmLabel={confirmation.confirmLabel}
+          cancelLabel={confirmation.cancelLabel}
           isBusy={isSaving}
           onCancel={closeConfirmation}
           onConfirm={() => void confirmAction()}
@@ -1904,6 +1931,7 @@ export default function InstagramDashboardButtons({
           font-size: 13px;
           line-height: 1.6;
           margin: 0;
+          white-space: pre-line;
         }
 
         .ig-confirm-actions {
@@ -2168,6 +2196,8 @@ function ConfirmationModal({
   title,
   description,
   confirmTone,
+  confirmLabel = "Confirm action",
+  cancelLabel = "Cancel",
   isBusy,
   onCancel,
   onConfirm,
@@ -2175,6 +2205,8 @@ function ConfirmationModal({
   title: string;
   description: string;
   confirmTone: "primary" | "danger";
+  confirmLabel?: string;
+  cancelLabel?: string;
   isBusy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -2185,14 +2217,14 @@ function ConfirmationModal({
         <h3 id="ig-confirm-title">{title}</h3>
         <p>{description}</p>
         <div className="ig-confirm-actions">
-          <button type="button" className="ig-settings-secondary" onClick={onCancel} disabled={isBusy}>Cancel</button>
+          <button type="button" className="ig-settings-secondary" onClick={onCancel} disabled={isBusy}>{cancelLabel}</button>
           <button
             type="button"
             className={confirmTone === "danger" ? "ig-settings-primary ig-confirm-danger" : "ig-settings-primary"}
             onClick={onConfirm}
             disabled={isBusy}
           >
-            Confirm action
+            {confirmLabel}
           </button>
         </div>
       </section>
@@ -2319,7 +2351,7 @@ function renderSettingsTabs({
   settingsBaseline,
   filters,
   settingsTab,
-  setSettingsTab,
+  selectSettingsTab,
   updateSetting,
   updateFilter,
   saveSettings,
@@ -2338,7 +2370,7 @@ function renderSettingsTabs({
   settingsBaseline: InstagramSettings | null;
   filters: InstagramFilters;
   settingsTab: SettingsTab;
-  setSettingsTab: (tab: SettingsTab) => void;
+  selectSettingsTab: (tab: SettingsTab) => void | Promise<void>;
   updateSetting: (key: string, value: ConfigValue) => void;
   updateFilter: (key: string, value: ConfigValue) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
@@ -2357,7 +2389,7 @@ function renderSettingsTabs({
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
   const hasEditableFields = fields.some((field) => !field.readOnly);
   const isDmTab = settingsTab === "DM";
-  const showDraftBanner = hasEditableFields || isFiltersTab;
+  const showDraftBanner = (hasEditableFields || isFiltersTab) && settingsTab !== "DM";
   const dmDirty = isDmTab && !sameDmPayload(settings, settingsBaseline);
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
 
@@ -2374,7 +2406,7 @@ function renderSettingsTabs({
             role="tab"
             aria-selected={settingsTab === tab}
             className={settingsTab === tab ? "ig-settings-tab ig-settings-tab-active" : "ig-settings-tab"}
-            onClick={() => setSettingsTab(tab)}
+            onClick={() => void selectSettingsTab(tab)}
           >
             {tab}
           </button>

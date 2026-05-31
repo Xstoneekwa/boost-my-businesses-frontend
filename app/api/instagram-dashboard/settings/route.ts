@@ -16,6 +16,7 @@ import {
   DEFAULT_WELCOME_DM_DAY_CAP,
   readProductDefaultDayCap,
 } from "./dm/route";
+import { dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -263,32 +264,6 @@ function boolStatus(enabled: boolean) {
   return enabled ? "Enabled" : "Disabled";
 }
 
-async function hasActiveDmTemplate(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  accountId: string,
-  templateType: "welcome" | "outreach",
-  templateId: unknown,
-) {
-  const configuredTemplateId = readString(templateId, "").trim();
-  let query = supabase
-    .from("ig_dm_templates")
-    .select("id,body")
-    .eq("account_id", accountId)
-    .eq("template_type", templateType)
-    .eq("active", true)
-    .limit(1);
-
-  if (configuredTemplateId) {
-    query = query.eq("id", configuredTemplateId);
-  } else {
-    query = query.eq("is_default", true);
-  }
-
-  const { data, error } = await query.maybeSingle<SupabaseRecord>();
-  if (error) return null;
-  return Boolean(data && readString(data.body, "").trim());
-}
-
 async function hasOutreachEntitlement(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
@@ -379,29 +354,39 @@ async function withDmRuntimeStatus(
 
   const welcomeEnabled = data?.welcome_enabled === true;
   const outreachEnabled = data?.outreach_enabled === true;
-  const welcomeTemplateReady = await hasActiveDmTemplate(supabase, settings.account_id, "welcome", data?.welcome_template_id);
-  const outreachTemplateReady = await hasActiveDmTemplate(
-    supabase,
-    settings.account_id,
-    "outreach",
-    data?.default_outreach_template_id,
-  );
+  let welcomeTemplate: SupabaseRecord | null = null;
+  let outreachTemplate: SupabaseRecord | null = null;
+  try {
+    [welcomeTemplate, outreachTemplate] = await Promise.all([
+      fetchActiveDmTemplate(supabase, settings.account_id, "welcome", data?.welcome_template_id),
+      fetchActiveDmTemplate(supabase, settings.account_id, "outreach", data?.default_outreach_template_id),
+    ]);
+  } catch {
+    welcomeTemplate = null;
+    outreachTemplate = null;
+  }
+  const welcomeMessage = readString(welcomeTemplate?.body, "");
+  const outreachMessage = readString(outreachTemplate?.body, "");
   const welcomeEntitlementActive = await hasClientFeatureEntitlement(supabase, settings.account_id, "welcome");
   const outreachEntitlementActive = await hasOutreachEntitlement(supabase, settings.account_id);
   const legacyGate = runControlLegacyDmSenderRealSendEnabled();
 
   return {
     ...settings,
+    welcome_dm_message: welcomeMessage,
+    cold_dm_message: outreachMessage,
     welcome_dm_runtime_enabled: welcomeEnabled,
+    welcome_dm_enabled: welcomeEnabled,
     welcome_dm_real_send_status: boolStatus(runControlWelcomeRealSendEnabled()),
-    welcome_dm_template_status: welcomeTemplateReady === null ? "Unknown" : welcomeTemplateReady ? "Ready" : "Missing",
+    welcome_dm_template_status: welcomeTemplate ? dmTemplateStatusLabel(welcomeMessage) : "Unknown",
     welcome_entitlement_status:
       welcomeEntitlementActive === null ? "Unknown" : welcomeEntitlementActive ? "Active" : "Missing",
     welcome_dm_effective_cap: readPositiveInteger(data?.welcome_per_session_limit) ?? 0,
     welcome_dm_effective_day_cap: readProductDefaultDayCap(data?.welcome_per_day_limit, DEFAULT_WELCOME_DM_DAY_CAP),
     outreach_dm_runtime_enabled: outreachEnabled,
+    cold_dm_enabled: outreachEnabled,
     outreach_dm_real_send_status: boolStatus(runControlOutreachRealSendEnabled()),
-    outreach_dm_template_status: outreachTemplateReady === null ? "Unknown" : outreachTemplateReady ? "Ready" : "Missing",
+    outreach_dm_template_status: outreachTemplate ? dmTemplateStatusLabel(outreachMessage) : "Unknown",
     outreach_dm_effective_session_cap: readPositiveInteger(data?.outreach_per_session_limit) ?? 0,
     outreach_dm_effective_day_cap: readProductDefaultDayCap(data?.outreach_per_day_limit, DEFAULT_OUTREACH_DM_DAY_CAP),
     outreach_entitlement_status:

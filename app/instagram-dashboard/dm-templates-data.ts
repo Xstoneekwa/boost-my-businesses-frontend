@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 
 type SourceStatus = "connected" | "pending" | "unknown";
 type VariableStatus = "connected" | "pending" | "unknown";
@@ -7,11 +8,13 @@ type ValidationStatus = "valid" | "warning" | "invalid" | "pending";
 type SettingsRow = {
   account_id?: string | null;
   username?: string | null;
-  welcome_dm_enabled?: boolean | null;
-  welcome_dm_message?: string | null;
+  welcome_enabled?: boolean | null;
+  welcome_template_id?: string | null;
+  welcome_message?: string | null;
   check_chat_before_welcoming?: boolean | null;
-  cold_dm_enabled?: boolean | null;
-  cold_dm_message?: string | null;
+  outreach_enabled?: boolean | null;
+  default_outreach_template_id?: string | null;
+  outreach_message?: string | null;
   max_dm_per_run?: number | null;
   max_consecutive_dms?: number | null;
   send_enabled?: boolean | null;
@@ -41,8 +44,6 @@ export type DmTemplateItem = {
   previewMessage: string;
   missingMessage: boolean;
   editableInSettings: boolean;
-  clientEditableFuture: boolean;
-  approvalStatus: "pending" | "approved" | "rejected" | "not_required" | "pending_backend";
   variableStatus: VariableStatus;
   validationStatus: ValidationStatus;
   validationNotes: string[];
@@ -168,16 +169,16 @@ function mapRow(row: SettingsRow): { account: DmTemplateAccount; templates: DmTe
     clientName: null,
     packageLabel: null,
     entitlementSummary: null,
-    sourceLabel: "ig_account_settings",
+    sourceLabel: "ig_account_dm_settings + ig_dm_templates",
     lastSafeUpdate: updatedAt,
   };
 
-  const welcomeMessage = readString(row.welcome_dm_message, "");
-  const outreachMessage = readString(row.cold_dm_message, "");
+  const welcomeMessage = readString(row.welcome_message, "");
+  const outreachMessage = readString(row.outreach_message, "");
   const welcomeVariables = detectVariables(welcomeMessage);
   const outreachVariables = detectVariables(outreachMessage);
-  const welcomeEnabled = readBoolean(row.welcome_dm_enabled, false);
-  const outreachEnabled = readBoolean(row.cold_dm_enabled, false);
+  const welcomeEnabled = readBoolean(row.welcome_enabled, false);
+  const outreachEnabled = readBoolean(row.outreach_enabled, false);
   const welcomeValidation = validateMessage(welcomeEnabled, welcomeMessage, welcomeVariables);
   const outreachValidation = validateMessage(outreachEnabled, outreachMessage, outreachVariables);
 
@@ -196,17 +197,15 @@ function mapRow(row: SettingsRow): { account: DmTemplateAccount; templates: DmTe
         previewMessage: previewMessage(welcomeMessage, account),
         missingMessage: welcomeEnabled && !welcomeMessage.trim(),
         editableInSettings: true,
-        clientEditableFuture: true,
-        approvalStatus: "pending_backend",
         variableStatus: variableStatus(welcomeVariables),
         validationStatus: welcomeValidation.status,
         validationNotes: welcomeValidation.notes,
         detectedVariables: welcomeVariables,
-        sourceLabel: "ig_account_settings",
+        sourceLabel: "ig_account_dm_settings + ig_dm_templates",
         updatedAt,
         isClientEditable: false,
         isAdminOnly: true,
-        pendingBackendModel: true,
+        pendingBackendModel: false,
       },
       {
         id: `${accountId}:cold_dm`,
@@ -220,17 +219,15 @@ function mapRow(row: SettingsRow): { account: DmTemplateAccount; templates: DmTe
         previewMessage: previewMessage(outreachMessage, account),
         missingMessage: outreachEnabled && !outreachMessage.trim(),
         editableInSettings: true,
-        clientEditableFuture: true,
-        approvalStatus: "pending_backend",
         variableStatus: variableStatus(outreachVariables),
         validationStatus: outreachValidation.status,
         validationNotes: outreachValidation.notes,
         detectedVariables: outreachVariables,
-        sourceLabel: "ig_account_settings",
+        sourceLabel: "ig_account_dm_settings + ig_dm_templates",
         updatedAt,
         isClientEditable: false,
         isAdminOnly: true,
-        pendingBackendModel: true,
+        pendingBackendModel: false,
       },
     ],
   };
@@ -255,20 +252,20 @@ function emptyOverview(sourceStatus: DmTemplatesSourceStatus["accountSettings"] 
     },
     sourceDetails: {
       accountSettings: {
-        label: sourceStatus === "connected" ? "ig_account_settings ready" : "Settings source pending",
-        description: "Safe projection from ig_account_settings DM columns only.",
+        label: sourceStatus === "connected" ? "DM domain ready" : "DM domain unavailable",
+        description: "Safe projection from ig_account_dm_settings and active ig_dm_templates.",
       },
       accountScopedModel: {
-        label: "Pending backend",
-        description: "Dedicated account/client-scoped DM message model is not connected yet. This view does not use global templates as the source.",
+        label: "Account scoped",
+        description: "Account-scoped DM messages are read from the same active templates used by runtime.",
       },
       clientApproval: {
-        label: "Pending backend",
-        description: "Client/admin approval workflow is not connected yet.",
+        label: "Approval not shown",
+        description: "Client/admin approval state is not shown in this view.",
       },
       activityAudit: {
-        label: "Pending backend",
-        description: "DM template changes are not written to Activity Log yet.",
+        label: "Audit not shown",
+        description: "DM template audit events are not displayed in this view.",
       },
     },
     allowedVariables: allowedDmVariables,
@@ -278,22 +275,52 @@ function emptyOverview(sourceStatus: DmTemplatesSourceStatus["accountSettings"] 
 export async function getDmTemplatesData(): Promise<DmTemplatesOverview> {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase
-    .from("ig_account_settings")
-    .select("account_id, username, welcome_dm_enabled, welcome_dm_message, check_chat_before_welcoming, cold_dm_enabled, cold_dm_message, max_dm_per_run, max_consecutive_dms, send_enabled, safe_review_mode, updated_at")
-    .order("username", { ascending: true });
+    .from("ig_account_dm_settings")
+    .select("account_id,welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,updated_at")
+    .order("updated_at", { ascending: false });
 
   if (error) {
     return emptyOverview("unknown");
   }
 
-  const mapped = ((data ?? []) as SettingsRow[]).filter((row) => readString(row.account_id, "")).map(mapRow);
+  const accountIds = ((data ?? []) as SettingsRow[])
+    .map((row) => readString(row.account_id, ""))
+    .filter(Boolean);
+  const { data: accountRows } = accountIds.length
+    ? await supabase
+        .from("ig_account_settings")
+        .select("account_id,username")
+        .in("account_id", accountIds)
+    : { data: [] };
+  const usernamesByAccountId = new Map(
+    ((accountRows ?? []) as SettingsRow[]).map((row) => [
+      readString(row.account_id, ""),
+      readString(row.username, ""),
+    ]),
+  );
+
+  const hydratedRows = await Promise.all(
+    ((data ?? []) as SettingsRow[])
+      .filter((row) => readString(row.account_id, ""))
+      .map(async (row) => {
+        const accountId = readString(row.account_id, "");
+        const [welcomeTemplate, outreachTemplate] = await Promise.all([
+          fetchActiveDmTemplate(supabase, accountId, "welcome", row.welcome_template_id).catch(() => null),
+          fetchActiveDmTemplate(supabase, accountId, "outreach", row.default_outreach_template_id).catch(() => null),
+        ]);
+        return {
+          ...row,
+          username: usernamesByAccountId.get(accountId) || accountId,
+          welcome_message: readString(welcomeTemplate?.body, ""),
+          outreach_message: readString(outreachTemplate?.body, ""),
+        };
+      }),
+  );
+
+  const mapped = hydratedRows.map(mapRow);
   const accounts = mapped.map((item) => item.account);
   const templates = mapped.flatMap((item) => item.templates);
 
-  // TODO: Replace this legacy projection with dedicated account/client-scoped DM
-  // messages, optional admin suggestion drafts, versioning, approval, Activity Log
-  // audit, and BotApp/admin/client sync. Do not make global templates the source
-  // of truth for personalized client/account messages.
   return {
     ...emptyOverview("connected"),
     accounts,
