@@ -22,6 +22,11 @@ type InstagramFilters = Record<string, ConfigValue> & { account_id: string };
 type FollowFiltersProjection = {
   account_id: string;
   skip_private_profiles: boolean;
+  min_followers: number | null;
+  max_followers: number | null;
+  min_posts: number | null;
+  runtime_ready_fields: string[];
+  planned_fields: string[];
   runtime_status: "active";
   save_ready: boolean;
   changed_fields?: string[];
@@ -423,12 +428,8 @@ type PlannedFilterCard = {
 
 const plannedFilterCards: PlannedFilterCard[] = [
   {
-    title: "Follower thresholds",
-    description: "Minimum and maximum follower counts before a follow attempt.",
-  },
-  {
     title: "Profile quality",
-    description: "Minimum posts, profile photo, and verified-account rules.",
+    description: "Require profile photo and verified-account rules.",
   },
   {
     title: "Business / creator",
@@ -707,6 +708,37 @@ export function unfollowDomainPayload(settings: InstagramSettings) {
 function sameUnfollowPayload(left: InstagramSettings | null, right: InstagramSettings | null) {
   if (!left || !right) return true;
   return JSON.stringify(unfollowDomainPayload(left)) === JSON.stringify(unfollowDomainPayload(right));
+}
+
+function sameFollowFiltersPayload(left: FollowFiltersProjection | null, right: FollowFiltersProjection | null) {
+  if (!left || !right) return true;
+  return (
+    left.skip_private_profiles === right.skip_private_profiles &&
+    left.min_followers === right.min_followers &&
+    left.max_followers === right.max_followers &&
+    left.min_posts === right.min_posts
+  );
+}
+
+function followFiltersValidationError(filters: FollowFiltersProjection | null) {
+  if (!filters) return "";
+  for (const [label, value] of [
+    ["Min followers", filters.min_followers],
+    ["Max followers", filters.max_followers],
+    ["Min posts", filters.min_posts],
+  ] as const) {
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      return `${label} must be a whole number greater than or equal to 0.`;
+    }
+  }
+  if (
+    filters.min_followers !== null &&
+    filters.max_followers !== null &&
+    filters.min_followers > filters.max_followers
+  ) {
+    return "Min followers cannot be greater than Max followers.";
+  }
+  return "";
 }
 
 export function unfollowClientValidationError(settings: InstagramSettings) {
@@ -1434,13 +1466,17 @@ export default function InstagramDashboardButtons({
     }
   }
 
-  function updateFollowFilter(value: boolean) {
-    setFollowFilters((current) => (current ? { ...current, skip_private_profiles: value } : current));
+  function updateFollowFilter(
+    key: "skip_private_profiles" | "min_followers" | "max_followers" | "min_posts",
+    value: boolean | number | null,
+  ) {
+    setFollowFilters((current) => (current ? { ...current, [key]: value } : current));
   }
 
   function saveFollowFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!followFilters || followFilters.skip_private_profiles === followFiltersBaseline?.skip_private_profiles) return;
+    if (!followFilters || sameFollowFiltersPayload(followFilters, followFiltersBaseline)) return;
+    if (followFiltersValidationError(followFilters)) return;
 
     requestConfirmation({
       title: "Save Follow filters?",
@@ -1466,6 +1502,9 @@ export default function InstagramDashboardButtons({
           body: JSON.stringify({
             account_id: followFilters.account_id,
             skip_private_profiles: followFilters.skip_private_profiles,
+            min_followers: followFilters.min_followers,
+            max_followers: followFilters.max_followers,
+            min_posts: followFilters.min_posts,
           }),
         }),
         "Could not save Follow filter settings.",
@@ -2715,7 +2754,10 @@ function renderSettingsTabs({
   settingsTab: SettingsTab;
   selectSettingsTab: (tab: SettingsTab) => void | Promise<void>;
   updateSetting: (key: string, value: ConfigValue) => void;
-  updateFollowFilter: (value: boolean) => void;
+  updateFollowFilter: (
+    key: "skip_private_profiles" | "min_followers" | "max_followers" | "min_posts",
+    value: boolean | number | null,
+  ) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveUnfollowSettings: (event: FormEvent<HTMLFormElement>) => void;
@@ -2740,8 +2782,8 @@ function renderSettingsTabs({
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
   const unfollowDirty = isFollowbackTab && !sameUnfollowPayload(settings, settingsBaseline);
   const unfollowValidationError = isFollowbackTab ? unfollowClientValidationError(settings) : "";
-  const followFiltersDirty =
-    isFiltersTab && followFilters.skip_private_profiles !== followFiltersBaseline?.skip_private_profiles;
+  const followFiltersDirty = isFiltersTab && !sameFollowFiltersPayload(followFilters, followFiltersBaseline);
+  const followFiltersError = isFiltersTab ? followFiltersValidationError(followFilters) : "";
 
   return (
     <form
@@ -2802,7 +2844,10 @@ function renderSettingsTabs({
           </div>
         </>
       ) : isFiltersTab ? (
-        <FiltersTargetPanel followFilters={followFilters} updateFollowFilter={updateFollowFilter} />
+        <>
+          {followFiltersError ? <p className="ig-settings-message ig-settings-error">{followFiltersError}</p> : null}
+          <FiltersTargetPanel followFilters={followFilters} updateFollowFilter={updateFollowFilter} />
+        </>
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
@@ -2846,7 +2891,7 @@ function renderSettingsTabs({
         <DomainTargetActions
           closePanel={closePanel}
           isDirty={followFiltersDirty}
-          validationError=""
+          validationError={followFiltersError}
           isSaving={isSaving}
           label="Save Filters"
         />
@@ -2862,7 +2907,10 @@ function FiltersTargetPanel({
   updateFollowFilter,
 }: {
   followFilters: FollowFiltersProjection;
-  updateFollowFilter: (value: boolean) => void;
+  updateFollowFilter: (
+    key: "skip_private_profiles" | "min_followers" | "max_followers" | "min_posts",
+    value: boolean | number | null,
+  ) => void;
 }) {
   return (
     <div className="ig-filters-target-panel">
@@ -2884,7 +2932,25 @@ function FiltersTargetPanel({
               helper: "When enabled, private accounts are skipped during Follow.",
             }}
             value={followFilters.skip_private_profiles}
-            onChange={(value) => updateFollowFilter(Boolean(value))}
+            onChange={(value) => updateFollowFilter("skip_private_profiles", Boolean(value))}
+          />
+          <NullableNumberFilterField
+            label="Min followers"
+            value={followFilters.min_followers}
+            helper="Off when empty. Candidates below this follower count are skipped."
+            onChange={(value) => updateFollowFilter("min_followers", value)}
+          />
+          <NullableNumberFilterField
+            label="Max followers"
+            value={followFilters.max_followers}
+            helper="Off when empty. Candidates above this follower count are skipped."
+            onChange={(value) => updateFollowFilter("max_followers", value)}
+          />
+          <NullableNumberFilterField
+            label="Min posts"
+            value={followFilters.min_posts}
+            helper="Off when empty. Candidates below this post count are skipped."
+            onChange={(value) => updateFollowFilter("min_posts", value)}
           />
         </div>
       </section>
@@ -2916,6 +2982,35 @@ function FiltersTargetPanel({
 
       <p className="ig-settings-message ig-filters-legacy-note">Legacy draft filters hidden.</p>
     </div>
+  );
+}
+
+function NullableNumberFilterField({
+  label,
+  value,
+  helper,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  helper: string;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <label className="ig-settings-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={0}
+        step={1}
+        value={value ?? ""}
+        onChange={(event) => {
+          const raw = event.target.value;
+          onChange(raw === "" ? null : Number(raw));
+        }}
+      />
+      <small>{helper}</small>
+    </label>
   );
 }
 

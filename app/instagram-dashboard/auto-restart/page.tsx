@@ -504,6 +504,10 @@ function CandidateRow({ candidate }: { candidate: AutoRestartCandidate }) {
       <td>
         <div className="ig-ar-tags">
           <span className="ig-ar-tag">{candidate.packageLabel}</span>
+          <span className="ig-ar-tag">Add-ons: {candidate.commercialAddonsLabel}</span>
+          <span className="ig-ar-tag">Outreach: {candidate.outreachSourceLabel}</span>
+          <span className="ig-ar-tag">Runtime: {candidate.runtimeProfilesLabel}</span>
+          <span className="ig-ar-tag">{candidate.followFiltersLabel}</span>
           {candidate.enabledServices.map((service) => <span key={service} className="ig-ar-tag">{service}</span>)}
         </div>
       </td>

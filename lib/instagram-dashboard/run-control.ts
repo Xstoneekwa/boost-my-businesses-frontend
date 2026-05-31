@@ -52,6 +52,7 @@ export type RunStartBlockReason =
   | "mini_run_follow_cap_unproven"
   | "follow_day_quota_exhausted"
   | "follow_warmup_pending"
+  | "follow_filter_invalid_range"
   | "mini_run_outreach_off_unproven"
   | "unfollow_entitlement_missing"
   | "unfollow_disabled"
@@ -215,6 +216,46 @@ function readPositiveInteger(value: unknown) {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0) return null;
   return parsed;
+}
+
+function readNullableNonnegativeInteger(value: unknown) {
+  if (value === null || value === undefined || value === "") return { value: null, valid: true };
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return { value: null, valid: false };
+  return { value: parsed, valid: true };
+}
+
+export function validateFollowFilterSettingsRow(row: SupabaseRecord | null | undefined): RunStartBlockReason | null {
+  if (!row) return null;
+  const minFollowers = readNullableNonnegativeInteger(row.min_followers);
+  const maxFollowers = readNullableNonnegativeInteger(row.max_followers);
+  const minPosts = readNullableNonnegativeInteger(row.min_posts);
+  if (!minFollowers.valid || !maxFollowers.valid || !minPosts.valid) {
+    return "follow_filter_invalid_range";
+  }
+  if (
+    minFollowers.value !== null &&
+    maxFollowers.value !== null &&
+    minFollowers.value > maxFollowers.value
+  ) {
+    return "follow_filter_invalid_range";
+  }
+  return null;
+}
+
+function followFiltersSummary(row: SupabaseRecord | null | undefined) {
+  if (!row) return { enabled: false, active: [] as string[], candidate_eligibility: "candidate eligibility not precomputed" };
+  const active = [
+    row.dont_follow_private_accounts === true ? "private" : "",
+    row.min_followers !== null && row.min_followers !== undefined ? "min_followers" : "",
+    row.max_followers !== null && row.max_followers !== undefined ? "max_followers" : "",
+    row.min_posts !== null && row.min_posts !== undefined ? "min_posts" : "",
+  ].filter(Boolean);
+  return {
+    enabled: active.length > 0,
+    active,
+    candidate_eligibility: "candidate eligibility not precomputed",
+  };
 }
 
 export function readMiniRunCap(names: string[], env: MiniRunEnv = process.env) {
@@ -967,6 +1008,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   }
 
   const supabase = createSupabaseClient();
+  let safeFollowFiltersSummary: ReturnType<typeof followFiltersSummary> | undefined;
   const { data: accountRow, error: accountError } = await supabase
     .from("ig_accounts")
     .select("id,status,username")
@@ -1134,6 +1176,21 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         }
       }
 
+      const { data: followFilterSettings, error: followFilterSettingsError } = await supabase
+        .from("ig_account_follow_settings")
+        .select("dont_follow_private_accounts,min_followers,max_followers,min_posts")
+        .eq("account_id", accountId)
+        .limit(1)
+        .maybeSingle<SupabaseRecord>();
+      if (followFilterSettingsError) {
+        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      }
+      const followFilterBlock = validateFollowFilterSettingsRow(followFilterSettings);
+      if (followFilterBlock) {
+        return { ok: false as const, reason: followFilterBlock, health };
+      }
+      safeFollowFiltersSummary = followFiltersSummary(followFilterSettings);
+
       const { data: unfollowSettings, error: unfollowSettingsError } = await supabase
         .from("ig_account_unfollow_settings")
         .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap")
@@ -1237,7 +1294,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
   }
 
-  return { ok: true as const, health, normalizedRunType };
+  return { ok: true as const, health, normalizedRunType, followFiltersSummary: safeFollowFiltersSummary };
 }
 
 export async function insertManualRunAudit(
@@ -1315,6 +1372,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual run is blocked because the effective Follow day quota is exhausted.";
     case "follow_warmup_pending":
       return "Manual run is blocked because Follow warmup is missing a package/service start date.";
+    case "follow_filter_invalid_range":
+      return "Manual run is blocked because Follow filter thresholds are invalid.";
     case "mini_run_outreach_off_unproven":
       return "Manual mini-run is blocked because Outreach isolation is not proven.";
     case "unfollow_entitlement_missing":

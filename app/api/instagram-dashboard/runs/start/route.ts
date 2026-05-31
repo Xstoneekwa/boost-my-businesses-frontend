@@ -110,6 +110,7 @@ export async function POST(request: Request) {
       p_metadata_safe: {
         requested_from: "instagram_dashboard",
         requested_run_type: eligibility.normalizedRunType,
+        follow_filters: eligibility.followFiltersSummary,
       },
     });
 

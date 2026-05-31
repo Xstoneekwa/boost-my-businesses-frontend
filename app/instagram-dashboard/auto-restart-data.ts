@@ -42,6 +42,7 @@ export type AutoRestartCandidate = {
   commercialAddonsLabel: string;
   outreachSourceLabel: string;
   runtimeProfilesLabel: string;
+  followFiltersLabel: string;
   enabledServices: string[];
   phoneName: string;
   phoneRestStatus: string;
@@ -222,9 +223,22 @@ function isBlockingAccount(account: ManageAccount) {
   return ["checkpoint", "challenge", "reauth", "missing", "blocked", "problem", "failed"].some((term) => combined.includes(term)) || account.pendingActionsCount > 0 || account.blockingCampaign;
 }
 
+function followFiltersLabel(settings: SupabaseRecord | undefined) {
+  const active = [
+    readBoolean(settings?.dont_follow_private_accounts, false) ? "private" : "",
+    settings?.min_followers !== null && settings?.min_followers !== undefined ? "min followers" : "",
+    settings?.max_followers !== null && settings?.max_followers !== undefined ? "max followers" : "",
+    settings?.min_posts !== null && settings?.min_posts !== undefined ? "min posts" : "",
+  ].filter(Boolean);
+  return active.length
+    ? `Follow filters active: ${active.join(", ")} · candidate eligibility not precomputed`
+    : "Follow filters inactive · candidate eligibility not precomputed";
+}
+
 function planCandidate({
   account,
   settings,
+  followFilterSettings,
   unfollowSettings,
   dmSettings,
   packageSummary,
@@ -235,6 +249,7 @@ function planCandidate({
 }: {
   account: ManageAccount;
   settings: SupabaseRecord | undefined;
+  followFilterSettings: SupabaseRecord | undefined;
   unfollowSettings: SupabaseRecord | undefined;
   dmSettings: SupabaseRecord | undefined;
   packageSummary: SupabaseRecord | undefined;
@@ -317,6 +332,7 @@ function planCandidate({
     commercialAddonsLabel: account.commercialAddonsLabel,
     outreachSourceLabel: account.outreachSourceLabel,
     runtimeProfilesLabel: account.runtimeProfilesLabel,
+    followFiltersLabel: followFiltersLabel(followFilterSettings),
     enabledServices: [
       followEnabled ? "Follow" : "",
       unfollowEnabled ? "Unfollow" : "",
@@ -368,6 +384,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     workerHeartbeatsResult,
     deviceHeartbeatsResult,
     packageSummaryResult,
+    followFilterSettingsResult,
   ] = await Promise.all([
     supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap").in("account_id", accountIds).limit(500),
@@ -379,6 +396,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("worker_heartbeats").select("worker_id,status,last_seen_at").order("last_seen_at", { ascending: false }).limit(20),
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
     supabase.from("account_package_summary").select("account_id,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
+    supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(500),
   ]);
 
   const errors = [
@@ -392,6 +410,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     workerHeartbeatsResult.error,
     deviceHeartbeatsResult.error,
     packageSummaryResult.error,
+    followFilterSettingsResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -403,11 +422,13 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
+  const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
 
   const candidates = manageData.activeAccounts
     .map((account) => planCandidate({
       account,
       settings: settingsByAccount.get(account.accountId),
+      followFilterSettings: followFilterSettingsByAccount.get(account.accountId),
       unfollowSettings: unfollowByAccount.get(account.accountId),
       dmSettings: dmByAccount.get(account.accountId),
       packageSummary: packageSummaryByAccount.get(account.accountId),

@@ -19,6 +19,7 @@ import {
   runControlOutreachRealSendEnabled,
   runControlWelcomeRealSendEnabled,
   runStartBlockMessage,
+  validateFollowFilterSettingsRow,
 } from "../../lib/instagram-dashboard/run-control";
 
 test("run start 401 is surfaced as an error", async () => {
@@ -74,6 +75,19 @@ test("API idempotent start payload returns existing request id", () => {
   assert.equal(payload.started, false);
   assert.equal(payload.idempotent, true);
   assert.equal(payload.request_id, "00000000-0000-4000-8000-000000000003");
+});
+
+test("Follow filter preflight rejects invalid follower ranges", () => {
+  assert.equal(
+    validateFollowFilterSettingsRow({ min_followers: 1000, max_followers: 500, min_posts: null }),
+    "follow_filter_invalid_range",
+  );
+  assert.equal(runStartBlockMessage("follow_filter_invalid_range"), "Manual run is blocked because Follow filter thresholds are invalid.");
+});
+
+test("Follow filter preflight accepts null or valid thresholds", () => {
+  assert.equal(validateFollowFilterSettingsRow({ min_followers: null, max_followers: null, min_posts: null }), null);
+  assert.equal(validateFollowFilterSettingsRow({ min_followers: 100, max_followers: 500, min_posts: 3 }), null);
 });
 
 test("DM service availability disables Growth without add-ons", () => {
