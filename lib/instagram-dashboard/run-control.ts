@@ -36,11 +36,25 @@ export type RunStartBlockReason =
   | "support_required"
   | "credentials_review_required"
   | "reauth_required"
+  | "welcome_template_missing"
   | "welcome_real_send_disabled"
+  | "welcome_cap_unproven"
+  | "welcome_daily_cap_exceeded"
+  | "outreach_entitlement_missing"
+  | "outreach_disabled"
+  | "outreach_template_missing"
   | "outreach_real_send_disabled"
+  | "outreach_cap_unproven"
+  | "outreach_daily_cap_exceeded"
+  | "session_cap_exceeds_day_cap"
+  | "dm_legacy_gate_mismatch"
   | "mini_run_welcome_cap_unproven"
   | "mini_run_follow_cap_unproven"
   | "mini_run_outreach_off_unproven"
+  | "real_handoff_disabled"
+  | "unfollow_any_not_supported"
+  | "unfollow_cap_unproven"
+  | "no_safe_unfollow_strategy"
   | "already_running"
   | "already_requested"
   | "invalid_run_type";
@@ -48,6 +62,8 @@ export type RunStartBlockReason =
 const BLOCKED_ACCOUNT_STATUSES = new Set(["archived", "trashed", "canceled", "deleted", "stopped"]);
 const CREDENTIAL_REVIEW_ACTIONS = new Set(["review_credentials", "submit_instagram_credentials"]);
 const CHECKPOINT_ACTIONS = new Set(["complete_two_factor", "review_checkpoint", "review_account_mismatch"]);
+export const DEFAULT_WELCOME_DM_DAY_CAP = 10;
+export const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
 
 export function runControlPlayFeatureEnabled() {
   return process.env.INSTAGRAM_RUN_CONTROL_PLAY_ENABLED === "true";
@@ -68,6 +84,26 @@ export function runControlWelcomeRealSendEnabled(env: MiniRunEnv = process.env) 
 
 export function runControlOutreachRealSendEnabled(env: MiniRunEnv = process.env) {
   return env.OUTREACH_DM_REAL_SEND_ENABLED === "true";
+}
+
+export function runControlLegacyDmSenderRealSendEnabled(env: MiniRunEnv = process.env) {
+  const raw = env.DM_SENDER_REAL_SEND_ENABLED;
+  return raw === "true" ? true : raw === "false" ? false : null;
+}
+
+export function runControlFollowToUnfollowRealEnabled(env: MiniRunEnv = process.env) {
+  return (
+    env.INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_ENABLED ??
+    env.ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_ENABLED
+  ) === "true";
+}
+
+export function runControlUnfollowAnyH3RealSupported(env: MiniRunEnv = process.env) {
+  return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_H3_REAL_SUPPORTED === "true";
+}
+
+export function runControlUnfollowAnySafeStrategyProven(env: MiniRunEnv = process.env) {
+  return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_SAFE_STRATEGY_PROVEN === "true";
 }
 
 export function runControlMiniRunCapsRequired() {
@@ -94,6 +130,112 @@ export function readMiniRunCap(names: string[], env: MiniRunEnv = process.env) {
 
 function capProvesAtMostOne(value: number | null) {
   return value !== null && value <= 1;
+}
+
+function capProvesAtLeastOne(value: number | null) {
+  return value !== null && value >= 1;
+}
+
+function minKnownCaps(values: Array<number | null>) {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length ? Math.min(...known) : null;
+}
+
+function remainingCap(limit: number | null, used: number | null) {
+  if (limit === null) return null;
+  return Math.max(0, limit - (used ?? 0));
+}
+
+function utcDateString(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+export function resolveWelcomePreflightCap({
+  sessionCap,
+  dayCap,
+  welcomeSentToday,
+  totalDayCap,
+  totalDmSentToday,
+  env = process.env,
+}: {
+  sessionCap: number | null;
+  dayCap: number | null;
+  welcomeSentToday: number | null;
+  totalDayCap?: number | null;
+  totalDmSentToday?: number | null;
+  env?: MiniRunEnv;
+}) {
+  const packageDayCap = DEFAULT_WELCOME_DM_DAY_CAP;
+  const dayCapExceedsProductMax = dayCap !== null && dayCap > packageDayCap;
+  const effectiveDayCap = dayCap ?? packageDayCap;
+  const hardSessionCap = readMiniRunCap(
+    ["INSTAGRAM_RUN_CONTROL_WELCOME_SESSION_SEND_MAX_JOBS", "WELCOME_SESSION_SEND_MAX_JOBS"],
+    env,
+  );
+  const dayRemaining = remainingCap(effectiveDayCap, welcomeSentToday);
+  const totalDayRemaining = remainingCap(totalDayCap ?? null, totalDmSentToday ?? null);
+  const effectiveCap = minKnownCaps([sessionCap, hardSessionCap, dayRemaining, totalDayRemaining]);
+  return {
+    effectiveCap,
+    effectiveDayCap,
+    dayRemaining,
+    dayCapExceedsProductMax,
+    sessionCapExceedsDayCap: sessionCap !== null && sessionCap > effectiveDayCap,
+    dailyCapExceeded:
+      capProvesAtLeastOne(sessionCap) &&
+      capProvesAtLeastOne(effectiveDayCap) &&
+      ((dayRemaining !== null && dayRemaining <= 0) || (totalDayRemaining !== null && totalDayRemaining <= 0)),
+  };
+}
+
+export function resolveOutreachPreflightCap({
+  sessionCap,
+  dayCap,
+  outreachSentToday,
+  totalDayCap,
+  totalDmSentToday,
+  env = process.env,
+}: {
+  sessionCap: number | null;
+  dayCap: number | null;
+  outreachSentToday: number | null;
+  totalDayCap?: number | null;
+  totalDmSentToday?: number | null;
+  env?: MiniRunEnv;
+}) {
+  const packageDayCap = DEFAULT_OUTREACH_DM_DAY_CAP;
+  const dayCapExceedsProductMax = dayCap !== null && dayCap > packageDayCap;
+  const effectiveDayCap = dayCap ?? packageDayCap;
+  const hardSessionCap = readMiniRunCap(
+    ["INSTAGRAM_RUN_CONTROL_OUTREACH_HARD_MAX_PER_SESSION", "OUTREACH_HARD_MAX_PER_SESSION"],
+    env,
+  );
+  const hardDayCap = readMiniRunCap(
+    ["INSTAGRAM_RUN_CONTROL_OUTREACH_HARD_MAX_PER_DAY", "OUTREACH_HARD_MAX_PER_DAY"],
+    env,
+  );
+  const dayRemaining = remainingCap(effectiveDayCap, outreachSentToday);
+  const hardDayRemaining = remainingCap(hardDayCap, outreachSentToday);
+  const totalDayRemaining = remainingCap(totalDayCap ?? null, totalDmSentToday ?? null);
+  const effectiveCap = minKnownCaps([sessionCap, hardSessionCap, dayRemaining, hardDayRemaining, totalDayRemaining]);
+  return {
+    effectiveCap,
+    effectiveDayCap,
+    dayRemaining,
+    dayCapExceedsProductMax,
+    sessionCapExceedsDayCap: sessionCap !== null && sessionCap > effectiveDayCap,
+    dailyCapExceeded:
+      capProvesAtLeastOne(sessionCap) &&
+      capProvesAtLeastOne(effectiveDayCap) &&
+      ((dayRemaining !== null && dayRemaining <= 0) ||
+        (hardDayCap !== null && hardDayRemaining !== null && hardDayRemaining <= 0) ||
+        (totalDayRemaining !== null && totalDayRemaining <= 0)),
+  };
+}
+
+export function isUnfollowAnyMode(value: unknown) {
+  const mode = readString(value, "").trim().toLowerCase();
+  return mode === "unfollow-any" || mode === "unfollow-any-non-followers" || mode === "unfollow-any-followers";
 }
 
 export function runControlDispatcherAllowedRunTypes(env: MiniRunEnv = process.env) {
@@ -156,6 +298,149 @@ export function evaluateMiniRunCapsPreflight({
   return null;
 }
 
+export function evaluateUnfollowAnyStartGate({
+  requestedRunType,
+  unfollowEnabled,
+  unfollowMode,
+  unfollowPerSessionLimit,
+  realHandoffEnabled,
+  realMaxActions,
+  realHardMax,
+  h3RealSupported,
+  safeCandidateStrategyProven,
+}: {
+  requestedRunType: string;
+  unfollowEnabled: boolean;
+  unfollowMode: string;
+  unfollowPerSessionLimit: number | null;
+  realHandoffEnabled: boolean;
+  realMaxActions: number | null;
+  realHardMax: number | null;
+  h3RealSupported: boolean;
+  safeCandidateStrategyProven: boolean;
+}): RunStartBlockReason | null {
+  if (requestedRunType !== "account_session" || !unfollowEnabled || !isUnfollowAnyMode(unfollowMode)) {
+    return null;
+  }
+
+  if (!realHandoffEnabled) {
+    return "real_handoff_disabled";
+  }
+  if (!h3RealSupported) {
+    return "unfollow_any_not_supported";
+  }
+  if (
+    !capProvesAtLeastOne(unfollowPerSessionLimit) ||
+    !capProvesAtLeastOne(realMaxActions) ||
+    !capProvesAtLeastOne(realHardMax)
+  ) {
+    return "unfollow_cap_unproven";
+  }
+  if (!safeCandidateStrategyProven) {
+    return "no_safe_unfollow_strategy";
+  }
+
+  return null;
+}
+
+export function evaluateDmStartGate({
+  requestedRunType,
+  welcomeEnabled,
+  welcomeTemplateReady,
+  welcomeRealSendEnabled,
+  welcomeEffectiveCap,
+  welcomeDailyCapExceeded = false,
+  welcomeDayCapExceedsProductMax = false,
+  welcomeSessionCapExceedsDayCap = false,
+  outreachEnabled,
+  outreachTemplateReady,
+  outreachRealSendEnabled,
+  outreachEffectiveSessionCap,
+  outreachEffectiveDayCap,
+  outreachDailyCapExceeded = false,
+  outreachDayCapExceedsProductMax = false,
+  outreachSessionCapExceedsDayCap = false,
+  outreachEntitlementActive,
+  legacyDmSenderRealSendEnabled = null,
+}: {
+  requestedRunType: string;
+  welcomeEnabled: boolean;
+  welcomeTemplateReady: boolean;
+  welcomeRealSendEnabled: boolean;
+  welcomeEffectiveCap: number | null;
+  welcomeDailyCapExceeded?: boolean;
+  welcomeDayCapExceedsProductMax?: boolean;
+  welcomeSessionCapExceedsDayCap?: boolean;
+  outreachEnabled: boolean;
+  outreachTemplateReady: boolean;
+  outreachRealSendEnabled: boolean;
+  outreachEffectiveSessionCap: number | null;
+  outreachEffectiveDayCap: number | null;
+  outreachDailyCapExceeded?: boolean;
+  outreachDayCapExceedsProductMax?: boolean;
+  outreachSessionCapExceedsDayCap?: boolean;
+  outreachEntitlementActive: boolean;
+  legacyDmSenderRealSendEnabled?: boolean | null;
+}): RunStartBlockReason | null {
+  if (requestedRunType === "account_session") {
+    if (!welcomeEnabled) return null;
+    if (legacyDmSenderRealSendEnabled === true && !welcomeRealSendEnabled) {
+      return "dm_legacy_gate_mismatch";
+    }
+    if (!welcomeTemplateReady) {
+      return "welcome_template_missing";
+    }
+    if (!welcomeRealSendEnabled) {
+      return "welcome_real_send_disabled";
+    }
+    if (welcomeSessionCapExceedsDayCap) {
+      return "session_cap_exceeds_day_cap";
+    }
+    if (welcomeDayCapExceedsProductMax) {
+      return "welcome_daily_cap_exceeded";
+    }
+    if (welcomeDailyCapExceeded) {
+      return "welcome_daily_cap_exceeded";
+    }
+    if (!capProvesAtLeastOne(welcomeEffectiveCap)) {
+      return "welcome_cap_unproven";
+    }
+    return null;
+  }
+
+  if (requestedRunType === "outreach_session") {
+    if (!outreachEnabled) {
+      return "outreach_disabled";
+    }
+    if (!outreachEntitlementActive) {
+      return "outreach_entitlement_missing";
+    }
+    if (legacyDmSenderRealSendEnabled === true && !outreachRealSendEnabled) {
+      return "dm_legacy_gate_mismatch";
+    }
+    if (!outreachTemplateReady) {
+      return "outreach_template_missing";
+    }
+    if (!outreachRealSendEnabled) {
+      return "outreach_real_send_disabled";
+    }
+    if (outreachSessionCapExceedsDayCap) {
+      return "session_cap_exceeds_day_cap";
+    }
+    if (outreachDayCapExceedsProductMax) {
+      return "outreach_daily_cap_exceeded";
+    }
+    if (outreachDailyCapExceeded) {
+      return "outreach_daily_cap_exceeded";
+    }
+    if (!capProvesAtLeastOne(outreachEffectiveSessionCap) || !capProvesAtLeastOne(outreachEffectiveDayCap)) {
+      return "outreach_cap_unproven";
+    }
+  }
+
+  return null;
+}
+
 export function accountSessionBlockedByWelcomeRealSendDisabled({
   requestedRunType,
   welcomeEnabled,
@@ -178,6 +463,49 @@ export function outreachSessionBlockedByOutreachRealSendDisabled({
   outreachRealSendEnabled: boolean;
 }) {
   return requestedRunType === "outreach_session" && outreachEnabled && !outreachRealSendEnabled;
+}
+
+async function hasActiveDmTemplate({
+  accountId,
+  templateType,
+  templateId,
+}: {
+  accountId: string;
+  templateType: "welcome" | "outreach";
+  templateId: unknown;
+}) {
+  const supabase = createSupabaseClient();
+  const configuredTemplateId = readString(templateId, "").trim();
+  let query = supabase
+    .from("ig_dm_templates")
+    .select("id,body")
+    .eq("account_id", accountId)
+    .eq("template_type", templateType)
+    .eq("active", true)
+    .limit(1);
+
+  if (configuredTemplateId) {
+    query = query.eq("id", configuredTemplateId);
+  } else {
+    query = query.eq("is_default", true);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    throw new Error("Could not verify DM template.");
+  }
+  return Boolean(data && readString((data as SupabaseRecord).body, "").trim());
+}
+
+async function accountHasOutreachEntitlement(accountId: string) {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase.rpc("client_account_has_outreach_entitlement", {
+    p_account_id: accountId,
+  });
+  if (error) {
+    throw new Error("Could not verify Outreach entitlement.");
+  }
+  return data === true;
 }
 
 export function sanitizeRunControlReason(value: unknown, fallback = "blocked") {
@@ -429,7 +757,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   if (normalizedRunType === "account_session" || normalizedRunType === "outreach_session") {
     const { data: dmSettings, error: dmSettingsError } = await supabase
       .from("ig_account_dm_settings")
-      .select("welcome_enabled,outreach_enabled")
+      .select("welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit,total_dm_per_day_limit")
       .eq("account_id", accountId)
       .limit(1)
       .maybeSingle();
@@ -440,10 +768,85 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
 
     const welcomeRealSendEnabled = runControlWelcomeRealSendEnabled();
     const outreachRealSendEnabled = runControlOutreachRealSendEnabled();
+    const welcomeEnabled = dmSettings?.welcome_enabled === true;
+    const outreachEnabled = dmSettings?.outreach_enabled === true;
+    const { data: dmCounter, error: dmCounterError } = await supabase
+      .from("ig_account_dm_counters")
+      .select("welcome_sent_count,outreach_sent_count,total_dm_sent_count")
+      .eq("account_id", accountId)
+      .eq("counter_date", utcDateString())
+      .limit(1)
+      .maybeSingle();
+
+    if (dmCounterError) {
+      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    }
+
+    let welcomeTemplateReady = false;
+    let outreachTemplateReady = false;
+    let outreachEntitlementActive = false;
+    try {
+      if (normalizedRunType === "account_session" && welcomeEnabled) {
+        welcomeTemplateReady = await hasActiveDmTemplate({
+          accountId,
+          templateType: "welcome",
+          templateId: dmSettings?.welcome_template_id,
+        });
+      }
+      if (normalizedRunType === "outreach_session" && outreachEnabled) {
+        outreachTemplateReady = await hasActiveDmTemplate({
+          accountId,
+          templateType: "outreach",
+          templateId: dmSettings?.default_outreach_template_id,
+        });
+        outreachEntitlementActive = await accountHasOutreachEntitlement(accountId);
+      }
+    } catch {
+      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    }
+
+    const welcomePreflightCap = resolveWelcomePreflightCap({
+      sessionCap: readPositiveInteger(dmSettings?.welcome_per_session_limit),
+      dayCap: readPositiveInteger(dmSettings?.welcome_per_day_limit) ?? DEFAULT_WELCOME_DM_DAY_CAP,
+      welcomeSentToday: readPositiveInteger(dmCounter?.welcome_sent_count) ?? 0,
+      totalDayCap: readPositiveInteger(dmSettings?.total_dm_per_day_limit),
+      totalDmSentToday: readPositiveInteger(dmCounter?.total_dm_sent_count) ?? 0,
+    });
+    const outreachPreflightCap = resolveOutreachPreflightCap({
+      sessionCap: readPositiveInteger(dmSettings?.outreach_per_session_limit),
+      dayCap: readPositiveInteger(dmSettings?.outreach_per_day_limit) ?? DEFAULT_OUTREACH_DM_DAY_CAP,
+      outreachSentToday: readPositiveInteger(dmCounter?.outreach_sent_count) ?? 0,
+      totalDayCap: readPositiveInteger(dmSettings?.total_dm_per_day_limit),
+      totalDmSentToday: readPositiveInteger(dmCounter?.total_dm_sent_count) ?? 0,
+    });
+
+    const dmBlock = evaluateDmStartGate({
+      requestedRunType: normalizedRunType,
+      welcomeEnabled,
+      welcomeTemplateReady,
+      welcomeRealSendEnabled,
+      welcomeEffectiveCap: welcomePreflightCap.effectiveCap,
+      welcomeDailyCapExceeded: welcomePreflightCap.dailyCapExceeded,
+      welcomeDayCapExceedsProductMax: welcomePreflightCap.dayCapExceedsProductMax,
+      welcomeSessionCapExceedsDayCap: welcomePreflightCap.sessionCapExceedsDayCap,
+      outreachEnabled,
+      outreachTemplateReady,
+      outreachRealSendEnabled,
+      outreachEffectiveSessionCap: outreachPreflightCap.effectiveCap,
+      outreachEffectiveDayCap: outreachPreflightCap.effectiveDayCap,
+      outreachDailyCapExceeded: outreachPreflightCap.dailyCapExceeded,
+      outreachDayCapExceedsProductMax: outreachPreflightCap.dayCapExceedsProductMax,
+      outreachSessionCapExceedsDayCap: outreachPreflightCap.sessionCapExceedsDayCap,
+      outreachEntitlementActive,
+      legacyDmSenderRealSendEnabled: runControlLegacyDmSenderRealSendEnabled(),
+    });
+    if (dmBlock) {
+      return { ok: false as const, reason: dmBlock, health };
+    }
 
     if (accountSessionBlockedByWelcomeRealSendDisabled({
       requestedRunType: normalizedRunType,
-      welcomeEnabled: dmSettings?.welcome_enabled === true,
+      welcomeEnabled,
       welcomeRealSendEnabled,
     })) {
       return { ok: false as const, reason: "welcome_real_send_disabled" as RunStartBlockReason, health };
@@ -451,7 +854,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
 
     if (outreachSessionBlockedByOutreachRealSendDisabled({
       requestedRunType: normalizedRunType,
-      outreachEnabled: dmSettings?.outreach_enabled === true,
+      outreachEnabled,
       outreachRealSendEnabled,
     })) {
       return { ok: false as const, reason: "outreach_real_send_disabled" as RunStartBlockReason, health };
@@ -459,13 +862,47 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
 
     const miniRunBlock = evaluateMiniRunCapsPreflight({
       requestedRunType: normalizedRunType,
-      welcomeEnabled: dmSettings?.welcome_enabled === true,
+      welcomeEnabled,
       welcomeRealSendEnabled,
       outreachRealSendEnabled,
-      outreachEnabled: dmSettings?.outreach_enabled === true,
+      outreachEnabled,
     });
     if (miniRunBlock) {
       return { ok: false as const, reason: miniRunBlock, health };
+    }
+
+    if (normalizedRunType === "account_session") {
+      const { data: unfollowSettings, error: unfollowSettingsError } = await supabase
+        .from("ig_account_unfollow_settings")
+        .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit")
+        .eq("account_id", accountId)
+        .limit(1)
+        .maybeSingle();
+
+      if (unfollowSettingsError) {
+        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      }
+
+      const unfollowBlock = evaluateUnfollowAnyStartGate({
+        requestedRunType: normalizedRunType,
+        unfollowEnabled: unfollowSettings?.unfollow_enabled === true,
+        unfollowMode: readString(unfollowSettings?.unfollow_mode, ""),
+        unfollowPerSessionLimit: readPositiveInteger(unfollowSettings?.unfollow_per_session_limit),
+        realHandoffEnabled: runControlFollowToUnfollowRealEnabled(),
+        realMaxActions: readMiniRunCap([
+          "INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS",
+          "ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS",
+        ]),
+        realHardMax: readMiniRunCap([
+          "INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX",
+          "ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX",
+        ]),
+        h3RealSupported: runControlUnfollowAnyH3RealSupported(),
+        safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
+      });
+      if (unfollowBlock) {
+        return { ok: false as const, reason: unfollowBlock, health };
+      }
     }
   }
 
@@ -565,16 +1002,44 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Credentials review is required before manual run.";
     case "reauth_required":
       return "Credential re-authentication is required before manual run.";
+    case "welcome_template_missing":
+      return "Manual run is blocked because no active Welcome DM template is configured.";
     case "welcome_real_send_disabled":
       return "Manual run is blocked because Welcome DM real send is disabled.";
+    case "welcome_cap_unproven":
+      return "Manual run is blocked because the effective Welcome DM cap is not proven.";
+    case "welcome_daily_cap_exceeded":
+      return "Manual run is blocked because the Welcome DM daily cap has no remaining quota.";
+    case "outreach_entitlement_missing":
+      return "Manual run is blocked because this account has no active Outreach entitlement.";
+    case "outreach_disabled":
+      return "Manual run is blocked because Outreach is disabled for this account.";
+    case "outreach_template_missing":
+      return "Manual run is blocked because no active Outreach DM template is configured.";
     case "outreach_real_send_disabled":
       return "Manual run is blocked because Outreach DM real send is disabled.";
+    case "outreach_cap_unproven":
+      return "Manual run is blocked because the effective Outreach DM caps are not proven.";
+    case "outreach_daily_cap_exceeded":
+      return "Manual run is blocked because the Outreach DM daily cap has no remaining quota.";
+    case "session_cap_exceeds_day_cap":
+      return "Manual run is blocked because a DM session cap exceeds its day cap.";
+    case "dm_legacy_gate_mismatch":
+      return "Manual run is blocked because the legacy DM sender flag conflicts with the domain DM real-send gate.";
     case "mini_run_welcome_cap_unproven":
       return "Manual mini-run is blocked because Welcome DM cap is not proven to be at most 1.";
     case "mini_run_follow_cap_unproven":
       return "Manual mini-run is blocked because Follow caps are not proven to be at most 1.";
     case "mini_run_outreach_off_unproven":
       return "Manual mini-run is blocked because Outreach isolation is not proven.";
+    case "real_handoff_disabled":
+      return "Manual run is blocked because Unfollow real handoff is disabled.";
+    case "unfollow_any_not_supported":
+      return "Manual run is blocked because Unfollow-any is not supported by the H3 real handoff path.";
+    case "unfollow_cap_unproven":
+      return "Manual run is blocked because the effective Unfollow cap is not proven to allow at least 1 action.";
+    case "no_safe_unfollow_strategy":
+      return "Manual run is blocked because no safe Unfollow-any candidate strategy is proven.";
     case "already_running":
       return "A run is already active for this account.";
     case "already_requested":

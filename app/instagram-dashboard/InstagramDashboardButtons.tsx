@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
 
 type InstagramDashboardButtonsProps = {
@@ -24,6 +25,30 @@ type AccountTemplate = Record<string, unknown> & {
   description?: string | null;
   template_type: "settings" | "filters" | "full";
   is_default?: boolean;
+};
+
+type DmDomainProjection = {
+  account_id: string;
+  welcome_service_active: boolean;
+  outreach_service_active: boolean;
+  welcome_entitlement_status: string;
+  outreach_entitlement_status: string;
+  welcome_enabled: boolean;
+  outreach_enabled: boolean;
+  welcome_message: string;
+  outreach_message: string;
+  welcome_template_status: string;
+  outreach_template_status: string;
+  welcome_cap_session: number;
+  welcome_cap_day: number;
+  outreach_cap_session: number;
+  outreach_cap_day: number;
+  welcome_real_send_status: string;
+  outreach_real_send_status: string;
+  legacy_dm_gate_status: string;
+  save_ready: boolean;
+  validation_error?: string | null;
+  changed_fields?: string[];
 };
 
 type StatsRow = {
@@ -152,6 +177,9 @@ type RunStartResponse = {
   status?: string;
 };
 
+const DEFAULT_WELCOME_DM_DAY_CAP = 10;
+const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
+
 export function runStartSuccessMessage(payload: RunStartResponse) {
   if (!payload.request_id || !payload.status) {
     throw new Error("Run start did not return a request id.");
@@ -251,6 +279,7 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "welcome_dm_real_send_status", label: "Welcome real-send status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: WELCOME_DM_REAL_SEND_ENABLED." },
     { key: "welcome_dm_template_status", label: "Welcome template status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Active configured or default Welcome template." },
     { key: "welcome_dm_effective_cap", label: "Welcome effective cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.welcome_per_session_limit; mini-run still requires hard cap proof." },
+    { key: "welcome_dm_effective_day_cap", label: "Welcome day cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.welcome_per_day_limit; package default/max 10." },
     { key: "outreach_dm_runtime_enabled", label: "Outreach enabled", type: "toggle", readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.outreach_enabled." },
     { key: "outreach_entitlement_status", label: "Outreach entitlement", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: client_account_has_outreach_entitlement." },
     { key: "outreach_dm_real_send_status", label: "Outreach real-send status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: OUTREACH_DM_REAL_SEND_ENABLED." },
@@ -479,6 +508,78 @@ function settingNumber(settings: InstagramSettings, key: string, fallback = 0) {
 function settingBoolean(settings: InstagramSettings, key: string, fallback = false) {
   const value = settings[key];
   return typeof value === "boolean" ? value : fallback;
+}
+
+function withDmDomainProjection(settings: InstagramSettings, projection: DmDomainProjection): InstagramSettings {
+  return {
+    ...settings,
+    welcome_dm_runtime_enabled: projection.welcome_enabled,
+    outreach_dm_runtime_enabled: projection.outreach_enabled,
+    welcome_dm_message: projection.welcome_message,
+    cold_dm_message: projection.outreach_message,
+    welcome_dm_template_status: projection.welcome_template_status,
+    outreach_dm_template_status: projection.outreach_template_status,
+    welcome_entitlement_status: projection.welcome_entitlement_status,
+    outreach_entitlement_status: projection.outreach_entitlement_status,
+    welcome_dm_effective_cap: projection.welcome_cap_session,
+    welcome_dm_effective_day_cap: projection.welcome_cap_day,
+    outreach_dm_effective_session_cap: projection.outreach_cap_session,
+    outreach_dm_effective_day_cap: projection.outreach_cap_day,
+    welcome_dm_real_send_status: projection.welcome_real_send_status,
+    outreach_dm_real_send_status: projection.outreach_real_send_status,
+    dm_legacy_gate_status: projection.legacy_dm_gate_status,
+    dm_domain_save_ready: projection.save_ready,
+  };
+}
+
+export function dmDomainPayload(settings: InstagramSettings) {
+  return {
+    account_id: settings.account_id,
+    welcome_enabled: settingBoolean(settings, "welcome_dm_runtime_enabled", settingBoolean(settings, "welcome_dm_enabled")),
+    welcome_message: normalizeDmTemplateMessage(settingString(settings, "welcome_dm_message")),
+    welcome_cap_session: settingNumber(settings, "welcome_dm_effective_cap", 0),
+    welcome_cap_day: settingNumber(settings, "welcome_dm_effective_day_cap", DEFAULT_WELCOME_DM_DAY_CAP),
+    outreach_enabled: settingBoolean(settings, "outreach_dm_runtime_enabled", settingBoolean(settings, "cold_dm_enabled")),
+    outreach_message: normalizeDmTemplateMessage(settingString(settings, "cold_dm_message")),
+    outreach_cap_session: settingNumber(settings, "outreach_dm_effective_session_cap", 0),
+    outreach_cap_day: settingNumber(settings, "outreach_dm_effective_day_cap", 0),
+  };
+}
+
+function sameDmPayload(left: InstagramSettings | null, right: InstagramSettings | null) {
+  if (!left || !right) return true;
+  return JSON.stringify(dmDomainPayload(left)) === JSON.stringify(dmDomainPayload(right));
+}
+
+export function dmClientValidationError(settings: InstagramSettings) {
+  const welcomeEnabled = settingBoolean(settings, "welcome_dm_runtime_enabled", settingBoolean(settings, "welcome_dm_enabled"));
+  const outreachEnabled = settingBoolean(settings, "outreach_dm_runtime_enabled", settingBoolean(settings, "cold_dm_enabled"));
+  const welcomeMessage = normalizeDmTemplateMessage(settingString(settings, "welcome_dm_message"));
+  const outreachMessage = normalizeDmTemplateMessage(settingString(settings, "cold_dm_message"));
+  if (welcomeEnabled && !welcomeMessage.trim()) return "Welcome message is required";
+  if (outreachEnabled && !outreachMessage.trim()) return "Outreach message is required";
+  const welcomeLengthError = dmTemplateLengthError("Welcome", welcomeMessage);
+  if (welcomeLengthError) return welcomeLengthError;
+  const outreachLengthError = dmTemplateLengthError("Outreach", outreachMessage);
+  if (outreachLengthError) return outreachLengthError;
+  if (welcomeEnabled && settingNumber(settings, "welcome_dm_effective_cap", 0) < 1) return "Welcome cap must be at least 1";
+  if (welcomeEnabled && settingNumber(settings, "welcome_dm_effective_day_cap", 0) < 1) return "Welcome day cap must be at least 1";
+  if (settingNumber(settings, "welcome_dm_effective_day_cap", DEFAULT_WELCOME_DM_DAY_CAP) > DEFAULT_WELCOME_DM_DAY_CAP) {
+    return `welcome_daily_cap_exceeded: Welcome day cap cannot exceed ${DEFAULT_WELCOME_DM_DAY_CAP}`;
+  }
+  if (welcomeEnabled && settingNumber(settings, "welcome_dm_effective_cap", 0) > settingNumber(settings, "welcome_dm_effective_day_cap", DEFAULT_WELCOME_DM_DAY_CAP)) {
+    return "session_cap_exceeds_day_cap: Welcome session cap cannot exceed Welcome day cap";
+  }
+  if (outreachEnabled && (settingNumber(settings, "outreach_dm_effective_session_cap", 0) < 1 || settingNumber(settings, "outreach_dm_effective_day_cap", 0) < 1)) {
+    return "Outreach caps must be at least 1";
+  }
+  if (settingNumber(settings, "outreach_dm_effective_day_cap", DEFAULT_OUTREACH_DM_DAY_CAP) > DEFAULT_OUTREACH_DM_DAY_CAP) {
+    return `outreach_daily_cap_exceeded: Outreach day cap cannot exceed ${DEFAULT_OUTREACH_DM_DAY_CAP}`;
+  }
+  if (outreachEnabled && settingNumber(settings, "outreach_dm_effective_session_cap", 0) > settingNumber(settings, "outreach_dm_effective_day_cap", DEFAULT_OUTREACH_DM_DAY_CAP)) {
+    return "session_cap_exceeds_day_cap: Outreach session cap cannot exceed Outreach day cap";
+  }
+  return "";
 }
 
 function normalizedContainsAny(value: string, terms: string[]) {
@@ -714,6 +815,7 @@ export default function InstagramDashboardButtons({
   const [styleReady, setStyleReady] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [settings, setSettings] = useState<InstagramSettings | null>(null);
+  const [settingsBaseline, setSettingsBaseline] = useState<InstagramSettings | null>(null);
   const [filters, setFilters] = useState<InstagramFilters | null>(null);
   const [templates, setTemplates] = useState<AccountTemplate[]>([]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("General");
@@ -855,6 +957,7 @@ export default function InstagramDashboardButtons({
           ),
         ]);
         setSettings(settingsPayload);
+        setSettingsBaseline(settingsPayload);
         setFilters(filtersPayload);
         setTemplates(templatePayload);
       }
@@ -888,6 +991,7 @@ export default function InstagramDashboardButtons({
     setError("");
     setSuccess("");
     setSettings(null);
+    setSettingsBaseline(null);
     setFilters(null);
     setTemplates([]);
     setTemplateDialog(null);
@@ -920,6 +1024,7 @@ export default function InstagramDashboardButtons({
       ),
     ]);
     setSettings(settingsPayload);
+    setSettingsBaseline(settingsPayload);
     setFilters(filtersPayload);
     setTemplates(templatePayload);
   }
@@ -1019,10 +1124,51 @@ export default function InstagramDashboardButtons({
         "Could not save account settings."
       );
       setSettings(savedSettings);
+      setSettingsBaseline(savedSettings);
       setSuccess("Dashboard draft settings saved. Runtime wiring is still pending for fields marked Needs routing.");
       router.refresh();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save account settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function saveDmSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!settings || sameDmPayload(settings, settingsBaseline)) return;
+
+    requestConfirmation({
+      title: "Save DM domain settings?",
+      description: "This saves Welcome and Outreach DM values to the runtime DM domain tables. It does not change real-send ops flags or start a run.",
+      confirmTone: "primary",
+      onConfirm: performSaveDmSettings,
+    });
+  }
+
+  async function performSaveDmSettings() {
+    if (!settings) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const projection = await readApiResponse<DmDomainProjection>(
+        await fetch("/api/instagram-dashboard/settings/dm", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(dmDomainPayload(settings)),
+        }),
+        "Could not save DM domain settings."
+      );
+      const savedSettings = withDmDomainProjection(settings, projection);
+      setSettings(savedSettings);
+      setSettingsBaseline(savedSettings);
+      setSuccess("DM domain settings saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save DM domain settings.");
     } finally {
       setIsSaving(false);
     }
@@ -1230,12 +1376,14 @@ export default function InstagramDashboardButtons({
             {!isLoading && (panel === "settings" || panel === "filters") && settings && filters
               ? renderSettingsTabs({
                   settings,
+                  settingsBaseline,
                   filters,
                   settingsTab,
                   setSettingsTab,
                   updateSetting,
                   updateFilter,
                   saveSettings,
+                  saveDmSettings,
                   saveFilters,
                   openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
                   openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
@@ -1610,6 +1758,47 @@ export default function InstagramDashboardButtons({
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 12px;
+        }
+
+        .ig-dm-preview {
+          grid-column: 1 / -1;
+          display: grid;
+          gap: 8px;
+          border: 1px solid rgba(255,255,255,0.09);
+          border-radius: 14px;
+          background: rgba(15,23,42,0.42);
+          padding: 11px 12px;
+        }
+
+        .ig-dm-preview-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          color: rgba(255,255,255,0.42);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .ig-dm-preview-body {
+          min-height: 44px;
+          color: rgba(255,255,255,0.78);
+          font-size: 13px;
+          line-height: 1.45;
+          overflow-wrap: anywhere;
+          white-space: pre-wrap;
+        }
+
+        .ig-dm-preview-empty {
+          color: rgba(255,255,255,0.34);
+        }
+
+        .ig-dm-preview-warning {
+          color: #FCA5A5;
+          font-size: 12px;
+          font-weight: 800;
         }
 
         .ig-settings-success {
@@ -2127,12 +2316,14 @@ function ExportBar({
 
 function renderSettingsTabs({
   settings,
+  settingsBaseline,
   filters,
   settingsTab,
   setSettingsTab,
   updateSetting,
   updateFilter,
   saveSettings,
+  saveDmSettings,
   saveFilters,
   openSaveTemplate,
   openApplyTemplate,
@@ -2144,12 +2335,14 @@ function renderSettingsTabs({
   entitlementSummary,
 }: {
   settings: InstagramSettings;
+  settingsBaseline: InstagramSettings | null;
   filters: InstagramFilters;
   settingsTab: SettingsTab;
   setSettingsTab: (tab: SettingsTab) => void;
   updateSetting: (key: string, value: ConfigValue) => void;
   updateFilter: (key: string, value: ConfigValue) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
+  saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveFilters: (event: FormEvent<HTMLFormElement>) => void;
   openSaveTemplate: (source: "settings" | "filters") => void;
   openApplyTemplate: (source: "settings" | "filters") => void;
@@ -2165,11 +2358,13 @@ function renderSettingsTabs({
   const hasEditableFields = fields.some((field) => !field.readOnly);
   const isDmTab = settingsTab === "DM";
   const showDraftBanner = hasEditableFields || isFiltersTab;
+  const dmDirty = isDmTab && !sameDmPayload(settings, settingsBaseline);
+  const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
 
   return (
     <form
       className="ig-settings-form"
-      onSubmit={isDmTab ? (event) => event.preventDefault() : isFiltersTab ? saveFilters : saveSettings}
+      onSubmit={isDmTab ? saveDmSettings : isFiltersTab ? saveFilters : saveSettings}
     >
       <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
         {settingsTabs.map((tab) => (
@@ -2226,7 +2421,12 @@ function renderSettingsTabs({
         </div>
       ) : null}
       {isDmTab ? (
-        <DmTargetActions closePanel={closePanel} />
+        <DmTargetActions
+          closePanel={closePanel}
+          isDirty={dmDirty}
+          validationError={dmValidationError}
+          isSaving={isSaving}
+        />
       ) : (
         <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields || isFiltersTab} />
       )}
@@ -2257,9 +2457,11 @@ function DmTargetPanel({
   });
   const welcomeReason = dmDisabledReasonLabel(availability.welcomeDisabledReason);
   const outreachReason = dmDisabledReasonLabel(availability.outreachDisabledReason);
+  const validationError = dmClientValidationError(settings);
 
   return (
     <div className="ig-dm-target-panel">
+      {validationError ? <p className="ig-settings-message ig-settings-error">{validationError}</p> : null}
       <section className={availability.welcomeServiceActive ? "ig-dm-card" : "ig-dm-card ig-dm-card-disabled"}>
         <div className="ig-dm-card-head">
           <div>
@@ -2292,8 +2494,19 @@ function DmTargetPanel({
               min: 0,
               disabled: !availability.welcomeServiceActive,
             }}
-            value={settingNumber(settings, "welcome_dm_effective_cap", settingNumber(settings, "max_dm_per_run", 0))}
+            value={settingNumber(settings, "welcome_dm_effective_cap", 0)}
             onChange={(value) => updateSetting("welcome_dm_effective_cap", value)}
+          />
+          <ConfigField
+            field={{
+              key: "welcome_dm_effective_day_cap",
+              label: "Welcome day cap",
+              type: "number",
+              min: 0,
+              disabled: !availability.welcomeServiceActive,
+            }}
+            value={settingNumber(settings, "welcome_dm_effective_day_cap", DEFAULT_WELCOME_DM_DAY_CAP)}
+            onChange={(value) => updateSetting("welcome_dm_effective_day_cap", value)}
           />
           <ConfigField
             field={{
@@ -2305,6 +2518,7 @@ function DmTargetPanel({
             value={settingString(settings, "welcome_dm_message")}
             onChange={(value) => updateSetting("welcome_dm_message", value)}
           />
+          <DmInstagramPreview label="Welcome" value={settingString(settings, "welcome_dm_message")} />
         </div>
       </section>
 
@@ -2364,19 +2578,46 @@ function DmTargetPanel({
             value={settingString(settings, "cold_dm_message")}
             onChange={(value) => updateSetting("cold_dm_message", value)}
           />
+          <DmInstagramPreview label="Outreach" value={settingString(settings, "cold_dm_message")} />
         </div>
       </section>
-
     </div>
   );
 }
 
-function DmTargetActions({ closePanel }: { closePanel: () => void }) {
+function DmInstagramPreview({ label, value }: { label: "Welcome" | "Outreach"; value: string }) {
+  const normalized = normalizeDmTemplateMessage(value);
+  const lengthError = dmTemplateLengthError(label, normalized);
+  return (
+    <div className="ig-dm-preview" aria-label={`${label} Instagram preview`}>
+      <div className="ig-dm-preview-head">
+        <span>Instagram preview</span>
+        <span>{normalized.length}/{DM_TEMPLATE_MESSAGE_MAX_CHARS} chars · {dmTemplateLineCount(normalized)} lines</span>
+      </div>
+      <div className={normalized ? "ig-dm-preview-body" : "ig-dm-preview-body ig-dm-preview-empty"}>
+        {normalized || "Message preview will appear here."}
+      </div>
+      {lengthError ? <div className="ig-dm-preview-warning">{lengthError}</div> : null}
+    </div>
+  );
+}
+
+function DmTargetActions({
+  closePanel,
+  isDirty,
+  validationError,
+  isSaving,
+}: {
+  closePanel: () => void;
+  isDirty: boolean;
+  validationError: string;
+  isSaving: boolean;
+}) {
   return (
     <div className="ig-settings-actions">
-      <button type="button" className="ig-settings-secondary" onClick={closePanel}>Close</button>
-      <button type="button" className="ig-settings-primary" disabled>
-        Save pending domain API
+      <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>Close</button>
+      <button type="submit" className="ig-settings-primary" disabled={isSaving || !isDirty || Boolean(validationError)}>
+        {isSaving ? "Saving..." : "Save DM settings"}
       </button>
     </div>
   );

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getDmServiceAvailability, readApiResponse, runStartSuccessMessage } from "./InstagramDashboardButtons";
+import { dmClientValidationError, dmDomainPayload, getDmServiceAvailability, readApiResponse, runStartSuccessMessage } from "./InstagramDashboardButtons";
 import { runStartSuccessPayload } from "../api/instagram-dashboard/runs/start/route";
+import { DEFAULT_OUTREACH_DM_DAY_CAP, DEFAULT_WELCOME_DM_DAY_CAP, dmChangedFields, readProductDefaultDayCap, validateDmDomainInput, type DmDomainValidationInput } from "../api/instagram-dashboard/settings/dm/route";
+import { DM_TEMPLATE_MESSAGE_MAX_CHARS, normalizeDmTemplateMessage } from "../../lib/instagram-dashboard/dm-formatting";
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
   evaluateDmStartGate,
   evaluateMiniRunCapsPreflight,
   evaluateUnfollowAnyStartGate,
   outreachSessionBlockedByOutreachRealSendDisabled,
+  resolveOutreachPreflightCap,
+  resolveWelcomePreflightCap,
   runControlOutreachRealSendEnabled,
   runControlWelcomeRealSendEnabled,
   runStartBlockMessage,
@@ -207,6 +211,249 @@ test("DM service availability stays conservative when domain source is pending",
   assert.equal(availability.outreachDisabledReason, "domain_api_pending");
 });
 
+const baseDmDomainInput: DmDomainValidationInput = {
+  welcomeServiceActive: true,
+  outreachServiceActive: true,
+  welcomeEnabled: true,
+  outreachEnabled: true,
+  welcomeMessage: "Welcome",
+  outreachMessage: "Outreach",
+  welcomeCapSession: 1,
+  welcomeCapDay: 1,
+  outreachCapSession: 1,
+  outreachCapDay: 1,
+};
+
+const multilineDmTemplate = "Bonjour {{first_name}},\n\nJe voulais vous contacter rapidement.\n\nÀ bientôt";
+
+test("DM formatting normalizes line endings without flattening paragraphs", () => {
+  const raw = ` ${multilineDmTemplate.replace(/\n/g, "\r\n")} `;
+  const normalized = normalizeDmTemplateMessage(raw);
+
+  assert.equal(normalized, multilineDmTemplate);
+  assert.match(normalized, /\n\nJe voulais/);
+  assert.doesNotMatch(normalized, /Bonjour \{\{first_name\}\}, Je voulais/);
+});
+
+test("DM domain payload preserves Welcome and Outreach line breaks", () => {
+  const payload = dmDomainPayload({
+    account_id: "00000000-0000-4000-8000-000000000001",
+    welcome_dm_runtime_enabled: true,
+    outreach_dm_runtime_enabled: true,
+    welcome_dm_message: multilineDmTemplate,
+    cold_dm_message: multilineDmTemplate,
+    welcome_dm_effective_cap: 1,
+    welcome_dm_effective_day_cap: 10,
+    outreach_dm_effective_session_cap: 1,
+    outreach_dm_effective_day_cap: 1,
+  });
+
+  assert.equal(payload.welcome_message, multilineDmTemplate);
+  assert.equal(payload.outreach_message, multilineDmTemplate);
+  assert.equal(payload.welcome_cap_day, 10);
+  assert.equal(payload.welcome_message.split("\n").length, 5);
+  assert.equal(payload.outreach_message.split("\n").length, 5);
+});
+
+test("DM domain payload never falls back to legacy max_dm_per_run", () => {
+  const payload = dmDomainPayload({
+    account_id: "00000000-0000-4000-8000-000000000001",
+    welcome_dm_runtime_enabled: true,
+    welcome_dm_message: "Welcome",
+    max_dm_per_run: 9,
+    outreach_dm_runtime_enabled: false,
+    cold_dm_message: "Outreach",
+  });
+
+  assert.equal(payload.welcome_cap_session, 0);
+  assert.equal(payload.welcome_cap_day, DEFAULT_WELCOME_DM_DAY_CAP);
+});
+
+test("DM domain validation accepts multi-line templates without flattening", () => {
+  assert.equal(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      welcomeMessage: multilineDmTemplate,
+      outreachMessage: multilineDmTemplate,
+    }),
+    null,
+  );
+});
+
+test("DM domain validation rejects too-long messages without truncating", () => {
+  const tooLong = "a".repeat(DM_TEMPLATE_MESSAGE_MAX_CHARS + 1);
+
+  assert.match(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      welcomeMessage: tooLong,
+    }) ?? "",
+    /Welcome message is too long/,
+  );
+  assert.equal(tooLong.length, DM_TEMPLATE_MESSAGE_MAX_CHARS + 1);
+});
+
+test("DM client validation rejects too-long messages before save", () => {
+  const error = dmClientValidationError({
+    account_id: "00000000-0000-4000-8000-000000000001",
+    welcome_dm_runtime_enabled: true,
+    outreach_dm_runtime_enabled: false,
+    welcome_dm_message: "a".repeat(DM_TEMPLATE_MESSAGE_MAX_CHARS + 1),
+    welcome_dm_effective_cap: 1,
+  });
+
+  assert.match(error, /Welcome message is too long/);
+});
+
+test("DM client validation rejects day caps above product max before save", () => {
+  assert.match(
+    dmClientValidationError({
+      account_id: "00000000-0000-4000-8000-000000000001",
+      welcome_dm_runtime_enabled: true,
+      outreach_dm_runtime_enabled: false,
+      welcome_dm_message: "Welcome",
+      cold_dm_message: "Outreach",
+      welcome_dm_effective_cap: 1,
+      welcome_dm_effective_day_cap: 11,
+    }),
+    /welcome_daily_cap_exceeded/,
+  );
+  assert.match(
+    dmClientValidationError({
+      account_id: "00000000-0000-4000-8000-000000000001",
+      welcome_dm_runtime_enabled: false,
+      outreach_dm_runtime_enabled: true,
+      welcome_dm_message: "Welcome",
+      cold_dm_message: "Outreach",
+      outreach_dm_effective_session_cap: 1,
+      outreach_dm_effective_day_cap: 31,
+    }),
+    /outreach_daily_cap_exceeded/,
+  );
+});
+
+test("DM client validation rejects session caps above day caps before save", () => {
+  assert.match(
+    dmClientValidationError({
+      account_id: "00000000-0000-4000-8000-000000000001",
+      welcome_dm_runtime_enabled: true,
+      outreach_dm_runtime_enabled: false,
+      welcome_dm_message: "Welcome",
+      welcome_dm_effective_cap: 6,
+      welcome_dm_effective_day_cap: 5,
+    }),
+    /session_cap_exceeds_day_cap/,
+  );
+  assert.match(
+    dmClientValidationError({
+      account_id: "00000000-0000-4000-8000-000000000001",
+      welcome_dm_runtime_enabled: false,
+      outreach_dm_runtime_enabled: true,
+      cold_dm_message: "Outreach",
+      outreach_dm_effective_session_cap: 21,
+      outreach_dm_effective_day_cap: 20,
+    }),
+    /session_cap_exceeds_day_cap/,
+  );
+});
+
+test("DM domain validation blocks Outreach writes when entitlement is missing", () => {
+  assert.equal(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      outreachServiceActive: false,
+      outreachEnabled: true,
+    }),
+    "Outreach service is not active for this account.",
+  );
+});
+
+test("DM domain validation keeps Welcome independent from Outreach", () => {
+  assert.equal(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      outreachServiceActive: false,
+      outreachEnabled: false,
+    }),
+    null,
+  );
+});
+
+test("DM domain validation enforces Welcome daily cap defaults", () => {
+  assert.equal(DEFAULT_WELCOME_DM_DAY_CAP, 10);
+  assert.equal(validateDmDomainInput({ ...baseDmDomainInput, welcomeCapDay: 5 }), null);
+  assert.equal(validateDmDomainInput({ ...baseDmDomainInput, welcomeCapDay: 10 }), null);
+  assert.match(validateDmDomainInput({ ...baseDmDomainInput, welcomeCapDay: 11 }) ?? "", /welcome_daily_cap_exceeded/);
+});
+
+test("DM domain validation enforces Outreach daily cap defaults", () => {
+  assert.equal(DEFAULT_OUTREACH_DM_DAY_CAP, 30);
+  assert.equal(validateDmDomainInput({ ...baseDmDomainInput, outreachCapDay: 20 }), null);
+  assert.equal(validateDmDomainInput({ ...baseDmDomainInput, outreachCapDay: 30 }), null);
+  assert.match(validateDmDomainInput({ ...baseDmDomainInput, outreachCapDay: 31 }) ?? "", /outreach_daily_cap_exceeded/);
+});
+
+test("DM day cap projection shows real DB values and only defaults missing values", () => {
+  assert.equal(readProductDefaultDayCap(null, DEFAULT_WELCOME_DM_DAY_CAP), 10);
+  assert.equal(readProductDefaultDayCap(5, DEFAULT_WELCOME_DM_DAY_CAP), 5);
+  assert.equal(readProductDefaultDayCap(50, DEFAULT_WELCOME_DM_DAY_CAP), 50);
+  assert.equal(readProductDefaultDayCap(null, DEFAULT_OUTREACH_DM_DAY_CAP), 30);
+  assert.equal(readProductDefaultDayCap(20, DEFAULT_OUTREACH_DM_DAY_CAP), 20);
+  assert.equal(readProductDefaultDayCap(45, DEFAULT_OUTREACH_DM_DAY_CAP), 45);
+});
+
+test("DM domain validation rejects session caps above day caps", () => {
+  assert.match(
+    validateDmDomainInput({ ...baseDmDomainInput, welcomeCapSession: 6, welcomeCapDay: 5 }) ?? "",
+    /session_cap_exceeds_day_cap/,
+  );
+  assert.match(
+    validateDmDomainInput({ ...baseDmDomainInput, outreachCapSession: 21, outreachCapDay: 20 }) ?? "",
+    /session_cap_exceeds_day_cap/,
+  );
+});
+
+test("DM domain validation keeps Outreach independent from Welcome", () => {
+  assert.equal(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      welcomeServiceActive: false,
+      welcomeEnabled: false,
+    }),
+    null,
+  );
+});
+
+test("DM domain validation blocks empty required templates", () => {
+  assert.match(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      welcomeMessage: "   ",
+    }) ?? "",
+    /Template message is required/,
+  );
+  assert.match(
+    validateDmDomainInput({
+      ...baseDmDomainInput,
+      outreachMessage: "",
+    }) ?? "",
+    /Template message is required/,
+  );
+});
+
+test("DM domain changed fields only include domain source changes", () => {
+  assert.deepEqual(
+    dmChangedFields(baseDmDomainInput, {
+      ...baseDmDomainInput,
+      welcomeEnabled: false,
+      outreachMessage: "New outreach",
+      outreachCapDay: 2,
+    }),
+    ["welcome_enabled", "outreach_template_body", "outreach_per_day_limit"],
+  );
+  assert.deepEqual(dmChangedFields(baseDmDomainInput, baseDmDomainInput), []);
+});
+
 test("account_session is blocked when Welcome requires disabled real send", () => {
   assert.equal(
     accountSessionBlockedByWelcomeRealSendDisabled({
@@ -313,6 +560,78 @@ test("account_session DM gate blocks Welcome when cap is unproven", () => {
       outreachEntitlementActive: false,
     }),
     "welcome_cap_unproven",
+  );
+});
+
+test("Welcome preflight cap uses package default day cap and remaining quota", () => {
+  const cap = resolveWelcomePreflightCap({
+    sessionCap: 5,
+    dayCap: null,
+    welcomeSentToday: 9,
+    totalDayCap: 100,
+    totalDmSentToday: 9,
+  });
+
+  assert.equal(cap.effectiveDayCap, DEFAULT_WELCOME_DM_DAY_CAP);
+  assert.equal(cap.effectiveCap, 1);
+  assert.equal(cap.dailyCapExceeded, false);
+});
+
+test("account_session DM gate blocks when Welcome remaining quota is zero", () => {
+  const cap = resolveWelcomePreflightCap({
+    sessionCap: 5,
+    dayCap: 10,
+    welcomeSentToday: 10,
+    totalDayCap: 100,
+    totalDmSentToday: 10,
+  });
+
+  assert.equal(
+    evaluateDmStartGate({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeTemplateReady: true,
+      welcomeRealSendEnabled: true,
+      welcomeEffectiveCap: cap.effectiveCap,
+      welcomeDailyCapExceeded: cap.dailyCapExceeded,
+      welcomeSessionCapExceedsDayCap: cap.sessionCapExceedsDayCap,
+      outreachEnabled: false,
+      outreachTemplateReady: false,
+      outreachRealSendEnabled: false,
+      outreachEffectiveSessionCap: null,
+      outreachEffectiveDayCap: null,
+      outreachEntitlementActive: false,
+    }),
+    "welcome_daily_cap_exceeded",
+  );
+});
+
+test("account_session DM gate blocks when DB Welcome day cap exceeds product max", () => {
+  const cap = resolveWelcomePreflightCap({
+    sessionCap: 10,
+    dayCap: 50,
+    welcomeSentToday: 0,
+    totalDayCap: 100,
+    totalDmSentToday: 0,
+  });
+
+  assert.equal(
+    evaluateDmStartGate({
+      requestedRunType: "account_session",
+      welcomeEnabled: true,
+      welcomeTemplateReady: true,
+      welcomeRealSendEnabled: true,
+      welcomeEffectiveCap: cap.effectiveCap,
+      welcomeDayCapExceedsProductMax: cap.dayCapExceedsProductMax,
+      welcomeSessionCapExceedsDayCap: cap.sessionCapExceedsDayCap,
+      outreachEnabled: false,
+      outreachTemplateReady: false,
+      outreachRealSendEnabled: false,
+      outreachEffectiveSessionCap: null,
+      outreachEffectiveDayCap: null,
+      outreachEntitlementActive: false,
+    }),
+    "welcome_daily_cap_exceeded",
   );
 });
 
@@ -427,6 +746,78 @@ test("outreach_session DM gate does not require Welcome when Welcome is off", ()
       outreachEntitlementActive: true,
     }),
     null,
+  );
+});
+
+test("Outreach preflight cap uses package default day cap and remaining quota", () => {
+  const cap = resolveOutreachPreflightCap({
+    sessionCap: 5,
+    dayCap: null,
+    outreachSentToday: 29,
+    totalDayCap: 100,
+    totalDmSentToday: 29,
+  });
+
+  assert.equal(cap.effectiveDayCap, DEFAULT_OUTREACH_DM_DAY_CAP);
+  assert.equal(cap.effectiveCap, 1);
+  assert.equal(cap.dailyCapExceeded, false);
+});
+
+test("outreach_session DM gate blocks when effective Outreach remaining quota is zero", () => {
+  const cap = resolveOutreachPreflightCap({
+    sessionCap: 5,
+    dayCap: 30,
+    outreachSentToday: 30,
+    totalDayCap: 100,
+    totalDmSentToday: 30,
+  });
+
+  assert.equal(
+    evaluateDmStartGate({
+      requestedRunType: "outreach_session",
+      welcomeEnabled: false,
+      welcomeTemplateReady: false,
+      welcomeRealSendEnabled: false,
+      welcomeEffectiveCap: null,
+      outreachEnabled: true,
+      outreachTemplateReady: true,
+      outreachRealSendEnabled: true,
+      outreachEffectiveSessionCap: cap.effectiveCap,
+      outreachEffectiveDayCap: cap.effectiveDayCap,
+      outreachDailyCapExceeded: cap.dailyCapExceeded,
+      outreachSessionCapExceedsDayCap: cap.sessionCapExceedsDayCap,
+      outreachEntitlementActive: true,
+    }),
+    "outreach_daily_cap_exceeded",
+  );
+});
+
+test("outreach_session DM gate blocks when DB Outreach day cap exceeds product max", () => {
+  const cap = resolveOutreachPreflightCap({
+    sessionCap: 5,
+    dayCap: 45,
+    outreachSentToday: 0,
+    totalDayCap: 100,
+    totalDmSentToday: 0,
+  });
+
+  assert.equal(
+    evaluateDmStartGate({
+      requestedRunType: "outreach_session",
+      welcomeEnabled: false,
+      welcomeTemplateReady: false,
+      welcomeRealSendEnabled: false,
+      welcomeEffectiveCap: null,
+      outreachEnabled: true,
+      outreachTemplateReady: true,
+      outreachRealSendEnabled: true,
+      outreachEffectiveSessionCap: cap.effectiveCap,
+      outreachEffectiveDayCap: cap.effectiveDayCap,
+      outreachDayCapExceedsProductMax: cap.dayCapExceedsProductMax,
+      outreachSessionCapExceedsDayCap: cap.sessionCapExceedsDayCap,
+      outreachEntitlementActive: true,
+    }),
+    "outreach_daily_cap_exceeded",
   );
 });
 

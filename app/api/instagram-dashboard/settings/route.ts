@@ -11,6 +11,11 @@ import {
   runControlWelcomeRealSendEnabled,
   type RunStartBlockReason,
 } from "@/lib/instagram-dashboard/run-control";
+import {
+  DEFAULT_OUTREACH_DM_DAY_CAP,
+  DEFAULT_WELCOME_DM_DAY_CAP,
+  readProductDefaultDayCap,
+} from "./dm/route";
 import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -267,7 +272,7 @@ async function hasActiveDmTemplate(
   const configuredTemplateId = readString(templateId, "").trim();
   let query = supabase
     .from("ig_dm_templates")
-    .select("id")
+    .select("id,body")
     .eq("account_id", accountId)
     .eq("template_type", templateType)
     .eq("active", true)
@@ -281,7 +286,7 @@ async function hasActiveDmTemplate(
 
   const { data, error } = await query.maybeSingle<SupabaseRecord>();
   if (error) return null;
-  return Boolean(data);
+  return Boolean(data && readString(data.body, "").trim());
 }
 
 async function hasOutreachEntitlement(
@@ -355,7 +360,7 @@ async function withDmRuntimeStatus(
 ) {
   const { data, error } = await supabase
     .from("ig_account_dm_settings")
-    .select("welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,outreach_per_session_limit,outreach_per_day_limit")
+    .select("welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit")
     .eq("account_id", settings.account_id)
     .limit(1)
     .maybeSingle<SupabaseRecord>();
@@ -393,11 +398,12 @@ async function withDmRuntimeStatus(
     welcome_entitlement_status:
       welcomeEntitlementActive === null ? "Unknown" : welcomeEntitlementActive ? "Active" : "Missing",
     welcome_dm_effective_cap: readPositiveInteger(data?.welcome_per_session_limit) ?? 0,
+    welcome_dm_effective_day_cap: readProductDefaultDayCap(data?.welcome_per_day_limit, DEFAULT_WELCOME_DM_DAY_CAP),
     outreach_dm_runtime_enabled: outreachEnabled,
     outreach_dm_real_send_status: boolStatus(runControlOutreachRealSendEnabled()),
     outreach_dm_template_status: outreachTemplateReady === null ? "Unknown" : outreachTemplateReady ? "Ready" : "Missing",
     outreach_dm_effective_session_cap: readPositiveInteger(data?.outreach_per_session_limit) ?? 0,
-    outreach_dm_effective_day_cap: readPositiveInteger(data?.outreach_per_day_limit) ?? 0,
+    outreach_dm_effective_day_cap: readProductDefaultDayCap(data?.outreach_per_day_limit, DEFAULT_OUTREACH_DM_DAY_CAP),
     outreach_entitlement_status:
       outreachEntitlementActive === null ? "Unknown" : outreachEntitlementActive ? "Active" : "Missing",
     dm_legacy_gate_status: legacyGate === null ? "Not configured" : `Legacy global ${boolStatus(legacyGate).toLowerCase()} (read-only)`,

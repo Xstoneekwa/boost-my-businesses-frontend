@@ -52,6 +52,11 @@ const activeAccountStatus = "active";
 const supportRequiredStatus = "support_required";
 const addProfileOperation = "add_profile";
 const addProfileSourceSurface = "admin_dashboard";
+const defaultWelcomeDmDayCap = 10;
+const defaultOutreachDmDayCap = 30;
+const defaultWelcomeDmSessionCap = 10;
+const defaultOutreachDmSessionCap = 5;
+const defaultTotalDmDayCap = defaultWelcomeDmDayCap + defaultOutreachDmDayCap;
 const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
 const sensitivePayloadKeys = new Set([
   "password",
@@ -635,6 +640,35 @@ export async function POST(request: Request) {
       });
       if (!compensated) {
         await markCredentialFailureWithSupportAction(supabase, accountId, "profile_filters_compensation_failed", externalRequestId, adminContext.userId);
+      }
+      return jsonError("profile_setup_failed", 500);
+    }
+
+    const dmSettingsResult = await supabase
+      .from("ig_account_dm_settings")
+      .insert({
+        account_id: accountId,
+        welcome_enabled: false,
+        outreach_enabled: false,
+        welcome_per_session_limit: defaultWelcomeDmSessionCap,
+        welcome_per_day_limit: defaultWelcomeDmDayCap,
+        outreach_per_session_limit: defaultOutreachDmSessionCap,
+        outreach_per_day_limit: defaultOutreachDmDayCap,
+        total_dm_per_day_limit: defaultTotalDmDayCap,
+      });
+
+    if (dmSettingsResult.error) {
+      const compensated = await compensateNewProfile(supabase, accountId);
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username: accountUsername,
+        externalRequestId,
+        actorId: adminContext.userId,
+        resultStatus: compensated ? "compensated" : "failed",
+        failureReason: compensated ? "profile_dm_settings_create_failed" : "profile_dm_settings_compensation_failed",
+      });
+      if (!compensated) {
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_dm_settings_compensation_failed", externalRequestId, adminContext.userId);
       }
       return jsonError("profile_setup_failed", 500);
     }
