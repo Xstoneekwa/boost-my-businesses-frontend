@@ -10,6 +10,8 @@ type InstagramDashboardButtonsProps = {
   accountId: string;
   username: string;
   mode?: "active" | "archived" | "trashed";
+  packageLabel?: string | null;
+  entitlementSummary?: string | null;
 };
 
 type ConfigValue = string | number | boolean;
@@ -82,10 +84,25 @@ type FieldSpec = {
   type: FieldType;
   helper?: string;
   readOnly?: boolean;
+  disabled?: boolean;
   runtimeStatus?: RuntimeStatus;
   options?: string[];
   min?: number;
   step?: number;
+  hideStateText?: boolean;
+};
+
+export type DmServiceDisabledReason =
+  | "not_included_in_package"
+  | "add_on_not_active"
+  | "entitlement_missing"
+  | "domain_api_pending";
+
+export type DmServiceAvailability = {
+  welcomeServiceActive: boolean;
+  outreachServiceActive: boolean;
+  welcomeDisabledReason: DmServiceDisabledReason | null;
+  outreachDisabledReason: DmServiceDisabledReason | null;
 };
 
 type AccountTool = {
@@ -230,14 +247,18 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "likes_per_follow_max", label: "Likes per follow max", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: post-follow like policy API." },
   ],
   DM: [
-    { key: "welcome_dm_enabled", label: "Welcome DM enabled", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_dm_settings.welcome_enabled." },
-    { key: "welcome_dm_message", label: "Welcome DM message", type: "textarea", runtimeStatus: "needs-routing", helper: "Target: versioned DM template API." },
-    { key: "cold_dm_enabled", label: "Cold DM enabled", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_dm_settings.outreach_enabled." },
-    { key: "cold_dm_message", label: "Cold DM message", type: "textarea", runtimeStatus: "needs-routing", helper: "Target: versioned outreach template API." },
-    { key: "max_dm_per_run", label: "Max DMs per run", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: welcome/outreach per-session limits with hard caps." },
-    { key: "max_consecutive_dms", label: "Max consecutive DMs", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: DM pacing domain policy." },
-    { key: "check_chat_before_welcoming", label: "Check chat before welcoming", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_dm_settings.check_chat_before_welcome." },
-    { key: "safe_review_mode", label: "Safe review mode", type: "toggle", runtimeStatus: "needs-routing", helper: "Admin review flag only. Does not gate real send — env/domain gates required." },
+    { key: "welcome_dm_runtime_enabled", label: "Welcome enabled", type: "toggle", readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.welcome_enabled." },
+    { key: "welcome_dm_real_send_status", label: "Welcome real-send status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: WELCOME_DM_REAL_SEND_ENABLED." },
+    { key: "welcome_dm_template_status", label: "Welcome template status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Active configured or default Welcome template." },
+    { key: "welcome_dm_effective_cap", label: "Welcome effective cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.welcome_per_session_limit; mini-run still requires hard cap proof." },
+    { key: "outreach_dm_runtime_enabled", label: "Outreach enabled", type: "toggle", readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.outreach_enabled." },
+    { key: "outreach_entitlement_status", label: "Outreach entitlement", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: client_account_has_outreach_entitlement." },
+    { key: "outreach_dm_real_send_status", label: "Outreach real-send status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: OUTREACH_DM_REAL_SEND_ENABLED." },
+    { key: "outreach_dm_template_status", label: "Outreach template status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Active configured or default Outreach template." },
+    { key: "outreach_dm_effective_session_cap", label: "Outreach session cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.outreach_per_session_limit." },
+    { key: "outreach_dm_effective_day_cap", label: "Outreach day cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_dm_settings.outreach_per_day_limit." },
+    { key: "dm_legacy_gate_status", label: "Legacy DM sender flag", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Read-only only. DM_SENDER_REAL_SEND_ENABLED must not control Welcome or Outreach." },
+    { key: "max_dm_per_run_legacy_status", label: "Legacy shared DM cap", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "max_dm_per_run is no longer a valid shared Welcome/Outreach control." },
   ],
   Followback: [
     { key: "followback_on_followers", label: "Followback on followers", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: followback/unfollow domain policy." },
@@ -245,7 +266,10 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "max_followback_ignore", label: "Max followback ignore", type: "number", min: 0, runtimeStatus: "needs-routing" },
     { key: "sort_followers_mode", label: "Sort followers mode", type: "select", runtimeStatus: "needs-routing", options: ["recent", "oldest", "random"] },
     { key: "unfollow_non_followers", label: "Unfollow non-followers", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_mode." },
-    { key: "unfollow_any", label: "Unfollow any", type: "toggle", runtimeStatus: "needs-routing", helper: "Destructive. Target: unfollow domain API + env kill switch." },
+    { key: "unfollow_runtime_mode", label: "Runtime Unfollow mode", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_unfollow_settings.unfollow_mode." },
+    { key: "unfollow_any_runtime_state", label: "Unfollow-any runtime state", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Shows Ready only when the full runtime preset passes start gates." },
+    { key: "unfollow_any_runtime_block_reason", label: "Unfollow-any block reason", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Stable preflight reason when configured but blocked." },
+    { key: "unfollow_runtime_session_cap", label: "Runtime Unfollow session cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_unfollow_settings.unfollow_per_session_limit." },
     { key: "unfollow_skip_limit", label: "Unfollow skip limit", type: "number", min: 0, runtimeStatus: "needs-routing" },
     { key: "mute_posts_after_follow", label: "Mute posts after follow", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: post-follow mute policy API." },
     { key: "mute_stories_after_follow", label: "Mute stories after follow", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: post-follow mute policy API." },
@@ -434,6 +458,108 @@ function compactMetadata(metadata: unknown) {
   return formatted.length > 180 ? `${formatted.slice(0, 180)}...` : formatted;
 }
 
+function settingString(settings: InstagramSettings, key: string, fallback = "") {
+  const value = settings[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return fallback;
+}
+
+function settingNumber(settings: InstagramSettings, key: string, fallback = 0) {
+  const value = settings[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function settingBoolean(settings: InstagramSettings, key: string, fallback = false) {
+  const value = settings[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizedContainsAny(value: string, terms: string[]) {
+  const normalized = value.trim().toLowerCase();
+  return terms.some((term) => normalized.includes(term));
+}
+
+export function getDmServiceAvailability({
+  packageLabel = "",
+  entitlementSummary = "",
+  welcomeEntitlementStatus,
+  welcomeEnabled,
+  welcomeTemplateStatus,
+  outreachEntitlementStatus = "",
+  outreachEnabled,
+  outreachTemplateStatus,
+}: {
+  packageLabel?: string | null;
+  entitlementSummary?: string | null;
+  welcomeEntitlementStatus?: string | null;
+  welcomeEnabled?: boolean | null;
+  welcomeTemplateStatus?: string | null;
+  outreachEntitlementStatus?: string | null;
+  outreachEnabled?: boolean | null;
+  outreachTemplateStatus?: string | null;
+}): DmServiceAvailability {
+  const packageText = packageLabel ?? "";
+  const entitlementText = entitlementSummary ?? "";
+  const packageKnown = Boolean(packageText.trim() || entitlementText.trim());
+  const welcomeStatus = (welcomeEntitlementStatus ?? "").trim().toLowerCase();
+  const outreachStatus = (outreachEntitlementStatus ?? "").trim().toLowerCase();
+  const welcomeTemplate = (welcomeTemplateStatus ?? "").trim().toLowerCase();
+  const outreachTemplate = (outreachTemplateStatus ?? "").trim().toLowerCase();
+  const hasWelcomeRuntimeSignal =
+    typeof welcomeEnabled === "boolean" || Boolean(welcomeEntitlementStatus?.trim() || welcomeTemplateStatus?.trim());
+  const hasOutreachRuntimeSignal =
+    typeof outreachEnabled === "boolean" || Boolean(outreachEntitlementStatus?.trim() || outreachTemplateStatus?.trim());
+  const welcomePackageFallback = normalizedContainsAny(packageText, ["pro", "premium"]);
+  const outreachPackageFallback = normalizedContainsAny(packageText, ["addon", "add-on", "standalone"]);
+
+  const welcomeServiceActive =
+    ["active", "enabled", "ready", "included"].includes(welcomeStatus) ||
+    normalizedContainsAny(entitlementText, ["welcome"]) ||
+    welcomeEnabled === true ||
+    welcomeTemplate === "ready" ||
+    welcomePackageFallback;
+  const outreachServiceActive =
+    ["active", "enabled", "ready", "included"].includes(outreachStatus) ||
+    normalizedContainsAny(entitlementText, ["outreach"]) ||
+    outreachEnabled === true ||
+    outreachTemplate === "ready" ||
+    outreachPackageFallback;
+
+  return {
+    welcomeServiceActive,
+    outreachServiceActive,
+    welcomeDisabledReason: welcomeServiceActive
+      ? null
+      : !hasWelcomeRuntimeSignal && !packageKnown
+        ? "domain_api_pending"
+        : welcomeStatus === "missing" && !packageKnown
+          ? "entitlement_missing"
+          : "not_included_in_package",
+    outreachDisabledReason: outreachServiceActive
+      ? null
+      : !hasOutreachRuntimeSignal && !packageKnown
+        ? "domain_api_pending"
+      : outreachPackageFallback || (outreachStatus === "missing" && !packageKnown)
+          ? "entitlement_missing"
+          : "add_on_not_active",
+  };
+}
+
+function dmDisabledReasonLabel(reason: DmServiceDisabledReason | null) {
+  if (reason === "not_included_in_package") return "Not included in package";
+  if (reason === "add_on_not_active") return "Add-on not active";
+  if (reason === "entitlement_missing") return "Entitlement missing";
+  if (reason === "domain_api_pending") return "Domain API pending";
+  return "";
+}
+
 function templateSafeSettings(settings: InstagramSettings) {
   const { password, email, device_udid, app_package, cloned_app_mode, ...safeSettings } = settings;
   void password;
@@ -577,8 +703,15 @@ function statsToCsv(username: string, rows: StatsRow[]) {
   ].join("\n");
 }
 
-export default function InstagramDashboardButtons({ accountId, username, mode = "active" }: InstagramDashboardButtonsProps) {
+export default function InstagramDashboardButtons({
+  accountId,
+  username,
+  mode = "active",
+  packageLabel = null,
+  entitlementSummary = null,
+}: InstagramDashboardButtonsProps) {
   const router = useRouter();
+  const [styleReady, setStyleReady] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [settings, setSettings] = useState<InstagramSettings | null>(null);
   const [filters, setFilters] = useState<InstagramFilters | null>(null);
@@ -598,6 +731,10 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
   const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
+
+  useEffect(() => {
+    setStyleReady(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1106,6 +1243,8 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
                   isSaving,
                   error,
                   success,
+                  packageLabel,
+                  entitlementSummary,
                 })
               : null}
             {!isLoading && panel === "stats" ? renderStats({
@@ -1166,7 +1305,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
         />
       ) : null}
 
-      <style>{`
+      {styleReady ? <style>{`
         .ig-action-inline {
           width: 100%;
           margin: 8px 0 0;
@@ -1379,12 +1518,98 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
           line-height: 1.35;
         }
 
+        .ig-settings-control-disabled {
+          cursor: not-allowed;
+          opacity: 0.62;
+        }
+
         .ig-settings-message {
           border-radius: 12px;
           font-size: 13px;
           font-weight: 700;
           margin: 0;
           padding: 11px 12px;
+        }
+
+        .ig-dm-target-panel {
+          display: grid;
+          gap: 14px;
+        }
+
+        .ig-dm-card {
+          border: 1px solid rgba(255,255,255,0.09);
+          border-radius: 18px;
+          background: rgba(255,255,255,0.03);
+          padding: 14px;
+        }
+
+        .ig-dm-card-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 14px;
+        }
+
+        .ig-dm-card-head {
+          margin-bottom: 14px;
+        }
+
+        .ig-dm-card-disabled {
+          opacity: 0.62;
+        }
+
+        .ig-dm-section-kicker {
+          display: block;
+          color: rgba(251,191,36,0.78);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .ig-dm-card h3 {
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 1.08rem;
+          margin: 5px 0 5px;
+        }
+
+        .ig-dm-card p {
+          color: rgba(255,255,255,0.50);
+          font-size: 12px;
+          line-height: 1.4;
+          margin: 0;
+        }
+
+        .ig-dm-service-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 26px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.11);
+          padding: 3px 9px;
+          font-size: 11px;
+          font-weight: 900;
+          white-space: nowrap;
+        }
+
+        .ig-dm-service-active {
+          border-color: rgba(52,211,153,0.28);
+          background: rgba(52,211,153,0.08);
+          color: #86EFAC;
+        }
+
+        .ig-dm-service-inactive {
+          border-color: rgba(148,163,184,0.22);
+          background: rgba(148,163,184,0.08);
+          color: rgba(255,255,255,0.58);
+        }
+
+        .ig-dm-card-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
         }
 
         .ig-settings-success {
@@ -1713,8 +1938,13 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
 
           .ig-settings-toggle-grid,
           .ig-settings-number-grid,
-          .ig-settings-grid {
+          .ig-settings-grid,
+          .ig-dm-card-grid {
             grid-template-columns: 1fr;
+          }
+
+          .ig-dm-card-head {
+            display: grid;
           }
 
           .ig-settings-actions {
@@ -1722,7 +1952,7 @@ export default function InstagramDashboardButtons({ accountId, username, mode = 
             padding: 14px 18px 18px;
           }
         }
-      `}</style>
+      `}</style> : null}
     </>
   );
 }
@@ -1910,6 +2140,8 @@ function renderSettingsTabs({
   isSaving,
   error,
   success,
+  packageLabel,
+  entitlementSummary,
 }: {
   settings: InstagramSettings;
   filters: InstagramFilters;
@@ -1925,14 +2157,20 @@ function renderSettingsTabs({
   isSaving: boolean;
   error: string;
   success: string;
+  packageLabel?: string | null;
+  entitlementSummary?: string | null;
 }) {
   const isFiltersTab = settingsTab === "Filters";
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
   const hasEditableFields = fields.some((field) => !field.readOnly);
+  const isDmTab = settingsTab === "DM";
   const showDraftBanner = hasEditableFields || isFiltersTab;
 
   return (
-    <form className="ig-settings-form" onSubmit={isFiltersTab ? saveFilters : saveSettings}>
+    <form
+      className="ig-settings-form"
+      onSubmit={isDmTab ? (event) => event.preventDefault() : isFiltersTab ? saveFilters : saveSettings}
+    >
       <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
         {settingsTabs.map((tab) => (
           <button
@@ -1956,19 +2194,28 @@ function renderSettingsTabs({
         <p className="ig-settings-message">Read-only runtime projections. Use Stop run, lifecycle actions, and logs for operational changes.</p>
       ) : null}
 
-      <div className="ig-settings-grid">
-        {fields.map((field) => (
-          <ConfigField
-            key={field.key}
-            field={field}
-            value={isFiltersTab ? filters[field.key] : settings[field.key]}
-            onChange={(value) => (isFiltersTab ? updateFilter(field.key, value) : updateSetting(field.key, value))}
-          />
-        ))}
-      </div>
+      {isDmTab ? (
+        <DmTargetPanel
+          settings={settings}
+          updateSetting={updateSetting}
+          packageLabel={packageLabel}
+          entitlementSummary={entitlementSummary}
+        />
+      ) : (
+        <div className="ig-settings-grid">
+          {fields.map((field) => (
+            <ConfigField
+              key={field.key}
+              field={field}
+              value={isFiltersTab ? filters[field.key] : settings[field.key]}
+              onChange={(value) => (isFiltersTab ? updateFilter(field.key, value) : updateSetting(field.key, value))}
+            />
+          ))}
+        </div>
+      )}
 
       <FormMessages error={error} success={success} />
-      {hasEditableFields || isFiltersTab ? (
+      {!isDmTab && (hasEditableFields || isFiltersTab) ? (
         <div className="ig-template-actions">
           <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
             Save as Template
@@ -1978,8 +2225,160 @@ function renderSettingsTabs({
           </button>
         </div>
       ) : null}
-      <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields || isFiltersTab} />
+      {isDmTab ? (
+        <DmTargetActions closePanel={closePanel} />
+      ) : (
+        <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields || isFiltersTab} />
+      )}
     </form>
+  );
+}
+
+function DmTargetPanel({
+  settings,
+  updateSetting,
+  packageLabel,
+  entitlementSummary,
+}: {
+  settings: InstagramSettings;
+  updateSetting: (key: string, value: ConfigValue) => void;
+  packageLabel?: string | null;
+  entitlementSummary?: string | null;
+}) {
+  const availability = getDmServiceAvailability({
+    packageLabel,
+    entitlementSummary,
+    welcomeEntitlementStatus: settingString(settings, "welcome_entitlement_status"),
+    welcomeEnabled: settingBoolean(settings, "welcome_dm_runtime_enabled"),
+    welcomeTemplateStatus: settingString(settings, "welcome_dm_template_status"),
+    outreachEntitlementStatus: settingString(settings, "outreach_entitlement_status"),
+    outreachEnabled: settingBoolean(settings, "outreach_dm_runtime_enabled"),
+    outreachTemplateStatus: settingString(settings, "outreach_dm_template_status"),
+  });
+  const welcomeReason = dmDisabledReasonLabel(availability.welcomeDisabledReason);
+  const outreachReason = dmDisabledReasonLabel(availability.outreachDisabledReason);
+
+  return (
+    <div className="ig-dm-target-panel">
+      <section className={availability.welcomeServiceActive ? "ig-dm-card" : "ig-dm-card ig-dm-card-disabled"}>
+        <div className="ig-dm-card-head">
+          <div>
+            <span className="ig-dm-section-kicker">Welcome DM</span>
+            <h3>Welcome</h3>
+            {!availability.welcomeServiceActive && welcomeReason ? <p>{welcomeReason}</p> : null}
+          </div>
+          <span className={availability.welcomeServiceActive ? "ig-dm-service-badge ig-dm-service-active" : "ig-dm-service-badge ig-dm-service-inactive"}>
+            {availability.welcomeServiceActive ? "Service active" : "Service inactive"}
+          </span>
+        </div>
+
+        <div className="ig-dm-card-grid">
+          <ConfigField
+            field={{
+              key: "welcome_dm_runtime_enabled",
+              label: "Welcome DM enabled",
+              type: "toggle",
+              hideStateText: true,
+              disabled: !availability.welcomeServiceActive,
+            }}
+            value={settingBoolean(settings, "welcome_dm_runtime_enabled", settingBoolean(settings, "welcome_dm_enabled"))}
+            onChange={(value) => updateSetting("welcome_dm_runtime_enabled", value)}
+          />
+          <ConfigField
+            field={{
+              key: "welcome_dm_effective_cap",
+              label: "Welcome cap/session",
+              type: "number",
+              min: 0,
+              disabled: !availability.welcomeServiceActive,
+            }}
+            value={settingNumber(settings, "welcome_dm_effective_cap", settingNumber(settings, "max_dm_per_run", 0))}
+            onChange={(value) => updateSetting("welcome_dm_effective_cap", value)}
+          />
+          <ConfigField
+            field={{
+              key: "welcome_dm_message",
+              label: "Welcome DM message",
+              type: "textarea",
+              disabled: !availability.welcomeServiceActive,
+            }}
+            value={settingString(settings, "welcome_dm_message")}
+            onChange={(value) => updateSetting("welcome_dm_message", value)}
+          />
+        </div>
+      </section>
+
+      <section className={availability.outreachServiceActive ? "ig-dm-card" : "ig-dm-card ig-dm-card-disabled"}>
+        <div className="ig-dm-card-head">
+          <div>
+            <span className="ig-dm-section-kicker">Outreach DM</span>
+            <h3>Outreach</h3>
+            {!availability.outreachServiceActive && outreachReason ? <p>{outreachReason}</p> : null}
+          </div>
+          <span className={availability.outreachServiceActive ? "ig-dm-service-badge ig-dm-service-active" : "ig-dm-service-badge ig-dm-service-inactive"}>
+            {availability.outreachServiceActive ? "Service active" : "Service inactive"}
+          </span>
+        </div>
+
+        <div className="ig-dm-card-grid">
+          <ConfigField
+            field={{
+              key: "outreach_dm_runtime_enabled",
+              label: "Outreach enabled",
+              type: "toggle",
+              hideStateText: true,
+              disabled: !availability.outreachServiceActive,
+            }}
+            value={settingBoolean(settings, "outreach_dm_runtime_enabled", settingBoolean(settings, "cold_dm_enabled"))}
+            onChange={(value) => updateSetting("outreach_dm_runtime_enabled", value)}
+          />
+          <ConfigField
+            field={{
+              key: "outreach_dm_effective_session_cap",
+              label: "Outreach session cap",
+              type: "number",
+              min: 0,
+              disabled: !availability.outreachServiceActive,
+            }}
+            value={settingNumber(settings, "outreach_dm_effective_session_cap", 0)}
+            onChange={(value) => updateSetting("outreach_dm_effective_session_cap", value)}
+          />
+          <ConfigField
+            field={{
+              key: "outreach_dm_effective_day_cap",
+              label: "Outreach day cap",
+              type: "number",
+              min: 0,
+              disabled: !availability.outreachServiceActive,
+            }}
+            value={settingNumber(settings, "outreach_dm_effective_day_cap", 0)}
+            onChange={(value) => updateSetting("outreach_dm_effective_day_cap", value)}
+          />
+          <ConfigField
+            field={{
+              key: "cold_dm_message",
+              label: "Outreach DM message",
+              type: "textarea",
+              disabled: !availability.outreachServiceActive,
+            }}
+            value={settingString(settings, "cold_dm_message")}
+            onChange={(value) => updateSetting("cold_dm_message", value)}
+          />
+        </div>
+      </section>
+
+    </div>
+  );
+}
+
+function DmTargetActions({ closePanel }: { closePanel: () => void }) {
+  return (
+    <div className="ig-settings-actions">
+      <button type="button" className="ig-settings-secondary" onClick={closePanel}>Close</button>
+      <button type="button" className="ig-settings-primary" disabled>
+        Save pending domain API
+      </button>
+    </div>
   );
 }
 
@@ -2156,15 +2555,16 @@ function renderLogs({
 
 function ConfigField({ field, value, onChange }: { field: FieldSpec; value: ConfigValue | undefined; onChange: (value: ConfigValue) => void }) {
   const helper = buildFieldHelper(field);
+  const disabled = field.readOnly || field.disabled;
 
   if (field.type === "toggle") {
     const checked = Boolean(value);
     return (
-      <label className="ig-settings-toggle">
-        <input type="checkbox" checked={checked} disabled={field.readOnly} onChange={(event) => onChange(event.target.checked)} />
+      <label className={disabled ? "ig-settings-toggle ig-settings-control-disabled" : "ig-settings-toggle"}>
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
         <span aria-hidden="true" />
         <strong>{field.label}</strong>
-        <small>{helper ?? (checked ? "Enabled" : "Disabled")}</small>
+        {field.hideStateText ? null : <small>{helper ?? (checked ? "Enabled" : "Disabled")}</small>}
       </label>
     );
   }
@@ -2173,7 +2573,7 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
     return (
       <label className="ig-settings-field ig-settings-field-wide">
         <span>{field.label}</span>
-        <textarea value={String(value ?? "")} rows={4} readOnly={field.readOnly} onChange={(event) => onChange(event.target.value)} />
+        <textarea value={String(value ?? "")} rows={4} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
         {helper ? <small>{helper}</small> : null}
       </label>
     );
@@ -2183,7 +2583,7 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
     return (
       <label className="ig-settings-field">
         <span>{field.label}</span>
-        <select value={String(value ?? "")} disabled={field.readOnly} onChange={(event) => onChange(event.target.value)}>
+        <select value={String(value ?? "")} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
           {(field.options ?? []).map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
@@ -2202,7 +2602,7 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
           min={field.min ?? 0}
           step={field.step ?? 1}
           value={Number(value ?? 0)}
-          readOnly={field.readOnly}
+          disabled={disabled}
           onChange={(event) => onChange(Number(event.target.value))}
         />
         {helper ? <small>{helper}</small> : null}
@@ -2216,7 +2616,7 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
       <input
         type={field.type === "password" ? "password" : field.type === "time" ? "time" : field.type === "date" ? "date" : "text"}
         value={String(value ?? "")}
-        readOnly={field.readOnly}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
       {helper ? <small>{helper}</small> : null}

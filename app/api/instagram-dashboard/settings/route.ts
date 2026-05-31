@@ -1,5 +1,16 @@
 import { NextResponse } from "next/server";
 import { createSupabaseClient } from "@/lib/supabase";
+import {
+  evaluateUnfollowAnyStartGate,
+  isUnfollowAnyMode,
+  runControlFollowToUnfollowRealEnabled,
+  runControlLegacyDmSenderRealSendEnabled,
+  runControlOutreachRealSendEnabled,
+  runControlUnfollowAnyH3RealSupported,
+  runControlUnfollowAnySafeStrategyProven,
+  runControlWelcomeRealSendEnabled,
+  type RunStartBlockReason,
+} from "@/lib/instagram-dashboard/run-control";
 import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -34,11 +45,23 @@ const stringDefaults = {
   last_error: "",
   last_successful_action: "",
   current_run_status: "idle",
+  welcome_dm_real_send_status: "Disabled",
+  welcome_dm_template_status: "Missing",
+  welcome_entitlement_status: "Missing",
+  outreach_dm_real_send_status: "Disabled",
+  outreach_dm_template_status: "Missing",
+  outreach_entitlement_status: "Missing",
+  dm_legacy_gate_status: "Not configured",
+  max_dm_per_run_legacy_status: "Legacy shared cap; use domain caps",
+  unfollow_runtime_mode: "unfollow",
+  unfollow_any_runtime_state: "Disabled",
+  unfollow_any_runtime_block_reason: "",
 } satisfies Record<string, string>;
 
 const booleanDefaults = {
   two_fa_enabled: false,
   cloned_app_mode: false,
+  unfollow_any_runtime_configured: false,
   randomize_start_enabled: true,
   follow_enabled: false,
   unfollow_enabled: false,
@@ -49,6 +72,8 @@ const booleanDefaults = {
   check_chat_before_welcoming: true,
   send_enabled: false,
   safe_review_mode: true,
+  welcome_dm_runtime_enabled: false,
+  outreach_dm_runtime_enabled: false,
   followback_on_followers: false,
   unfollow_non_followers: false,
   unfollow_any: false,
@@ -100,6 +125,9 @@ const numberDefaults = {
   watch_video_time_min: 5,
   watch_video_time_max: 18,
   max_dm_per_run: 2,
+  welcome_dm_effective_cap: 0,
+  outreach_dm_effective_session_cap: 0,
+  outreach_dm_effective_day_cap: 0,
   max_consecutive_dms: 3,
   max_followback_skips: 50,
   max_followback_ignore: 200,
@@ -122,6 +150,7 @@ const numberDefaults = {
   max_repeated_errors: 5,
   relog_delay_seconds: 120,
   total_crashes_limit: 3,
+  unfollow_runtime_session_cap: 0,
 } satisfies Record<string, number>;
 
 const DEFAULT_SETTINGS: SettingsPayload = {
@@ -130,6 +159,35 @@ const DEFAULT_SETTINGS: SettingsPayload = {
   ...booleanDefaults,
   ...numberDefaults,
 };
+
+const runtimeProjectionKeys = [
+  "welcome_dm_runtime_enabled",
+  "welcome_dm_real_send_status",
+  "welcome_dm_template_status",
+  "welcome_entitlement_status",
+  "welcome_dm_effective_cap",
+  "outreach_dm_runtime_enabled",
+  "outreach_dm_real_send_status",
+  "outreach_dm_template_status",
+  "outreach_dm_effective_session_cap",
+  "outreach_dm_effective_day_cap",
+  "outreach_entitlement_status",
+  "dm_legacy_gate_status",
+  "max_dm_per_run_legacy_status",
+  "unfollow_runtime_mode",
+  "unfollow_any_runtime_configured",
+  "unfollow_any_runtime_state",
+  "unfollow_any_runtime_block_reason",
+  "unfollow_runtime_session_cap",
+] as const;
+
+function persistableSettings(settings: SettingsPayload): SettingsPayload {
+  const payload: Record<string, SettingsValue> & { account_id: string } = { ...settings };
+  for (const key of runtimeProjectionKeys) {
+    delete payload[key];
+  }
+  return payload as SettingsPayload;
+}
 
 function normalizeSettings(row: SettingsRecord | null | undefined, accountId: string): SettingsPayload {
   const settings: SettingsPayload = { ...DEFAULT_SETTINGS, account_id: accountId };
@@ -185,6 +243,222 @@ function safeSettingsForClient(settings: SettingsPayload): Record<string, Settin
   safeSettings.clone_assignment_status = settings.cloned_app_mode ? "clone assigned" : "standard app";
 
   return safeSettings;
+}
+
+function readPositiveInteger(value: unknown) {
+  const parsed = readNumber(value, Number.NaN);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function runtimeBlockLabel(reason: RunStartBlockReason | null) {
+  return reason ?? "";
+}
+
+function boolStatus(enabled: boolean) {
+  return enabled ? "Enabled" : "Disabled";
+}
+
+async function hasActiveDmTemplate(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  templateType: "welcome" | "outreach",
+  templateId: unknown,
+) {
+  const configuredTemplateId = readString(templateId, "").trim();
+  let query = supabase
+    .from("ig_dm_templates")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("template_type", templateType)
+    .eq("active", true)
+    .limit(1);
+
+  if (configuredTemplateId) {
+    query = query.eq("id", configuredTemplateId);
+  } else {
+    query = query.eq("is_default", true);
+  }
+
+  const { data, error } = await query.maybeSingle<SupabaseRecord>();
+  if (error) return null;
+  return Boolean(data);
+}
+
+async function hasOutreachEntitlement(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const { data, error } = await supabase.rpc("client_account_has_outreach_entitlement", {
+    p_account_id: accountId,
+  });
+  if (error) return null;
+  return data === true;
+}
+
+function entitlementCurrentlyActive(row: SupabaseRecord) {
+  if (row.active !== true) return false;
+  const validUntil = readString(row.valid_until, "").trim();
+  if (!validUntil) return true;
+  const validUntilTime = new Date(validUntil).getTime();
+  return Number.isFinite(validUntilTime) && validUntilTime > Date.now();
+}
+
+async function hasClientFeatureEntitlement(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  featureCode: "welcome",
+) {
+  const { data: accountEntitlements, error: accountError } = await supabase
+    .from("client_entitlements")
+    .select("active,valid_until")
+    .eq("account_id", accountId)
+    .eq("feature_code", featureCode)
+    .eq("active", true)
+    .limit(5);
+
+  if (accountError) return null;
+  if ((accountEntitlements ?? []).some(entitlementCurrentlyActive)) return true;
+
+  const { data: accountLinks, error: linkError } = await supabase
+    .from("client_instagram_accounts")
+    .select("client_id")
+    .eq("account_id", accountId)
+    .limit(10);
+
+  if (linkError) return null;
+
+  const clientIds = Array.from(
+    new Set(
+      (accountLinks ?? [])
+        .map((row) => readString(row.client_id, "").trim())
+        .filter(Boolean),
+    ),
+  );
+  if (!clientIds.length) return false;
+
+  const { data: clientEntitlements, error: clientError } = await supabase
+    .from("client_entitlements")
+    .select("active,valid_until")
+    .in("client_id", clientIds)
+    .is("account_id", null)
+    .eq("feature_code", featureCode)
+    .eq("active", true)
+    .limit(10);
+
+  if (clientError) return null;
+  return (clientEntitlements ?? []).some(entitlementCurrentlyActive);
+}
+
+async function withDmRuntimeStatus(
+  settings: SettingsPayload,
+  supabase: ReturnType<typeof createSupabaseClient>,
+) {
+  const { data, error } = await supabase
+    .from("ig_account_dm_settings")
+    .select("welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,outreach_per_session_limit,outreach_per_day_limit")
+    .eq("account_id", settings.account_id)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+
+  if (error) {
+    return {
+      ...settings,
+      welcome_dm_real_send_status: "Unknown",
+      welcome_dm_template_status: "Unknown",
+      welcome_entitlement_status: "Unknown",
+      outreach_dm_real_send_status: "Unknown",
+      outreach_dm_template_status: "Unknown",
+      outreach_entitlement_status: "Unknown",
+    };
+  }
+
+  const welcomeEnabled = data?.welcome_enabled === true;
+  const outreachEnabled = data?.outreach_enabled === true;
+  const welcomeTemplateReady = await hasActiveDmTemplate(supabase, settings.account_id, "welcome", data?.welcome_template_id);
+  const outreachTemplateReady = await hasActiveDmTemplate(
+    supabase,
+    settings.account_id,
+    "outreach",
+    data?.default_outreach_template_id,
+  );
+  const welcomeEntitlementActive = await hasClientFeatureEntitlement(supabase, settings.account_id, "welcome");
+  const outreachEntitlementActive = await hasOutreachEntitlement(supabase, settings.account_id);
+  const legacyGate = runControlLegacyDmSenderRealSendEnabled();
+
+  return {
+    ...settings,
+    welcome_dm_runtime_enabled: welcomeEnabled,
+    welcome_dm_real_send_status: boolStatus(runControlWelcomeRealSendEnabled()),
+    welcome_dm_template_status: welcomeTemplateReady === null ? "Unknown" : welcomeTemplateReady ? "Ready" : "Missing",
+    welcome_entitlement_status:
+      welcomeEntitlementActive === null ? "Unknown" : welcomeEntitlementActive ? "Active" : "Missing",
+    welcome_dm_effective_cap: readPositiveInteger(data?.welcome_per_session_limit) ?? 0,
+    outreach_dm_runtime_enabled: outreachEnabled,
+    outreach_dm_real_send_status: boolStatus(runControlOutreachRealSendEnabled()),
+    outreach_dm_template_status: outreachTemplateReady === null ? "Unknown" : outreachTemplateReady ? "Ready" : "Missing",
+    outreach_dm_effective_session_cap: readPositiveInteger(data?.outreach_per_session_limit) ?? 0,
+    outreach_dm_effective_day_cap: readPositiveInteger(data?.outreach_per_day_limit) ?? 0,
+    outreach_entitlement_status:
+      outreachEntitlementActive === null ? "Unknown" : outreachEntitlementActive ? "Active" : "Missing",
+    dm_legacy_gate_status: legacyGate === null ? "Not configured" : `Legacy global ${boolStatus(legacyGate).toLowerCase()} (read-only)`,
+    max_dm_per_run_legacy_status: "Legacy shared cap; Welcome/Outreach use split domain caps.",
+  };
+}
+
+async function withUnfollowRuntimeStatus(
+  settings: SettingsPayload,
+  supabase: ReturnType<typeof createSupabaseClient>,
+) {
+  const { data, error } = await supabase
+    .from("ig_account_unfollow_settings")
+    .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit")
+    .eq("account_id", settings.account_id)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+
+  if (error) {
+    return {
+      ...settings,
+      unfollow_any_runtime_state: "Configured but blocked by runtime gate",
+      unfollow_any_runtime_block_reason: "support_required",
+    };
+  }
+
+  const mode = readString(data?.unfollow_mode, "unfollow").trim().toLowerCase() || "unfollow";
+  const configured = data?.unfollow_enabled === true && isUnfollowAnyMode(mode);
+  const sessionCap = readPositiveInteger(data?.unfollow_per_session_limit) ?? 0;
+  const blockReason = configured
+    ? evaluateUnfollowAnyStartGate({
+        requestedRunType: "account_session",
+        unfollowEnabled: data?.unfollow_enabled === true,
+        unfollowMode: mode,
+        unfollowPerSessionLimit: sessionCap,
+        realHandoffEnabled: runControlFollowToUnfollowRealEnabled(),
+        realMaxActions: readPositiveInteger(
+          process.env.INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS ??
+            process.env.ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS,
+        ),
+        realHardMax: readPositiveInteger(
+          process.env.INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX ??
+            process.env.ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX,
+        ),
+        h3RealSupported: runControlUnfollowAnyH3RealSupported(),
+        safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
+      })
+    : null;
+
+  return {
+    ...settings,
+    unfollow_runtime_mode: mode,
+    unfollow_any_runtime_configured: configured,
+    unfollow_runtime_session_cap: sessionCap,
+    unfollow_any_runtime_state: configured
+      ? blockReason
+        ? "Configured but blocked by runtime gate"
+        : "Ready"
+      : "Disabled",
+    unfollow_any_runtime_block_reason: runtimeBlockLabel(blockReason),
+  };
 }
 
 function preserveProtectedSettings(settings: SettingsPayload, existing: SettingsRecord | null | undefined) {
@@ -265,19 +539,27 @@ export async function GET(request: Request) {
     const account = await fetchAccount(accountId, supabase);
 
     if (data) {
-      return jsonSuccess(withAccountDefaults(normalizeSettings(data, accountId), account));
+      const settings = await withUnfollowRuntimeStatus(
+        await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(data, accountId), account), supabase),
+        supabase,
+      );
+      return jsonSuccess(settings);
     }
 
     const defaultSettings = withAccountDefaults({ ...DEFAULT_SETTINGS, account_id: accountId }, account);
     const { data: inserted, error: insertError } = await supabase
       .from("ig_account_settings")
-      .insert(defaultSettings)
+      .insert(persistableSettings(defaultSettings))
       .select("*")
       .single<SettingsRecord>();
 
     if (insertError) return migrationError(insertError.message);
 
-    return jsonSuccess(withAccountDefaults(normalizeSettings(inserted, accountId), account), 201);
+    const settings = await withUnfollowRuntimeStatus(
+      await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(inserted, accountId), account), supabase),
+      supabase,
+    );
+    return jsonSuccess(settings, 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load account settings.";
     return jsonError(message, 500);
@@ -311,9 +593,10 @@ async function saveSettings(request: Request) {
 
     const settings = preserveProtectedSettings(normalizeSettings(body, accountId), existing);
 
+    const persistable = persistableSettings(settings);
     const { data, error } = await supabase
       .from("ig_account_settings")
-      .update(settings)
+      .update(persistable)
       .eq("account_id", accountId)
       .select("*")
       .maybeSingle<SettingsRecord>();
@@ -323,16 +606,26 @@ async function saveSettings(request: Request) {
     if (!data) {
       const { data: inserted, error: insertError } = await supabase
         .from("ig_account_settings")
-        .insert(settings)
+        .insert(persistable)
         .select("*")
         .single<SettingsRecord>();
 
       if (insertError) return migrationError(insertError.message);
 
-      return jsonSuccess(normalizeSettings(inserted, accountId), 201);
+      const account = await fetchAccount(accountId, supabase);
+      const responseSettings = await withUnfollowRuntimeStatus(
+        await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(inserted, accountId), account), supabase),
+        supabase,
+      );
+      return jsonSuccess(responseSettings, 201);
     }
 
-    return jsonSuccess(normalizeSettings(data, accountId));
+    const account = await fetchAccount(accountId, supabase);
+    const responseSettings = await withUnfollowRuntimeStatus(
+      await withDmRuntimeStatus(withAccountDefaults(normalizeSettings(data, accountId), account), supabase),
+      supabase,
+    );
+    return jsonSuccess(responseSettings);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not save account settings.";
     return jsonError(message, 500);

@@ -658,7 +658,13 @@ function AccountList({
                 <td>{account.macHostName}</td>
                 <td>{mode === "archived" ? formatDateTime(account.scheduledTrashAt) : mode === "trashed" ? formatDateTime(account.scheduledDeleteAt) : formatDateTime(account.createdAt)}</td>
                 <td>
-                  <InstagramDashboardButtons accountId={account.accountId || account.username} username={account.username} mode={mode} />
+                  <InstagramDashboardButtons
+                    accountId={account.accountId || account.username}
+                    username={account.username}
+                    mode={mode}
+                    packageLabel={account.packageLabel}
+                    entitlementSummary={account.entitlementSummary}
+                  />
                 </td>
               </tr>
             ))}
@@ -713,7 +719,13 @@ function AccountList({
                 <dd>{mode === "archived" ? formatDateTime(account.scheduledTrashAt) : mode === "trashed" ? formatDateTime(account.scheduledDeleteAt) : formatDateTime(account.createdAt)}</dd>
               </div>
             </dl>
-            <InstagramDashboardButtons accountId={account.accountId || account.username} username={account.username} mode={mode} />
+            <InstagramDashboardButtons
+              accountId={account.accountId || account.username}
+              username={account.username}
+              mode={mode}
+              packageLabel={account.packageLabel}
+              entitlementSummary={account.entitlementSummary}
+            />
           </article>
         ))}
       </div>
