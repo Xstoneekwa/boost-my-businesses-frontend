@@ -18,6 +18,14 @@ type InstagramDashboardButtonsProps = {
 type ConfigValue = string | number | boolean;
 type InstagramSettings = Record<string, ConfigValue> & { account_id: string };
 type InstagramFilters = Record<string, ConfigValue> & { account_id: string };
+
+type FollowFiltersProjection = {
+  account_id: string;
+  skip_private_profiles: boolean;
+  runtime_status: "active";
+  save_ready: boolean;
+  changed_fields?: string[];
+};
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
 type AccountTemplate = Record<string, unknown> & {
   id: string;
@@ -179,8 +187,8 @@ type AccountTool = {
 const DRAFT_SETTINGS_BANNER =
   "Dashboard draft settings. Saved values persist to the dashboard DB; fields marked Needs routing are not runtime-active until Phone Farm domain wiring is complete.";
 
-const FILTERS_LEGACY_BANNER =
-  "Legacy filter values stored in ig_account_filters. They are not used by /runs/start, Auto Restart preview, or the Phone Farm worker. Editing is disabled until filter domain wiring is complete.";
+const FILTERS_PRODUCTION_BANNER =
+  "Follow filters apply before the worker attempts a follow. Legacy draft filters are hidden.";
 
 type Confirmation = {
   title: string;
@@ -403,81 +411,42 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   ],
 };
 
-type FilterSectionSpec = {
-  title: string;
-  description: string;
-  fields: FieldSpec[];
-};
-
-function legacyFilterField(field: FieldSpec): FieldSpec {
-  return {
-    readOnly: true,
-    disabled: true,
-    runtimeStatus: "read-only",
-    ...field,
-  };
+function settingsFieldsForTab(tab: SettingsTab): FieldSpec[] {
+  if (tab === "Filters") return [];
+  return settingsFields[tab];
 }
 
-const filterSections: FilterSectionSpec[] = [
+type PlannedFilterCard = {
+  title: string;
+  description: string;
+};
+
+const plannedFilterCards: PlannedFilterCard[] = [
   {
-    title: "Runtime-ready filters",
-    description: "No follow filter fields are runtime-active yet. Private-profile follow policy will live in Follow settings via ig_account_follow_settings when wired.",
-    fields: [],
+    title: "Follower thresholds",
+    description: "Minimum and maximum follower counts before a follow attempt.",
   },
   {
-    title: "Follow filters (planned)",
-    description: "Relationship, business-type, and profile-threshold filters. Worker wiring pending.",
-    fields: [
-      legacyFilterField({ key: "skip_followers", label: "Skip followers", type: "toggle", helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "skip_following", label: "Skip following", type: "toggle", helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "skip_business_profiles", label: "Skip business profiles", type: "toggle", helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "skip_non_business_profiles", label: "Skip non-business profiles", type: "toggle", helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "follow_only_private_profiles", label: "Follow only private profiles", type: "toggle", helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "min_following", label: "Minimum following", type: "number", min: 0, helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "max_following", label: "Maximum following", type: "number", min: 0, helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "min_posts", label: "Minimum posts", type: "number", min: 0, helper: "Planned · Not consumed by worker." }),
-      legacyFilterField({ key: "blacklisted_words", label: "Blacklisted words", type: "textarea", helper: "Planned · Normalized policy table preferred." }),
-      legacyFilterField({ key: "mandatory_words", label: "Mandatory words", type: "textarea", helper: "Planned · Normalized policy table preferred." }),
-      legacyFilterField({ key: "blacklist_accounts", label: "Blacklist accounts", type: "textarea", helper: "Planned · Runtime blacklist uses interaction rows, not this textarea." }),
-    ],
+    title: "Profile quality",
+    description: "Minimum posts, profile photo, and verified-account rules.",
   },
   {
-    title: "Outreach filters (planned)",
-    description: "DM eligibility belongs in the DM tab and ig_account_dm_settings when wired.",
-    fields: [
-      legacyFilterField({ key: "dm_private_profiles", label: "DM private profiles", type: "toggle", helper: "Planned · Use DM domain settings when wired." }),
-    ],
+    title: "Business / creator",
+    description: "Skip or target business and creator account types.",
   },
   {
-    title: "CT quality filters (planned)",
-    description: "CT follower thresholds and verification rules are managed in the Targets panel and ig_targets quality_status.",
-    fields: [
-      legacyFilterField({ key: "min_followers", label: "Minimum followers", type: "number", min: 0, helper: "Planned · CT/target quality wiring pending." }),
-      legacyFilterField({ key: "max_followers", label: "Maximum followers", type: "number", min: 0, helper: "Planned · CT/target quality wiring pending." }),
-    ],
+    title: "Blacklist / whitelist",
+    description: "Word lists and account exclusion policies.",
   },
   {
-    title: "Legacy draft values",
-    description: "Stored legacy values kept for inspection only. Unfollow whitelist uses ig_interacted_users.whitelist_protected, not whitelist_words.",
-    fields: [
-      legacyFilterField({ key: "disable_filters", label: "Disable filters", type: "toggle", helper: "Legacy global toggle · Not consumed by runtime." }),
-      legacyFilterField({
-        key: "follow_private_profiles",
-        label: "Follow private profiles",
-        type: "toggle",
-        helper: "Legacy · Conflicts with ig_account_follow_settings.dont_follow_private_accounts.",
-      }),
-      legacyFilterField({
-        key: "whitelist_words",
-        label: "Whitelist words",
-        type: "textarea",
-        helper: "Legacy ambiguous field · Not the unfollow whitelist_protected flag.",
-      }),
-    ],
+    title: "Outreach filters",
+    description: "Skip already DM'd, replied, blocked, and source-type rules.",
+  },
+  {
+    title: "CT quality",
+    description: "CT verification thresholds and source health rules.",
   },
 ];
-
-const filterFields: FieldSpec[] = filterSections.flatMap((section) => section.fields);
 
 export async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
@@ -1025,6 +994,8 @@ export default function InstagramDashboardButtons({
   const [settings, setSettings] = useState<InstagramSettings | null>(null);
   const [settingsBaseline, setSettingsBaseline] = useState<InstagramSettings | null>(null);
   const [filters, setFilters] = useState<InstagramFilters | null>(null);
+  const [followFilters, setFollowFilters] = useState<FollowFiltersProjection | null>(null);
+  const [followFiltersBaseline, setFollowFiltersBaseline] = useState<FollowFiltersProjection | null>(null);
   const [templates, setTemplates] = useState<AccountTemplate[]>([]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("General");
   const [statsRows, setStatsRows] = useState<StatsRow[]>([]);
@@ -1150,14 +1121,14 @@ export default function InstagramDashboardButtons({
 
     try {
       if (nextPanel === "settings" || nextPanel === "filters") {
-        const [settingsPayload, filtersPayload, templatePayload] = await Promise.all([
+        const [settingsPayload, followFiltersPayload, templatePayload] = await Promise.all([
           readApiResponse<InstagramSettings>(
             await fetch(`/api/instagram-dashboard/settings?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
             "Could not load account settings."
           ),
-          readApiResponse<InstagramFilters>(
-            await fetch(`/api/instagram-dashboard/filters?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
-            "Could not load account filters."
+          readApiResponse<FollowFiltersProjection>(
+            await fetch(`/api/instagram-dashboard/settings/follow-filters?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+            "Could not load Follow filter settings."
           ),
           readApiResponse<AccountTemplate[]>(
             await fetch("/api/instagram-dashboard/templates", { headers: { Accept: "application/json" } }),
@@ -1166,7 +1137,8 @@ export default function InstagramDashboardButtons({
         ]);
         setSettings(settingsPayload);
         setSettingsBaseline(settingsPayload);
-        setFilters(filtersPayload);
+        setFollowFilters(followFiltersPayload);
+        setFollowFiltersBaseline(followFiltersPayload);
         setTemplates(templatePayload);
       }
 
@@ -1201,6 +1173,8 @@ export default function InstagramDashboardButtons({
     setSettings(null);
     setSettingsBaseline(null);
     setFilters(null);
+    setFollowFilters(null);
+    setFollowFiltersBaseline(null);
     setTemplates([]);
     setTemplateDialog(null);
     setSettingsTab("General");
@@ -1227,10 +1201,28 @@ export default function InstagramDashboardButtons({
     }
   }
 
+  async function loadFollowFiltersDomain() {
+    try {
+      const projection = await readApiResponse<FollowFiltersProjection>(
+        await fetch(`/api/instagram-dashboard/settings/follow-filters?account_id=${encodeURIComponent(accountId)}`, {
+          headers: { Accept: "application/json" },
+        }),
+        "Could not load Follow filter settings.",
+      );
+      setFollowFilters(projection);
+      setFollowFiltersBaseline(projection);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load Follow filter settings.");
+    }
+  }
+
   async function selectSettingsTab(tab: SettingsTab) {
     setSettingsTab(tab);
     if (tab === "DM") {
       await loadDmDomainSettings();
+    }
+    if (tab === "Filters") {
+      await loadFollowFiltersDomain();
     }
   }
 
@@ -1442,6 +1434,53 @@ export default function InstagramDashboardButtons({
     }
   }
 
+  function updateFollowFilter(value: boolean) {
+    setFollowFilters((current) => (current ? { ...current, skip_private_profiles: value } : current));
+  }
+
+  function saveFollowFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!followFilters || followFilters.skip_private_profiles === followFiltersBaseline?.skip_private_profiles) return;
+
+    requestConfirmation({
+      title: "Save Follow filters?",
+      description: "This updates the runtime Follow filter policy. It will not start a run.",
+      confirmTone: "primary",
+      confirmLabel: "Save filters",
+      onConfirm: performSaveFollowFilters,
+    });
+  }
+
+  async function performSaveFollowFilters() {
+    if (!followFilters) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const projection = await readApiResponse<FollowFiltersProjection>(
+        await fetch("/api/instagram-dashboard/settings/follow-filters", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            account_id: followFilters.account_id,
+            skip_private_profiles: followFilters.skip_private_profiles,
+          }),
+        }),
+        "Could not save Follow filter settings.",
+      );
+      setFollowFilters(projection);
+      setFollowFiltersBaseline(projection);
+      setSuccess("Follow filter settings saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save Follow filter settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function stopRun() {
     setError("");
     setSuccess("");
@@ -1603,17 +1642,20 @@ export default function InstagramDashboardButtons({
             </div>
 
             {isLoading ? <div className="ig-settings-loading">Loading account data...</div> : null}
-            {!isLoading && (panel === "settings" || panel === "filters") && settings && filters
+            {!isLoading && (panel === "settings" || panel === "filters") && settings && followFilters
               ? renderSettingsTabs({
                   settings,
                   settingsBaseline,
-                  filters,
+                  followFilters,
+                  followFiltersBaseline,
                   settingsTab,
                   selectSettingsTab,
                   updateSetting,
+                  updateFollowFilter,
                   saveSettings,
                   saveDmSettings,
                   saveUnfollowSettings,
+                  saveFollowFilters,
                   openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
                   openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
                   closePanel,
@@ -1643,7 +1685,7 @@ export default function InstagramDashboardButtons({
               exportLogs,
               copyLogs,
             }) : null}
-            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !filters) ? (
+            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !followFilters) ? (
               <div className="ig-settings-loading">
                 <p className="ig-settings-message ig-settings-error">{error}</p>
                 <button type="button" className="ig-settings-secondary" onClick={closePanel}>Cancel</button>
@@ -1939,6 +1981,74 @@ export default function InstagramDashboardButtons({
           font-size: 12px;
           line-height: 1.4;
           margin: 0 0 12px;
+        }
+
+        .ig-filters-section-title-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 6px;
+        }
+
+        .ig-filters-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 22px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.11);
+          padding: 2px 8px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          white-space: nowrap;
+        }
+
+        .ig-filters-badge-active {
+          border-color: rgba(52,211,153,0.28);
+          background: rgba(52,211,153,0.08);
+          color: #86EFAC;
+        }
+
+        .ig-filters-badge-planned {
+          border-color: rgba(148,163,184,0.22);
+          background: rgba(148,163,184,0.08);
+          color: rgba(255,255,255,0.58);
+        }
+
+        .ig-filters-section-info {
+          opacity: 0.92;
+        }
+
+        .ig-filters-planned-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .ig-filters-planned-card {
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 14px;
+          background: rgba(255,255,255,0.02);
+          padding: 12px;
+        }
+
+        .ig-filters-planned-card p {
+          color: rgba(255,255,255,0.48);
+          font-size: 11px;
+          line-height: 1.35;
+          margin: 8px 0 0;
+        }
+
+        .ig-filters-planned-card strong {
+          color: #f0f0ef;
+          font-size: 12px;
+        }
+
+        .ig-filters-legacy-note {
+          margin-top: 4px;
+          opacity: 0.72;
         }
 
         .ig-dm-card {
@@ -2579,13 +2689,16 @@ function ExportBar({
 function renderSettingsTabs({
   settings,
   settingsBaseline,
-  filters,
+  followFilters,
+  followFiltersBaseline,
   settingsTab,
   selectSettingsTab,
   updateSetting,
+  updateFollowFilter,
   saveSettings,
   saveDmSettings,
   saveUnfollowSettings,
+  saveFollowFilters,
   openSaveTemplate,
   openApplyTemplate,
   closePanel,
@@ -2597,13 +2710,16 @@ function renderSettingsTabs({
 }: {
   settings: InstagramSettings;
   settingsBaseline: InstagramSettings | null;
-  filters: InstagramFilters;
+  followFilters: FollowFiltersProjection;
+  followFiltersBaseline: FollowFiltersProjection | null;
   settingsTab: SettingsTab;
   selectSettingsTab: (tab: SettingsTab) => void | Promise<void>;
   updateSetting: (key: string, value: ConfigValue) => void;
+  updateFollowFilter: (value: boolean) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveUnfollowSettings: (event: FormEvent<HTMLFormElement>) => void;
+  saveFollowFilters: (event: FormEvent<HTMLFormElement>) => void;
   openSaveTemplate: (source: "settings" | "filters") => void;
   openApplyTemplate: (source: "settings" | "filters") => void;
   closePanel: () => void;
@@ -2614,7 +2730,7 @@ function renderSettingsTabs({
   entitlementSummary?: string | null;
 }) {
   const isFiltersTab = settingsTab === "Filters";
-  const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
+  const fields = settingsFieldsForTab(settingsTab);
   const hasEditableFields = fields.some((field) => !field.readOnly && !field.disabled);
   const isDmTab = settingsTab === "DM";
   const isFollowTab = settingsTab === "Follow";
@@ -2624,10 +2740,8 @@ function renderSettingsTabs({
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
   const unfollowDirty = isFollowbackTab && !sameUnfollowPayload(settings, settingsBaseline);
   const unfollowValidationError = isFollowbackTab ? unfollowClientValidationError(settings) : "";
-
-  function preventFiltersSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-  }
+  const followFiltersDirty =
+    isFiltersTab && followFilters.skip_private_profiles !== followFiltersBaseline?.skip_private_profiles;
 
   return (
     <form
@@ -2638,7 +2752,7 @@ function renderSettingsTabs({
           : isFollowbackTab
             ? saveUnfollowSettings
             : isFiltersTab
-              ? preventFiltersSubmit
+              ? saveFollowFilters
               : saveSettings
       }
     >
@@ -2658,7 +2772,7 @@ function renderSettingsTabs({
       </div>
 
       {showDraftBanner ? <p className="ig-settings-message">{DRAFT_SETTINGS_BANNER}</p> : null}
-      {isFiltersTab ? <p className="ig-settings-message">{FILTERS_LEGACY_BANNER}</p> : null}
+      {isFiltersTab ? <p className="ig-settings-message">{FILTERS_PRODUCTION_BANNER}</p> : null}
       {settingsTab === "Sources" ? (
         <p className="ig-settings-message">CT targets are managed in the Targets panel. Source policy fields here are draft settings for future Phone Farm routing.</p>
       ) : null}
@@ -2688,7 +2802,7 @@ function renderSettingsTabs({
           </div>
         </>
       ) : isFiltersTab ? (
-        <FiltersTargetPanel filters={filters} />
+        <FiltersTargetPanel followFilters={followFilters} updateFollowFilter={updateFollowFilter} />
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
@@ -2729,7 +2843,13 @@ function renderSettingsTabs({
           label="Save Unfollow settings"
         />
       ) : isFiltersTab ? (
-        <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={false} />
+        <DomainTargetActions
+          closePanel={closePanel}
+          isDirty={followFiltersDirty}
+          validationError=""
+          isSaving={isSaving}
+          label="Save Filters"
+        />
       ) : (
         <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields} />
       )}
@@ -2737,29 +2857,64 @@ function renderSettingsTabs({
   );
 }
 
-function FiltersTargetPanel({ filters }: { filters: InstagramFilters }) {
+function FiltersTargetPanel({
+  followFilters,
+  updateFollowFilter,
+}: {
+  followFilters: FollowFiltersProjection;
+  updateFollowFilter: (value: boolean) => void;
+}) {
   return (
     <div className="ig-filters-target-panel">
-      {filterSections.map((section) => (
-        <section key={section.title} className="ig-filters-section">
-          <div className="ig-filters-section-head">
-            <h3>{section.title}</h3>
-            <p>{section.description}</p>
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Runtime-ready Follow filters</h3>
+            <span className="ig-filters-badge ig-filters-badge-active">Runtime active</span>
           </div>
-          {section.fields.length > 0 ? (
-            <div className="ig-settings-grid">
-              {section.fields.map((field) => (
-                <ConfigField
-                  key={field.key}
-                  field={field}
-                  value={filters[field.key]}
-                  onChange={() => undefined}
-                />
-              ))}
+          <p>These settings are applied by the worker before a follow attempt.</p>
+        </div>
+        <div className="ig-settings-grid">
+          <ConfigField
+            field={{
+              key: "skip_private_profiles",
+              label: "Skip private profiles",
+              type: "toggle",
+              runtimeStatus: "active",
+              helper: "When enabled, private accounts are skipped during Follow.",
+            }}
+            value={followFilters.skip_private_profiles}
+            onChange={(value) => updateFollowFilter(Boolean(value))}
+          />
+        </div>
+      </section>
+
+      <section className="ig-filters-section ig-filters-section-info">
+        <div className="ig-filters-section-head">
+          <h3>Automatic runtime protections</h3>
+          <p>Already interacted accounts, accounts already followed, and interaction blacklist status are enforced automatically.</p>
+        </div>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <h3>Planned filters</h3>
+          <p>These groups will become configurable after worker and domain wiring is complete.</p>
+        </div>
+        <div className="ig-filters-planned-grid">
+          {plannedFilterCards.map((card) => (
+            <div key={card.title} className="ig-filters-planned-card">
+              <div className="ig-filters-section-title-row">
+                <strong>{card.title}</strong>
+                <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
+              </div>
+              <p>{card.description}</p>
             </div>
-          ) : null}
-        </section>
-      ))}
+          ))}
+        </div>
+      </section>
+
+      <p className="ig-settings-message ig-filters-legacy-note">Legacy draft filters hidden.</p>
     </div>
   );
 }
