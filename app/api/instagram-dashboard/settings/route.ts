@@ -4,6 +4,8 @@ import {
   evaluateUnfollowAnyStartGate,
   isUnfollowAnyMode,
   runControlFollowToUnfollowRealEnabled,
+  runControlFollowToUnfollowRealHardMax,
+  runControlFollowToUnfollowRealMaxActions,
   runControlLegacyDmSenderRealSendEnabled,
   runControlOutreachRealSendEnabled,
   runControlUnfollowAnyH3RealSupported,
@@ -62,12 +64,22 @@ const stringDefaults = {
   unfollow_runtime_mode: "unfollow",
   unfollow_any_runtime_state: "Disabled",
   unfollow_any_runtime_block_reason: "",
+  unfollow_mode: "unfollow",
+  follow_entitlement_status: "Unknown",
+  unfollow_entitlement_status: "Unknown",
+  current_runtime_mode: "unfollow",
+  handoff_real_status: "Unknown",
+  safe_candidate_strategy_status: "Unknown",
+  limiting_reason: "Unknown",
+  runtime_cap_mode: "Unknown",
+  runtime_cap_source: "account_session_h3_ops_cap",
 } satisfies Record<string, string>;
 
 const booleanDefaults = {
   two_fa_enabled: false,
   cloned_app_mode: false,
   unfollow_any_runtime_configured: false,
+  do_unfollow_first: false,
   randomize_start_enabled: true,
   follow_enabled: false,
   unfollow_enabled: false,
@@ -157,6 +169,13 @@ const numberDefaults = {
   relog_delay_seconds: 120,
   total_crashes_limit: 3,
   unfollow_runtime_session_cap: 0,
+  unfollow_per_session_limit: 50,
+  unfollow_per_day_limit: 200,
+  unfollow_after_days: 3,
+  effective_unfollow_cap: 50,
+  runtime_safety_cap: 1,
+  runtime_hard_cap: 3,
+  unfollow_day_remaining: 200,
 } satisfies Record<string, number>;
 
 const DEFAULT_SETTINGS: SettingsPayload = {
@@ -185,6 +204,23 @@ const runtimeProjectionKeys = [
   "unfollow_any_runtime_state",
   "unfollow_any_runtime_block_reason",
   "unfollow_runtime_session_cap",
+  "unfollow_mode",
+  "unfollow_per_session_limit",
+  "unfollow_per_day_limit",
+  "unfollow_after_days",
+  "effective_unfollow_cap",
+  "follow_entitlement_status",
+  "unfollow_entitlement_status",
+  "current_runtime_mode",
+  "handoff_real_status",
+  "safe_candidate_strategy_status",
+  "limiting_reason",
+  "runtime_cap_mode",
+  "runtime_cap_source",
+  "runtime_safety_cap",
+  "runtime_hard_cap",
+  "unfollow_day_remaining",
+  "do_unfollow_first",
 ] as const;
 
 function persistableSettings(settings: SettingsPayload): SettingsPayload {
@@ -286,7 +322,7 @@ function entitlementCurrentlyActive(row: SupabaseRecord) {
 async function hasClientFeatureEntitlement(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
-  featureCode: "welcome",
+  featureCode: "welcome" | "follow" | "unfollow",
 ) {
   const { data: accountEntitlements, error: accountError } = await supabase
     .from("client_entitlements")
@@ -402,7 +438,7 @@ async function withUnfollowRuntimeStatus(
 ) {
   const { data, error } = await supabase
     .from("ig_account_unfollow_settings")
-    .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit")
+    .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,unfollow_after_days")
     .eq("account_id", settings.account_id)
     .limit(1)
     .maybeSingle<SupabaseRecord>();
@@ -418,6 +454,13 @@ async function withUnfollowRuntimeStatus(
   const mode = readString(data?.unfollow_mode, "unfollow").trim().toLowerCase() || "unfollow";
   const configured = data?.unfollow_enabled === true && isUnfollowAnyMode(mode);
   const sessionCap = readPositiveInteger(data?.unfollow_per_session_limit) ?? 0;
+  const dayCap = readPositiveInteger(data?.unfollow_per_day_limit) ?? 0;
+  const afterDays = readPositiveInteger(data?.unfollow_after_days) ?? 3;
+  const runtimeRequestedCap = runControlFollowToUnfollowRealMaxActions();
+  const runtimeHardCap = runControlFollowToUnfollowRealHardMax();
+  const runtimeSafetyCap = Math.min(runtimeRequestedCap, runtimeHardCap);
+  const followEntitlementActive = await hasClientFeatureEntitlement(supabase, settings.account_id, "follow");
+  const unfollowEntitlementActive = await hasClientFeatureEntitlement(supabase, settings.account_id, "unfollow");
   const blockReason = configured
     ? evaluateUnfollowAnyStartGate({
         requestedRunType: "account_session",
@@ -425,24 +468,56 @@ async function withUnfollowRuntimeStatus(
         unfollowMode: mode,
         unfollowPerSessionLimit: sessionCap,
         realHandoffEnabled: runControlFollowToUnfollowRealEnabled(),
-        realMaxActions: readPositiveInteger(
-          process.env.INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS ??
-            process.env.ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS,
-        ),
-        realHardMax: readPositiveInteger(
-          process.env.INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX ??
-            process.env.ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX,
-        ),
+        realMaxActions: runtimeRequestedCap,
+        realHardMax: runtimeHardCap,
         h3RealSupported: runControlUnfollowAnyH3RealSupported(),
         safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
       })
     : null;
+  const rawEffectiveCap = Math.min(sessionCap, dayCap, runtimeSafetyCap);
+  const effectiveCap = blockReason ? 0 : Math.max(0, rawEffectiveCap);
 
   return {
     ...settings,
+    unfollow_enabled: data?.unfollow_enabled === true,
+    unfollow_mode: mode,
+    unfollow_per_session_limit: sessionCap,
+    unfollow_per_day_limit: dayCap,
+    unfollow_after_days: afterDays,
+    effective_unfollow_cap: effectiveCap,
+    runtime_safety_cap: runtimeSafetyCap,
+    runtime_hard_cap: runtimeHardCap,
+    unfollow_day_remaining: dayCap,
+    limiting_reason:
+      blockReason
+        ? blockReason === "unfollow_entitlement_missing"
+          ? "limited_by_entitlement"
+          : blockReason === "unfollow_no_safe_candidate_strategy"
+            ? "limited_by_no_safe_candidate"
+            : "limited_by_runtime_gate"
+        : runtimeSafetyCap <= effectiveCap && runtimeSafetyCap < sessionCap
+          ? runtimeSafetyCap <= 1
+            ? "limited_by_mini_run_mode"
+            : "limited_by_safety_cap"
+          : "ready",
+    runtime_cap_mode:
+      runtimeSafetyCap <= 1 && sessionCap > 1
+        ? "mini-run/safety"
+        : runtimeSafetyCap < sessionCap
+          ? "safety-limited"
+          : "prod-aligned",
+    runtime_cap_source: "account_session_h3_ops_cap",
+    follow_entitlement_status:
+      followEntitlementActive === null ? "Unknown" : followEntitlementActive ? "Active" : "Missing",
+    unfollow_entitlement_status:
+      unfollowEntitlementActive === null ? "Unknown" : unfollowEntitlementActive ? "Active" : "Missing",
     unfollow_runtime_mode: mode,
     unfollow_any_runtime_configured: configured,
     unfollow_runtime_session_cap: sessionCap,
+    current_runtime_mode: mode,
+    handoff_real_status: runControlFollowToUnfollowRealEnabled() ? "Enabled" : "Disabled",
+    safe_candidate_strategy_status: runControlUnfollowAnySafeStrategyProven() ? "Ready" : "Unknown",
+    do_unfollow_first: false,
     unfollow_any_runtime_state: configured
       ? blockReason
         ? "Configured but blocked by runtime gate"

@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dmClientValidationError, dmDomainPayload, getDmServiceAvailability, readApiResponse, runStartSuccessMessage } from "./InstagramDashboardButtons";
+import { dmClientValidationError, dmDomainPayload, getDmServiceAvailability, readApiResponse, runStartSuccessMessage, unfollowClientValidationError, unfollowDomainPayload } from "./InstagramDashboardButtons";
 import { runStartSuccessPayload } from "../api/instagram-dashboard/runs/start/route";
 import { DEFAULT_OUTREACH_DM_DAY_CAP, DEFAULT_WELCOME_DM_DAY_CAP, dmChangedFields, readProductDefaultDayCap, validateDmDomainInput, type DmDomainValidationInput } from "../api/instagram-dashboard/settings/dm/route";
+import { validateUnfollowDomainInput } from "../api/instagram-dashboard/settings/unfollow/route";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, normalizeDmTemplateMessage } from "../../lib/instagram-dashboard/dm-formatting";
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
   evaluateDmStartGate,
   evaluateMiniRunCapsPreflight,
+  evaluateUnfollowStartGate,
   evaluateUnfollowAnyStartGate,
   outreachSessionBlockedByOutreachRealSendDisabled,
   resolveOutreachPreflightCap,
@@ -973,9 +975,9 @@ test("unfollow-any blocks account start when real handoff is off", () => {
       h3RealSupported: true,
       safeCandidateStrategyProven: true,
     }),
-    "real_handoff_disabled",
+    "unfollow_handoff_disabled",
   );
-  assert.match(runStartBlockMessage("real_handoff_disabled"), /Unfollow real handoff is disabled/);
+  assert.match(runStartBlockMessage("unfollow_handoff_disabled"), /Unfollow real handoff is disabled/);
 });
 
 test("unfollow-any blocks account start when H3 real support is not proven", () => {
@@ -991,9 +993,9 @@ test("unfollow-any blocks account start when H3 real support is not proven", () 
       h3RealSupported: false,
       safeCandidateStrategyProven: true,
     }),
-    "unfollow_any_not_supported",
+    "unfollow_mode_not_supported",
   );
-  assert.match(runStartBlockMessage("unfollow_any_not_supported"), /not supported by the H3 real handoff path/);
+  assert.match(runStartBlockMessage("unfollow_mode_not_supported"), /selected Unfollow mode is not supported/);
 });
 
 test("unfollow-any blocks account start when cap is not proven", () => {
@@ -1027,9 +1029,9 @@ test("unfollow-any blocks account start when safe strategy is not proven", () =>
       h3RealSupported: true,
       safeCandidateStrategyProven: false,
     }),
-    "no_safe_unfollow_strategy",
+    "unfollow_no_safe_candidate_strategy",
   );
-  assert.match(runStartBlockMessage("no_safe_unfollow_strategy"), /no safe Unfollow-any candidate strategy/);
+  assert.match(runStartBlockMessage("unfollow_no_safe_candidate_strategy"), /no safe Unfollow-any candidate strategy/);
 });
 
 test("unfollow-any ready state passes the Unfollow start gate", () => {
@@ -1046,5 +1048,105 @@ test("unfollow-any ready state passes the Unfollow start gate", () => {
       safeCandidateStrategyProven: true,
     }),
     null,
+  );
+});
+
+test("standard unfollow ready state passes the generic Unfollow handoff gate", () => {
+  assert.equal(
+    evaluateUnfollowStartGate({
+      requestedRunType: "account_session",
+      unfollowEntitlementActive: true,
+      unfollowEnabled: true,
+      unfollowMode: "unfollow",
+      unfollowPerSessionLimit: 1,
+      unfollowPerDayLimit: 200,
+      unfollowDayRemaining: 200,
+      realHandoffEnabled: true,
+      realMaxActions: 1,
+      realHardMax: 1,
+      h3RealSupported: true,
+      safeCandidateStrategyProven: true,
+    }),
+    null,
+  );
+});
+
+test("generic Unfollow handoff gate rejects planned non-followers mode", () => {
+  assert.equal(
+    evaluateUnfollowStartGate({
+      requestedRunType: "account_session",
+      unfollowEntitlementActive: true,
+      unfollowEnabled: true,
+      unfollowMode: "unfollow-non-followers",
+      unfollowPerSessionLimit: 1,
+      unfollowPerDayLimit: 200,
+      unfollowDayRemaining: 200,
+      realHandoffEnabled: true,
+      realMaxActions: 1,
+      realHardMax: 1,
+      h3RealSupported: true,
+      safeCandidateStrategyProven: true,
+    }),
+    "unfollow_mode_not_supported",
+  );
+});
+
+test("unfollow domain payload writes runtime source only", () => {
+  const payload = unfollowDomainPayload({
+    account_id: "00000000-0000-4000-8000-000000000001",
+    unfollow_enabled: true,
+    unfollow_mode: "unfollow-any",
+    unfollow_per_session_limit: 1,
+    unfollow_per_day_limit: 200,
+    unfollow_after_days: 3,
+    unfollow_any: false,
+    unfollow_non_followers: false,
+    do_follows_first: true,
+  });
+
+  assert.deepEqual(payload, {
+    account_id: "00000000-0000-4000-8000-000000000001",
+    unfollow_enabled: true,
+    unfollow_mode: "unfollow-any",
+    unfollow_per_session_limit: 1,
+    unfollow_per_day_limit: 200,
+    unfollow_after_days: 3,
+  });
+});
+
+test("unfollow domain validation rejects planned non-followers and invalid caps", () => {
+  assert.equal(
+    validateUnfollowDomainInput({
+      unfollowEnabled: true,
+      unfollowMode: "unfollow-non-followers",
+      unfollowPerSessionLimit: 1,
+      unfollowPerDayLimit: 200,
+      unfollowAfterDays: 3,
+    }),
+    "unfollow_non_followers_planned",
+  );
+  assert.equal(
+    validateUnfollowDomainInput({
+      unfollowEnabled: true,
+      unfollowMode: "unfollow-any",
+      unfollowPerSessionLimit: 2,
+      unfollowPerDayLimit: 1,
+      unfollowAfterDays: 3,
+    }),
+    "session_cap_exceeds_day_cap",
+  );
+});
+
+test("unfollow client validation treats non-followers as planned only", () => {
+  assert.equal(
+    unfollowClientValidationError({
+      account_id: "00000000-0000-4000-8000-000000000001",
+      unfollow_enabled: true,
+      unfollow_mode: "unfollow-non-followers",
+      unfollow_per_session_limit: 1,
+      unfollow_per_day_limit: 200,
+      unfollow_after_days: 3,
+    }),
+    "unfollow_non_followers_planned",
   );
 });

@@ -51,6 +51,30 @@ type DmDomainProjection = {
   changed_fields?: string[];
 };
 
+type UnfollowDomainProjection = {
+  account_id: string;
+  unfollow_enabled: boolean;
+  unfollow_mode: string;
+  unfollow_per_session_limit: number;
+  unfollow_per_day_limit: number;
+  unfollow_after_days: number;
+  effective_unfollow_cap: number;
+  runtime_safety_cap: number;
+  runtime_hard_cap: number;
+  unfollow_day_remaining: number | null;
+  limiting_reason: string;
+  runtime_cap_mode: string;
+  runtime_cap_source: string;
+  follow_entitlement_status: string;
+  unfollow_entitlement_status: string;
+  current_runtime_mode: string;
+  handoff_real_status: string;
+  block_reason: string;
+  safe_candidate_strategy_status: string;
+  do_unfollow_first_status: string;
+  changed_fields?: string[];
+};
+
 type StatsRow = {
   id: string;
   worker_type?: string;
@@ -112,9 +136,12 @@ type FieldSpec = {
   disabled?: boolean;
   runtimeStatus?: RuntimeStatus;
   options?: string[];
+  disabledOptions?: string[];
+  optionLabels?: Record<string, string>;
   min?: number;
   step?: number;
   hideStateText?: boolean;
+  hideHelper?: boolean;
 };
 
 export type DmServiceDisabledReason =
@@ -292,19 +319,34 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "max_dm_per_run_legacy_status", label: "Legacy shared DM cap", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "max_dm_per_run is no longer a valid shared Welcome/Outreach control." },
   ],
   Followback: [
-    { key: "followback_on_followers", label: "Followback on followers", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: followback/unfollow domain policy." },
-    { key: "max_followback_skips", label: "Max followback skips", type: "number", min: 0, runtimeStatus: "needs-routing" },
-    { key: "max_followback_ignore", label: "Max followback ignore", type: "number", min: 0, runtimeStatus: "needs-routing" },
-    { key: "sort_followers_mode", label: "Sort followers mode", type: "select", runtimeStatus: "needs-routing", options: ["recent", "oldest", "random"] },
-    { key: "unfollow_non_followers", label: "Unfollow non-followers", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: ig_account_unfollow_settings.unfollow_mode." },
-    { key: "unfollow_runtime_mode", label: "Runtime Unfollow mode", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_unfollow_settings.unfollow_mode." },
-    { key: "unfollow_any_runtime_state", label: "Unfollow-any runtime state", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Shows Ready only when the full runtime preset passes start gates." },
-    { key: "unfollow_any_runtime_block_reason", label: "Unfollow-any block reason", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Stable preflight reason when configured but blocked." },
-    { key: "unfollow_runtime_session_cap", label: "Runtime Unfollow session cap", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Source: ig_account_unfollow_settings.unfollow_per_session_limit." },
-    { key: "unfollow_skip_limit", label: "Unfollow skip limit", type: "number", min: 0, runtimeStatus: "needs-routing" },
-    { key: "mute_posts_after_follow", label: "Mute posts after follow", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: post-follow mute policy API." },
-    { key: "mute_stories_after_follow", label: "Mute stories after follow", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: post-follow mute policy API." },
-    { key: "do_follows_first", label: "Do follows first", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: account session phase ordering policy." },
+    { key: "unfollow_enabled", label: "Unfollow enabled", type: "toggle", hideHelper: true },
+    {
+      key: "unfollow_mode",
+      label: "Unfollow mode",
+      type: "select",
+      options: ["unfollow", "unfollow-any", "unfollow-non-followers"],
+      disabledOptions: ["unfollow-non-followers"],
+      optionLabels: {
+        "unfollow": "Standard Unfollow · Default",
+        "unfollow-any": "Unfollow any",
+        "unfollow-non-followers": "Unfollow non-followers · Coming later",
+      },
+      hideHelper: true,
+    },
+    { key: "unfollow_per_session_limit", label: "Unfollow cap/session", type: "number", min: 0, hideHelper: true },
+    { key: "unfollow_per_day_limit", label: "Unfollow cap/day", type: "number", min: 0, hideHelper: true },
+    { key: "unfollow_after_days", label: "Unfollow delay days", type: "number", min: 0, hideHelper: true },
+    { key: "effective_unfollow_cap", label: "Effective cap now", type: "number", min: 0, readOnly: true, helper: "Lowest active limit for the next run" },
+    { key: "limiting_reason", label: "Limiting reason", type: "text", readOnly: true, hideHelper: true },
+    { key: "runtime_safety_cap", label: "Runtime safety cap", type: "number", min: 0, readOnly: true, hideHelper: true },
+    { key: "runtime_cap_mode", label: "Runtime cap mode", type: "text", readOnly: true, hideHelper: true },
+    { key: "runtime_cap_source", label: "Runtime cap source", type: "text", readOnly: true, hideHelper: true },
+    { key: "follow_entitlement_status", label: "Follow entitlement", type: "text", readOnly: true, hideHelper: true },
+    { key: "unfollow_entitlement_status", label: "Unfollow entitlement", type: "text", readOnly: true, hideHelper: true },
+    { key: "handoff_real_status", label: "Handoff status", type: "text", readOnly: true, hideHelper: true },
+    { key: "unfollow_any_runtime_block_reason", label: "Run block", type: "text", readOnly: true, hideHelper: true },
+    { key: "safe_candidate_strategy_status", label: "Safe candidate strategy", type: "text", readOnly: true, hideHelper: true },
+    { key: "do_unfollow_first", label: "Do unfollow first", type: "toggle", disabled: true, helper: "Planned" },
   ],
   Sources: [
     { key: "truncate_sources_min", label: "Truncate sources min", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Source list policy draft. CT targets are managed in the Targets panel." },
@@ -415,6 +457,7 @@ function runtimeStatusPrefix(status?: RuntimeStatus) {
 }
 
 function buildFieldHelper(field: FieldSpec) {
+  if (field.hideHelper) return undefined;
   const parts = [runtimeStatusPrefix(field.runtimeStatus), field.helper, field.readOnly && !field.runtimeStatus ? "Read-only projection." : null].filter(Boolean);
   return parts.length ? parts.join(" · ") : undefined;
 }
@@ -534,6 +577,40 @@ function withDmDomainProjection(settings: InstagramSettings, projection: DmDomai
   };
 }
 
+function withUnfollowDomainProjection(settings: InstagramSettings, projection: UnfollowDomainProjection): InstagramSettings {
+  return {
+    ...settings,
+    unfollow_enabled: projection.unfollow_enabled,
+    unfollow_mode: projection.unfollow_mode,
+    unfollow_per_session_limit: projection.unfollow_per_session_limit,
+    unfollow_per_day_limit: projection.unfollow_per_day_limit,
+    unfollow_after_days: projection.unfollow_after_days,
+    effective_unfollow_cap: projection.effective_unfollow_cap,
+    runtime_safety_cap: projection.runtime_safety_cap,
+    runtime_hard_cap: projection.runtime_hard_cap,
+    unfollow_day_remaining: projection.unfollow_day_remaining ?? "",
+    limiting_reason: projection.limiting_reason,
+    runtime_cap_mode: projection.runtime_cap_mode,
+    runtime_cap_source: projection.runtime_cap_source,
+    follow_entitlement_status: projection.follow_entitlement_status,
+    unfollow_entitlement_status: projection.unfollow_entitlement_status,
+    current_runtime_mode: projection.current_runtime_mode,
+    handoff_real_status: projection.handoff_real_status,
+    safe_candidate_strategy_status: projection.safe_candidate_strategy_status,
+    unfollow_runtime_mode: projection.current_runtime_mode,
+    unfollow_runtime_session_cap: projection.unfollow_per_session_limit,
+    unfollow_any_runtime_configured: projection.unfollow_enabled && projection.unfollow_mode === "unfollow-any",
+    unfollow_any_runtime_state:
+      projection.unfollow_enabled && projection.unfollow_mode === "unfollow-any"
+        ? projection.block_reason
+          ? "Configured but blocked by runtime gate"
+          : "Ready"
+        : "Disabled",
+    unfollow_any_runtime_block_reason: projection.block_reason,
+    do_unfollow_first: false,
+  };
+}
+
 export function dmDomainPayload(settings: InstagramSettings) {
   return {
     account_id: settings.account_id,
@@ -551,6 +628,34 @@ export function dmDomainPayload(settings: InstagramSettings) {
 function sameDmPayload(left: InstagramSettings | null, right: InstagramSettings | null) {
   if (!left || !right) return true;
   return JSON.stringify(dmDomainPayload(left)) === JSON.stringify(dmDomainPayload(right));
+}
+
+export function unfollowDomainPayload(settings: InstagramSettings) {
+  return {
+    account_id: settings.account_id,
+    unfollow_enabled: settingBoolean(settings, "unfollow_enabled", false),
+    unfollow_mode: settingString(settings, "unfollow_mode", "unfollow"),
+    unfollow_per_session_limit: settingNumber(settings, "unfollow_per_session_limit", 0),
+    unfollow_per_day_limit: settingNumber(settings, "unfollow_per_day_limit", 0),
+    unfollow_after_days: settingNumber(settings, "unfollow_after_days", 3),
+  };
+}
+
+function sameUnfollowPayload(left: InstagramSettings | null, right: InstagramSettings | null) {
+  if (!left || !right) return true;
+  return JSON.stringify(unfollowDomainPayload(left)) === JSON.stringify(unfollowDomainPayload(right));
+}
+
+export function unfollowClientValidationError(settings: InstagramSettings) {
+  const enabled = settingBoolean(settings, "unfollow_enabled", false);
+  const mode = settingString(settings, "unfollow_mode", "unfollow").trim().toLowerCase();
+  const sessionCap = settingNumber(settings, "unfollow_per_session_limit", 0);
+  const dayCap = settingNumber(settings, "unfollow_per_day_limit", 0);
+  if (mode === "unfollow-non-followers") return "unfollow_non_followers_planned";
+  if (mode !== "unfollow" && mode !== "unfollow-any") return "unfollow_mode_not_supported";
+  if (enabled && (sessionCap < 1 || dayCap < 1)) return "unfollow_cap_unproven";
+  if (enabled && sessionCap > dayCap) return "session_cap_exceeds_day_cap";
+  return "";
 }
 
 export function dmClientValidationError(settings: InstagramSettings) {
@@ -1199,6 +1304,47 @@ export default function InstagramDashboardButtons({
     }
   }
 
+  function saveUnfollowSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!settings || sameUnfollowPayload(settings, settingsBaseline)) return;
+
+    requestConfirmation({
+      title: "Save Unfollow settings?",
+      description: "This will update the Followback / Unfollow settings.\nIt will not start a run or perform any Unfollow action.",
+      confirmTone: "primary",
+      confirmLabel: "Save settings",
+      onConfirm: performSaveUnfollowSettings,
+    });
+  }
+
+  async function performSaveUnfollowSettings() {
+    if (!settings) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const projection = await readApiResponse<UnfollowDomainProjection>(
+        await fetch("/api/instagram-dashboard/settings/unfollow", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(unfollowDomainPayload(settings)),
+        }),
+        "Could not save Unfollow domain settings."
+      );
+      const savedSettings = withUnfollowDomainProjection(settings, projection);
+      setSettings(savedSettings);
+      setSettingsBaseline(savedSettings);
+      setSuccess("Unfollow domain settings saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save Unfollow domain settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function saveFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!filters) return;
@@ -1409,6 +1555,7 @@ export default function InstagramDashboardButtons({
                   updateFilter,
                   saveSettings,
                   saveDmSettings,
+                  saveUnfollowSettings,
                   saveFilters,
                   openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
                   openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
@@ -2356,6 +2503,7 @@ function renderSettingsTabs({
   updateFilter,
   saveSettings,
   saveDmSettings,
+  saveUnfollowSettings,
   saveFilters,
   openSaveTemplate,
   openApplyTemplate,
@@ -2375,6 +2523,7 @@ function renderSettingsTabs({
   updateFilter: (key: string, value: ConfigValue) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
+  saveUnfollowSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveFilters: (event: FormEvent<HTMLFormElement>) => void;
   openSaveTemplate: (source: "settings" | "filters") => void;
   openApplyTemplate: (source: "settings" | "filters") => void;
@@ -2389,14 +2538,17 @@ function renderSettingsTabs({
   const fields = isFiltersTab ? filterFields : settingsFields[settingsTab as Exclude<SettingsTab, "Filters">];
   const hasEditableFields = fields.some((field) => !field.readOnly);
   const isDmTab = settingsTab === "DM";
-  const showDraftBanner = (hasEditableFields || isFiltersTab) && settingsTab !== "DM";
+  const isFollowbackTab = settingsTab === "Followback";
+  const showDraftBanner = (hasEditableFields || isFiltersTab) && !isDmTab && !isFollowbackTab;
   const dmDirty = isDmTab && !sameDmPayload(settings, settingsBaseline);
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
+  const unfollowDirty = isFollowbackTab && !sameUnfollowPayload(settings, settingsBaseline);
+  const unfollowValidationError = isFollowbackTab ? unfollowClientValidationError(settings) : "";
 
   return (
     <form
       className="ig-settings-form"
-      onSubmit={isDmTab ? saveDmSettings : isFiltersTab ? saveFilters : saveSettings}
+      onSubmit={isDmTab ? saveDmSettings : isFollowbackTab ? saveUnfollowSettings : isFiltersTab ? saveFilters : saveSettings}
     >
       <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
         {settingsTabs.map((tab) => (
@@ -2428,6 +2580,20 @@ function renderSettingsTabs({
           packageLabel={packageLabel}
           entitlementSummary={entitlementSummary}
         />
+      ) : isFollowbackTab ? (
+        <>
+          {unfollowValidationError ? <p className="ig-settings-message ig-settings-error">{unfollowValidationError}</p> : null}
+          <div className="ig-settings-grid">
+            {fields.map((field) => (
+              <ConfigField
+                key={field.key}
+                field={field}
+                value={settings[field.key]}
+                onChange={(value) => updateSetting(field.key, value)}
+              />
+            ))}
+          </div>
+        </>
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
@@ -2442,7 +2608,7 @@ function renderSettingsTabs({
       )}
 
       <FormMessages error={error} success={success} />
-      {!isDmTab && (hasEditableFields || isFiltersTab) ? (
+      {!isDmTab && !isFollowbackTab && (hasEditableFields || isFiltersTab) ? (
         <div className="ig-template-actions">
           <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate(isFiltersTab ? "filters" : "settings")} disabled={isSaving}>
             Save as Template
@@ -2458,6 +2624,14 @@ function renderSettingsTabs({
           isDirty={dmDirty}
           validationError={dmValidationError}
           isSaving={isSaving}
+        />
+      ) : isFollowbackTab ? (
+        <DomainTargetActions
+          closePanel={closePanel}
+          isDirty={unfollowDirty}
+          validationError={unfollowValidationError}
+          isSaving={isSaving}
+          label="Save Unfollow settings"
         />
       ) : (
         <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields || isFiltersTab} />
@@ -2650,6 +2824,29 @@ function DmTargetActions({
       <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>Close</button>
       <button type="submit" className="ig-settings-primary" disabled={isSaving || !isDirty || Boolean(validationError)}>
         {isSaving ? "Saving..." : "Save DM settings"}
+      </button>
+    </div>
+  );
+}
+
+function DomainTargetActions({
+  closePanel,
+  isDirty,
+  validationError,
+  isSaving,
+  label,
+}: {
+  closePanel: () => void;
+  isDirty: boolean;
+  validationError: string;
+  isSaving: boolean;
+  label: string;
+}) {
+  return (
+    <div className="ig-settings-actions">
+      <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>Close</button>
+      <button type="submit" className="ig-settings-primary" disabled={isSaving || !isDirty || Boolean(validationError)}>
+        {isSaving ? "Saving..." : label}
       </button>
     </div>
   );
@@ -2858,7 +3055,9 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
         <span>{field.label}</span>
         <select value={String(value ?? "")} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
           {(field.options ?? []).map((option) => (
-            <option key={option} value={option}>{option}</option>
+            <option key={option} value={option} disabled={field.disabledOptions?.includes(option)}>
+              {field.optionLabels?.[option] ?? option}
+            </option>
           ))}
         </select>
         {helper ? <small>{helper}</small> : null}

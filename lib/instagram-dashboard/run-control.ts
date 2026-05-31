@@ -51,10 +51,13 @@ export type RunStartBlockReason =
   | "mini_run_welcome_cap_unproven"
   | "mini_run_follow_cap_unproven"
   | "mini_run_outreach_off_unproven"
-  | "real_handoff_disabled"
-  | "unfollow_any_not_supported"
+  | "unfollow_entitlement_missing"
+  | "unfollow_disabled"
+  | "unfollow_mode_not_supported"
+  | "unfollow_handoff_disabled"
   | "unfollow_cap_unproven"
-  | "no_safe_unfollow_strategy"
+  | "unfollow_day_quota_exhausted"
+  | "unfollow_no_safe_candidate_strategy"
   | "already_running"
   | "already_requested"
   | "invalid_run_type";
@@ -99,11 +102,32 @@ export function runControlFollowToUnfollowRealEnabled(env: MiniRunEnv = process.
 }
 
 export function runControlUnfollowAnyH3RealSupported(env: MiniRunEnv = process.env) {
-  return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_H3_REAL_SUPPORTED === "true";
+  return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_H3_REAL_SUPPORTED !== "false";
 }
 
 export function runControlUnfollowAnySafeStrategyProven(env: MiniRunEnv = process.env) {
-  return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_SAFE_STRATEGY_PROVEN === "true";
+  return env.INSTAGRAM_RUN_CONTROL_UNFOLLOW_ANY_SAFE_STRATEGY_PROVEN !== "false";
+}
+
+export function runControlFollowToUnfollowRealMaxActions(env: MiniRunEnv = process.env) {
+  return readMiniRunCap(
+    [
+      "INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS",
+      "ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS",
+    ],
+    env,
+  ) ?? 1;
+}
+
+export function runControlFollowToUnfollowRealHardMax(env: MiniRunEnv = process.env) {
+  const raw = readMiniRunCap(
+    [
+      "INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX",
+      "ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX",
+    ],
+    env,
+  ) ?? 3;
+  return Math.max(0, Math.min(raw, 10));
 }
 
 export function runControlMiniRunCapsRequired() {
@@ -238,6 +262,11 @@ export function isUnfollowAnyMode(value: unknown) {
   return mode === "unfollow-any" || mode === "unfollow-any-non-followers" || mode === "unfollow-any-followers";
 }
 
+export function isSupportedHandoffUnfollowMode(value: unknown) {
+  const mode = readString(value, "").trim().toLowerCase();
+  return mode === "unfollow" || mode === "unfollow-any";
+}
+
 export function runControlDispatcherAllowedRunTypes(env: MiniRunEnv = process.env) {
   const raw = readString(
     env.INSTAGRAM_RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES ?? env.RUN_CONTROL_DISPATCHER_ALLOWED_RUN_TYPES,
@@ -298,17 +327,72 @@ export function evaluateMiniRunCapsPreflight({
   return null;
 }
 
-export function evaluateUnfollowAnyStartGate({
+export function evaluateUnfollowStartGate({
   requestedRunType,
+  unfollowEntitlementActive,
   unfollowEnabled,
   unfollowMode,
   unfollowPerSessionLimit,
+  unfollowPerDayLimit,
+  unfollowDayRemaining,
   realHandoffEnabled,
   realMaxActions,
   realHardMax,
   h3RealSupported,
   safeCandidateStrategyProven,
 }: {
+  requestedRunType: string;
+  unfollowEntitlementActive: boolean;
+  unfollowEnabled: boolean;
+  unfollowMode: string;
+  unfollowPerSessionLimit: number | null;
+  unfollowPerDayLimit: number | null;
+  unfollowDayRemaining: number | null;
+  realHandoffEnabled: boolean;
+  realMaxActions: number | null;
+  realHardMax: number | null;
+  h3RealSupported: boolean;
+  safeCandidateStrategyProven: boolean;
+}): RunStartBlockReason | null {
+  if (requestedRunType !== "account_session") {
+    return null;
+  }
+
+  const mode = readString(unfollowMode, "unfollow").trim().toLowerCase() || "unfollow";
+  if (!unfollowEntitlementActive) {
+    return "unfollow_entitlement_missing";
+  }
+  if (!unfollowEnabled) {
+    return "unfollow_disabled";
+  }
+  if (!isSupportedHandoffUnfollowMode(mode)) {
+    return "unfollow_mode_not_supported";
+  }
+  if (!realHandoffEnabled) {
+    return "unfollow_handoff_disabled";
+  }
+  if (isUnfollowAnyMode(mode) && !h3RealSupported) {
+    return "unfollow_mode_not_supported";
+  }
+  if (
+    !capProvesAtLeastOne(unfollowPerSessionLimit) ||
+    !capProvesAtLeastOne(unfollowPerDayLimit) ||
+    !capProvesAtLeastOne(realMaxActions) ||
+    !capProvesAtLeastOne(realHardMax)
+  ) {
+    return "unfollow_cap_unproven";
+  }
+  if (unfollowDayRemaining !== null && unfollowDayRemaining < 1) {
+    return "unfollow_day_quota_exhausted";
+  }
+  if (isUnfollowAnyMode(mode) && !safeCandidateStrategyProven) {
+    return "unfollow_no_safe_candidate_strategy";
+  }
+
+  return null;
+}
+
+export function evaluateUnfollowAnyStartGate(args: {
   requestedRunType: string;
   unfollowEnabled: boolean;
   unfollowMode: string;
@@ -319,28 +403,15 @@ export function evaluateUnfollowAnyStartGate({
   h3RealSupported: boolean;
   safeCandidateStrategyProven: boolean;
 }): RunStartBlockReason | null {
-  if (requestedRunType !== "account_session" || !unfollowEnabled || !isUnfollowAnyMode(unfollowMode)) {
+  if (args.requestedRunType !== "account_session" || !args.unfollowEnabled || !isUnfollowAnyMode(args.unfollowMode)) {
     return null;
   }
-
-  if (!realHandoffEnabled) {
-    return "real_handoff_disabled";
-  }
-  if (!h3RealSupported) {
-    return "unfollow_any_not_supported";
-  }
-  if (
-    !capProvesAtLeastOne(unfollowPerSessionLimit) ||
-    !capProvesAtLeastOne(realMaxActions) ||
-    !capProvesAtLeastOne(realHardMax)
-  ) {
-    return "unfollow_cap_unproven";
-  }
-  if (!safeCandidateStrategyProven) {
-    return "no_safe_unfollow_strategy";
-  }
-
-  return null;
+  return evaluateUnfollowStartGate({
+    ...args,
+    unfollowEntitlementActive: true,
+    unfollowPerDayLimit: 1,
+    unfollowDayRemaining: 1,
+  });
 }
 
 export function evaluateDmStartGate({
@@ -506,6 +577,50 @@ async function accountHasOutreachEntitlement(accountId: string) {
     throw new Error("Could not verify Outreach entitlement.");
   }
   return data === true;
+}
+
+async function accountHasFeatureEntitlement(accountId: string, featureCode: "follow" | "unfollow") {
+  const supabase = createSupabaseClient();
+  const { data: links, error: linkError } = await supabase
+    .from("client_instagram_accounts")
+    .select("client_id")
+    .eq("account_id", accountId)
+    .limit(10);
+  if (linkError) {
+    throw new Error(`Could not verify ${featureCode} entitlement.`);
+  }
+  const clientIds = [...new Set((links ?? []).map((row) => readString((row as SupabaseRecord).client_id, "")).filter(Boolean))];
+  if (!clientIds.length) return false;
+
+  const { data, error } = await supabase
+    .from("client_entitlements")
+    .select("active,valid_until")
+    .in("client_id", clientIds)
+    .eq("feature_code", featureCode)
+    .eq("active", true)
+    .limit(10);
+  if (error) {
+    throw new Error(`Could not verify ${featureCode} entitlement.`);
+  }
+
+  const now = Date.now();
+  return (data ?? []).some((row) => {
+    const validUntil = readString((row as SupabaseRecord).valid_until, "").trim();
+    return !validUntil || Date.parse(validUntil) > now;
+  });
+}
+
+async function countUnfollowsToday(accountId: string) {
+  const since = `${utcDateString()}T00:00:00.000Z`;
+  const { count, error } = await createSupabaseClient()
+    .from("ig_interacted_users")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId)
+    .gte("unfollowed_at", since);
+  if (error) {
+    throw new Error("Could not verify Unfollow day quota.");
+  }
+  return count ?? 0;
 }
 
 export function sanitizeRunControlReason(value: unknown, fallback = "blocked") {
@@ -874,7 +989,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     if (normalizedRunType === "account_session") {
       const { data: unfollowSettings, error: unfollowSettingsError } = await supabase
         .from("ig_account_unfollow_settings")
-        .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit")
+        .select("unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit")
         .eq("account_id", accountId)
         .limit(1)
         .maybeSingle();
@@ -883,20 +998,28 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
       }
 
-      const unfollowBlock = evaluateUnfollowAnyStartGate({
+      const unfollowDayLimit = readPositiveInteger(unfollowSettings?.unfollow_per_day_limit);
+      let unfollowEntitlementActive = false;
+      let unfollowsDoneToday = 0;
+      try {
+        unfollowEntitlementActive = await accountHasFeatureEntitlement(accountId, "unfollow");
+        unfollowsDoneToday = await countUnfollowsToday(accountId);
+      } catch {
+        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      }
+
+      const unfollowBlock = evaluateUnfollowStartGate({
         requestedRunType: normalizedRunType,
+        unfollowEntitlementActive,
         unfollowEnabled: unfollowSettings?.unfollow_enabled === true,
         unfollowMode: readString(unfollowSettings?.unfollow_mode, ""),
         unfollowPerSessionLimit: readPositiveInteger(unfollowSettings?.unfollow_per_session_limit),
+        unfollowPerDayLimit: unfollowDayLimit,
+        unfollowDayRemaining:
+          unfollowDayLimit === null ? null : Math.max(0, unfollowDayLimit - unfollowsDoneToday),
         realHandoffEnabled: runControlFollowToUnfollowRealEnabled(),
-        realMaxActions: readMiniRunCap([
-          "INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS",
-          "ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_MAX_ACTIONS",
-        ]),
-        realHardMax: readMiniRunCap([
-          "INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX",
-          "ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_HARD_MAX",
-        ]),
+        realMaxActions: runControlFollowToUnfollowRealMaxActions(),
+        realHardMax: runControlFollowToUnfollowRealHardMax(),
         h3RealSupported: runControlUnfollowAnyH3RealSupported(),
         safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
       });
@@ -1032,13 +1155,19 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual mini-run is blocked because Follow caps are not proven to be at most 1.";
     case "mini_run_outreach_off_unproven":
       return "Manual mini-run is blocked because Outreach isolation is not proven.";
-    case "real_handoff_disabled":
+    case "unfollow_entitlement_missing":
+      return "Manual run is blocked because the Unfollow entitlement is missing.";
+    case "unfollow_disabled":
+      return "Manual run is blocked because Unfollow is disabled for this account.";
+    case "unfollow_mode_not_supported":
+      return "Manual run is blocked because the selected Unfollow mode is not supported by the runtime handoff.";
+    case "unfollow_handoff_disabled":
       return "Manual run is blocked because Unfollow real handoff is disabled.";
-    case "unfollow_any_not_supported":
-      return "Manual run is blocked because Unfollow-any is not supported by the H3 real handoff path.";
     case "unfollow_cap_unproven":
       return "Manual run is blocked because the effective Unfollow cap is not proven to allow at least 1 action.";
-    case "no_safe_unfollow_strategy":
+    case "unfollow_day_quota_exhausted":
+      return "Manual run is blocked because the Unfollow day quota is exhausted.";
+    case "unfollow_no_safe_candidate_strategy":
       return "Manual run is blocked because no safe Unfollow-any candidate strategy is proven.";
     case "already_running":
       return "A run is already active for this account.";
