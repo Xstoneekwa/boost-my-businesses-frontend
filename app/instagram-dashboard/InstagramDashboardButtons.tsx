@@ -6,6 +6,15 @@ import { useRouter } from "next/navigation";
 import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import type { ScheduleProjection, ScheduleSlotProjection } from "@/lib/instagram-dashboard/schedule";
+import {
+  buildTargetsOverview,
+  isArchivedOrDeletedTarget,
+  isValidEligibleTarget,
+  targetFbrLabel,
+  type TargetAccountItem,
+  type TargetSafeRow,
+  type TargetsOverview,
+} from "./targets-data";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
 
 type InstagramDashboardButtonsProps = {
@@ -401,13 +410,6 @@ type PlannedFilterCard = {
   description: string;
 };
 
-type SourcePolicyCard = {
-  title: string;
-  badge: "Read-only" | "Planned" | "Separate";
-  summary: string;
-  items: string[];
-};
-
 const plannedFilterCards: PlannedFilterCard[] = [
   {
     title: "Profile quality",
@@ -428,65 +430,6 @@ const plannedFilterCards: PlannedFilterCard[] = [
   {
     title: "Target quality",
     description: "Target verification thresholds and source health rules.",
-  },
-];
-
-const sourcePolicyCards: SourcePolicyCard[] = [
-  {
-    title: "Current Follow source",
-    badge: "Read-only",
-    summary: "Current Follow runtime uses one source per run. Multi-source rotation is planned.",
-    items: [
-      "Current mode: Single source",
-      "Source priority: Runtime configured source -> fallback first eligible target",
-      "Multi-source rotation: Planned",
-      "Switch on source exhaustion: Planned",
-    ],
-  },
-  {
-    title: "Target accounts / Sources",
-    badge: "Separate",
-    summary: "Target accounts are managed in Targets.",
-    items: [
-      "Target accounts: Manage in Targets",
-      "Active targets count: Available in Targets",
-      "Target quality: Planned",
-      "Source health: Planned",
-    ],
-  },
-  {
-    title: "Scroll / exhaustion rules",
-    badge: "Read-only",
-    summary: "Scroll rules stop the current source today; switching to next source is planned.",
-    items: [
-      "Scroll rules exist in the worker",
-      "Current behavior: Stop session when no candidates",
-      "Switch to next source: Planned",
-    ],
-  },
-  {
-    title: "Outreach sources",
-    badge: "Separate",
-    summary: "Outreach sources are handled separately.",
-    items: [
-      "Dashboard list: Separate Outreach source",
-      "N8N source: Separate Outreach source",
-      "Manual and job sources: Managed in DM/Outreach later",
-    ],
-  },
-  {
-    title: "Future source policy",
-    badge: "Planned",
-    summary: "Future policy will choose, rotate, and score Follow sources.",
-    items: [
-      "Single source",
-      "Rotate sources",
-      "Max targets per run",
-      "Switch after no candidates",
-      "Mark source exhausted",
-      "Attribution by target",
-      "FBR by target",
-    ],
   },
 ];
 
@@ -996,6 +939,12 @@ function templateSafeSettings(settings: InstagramSettings) {
     "screen_sleep",
     "screen_record",
     "debug_mode",
+    "truncate_sources_min",
+    "truncate_sources_max",
+    "change_source_if_crash",
+    "skipped_posts_limit",
+    "fling_when_skipped",
+    "delete_interacted_users",
     "email_display",
     "password_status",
     "device_assignment",
@@ -1116,6 +1065,7 @@ export default function InstagramDashboardButtons({
   const [followFiltersBaseline, setFollowFiltersBaseline] = useState<FollowFiltersProjection | null>(null);
   const [schedule, setSchedule] = useState<ScheduleProjection | null>(null);
   const [scheduleBaseline, setScheduleBaseline] = useState<ScheduleProjection | null>(null);
+  const [targetsOverview, setTargetsOverview] = useState<TargetsOverview | null>(null);
   const [selectedScheduleSlotKey, setSelectedScheduleSlotKey] = useState("");
   const [templates, setTemplates] = useState<AccountTemplate[]>([]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("General");
@@ -1242,7 +1192,7 @@ export default function InstagramDashboardButtons({
 
     try {
       if (nextPanel === "settings" || nextPanel === "filters") {
-        const [settingsPayload, followFiltersPayload, schedulePayload, templatePayload] = await Promise.all([
+        const [settingsPayload, followFiltersPayload, schedulePayload, templatePayload, targetsPayload] = await Promise.all([
           readApiResponse<InstagramSettings>(
             await fetch(`/api/instagram-dashboard/settings?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
             "Could not load account settings."
@@ -1259,6 +1209,7 @@ export default function InstagramDashboardButtons({
             await fetch("/api/instagram-dashboard/templates", { headers: { Accept: "application/json" } }),
             "Could not load account templates."
           ),
+          loadTargetsOverview(),
         ]);
         setSettings(settingsPayload);
         setSettingsBaseline(settingsPayload);
@@ -1266,6 +1217,7 @@ export default function InstagramDashboardButtons({
         setFollowFiltersBaseline(followFiltersPayload);
         setSchedule(schedulePayload);
         setScheduleBaseline(schedulePayload);
+        setTargetsOverview(targetsPayload);
         setSelectedScheduleSlotKey(scheduleSlotKeyFromAssignment(schedulePayload.current_assignment));
         setTemplates(templatePayload);
       }
@@ -1303,6 +1255,7 @@ export default function InstagramDashboardButtons({
     setFilters(null);
     setFollowFilters(null);
     setFollowFiltersBaseline(null);
+    setTargetsOverview(null);
     setTemplates([]);
     setTemplateDialog(null);
     setSettingsTab("General");
@@ -1326,6 +1279,20 @@ export default function InstagramDashboardButtons({
       setSettingsBaseline((current) => (current ? withDmDomainProjection(current, projection) : current));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load DM domain settings.");
+    }
+  }
+
+  async function loadTargetsOverview() {
+    try {
+      const rows = await readApiResponse<TargetSafeRow[]>(
+        await fetch(`/api/instagram-dashboard/targets?account_id=${encodeURIComponent(accountId)}`, {
+          headers: { Accept: "application/json" },
+        }),
+        "Could not load target accounts.",
+      );
+      return buildTargetsOverview(rows ?? []);
+    } catch {
+      return null;
     }
   }
 
@@ -1852,6 +1819,8 @@ export default function InstagramDashboardButtons({
                   isSaving,
                   error,
                   success,
+                  targetsOverview,
+                  openTargetsPanel: () => setTargetsOpen(true),
                   packageLabel,
                   entitlementSummary,
                 })
@@ -2951,6 +2920,8 @@ function renderSettingsTabs({
   isSaving,
   error,
   success,
+  targetsOverview,
+  openTargetsPanel,
   packageLabel,
   entitlementSummary,
 }: {
@@ -2980,6 +2951,8 @@ function renderSettingsTabs({
   isSaving: boolean;
   error: string;
   success: string;
+  targetsOverview: TargetsOverview | null;
+  openTargetsPanel: () => void;
   packageLabel?: string | null;
   entitlementSummary?: string | null;
 }) {
@@ -3041,7 +3014,7 @@ function renderSettingsTabs({
       ) : null}
       {isFiltersTab ? <p className="ig-settings-message">{FILTERS_PRODUCTION_BANNER}</p> : null}
       {isSourcesTab ? (
-        <p className="ig-settings-message">Sources is a read-only preview for future Follow source and target policy. Target accounts are managed in Targets.</p>
+        <p className="ig-settings-message">Sources is a read-only runtime summary. Target accounts are managed in Targets.</p>
       ) : null}
 
       {isGeneralTab ? (
@@ -3084,7 +3057,7 @@ function renderSettingsTabs({
           <FiltersTargetPanel followFilters={followFilters} updateFollowFilter={updateFollowFilter} />
         </>
       ) : isSourcesTab ? (
-        <SourcesPolicyPanel />
+        <SourcesPolicyPanel targetsOverview={targetsOverview} openTargetsPanel={openTargetsPanel} />
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
@@ -3390,35 +3363,186 @@ function ScheduleActivePanel({
   );
 }
 
-function SourcesPolicyPanel() {
+function activeTargetCount(items: TargetAccountItem[]) {
+  return items.filter((item) => {
+    if (isArchivedOrDeletedTarget(item)) return false;
+    const status = item.status.toLowerCase();
+    return status === "valid" || status === "active";
+  }).length;
+}
+
+function pendingTargetCount(items: TargetAccountItem[]) {
+  return items.filter((item) => {
+    if (isArchivedOrDeletedTarget(item)) return false;
+    const status = item.status.toLowerCase();
+    const verification = item.verificationStatus.toLowerCase();
+    return (
+      status === "pending" ||
+      status === "queued" ||
+      status === "pending_verification" ||
+      status === "review" ||
+      verification === "pending" ||
+      item.qualityStatus === "unknown" ||
+      item.qualityStatus.startsWith("review_")
+    );
+  }).length;
+}
+
+function sourceMetricCount(value: number, singular: string, plural: string) {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function SourcesPolicyPanel({
+  targetsOverview,
+  openTargetsPanel,
+}: {
+  targetsOverview: TargetsOverview | null;
+  openTargetsPanel: () => void;
+}) {
+  const items = targetsOverview?.items ?? [];
+  const eligibleTargets = items.filter(isValidEligibleTarget);
+  const nextTarget = eligibleTargets[0] ?? null;
+  const fbrTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.fbrPercent !== null);
+  const followsSentTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.followsSent !== null);
+  const avgFbr = fbrTargets.length
+    ? fbrTargets.reduce((total, item) => total + (item.fbrPercent ?? 0), 0) / fbrTargets.length
+    : null;
+  const targetCountItems = [
+    ["Total target accounts", targetsOverview ? String(targetsOverview.summary.total) : "Managed in Targets"],
+    ["Active targets", targetsOverview ? String(activeTargetCount(items)) : "Managed in Targets"],
+    ["Eligible targets", targetsOverview ? String(targetsOverview.summary.validEligible) : "Managed in Targets"],
+    ["Pending / queued", targetsOverview ? String(pendingTargetCount(items)) : "Managed in Targets"],
+    ["Archived", targetsOverview ? String(targetsOverview.summary.archivedCount) : "Managed in Targets"],
+  ];
+  const runtimeItems = [
+    ["Current Follow runtime", "Single source"],
+    ["Next target probable", nextTarget ? `@${nextTarget.targetUsername}` : targetsOverview ? "No eligible target in DB" : "Managed in Targets"],
+    ["Config fallback", "Worker env fallback is not exposed here"],
+    ["Multi-target rotation", "Not active yet"],
+    ["Switch on exhaustion", "Not active yet"],
+  ];
+  const performanceItems = [
+    ["Followback ratio by target", avgFbr === null ? "pending runtime data" : `${targetFbrLabel(avgFbr)} avg across ${sourceMetricCount(fbrTargets.length, "target", "targets")}`],
+    ["Follows sent by target", followsSentTargets.length ? `Available on ${sourceMetricCount(followsSentTargets.length, "target", "targets")}` : "pending runtime data"],
+    ["Auto-archive rule", "Planned: flag/archive if ratio <= 8% after at least 100 follows sent"],
+    ["Performance verdicts", "Not shown until runtime metrics are reliable"],
+  ];
+
   return (
     <div className="ig-filters-target-panel">
       <section className="ig-filters-section ig-filters-section-info">
         <div className="ig-filters-section-head">
           <div className="ig-filters-section-title-row">
             <h3>Follow sources / Target policy</h3>
-            <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
+            <span className="ig-filters-badge ig-filters-badge-readonly">Read-only</span>
           </div>
-          <p>No Sources settings are editable in P0. Legacy source fields are hidden until a domain policy exists.</p>
+          <p>Follow sources are managed in Targets. This panel summarizes runtime readiness only.</p>
         </div>
       </section>
 
-      <div className="ig-filters-planned-grid">
-        {sourcePolicyCards.map((card) => (
-          <section key={card.title} className="ig-filters-planned-card">
-            <div className="ig-filters-section-title-row">
-              <strong>{card.title}</strong>
-              <span className="ig-filters-badge ig-filters-badge-planned">{card.badge}</span>
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Current Follow source</h3>
+            <span className="ig-filters-badge ig-filters-badge-planned">Runtime partial</span>
+          </div>
+          <p>The worker Follow session still consumes one primary source per run. Multi-target rotation is not active yet.</p>
+        </div>
+        <div className="ig-schedule-assignment-grid">
+          {runtimeItems.map(([label, value]) => (
+            <div key={label} className="ig-schedule-assignment-item">
+              <span>{label}</span>
+              <strong>{value}</strong>
             </div>
-            <p>{card.summary}</p>
-            <ul className="ig-source-policy-list">
-              {card.items.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
+          ))}
+        </div>
+        {targetsOverview && !nextTarget ? (
+          <p className="ig-settings-message">If a worker env fallback is configured, it can still force a single source even when no eligible DB target is shown here.</p>
+        ) : null}
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Target accounts / Sources</h3>
+            <span className="ig-filters-badge ig-filters-badge-readonly">Managed in Targets</span>
+          </div>
+          <p>Counts come from real target account rows when the Targets API is available. Add, archive, restore, and verify stay in Targets.</p>
+        </div>
+        <div className="ig-schedule-assignment-grid">
+          {targetCountItems.map(([label, value]) => (
+            <div key={label} className="ig-schedule-assignment-item">
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+        <div className="ig-settings-actions">
+          <button type="button" className="ig-settings-secondary" onClick={openTargetsPanel}>
+            Open Targets
+          </button>
+        </div>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Scroll / exhaustion rules</h3>
+            <span className="ig-filters-badge ig-filters-badge-readonly">Runtime read-only</span>
+          </div>
+          <p>Current behavior stops the session/source when no candidates are found. Switching to the next source is not active.</p>
+        </div>
+        <ul className="ig-source-policy-list">
+          <li>Current behavior: stop session / stop source when no followable candidates remain.</li>
+          <li>Source exhaustion reasons are worker logs, not editable dashboard policy.</li>
+          <li>Switch to next source: not active.</li>
+        </ul>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Followback ratio / Target performance</h3>
+            <span className="ig-filters-badge ig-filters-badge-planned">Metrics pending</span>
+          </div>
+          <p>Performance data stays pending until the worker reliably writes per-target runtime metrics.</p>
+        </div>
+        <div className="ig-schedule-assignment-grid">
+          {performanceItems.map(([label, value]) => (
+            <div key={label} className="ig-schedule-assignment-item">
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Future source policy</h3>
+            <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
+          </div>
+          <p>Future worker/API patches will own source selection and rotation rules.</p>
+        </div>
+        <ul className="ig-source-policy-list">
+          <li>Rotate sources and max targets per run.</li>
+          <li>Switch after no candidates and mark source exhausted.</li>
+          <li>Attribution by target for every follow.</li>
+          <li>Followback ratio by target with threshold-based archive/flag.</li>
+        </ul>
+        <p className="ig-settings-message">Outreach sources are managed in DM/Outreach.</p>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Runtime readiness gate</h3>
+            <span className="ig-filters-badge ig-filters-badge-planned">Required before ready</span>
+          </div>
+          <p>Multi-target Follow stays not runtime-ready until a controlled test run proves selection, target attribution, exhaustion switch, per-target metrics, dashboard reflection, and no Follow regression.</p>
+        </div>
+      </section>
 
       <p className="ig-settings-message ig-filters-legacy-note">Legacy Sources controls hidden. No Sources save action is available.</p>
     </div>

@@ -262,6 +262,13 @@ const runtimeProjectionKeys = [
   "last_error",
   "last_successful_action",
   "manual_stop_requested",
+  "source_accounts",
+  "truncate_sources_min",
+  "truncate_sources_max",
+  "change_source_if_crash",
+  "skipped_posts_limit",
+  "fling_when_skipped",
+  "delete_interacted_users",
 ] as const;
 
 function persistableSettings(settings: SettingsPayload): SettingsPayload {
