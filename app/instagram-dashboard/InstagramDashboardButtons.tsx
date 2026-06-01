@@ -41,6 +41,20 @@ type FollowFiltersProjection = {
   save_ready: boolean;
   changed_fields?: string[];
 };
+type FollowSourcesProjection = {
+  account_id: string;
+  max_follows_per_target_per_run: number;
+  max_targets_per_run: number;
+  source: "account_setting" | "env_fallback" | "default";
+  bounds: {
+    max_follows_per_target_per_run: { min: number; max: number };
+    max_targets_per_run: { min: number; max: number };
+  };
+  save_ready: boolean;
+  runtime_status: "active" | "schema_pending";
+  note: string;
+  changed_fields?: string[];
+};
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
 type AccountTemplate = Record<string, unknown> & {
   id: string;
@@ -749,6 +763,14 @@ function sameFollowFiltersPayload(left: FollowFiltersProjection | null, right: F
   );
 }
 
+function sameFollowSourcesPayload(left: FollowSourcesProjection | null, right: FollowSourcesProjection | null) {
+  if (!left || !right) return true;
+  return (
+    left.max_follows_per_target_per_run === right.max_follows_per_target_per_run &&
+    left.max_targets_per_run === right.max_targets_per_run
+  );
+}
+
 function followFiltersValidationError(filters: FollowFiltersProjection | null) {
   if (!filters) return "";
   for (const [label, value] of [
@@ -766,6 +788,21 @@ function followFiltersValidationError(filters: FollowFiltersProjection | null) {
     filters.min_followers > filters.max_followers
   ) {
     return "Min followers cannot be greater than Max followers.";
+  }
+  return "";
+}
+
+function followSourcesValidationError(sources: FollowSourcesProjection | null) {
+  if (!sources) return "";
+  for (const [label, key] of [
+    ["Max follows per target per run", "max_follows_per_target_per_run"],
+    ["Max targets per run", "max_targets_per_run"],
+  ] as const) {
+    const value = sources[key];
+    const bounds = sources.bounds[key];
+    if (!Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+      return `${label} must be a whole number from ${bounds.min} to ${bounds.max}.`;
+    }
   }
   return "";
 }
@@ -1063,6 +1100,8 @@ export default function InstagramDashboardButtons({
   const [filters, setFilters] = useState<InstagramFilters | null>(null);
   const [followFilters, setFollowFilters] = useState<FollowFiltersProjection | null>(null);
   const [followFiltersBaseline, setFollowFiltersBaseline] = useState<FollowFiltersProjection | null>(null);
+  const [followSources, setFollowSources] = useState<FollowSourcesProjection | null>(null);
+  const [followSourcesBaseline, setFollowSourcesBaseline] = useState<FollowSourcesProjection | null>(null);
   const [schedule, setSchedule] = useState<ScheduleProjection | null>(null);
   const [scheduleBaseline, setScheduleBaseline] = useState<ScheduleProjection | null>(null);
   const [targetsOverview, setTargetsOverview] = useState<TargetsOverview | null>(null);
@@ -1192,7 +1231,7 @@ export default function InstagramDashboardButtons({
 
     try {
       if (nextPanel === "settings" || nextPanel === "filters") {
-        const [settingsPayload, followFiltersPayload, schedulePayload, templatePayload, targetsPayload] = await Promise.all([
+        const [settingsPayload, followFiltersPayload, followSourcesPayload, schedulePayload, templatePayload, targetsPayload] = await Promise.all([
           readApiResponse<InstagramSettings>(
             await fetch(`/api/instagram-dashboard/settings?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
             "Could not load account settings."
@@ -1200,6 +1239,10 @@ export default function InstagramDashboardButtons({
           readApiResponse<FollowFiltersProjection>(
             await fetch(`/api/instagram-dashboard/settings/follow-filters?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
             "Could not load Follow filter settings."
+          ),
+          readApiResponse<FollowSourcesProjection>(
+            await fetch(`/api/instagram-dashboard/settings/follow-sources?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+            "Could not load Follow source settings."
           ),
           readApiResponse<ScheduleProjection>(
             await fetch(`/api/instagram-dashboard/settings/schedule?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
@@ -1215,6 +1258,8 @@ export default function InstagramDashboardButtons({
         setSettingsBaseline(settingsPayload);
         setFollowFilters(followFiltersPayload);
         setFollowFiltersBaseline(followFiltersPayload);
+        setFollowSources(followSourcesPayload);
+        setFollowSourcesBaseline(followSourcesPayload);
         setSchedule(schedulePayload);
         setScheduleBaseline(schedulePayload);
         setTargetsOverview(targetsPayload);
@@ -1255,6 +1300,8 @@ export default function InstagramDashboardButtons({
     setFilters(null);
     setFollowFilters(null);
     setFollowFiltersBaseline(null);
+    setFollowSources(null);
+    setFollowSourcesBaseline(null);
     setTargetsOverview(null);
     setTemplates([]);
     setTemplateDialog(null);
@@ -1311,6 +1358,21 @@ export default function InstagramDashboardButtons({
     }
   }
 
+  async function loadFollowSourcesDomain() {
+    try {
+      const projection = await readApiResponse<FollowSourcesProjection>(
+        await fetch(`/api/instagram-dashboard/settings/follow-sources?account_id=${encodeURIComponent(accountId)}`, {
+          headers: { Accept: "application/json" },
+        }),
+        "Could not load Follow source settings.",
+      );
+      setFollowSources(projection);
+      setFollowSourcesBaseline(projection);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load Follow source settings.");
+    }
+  }
+
   async function selectSettingsTab(tab: SettingsTab) {
     setSettingsTab(tab);
     if (tab === "DM") {
@@ -1318,6 +1380,9 @@ export default function InstagramDashboardButtons({
     }
     if (tab === "Filters") {
       await loadFollowFiltersDomain();
+    }
+    if (tab === "Sources") {
+      await loadFollowSourcesDomain();
     }
   }
 
@@ -1536,6 +1601,13 @@ export default function InstagramDashboardButtons({
     setFollowFilters((current) => (current ? { ...current, [key]: value } : current));
   }
 
+  function updateFollowSourceSetting(
+    key: "max_follows_per_target_per_run" | "max_targets_per_run",
+    value: number,
+  ) {
+    setFollowSources((current) => (current ? { ...current, [key]: value } : current));
+  }
+
   function saveFollowFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!followFilters || sameFollowFiltersPayload(followFilters, followFiltersBaseline)) return;
@@ -1578,6 +1650,51 @@ export default function InstagramDashboardButtons({
       router.refresh();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save Follow filter settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function saveFollowSources(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!followSources || sameFollowSourcesPayload(followSources, followSourcesBaseline)) return;
+    if (followSourcesValidationError(followSources)) return;
+
+    requestConfirmation({
+      title: "Save source rotation settings?",
+      description: "This updates per-run Follow source rotation settings for this account. It will not start a run and does not raise global Follow caps.",
+      confirmTone: "primary",
+      confirmLabel: "Save Sources",
+      onConfirm: performSaveFollowSources,
+    });
+  }
+
+  async function performSaveFollowSources() {
+    if (!followSources) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const projection = await readApiResponse<FollowSourcesProjection>(
+        await fetch("/api/instagram-dashboard/settings/follow-sources", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            account_id: followSources.account_id,
+            max_follows_per_target_per_run: followSources.max_follows_per_target_per_run,
+            max_targets_per_run: followSources.max_targets_per_run,
+          }),
+        }),
+        "Could not save Follow source settings.",
+      );
+      setFollowSources(projection);
+      setFollowSourcesBaseline(projection);
+      setSuccess("Follow source rotation settings saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save Follow source settings.");
     } finally {
       setIsSaving(false);
     }
@@ -1794,12 +1911,14 @@ export default function InstagramDashboardButtons({
             </div>
 
             {isLoading ? <div className="ig-settings-loading">Loading account data...</div> : null}
-            {!isLoading && (panel === "settings" || panel === "filters") && settings && followFilters && schedule
+            {!isLoading && (panel === "settings" || panel === "filters") && settings && followFilters && followSources && schedule
               ? renderSettingsTabs({
                   settings,
                   settingsBaseline,
                   followFilters,
                   followFiltersBaseline,
+                  followSources,
+                  followSourcesBaseline,
                   schedule,
                   scheduleBaseline,
                   selectedScheduleSlotKey,
@@ -1808,10 +1927,12 @@ export default function InstagramDashboardButtons({
                   selectSettingsTab,
                   updateSetting,
                   updateFollowFilter,
+                  updateFollowSourceSetting,
                   saveSettings,
                   saveDmSettings,
                   saveUnfollowSettings,
                   saveFollowFilters,
+                  saveFollowSources,
                   saveSchedule,
                   openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
                   openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
@@ -1844,7 +1965,7 @@ export default function InstagramDashboardButtons({
               exportLogs,
               copyLogs,
             }) : null}
-            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !followFilters || !schedule) ? (
+            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !followFilters || !followSources || !schedule) ? (
               <div className="ig-settings-loading">
                 <p className="ig-settings-message ig-settings-error">{error}</p>
                 <button type="button" className="ig-settings-secondary" onClick={closePanel}>Cancel</button>
@@ -2901,6 +3022,8 @@ function renderSettingsTabs({
   settingsBaseline,
   followFilters,
   followFiltersBaseline,
+  followSources,
+  followSourcesBaseline,
   schedule,
   scheduleBaseline,
   selectedScheduleSlotKey,
@@ -2909,10 +3032,12 @@ function renderSettingsTabs({
   selectSettingsTab,
   updateSetting,
   updateFollowFilter,
+  updateFollowSourceSetting,
   saveSettings,
   saveDmSettings,
   saveUnfollowSettings,
   saveFollowFilters,
+  saveFollowSources,
   saveSchedule,
   openSaveTemplate,
   openApplyTemplate,
@@ -2929,6 +3054,8 @@ function renderSettingsTabs({
   settingsBaseline: InstagramSettings | null;
   followFilters: FollowFiltersProjection;
   followFiltersBaseline: FollowFiltersProjection | null;
+  followSources: FollowSourcesProjection;
+  followSourcesBaseline: FollowSourcesProjection | null;
   schedule: ScheduleProjection;
   scheduleBaseline: ScheduleProjection | null;
   selectedScheduleSlotKey: string;
@@ -2940,10 +3067,15 @@ function renderSettingsTabs({
     key: "skip_private_profiles" | "min_followers" | "max_followers" | "min_posts",
     value: boolean | number | null,
   ) => void;
+  updateFollowSourceSetting: (
+    key: "max_follows_per_target_per_run" | "max_targets_per_run",
+    value: number,
+  ) => void;
   saveSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveUnfollowSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveFollowFilters: (event: FormEvent<HTMLFormElement>) => void;
+  saveFollowSources: (event: FormEvent<HTMLFormElement>) => void;
   saveSchedule: (event: FormEvent<HTMLFormElement>) => void;
   openSaveTemplate: (source: "settings" | "filters") => void;
   openApplyTemplate: (source: "settings" | "filters") => void;
@@ -2973,6 +3105,8 @@ function renderSettingsTabs({
   const unfollowValidationError = isFollowbackTab ? unfollowClientValidationError(settings) : "";
   const followFiltersDirty = isFiltersTab && !sameFollowFiltersPayload(followFilters, followFiltersBaseline);
   const followFiltersError = isFiltersTab ? followFiltersValidationError(followFilters) : "";
+  const followSourcesDirty = isSourcesTab && !sameFollowSourcesPayload(followSources, followSourcesBaseline);
+  const followSourcesError = isSourcesTab ? followSourcesValidationError(followSources) : "";
   const scheduleDirtyState = isScheduleTab && scheduleBaseline
     ? scheduleDirty(schedule, scheduleBaseline, selectedScheduleSlotKey)
     : false;
@@ -2988,9 +3122,11 @@ function renderSettingsTabs({
             ? saveUnfollowSettings
             : isFiltersTab
               ? saveFollowFilters
-              : isScheduleTab
-                ? saveSchedule
-                : saveSettings
+              : isSourcesTab
+                ? saveFollowSources
+                : isScheduleTab
+                  ? saveSchedule
+                  : saveSettings
       }
     >
       <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
@@ -3014,7 +3150,7 @@ function renderSettingsTabs({
       ) : null}
       {isFiltersTab ? <p className="ig-settings-message">{FILTERS_PRODUCTION_BANNER}</p> : null}
       {isSourcesTab ? (
-        <p className="ig-settings-message">Sources is a read-only runtime summary. Target accounts are managed in Targets.</p>
+        <p className="ig-settings-message">Target accounts are managed in Targets. Rotation settings below are per-run controls; global Follow caps still apply.</p>
       ) : null}
 
       {isGeneralTab ? (
@@ -3057,7 +3193,15 @@ function renderSettingsTabs({
           <FiltersTargetPanel followFilters={followFilters} updateFollowFilter={updateFollowFilter} />
         </>
       ) : isSourcesTab ? (
-        <SourcesPolicyPanel targetsOverview={targetsOverview} openTargetsPanel={openTargetsPanel} />
+        <>
+          {followSourcesError ? <p className="ig-settings-message ig-settings-error">{followSourcesError}</p> : null}
+          <SourcesPolicyPanel
+            targetsOverview={targetsOverview}
+            followSources={followSources}
+            updateFollowSourceSetting={updateFollowSourceSetting}
+            openTargetsPanel={openTargetsPanel}
+          />
+        </>
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
@@ -3104,6 +3248,15 @@ function renderSettingsTabs({
           validationError={followFiltersError}
           isSaving={isSaving}
           label="Save Filters"
+        />
+      ) : isSourcesTab ? (
+        <DomainTargetActions
+          closePanel={closePanel}
+          isDirty={followSourcesDirty}
+          validationError={followSourcesError}
+          isSaving={isSaving}
+          label="Save Sources"
+          canSubmit={followSources.save_ready}
         />
       ) : isScheduleTab ? (
         <DomainTargetActions
@@ -3394,9 +3547,16 @@ function sourceMetricCount(value: number, singular: string, plural: string) {
 
 function SourcesPolicyPanel({
   targetsOverview,
+  followSources,
+  updateFollowSourceSetting,
   openTargetsPanel,
 }: {
   targetsOverview: TargetsOverview | null;
+  followSources: FollowSourcesProjection;
+  updateFollowSourceSetting: (
+    key: "max_follows_per_target_per_run" | "max_targets_per_run",
+    value: number,
+  ) => void;
   openTargetsPanel: () => void;
 }) {
   const items = targetsOverview?.items ?? [];
@@ -3415,11 +3575,12 @@ function SourcesPolicyPanel({
     ["Archived", targetsOverview ? String(targetsOverview.summary.archivedCount) : "Managed in Targets"],
   ];
   const runtimeItems = [
-    ["Current Follow runtime", "Single source"],
+    ["Current Follow runtime", "Multi-target rotation"],
     ["Next target probable", nextTarget ? `@${nextTarget.targetUsername}` : targetsOverview ? "No eligible target in DB" : "Managed in Targets"],
-    ["Config fallback", "Worker env fallback is not exposed here"],
-    ["Multi-target rotation", "Not active yet"],
-    ["Switch on exhaustion", "Not active yet"],
+    ["Rotation settings source", followSources.source.replaceAll("_", " ")],
+    ["Max follows / target / run", String(followSources.max_follows_per_target_per_run)],
+    ["Max targets / run", String(followSources.max_targets_per_run)],
+    ["Switch on exhaustion or budget", "Active in worker P1b"],
   ];
   const performanceItems = [
     ["Followback ratio by target", avgFbr === null ? "pending runtime data" : `${targetFbrLabel(avgFbr)} avg across ${sourceMetricCount(fbrTargets.length, "target", "targets")}`],
@@ -3434,9 +3595,9 @@ function SourcesPolicyPanel({
         <div className="ig-filters-section-head">
           <div className="ig-filters-section-title-row">
             <h3>Follow sources / Target policy</h3>
-            <span className="ig-filters-badge ig-filters-badge-readonly">Read-only</span>
+            <span className="ig-filters-badge ig-filters-badge-active">Runtime active</span>
           </div>
-          <p>Follow sources are managed in Targets. This panel summarizes runtime readiness only.</p>
+          <p>Follow sources are managed in Targets. This panel edits only per-run rotation limits for this account.</p>
         </div>
       </section>
 
@@ -3444,9 +3605,9 @@ function SourcesPolicyPanel({
         <div className="ig-filters-section-head">
           <div className="ig-filters-section-title-row">
             <h3>Current Follow source</h3>
-            <span className="ig-filters-badge ig-filters-badge-planned">Runtime partial</span>
+            <span className="ig-filters-badge ig-filters-badge-active">P1b active</span>
           </div>
-          <p>The worker Follow session still consumes one primary source per run. Multi-target rotation is not active yet.</p>
+          <p>The worker can rotate across eligible targets when a target is exhausted or reaches its per-run budget.</p>
         </div>
         <div className="ig-schedule-assignment-grid">
           {runtimeItems.map(([label, value]) => (
@@ -3456,9 +3617,49 @@ function SourcesPolicyPanel({
             </div>
           ))}
         </div>
-        {targetsOverview && !nextTarget ? (
-          <p className="ig-settings-message">If a worker env fallback is configured, it can still force a single source even when no eligible DB target is shown here.</p>
-        ) : null}
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Target rotation settings</h3>
+            <span className={`ig-filters-badge ${followSources.save_ready ? "ig-filters-badge-active" : "ig-filters-badge-planned"}`}>
+              {followSources.save_ready ? "Save ready" : "Schema pending"}
+            </span>
+          </div>
+          <p>These settings are per-run, not daily limits. Global Follow caps still apply. Production values should be tuned after controlled multi-target tests.</p>
+        </div>
+        <div className="ig-settings-grid">
+          <ConfigField
+            field={{
+              key: "max_follows_per_target_per_run",
+              label: "Max follows per target per run",
+              type: "number",
+              min: followSources.bounds.max_follows_per_target_per_run.min,
+              runtimeStatus: "active",
+              helper: `Maximum follows to send from one target during a single run before trying the next target. This does not increase the global follow cap. Allowed: ${followSources.bounds.max_follows_per_target_per_run.min}-${followSources.bounds.max_follows_per_target_per_run.max}.`,
+            }}
+            value={followSources.max_follows_per_target_per_run}
+            onChange={(value) => updateFollowSourceSetting("max_follows_per_target_per_run", Number(value))}
+          />
+          <ConfigField
+            field={{
+              key: "max_targets_per_run",
+              label: "Max targets per run",
+              type: "number",
+              min: followSources.bounds.max_targets_per_run.min,
+              runtimeStatus: "active",
+              helper: `Maximum number of targets the worker can try during one run. Allowed: ${followSources.bounds.max_targets_per_run.min}-${followSources.bounds.max_targets_per_run.max}.`,
+            }}
+            value={followSources.max_targets_per_run}
+            onChange={(value) => updateFollowSourceSetting("max_targets_per_run", Number(value))}
+          />
+        </div>
+        <ul className="ig-source-policy-list">
+          <li>Defaults remain conservative: 2 follows per target and 3 targets per run.</li>
+          <li>Values above 10 follows per target are opt-in only after controlled P2 tests.</li>
+          <li>No environment file is edited from the dashboard.</li>
+        </ul>
       </section>
 
       <section className="ig-filters-section">
@@ -3490,12 +3691,13 @@ function SourcesPolicyPanel({
             <h3>Scroll / exhaustion rules</h3>
             <span className="ig-filters-badge ig-filters-badge-readonly">Runtime read-only</span>
           </div>
-          <p>Current behavior stops the session/source when no candidates are found. Switching to the next source is not active.</p>
+          <p>Switch conditions are owned by the worker and are not editable in this dashboard section.</p>
         </div>
         <ul className="ig-source-policy-list">
-          <li>Current behavior: stop session / stop source when no followable candidates remain.</li>
+          <li>Switch when a target is exhausted or bounded exploration finds no candidates.</li>
+          <li>Switch when the target reaches its per-run budget and another target is available.</li>
           <li>Source exhaustion reasons are worker logs, not editable dashboard policy.</li>
-          <li>Switch to next source: not active.</li>
+          <li>Runtime blockers such as login, checkpoint, rate limit, wrong surface or crash do not switch targets.</li>
         </ul>
       </section>
 
@@ -3523,11 +3725,11 @@ function SourcesPolicyPanel({
             <h3>Future source policy</h3>
             <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
           </div>
-          <p>Future worker/API patches will own source selection and rotation rules.</p>
+          <p>Later patches will add durable per-target metrics, FBR, cooldowns, and source health automation.</p>
         </div>
         <ul className="ig-source-policy-list">
-          <li>Rotate sources and max targets per run.</li>
-          <li>Switch after no candidates and mark source exhausted.</li>
+          <li>Metrics per target and followback ratio by target.</li>
+          <li>Cooldown or archive decisions after enough evidence.</li>
           <li>Attribution by target for every follow.</li>
           <li>Followback ratio by target with threshold-based archive/flag.</li>
         </ul>
@@ -3540,11 +3742,11 @@ function SourcesPolicyPanel({
             <h3>Runtime readiness gate</h3>
             <span className="ig-filters-badge ig-filters-badge-planned">Required before ready</span>
           </div>
-          <p>Multi-target Follow stays not runtime-ready until a controlled test run proves selection, target attribution, exhaustion switch, per-target metrics, dashboard reflection, and no Follow regression.</p>
+          <p>Do not mark Follow runtime-ready until a controlled multi-target run proves selection, target attribution, exhaustion/budget switch, per-target metrics, dashboard reflection, and no mono-target regression.</p>
         </div>
       </section>
 
-      <p className="ig-settings-message ig-filters-legacy-note">Legacy Sources controls hidden. No Sources save action is available.</p>
+      <p className="ig-settings-message ig-filters-legacy-note">Legacy Sources controls remain hidden. Only target rotation settings can be saved here.</p>
     </div>
   );
 }
