@@ -443,6 +443,7 @@ function AccountAccordion({ entry }: { entry: GrowthAccountOverview }) {
             <small>{entry.account.clientName ?? "Client pending"}</small>
           </div>
           <SummaryMetric label="Package" value={entry.account.packageLabel ?? "unknown"} />
+          <SummaryMetric label="Runtime profile" value={entry.account.runtimeProfilesLabel ?? "unknown"} />
           <SummaryMetric label="Subscription" value={entry.account.subscriptionStatus ?? "unknown"} />
           <StatusPill label={entry.runtimeProofStatus === "verified" ? "Runtime verified" : "Needs review"} tone={entry.runtimeProofStatus === "verified" ? "good" : "warning"} />
           <StatusPill label={visibilityLabel(entry.clientVisibilityStatus)} tone="warning" />
@@ -456,6 +457,9 @@ function AccountAccordion({ entry }: { entry: GrowthAccountOverview }) {
       <div className="ig-growth-accordion-body">
         <div className="ig-growth-package-grid">
           <SummaryCard label="Package" value={entry.packageSummary.packageLabel} />
+          <SummaryCard label="Add-ons" value={entry.packageSummary.commercialAddonsLabel} />
+          <SummaryCard label="Outreach source" value={entry.packageSummary.outreachSourceLabel} />
+          <SummaryCard label="Runtime profile" value={entry.packageSummary.runtimeProfilesLabel} />
           <SummaryCard label="Entitlement" value={entry.packageSummary.entitlementSummary} />
           <SummaryCard label="Runtime status" value={entry.packageSummary.runtimeProofStatus} />
           <SummaryCard label="Readiness" value={entry.packageSummary.pricingReadyStatus} />

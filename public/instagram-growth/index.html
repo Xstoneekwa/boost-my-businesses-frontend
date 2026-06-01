@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Boost My Businesses – Croissance Instagram automatisée</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body class="dir-neon">
+
+<!-- ===================== NAV ===================== -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top"><span class="logo-mark">B</span><span>Boost<span class="brand-my">My</span>Businesses</span></a>
+    <nav class="nav-links">
+      <a href="#features" data-en="Why us">Pourquoi nous</a>
+      <a href="#how" data-en="How it works">Comment ça marche</a>
+      <a href="#cases" data-en="Testimonials">Témoignages</a>
+      <a href="#pricing" data-en="Pricing">Tarifs</a>
+      <a href="#faq" data-en="FAQ">FAQ</a>
+    </nav>
+    <div class="nav-right">
+      <div class="lang-toggle" id="lang">
+        <button data-lang="fr" class="on">FR</button>
+        <button data-lang="en">EN</button>
+      </div>
+      <a class="nav-cta-soft" href="#how" data-en="Book a call">Réserver un appel</a>
+      <a class="btn btn-primary btn-sm" href="#pricing" data-en="Get started">Démarrer</a>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== HERO ===================== -->
+<section class="hero" id="top">
+  <div class="wrap hero-inner hero-solo">
+    <div>
+      <div class="hero-trustline">
+        <span class="rating"><span class="stars">★★★★★</span><b>4,8/5</b><span data-en="· +500 clients">· +500 clients</span></span>
+      </div>
+      <h1>
+        <span data-en="Your next ">Vos prochains </span><span class="rotator" id="rotator" data-words-fr="clients,abonnés,partenaires,prospects" data-words-en="clients,followers,partners,leads">clients</span>
+        <span data-en=" are already on Instagram. We bring them to you."> sont déjà sur Instagram. On vous les amène.</span>
+      </h1>
+      <p class="lead" data-en="Our AI agents identify and bring them to you, real, geo-targeted profiles genuinely interested in your profile, contacted from real phones for 100% natural, undetectable activity. You focus on your business, we handle the growth.">Nos agents IA les identifient et vous les amènent — des profils réels, géolocalisés et vraiment intéressés par votre profil, contactés depuis de vrais téléphones pour une activité 100% naturelle et indétectable. Vous gérez votre business, on gère la croissance.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" href="#pricing" data-en="Start your 7-day trial">Démarrer mon essai 7 jours</a>
+        <a class="btn btn-soft btn-lg" href="#how" data-en="Book a call">Réserver un appel</a>
+      </div>
+      <div class="hero-micro">
+        <span><span class="ck">✓</span><span data-en="No commitment">Sans engagement</span></span>
+        <span><span class="ck">✓</span><span data-en="Active in 24h">Actif en 24h</span></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== TRUST MARQUEE ===================== -->
+<div class="marquee-wrap">
+  <div class="marquee">
+    <div class="track" id="logoTrack">
+      <img class="wm-logo" src="/instagram-growth/assets/logo-proriderdesign.png" alt="Pro Rider Design" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-lecurlshop.png" alt="Le Curl Shop" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-osoleil.png" alt="À Soleil Boutique" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-gg.png" alt="GG" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-showgirl.png" alt="Showgirl Atelier" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-plugdrive.png" alt="Plug and Drive" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-proriderdesign.png" alt="Pro Rider Design" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-lecurlshop.png" alt="Le Curl Shop" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-osoleil.png" alt="À Soleil Boutique" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-gg.png" alt="GG" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-showgirl.png" alt="Showgirl Atelier" />
+      <img class="wm-logo" src="/instagram-growth/assets/logo-plugdrive.png" alt="Plug and Drive" />
+    </div>
+  </div>
+</div>
+
+<!-- ===================== DEMO VIDEO ===================== -->
+<section class="sec" id="demo">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p data-en="Two minutes to understand how we turn Instagram into a real growth channel.">Deux minutes pour comprendre comment on transforme Instagram en vrai canal de croissance.</p>
+    </div>
+    <div class="video-wrap reveal">
+      <div class="video-frame" id="videoFrame">
+        <video id="demoVideo" class="demo-video" playsinline preload="metadata" style="display:none">
+          <!-- Déposez votre vidéo dans /public/instagram-growth/assets/demo.mp4 et ajoutez : <source src="/instagram-growth/assets/demo.mp4" type="video/mp4" /> -->
+        </video>
+        <div class="video-ph" id="videoPh">
+          <button class="video-play" id="videoPlay" aria-label="Lecture">
+            <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          </button>
+          <div class="video-ph-cap" data-en="[ drop your presentation video here — assets/demo.mp4 ]">[ déposez votre vidéo de présentation ici — assets/demo.mp4 ]</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FEATURES ===================== -->
+<section class="sec tint" id="features">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker" data-en="Why BoostMyBusinesses">Pourquoi BoostMyBusinesses</span>
+      <h2 data-en="Your growth, <span class='grad'>on autopilot.</span>">Votre croissance, <span class="grad">en pilote automatique.</span></h2>
+      <p data-en="A smarter way to turn Instagram into a real acquisition channel — safely.">Une manière plus intelligente de faire d'Instagram un vrai canal d'acquisition en toute sécurité.</p>
+    </div>
+    <div class="features">
+      <div class="fcard reveal">
+        <div class="fic">🎯</div>
+        <h3 data-en="Smart targeting">Ciblage intelligent</h3>
+        <p data-en="We analyze your niche to reach the profiles that matter — a qualified, engaged audience ready to become clients.">Nous analysons votre niche pour atteindre les profils qui comptent — une audience qualifiée et engagée, prête à devenir cliente.</p>
+      </div>
+      <div class="fcard reveal">
+        <div class="fic">🤖</div>
+        <h3 data-en="24/7 automation">Automatisation 24/7</h3>
+        <p data-en="Our AI agents run around the clock and generate targeted interactions for you — even while you sleep.">Nos agents IA tournent en continu et génèrent des interactions ciblées pour vous — même quand vous dormez.</p>
+      </div>
+      <div class="fcard reveal">
+        <div class="fic">🛡️</div>
+        <h3 data-en="Maximum security">Sécurité maximale</h3>
+        <p data-en="Our system emulates natural human behavior through physical devices and a private proxy network. Each account runs on a dedicated phone with its own residential proxy, plus a progressive warm-up before any action. Result: maximum security, zero accounts banned.">Notre système émule le comportement humain naturel via des appareils physiques et un réseau de proxys privés. Chaque compte tourne sur un téléphone dédié avec son propre proxy résidentiel, et bénéficie d'un warm-up progressif avant toute action. Résultat : une sécurité maximale, zéro compte banni.</p>
+      </div>
+      <div class="fcard reveal">
+        <div class="fic">📊</div>
+        <h3 data-en="Real-time analytics">Analytics en temps réel</h3>
+        <p data-en="Track every action, every new follower, every interaction from your own dashboard.">Suivez chaque action, chaque abonné, chaque interaction depuis votre tableau de bord.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== STRIP ===================== -->
+<div class="strip">
+  <div class="marquee">
+    <div class="track">
+      <span class="si" data-en="100% Instagram-compliant">100% conforme Instagram</span><span class="star">✦</span>
+      <span class="si" data-en="Organic growth">Croissance organique</span><span class="star">✦</span>
+      <span class="si" data-en="Geo-targeted audience">Audience géolocalisée</span><span class="star">✦</span>
+      <span class="si" data-en="Results from week one">Résultats dès la 1ère semaine</span><span class="star">✦</span>
+      <span class="si" data-en="No commitment">Sans engagement</span><span class="star">✦</span>
+      <span class="si" data-en="Human support">Accompagnement humain</span><span class="star">✦</span>
+      <span class="si" data-en="100% Instagram-compliant">100% conforme Instagram</span><span class="star">✦</span>
+      <span class="si" data-en="Organic growth">Croissance organique</span><span class="star">✦</span>
+      <span class="si" data-en="Geo-targeted audience">Audience géolocalisée</span><span class="star">✦</span>
+      <span class="si" data-en="Results from week one">Résultats dès la 1ère semaine</span><span class="star">✦</span>
+      <span class="si" data-en="No commitment">Sans engagement</span><span class="star">✦</span>
+      <span class="si" data-en="Human support">Accompagnement humain</span><span class="star">✦</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== HOW IT WORKS ===================== -->
+<section class="sec" id="how">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker" data-en="How it works">Comment ça marche</span>
+      <h2 data-en="Three steps, and <span class='grad'>we launch your campaign within 24 hours.</span>">Trois étapes, et <span class="grad">nous lançons votre campagne sous 24H.</span></h2>
+      <p data-en="A simple, proven process trusted by over 500 clients.">Un processus simple et éprouvé, adopté par plus de 500 clients.</p>
+    </div>
+    <div class="how-grid">
+      <div class="steps">
+        <div class="stp reveal">
+          <span class="sn">01</span>
+          <div>
+            <h3 data-en="Link your account to BMB">Vous reliez votre compte à BMB</h3>
+            <p data-en="Everything starts from our secure dashboard — no installation, no risk for your account.">Tout se passe depuis notre tableau de bord sécurisé — aucune installation, aucun risque pour votre compte.</p>
+          </div>
+        </div>
+        <div class="stp reveal">
+          <span class="sn">02</span>
+          <div>
+            <h3 data-en="Define your targets">Vous définissez vos cibles</h3>
+            <p data-en="Competitor accounts, geographic zones: tell us who your ideal clients are — on your own with the Growth plan, or with our AI on Pro and Premium.">Comptes concurrents, zones géographiques : dites-nous qui sont vos clients cibles — seul pour le pack Growth, ou avec notre IA pour Pro et Premium.</p>
+          </div>
+        </div>
+        <div class="stp reveal">
+          <span class="sn">03</span>
+          <div>
+            <h3 data-en="We take care of everything">On gère tout pour vous</h3>
+            <p data-en="Our agents launch, fine-tune and steer your growth day after day. You follow every result from your dashboard.">Nos agents lancent, ajustent et pilotent votre croissance jour après jour. Vous suivez chaque résultat depuis votre tableau de bord.</p>
+          </div>
+        </div>
+      </div>
+      <div class="chips">
+        <span class="chip on">Stories</span>
+        <span class="chip">Likes</span>
+        <span class="chip">Follows</span>
+        <span class="chip on">DMs</span>
+        <span class="chip">Interactions</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== RESULTS CHART ===================== -->
+<section class="sec tint" id="results">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker" data-en="Results">Résultats</span>
+      <h2 data-en="The difference is <span class='grad'>measurable.</span>">La différence est <span class="grad">mesurable.</span></h2>
+    </div>
+    <div class="results-grid">
+      <div class="results-stats reveal">
+        <div class="rstat">
+          <span class="rstat-num">+200<small data-en=" to +800"> à +800</small></span>
+          <span class="rstat-label" data-en="real followers / month">abonnés réels / mois</span>
+          <span class="rstat-note" data-en="average across all our clients">moyenne tous comptes confondus</span>
+        </div>
+        <div class="rstat-divider"></div>
+        <div class="rstat">
+          <span class="rstat-num" data-en="Week 1">Sem. 1</span>
+          <span class="rstat-label" data-en="First visible results">Premiers résultats visibles</span>
+          <span class="rstat-note" data-en="real profiles, no bots">profils réels, aucun bot</span>
+        </div>
+      </div>
+      <div class="chart-card reveal">
+        <div class="chart-tabs" id="chartToggle">
+          <button data-state="without" class="bad-on"><span data-en="WITHOUT BMB">SANS BMB</span></button>
+          <button data-state="with"><span data-en="AFTER 1 MONTH WITH BMB">APRÈS 1 MOIS AVEC BMB</span></button>
+        </div>
+        <div class="chart-title" data-en="Followers — 30 days">Abonnés — 30 jours</div>
+        <div class="chart-sub" data-en="Average observed across client accounts">Moyenne constatée sur comptes clients</div>
+        <svg class="chart-svg" viewBox="0 0 560 300" id="chartSvg" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="fillGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--chart-stroke)" stop-opacity="0.28"/>
+              <stop offset="100%" stop-color="var(--chart-stroke)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <g class="chart-gridline">
+            <line x1="44" y1="40" x2="540" y2="40"/>
+            <line x1="44" y1="100" x2="540" y2="100"/>
+            <line x1="44" y1="160" x2="540" y2="160"/>
+            <line x1="44" y1="220" x2="540" y2="220"/>
+            <line x1="44" y1="260" x2="540" y2="260"/>
+          </g>
+          <text class="chart-axis" x="8" y="44">3,8k</text>
+          <text class="chart-axis" x="8" y="164">3,4k</text>
+          <text class="chart-axis" x="8" y="264">3,0k</text>
+          <path class="chart-area" id="chartArea" fill="url(#fillGrad)" d=""></path>
+          <path class="chart-path" id="chartLine" stroke="var(--chart-stroke)" d=""></path>
+        </svg>
+        <div class="chart-timeline">
+          <span data-en="Week 1">Sem. 1</span>
+          <span data-en="Week 2">Sem. 2</span>
+          <span data-en="Week 3">Sem. 3</span>
+          <span data-en="Week 4">Sem. 4</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== COMPARISON ===================== -->
+<section class="sec" id="compare">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <h2 data-en="Why hire <span class='grad'>BoostMyBusinesses?</span>">Pourquoi faire appel à <span class="grad">BoostMyBusinesses ?</span></h2>
+    </div>
+    <div class="cmp-table reveal">
+      <div class="cmp-head">
+        <div class="cmp-feat-col"><span class="cmp-col-head" data-en="Feature">Fonctionnalité</span></div>
+        <div class="cmp-alone"><span class="cmp-lbl-bad" data-en="On your own / CM">Seul / CM</span></div>
+        <div class="cmp-boost">
+          <span class="cmp-lbl-good">
+            <span class="logo-mark" style="width:26px;height:26px;font-size:.8rem;border-radius:7px;flex:none;">B</span>
+            <span data-en="Boost My Businesses">Boost My Businesses</span>
+          </span>
+        </div>
+      </div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="Real qualified followers every day">Abonnés qualifiés chaque jour</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="Measurable results from week 1">Résultats mesurables dès la 1ère semaine</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="Automated Instagram prospecting">Prospection Instagram automatisée</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="100% automated, 24/7">100% automatisé, 24H/24</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="No ongoing mental load">Zéro charge mentale</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="Human support 24/7">Support humain 24/7</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row"><span class="cmp-feat" data-en="No commitment">Sans engagement</span><span class="cmp-no">✗</span><span class="cmp-yes">✓</span></div>
+      <div class="cmp-row">
+        <span class="cmp-feat" data-en="Cost vs. a community manager">Coût vs. community manager</span>
+        <span class="cmp-no cmp-text" data-en="€2,000–4,000/mo">2 000–4 000 €/mois</span>
+        <span class="cmp-yes cmp-text" data-en="From 147€/mo">À partir de 147 €/mois</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== INDUSTRIES ===================== -->
+<section class="sec tint" id="industries">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <h2 data-en="Whatever your activity, <span class='grad'>your account has untapped potential.</span>">Quelle que soit votre activité, <span class="grad">votre compte a un potentiel inexploité.</span></h2>
+    </div>
+    <div class="inds">
+      <div class="ind reveal">
+        <div class="ie">🤝</div>
+        <h3 data-en="Creators & influencers">Créateurs & influenceurs</h3>
+        <p data-en="Develop an engaged community that strengthens your media kit and attracts brand partnerships.">Développez une communauté engagée qui renforce votre media kit et attire les partenariats de marques.</p>
+      </div>
+      <div class="ind reveal">
+        <div class="ie">💼</div>
+        <h3 data-en="Executives & entrepreneurs">Dirigeants & entrepreneurs</h3>
+        <p data-en="Build an authoritative personal brand that generates qualified business opportunities.">Construisez un personal branding crédible qui génère des opportunités d'affaires qualifiées.</p>
+      </div>
+      <div class="ind reveal">
+        <div class="ie">🍽️</div>
+        <h3 data-en="Restaurants & local businesses">Restaurants & commerces locaux</h3>
+        <p data-en="Reach a geographically targeted audience and convert nearby followers into in-store visits.">Touchez une audience géographiquement ciblée et convertissez les abonnés de proximité en visites en boutique.</p>
+      </div>
+      <div class="ind reveal">
+        <div class="ie">🛍️</div>
+        <h3 data-en="E-commerce brands">Marques e-commerce</h3>
+        <p data-en="Grow a qualified audience of potential buyers and turn your profile into a high-converting sales channel.">Développez une audience qualifiée d'acheteurs potentiels et faites de votre profil un canal de vente performant.</p>
+      </div>
+      <div class="ind reveal">
+        <div class="ie">🎯</div>
+        <h3 data-en="Coaches & consultants">Coachs & consultants</h3>
+        <p data-en="Attract prospects already interested in your expertise and fill your schedule with qualified leads.">Attirez des prospects déjà intéressés par votre expertise et remplissez votre agenda de rendez-vous qualifiés.</p>
+      </div>
+      <div class="ind reveal">
+        <div class="ie">🏢</div>
+        <h3 data-en="Agencies & resellers">Agences & revendeurs</h3>
+        <p data-en="Add Instagram growth to your service offering with dedicated agency rates, multi-account management and white-label reporting.">Ajoutez la croissance Instagram à votre offre avec un tarif agence dédié, la gestion multi-comptes et un reporting en marque blanche.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CASE STUDIES / TESTIMONIALS ===================== -->
+<section class="sec" id="cases">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <h2 data-en="They grew <span class='grad'>with us.</span>">Ils ont grandi <span class="grad">avec nous.</span></h2>
+      <p data-en="Real accounts, real numbers, real clients across +10 countries.">De vrais comptes, de vrais chiffres, de vrais clients dans +10 pays.</p>
+    </div>
+    <div class="cases">
+      <div class="case reveal">
+        <div class="top">
+          <span class="av">CL</span>
+          <div class="hd"><b>Christine Leclerc</b></div>
+          <div class="res"><b>+1 240</b><small data-en="in 6 weeks">en 6 semaines</small></div>
+        </div>
+        <div class="stars">★★★★★</div>
+        <p data-en='"Thanks to their support, I attract qualified followers who turn into real clients. I delegate the management and focus on my business."'>Grâce à leur accompagnement, j'attire des abonnés qualifiés qui deviennent de réels clients. Je délègue la gestion, je me concentre sur mon activité.</p>
+      </div>
+      <div class="case reveal">
+        <div class="top">
+          <span class="av">KK</span>
+          <div class="hd"><b>Khaïs K.</b></div>
+          <div class="res"><b>+480 <span data-en="/mo">/mois</span></b></div>
+        </div>
+        <div class="stars">★★★★★</div>
+        <p data-en='"We searched a long time before we found them. Boost My Business is the value for money we were hoping for — and the results we had stopped daring to expect."'>On a cherché longtemps avant de trouver. Boost My Business, c'est le rapport qualité-prix qu'on espérait — et les résultats qu'on n'osait plus attendre.</p>
+      </div>
+      <div class="case reveal">
+        <div class="top">
+          <span class="av">MM</span>
+          <div class="hd"><b>Mindset Motivation</b></div>
+          <div class="res"><b>+1 479</b><small data-en="in 3 months">en 3 mois</small></div>
+        </div>
+        <div class="stars">★★★★★</div>
+        <p data-en='"First week, first results. My DMs have never been so active — qualified, genuinely interested prospects. It changes everything."'>Première semaine, premiers résultats. Mes DM n'ont jamais été aussi actifs — des prospects qualifiés, vraiment intéressés. Ça change tout.</p>
+      </div>
+      <div class="case reveal">
+        <div class="top">
+          <span class="av">LF</span>
+          <div class="hd"><b>Léa Fontaine</b></div>
+          <div class="res"><b>+389</b><small data-en="in 1 month">en 1 mois</small></div>
+        </div>
+        <div class="stars">★★★★★</div>
+        <p data-en='"I wanted to grow my account without spending hours on it. In one month I gained a real, engaged audience — and I didn't have to lift a finger."'>Je voulais faire grandir mon compte sans y passer des heures. En un mois, j'ai gagné une audience réelle et engagée sans rien avoir à faire.</p>
+      </div>
+      <div class="case reveal">
+        <div class="top">
+          <span class="av">TR</span>
+          <div class="hd"><b>Thomas R.</b></div>
+          <div class="res"><b>+420</b><small data-en="first month">le 1er mois</small></div>
+        </div>
+        <div class="stars">★★★★★</div>
+        <p data-en='"My account had been stuck for months. +420 followers in the first month — and above all the right ones, people who actually interact with my content."'>Mon compte stagnait depuis des mois. +420 abonnés le premier mois — et surtout les bons, des gens qui interagissent vraiment avec mon contenu.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== PRICING ===================== -->
+<section class="sec tint" id="pricing">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker" data-en="Transparent pricing">Tarifs transparents</span>
+      <h2 data-en="Choose your <span class='grad'>growth speed.</span>">Choisissez votre <span class="grad">vitesse de croissance.</span></h2>
+      <p data-en="No commitment. All-inclusive pricing.">Sans engagement. Tarifs tout compris.</p>
+    </div>
+    <div class="center">
+      <div class="bill-toggle" id="billToggle">
+        <button data-period="m" class="on" data-en="Monthly">Mensuel</button>
+        <button data-period="q" data-en="3 months">3 mois <span class="save">-10%</span></button>
+        <button data-period="h" data-en="6 months">6 mois <span class="save">-20%</span></button>
+        <button data-period="y" data-en="12 months">12 mois <span class="save">-25%</span></button>
+      </div>
+    </div>
+    <div class="pricing">
+      <!-- Growth -->
+      <div class="plan reveal">
+        <div class="tier" data-en="Growth">Growth</div>
+        <div class="est" data-en="~ 200–350 followers">~ 200–350 abonnés</div>
+        <div class="price"><span data-price data-m="147">147</span>€ <small data-en="/mo">/mois</small></div>
+        <div class="price-note" data-period-note data-en="billed monthly">facturé mensuellement</div>
+        <ul>
+          <li><span class="ck">✓</span><span data-en="Weekly optimization">Optimisation hebdomadaire</span></li>
+          <li><span class="ck">✓</span><span data-en="Real-time growth dashboard">Tableau de bord de croissance en temps réel</span></li>
+          <li><span class="ck">✓</span><span data-en="100% automatic growth">Croissance 100% automatique</span></li>
+          <li><span class="ck">✓</span><span data-en="Smart targeting (competitors, location)">Ciblage intelligent (concurrents, localisation)</span></li>
+          <li><span class="ck">✓</span><span data-en="Email support 7/7">Support email 7j/7</span></li>
+        </ul>
+        <a class="btn btn-primary" href="#" data-en="Get started">Commencer</a>
+      </div>
+
+      <!-- Pro (featured) -->
+      <div class="plan featured reveal">
+        <span class="tag" data-en="Most popular">Le plus choisi</span>
+        <div class="tier" data-en="Pro">Pro</div>
+        <div class="est" data-en="~ 300–500 followers">~ 300–500 abonnés</div>
+        <div class="price"><span data-price data-m="197">197</span>€ <small data-en="/mo">/mois</small></div>
+        <div class="price-note" data-period-note data-en="billed monthly">facturé mensuellement</div>
+        <ul>
+          <li><span class="ck">✓</span><span data-en="Daily optimization">Optimisation quotidienne</span></li>
+          <li><span class="ck">✓</span><span data-en="Real-time growth dashboard">Tableau de bord de croissance en temps réel</span></li>
+          <li><span class="ck">✓</span><span data-en="Advanced smart targeting (competitors, location, bio)">Ciblage intelligent avancé (concurrents, localisation, bio)</span></li>
+          <li><span class="ck">✓</span><span data-en="AI-powered target account research">Recherche des comptes cibles par l'IA</span></li>
+          <li><span class="ck">✓</span><span data-en="Welcome DMs to new followers">DM de bienvenue aux nouveaux abonnés</span></li>
+          <li><span class="ck">✓</span><span data-en="100% automatic growth">Croissance 100% automatique</span></li>
+          <li><span class="ck">✓</span><span data-en="Email support 7/7">Support email 7j/7</span></li>
+        </ul>
+        <a class="btn btn-primary" href="#" data-en="Boost my account">Booster mon compte</a>
+      </div>
+
+      <!-- Premium -->
+      <div class="plan reveal">
+        <div class="tier" data-en="Premium">Premium</div>
+        <div class="est" data-en="~ 500–1,000 followers">~ 300–800 abonnés</div>
+        <div class="price"><span data-price data-m="247">247</span>€ <small data-en="/mo">/mois</small></div>
+        <div class="price-note" data-period-note data-en="billed monthly">facturé mensuellement</div>
+        <ul>
+          <li><span class="ck">✓</span><span data-en="Daily optimization">Optimisation quotidienne</span></li>
+          <li><span class="ck">✓</span><span data-en="Real-time growth dashboard">Tableau de bord de croissance en temps réel</span></li>
+          <li><span class="ck">✓</span><span data-en="Advanced smart targeting (competitors, location, bio)">Ciblage intelligent avancé (concurrents, localisation, bio)</span></li>
+          <li><span class="ck">✓</span><span data-en="AI-powered target account research">Recherche des comptes cibles par l'IA</span></li>
+          <li><span class="ck">✓</span><span data-en="Welcome DMs to new followers">DM de bienvenue aux nouveaux abonnés</span></li>
+          <li><span class="ck">✓</span><span data-en="100% automatic growth">Croissance 100% automatique</span></li>
+          <li><span class="ck">✓</span><span data-en="Email support 7/7">Support email 7j/7</span></li>
+          <li><span class="ck">✓</span><span data-en="AI post commenting">Commentaire des posts par l'IA</span></li>
+        </ul>
+        <a class="btn btn-primary" href="#" data-en="Get started">Commencer</a>
+      </div>
+
+      <!-- Outreach -->
+      <div class="plan plan-outreach reveal">
+        <span class="tag tag-outreach" data-en="Prospecting">Prospection</span>
+        <div class="tier">Outreach</div>
+        <div class="est" data-en="Instagram prospecting (DMs)">Prospection Instagram (DMs)</div>
+        <div class="outreach-opts">
+          <div class="outreach-opt">
+            <div class="oo-head">
+              <span class="oo-name" data-en="Outreach Standard">Outreach Standard</span>
+              <span class="oo-price"><span data-price data-m="89">89</span>€<small data-en="/mo">/mois</small></span>
+            </div>
+            <span class="oo-note" data-en="Account list provided by you">Liste de comptes fournie par vous</span>
+          </div>
+          <div class="outreach-opt featured-opt">
+            <div class="oo-head">
+              <span class="oo-name" data-en="Outreach AI">Outreach IA</span>
+              <span class="oo-price"><span data-price data-m="149">149</span>€<small data-en="/mo">/mois</small></span>
+            </div>
+            <span class="oo-note" data-en="List built by our AI">Liste fournie par l'IA</span>
+          </div>
+        </div>
+        <ul>
+          <li><span class="ck">✓</span><span data-en="Tailor-made setup">Setup sur-mesure</span></li>
+          <li><span class="ck">✓</span><span data-en="30 prospecting DMs sent every day">30 DMs de prospection envoyés chaque jour</span></li>
+          <li><span class="ck">✓</span><span data-en="Targeted Instagram prospecting">Prospection Instagram ciblée</span></li>
+          <li><span class="ck">✓</span><span data-en="Personalized DM scripts">Scripts de DM personnalisés</span></li>
+          <li><span class="ck">✓</span><span data-en="Email support 7/7">Support email 7j/7</span></li>
+        </ul>
+        <a class="btn btn-primary" href="#" data-en="Get started">Commencer</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FAQ ===================== -->
+<section class="sec" id="faq">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="kicker" data-en="Good to know">FAQ</span>
+      <h2 data-en="The questions <span class='grad'>we hear most often.</span>">Les questions <span class="grad">qu'on nous pose le plus souvent.</span></h2>
+      <p data-en="A question we haven't covered? Write to us, a real person replies.">Une question qu'on n'a pas couverte ? Écrivez-nous, une vraie personne vous répond.</p>
+    </div>
+    <div class="faq reveal">
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="Are these genuine accounts behind the new followers?">Y a-t-il de vraies personnes derrière les nouveaux abonnés ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="Always. We never inflate numbers with fake profiles. Each new follower is a real Instagram user who already engages with accounts close to yours — a competitor, a similar creator, an aligned interest. They discover you because they were genuinely likely to care.">Toujours. On ne gonfle jamais vos chiffres avec des profils fictifs. Chaque nouvel abonné est un véritable utilisateur Instagram qui interagit déjà avec des comptes proches du vôtre : un concurrent, un créateur similaire, un centre d'intérêt aligné. S'il vous découvre, c'est parce qu'il avait de vraies chances de s'intéresser à vous.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="What kind of growth should I realistically expect?">À quelle croissance puis-je raisonnablement m'attendre ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="We don't sell guaranteed-results promises. Your performance doesn't rest on our service alone — your sector and the kind of content you post weigh in just as much. With a quality account, the results are genuinely strong: between 300 and 800 new followers a month.">Nous ne promettons pas de résultats garantis. Chaque compte est unique, vos résultats ne dépendent pas uniquement de notre service. Votre niche, la qualité de votre contenu et votre fréquence de publication entrent aussi en jeu. Avec un compte de qualité, nos clients gagnent en moyenne entre 300 et 800 abonnés par mois.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="When do things actually start moving?">Au bout de combien de temps ça commence à bouger ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="Setup takes a day, and once you're live the needle usually starts moving inside the first week: a steady trickle of new real followers, more people landing on your profile, and noticeably more activity under your posts.">Le paramétrage prend une journée, et une fois lancé, les choses bougent généralement dès la première semaine : un flux régulier de nouveaux abonnés réels, davantage de visites sur votre profil et nettement plus d'activité sous vos publications.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="Could this put my account at risk?">Est-ce que ça peut mettre mon compte en danger ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="That's exactly what we built the system to avoid. Your profile lives on its own physical phone with a dedicated residential connection, and we ramp activity up slowly rather than all at once. To Instagram it simply reads as a person using their phone normally — which is why we've never had an account banned.">C'est précisément ce que notre système est conçu pour éviter. Votre profil vit sur son propre téléphone physique avec une connexion résidentielle dédiée, et on monte l'activité en puissance progressivement plutôt que d'un coup. Pour Instagram, cela ressemble simplement à une personne qui utilise son téléphone normalement : c'est la raison pour laquelle nous n'avons jamais eu de compte banni.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="What exactly happens on my profile day to day?">Concrètement, qu'est-ce qui se passe sur mon profil au quotidien ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="We engage with the audience you picked, through likes, follows and story views, and on the higher plans, welcome or outreach DMs. You decide which of these levers stay on, and everything is pointed at the profiles you and your manager defined together.">On interagit avec l'audience que vous avez choisie : likes, abonnements, vues de stories, et sur les formules supérieures, des DM de bienvenue ou de prospection. C'est vous qui décidez quels leviers restent activés, et tout est dirigé vers les profils définis.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="Am I locked into a contract?">Suis-je engagé sur la durée ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="Not unless you want to be. Your subscription renews automatically each month so your growth never stops. You stay free to cancel at any time by emailing us 7 days before the renewal date. Prefer to lock in a lower price? Our 3, 6 and 12-month plans unlock bigger discounts in exchange for a longer term.">Non, à moins que vous le souhaitiez. Nos abonnements se renouvellent automatiquement chaque mois pour assurer une croissance sans interruption. Vous restez libre de résilier à tout moment en nous envoyant un mail 7 jours avant la date de renouvellement. Et si vous préférez bloquer un tarif plus bas, nos formules 3, 6 et 12 mois donnent droit à des remises plus importantes en échange d'un engagement plus long.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="Can you promise a specific number?">Pouvez-vous me promettre un chiffre précis ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="We'd rather be straight with you: no serious provider can promise an exact figure. Your content, your field and the targets we pick at launch all move the result. What we do bring is a method that works, a manager who fine-tunes it weekly, and full transparency on the numbers — so you always know where you stand.">On préfère être franc avec vous : aucun prestataire sérieux ne peut promettre un chiffre exact. Les fourchettes indiquées sur notre site sont des moyennes établies à partir des performances réelles de nos clients. Les résultats peuvent varier selon la qualité de votre contenu, votre domaine et les comptes cibles choisis au lancement. Ce qu'on apporte, c'est une méthode qui fonctionne, un manager qui l'ajuste chaque semaine et une transparence totale sur les chiffres, pour que vous sachiez toujours où vous en êtes.</p>
+        </div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button">
+          <span data-en="Who do I talk to if I need help?">À qui je m'adresse si j'ai besoin d'aide ?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </button>
+        <div class="faq-a"><div class="faq-a-in">
+          <p data-en="You're never alone. Our team is available 7 days a week by email at growth@boostmybusinesses.com with a guaranteed response within 24 hours.">Vous n'êtes jamais seul. Notre équipe reste à votre disposition 7j/7 par e-mail à growth@boostmybusinesses.com avec une réponse assurée sous 24h.</p>
+        </div></div>
+      </div>
+    </div>
+    <div class="faq-foot reveal">
+      <span data-en="A doubt left over? Let's clear it up together.">Un doute qui traîne ? Levons-le ensemble.</span>
+      <a class="btn btn-soft" href="#how" data-en="Talk to an expert">Parler à un expert</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FINAL CTA ===================== -->
+<section class="cta-final">
+  <div class="wrap">
+    <span class="spots" data-en="✦ Limited number of new accounts each month">✦ Nombre de nouveaux comptes limité chaque mois</span>
+    <h2 data-en="Give your Instagram the growth it deserves.">Donnez à votre Instagram la croissance qu'il mérite.</h2>
+    <p data-en="Your future clients are already scrolling. Let BoostMyBusinesses connect you with them, starting this week.">Vos futurs clients scrollent déjà. Laissez BoostMyBusinesses vous mettre en relation avec eux dès cette semaine.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary btn-lg" href="#pricing" data-en="Start now">Démarrer maintenant</a>
+      <a class="btn btn-soft btn-lg" href="#how" data-en="Book a strategic call">Réserver un appel stratégique</a>
+    </div>
+    <div class="hero-micro">
+      <span><span class="ck">✓</span><span data-en="No commitment">Sans engagement</span></span>
+      <span><span class="ck">✓</span><span data-en="Active in 24h">Actif en 24h</span></span>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FOOTER ===================== -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-top">
+      <div>
+        <a class="brand" href="#top"><span class="logo-mark">B</span><span>Boost<span class="brand-my">My</span>Businesses</span></a>
+        <p class="ftabout" data-en="AI agents built for real business workflows. No prompting skills required.">Des agents IA conçus pour de vrais workflows d'entreprise. Aucune compétence en prompting requise.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="fcol">
+          <h4 data-en="Agents">Agents</h4>
+          <a href="https://www.boostmybusinesses.com/agent/ugc-ads-engine" data-en="UGC Ads Engine">UGC Ads Engine</a>
+          <a href="https://www.boostmybusinesses.com/agent/general" data-en="AI Assistant">AI Assistant</a>
+          <a href="https://www.boostmybusinesses.com/agent/whatsapp-lead-system" data-en="WhatsApp Leads">WhatsApp Leads</a>
+          <a href="https://www.boostmybusinesses.com/agent/restaurant-call-assistant" data-en="AI Restaurant Call Assistant">AI Restaurant Call Assistant</a>
+          <a href="https://www.boostmybusinesses.com/agent/support" data-en="Support Agent">Support Agent</a>
+        </div>
+        <div class="fcol">
+          <h4 data-en="Company">Entreprise</h4>
+          <a href="https://www.boostmybusinesses.com/#pricing" data-en="Pricing">Tarifs</a>
+          <a href="https://www.boostmybusinesses.com/about" data-en="About">À propos</a>
+          <a href="https://www.boostmybusinesses.com/contact" data-en="Contact">Contact</a>
+        </div>
+        <div class="fcol">
+          <h4 data-en="Legal">Légal</h4>
+          <a href="https://www.boostmybusinesses.com/privacy-policy" data-en="Privacy policy">Politique de confidentialité</a>
+          <a href="https://www.boostmybusinesses.com/terms-and-conditions" data-en="Terms of service">Conditions d'utilisation</a>
+          <a href="https://www.boostmybusinesses.com/refund-policy" data-en="Refund policy">Politique de remboursement</a>
+        </div>
+      </div>
+    </div>
+    <div class="copy">
+      <span data-en="© 2025 BoostMyBusinesses. All rights reserved.">© 2025 BoostMyBusinesses. Tous droits réservés.</span>
+      <span data-en="Made with AI — built for humans.">Conçu avec l'IA — pensé pour les humains.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

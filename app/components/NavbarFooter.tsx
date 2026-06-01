@@ -9,7 +9,7 @@
 //     {/* page content */}
 //   </NavbarFooter>
 //
-// agent prop: "whatsapp" | "assistant" | "ugc" | "support" | "restaurant" | undefined
+// agent prop: "whatsapp" | "assistant" | "ugc" | "support" | "restaurant" | "instagram" | undefined
 // The "B" logo mark and CTA button take the agent's accent color.
 // Passing no agent (homepage) keeps the logo neutral white.
 // ============================================================
@@ -18,7 +18,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
-type Agent = "whatsapp" | "assistant" | "ugc" | "support" | "restaurant";
+type Agent = "whatsapp" | "assistant" | "ugc" | "support" | "restaurant" | "instagram";
 type Lang = "fr" | "en";
 
 const AGENT_COLORS: Record<Agent, string> = {
@@ -27,6 +27,7 @@ const AGENT_COLORS: Record<Agent, string> = {
   ugc: "#F97316",
   support: "#3B82F6",
   restaurant: "#F59E0B",
+  instagram: "#E1306C",
 };
 
 const NAV_LINKS = [
@@ -35,6 +36,7 @@ const NAV_LINKS = [
   { label: { fr: "WhatsApp Leads", en: "WhatsApp Leads" }, href: "/agent/whatsapp-lead-system", agent: "whatsapp" as Agent },
   { label: { fr: "AI Restaurant Call Assistant", en: "AI Restaurant Call Assistant" }, href: "/agent/restaurant-call-assistant", agent: "restaurant" as Agent },
   { label: { fr: "Support Agent", en: "Support Agent" }, href: "/agent/support", agent: "support" as Agent },
+  { label: { fr: "Instagram Growth", en: "Instagram Growth" }, href: "/instagram-growth", agent: "instagram" as Agent },
 ];
 
 const COPY = {

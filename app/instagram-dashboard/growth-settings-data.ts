@@ -13,6 +13,9 @@ export type GrowthSettingsAccount = {
   username: string;
   clientName: string | null;
   packageLabel: string | null;
+  commercialAddonsLabel: string | null;
+  outreachSourceLabel: string | null;
+  runtimeProfilesLabel: string | null;
   entitlementSummary: string | null;
   subscriptionStatus: string | null;
   customerStatus: string | null;
@@ -41,6 +44,9 @@ export type GrowthLimitGroup = {
 
 export type GrowthPackageSummary = {
   packageLabel: string;
+  commercialAddonsLabel: string;
+  outreachSourceLabel: string;
+  runtimeProfilesLabel: string;
   entitlementSummary: string;
   subscriptionStatus: string;
   runtimeProofStatus: GrowthRuntimeStatus;
@@ -90,7 +96,7 @@ export type GrowthSettingsOverview = {
 const settingsSourceLabel = "ig_account_settings safe projection";
 const filtersSourceLabel = "ig_account_filters safe projection";
 const manageSourceLabel = "admin-dashboard/manage_overview";
-const runtimeWarning = "Runtime application is not verified yet. Do not use for client/pricing promises.";
+const runtimeWarning = "Needs operator review before exposing outside admin views.";
 
 const settingsSelect = [
   "account_id",
@@ -203,7 +209,7 @@ function item(
 }
 
 function packageItem(key: string, label: string, valueLabel: string): GrowthSettingItem {
-  return item(key, label, valueLabel || "unknown", "package", "pending_review", manageSourceLabel, "pending", "Package/pricing model is pending runtime proof.");
+  return item(key, label, valueLabel || "unknown", "package", "pending_review", manageSourceLabel, "pending", "Package setting needs operator review.");
 }
 
 function group(groupKey: string, title: string, description: string, items: GrowthSettingItem[]): GrowthLimitGroup {
@@ -216,6 +222,9 @@ function mapAccount(account: ManageAccount): GrowthSettingsAccount {
     username: account.username,
     clientName: account.clientName,
     packageLabel: account.packageLabel,
+    commercialAddonsLabel: account.commercialAddonsLabel,
+    outreachSourceLabel: account.outreachSourceLabel,
+    runtimeProfilesLabel: account.runtimeProfilesLabel,
     entitlementSummary: account.entitlementSummary,
     subscriptionStatus: account.subscriptionStatus,
     customerStatus: account.customerStatus,
@@ -228,6 +237,9 @@ function mapAccount(account: ManageAccount): GrowthSettingsAccount {
 function buildGroups(account: ManageAccount, settings: SafeRecord | undefined, filters: SafeRecord | undefined): GrowthLimitGroup[] {
   const packageItems = [
     packageItem("package_label", "Package", account.packageLabel),
+    packageItem("commercial_addons", "Add-ons", account.commercialAddonsLabel),
+    packageItem("outreach_source", "Outreach source", account.outreachSourceLabel),
+    packageItem("runtime_profiles", "Runtime profile", account.runtimeProfilesLabel),
     packageItem("entitlement_summary", "Entitlement", account.entitlementSummary),
     packageItem("subscription_status", "Subscription", account.subscriptionStatus),
     packageItem("customer_status", "Customer status", account.customerStatus),
@@ -251,7 +263,7 @@ function buildGroups(account: ManageAccount, settings: SafeRecord | undefined, f
     item("cold_dm_message", "Cold DM message", readString(settings, "cold_dm_message") ? "Configured" : "Missing", "dm", "pending_review", settingsSourceLabel),
     item("max_dm_per_run", "Max DMs per run", String(readNumber(settings, "max_dm_per_run", 2)), "dm", "pending_review", settingsSourceLabel),
     item("max_consecutive_dms", "Max consecutive DMs", String(readNumber(settings, "max_consecutive_dms", 3)), "dm", "admin_only", settingsSourceLabel),
-    item("send_enabled", "Real send enabled", boolLabel(readBoolean(settings, "send_enabled")), "dm", "admin_only", settingsSourceLabel, "unverified", "Admin-only until runtime and package rules are proven."),
+    item("send_enabled", "Real send enabled", boolLabel(readBoolean(settings, "send_enabled")), "dm", "admin_only", settingsSourceLabel, "unverified", "Admin-only send control."),
   ];
 
   const welcomeItems = [
@@ -275,7 +287,7 @@ function buildGroups(account: ManageAccount, settings: SafeRecord | undefined, f
     item("max_actions_per_day", "Max actions/day", String(readNumber(settings, "max_actions_per_day", 120)), "safety", "admin_only", settingsSourceLabel),
     item("end_if_follow_limit_reached", "Stop at follow cap", boolLabel(readBoolean(settings, "end_if_follow_limit_reached", true)), "safety", "admin_only", settingsSourceLabel),
     item("end_if_dm_limit_reached", "Stop at DM cap", boolLabel(readBoolean(settings, "end_if_dm_limit_reached", true)), "safety", "admin_only", settingsSourceLabel),
-    item("filters", "Follower filters", filters ? "Safe projection available" : "Pending source", "filters", "pending_review", filtersSourceLabel, "unverified"),
+    item("filters", "Follower filters", filters ? "Safe projection available" : "No filter source", "filters", "pending_review", filtersSourceLabel, "unverified"),
     item("min_followers", "Follower range", `${readNumber(filters, "min_followers", 1)} - ${readNumber(filters, "max_followers", 0) || "unknown"}`, "filters", "pending_review", filtersSourceLabel),
     item("word_filters", "Word/account filters", [
       configuredLabel(readString(filters, "blacklisted_words")),
@@ -286,32 +298,35 @@ function buildGroups(account: ManageAccount, settings: SafeRecord | undefined, f
 
   const sourceItems = [
     item("source_accounts", "Source accounts", configuredLabel(readString(settings, "source_accounts")), "sources", "pending_review", settingsSourceLabel),
-    item("target_accounts", "Target accounts / CT", "Managed in Targets modal", "sources", "pending_review", "ig_targets / Targets modal", "pending", "Use CT quality/sync model before exposing to client/pricing."),
+    item("target_accounts", "Target accounts / CT", "Managed in Targets modal", "sources", "pending_review", "ig_targets / Targets modal", "pending", "Use CT quality/sync model for target management."),
   ];
 
   const runtimeItems = [
-    item("runtime_proof", "Runtime proof", "Pending proof", "runtime", "pending_review", "runtime proof pending", "pending", "A setting is client/pricing-ready only after runtime application is verified."),
-    item("pricing_ready", "Pricing readiness", "Pending runtime verification", "runtime", "pending_review", "package model pending", "pending", "Pricing must use only runtime-verified package limits."),
-    item("client_dashboard_subset", "Client dashboard subset", "Pending approval", "runtime", "pending_review", "client dashboard pending", "pending", "Client dashboard will use a restricted client-safe subset only."),
-    item("ops_internals", "Ops-only internals", "Hidden", "runtime", "ops_only", "hidden by projection", "pending", "Device internals, clone/runtime knobs, raw payloads, credentials, tokens, and env values are intentionally omitted."),
+    item("runtime_proof", "Runtime review", "Needs review", "runtime", "pending_review", "runtime review", "pending", "Operator review required."),
+    item("pricing_ready", "Package readiness", "Needs review", "runtime", "pending_review", "package review", "pending", "Package limits require operator review."),
+    item("client_dashboard_subset", "Client dashboard subset", "Needs review", "runtime", "pending_review", "client dashboard review", "pending", "Restricted client-safe subset only."),
+    item("ops_internals", "Ops-only internals", "Hidden", "runtime", "ops_only", "hidden by projection", "pending", "Sensitive internals are intentionally omitted."),
   ];
 
   return [
-    group("package", "Package / entitlement", "Package labels are visible, but pricing readiness is pending runtime proof.", packageItems),
-    group("follow", "Follow limits", "Potential client-facing limits after runtime verification.", followItems),
-    group("unfollow", "Unfollow limits", "Potential client-facing limits after runtime verification.", unfollowItems),
+    group("package", "Package / entitlement", "Package labels and entitlement status.", packageItems),
+    group("follow", "Follow limits", "Follow limits from the safe settings projection.", followItems),
+    group("unfollow", "Unfollow limits", "Unfollow limits from the safe settings projection.", unfollowItems),
     group("dm", "DM / outreach limits", "DM limits and send controls from safe settings projection.", dmItems),
     group("welcome", "Welcome DM limits", "Welcome DM status without rendering raw settings payloads.", welcomeItems),
     group("schedule", "Schedule / timeslot", "Schedule fields are shown as settings, not pricing promises.", scheduleItems),
     group("safety", "Safety / filters", "Admin safety controls and filter summaries.", safetyItems),
     group("sources", "Sources / CT link", "Source summaries; detailed CT management stays in Targets.", sourceItems),
-    group("runtime", "Runtime proof / client visibility", "Readiness markers for client dashboard and pricing.", runtimeItems),
+    group("runtime", "Runtime review / visibility", "Readiness markers for operator review.", runtimeItems),
   ];
 }
 
 function packageSummary(account: ManageAccount): GrowthPackageSummary {
   return {
     packageLabel: account.packageLabel || "unknown",
+    commercialAddonsLabel: account.commercialAddonsLabel || "No add-ons",
+    outreachSourceLabel: account.outreachSourceLabel || "pending_source_classification",
+    runtimeProfilesLabel: account.runtimeProfilesLabel || "Runtime profile pending",
     entitlementSummary: account.entitlementSummary || "unknown",
     subscriptionStatus: account.subscriptionStatus || "unknown",
     runtimeProofStatus: "pending",
@@ -380,10 +395,6 @@ export async function getGrowthSettingsData(): Promise<GrowthSettingsOverview> {
     } satisfies GrowthAccountOverview;
   });
 
-  // TODO: Pricing must use only runtime-verified package limits.
-  // TODO: Client dashboard must consume a restricted client-safe subset only.
-  // TODO: Replace legacy safe projections with a dedicated package/runtime proof source.
-
   return {
     accounts: groupsByAccount.map((entry) => entry.account),
     groupsByAccount,
@@ -409,12 +420,12 @@ export async function getGrowthSettingsData(): Promise<GrowthSettingsOverview> {
         description: "Whitelist read from ig_account_filters. Raw filter payloads are not rendered.",
       },
       packageModel: {
-        label: "Package model pending",
-        description: "Package limits are not pricing-ready until runtime proof is connected.",
+        label: "Package model review",
+        description: "Package limits are shown for operator review.",
       },
       runtimeProof: {
-        label: "Runtime proof pending",
-        description: "A setting is client/pricing-ready only after runtime application is verified.",
+        label: "Runtime review",
+        description: "Runtime readiness is shown as an operator review status.",
       },
     },
     errors: [...manageData.errors, ...safeRows.errors],

@@ -211,7 +211,7 @@ export default async function InstagramAutomationDashboardPage() {
 
         .ig-dashboard-table {
           width: 100%;
-          min-width: 1320px;
+          min-width: 1200px;
           border-collapse: separate;
           border-spacing: 0 8px;
         }
@@ -618,10 +618,10 @@ function AccountList({
             <tr>
               <th>Username</th>
               <th>Client</th>
-              <th>Admin status</th>
-              <th>Customer</th>
               <th>Subscription</th>
               <th>Package</th>
+              <th>Add-ons</th>
+              <th>Runtime profile</th>
               <th>Credentials</th>
               <th>Login</th>
               <th>Phone</th>
@@ -641,13 +641,17 @@ function AccountList({
                 </td>
                 <td>{account.clientName ?? account.emailDisplay}</td>
                 <td>
-                  <span className="ig-dashboard-status" style={{ color: statusTone(account.adminStatus) }}>
-                    {account.adminStatus}
+                  <span className="ig-dashboard-status" style={{ color: statusTone(account.subscriptionStatus) }}>
+                    {account.subscriptionStatus}
                   </span>
                 </td>
-                <td>{account.customerStatus}</td>
-                <td>{account.subscriptionStatus}</td>
                 <td>{account.packageLabel}</td>
+                <td>
+                  {account.commercialAddonsLabel}
+                  <br />
+                  <small>Outreach: {account.outreachSourceLabel}</small>
+                </td>
+                <td>{account.runtimeProfilesLabel}</td>
                 <td style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</td>
                 <td>
                   <span className="ig-dashboard-status" style={{ color: statusTone(account.loginStatus) }}>
@@ -687,16 +691,24 @@ function AccountList({
             </div>
             <dl>
               <div>
-                <dt>Customer</dt>
-                <dd>{account.customerStatus}</dd>
-              </div>
-              <div>
                 <dt>Subscription</dt>
-                <dd>{account.subscriptionStatus}</dd>
+                <dd style={{ color: statusTone(account.subscriptionStatus) }}>{account.subscriptionStatus}</dd>
               </div>
               <div>
                 <dt>Package</dt>
                 <dd>{account.packageLabel}</dd>
+              </div>
+              <div>
+                <dt>Add-ons</dt>
+                <dd>{account.commercialAddonsLabel}</dd>
+              </div>
+              <div>
+                <dt>Outreach source</dt>
+                <dd>{account.outreachSourceLabel}</dd>
+              </div>
+              <div>
+                <dt>Runtime profile</dt>
+                <dd>{account.runtimeProfilesLabel}</dd>
               </div>
               <div>
                 <dt>Credentials</dt>

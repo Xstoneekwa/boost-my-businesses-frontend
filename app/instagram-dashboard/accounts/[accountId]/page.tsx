@@ -187,7 +187,12 @@ export default async function InstagramAccountDetailPage({
         <article>
           <span>Package</span>
           <strong>{account.packageLabel}</strong>
-          <small>{account.entitlementSummary}</small>
+          <small>Add-ons: {account.commercialAddonsLabel}</small>
+        </article>
+        <article>
+          <span>Outreach source</span>
+          <strong>{account.outreachSourceLabel}</strong>
+          <small>Runtime profiles: {account.runtimeProfilesLabel}</small>
         </article>
         <article>
           <span>Source</span>
@@ -205,7 +210,7 @@ export default async function InstagramAccountDetailPage({
           <FieldGrid
             fields={[
               ["Username verification", account.instagramVerificationStatus ?? "pending"],
-              ["Verification reason", account.usernameVerificationReason ?? "pending source"],
+              ["Verification reason", account.usernameVerificationReason ?? "not provided"],
               ["Canonical username", account.instagramCanonicalUsername ?? account.username],
               ["Avatar", account.profileImageUrl ? "available" : "pending"],
             ]}
@@ -276,13 +281,6 @@ export default async function InstagramAccountDetailPage({
           <TargetsSummaryCard overview={targets.overview} unavailable={targets.unavailable} />
         </AnalyticsSectionCard>
 
-        <AnalyticsSectionCard
-          eyebrow="DM"
-          title="DM / templates summary"
-          description="Read-only placeholder until DM templates and messaging summaries are connected to the detail contract."
-        >
-          <PendingState title="DM source pending" text="DM template summary data is not connected to Account Detail yet." />
-        </AnalyticsSectionCard>
       </section>
 
       <style>{`
@@ -604,7 +602,7 @@ function TargetsSummaryCard({ overview, unavailable }: { overview: TargetsOvervi
 function PendingState({ title, text }: { title: string; text: string }) {
   return (
     <div className="ig-account-detail-pending">
-      <span>Pending source</span>
+      <span>Empty state</span>
       <strong>{title}</strong>
       <p>{text}</p>
     </div>

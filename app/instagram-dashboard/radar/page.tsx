@@ -104,7 +104,7 @@ export default async function InstagramRadarPage({
         <RadarKpi
           label="Running or queued"
           value={summary.runningCount + (summary.queuedCount ?? 0)}
-          detail={`Running: ${formatInteger(summary.runningCount)} · Queued: ${summary.queuedCount === null ? "pending source" : formatInteger(summary.queuedCount)}`}
+          detail={`Running: ${formatInteger(summary.runningCount)} · Queued: ${summary.queuedCount === null ? "unknown" : formatInteger(summary.queuedCount)}`}
           tone={summary.runningCount || summary.queuedCount ? "warning" : "neutral"}
         />
         <RadarKpi
@@ -685,7 +685,7 @@ function RunTable({ runs, emptyText }: { runs: RadarRun[]; emptyText: string }) 
 
 function WarningList({ warnings }: { warnings: RadarWarning[] }) {
   if (!warnings.length) {
-    return <EmptyState title="No warning logs found." text="No legacy warning logs found. account_incidents/runtime_events source pending migration." />;
+    return <EmptyState title="No warning logs found." text="No warning signals found from current sources." />;
   }
 
   return (
@@ -752,7 +752,7 @@ function RiskAccountList({ accounts, warningCount }: { accounts: RadarAccount[];
 
 function DeviceTable({ devices }: { devices: RadarDevice[] }) {
   if (!devices.length) {
-    return <EmptyState title="Device source pending" text="No devices found from current source." />;
+    return <EmptyState title="No devices found" text="No devices found from current source." />;
   }
 
   return (

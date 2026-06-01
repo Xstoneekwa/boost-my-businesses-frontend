@@ -176,7 +176,7 @@ type AdminDashboardRadarResponse = {
 export const unknownPhone = "Unknown phone";
 export const unknownMac = "Unknown Mac";
 export const localMac = "Local Mac";
-export const pendingSourceLabel = "admin-dashboard radar_overview pending";
+export const pendingSourceLabel = "admin-dashboard radar_overview unavailable";
 export const legacyAccountsSource = "legacy ig_accounts";
 export const legacyRunsSource = "legacy ig_runs";
 export const legacyWarningsSource = "legacy ig_action_logs";
@@ -186,8 +186,8 @@ export const adminDashboardSource = "admin-dashboard radar_overview";
 
 export const backendApiPendingStatus: RadarSourceStatus = {
   status: "pending",
-  label: "Pending API branch",
-  description: "Backend API: pending branch. UI and data contract are ready; admin-dashboard/radar_overview is not consumed yet.",
+  label: "Backend API unavailable",
+  description: "Using safe fallback sources for Radar.",
 };
 
 export const backendApiNotConfiguredStatus: RadarSourceStatus = {
@@ -400,9 +400,9 @@ function adminDashboardSourceStatus(): RadarSummary["sourceStatus"] {
   return {
     backendApi: backendApiReadyStatus,
     accounts: connectedStatus("Admin API", "Account health data comes from admin-dashboard/radar_overview."),
-    runs: pendingStatus("Pending source", "admin-dashboard/radar_overview does not provide run rows yet. Runtime run source remains pending."),
-    warnings: connectedStatus("Admin API signals", "Warning signals are derived from admin-dashboard/radar_overview account health. account_incidents/runtime_events pending migration."),
-    devices: pendingStatus("Inventory pending", "admin-dashboard/radar_overview does not provide device/host inventory yet. Device source remains pending."),
+    runs: pendingStatus("Runs unavailable", "Run rows are unavailable from the current Radar source."),
+    warnings: connectedStatus("Admin API signals", "Warning signals are derived from admin-dashboard/radar_overview account health."),
+    devices: pendingStatus("Inventory unavailable", "Device and host rows are unavailable from the current Radar source."),
   };
 }
 
@@ -924,29 +924,29 @@ function buildSummary(
       accounts: legacySourceStatus(
         accounts,
         "Legacy DB ready",
-        "Pending source",
-        "Current account data comes from legacy ig_accounts. Backend API branch is pending.",
+        "No accounts",
+        "Current account data comes from legacy ig_accounts.",
         "No account rows found from legacy ig_accounts.",
       ),
       runs: legacySourceStatus(
         runs,
         "Legacy DB ready",
-        "Pending source",
-        "Running data comes from legacy ig_runs. Queue source is still pending unless queued rows exist.",
+        "No runs",
+        "Running data comes from legacy ig_runs.",
         "No run rows found from legacy ig_runs.",
       ),
       warnings: legacySourceStatus(
         warnings,
         "Legacy logs ready",
-        "Pending source",
-        "Current warning data comes from legacy ig_action_logs. account_incidents/runtime_events pending migration.",
+        "No warnings",
+        "Current warning data comes from legacy ig_action_logs.",
         "No warning rows found from legacy ig_action_logs.",
       ),
       devices: hasLegacyDevices
         ? legacyReadyStatus("Legacy DB ready", "Device readiness comes from legacy ig_devices.")
         : hasDerivedDevices
           ? legacyReadyStatus("Derived from account/run data", "No device inventory rows found; phone readiness is derived from linked account/run data.")
-        : pendingStatus("Inventory pending", "No devices found from current source. Future device/host inventory source pending."),
+        : pendingStatus("Inventory unavailable", "No devices found from current source."),
     },
   };
 }

@@ -44,8 +44,6 @@ export default async function InstagramDevicesPage() {
       <section className="ig-devices-source-strip" aria-label="Device source status">
         <SourcePill label="Device inventory" value={data.sourceStatus.deviceInventory.label} detail={data.sourceStatus.deviceInventory.description} />
         <SourcePill label="Account assignment" value={data.sourceStatus.accountAssignments.label} detail={data.sourceStatus.accountAssignments.description} />
-        <SourcePill label="Runtime controls" value={data.sourceStatus.runtimeControls.label} detail={data.sourceStatus.runtimeControls.description} />
-        <SourcePill label="Notes" value={data.sourceStatus.notes.label} detail={data.sourceStatus.notes.description} />
       </section>
 
       <section className="ig-devices-kpis" aria-label="Device inventory summary">
@@ -63,28 +61,6 @@ export default async function InstagramDevicesPage() {
       >
         <HostAccordion hosts={data.hosts} phones={data.phones} groups={data.accountsByPhone} />
       </AnalyticsSectionCard>
-
-      <section className="ig-devices-grid">
-        <AnalyticsSectionCard
-          eyebrow="Future controls"
-          title="Read-only control preview"
-          description="Prepared actions only. No phone, worker, or runtime command is wired from this view."
-        >
-          <FutureControls />
-        </AnalyticsSectionCard>
-
-        <AnalyticsSectionCard
-          eyebrow="Notes"
-          title="Phone notes and order"
-          description="Prepared for future phone notes, author/date tracking, and custom display ordering."
-        >
-          <div className="ig-devices-pending">
-            <span>Pending source</span>
-            <strong>Notes: pending source</strong>
-            <p>Phone notes, edit history, and custom order require a backend source. No write or local persistence is used in this view.</p>
-          </div>
-        </AnalyticsSectionCard>
-      </section>
 
       <style>{`
         .ig-devices-page {
@@ -119,7 +95,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-source-strip {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           margin-bottom: 14px;
         }
 
@@ -137,8 +113,7 @@ export default async function InstagramDevicesPage() {
         .ig-devices-source-pill,
         .ig-devices-kpi,
         .ig-devices-host,
-        .ig-devices-pending,
-        .ig-devices-control {
+        .ig-devices-pending {
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: 16px;
           background: rgba(255,255,255,0.028);
@@ -146,8 +121,7 @@ export default async function InstagramDevicesPage() {
 
         .ig-devices-source-pill,
         .ig-devices-host,
-        .ig-devices-pending,
-        .ig-devices-control {
+        .ig-devices-pending {
           display: grid;
           gap: 8px;
           padding: 14px;
@@ -161,8 +135,7 @@ export default async function InstagramDevicesPage() {
         .ig-devices-source-pill span,
         .ig-devices-kpi span,
         .ig-devices-host span,
-        .ig-devices-pending span,
-        .ig-devices-control span {
+        .ig-devices-pending span {
           color: rgba(255,255,255,0.36);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
@@ -182,14 +155,12 @@ export default async function InstagramDevicesPage() {
         .ig-devices-source-pill strong,
         .ig-devices-kpi small,
         .ig-devices-host p,
-        .ig-devices-pending p,
-        .ig-devices-control p {
+        .ig-devices-pending p {
           color: rgba(255,255,255,0.60);
           font-size: 12px;
         }
 
-        .ig-devices-accordion-list,
-        .ig-devices-control-list {
+        .ig-devices-accordion-list {
           display: grid;
           gap: 10px;
         }
@@ -313,8 +284,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-host strong,
-        .ig-devices-pending strong,
-        .ig-devices-control strong {
+        .ig-devices-pending strong {
           color: #f0f0ef;
           font-size: 15px;
         }
@@ -329,19 +299,6 @@ export default async function InstagramDevicesPage() {
         .ig-devices-account-link:focus-visible {
           color: #FBBF24;
           outline: none;
-        }
-
-        .ig-devices-control button {
-          justify-self: start;
-          min-height: 32px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 999px;
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.42);
-          cursor: not-allowed;
-          font-size: 12px;
-          font-weight: 900;
-          padding: 0 12px;
         }
 
         @media (max-width: 1120px) {
@@ -413,7 +370,7 @@ function HostAccordion({
   groups: DevicesOverview["accountsByPhone"];
 }) {
   if (!hosts.length) {
-    return <div className="ig-devices-pending"><span>Pending source</span><strong>No hosts found</strong><p>Host inventory is pending and no account assignment data is available.</p></div>;
+    return <div className="ig-devices-pending"><span>Empty state</span><strong>No hosts found</strong><p>No host inventory or account assignment data is available.</p></div>;
   }
 
   return (
@@ -457,7 +414,7 @@ function PhoneAccordion({
   groups: DevicesOverview["accountsByPhone"];
 }) {
   if (!phones.length) {
-    return <div className="ig-devices-pending"><span>Pending source</span><strong>No phones found</strong><p>No phones found from current source.</p></div>;
+    return <div className="ig-devices-pending"><span>Empty state</span><strong>No phones found</strong><p>No phones found from current source.</p></div>;
   }
 
   return (
@@ -487,7 +444,6 @@ function PhoneAccordion({
                   <strong>{phone.healthReason ?? "No issue from current source"}</strong>
                   <p>{phone.sourceLabel}</p>
                 </div>
-                <FutureControls compact />
               </div>
               <AccountList accounts={group?.accounts ?? []} />
             </div>
@@ -534,29 +490,5 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
       <span>{label}</span>
       <strong style={tone ? { color: statusTone(tone) } : undefined}>{value}</strong>
     </span>
-  );
-}
-
-function FutureControls({ compact = false }: { compact?: boolean }) {
-  const controls = [
-    ["Restart phone", "Future control · requires backend"],
-    ["Stop all accounts", "Future control · pending operator approval"],
-    ["Notes", "Pending backend"],
-    ["Save order", "Pending backend"],
-  ];
-
-  return (
-    <div className={compact ? "ig-devices-control-list ig-devices-control-list-compact" : "ig-devices-control-list"}>
-      {controls.map(([label, text]) => (
-        <article className="ig-devices-control" key={label}>
-          <span>Read-only</span>
-          <strong>{label}</strong>
-          <p>{text}</p>
-          <button type="button" disabled>
-            Disabled
-          </button>
-        </article>
-      ))}
-    </div>
   );
 }

@@ -42,9 +42,7 @@ export default async function InstagramCredentialsActionsPage() {
       <section className="ig-credentials-source-strip" aria-label="Credentials source status">
         <SourcePill label="Manage overview" detail={data.sourceDetails.manageOverview} />
         <SourcePill label="Radar overview" detail={data.sourceDetails.radarOverview} />
-        <SourcePill label="Account credentials" detail={data.sourceDetails.accountCredentials} />
         <SourcePill label="Dashboard actions" detail={data.sourceDetails.dashboardActions} />
-        <SourcePill label="Mutations" detail={data.sourceDetails.mutations} />
       </section>
 
       <section className="ig-credentials-kpis" aria-label="Credentials summary">
@@ -53,7 +51,7 @@ export default async function InstagramCredentialsActionsPage() {
         <Kpi label="Login problems" value={formatInteger(data.summary.loginProblemCount)} detail="Problem, blocked, checkpoint, challenge" tone={data.summary.loginProblemCount ? "danger" : "good"} />
         <Kpi label="Pending actions" value={formatInteger(data.summary.pendingActionsCount)} detail="Derived V1 action worklist" tone={data.summary.pendingActionsCount ? "warning" : "good"} />
         <Kpi label="Blocking campaigns" value={formatInteger(data.summary.blockingCampaignCount)} detail="No mutation from this view" tone={data.summary.blockingCampaignCount ? "danger" : "good"} />
-        <Kpi label="Client action required" value={formatInteger(data.summary.clientActionRequiredCount)} detail="Client-safe future workflows" tone={data.summary.clientActionRequiredCount ? "warning" : "good"} />
+        <Kpi label="Client action required" value={formatInteger(data.summary.clientActionRequiredCount)} detail="Actions requiring client input" tone={data.summary.clientActionRequiredCount ? "warning" : "good"} />
       </section>
 
       <AnalyticsSectionCard
@@ -67,7 +65,7 @@ export default async function InstagramCredentialsActionsPage() {
       <AnalyticsSectionCard
         eyebrow="Actions"
         title="Dashboard actions"
-        description="V1 actions are derived from safe dashboard status. Resolution buttons are disabled until account_dashboard_actions and credential mutations are connected."
+        description="Action worklist derived from safe dashboard status."
       >
         <ActionsList groups={data.actionGroups} />
       </AnalyticsSectionCard>
@@ -105,7 +103,7 @@ export default async function InstagramCredentialsActionsPage() {
         }
 
         .ig-credentials-source-strip {
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           margin-bottom: 14px;
         }
 
@@ -457,7 +455,7 @@ function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
       <div className="ig-credentials-empty">
         <span>Empty state</span>
         <strong>No dashboard actions found</strong>
-        <p>No derived dashboard actions were found. Dedicated account_dashboard_actions backend remains pending.</p>
+        <p>No derived dashboard actions were found from the current safe sources.</p>
       </div>
     );
   }
@@ -475,7 +473,6 @@ function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
               </div>
               <div className="ig-credentials-action-badges" aria-label="Action status badges">
                 <span className="ig-credentials-action-badge" style={{ color: statusTone(group.severity) }}>{group.severity}</span>
-                <span className="ig-credentials-action-badge">{group.backendMutationStatus}</span>
               </div>
             </div>
             <p>{group.description}</p>
@@ -485,7 +482,6 @@ function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
               <span>Audience <strong>{group.audience}</strong></span>
               <span>Status <strong>{group.status}</strong></span>
               <span>Source <strong>{group.sourceLabel}</strong></span>
-              <span>Backend <strong>{group.backendMutationStatus}</strong></span>
             </div>
             <div className="ig-credentials-action-grid" aria-label="Account action status">
               <ActionField label="Credentials" value={group.credentialsStatus} tone={group.credentialsStatus} />
@@ -507,9 +503,6 @@ function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
           </div>
           <div className="ig-credentials-action-buttons">
             <Link href={group.deepLink ?? `/instagram-dashboard/accounts/${encodeURIComponent(group.accountId || group.username)}`}>View Account</Link>
-            <button type="button" disabled title="Requires account_dashboard_actions backend">Future: Resolve</button>
-            <button type="button" disabled title="Requires account_dashboard_actions backend">Future: Acknowledge</button>
-            <button type="button" disabled title="Requires account_dashboard_actions backend">Future: Dismiss</button>
           </div>
         </article>
       ))}

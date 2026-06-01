@@ -178,7 +178,7 @@ function buildHosts(phones: PhoneDevice[]): DeviceHost[] {
       phonesCount: hostPhones.length,
       accountsCount: hostPhones.reduce((total, phone) => total + phone.accountsCount, 0),
       lastSeenAt: hostPhones.map((phone) => phone.lastSeenAt).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null,
-      notesStatus: "Notes: pending source",
+      notesStatus: "No host notes",
       sourceStatus: hostPhones.some((phone) => !phone.isInventoryPending) ? "partial" : "pending",
     };
   });
@@ -227,8 +227,8 @@ export async function getDevicesData(): Promise<DevicesOverview> {
             ? status("Device inventory partial", "Some phones are derived from account assignment data while inventory remains incomplete.", "pending")
             : status("Inventory pending", "No dedicated phone or host inventory source is connected yet.", "pending"),
       accountAssignments: status(manageData.summary.sourceStatus.accounts.label, "Account phone and host labels are derived from the Manage account contract.", manageData.summary.sourceStatus.accounts.status),
-      runtimeControls: status("Runtime controls disabled", "Restart, stop all, and order writes require backend support and operator approval.", "pending"),
-      notes: status("Notes pending source", "Phone notes and custom order are prepared for future backend storage.", "pending"),
+      runtimeControls: status("Runtime controls unavailable", "Runtime commands are not exposed from this read-only inventory view.", "pending"),
+      notes: status("Notes unavailable", "Phone notes and custom order are not shown in this view.", "pending"),
     },
     errors: [...manageData.errors, ...radarData.errors],
   };

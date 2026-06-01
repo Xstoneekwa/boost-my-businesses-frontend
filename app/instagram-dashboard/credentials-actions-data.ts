@@ -517,8 +517,8 @@ export async function getCredentialsActionsData(): Promise<CredentialsActionsOve
         description: "Risk and action signals are cross-checked with the Radar data contract.",
       },
       accountCredentials: {
-        label: "Account credentials pending backend",
-        description: "account_credentials is not consumed by this frontend view yet.",
+        label: "Account credentials unavailable",
+        description: "Credentials status is shown from the safe Manage projection.",
       },
       dashboardActions: {
         label: persistedDashboardActions.connected ? "Dashboard actions connected" : "Dashboard actions unavailable",
@@ -527,8 +527,8 @@ export async function getCredentialsActionsData(): Promise<CredentialsActionsOve
           : "Falling back to derived read-only signals because account_dashboard_actions could not be loaded.",
       },
       mutations: {
-        label: "Mutations disabled V1",
-        description: "Resolve, acknowledge, dismiss, credentials submit, 2FA, and reconnect workflows require backend approval.",
+        label: "Actions read-only",
+        description: "This view surfaces review actions without running credential mutations.",
       },
     },
     errors: [...manageData.errors, ...radarData.errors, ...(persistedDashboardActions.error ? [persistedDashboardActions.error] : [])],

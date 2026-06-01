@@ -7,6 +7,7 @@ import {
   type InstagramPublicProfileLookupResult,
 } from "@/lib/instagram-public-profile-lookup";
 import { canAccessTenantPages, getDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
 import { jsonError, jsonOk, readJsonBody, readString, type SupabaseRecord } from "../../_utils";
 
 export const dynamic = "force-dynamic";
@@ -450,7 +451,11 @@ async function fetchDeviceUdid(
   return readString(data?.device_udid, "").trim();
 }
 
-function safeCreateResponse(account: SupabaseRecord, credentials: AddProfileCredentialsResponse) {
+function safeCreateResponse(
+  account: SupabaseRecord,
+  credentials: AddProfileCredentialsResponse,
+  scheduleMeta?: { onboarding_schedule_assigned?: boolean; onboarding_schedule_reason?: string },
+) {
   return {
     account: {
       id: readString(account.id, ""),
@@ -462,6 +467,8 @@ function safeCreateResponse(account: SupabaseRecord, credentials: AddProfileCred
       status: "created",
       password_status: "write_only",
       device_assignment: readString(account.device_name, "pending source"),
+      onboarding_schedule_assigned: scheduleMeta?.onboarding_schedule_assigned ?? false,
+      onboarding_schedule_reason: scheduleMeta?.onboarding_schedule_reason ?? "not_attempted",
     },
     credentials: {
       request_id: credentials.request_id,
@@ -716,6 +723,12 @@ export async function POST(request: Request) {
       } catch {
         // Credential state is authoritative; dashboard actions can be reconciled later.
       }
+
+      const onboardingSchedule = await tryAutoAssignOnboardingSchedule(accountId).catch(() => ({
+        assigned: false,
+        reason: "onboarding_schedule_failed",
+      }));
+
       await tryRecordAddProfileAudit(supabase, {
         accountId,
         username: accountUsername,
@@ -723,8 +736,22 @@ export async function POST(request: Request) {
         credentialRequestId: credentials.request_id,
         actorId: adminContext.userId,
         resultStatus: "success",
+        metadataSafe: {
+          onboarding_schedule_assigned: onboardingSchedule.assigned,
+          onboarding_schedule_reason: onboardingSchedule.reason,
+        },
       });
-      return jsonOk(safeCreateResponse({ ...account, status: activeAccountStatus }, credentials), 201);
+      return jsonOk(
+        safeCreateResponse(
+          { ...account, status: activeAccountStatus },
+          credentials,
+          {
+            onboarding_schedule_assigned: onboardingSchedule.assigned,
+            onboarding_schedule_reason: onboardingSchedule.reason,
+          },
+        ),
+        201,
+      );
     } catch (credentialsError) {
       const reason = credentialsError instanceof Error && credentialsError.message === "credentials_ingestion_timeout"
         ? "credentials_ingestion_timeout"
