@@ -11,6 +11,7 @@ import {
   evaluateMiniRunCapsPreflight,
   evaluateUnfollowStartGate,
   evaluateUnfollowAnyStartGate,
+  isEligibleFollowTarget,
   outreachSessionBlockedByOutreachRealSendDisabled,
   resolveOutreachPreflightCap,
   resolveFollowToUnfollowHandoffEnabled,
@@ -107,6 +108,49 @@ test("Follow filter preflight rejects invalid follower ranges", () => {
 test("Follow filter preflight accepts null or valid thresholds", () => {
   assert.equal(validateFollowFilterSettingsRow({ min_followers: null, max_followers: null, min_posts: null }), null);
   assert.equal(validateFollowFilterSettingsRow({ min_followers: 100, max_followers: 500, min_posts: 3 }), null);
+});
+
+test("Follow target gate message is explicit", () => {
+  assert.equal(
+    runStartBlockMessage("no_eligible_targets"),
+    "Manual run is blocked because no eligible target account is available.",
+  );
+});
+
+test("Follow target eligibility uses ig_targets lifecycle fields", () => {
+  assert.equal(isEligibleFollowTarget({
+    status: "valid",
+    quality_status: "eligible",
+    verification_status: "found",
+    archived_at: null,
+    deleted_at: null,
+  }), true);
+  assert.equal(isEligibleFollowTarget({
+    status: "active",
+    quality_status: "eligible",
+    verification_status: "found",
+  }), true);
+  assert.equal(isEligibleFollowTarget({
+    status: "pending",
+    quality_status: "eligible",
+    verification_status: "found",
+  }), false);
+  assert.equal(isEligibleFollowTarget({
+    status: "valid",
+    quality_status: "rejected_verified",
+    verification_status: "found",
+  }), false);
+  assert.equal(isEligibleFollowTarget({
+    status: "valid",
+    quality_status: "eligible",
+    verification_status: "pending",
+  }), false);
+  assert.equal(isEligibleFollowTarget({
+    status: "valid",
+    quality_status: "eligible",
+    verification_status: "found",
+    archived_at: "2026-01-01T00:00:00Z",
+  }), false);
 });
 
 test("Schedule block messages are stable", () => {

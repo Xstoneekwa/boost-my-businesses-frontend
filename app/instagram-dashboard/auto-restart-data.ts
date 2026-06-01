@@ -236,6 +236,28 @@ function followFiltersLabel(settings: SupabaseRecord | undefined) {
     : "Follow filters inactive · candidate eligibility not precomputed";
 }
 
+function isEligibleFollowTarget(row: SupabaseRecord) {
+  const status = readString(row.status, "").toLowerCase();
+  if (status !== "valid" && status !== "active") return false;
+  if (readString(row.quality_status, "").toLowerCase() !== "eligible") return false;
+  const verificationStatus = readString(row.verification_status, "").toLowerCase();
+  if (verificationStatus && verificationStatus !== "found") return false;
+  if (readString(row.archived_at, "")) return false;
+  if (readString(row.deleted_at, "")) return false;
+  return true;
+}
+
+function eligibleFollowTargetCounts(rows: SupabaseRecord[]) {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!isEligibleFollowTarget(row)) continue;
+    const accountId = readString(row.account_id, "");
+    if (!accountId) continue;
+    counts.set(accountId, (counts.get(accountId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function planCandidate({
   account,
   settings,
@@ -248,6 +270,7 @@ function planCandidate({
   activeRequest,
   assignment,
   restWindows,
+  eligibleFollowTargetCount,
   rules,
 }: {
   account: ManageAccount;
@@ -261,6 +284,7 @@ function planCandidate({
   activeRequest: SupabaseRecord | undefined;
   assignment: SupabaseRecord | undefined;
   restWindows: ScheduleRestWindowProjection[];
+  eligibleFollowTargetCount: number;
   rules: AutoRestartRulePreview;
 }): AutoRestartCandidate {
   const packageDefaults = inferPackageDefaults(account);
@@ -335,6 +359,7 @@ function planCandidate({
   if (rules.respectSixHourWindow && assignment && !windowActive) blockingReasons.push("assignment_window_closed");
   if (rules.respectPhoneRest && phoneRestActive) blockingReasons.push("phone_rest_active");
   if (!account.phoneName || account.phoneName === "Unknown phone") blockingReasons.push("assignment_or_device_pending");
+  if (follow.enabled && follow.remaining > 0 && eligibleFollowTargetCount < 1) blockingReasons.push("no_eligible_targets");
 
   const accountSessionRemaining = follow.remaining + unfollow.remaining + welcome.remaining;
   const outreachRemaining = outreach.remaining;
@@ -408,6 +433,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceHeartbeatsResult,
     packageSummaryResult,
     followFilterSettingsResult,
+    targetsResult,
     assignmentsResult,
     restWindowsResult,
   ] = await Promise.all([
@@ -422,6 +448,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
     supabase.from("account_package_summary").select("account_id,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(500),
+    supabase.from("ig_targets").select("account_id,status,quality_status,verification_status,archived_at,deleted_at").in("account_id", accountIds).in("status", ["valid", "active"]).limit(5000),
     supabase
       .from("account_assignments")
       .select("account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,phone_devices(name,timezone,status)")
@@ -447,6 +474,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceHeartbeatsResult.error,
     packageSummaryResult.error,
     followFilterSettingsResult.error,
+    targetsResult.error,
     assignmentsResult.error,
     restWindowsResult.error,
     ...manageData.errors.map((message) => ({ message })),
@@ -461,6 +489,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
+  const eligibleTargetsByAccount = eligibleFollowTargetCounts((targetsResult.data ?? []) as SupabaseRecord[]);
   const assignmentsByAccount = mapByAccount((assignmentsResult.data ?? []) as SupabaseRecord[]);
   const restWindowsByDevice = groupByAccount((restWindowsResult.data ?? []) as SupabaseRecord[], "device_id");
 
@@ -489,6 +518,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         activeRequest: activeRequestsByAccount.get(account.accountId),
         assignment,
         restWindows,
+        eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         rules,
       });
     })
@@ -519,6 +549,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       { label: "Device availability", status: latestDeviceSeen ? "observed" : "unknown", detail: latestDeviceSeen ?? "No device heartbeat visible from current source." },
       { label: "Fixed blackout windows", status: restWindowsResult.error ? "unknown" : "connected", detail: "Uses phone_rest_windows only for explicit maintenance/ops blackouts; natural post-session rest is buffer time inside the assigned slot." },
       { label: "6h session window", status: assignmentsResult.error ? "unknown" : "connected", detail: "Uses account_assignments starts_at/ends_at for schedule window compliance." },
+      { label: "Follow target accounts", status: targetsResult.error ? "unknown" : "connected", detail: "Blocks account_session dry-run restart when no eligible target account exists." },
       { label: "Active run/request protection", status: "connected", detail: "Preview blocks accounts with active ig_runs or account_run_requests." },
       { label: "Package cap alignment", status: "partial", detail: "Uses account_package_summary when available plus domain caps; runtime profiles are displayed separately." },
     ],

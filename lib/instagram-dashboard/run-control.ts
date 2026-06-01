@@ -54,6 +54,7 @@ export type RunStartBlockReason =
   | "dm_legacy_gate_mismatch"
   | "mini_run_welcome_cap_unproven"
   | "mini_run_follow_cap_unproven"
+  | "no_eligible_targets"
   | "follow_day_quota_exhausted"
   | "follow_warmup_pending"
   | "follow_filter_invalid_range"
@@ -114,6 +115,29 @@ export function runControlFollowToUnfollowRealEnabled(env: MiniRunEnv = process.
     env.INSTAGRAM_RUN_CONTROL_ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_ENABLED ??
     env.ACCOUNT_SESSION_FOLLOW_TO_UNFOLLOW_REAL_ENABLED
   ) === "true";
+}
+
+export function isEligibleFollowTarget(row: SupabaseRecord) {
+  const status = readString(row.status, "").toLowerCase();
+  if (status !== "valid" && status !== "active") return false;
+  if (readString(row.quality_status, "").toLowerCase() !== "eligible") return false;
+  const verificationStatus = readString(row.verification_status, "").toLowerCase();
+  if (verificationStatus && verificationStatus !== "found") return false;
+  if (readString(row.archived_at, "")) return false;
+  if (readString(row.deleted_at, "")) return false;
+  return true;
+}
+
+async function countEligibleFollowTargets(accountId: string) {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase
+    .from("ig_targets")
+    .select("id,status,quality_status,verification_status,archived_at,deleted_at")
+    .eq("account_id", accountId)
+    .in("status", ["valid", "active"])
+    .limit(500);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as SupabaseRecord[]).filter(isEligibleFollowTarget).length;
 }
 
 export function resolveFollowToUnfollowHandoffEnabled({
@@ -1171,6 +1195,16 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     }
 
     if (normalizedRunType === "account_session") {
+      let eligibleFollowTargets = 0;
+      try {
+        eligibleFollowTargets = await countEligibleFollowTargets(accountId);
+      } catch {
+        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      }
+      if (eligibleFollowTargets < 1) {
+        return { ok: false as const, reason: "no_eligible_targets" as RunStartBlockReason, health };
+      }
+
       const { data: packageSummary, error: packageSummaryError } = await supabase
         .from("account_package_summary")
         .select("warmup_status,package_caps,effective_caps_preview")
@@ -1418,6 +1452,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual mini-run is blocked because Welcome DM cap is not proven to be at most 1.";
     case "mini_run_follow_cap_unproven":
       return "Manual mini-run is blocked because Follow caps are not proven to be at most 1.";
+    case "no_eligible_targets":
+      return "Manual run is blocked because no eligible target account is available.";
     case "follow_day_quota_exhausted":
       return "Manual run is blocked because the effective Follow day quota is exhausted.";
     case "follow_warmup_pending":
