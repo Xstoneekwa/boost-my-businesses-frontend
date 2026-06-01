@@ -199,6 +199,7 @@ function operationsStatus(account: ManageAccount): ClientAccountOperationsStatus
 
   if (includesAny(combined, ["cancelled", "canceled"])) return "cancelled";
   if (includesAny(admin, ["paused"])) return "paused";
+  if (includesAny(admin, ["needs_assistance", "needs assistance"])) return "pending";
   if (includesAny(onboarding, ["onboarding"])) return "onboarding";
   if (includesAny(combined, ["pending"])) return "pending";
   if (lifecycle === "active" && admin === "active") return "active";
@@ -255,15 +256,6 @@ function buildActions(account: ManageAccount): ClientAccountOperationAction[] {
       targetHref: null,
       backendStatus: "pending_backend",
     },
-    {
-      key: "mark_needs_assistance",
-      label: "Mark needs assistance",
-      description: "Future support flag with activity audit and cross-surface sync.",
-      disabled: true,
-      disabledReason: "Requires audited status/action backend.",
-      targetHref: null,
-      backendStatus: "pending_backend",
-    },
   ];
 }
 
@@ -273,6 +265,7 @@ function isAssistanceNeeded(account: ManageAccount, hasDashboardAction: boolean)
     account.reauthRequired ||
     account.pendingActionsCount > 0 ||
     account.blockingCampaign ||
+    includesAny(account.adminStatus, ["needs_assistance", "needs assistance"]) ||
     passwordStatus(account) === "missing" ||
     includesAny(`${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`, ["problem", "error", "failed", "blocked", "checkpoint", "challenge"])
   );
@@ -321,13 +314,6 @@ function buildSummary(items: ClientAccountOperationsItem[]): ClientAccountsOpera
   };
 }
 
-// TODO: Future backend should verify Instagram account existence at account
-// creation/update time, normalize the username, store/cache canonical username
-// and safe profile picture URL, and block auto-login/provisioning when
-// instagramVerificationStatus is not_found or critically failed.
-// TODO: Future status changes need an audited account status backend with
-// source_surface, actor_type, actor_id, reason, changed_at, sync_status, and
-// audit_event_id, then sync admin dashboard, client dashboard, BotApp, and DB.
 export async function getClientAccountsOperationsData(): Promise<ClientAccountsOperationsOverview> {
   const [manageData, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
   const actionAccountIds = new Set(credentialsData.actionGroups.map((group) => group.accountId || group.username));
@@ -353,16 +339,16 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
         description: "Assistance signals are derived from the read-only Credentials Actions contract.",
       },
       statusMutations: {
-        label: "Status mutations pending backend",
-        description: "Business status changes require audited backend sync before enabling selectors.",
+        label: "Status changes unavailable",
+        description: "Business status changes are not exposed from this read-only support view.",
       },
       botAppSync: {
-        label: "BotApp sync pending backend",
-        description: "Future status changes must sync to BotApp/Mac app through backend DB.",
+        label: "BotApp sync not shown",
+        description: "BotApp sync status is not displayed in this support view.",
       },
       clientDashboardSync: {
-        label: "Client dashboard sync pending backend",
-        description: "Future status changes must be reflected in the client dashboard.",
+        label: "Client sync not shown",
+        description: "Client dashboard sync status is not displayed in this support view.",
       },
     },
     errors: [...manageData.errors, ...credentialsData.errors],

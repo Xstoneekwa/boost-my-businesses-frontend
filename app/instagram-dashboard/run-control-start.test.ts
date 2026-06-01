@@ -21,6 +21,19 @@ import {
   runStartBlockMessage,
   validateFollowFilterSettingsRow,
 } from "../../lib/instagram-dashboard/run-control";
+import {
+  assignmentWindowContainsNow,
+  mapScheduleGateReasonToRunStart,
+  phoneRestActiveNow,
+  scheduleBlockMessage,
+} from "../../lib/instagram-dashboard/schedule";
+import {
+  findScheduleSlot,
+  scheduleDirty,
+  scheduleSlotKey,
+  scheduleValidationError,
+} from "./InstagramDashboardButtons";
+import type { ScheduleProjection } from "../../lib/instagram-dashboard/schedule";
 
 test("run start 401 is surfaced as an error", async () => {
   await assert.rejects(
@@ -49,6 +62,12 @@ test("run start success with request_id is shown as success", () => {
     status: "queued",
   });
   assert.equal(message, "Run request 00000000 queued (queued).");
+});
+
+test("admin lifecycle block messages are explicit", () => {
+  assert.match(runStartBlockMessage("account_paused"), /Paused accounts/);
+  assert.match(runStartBlockMessage("account_cancelled"), /Cancelled accounts/);
+  assert.match(runStartBlockMessage("account_needs_assistance"), /needs assistance/);
 });
 
 test("API start success payload includes request id and account id", () => {
@@ -88,6 +107,119 @@ test("Follow filter preflight rejects invalid follower ranges", () => {
 test("Follow filter preflight accepts null or valid thresholds", () => {
   assert.equal(validateFollowFilterSettingsRow({ min_followers: null, max_followers: null, min_posts: null }), null);
   assert.equal(validateFollowFilterSettingsRow({ min_followers: 100, max_followers: 500, min_posts: 3 }), null);
+});
+
+test("Schedule block messages are stable", () => {
+  assert.match(scheduleBlockMessage("assignment_window_closed"), /outside its assigned schedule window/);
+  assert.match(scheduleBlockMessage("phone_rest_active"), /rest window/);
+  assert.match(scheduleBlockMessage("no_app_instance_available"), /app instance/);
+  assert.equal(mapScheduleGateReasonToRunStart("phone_rest_active"), "phone_rest_active");
+});
+
+test("Schedule window helper detects active and inactive windows", () => {
+  const now = new Date("2026-06-01T03:00:00.000Z");
+  assert.equal(
+    assignmentWindowContainsNow("2026-06-01T00:00:00.000Z", "2026-06-01T06:00:00.000Z", now),
+    true,
+  );
+  assert.equal(
+    assignmentWindowContainsNow("2026-06-01T06:00:00.000Z", "2026-06-01T12:00:00.000Z", now),
+    false,
+  );
+});
+
+test("Fixed blackout helper blocks during configured window", () => {
+  const now = new Date("2026-06-01T03:00:00.000Z");
+  const active = phoneRestActiveNow(
+    [{
+      id: "rest-1",
+      weekday: null,
+      local_start_time: "02:00:00",
+      local_end_time: "04:00:00",
+      timezone: "UTC",
+      status: "active",
+      reason: "nightly rest",
+    }],
+    now,
+    "UTC",
+  );
+  assert.equal(active, true);
+});
+
+test("Schedule UI validation rejects occupied slots", () => {
+  const schedule: ScheduleProjection = {
+    account_id: "acct-1",
+    assignment_type: "full_cycle",
+    slot_kind: "full_cycle_6h",
+    device_id: "dev-1",
+    device_label: "Phone A",
+    device_timezone: "UTC",
+    slot_date: "2026-06-01",
+    current_assignment: null,
+    available_slots: [{
+      slot_index: 1,
+      slot_kind: "full_cycle_6h",
+      slot_kind_label: "full_cycle_6h",
+      local_label: "00:00 - 06:00",
+      starts_at: "2026-06-01T00:00:00.000Z",
+      ends_at: "2026-06-01T06:00:00.000Z",
+      available: false,
+      reason: "occupied",
+      occupied_by: "other_account",
+    }],
+    rest_windows: [],
+    gates: {
+      ok: false,
+      reason: "assignment_missing",
+      run_start_gate: "blocked",
+      dispatcher_gate: "blocked",
+      auto_restart_gate: "blocked",
+    },
+    save_ready: true,
+    runtime_status: "active" as const,
+  };
+
+  const key = scheduleSlotKey("2026-06-01T00:00:00.000Z", "2026-06-01T06:00:00.000Z");
+  assert.equal(findScheduleSlot(schedule, key)?.reason, "occupied");
+  assert.match(scheduleValidationError(schedule, key), /occupied/);
+  assert.equal(scheduleDirty(schedule, schedule, ""), true);
+});
+
+test("Schedule UI validation rejects slots without free app instances", () => {
+  const schedule: ScheduleProjection = {
+    account_id: "acct-1",
+    assignment_type: "full_cycle",
+    slot_kind: "full_cycle_6h",
+    device_id: "dev-1",
+    device_label: "Phone A",
+    device_timezone: "UTC",
+    slot_date: "2026-06-01",
+    current_assignment: null,
+    available_slots: [{
+      slot_index: 1,
+      slot_kind: "full_cycle_6h",
+      slot_kind_label: "full_cycle_6h",
+      local_label: "00:00 - 06:00",
+      starts_at: "2026-06-01T00:00:00.000Z",
+      ends_at: "2026-06-01T06:00:00.000Z",
+      available: false,
+      reason: "no_app_instance_available",
+      occupied_by: null,
+    }],
+    rest_windows: [],
+    gates: {
+      ok: false,
+      reason: "assignment_missing",
+      run_start_gate: "blocked",
+      dispatcher_gate: "blocked",
+      auto_restart_gate: "blocked",
+    },
+    save_ready: true,
+    runtime_status: "active" as const,
+  };
+
+  const key = scheduleSlotKey("2026-06-01T00:00:00.000Z", "2026-06-01T06:00:00.000Z");
+  assert.match(scheduleValidationError(schedule, key), /no free Instagram app instance/);
 });
 
 test("DM service availability disables Growth without add-ons", () => {

@@ -5,12 +5,11 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
+import AccountStatusActionMenu from "./AccountStatusActionMenu";
 import {
   getClientAccountsOperationsData,
-  type ClientAccountOperationAction,
   type ClientAccountOperationsItem,
   type ClientAccountOperationsStatus,
-  type ClientAccountsSourceDetail,
 } from "../client-accounts-data";
 import { formatDateTime, formatInteger, statusTone } from "../manage-data";
 import { getRadarData } from "../radar-data";
@@ -70,7 +69,7 @@ export default async function InstagramClientAccountsPage({
       <DashboardPageHeader
         eyebrow="Accounts"
         title="Client Accounts"
-        description="Admin support view for client account status and safe assistance."
+        description=""
         action={<InstagramDashboardViewNav active="client-accounts" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
@@ -80,14 +79,6 @@ export default async function InstagramClientAccountsPage({
           <span>{data.errors.join(" · ")}</span>
         </section>
       )}
-
-      <section className="ig-client-accounts-source-strip" aria-label="Client Accounts source status">
-        <SourcePill label="Manage overview" detail={data.sourceDetails.manageOverview} />
-        <SourcePill label="Credentials actions" detail={data.sourceDetails.credentialsActions} />
-        <SourcePill label="Status mutations" detail={data.sourceDetails.statusMutations} />
-        <SourcePill label="BotApp sync" detail={data.sourceDetails.botAppSync} />
-        <SourcePill label="Client sync" detail={data.sourceDetails.clientDashboardSync} />
-      </section>
 
       <section className="ig-client-accounts-kpis" aria-label="Client Accounts summary">
         <Kpi label="Total" value={formatInteger(data.summary.total)} detail="Safe account rows" />
@@ -102,7 +93,6 @@ export default async function InstagramClientAccountsPage({
       <AnalyticsSectionCard
         eyebrow="Client accounts"
         title="Account operations worklist"
-        description="Support/admin overview. Manage controls and Settings drawers remain unchanged."
       >
         <FilterBar items={data.items} activeFilter={activeFilter} />
         <ClientAccountsTable items={visibleItems} />
@@ -113,6 +103,10 @@ export default async function InstagramClientAccountsPage({
           max-width: 1480px;
           margin: 0 auto;
           padding: 28px clamp(16px, 3vw, 36px) 48px;
+        }
+
+        .ig-client-accounts-page .dashboard-page-copy {
+          display: none;
         }
 
         .ig-client-accounts-alert {
@@ -133,15 +127,9 @@ export default async function InstagramClientAccountsPage({
           color: #FCA5A5;
         }
 
-        .ig-client-accounts-source-strip,
         .ig-client-accounts-kpis {
           display: grid;
           gap: 14px;
-        }
-
-        .ig-client-accounts-source-strip {
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          margin-bottom: 14px;
         }
 
         .ig-client-accounts-kpis {
@@ -149,7 +137,6 @@ export default async function InstagramClientAccountsPage({
           margin-bottom: 18px;
         }
 
-        .ig-client-accounts-source-pill,
         .ig-client-accounts-kpi,
         .ig-client-accounts-empty {
           border: 1px solid rgba(255,255,255,0.08);
@@ -157,7 +144,6 @@ export default async function InstagramClientAccountsPage({
           background: rgba(255,255,255,0.028);
         }
 
-        .ig-client-accounts-source-pill,
         .ig-client-accounts-empty {
           display: grid;
           gap: 8px;
@@ -169,7 +155,6 @@ export default async function InstagramClientAccountsPage({
           padding: 16px;
         }
 
-        .ig-client-accounts-source-pill span,
         .ig-client-accounts-kpi span,
         .ig-client-accounts-filters span,
         .ig-client-accounts-table th,
@@ -182,13 +167,11 @@ export default async function InstagramClientAccountsPage({
           text-transform: uppercase;
         }
 
-        .ig-client-accounts-source-pill strong,
         .ig-client-accounts-empty strong {
           color: #f0f0ef;
           font-size: 14px;
         }
 
-        .ig-client-accounts-source-pill small,
         .ig-client-accounts-kpi small,
         .ig-client-accounts-table td,
         .ig-client-accounts-empty p {
@@ -252,7 +235,7 @@ export default async function InstagramClientAccountsPage({
 
         .ig-client-accounts-table {
           width: 100%;
-          min-width: 1160px;
+          min-width: 1040px;
           border-collapse: separate;
           border-spacing: 0 10px;
           table-layout: fixed;
@@ -278,9 +261,13 @@ export default async function InstagramClientAccountsPage({
         .ig-client-accounts-table th:nth-child(7),
         .ig-client-accounts-table td:nth-child(3),
         .ig-client-accounts-table td:nth-child(4),
-        .ig-client-accounts-table td:nth-child(5),
-        .ig-client-accounts-table td:nth-child(7) {
+        .ig-client-accounts-table td:nth-child(5) {
           text-align: center;
+        }
+
+        .ig-client-accounts-table th:nth-child(7),
+        .ig-client-accounts-table td:nth-child(7) {
+          text-align: right;
         }
 
         .ig-client-accounts-table td:nth-child(3),
@@ -407,30 +394,17 @@ export default async function InstagramClientAccountsPage({
           color: #86EFAC;
         }
 
-        .ig-client-accounts-select {
-          min-height: 36px;
-          width: 100%;
-          max-width: 170px;
-          border: 1px solid rgba(245,158,11,0.26);
-          border-radius: 999px;
-          background: rgba(245,158,11,0.10);
-          color: rgba(255,255,255,0.70);
-          font-size: 12px;
-          font-weight: 900;
-          padding: 0 12px;
-        }
-
-        .ig-client-accounts-select:disabled {
-          cursor: not-allowed;
-          opacity: 0.82;
-        }
-
         .ig-client-accounts-actions {
           display: flex;
-          justify-content: center;
+          justify-content: flex-end;
           gap: 6px;
           flex-wrap: nowrap;
           min-width: 0;
+        }
+
+        .ig-client-accounts-status-menu {
+          position: relative;
+          display: inline-flex;
         }
 
         .ig-client-accounts-action-link,
@@ -468,22 +442,98 @@ export default async function InstagramClientAccountsPage({
           opacity: 0.72;
         }
 
+        .ig-client-accounts-status-popover {
+          position: absolute;
+          z-index: 20;
+          right: 0;
+          top: calc(100% + 8px);
+          display: grid;
+          gap: 6px;
+          width: 238px;
+          padding: 8px;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 14px;
+          background: rgba(9,14,28,0.98);
+          box-shadow: 0 18px 40px rgba(0,0,0,0.34);
+        }
+
+        .ig-client-accounts-status-menu-item {
+          display: grid;
+          grid-template-columns: 18px 1fr;
+          align-items: center;
+          gap: 9px;
+          width: 100%;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 10px;
+          background: rgba(255,255,255,0.035);
+          color: rgba(255,255,255,0.78);
+          cursor: pointer;
+          padding: 8px;
+          text-align: left;
+        }
+
+        .ig-client-accounts-status-menu-item:hover,
+        .ig-client-accounts-status-menu-item:focus-visible {
+          border-color: rgba(245,158,11,0.34);
+          background: rgba(245,158,11,0.10);
+          outline: none;
+        }
+
+        .ig-client-accounts-status-menu-item:disabled {
+          cursor: not-allowed;
+          opacity: 0.54;
+        }
+
+        .ig-client-accounts-status-menu-item svg {
+          width: 16px;
+          height: 16px;
+        }
+
+        .ig-client-accounts-status-menu-item strong,
+        .ig-client-accounts-status-menu-item small {
+          display: block;
+        }
+
+        .ig-client-accounts-status-menu-item strong {
+          color: #f0f0ef;
+          font-size: 12px;
+        }
+
+        .ig-client-accounts-status-menu-item small {
+          margin-top: 2px;
+          color: rgba(255,255,255,0.50);
+          font-size: 10.5px;
+          line-height: 1.35;
+        }
+
+        .ig-client-accounts-status-menu-item-danger {
+          border-color: rgba(248,113,113,0.18);
+        }
+
+        .ig-client-accounts-status-menu-item-danger:hover,
+        .ig-client-accounts-status-menu-item-danger:focus-visible {
+          border-color: rgba(248,113,113,0.40);
+          background: rgba(248,113,113,0.10);
+        }
+
+        .ig-client-accounts-status-menu-error {
+          color: #FCA5A5;
+          font-size: 11px;
+          line-height: 1.35;
+          padding: 2px 4px;
+        }
+
         .ig-client-accounts-empty {
           margin-top: 10px;
         }
 
         @media (max-width: 1180px) {
-          .ig-client-accounts-source-strip {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
           .ig-client-accounts-kpis {
             grid-template-columns: repeat(3, minmax(0, 1fr));
           }
         }
 
         @media (max-width: 760px) {
-          .ig-client-accounts-source-strip,
           .ig-client-accounts-kpis {
             grid-template-columns: 1fr;
           }
@@ -498,16 +548,6 @@ export default async function InstagramClientAccountsPage({
         }
       `}</style>
     </main>
-  );
-}
-
-function SourcePill({ label, detail }: { label: string; detail: ClientAccountsSourceDetail }) {
-  return (
-    <article className="ig-client-accounts-source-pill">
-      <span>{label}</span>
-      <strong>{detail.label}</strong>
-      <small>{detail.description}</small>
-    </article>
   );
 }
 
@@ -564,13 +604,13 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
     <div className="ig-client-accounts-table-wrap">
       <table className="ig-client-accounts-table">
         <colgroup>
-          <col style={{ width: "22%" }} />
-          <col style={{ width: "19%" }} />
-          <col style={{ width: "11%" }} />
-          <col style={{ width: "10%" }} />
+          <col style={{ width: "27%" }} />
           <col style={{ width: "13%" }} />
-          <col style={{ width: "15%" }} />
           <col style={{ width: "10%" }} />
+          <col style={{ width: "9%" }} />
+          <col style={{ width: "16%" }} />
+          <col style={{ width: "13%" }} />
+          <col style={{ width: "12%" }} />
         </colgroup>
         <thead>
           <tr>
@@ -610,27 +650,13 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
               <td>{formatDateTime(item.createdAt)}</td>
               <td>
                 <div className="ig-client-accounts-status-cell">
-                  <label className="ig-client-accounts-status-select-label" htmlFor={`status-${item.accountId || item.username}`}>Pending backend</label>
-                  <select
-                    id={`status-${item.accountId || item.username}`}
-                    className="ig-client-accounts-select"
-                    value={item.operationsStatus}
-                    disabled
-                    title="Status changes require audited backend sync."
-                    aria-label={`${item.username} status selector disabled pending backend`}
-                  >
-                    <option value="active">active</option>
-                    <option value="pending">pending</option>
-                    <option value="onboarding">onboarding</option>
-                    <option value="paused">paused</option>
-                    <option value="cancelled">cancelled</option>
-                    <option value="unknown">unknown</option>
-                  </select>
+                  <span className="ig-client-accounts-status-select-label">Status</span>
+                  <StatusBadge value={item.needsAssistance ? "needs assistance" : item.operationsStatus} tone={item.needsAssistance ? "danger" : statusBadgeTone(item.operationsStatus)} />
                   <small style={{ color: statusTone(item.operationsStatus) }}>{item.adminStatus} · {item.customerStatus} · {item.subscriptionStatus}</small>
                 </div>
               </td>
               <td>
-                <ActionList actions={item.actions} />
+                <ActionList item={item} />
               </td>
             </tr>
           ))}
@@ -640,10 +666,10 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
   );
 }
 
-function ActionList({ actions }: { actions: ClientAccountOperationAction[] }) {
+function ActionList({ item }: { item: ClientAccountOperationsItem }) {
   return (
     <div className="ig-client-accounts-actions">
-      {actions.map((action) => {
+      {item.actions.map((action) => {
         const Icon = actionIcon(action.key);
         const title = action.disabledReason ? `${action.label}: ${action.disabledReason}` : `${action.label}: ${action.description}`;
 
@@ -664,6 +690,11 @@ function ActionList({ actions }: { actions: ClientAccountOperationAction[] }) {
           </Link>
         );
       })}
+      <AccountStatusActionMenu
+        accountId={item.accountId}
+        username={item.username}
+        operationsStatus={item.needsAssistance ? "needs-assistance" : item.operationsStatus}
+      />
     </div>
   );
 }
@@ -720,5 +751,12 @@ function twoFactorTone(value: string): "neutral" | "good" | "warning" | "danger"
   if (value === "enabled" || value === "disabled") return "good";
   if (value === "code required") return "danger";
   if (value === "pending action" || value === "checkpoint" || value === "blocked") return "warning";
+  return "neutral";
+}
+
+function statusBadgeTone(value: ClientAccountOperationsStatus): "neutral" | "good" | "warning" | "danger" {
+  if (value === "active") return "good";
+  if (value === "cancelled") return "danger";
+  if (value === "pending" || value === "onboarding" || value === "paused") return "warning";
   return "neutral";
 }

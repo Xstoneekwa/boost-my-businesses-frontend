@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
 
@@ -245,6 +246,8 @@ function planCandidate({
   interactions,
   activeRun,
   activeRequest,
+  assignment,
+  restWindows,
   rules,
 }: {
   account: ManageAccount;
@@ -256,6 +259,8 @@ function planCandidate({
   interactions: SupabaseRecord[];
   activeRun: SupabaseRecord | undefined;
   activeRequest: SupabaseRecord | undefined;
+  assignment: SupabaseRecord | undefined;
+  restWindows: ScheduleRestWindowProjection[];
   rules: AutoRestartRulePreview;
 }): AutoRestartCandidate {
   const packageDefaults = inferPackageDefaults(account);
@@ -306,11 +311,29 @@ function planCandidate({
   });
 
   const blockingReasons: string[] = [];
+  const startsAt = readString(assignment?.starts_at, "");
+  const endsAt = readString(assignment?.ends_at, "");
+  const deviceTimezone = readString(
+    (assignment?.phone_devices as SupabaseRecord | undefined)?.timezone,
+    "UTC",
+  );
+  const windowActive = startsAt && endsAt ? assignmentWindowContainsNow(startsAt, endsAt) : false;
+  const phoneRestActive = phoneRestActiveNow(restWindows, new Date(), deviceTimezone);
+  const sessionWindowStatus = !assignment
+    ? "assignment_missing"
+    : windowActive
+      ? "in_window"
+      : "outside_window";
+  const phoneRestStatus = phoneRestActive ? "active" : restWindows.length ? "clear" : "no_rest_configured";
+
   if (!rules.enabled) blockingReasons.push("scheduler_disabled");
   if (rules.mode !== "dry_run") blockingReasons.push("active_mode_not_wired");
   if (activeRun) blockingReasons.push("active_run_exists");
   if (activeRequest) blockingReasons.push("active_run_request_exists");
   if (isBlockingAccount(account)) blockingReasons.push("account_blocking_action_or_credentials");
+  if (!assignment) blockingReasons.push("assignment_missing");
+  if (rules.respectSixHourWindow && assignment && !windowActive) blockingReasons.push("assignment_window_closed");
+  if (rules.respectPhoneRest && phoneRestActive) blockingReasons.push("phone_rest_active");
   if (!account.phoneName || account.phoneName === "Unknown phone") blockingReasons.push("assignment_or_device_pending");
 
   const accountSessionRemaining = follow.remaining + unfollow.remaining + welcome.remaining;
@@ -339,10 +362,10 @@ function planCandidate({
       welcomeEnabled ? "Welcome" : "",
       outreachEnabled ? "Outreach" : "",
     ].filter(Boolean),
-    phoneName: account.phoneName || "Unknown phone",
-    phoneRestStatus: "pending source",
-    sessionWindowStatus: "6h window pending source",
-    assignmentStatus: account.phoneName && account.phoneName !== "Unknown phone" ? "assigned" : "pending",
+    phoneName: account.phoneName || readString((assignment?.phone_devices as SupabaseRecord | undefined)?.name, "Unknown phone"),
+    phoneRestStatus,
+    sessionWindowStatus,
+    assignmentStatus: assignment ? readString(assignment.status, "assigned") : "pending",
     gateStatus: restartEligible ? "dry-run eligible" : "blocked",
     restartEligible,
     blockReason: blockingReasons.join(",") || "eligible_dry_run",
@@ -385,6 +408,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceHeartbeatsResult,
     packageSummaryResult,
     followFilterSettingsResult,
+    assignmentsResult,
+    restWindowsResult,
   ] = await Promise.all([
     supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap").in("account_id", accountIds).limit(500),
@@ -397,6 +422,17 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
     supabase.from("account_package_summary").select("account_id,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(500),
+    supabase
+      .from("account_assignments")
+      .select("account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,phone_devices(name,timezone,status)")
+      .in("account_id", accountIds)
+      .in("status", ["pending", "reserved", "active"])
+      .limit(500),
+    supabase
+      .from("phone_rest_windows")
+      .select("id,device_id,weekday,local_start_time,local_end_time,timezone,status,reason")
+      .eq("status", "active")
+      .limit(1000),
   ]);
 
   const errors = [
@@ -411,6 +447,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceHeartbeatsResult.error,
     packageSummaryResult.error,
     followFilterSettingsResult.error,
+    assignmentsResult.error,
+    restWindowsResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -423,20 +461,37 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
+  const assignmentsByAccount = mapByAccount((assignmentsResult.data ?? []) as SupabaseRecord[]);
+  const restWindowsByDevice = groupByAccount((restWindowsResult.data ?? []) as SupabaseRecord[], "device_id");
 
   const candidates = manageData.activeAccounts
-    .map((account) => planCandidate({
-      account,
-      settings: settingsByAccount.get(account.accountId),
-      followFilterSettings: followFilterSettingsByAccount.get(account.accountId),
-      unfollowSettings: unfollowByAccount.get(account.accountId),
-      dmSettings: dmByAccount.get(account.accountId),
-      packageSummary: packageSummaryByAccount.get(account.accountId),
-      interactions: interactionsByAccount.get(account.accountId) ?? [],
-      activeRun: activeRunsByAccount.get(account.accountId),
-      activeRequest: activeRequestsByAccount.get(account.accountId),
-      rules,
-    }))
+    .map((account) => {
+      const assignment = assignmentsByAccount.get(account.accountId);
+      const deviceId = readString(assignment?.device_id, "");
+      const restWindows = (restWindowsByDevice.get(deviceId) ?? []).map((row) => ({
+        id: readString(row.id, ""),
+        weekday: typeof row.weekday === "number" ? row.weekday : null,
+        local_start_time: readString(row.local_start_time, ""),
+        local_end_time: readString(row.local_end_time, ""),
+        timezone: readString(row.timezone, "UTC"),
+        status: readString(row.status, "active"),
+        reason: readString(row.reason, "") || null,
+      }));
+      return planCandidate({
+        account,
+        settings: settingsByAccount.get(account.accountId),
+        followFilterSettings: followFilterSettingsByAccount.get(account.accountId),
+        unfollowSettings: unfollowByAccount.get(account.accountId),
+        dmSettings: dmByAccount.get(account.accountId),
+        packageSummary: packageSummaryByAccount.get(account.accountId),
+        interactions: interactionsByAccount.get(account.accountId) ?? [],
+        activeRun: activeRunsByAccount.get(account.accountId),
+        activeRequest: activeRequestsByAccount.get(account.accountId),
+        assignment,
+        restWindows,
+        rules,
+      });
+    })
     .sort((a, b) => Number(b.restartEligible) - Number(a.restartEligible) || b.quotas.follow.remaining + b.quotas.unfollow.remaining - (a.quotas.follow.remaining + a.quotas.unfollow.remaining))
     .slice(0, 50);
 
@@ -462,8 +517,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     safetyGates: [
       { label: "Dispatcher / worker heartbeat", status: latestWorkerSeen ? "observed" : "unknown", detail: latestWorkerSeen ?? "No worker heartbeat visible from current source." },
       { label: "Device availability", status: latestDeviceSeen ? "observed" : "unknown", detail: latestDeviceSeen ?? "No device heartbeat visible from current source." },
-      { label: "Phone rest", status: "pending", detail: "No dedicated phone-rest settings table is wired yet." },
-      { label: "6h session window", status: "pending", detail: "Session window enforcement is not wired to scheduler settings yet." },
+      { label: "Fixed blackout windows", status: restWindowsResult.error ? "unknown" : "connected", detail: "Uses phone_rest_windows only for explicit maintenance/ops blackouts; natural post-session rest is buffer time inside the assigned slot." },
+      { label: "6h session window", status: assignmentsResult.error ? "unknown" : "connected", detail: "Uses account_assignments starts_at/ends_at for schedule window compliance." },
       { label: "Active run/request protection", status: "connected", detail: "Preview blocks accounts with active ig_runs or account_run_requests." },
       { label: "Package cap alignment", status: "partial", detail: "Uses account_package_summary when available plus domain caps; runtime profiles are displayed separately." },
     ],

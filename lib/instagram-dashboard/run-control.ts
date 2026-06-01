@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { mapScheduleGateReasonToRunStart, type ScheduleBlockReason } from "@/lib/instagram-dashboard/schedule";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 
 export const ACTIVE_IG_RUN_STATUSES = ["running", "queued", "pending", "in_progress", "active", "starting"] as const;
@@ -33,6 +34,9 @@ export type RunStartBlockReason =
   | "account_archived"
   | "account_trashed"
   | "account_canceled"
+  | "account_cancelled"
+  | "account_paused"
+  | "account_needs_assistance"
   | "support_required"
   | "credentials_review_required"
   | "reauth_required"
@@ -61,11 +65,19 @@ export type RunStartBlockReason =
   | "unfollow_cap_unproven"
   | "unfollow_day_quota_exhausted"
   | "unfollow_no_safe_candidate_strategy"
+  | "assignment_missing"
+  | "assignment_window_closed"
+  | "assignment_slot_conflict"
+  | "phone_rest_active"
+  | "outreach_rest_reserved"
+  | "no_app_instance_available"
+  | "device_unavailable"
+  | "assignment_profile_mismatch"
   | "already_running"
   | "already_requested"
   | "invalid_run_type";
 
-const BLOCKED_ACCOUNT_STATUSES = new Set(["archived", "trashed", "canceled", "deleted", "stopped"]);
+const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
 const CREDENTIAL_REVIEW_ACTIONS = new Set(["review_credentials", "submit_instagram_credentials"]);
 const CHECKPOINT_ACTIONS = new Set(["complete_two_factor", "review_checkpoint", "review_account_mismatch"]);
 export const DEFAULT_WELCOME_DM_DAY_CAP = 10;
@@ -1011,7 +1023,7 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   let safeFollowFiltersSummary: ReturnType<typeof followFiltersSummary> | undefined;
   const { data: accountRow, error: accountError } = await supabase
     .from("ig_accounts")
-    .select("id,status,username")
+    .select("id,status,admin_lifecycle_status,username")
     .eq("id", accountId)
     .limit(1)
     .maybeSingle();
@@ -1021,6 +1033,16 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   }
 
   const accountStatus = readString(accountRow.status, "active").toLowerCase();
+  const adminLifecycleStatus = readString(accountRow.admin_lifecycle_status, accountStatus).toLowerCase();
+  if (adminLifecycleStatus === "paused") {
+    return { ok: false as const, reason: "account_paused" as RunStartBlockReason, health };
+  }
+  if (adminLifecycleStatus === "needs_assistance") {
+    return { ok: false as const, reason: "account_needs_assistance" as RunStartBlockReason, health };
+  }
+  if (adminLifecycleStatus === "cancelled" || adminLifecycleStatus === "pending_cancellation") {
+    return { ok: false as const, reason: "account_cancelled" as RunStartBlockReason, health };
+  }
   if (accountStatus === "archived") {
     return { ok: false as const, reason: "account_archived" as RunStartBlockReason, health };
   }
@@ -1289,12 +1311,34 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     return { ok: false as const, reason: "already_running" as RunStartBlockReason, health };
   }
 
+  const scheduleBlock = await evaluateScheduleStartGate(accountId, normalizedRunType);
+  if (scheduleBlock) {
+    return { ok: false as const, reason: scheduleBlock, health };
+  }
+
   const activeRequest = await getActiveRunRequest(accountId);
   if (activeRequest) {
     return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
   }
 
   return { ok: true as const, health, normalizedRunType, followFiltersSummary: safeFollowFiltersSummary };
+}
+
+export async function evaluateScheduleStartGate(
+  accountId: string,
+  requestedRunType: string,
+): Promise<ScheduleBlockReason | null> {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase.rpc("evaluate_account_schedule_gate", {
+    p_account_id: accountId,
+    p_requested_run_type: requestedRunType,
+  });
+  if (error) {
+    return "assignment_missing";
+  }
+  const row = (data && typeof data === "object" && !Array.isArray(data) ? data : {}) as SupabaseRecord;
+  if (row.ok === true) return null;
+  return mapScheduleGateReasonToRunStart(readString(row.reason, "assignment_missing")) ?? "assignment_missing";
 }
 
 export async function insertManualRunAudit(
@@ -1334,6 +1378,12 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Trashed accounts cannot be started.";
     case "account_canceled":
       return "This account cannot be started.";
+    case "account_cancelled":
+      return "Cancelled accounts cannot be started.";
+    case "account_paused":
+      return "Paused accounts cannot be started until an admin reactivates them.";
+    case "account_needs_assistance":
+      return "This account needs assistance before it can be started.";
     case "support_required":
       return "Account requires support review before manual run.";
     case "credentials_review_required":
@@ -1390,6 +1440,22 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual run is blocked because the Unfollow day quota is exhausted.";
     case "unfollow_no_safe_candidate_strategy":
       return "Manual run is blocked because no safe Unfollow-any candidate strategy is proven.";
+    case "assignment_missing":
+      return "Manual run is blocked because no phone slot assignment exists for this account.";
+    case "assignment_window_closed":
+      return "Manual run is blocked because the account is outside its assigned schedule window.";
+    case "assignment_slot_conflict":
+      return "Manual run is blocked because the assigned slot conflicts with another account on this phone.";
+    case "phone_rest_active":
+      return "Manual run is blocked because the phone is in a rest window.";
+    case "outreach_rest_reserved":
+      return "Manual run is blocked because this Outreach slot is reserved for phone rest.";
+    case "no_app_instance_available":
+      return "Manual run is blocked because no Instagram app instance is available on this phone.";
+    case "device_unavailable":
+      return "Manual run is blocked because the assigned phone/device is unavailable.";
+    case "assignment_profile_mismatch":
+      return "Manual run is blocked because the assignment profile does not match this run type.";
     case "already_running":
       return "A run is already active for this account.";
     case "already_requested":

@@ -439,7 +439,7 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
   const accountSettings = settings.find((setting) => keyForAccount(setting) === accountId);
   const target = targets.find((item) => keyForAccount(item) === accountId);
   const latestRun = latestRunForAccount(runs, accountId);
-  const adminStatus = readString(account, ["status", "state"], "active");
+  const adminStatus = readString(account, ["admin_lifecycle_status", "status", "state"], "active");
   const loginStatus = readString(account, ["login_status"], readString(accountSettings, ["login_status"], "unknown"));
   const credentialsStatus = readString(account, ["credentials_status", "credential_status"], readString(accountSettings, ["credentials_status", "credential_status"], "unknown"));
   const latestRunStatus = readString(latestRun, ["status", "run_status", "state"], "unknown");
@@ -503,7 +503,7 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     clientName: readString(row, ["client_name"], "") || null,
     username: readString(row, ["username", "ig_username", "handle"], "Unknown"),
     emailDisplay: safeEmailDisplay(row),
-    adminStatus: readString(row, ["admin_status"], "unknown"),
+    adminStatus: readString(row, ["admin_lifecycle_status", "admin_status"], "unknown"),
     customerStatus: readString(row, ["customer_status"], "unknown"),
     subscriptionStatus: readString(row, ["subscription_status"], "unknown"),
     packageLabel: packagePending,

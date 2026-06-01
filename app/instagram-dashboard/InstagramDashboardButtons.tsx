@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
+import type { ScheduleProjection, ScheduleSlotProjection } from "@/lib/instagram-dashboard/schedule";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
 
 type InstagramDashboardButtonsProps = {
@@ -285,7 +286,11 @@ const trashedAccountTools: AccountTool[] = [
   { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
 ];
 
-const settingsTabs: SettingsTab[] = ["General", "Schedule", "Follow", "DM", "Followback", "Sources", "Filters", "Safety", "Advanced"];
+const settingsTabs: SettingsTab[] = ["General", "Schedule", "Follow", "DM", "Followback", "Sources", "Filters", "Advanced"];
+
+function visibleSettingsTab(tab: SettingsTab): SettingsTab {
+  return settingsTabs.includes(tab) ? tab : "General";
+}
 
 const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
   General: [
@@ -301,15 +306,7 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "account_status", label: "Account status", type: "select", readOnly: true, runtimeStatus: "read-only", helper: "Legacy status projection. Use lifecycle actions for changes.", options: ["active", "paused", "review", "disabled"] },
     { key: "campaign_name", label: "Campaign name", type: "text", runtimeStatus: "needs-routing", helper: "Admin label only until campaign/domain policy API exists." },
   ],
-  Schedule: [
-    { key: "timeslot_start", label: "Timeslot start", type: "time", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
-    { key: "timeslot_end", label: "Timeslot end", type: "time", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
-    { key: "total_sessions", label: "Total sessions", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: session/package cap resolver." },
-    { key: "stop_interactions_after_minutes", label: "Stop after minutes", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: session scheduler / domain caps." },
-    { key: "pause_account_days", label: "Pause account days", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: lifecycle pause action API (not legacy settings alone)." },
-    { key: "pause_account_until", label: "Pause account until", type: "date", runtimeStatus: "needs-routing", helper: "Target: lifecycle pause action API." },
-    { key: "randomize_start_enabled", label: "Randomize start", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: session scheduler policy API." },
-  ],
+  Schedule: [],
   Follow: [
     { key: "commercial_package_label", label: "Commercial package", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: account_package_summary.commercial_package_label." },
     { key: "package_follow_day_cap", label: "Package follow cap/day", type: "number", min: 0, readOnly: true, runtimeStatus: "read-only", helper: "Strict package ceiling from commercial_packages." },
@@ -383,13 +380,7 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "safe_candidate_strategy_status", label: "Safe candidate strategy", type: "text", readOnly: true, hideHelper: true },
     { key: "do_unfollow_first", label: "Do unfollow first", type: "toggle", disabled: true, helper: "Planned" },
   ],
-  Sources: [
-    { key: "truncate_sources_min", label: "Truncate sources min", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Source list policy draft. CT targets are managed in the Targets panel." },
-    { key: "truncate_sources_max", label: "Truncate sources max", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Source list policy draft. CT targets are managed in the Targets panel." },
-    { key: "change_source_if_crash", label: "Change source if crash", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery/source policy API." },
-    { key: "skipped_posts_limit", label: "Skipped posts limit", type: "number", min: 0, runtimeStatus: "needs-routing" },
-    { key: "fling_when_skipped", label: "Fling when skipped", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: navigation heuristic policy API." },
-  ],
+  Sources: [],
   Safety: [
     { key: "total_interactions_limit", label: "Total interactions limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Does not protect runtime until domain caps are wired." },
     { key: "total_successful_interactions_limit", label: "Total successful interactions limit", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Does not protect runtime until domain caps are wired." },
@@ -426,6 +417,13 @@ type PlannedFilterCard = {
   description: string;
 };
 
+type SourcePolicyCard = {
+  title: string;
+  badge: "Read-only" | "Planned" | "Separate";
+  summary: string;
+  items: string[];
+};
+
 const plannedFilterCards: PlannedFilterCard[] = [
   {
     title: "Profile quality",
@@ -444,10 +442,114 @@ const plannedFilterCards: PlannedFilterCard[] = [
     description: "Skip already DM'd, replied, blocked, and source-type rules.",
   },
   {
-    title: "CT quality",
-    description: "CT verification thresholds and source health rules.",
+    title: "Target quality",
+    description: "Target verification thresholds and source health rules.",
   },
 ];
+
+const sourcePolicyCards: SourcePolicyCard[] = [
+  {
+    title: "Current Follow source",
+    badge: "Read-only",
+    summary: "Current Follow runtime uses one source per run. Multi-source rotation is planned.",
+    items: [
+      "Current mode: Single source",
+      "Source priority: Runtime configured source -> fallback first eligible target",
+      "Multi-source rotation: Planned",
+      "Switch on source exhaustion: Planned",
+    ],
+  },
+  {
+    title: "Target accounts / Sources",
+    badge: "Separate",
+    summary: "Target accounts are managed in Targets.",
+    items: [
+      "Target accounts: Manage in Targets",
+      "Active targets count: Available in Targets",
+      "Target quality: Planned",
+      "Source health: Planned",
+    ],
+  },
+  {
+    title: "Scroll / exhaustion rules",
+    badge: "Read-only",
+    summary: "Scroll rules stop the current source today; switching to next source is planned.",
+    items: [
+      "Scroll rules exist in the worker",
+      "Current behavior: Stop session when no candidates",
+      "Switch to next source: Planned",
+    ],
+  },
+  {
+    title: "Outreach sources",
+    badge: "Separate",
+    summary: "Outreach sources are handled separately.",
+    items: [
+      "Dashboard list: Separate Outreach source",
+      "N8N source: Separate Outreach source",
+      "Manual and job sources: Managed in DM/Outreach later",
+    ],
+  },
+  {
+    title: "Future source policy",
+    badge: "Planned",
+    summary: "Future policy will choose, rotate, and score Follow sources.",
+    items: [
+      "Single source",
+      "Rotate sources",
+      "Max targets per run",
+      "Switch after no candidates",
+      "Mark source exhausted",
+      "Attribution by target",
+      "FBR by target",
+    ],
+  },
+];
+
+function scheduleSlotKey(startsAt: string, endsAt: string) {
+  return `${startsAt}|${endsAt}`;
+}
+
+function scheduleSlotKeyFromAssignment(assignment: ScheduleProjection["current_assignment"]) {
+  if (!assignment) return "";
+  return scheduleSlotKey(assignment.starts_at, assignment.ends_at);
+}
+
+function findScheduleSlot(schedule: ScheduleProjection, slotKey: string) {
+  return schedule.available_slots.find((slot) => scheduleSlotKey(slot.starts_at, slot.ends_at) === slotKey) ?? null;
+}
+
+function scheduleDirty(
+  schedule: ScheduleProjection,
+  baseline: ScheduleProjection,
+  selectedSlotKey: string,
+) {
+  const baselineKey = scheduleSlotKeyFromAssignment(baseline.current_assignment);
+  return selectedSlotKey !== baselineKey;
+}
+
+function scheduleValidationError(schedule: ScheduleProjection | null, selectedSlotKey: string) {
+  if (!schedule?.save_ready) return "Schedule save is unavailable until slot API is ready.";
+  if (!selectedSlotKey) return "Select an available slot before saving.";
+  const slot = findScheduleSlot(schedule, selectedSlotKey);
+  if (!slot) return "Selected slot is no longer available.";
+  if (!slot.available) {
+    if (slot.reason === "phone_rest") return "Selected slot is blocked by a fixed blackout window.";
+    if (slot.reason === "outreach_rest_reserved") return "Selected Outreach slot is reserved for phone rest.";
+    if (slot.reason === "no_app_instance_available") return "Selected slot has no free Instagram app instance on this device.";
+    if (slot.reason === "no_clone_available") return "Selected slot has no free clone on this device.";
+    return "Selected slot is occupied.";
+  }
+  return "";
+}
+
+export {
+  scheduleSlotKey,
+  scheduleSlotKeyFromAssignment,
+  findScheduleSlot,
+  scheduleDirty,
+  scheduleValidationError,
+};
 
 export async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
@@ -1028,6 +1130,9 @@ export default function InstagramDashboardButtons({
   const [filters, setFilters] = useState<InstagramFilters | null>(null);
   const [followFilters, setFollowFilters] = useState<FollowFiltersProjection | null>(null);
   const [followFiltersBaseline, setFollowFiltersBaseline] = useState<FollowFiltersProjection | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleProjection | null>(null);
+  const [scheduleBaseline, setScheduleBaseline] = useState<ScheduleProjection | null>(null);
+  const [selectedScheduleSlotKey, setSelectedScheduleSlotKey] = useState("");
   const [templates, setTemplates] = useState<AccountTemplate[]>([]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("General");
   const [statsRows, setStatsRows] = useState<StatsRow[]>([]);
@@ -1153,7 +1258,7 @@ export default function InstagramDashboardButtons({
 
     try {
       if (nextPanel === "settings" || nextPanel === "filters") {
-        const [settingsPayload, followFiltersPayload, templatePayload] = await Promise.all([
+        const [settingsPayload, followFiltersPayload, schedulePayload, templatePayload] = await Promise.all([
           readApiResponse<InstagramSettings>(
             await fetch(`/api/instagram-dashboard/settings?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
             "Could not load account settings."
@@ -1161,6 +1266,10 @@ export default function InstagramDashboardButtons({
           readApiResponse<FollowFiltersProjection>(
             await fetch(`/api/instagram-dashboard/settings/follow-filters?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
             "Could not load Follow filter settings."
+          ),
+          readApiResponse<ScheduleProjection>(
+            await fetch(`/api/instagram-dashboard/settings/schedule?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+            "Could not load Schedule settings."
           ),
           readApiResponse<AccountTemplate[]>(
             await fetch("/api/instagram-dashboard/templates", { headers: { Accept: "application/json" } }),
@@ -1171,6 +1280,9 @@ export default function InstagramDashboardButtons({
         setSettingsBaseline(settingsPayload);
         setFollowFilters(followFiltersPayload);
         setFollowFiltersBaseline(followFiltersPayload);
+        setSchedule(schedulePayload);
+        setScheduleBaseline(schedulePayload);
+        setSelectedScheduleSlotKey(scheduleSlotKeyFromAssignment(schedulePayload.current_assignment));
         setTemplates(templatePayload);
       }
 
@@ -1520,6 +1632,56 @@ export default function InstagramDashboardButtons({
     }
   }
 
+  function saveSchedule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!schedule || !scheduleBaseline || !scheduleDirty(schedule, scheduleBaseline, selectedScheduleSlotKey)) return;
+    const validationError = scheduleValidationError(schedule, selectedScheduleSlotKey);
+    if (validationError) return;
+
+    requestConfirmation({
+      title: "Save Schedule assignment?",
+      description: "This updates the phone slot assignment for this account. It will not start a run.",
+      confirmTone: "primary",
+      confirmLabel: "Save Schedule",
+      onConfirm: performSaveSchedule,
+    });
+  }
+
+  async function performSaveSchedule() {
+    if (!schedule) return;
+    const selectedSlot = findScheduleSlot(schedule, selectedScheduleSlotKey);
+    if (!selectedSlot || !schedule.device_id) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const projection = await readApiResponse<ScheduleProjection>(
+        await fetch("/api/instagram-dashboard/settings/schedule", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            account_id: schedule.account_id,
+            device_id: schedule.device_id,
+            starts_at: selectedSlot.starts_at,
+            ends_at: selectedSlot.ends_at,
+          }),
+        }),
+        "Could not save Schedule settings.",
+      );
+      setSchedule(projection);
+      setScheduleBaseline(projection);
+      setSelectedScheduleSlotKey(scheduleSlotKeyFromAssignment(projection.current_assignment));
+      setSuccess("Schedule assignment saved.");
+      router.refresh();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save Schedule settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function stopRun() {
     setError("");
     setSuccess("");
@@ -1681,12 +1843,16 @@ export default function InstagramDashboardButtons({
             </div>
 
             {isLoading ? <div className="ig-settings-loading">Loading account data...</div> : null}
-            {!isLoading && (panel === "settings" || panel === "filters") && settings && followFilters
+            {!isLoading && (panel === "settings" || panel === "filters") && settings && followFilters && schedule
               ? renderSettingsTabs({
                   settings,
                   settingsBaseline,
                   followFilters,
                   followFiltersBaseline,
+                  schedule,
+                  scheduleBaseline,
+                  selectedScheduleSlotKey,
+                  setSelectedScheduleSlotKey,
                   settingsTab,
                   selectSettingsTab,
                   updateSetting,
@@ -1695,6 +1861,7 @@ export default function InstagramDashboardButtons({
                   saveDmSettings,
                   saveUnfollowSettings,
                   saveFollowFilters,
+                  saveSchedule,
                   openSaveTemplate: (source) => setTemplateDialog({ kind: "save", source }),
                   openApplyTemplate: (source) => setTemplateDialog({ kind: "apply", source }),
                   closePanel,
@@ -1724,7 +1891,7 @@ export default function InstagramDashboardButtons({
               exportLogs,
               copyLogs,
             }) : null}
-            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !followFilters) ? (
+            {!isLoading && error && (panel === "settings" || panel === "filters") && (!settings || !followFilters || !schedule) ? (
               <div className="ig-settings-loading">
                 <p className="ig-settings-message ig-settings-error">{error}</p>
                 <button type="button" className="ig-settings-secondary" onClick={closePanel}>Cancel</button>
@@ -2083,6 +2250,57 @@ export default function InstagramDashboardButtons({
         .ig-filters-planned-card strong {
           color: #f0f0ef;
           font-size: 12px;
+        }
+
+        .ig-source-policy-list {
+          display: grid;
+          gap: 7px;
+          margin: 10px 0 0;
+          padding: 0;
+          list-style: none;
+        }
+
+        .ig-source-policy-list li {
+          color: rgba(255,255,255,0.56);
+          font-size: 11.5px;
+          line-height: 1.35;
+        }
+
+        .ig-source-policy-list li::before {
+          content: "-";
+          color: rgba(245,158,11,0.72);
+          margin-right: 7px;
+        }
+
+        .ig-schedule-assignment-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 12px;
+        }
+
+        .ig-schedule-assignment-item {
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 14px;
+          background: rgba(255,255,255,0.02);
+          padding: 10px 12px;
+        }
+
+        .ig-schedule-assignment-item span {
+          display: block;
+          color: rgba(255,255,255,0.45);
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .ig-schedule-assignment-item strong {
+          display: block;
+          color: #f0f0ef;
+          font-size: 12px;
+          line-height: 1.35;
+          margin-top: 4px;
         }
 
         .ig-filters-legacy-note {
@@ -2730,6 +2948,10 @@ function renderSettingsTabs({
   settingsBaseline,
   followFilters,
   followFiltersBaseline,
+  schedule,
+  scheduleBaseline,
+  selectedScheduleSlotKey,
+  setSelectedScheduleSlotKey,
   settingsTab,
   selectSettingsTab,
   updateSetting,
@@ -2738,6 +2960,7 @@ function renderSettingsTabs({
   saveDmSettings,
   saveUnfollowSettings,
   saveFollowFilters,
+  saveSchedule,
   openSaveTemplate,
   openApplyTemplate,
   closePanel,
@@ -2751,6 +2974,10 @@ function renderSettingsTabs({
   settingsBaseline: InstagramSettings | null;
   followFilters: FollowFiltersProjection;
   followFiltersBaseline: FollowFiltersProjection | null;
+  schedule: ScheduleProjection;
+  scheduleBaseline: ScheduleProjection | null;
+  selectedScheduleSlotKey: string;
+  setSelectedScheduleSlotKey: (value: string) => void;
   settingsTab: SettingsTab;
   selectSettingsTab: (tab: SettingsTab) => void | Promise<void>;
   updateSetting: (key: string, value: ConfigValue) => void;
@@ -2762,6 +2989,7 @@ function renderSettingsTabs({
   saveDmSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveUnfollowSettings: (event: FormEvent<HTMLFormElement>) => void;
   saveFollowFilters: (event: FormEvent<HTMLFormElement>) => void;
+  saveSchedule: (event: FormEvent<HTMLFormElement>) => void;
   openSaveTemplate: (source: "settings" | "filters") => void;
   openApplyTemplate: (source: "settings" | "filters") => void;
   closePanel: () => void;
@@ -2771,19 +2999,26 @@ function renderSettingsTabs({
   packageLabel?: string | null;
   entitlementSummary?: string | null;
 }) {
-  const isFiltersTab = settingsTab === "Filters";
-  const fields = settingsFieldsForTab(settingsTab);
+  const activeSettingsTab = visibleSettingsTab(settingsTab);
+  const isFiltersTab = activeSettingsTab === "Filters";
+  const fields = settingsFieldsForTab(activeSettingsTab);
   const hasEditableFields = fields.some((field) => !field.readOnly && !field.disabled);
-  const isDmTab = settingsTab === "DM";
-  const isFollowTab = settingsTab === "Follow";
-  const isFollowbackTab = settingsTab === "Followback";
-  const showDraftBanner = hasEditableFields && !isDmTab && !isFollowTab && !isFollowbackTab && !isFiltersTab;
+  const isDmTab = activeSettingsTab === "DM";
+  const isFollowTab = activeSettingsTab === "Follow";
+  const isFollowbackTab = activeSettingsTab === "Followback";
+  const isScheduleTab = activeSettingsTab === "Schedule";
+  const isSourcesTab = activeSettingsTab === "Sources";
+  const showDraftBanner = hasEditableFields && !isDmTab && !isFollowTab && !isFollowbackTab && !isFiltersTab && !isScheduleTab;
   const dmDirty = isDmTab && !sameDmPayload(settings, settingsBaseline);
   const dmValidationError = isDmTab ? dmClientValidationError(settings) : "";
   const unfollowDirty = isFollowbackTab && !sameUnfollowPayload(settings, settingsBaseline);
   const unfollowValidationError = isFollowbackTab ? unfollowClientValidationError(settings) : "";
   const followFiltersDirty = isFiltersTab && !sameFollowFiltersPayload(followFilters, followFiltersBaseline);
   const followFiltersError = isFiltersTab ? followFiltersValidationError(followFilters) : "";
+  const scheduleDirtyState = isScheduleTab && scheduleBaseline
+    ? scheduleDirty(schedule, scheduleBaseline, selectedScheduleSlotKey)
+    : false;
+  const scheduleError = isScheduleTab ? scheduleValidationError(schedule, selectedScheduleSlotKey) : "";
 
   return (
     <form
@@ -2795,7 +3030,9 @@ function renderSettingsTabs({
             ? saveUnfollowSettings
             : isFiltersTab
               ? saveFollowFilters
-              : saveSettings
+              : isScheduleTab
+                ? saveSchedule
+                : saveSettings
       }
     >
       <div className="ig-settings-tabs" role="tablist" aria-label="Instagram Account settings sections">
@@ -2804,8 +3041,8 @@ function renderSettingsTabs({
             key={tab}
             type="button"
             role="tab"
-            aria-selected={settingsTab === tab}
-            className={settingsTab === tab ? "ig-settings-tab ig-settings-tab-active" : "ig-settings-tab"}
+            aria-selected={activeSettingsTab === tab}
+            className={activeSettingsTab === tab ? "ig-settings-tab ig-settings-tab-active" : "ig-settings-tab"}
             onClick={() => void selectSettingsTab(tab)}
           >
             {tab}
@@ -2814,15 +3051,24 @@ function renderSettingsTabs({
       </div>
 
       {showDraftBanner ? <p className="ig-settings-message">{DRAFT_SETTINGS_BANNER}</p> : null}
-      {isFiltersTab ? <p className="ig-settings-message">{FILTERS_PRODUCTION_BANNER}</p> : null}
-      {settingsTab === "Sources" ? (
-        <p className="ig-settings-message">CT targets are managed in the Targets panel. Source policy fields here are draft settings for future Phone Farm routing.</p>
+      {isScheduleTab ? (
+        <p className="ig-settings-message">Schedule assigns this account to a phone slot. Only available slots can be saved.</p>
       ) : null}
-      {!hasEditableFields && settingsTab === "Advanced" ? (
+      {isFiltersTab ? <p className="ig-settings-message">{FILTERS_PRODUCTION_BANNER}</p> : null}
+      {isSourcesTab ? (
+        <p className="ig-settings-message">Sources is a read-only preview for future Follow source and target policy. Target accounts are managed in Targets.</p>
+      ) : null}
+      {!hasEditableFields && activeSettingsTab === "Advanced" ? (
         <p className="ig-settings-message">Read-only runtime projections. Use Stop run, lifecycle actions, and logs for operational changes.</p>
       ) : null}
 
-      {isDmTab ? (
+      {isScheduleTab ? (
+        <ScheduleActivePanel
+          schedule={schedule}
+          selectedScheduleSlotKey={selectedScheduleSlotKey}
+          setSelectedScheduleSlotKey={setSelectedScheduleSlotKey}
+        />
+      ) : isDmTab ? (
         <DmTargetPanel
           settings={settings}
           updateSetting={updateSetting}
@@ -2848,6 +3094,8 @@ function renderSettingsTabs({
           {followFiltersError ? <p className="ig-settings-message ig-settings-error">{followFiltersError}</p> : null}
           <FiltersTargetPanel followFilters={followFilters} updateFollowFilter={updateFollowFilter} />
         </>
+      ) : isSourcesTab ? (
+        <SourcesPolicyPanel />
       ) : (
         <div className="ig-settings-grid">
           {fields.map((field) => (
@@ -2862,7 +3110,7 @@ function renderSettingsTabs({
       )}
 
       <FormMessages error={error} success={success} />
-      {!isDmTab && !isFollowTab && !isFollowbackTab && !isFiltersTab && hasEditableFields ? (
+      {!isDmTab && !isFollowTab && !isFollowbackTab && !isFiltersTab && !isScheduleTab && hasEditableFields ? (
         <div className="ig-template-actions">
           <button type="button" className="ig-settings-secondary" onClick={() => openSaveTemplate("settings")} disabled={isSaving}>
             Save as Template
@@ -2895,10 +3143,205 @@ function renderSettingsTabs({
           isSaving={isSaving}
           label="Save Filters"
         />
+      ) : isScheduleTab ? (
+        <DomainTargetActions
+          closePanel={closePanel}
+          isDirty={scheduleDirtyState}
+          validationError={scheduleError}
+          isSaving={isSaving}
+          label="Save Schedule"
+          canSubmit={schedule.save_ready}
+        />
       ) : (
         <FormActions isSaving={isSaving} closePanel={closePanel} canSubmit={hasEditableFields} />
       )}
     </form>
+  );
+}
+
+function scheduleSlotReasonLabel(slot: ScheduleSlotProjection) {
+  if (slot.available) return "Available";
+  if (slot.reason === "occupied") return slot.occupied_by ? `Occupied by @${slot.occupied_by}` : "Occupied";
+  if (slot.reason === "phone_rest") return "Fixed blackout";
+  if (slot.reason === "outreach_rest_reserved") return "Outreach rest reserved";
+  if (slot.reason === "no_app_instance_available") return "No app instance available";
+  if (slot.reason === "no_clone_available") return "No clone available";
+  if (slot.reason === "current") return "Current slot";
+  return "Unavailable";
+}
+
+function scheduleGateStatusLabel(status: string, reason: string) {
+  return status === "blocked" ? `blocked - ${reason || "unknown"}` : status;
+}
+
+function scheduleNextEligibleLabel(schedule: ScheduleProjection) {
+  if (schedule.gates.next_eligible_starts_at) return schedule.gates.next_eligible_starts_at;
+  if (schedule.gates.reason === "assignment_missing" || !schedule.current_assignment) return "Select a slot first";
+  return "None";
+}
+
+function ScheduleActivePanel({
+  schedule,
+  selectedScheduleSlotKey,
+  setSelectedScheduleSlotKey,
+}: {
+  schedule: ScheduleProjection;
+  selectedScheduleSlotKey: string;
+  setSelectedScheduleSlotKey: (value: string) => void;
+}) {
+  const assignment = schedule.current_assignment;
+  const expectedSlotKind = assignment?.slot_kind || schedule.slot_kind || schedule.available_slots.find((slot) => slot.slot_kind)?.slot_kind || "Pending assignment";
+  const appInstanceSummary = schedule.app_instance_availability
+    ? `${schedule.app_instance_availability.available} free · ${schedule.app_instance_availability.occupied} occupied · ${schedule.app_instance_availability.disabled + schedule.app_instance_availability.unknown} blocked`
+    : "Pending inventory";
+  const assignmentItems = [
+    ["Phone / device", schedule.device_label || "Unassigned"],
+    ["Runtime profile", schedule.assignment_type || "Unknown"],
+    [assignment ? "Slot kind" : "Expected slot kind", assignment ? expectedSlotKind : `${expectedSlotKind} pending assignment`],
+    ["Current slot", assignment?.local_label || "No slot assigned"],
+    ["App instances", appInstanceSummary],
+    ["Assignment status", assignment?.status || "Pending"],
+    ["Assignment source", assignment?.assignment_source || "Unknown"],
+    ["Device timezone", schedule.device_timezone || "UTC"],
+  ];
+
+  return (
+    <div className="ig-filters-target-panel">
+      <section className="ig-filters-section ig-filters-section-info">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Current assignment</h3>
+            <span className={`ig-filters-badge ${schedule.gates.ok ? "ig-filters-badge-active" : "ig-filters-badge-planned"}`}>
+              {schedule.gates.ok ? "In window" : "Outside window"}
+            </span>
+          </div>
+          <p>Full-cycle accounts use 6-hour slots. Outreach-only accounts use 40-minute slots.</p>
+          {!assignment ? (
+            <p className="ig-settings-message">No slot is saved for this account yet. Select an available slot, then Save Schedule to create the assignment.</p>
+          ) : null}
+        </div>
+        <div className="ig-schedule-assignment-grid">
+          {assignmentItems.map(([label, value]) => (
+            <div key={label} className="ig-schedule-assignment-item">
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Select slot</h3>
+            <span className={`ig-filters-badge ${schedule.save_ready ? "ig-filters-badge-active" : "ig-filters-badge-planned"}`}>
+              {schedule.save_ready ? "Save ready" : "Blocked"}
+            </span>
+          </div>
+          <p>Full-cycle slots stay available unless occupied or blacked out. Outreach rest reservations are planned and disabled unless explicitly configured.</p>
+        </div>
+        <label className="ig-settings-field">
+          <span>Available slot</span>
+          <select
+            value={selectedScheduleSlotKey}
+            onChange={(event) => setSelectedScheduleSlotKey(event.target.value)}
+            disabled={!schedule.save_ready}
+          >
+            <option value="">Select a slot</option>
+            {schedule.available_slots.map((slot) => {
+              const key = scheduleSlotKey(slot.starts_at, slot.ends_at);
+              return (
+                <option key={key} value={key} disabled={!slot.available}>
+                  {slot.local_label} · {scheduleSlotReasonLabel(slot)}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Fixed blackout windows</h3>
+            <span className="ig-filters-badge ig-filters-badge-planned">
+              {schedule.rest_windows.length ? "Active blackout" : "No blackout"}
+            </span>
+          </div>
+          <p>These are explicit maintenance or ops blackout windows. Natural rest happens after a run finishes early.</p>
+        </div>
+        {schedule.rest_windows.length ? (
+          <ul className="ig-source-policy-list">
+            {schedule.rest_windows.map((window) => (
+              <li key={window.id}>
+                {window.weekday === null ? "Daily" : `Weekday ${window.weekday}`}: {window.local_start_time} - {window.local_end_time} ({window.timezone})
+                {window.reason ? ` · ${window.reason}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="ig-settings-message">No active fixed blackout windows configured for this device.</p>
+        )}
+      </section>
+
+      <section className="ig-filters-section">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Schedule gates</h3>
+            <span className="ig-filters-badge ig-filters-badge-readonly">Runtime</span>
+          </div>
+        </div>
+        <div className="ig-schedule-assignment-grid">
+          {[
+            ["/runs/start", scheduleGateStatusLabel(schedule.gates.run_start_gate, schedule.gates.reason)],
+            ["Dispatcher", scheduleGateStatusLabel(schedule.gates.dispatcher_gate, schedule.gates.reason)],
+            ["Auto Restart", scheduleGateStatusLabel(schedule.gates.auto_restart_gate, schedule.gates.reason)],
+            ["Gate reason", schedule.gates.reason || "assignment_missing"],
+            ["Next eligible slot", scheduleNextEligibleLabel(schedule)],
+          ].map(([label, value]) => (
+            <div key={label} className="ig-schedule-assignment-item">
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SourcesPolicyPanel() {
+  return (
+    <div className="ig-filters-target-panel">
+      <section className="ig-filters-section ig-filters-section-info">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>Follow sources / Target policy</h3>
+            <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
+          </div>
+          <p>No Sources settings are editable in P0. Legacy source fields are hidden until a domain policy exists.</p>
+        </div>
+      </section>
+
+      <div className="ig-filters-planned-grid">
+        {sourcePolicyCards.map((card) => (
+          <section key={card.title} className="ig-filters-planned-card">
+            <div className="ig-filters-section-title-row">
+              <strong>{card.title}</strong>
+              <span className="ig-filters-badge ig-filters-badge-planned">{card.badge}</span>
+            </div>
+            <p>{card.summary}</p>
+            <ul className="ig-source-policy-list">
+              {card.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      <p className="ig-settings-message ig-filters-legacy-note">Legacy Sources controls hidden. No Sources save action is available.</p>
+    </div>
   );
 }
 
@@ -3209,17 +3652,19 @@ function DomainTargetActions({
   validationError,
   isSaving,
   label,
+  canSubmit = true,
 }: {
   closePanel: () => void;
   isDirty: boolean;
   validationError: string;
   isSaving: boolean;
   label: string;
+  canSubmit?: boolean;
 }) {
   return (
     <div className="ig-settings-actions">
       <button type="button" className="ig-settings-secondary" onClick={closePanel} disabled={isSaving}>Close</button>
-      <button type="submit" className="ig-settings-primary" disabled={isSaving || !isDirty || Boolean(validationError)}>
+      <button type="submit" className="ig-settings-primary" disabled={isSaving || !isDirty || Boolean(validationError) || !canSubmit}>
         {isSaving ? "Saving..." : label}
       </button>
     </div>

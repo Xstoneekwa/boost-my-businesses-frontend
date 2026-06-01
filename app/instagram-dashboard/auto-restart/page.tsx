@@ -84,7 +84,7 @@ export default async function InstagramAutoRestartPage() {
             <ReadOnlySwitch label="Auto Restart" checked={rules.enabled} helper="Disabled until scheduler and settings persistence are wired." />
             <ReadOnlySwitch label="Restart yellow accounts" checked={rules.restartYellowAccounts} helper="Partially done account_session summaries." />
             <ReadOnlySwitch label="Restart red accounts" checked={rules.restartRedAccounts} helper="Not done, but only when safe gates pass." />
-            <ReadOnlySwitch label="Respect phone rest" checked={rules.respectPhoneRest} helper="Pending phone-rest source." />
+            <ReadOnlySwitch label="Respect fixed blackouts" checked={rules.respectPhoneRest} helper="Blocks only explicit maintenance/ops blackout windows, not natural post-session buffer." />
             <ReadOnlySwitch label="Respect 6h session window" checked={rules.respectSixHourWindow} helper="Pending session-window source." />
             <ReadOnlyNumber label="Check every" value={rules.checkEveryMinutes} suffix="minutes" />
             <ReadOnlyNumber label="Max restarts/day" value={rules.maxRestartsPerAccountPerDay} suffix="per account" />
