@@ -138,6 +138,8 @@ type LogRow = {
 
 type Panel = "settings" | "stats" | "logs" | "filters" | null;
 type SettingsTab = "General" | "Schedule" | "Follow" | "DM" | "Followback" | "Sources" | "Filters" | "Safety" | "Advanced";
+type VisibleSettingsTab = Exclude<SettingsTab, "Advanced">;
+type DisplayedSettingsTab = Exclude<VisibleSettingsTab, "Safety">;
 type FieldType = "text" | "password" | "time" | "date" | "number" | "toggle" | "textarea" | "select";
 type RuntimeStatus = "active" | "needs-routing" | "read-only" | "ops-only" | "deprecated";
 
@@ -286,26 +288,14 @@ const trashedAccountTools: AccountTool[] = [
   { label: "Permanent delete", Icon: Trash2, tone: "danger", disabled: true },
 ];
 
-const settingsTabs: SettingsTab[] = ["General", "Schedule", "Follow", "DM", "Followback", "Sources", "Filters", "Advanced"];
+const settingsTabs: DisplayedSettingsTab[] = ["General", "Schedule", "Follow", "DM", "Followback", "Sources", "Filters"];
 
-function visibleSettingsTab(tab: SettingsTab): SettingsTab {
-  return settingsTabs.includes(tab) ? tab : "General";
+function visibleSettingsTab(tab: SettingsTab): DisplayedSettingsTab {
+  return settingsTabs.some((visibleTab) => visibleTab === tab) ? (tab as DisplayedSettingsTab) : "General";
 }
 
-const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
-  General: [
-    { key: "username", label: "Username", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Account identity projection. Edit through a future account identity API." },
-    { key: "display_name", label: "Display name", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Profile projection only; not a runtime worker setting." },
-    { key: "device_name", label: "Device name", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Device assignment projection. Runtime assignment uses domain tables/config." },
-    { key: "email_display", label: "Email display", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe masked email projection. Credential email is write-only." },
-    { key: "password_status", label: "Password status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe status only. Real password is never returned to the browser." },
-    { key: "two_fa_enabled", label: "Two-factor enabled", type: "toggle", runtimeStatus: "needs-routing", helper: "Planned login-status signal. Target: account identity/status API." },
-    { key: "device_assignment", label: "Device assignment", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe phone/host label. Device internals stay hidden." },
-    { key: "app_package_status", label: "App package status", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Clone/app package internals are hidden." },
-    { key: "clone_assignment_status", label: "Clone assignment", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Safe clone status only." },
-    { key: "account_status", label: "Account status", type: "select", readOnly: true, runtimeStatus: "read-only", helper: "Legacy status projection. Use lifecycle actions for changes.", options: ["active", "paused", "review", "disabled"] },
-    { key: "campaign_name", label: "Campaign name", type: "text", runtimeStatus: "needs-routing", helper: "Admin label only until campaign/domain policy API exists." },
-  ],
+const settingsFields: Record<Exclude<VisibleSettingsTab, "Filters">, FieldSpec[]> = {
+  General: [],
   Schedule: [],
   Follow: [
     { key: "commercial_package_label", label: "Commercial package", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Source: account_package_summary.commercial_package_label." },
@@ -399,15 +389,9 @@ const settingsFields: Record<Exclude<SettingsTab, "Filters">, FieldSpec[]> = {
     { key: "stop_on_repeated_navigation_failure", label: "Stop on repeated navigation failure", type: "toggle", runtimeStatus: "needs-routing", helper: "Target: recovery engine policy API." },
     { key: "max_repeated_errors", label: "Max repeated errors", type: "number", min: 0, runtimeStatus: "needs-routing", helper: "Target: recovery engine policy API." },
   ],
-  Advanced: [
-    { key: "current_run_status", label: "Current run status", type: "select", readOnly: true, runtimeStatus: "read-only", helper: "Runtime status projection. Use run actions for changes.", options: ["idle", "queued", "running", "paused", "stopped", "error"] },
-    { key: "last_error", label: "Last error", type: "textarea", readOnly: true, runtimeStatus: "read-only", helper: "Read-only sanitized status from the current projection." },
-    { key: "last_successful_action", label: "Last successful action", type: "text", readOnly: true, runtimeStatus: "read-only", helper: "Audit projection only. Runtime actions are sourced from logs/events." },
-    { key: "manual_stop_requested", label: "Manual stop requested", type: "toggle", readOnly: true, runtimeStatus: "read-only", helper: "Use the Stop run action instead of editing this legacy flag." },
-  ],
 };
 
-function settingsFieldsForTab(tab: SettingsTab): FieldSpec[] {
+function settingsFieldsForTab(tab: DisplayedSettingsTab): FieldSpec[] {
   if (tab === "Filters") return [];
   return settingsFields[tab];
 }
@@ -3000,6 +2984,7 @@ function renderSettingsTabs({
   entitlementSummary?: string | null;
 }) {
   const activeSettingsTab = visibleSettingsTab(settingsTab);
+  const isGeneralTab = activeSettingsTab === "General";
   const isFiltersTab = activeSettingsTab === "Filters";
   const fields = settingsFieldsForTab(activeSettingsTab);
   const hasEditableFields = fields.some((field) => !field.readOnly && !field.disabled);
@@ -3058,11 +3043,15 @@ function renderSettingsTabs({
       {isSourcesTab ? (
         <p className="ig-settings-message">Sources is a read-only preview for future Follow source and target policy. Target accounts are managed in Targets.</p>
       ) : null}
-      {!hasEditableFields && activeSettingsTab === "Advanced" ? (
-        <p className="ig-settings-message">Read-only runtime projections. Use Stop run, lifecycle actions, and logs for operational changes.</p>
-      ) : null}
 
-      {isScheduleTab ? (
+      {isGeneralTab ? (
+        <GeneralSummaryPanel
+          settings={settings}
+          schedule={schedule}
+          packageLabel={packageLabel}
+          entitlementSummary={entitlementSummary}
+        />
+      ) : isScheduleTab ? (
         <ScheduleActivePanel
           schedule={schedule}
           selectedScheduleSlotKey={selectedScheduleSlotKey}
@@ -3178,6 +3167,97 @@ function scheduleNextEligibleLabel(schedule: ScheduleProjection) {
   if (schedule.gates.next_eligible_starts_at) return schedule.gates.next_eligible_starts_at;
   if (schedule.gates.reason === "assignment_missing" || !schedule.current_assignment) return "Select a slot first";
   return "None";
+}
+
+function summaryValue(value: unknown, fallback = "Not available") {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
+  return fallback;
+}
+
+function titleCaseStatus(value: unknown, fallback = "Not available") {
+  const raw = summaryValue(value, fallback);
+  if (raw === fallback) return raw;
+  return raw.replaceAll("_", " ");
+}
+
+function GeneralSummaryPanel({
+  settings,
+  schedule,
+  packageLabel,
+  entitlementSummary,
+}: {
+  settings: InstagramSettings;
+  schedule: ScheduleProjection;
+  packageLabel?: string | null;
+  entitlementSummary?: string | null;
+}) {
+  const appInstanceSummary = schedule.app_instance_availability
+    ? `${schedule.app_instance_availability.available} free · ${schedule.app_instance_availability.occupied} occupied · ${schedule.app_instance_availability.disabled + schedule.app_instance_availability.unknown} blocked`
+    : "Managed in Schedule";
+  const generalSections = [
+    {
+      title: "Account identity",
+      badge: "Read-only",
+      items: [
+        ["Username", summaryValue(settings.username)],
+        ["Display name", summaryValue(settings.display_name)],
+      ],
+    },
+    {
+      title: "Package and runtime",
+      badge: "Runtime summary",
+      items: [
+        ["Commercial package", summaryValue(packageLabel || settings.commercial_package_label)],
+        ["Add-ons / entitlements", summaryValue(entitlementSummary, "See DM / package tabs")],
+        ["Runtime profile", summaryValue(schedule.assignment_type)],
+        ["Slot kind", summaryValue(schedule.slot_kind)],
+      ],
+    },
+    {
+      title: "Schedule summary",
+      badge: "Managed in Schedule",
+      items: [
+        ["Current slot", schedule.current_assignment?.local_label || "No slot assigned"],
+        ["Assignment status", titleCaseStatus(schedule.current_assignment?.status)],
+        ["App instances", appInstanceSummary],
+      ],
+    },
+  ];
+
+  return (
+    <div className="ig-filters-target-panel">
+      <section className="ig-filters-section ig-filters-section-info">
+        <div className="ig-filters-section-head">
+          <div className="ig-filters-section-title-row">
+            <h3>General summary</h3>
+            <span className="ig-filters-badge ig-filters-badge-readonly">Read-only</span>
+          </div>
+          <p>General is a compact status summary. Operational changes live in Schedule, Follow, DM, Followback, Filters, Credentials, and the Accounts action menu.</p>
+        </div>
+      </section>
+
+      {generalSections.map((section) => (
+        <section key={section.title} className="ig-filters-section">
+          <div className="ig-filters-section-head">
+            <div className="ig-filters-section-title-row">
+              <h3>{section.title}</h3>
+              <span className="ig-filters-badge ig-filters-badge-readonly">{section.badge}</span>
+            </div>
+          </div>
+          <div className="ig-schedule-assignment-grid">
+            {section.items.map(([label, value]) => (
+              <div key={label} className="ig-schedule-assignment-item">
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 }
 
 function ScheduleActivePanel({

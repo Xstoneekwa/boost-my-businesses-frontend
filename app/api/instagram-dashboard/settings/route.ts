@@ -77,6 +77,10 @@ const stringDefaults = {
   warmup_profile_code: "follow_default_v1",
   package_started_at: "",
   follow_limiting_reason: "Unknown",
+  admin_lifecycle_status: "unknown",
+  login_status: "unknown",
+  provisioning_status: "unknown",
+  onboarding_status: "unknown",
 } satisfies Record<string, string>;
 
 const booleanDefaults = {
@@ -254,6 +258,10 @@ const runtimeProjectionKeys = [
   "day_2_follow_cap",
   "day_3_follow_cap",
   "day_4_plus_follow_cap",
+  "current_run_status",
+  "last_error",
+  "last_successful_action",
+  "manual_stop_requested",
 ] as const;
 
 function persistableSettings(settings: SettingsPayload): SettingsPayload {
@@ -293,6 +301,10 @@ function withAccountDefaults(settings: SettingsPayload, account: SupabaseRecord 
     device_udid: settings.device_udid || readString(account.device_udid, readString(account.udid, "")),
     account_status: settings.account_status || readString(account.status, "active"),
     campaign_name: settings.campaign_name || readString(account.campaign_name, readString(account.campaign, "Default campaign")),
+    admin_lifecycle_status: readString(account.admin_lifecycle_status, readString(account.admin_status, settingsStringValue(settings.admin_lifecycle_status))),
+    login_status: readString(account.login_status, settingsStringValue(settings.login_status)),
+    provisioning_status: readString(account.provisioning_status, settingsStringValue(settings.provisioning_status)),
+    onboarding_status: readString(account.onboarding_status, settingsStringValue(settings.onboarding_status)),
   };
 }
 
@@ -300,6 +312,10 @@ function maskEmail(value: string) {
   const [name, domain] = value.split("@");
   if (!name || !domain) return value ? "configured" : "missing";
   return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function settingsStringValue(value: SettingsValue | undefined, fallback = "unknown") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 function safeSettingsForClient(settings: SettingsPayload): Record<string, SettingsValue> {
