@@ -71,20 +71,25 @@ test("performance is based on runtime FBR only, never followers count", () => {
   const eligibleWithFbr = mapTargetRow({
     ...baseRow,
     id: "target-fbr",
-    followback_ratio: 14.8,
+    followback_ratio: 15,
+    follows_sent_count: 120,
+    followbacks_count: 18,
   });
 
   assert.equal(eligibleWithoutFbr.performanceLabel, "Pending");
   assert.equal(targetFbrLabel(eligibleWithoutFbr.fbrPercent), "—");
   assert.equal(eligibleWithFbr.performanceLabel, "Good");
-  assert.equal(targetFbrLabel(eligibleWithFbr.fbrPercent), "14.8%");
+  assert.equal(targetFbrLabel(eligibleWithFbr.fbrPercent), "15%");
 });
 
 test("performance thresholds stay separate from eligibility", () => {
-  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 8)), "Poor");
-  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 8.2)), "Avg");
-  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 14.8)), "Good");
-  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("rejected_low_followers", 14.8)), "—");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", null, 0)), "Pending");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 8, 50)), "Insufficient data");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 8, 100)), "Bad");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 8.2, 100)), "Avg");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 14.8, 100)), "Avg");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("eligible", 15, 100)), "Good");
+  assert.equal(targetPerformanceLabel(targetPerformanceFromFbr("rejected_low_followers", 15, 100)), "—");
 });
 
 test("overview counts rejected and performance separately", () => {
@@ -99,12 +104,56 @@ test("overview counts rejected and performance separately", () => {
     },
     {
       ...baseRow,
-      id: "target-poor-performance",
+      id: "target-bad-performance",
       followback_ratio: 7.9,
+      follows_sent_count: 100,
+      followbacks_count: 7,
     },
   ]);
 
   assert.equal(overview.summary.validEligible, 2);
   assert.equal(overview.summary.rejected, 1);
   assert.equal(overview.summary.poorPerformanceCount, 1);
+});
+
+test("maps P1c metrics and computes FBR from counters when ratio is absent", () => {
+  const item = mapTargetRow({
+    ...baseRow,
+    followback_ratio: null,
+    follows_sent_count: 10,
+    followbacks_count: 1,
+    last_selected_at: "2026-06-02T00:00:00.000Z",
+    last_used_at: "2026-06-02T00:05:00.000Z",
+    last_successful_candidate_at: "2026-06-02T00:06:00.000Z",
+    last_exhausted_at: "2026-06-02T00:07:00.000Z",
+    exhaustion_reason: "no_candidates_after_sparse_scrolls",
+    cooldown_until: "2026-06-03T00:00:00.000Z",
+    metrics_updated_at: "2026-06-02T00:08:00.000Z",
+  });
+
+  assert.equal(item.followsSent, 10);
+  assert.equal(item.followbacks, 1);
+  assert.equal(item.fbrPercent, 10);
+  assert.equal(item.performanceLabel, "Insufficient data");
+  assert.equal(targetFbrLabel(item.fbrPercent, item.followsSent), "Insufficient");
+  assert.equal(item.lastUsedAt, "2026-06-02T00:05:00.000Z");
+  assert.equal(item.lastSelectedAt, "2026-06-02T00:00:00.000Z");
+  assert.equal(item.lastSuccessfulCandidateAt, "2026-06-02T00:06:00.000Z");
+  assert.equal(item.lastExhaustedAt, "2026-06-02T00:07:00.000Z");
+  assert.equal(item.exhaustionReason, "no_candidates_after_sparse_scrolls");
+  assert.equal(item.cooldownUntil, "2026-06-03T00:00:00.000Z");
+  assert.equal(item.metricsUpdatedAt, "2026-06-02T00:08:00.000Z");
+});
+
+test("does not label low FBR as poor before minimum sample size", () => {
+  const item = mapTargetRow({
+    ...baseRow,
+    id: "target-low-sample",
+    followback_ratio: 4,
+    follows_sent_count: 99,
+    followbacks_count: 4,
+  });
+
+  assert.equal(item.performanceLabel, "Insufficient data");
+  assert.notEqual(item.performanceLabel, "Bad");
 });

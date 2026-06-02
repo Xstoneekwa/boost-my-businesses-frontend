@@ -99,8 +99,8 @@ function EligibilityBadge({ status }: { status: TargetQualityStatus }) {
 function performanceBadgeClass(status: TargetPerformanceStatus) {
   if (status === "good") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
   if (status === "avg") return "border-amber-400/35 bg-amber-400/15 text-amber-200";
-  if (status === "poor") return "border-red-400/35 bg-red-400/12 text-red-200";
-  if (status === "pending") return "border-slate-400/25 bg-slate-400/10 text-slate-300";
+  if (status === "bad") return "border-red-400/35 bg-red-400/12 text-red-200";
+  if (status === "insufficient_data" || status === "pending") return "border-slate-400/25 bg-slate-400/10 text-slate-300";
   return "border-transparent bg-transparent text-slate-500";
 }
 
@@ -706,7 +706,7 @@ export default function InstagramAccountTargetsPanel({
             ) : filteredRows.length === 0 ? (
               <EmptyTargetsState hasRows={rows.length > 0} />
             ) : (
-              <table className="min-w-[900px] w-full border-separate border-spacing-y-1.5 text-sm">
+              <table className="min-w-[1040px] w-full border-separate border-spacing-y-1.5 text-sm">
                 <thead>
                   <tr>
                     <th className="sticky top-0 z-[1] w-10 bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Select">
@@ -737,6 +737,12 @@ export default function InstagramAccountTargetsPanel({
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Followback Ratio: followers gained / follows sent from this CT">
                       FBR
+                    </th>
+                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Real follows sent from this CT source">
+                      Sent
+                    </th>
+                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Last target metrics activity">
+                      Last used
                     </th>
                     <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Added
@@ -787,7 +793,20 @@ export default function InstagramAccountTargetsPanel({
                         <PerformanceBadge row={row} />
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
-                        <span title={targetFbrHelper(row.fbrPercent)}>{targetFbrLabel(row.fbrPercent)}</span>
+                        <span title={targetFbrHelper(row.fbrPercent, row.followsSent)}>{targetFbrLabel(row.fbrPercent, row.followsSent)}</span>
+                      </td>
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
+                        <span title={row.followbacks !== null ? `${metricText(row.followbacks)} followbacks attributed` : "Followbacks pending attribution"}>
+                          {metricText(row.followsSent)}
+                        </span>
+                      </td>
+                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs text-slate-400">
+                        <span className="block font-semibold text-slate-300">
+                          {row.lastUsedAt ? formatAddedDate(row.lastUsedAt) : "—"}
+                        </span>
+                        <small className="block text-[10px] text-slate-500" title={row.exhaustionReason || row.cooldownUntil || "Runtime metrics"}>
+                          {row.lastExhaustedAt ? "exhausted" : row.cooldownUntil ? "cooldown set" : row.metricsUpdatedAt ? "metrics" : "pending"}
+                        </small>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs text-slate-400">
                         <span className="block font-semibold text-slate-300">{formatAddedDate(row.createdAt)}</span>

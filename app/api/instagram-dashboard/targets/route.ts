@@ -65,6 +65,27 @@ type SafeTargetRow = {
   is_verified?: boolean | null;
   is_private?: boolean | null;
   followback_ratio?: number | null;
+  follows_sent_count?: number | null;
+  followbacks_count?: number | null;
+  performance_status?: "pending" | "insufficient_data" | "good" | "avg" | "bad" | "not_applicable";
+  followsSent?: number | null;
+  followbacks?: number | null;
+  fbrPercent?: number | null;
+  performanceStatus?: "pending" | "insufficient_data" | "good" | "avg" | "bad" | "not_applicable";
+  last_selected_at?: string | null;
+  last_used_at?: string | null;
+  last_successful_candidate_at?: string | null;
+  last_exhausted_at?: string | null;
+  exhaustion_reason?: string | null;
+  cooldown_until?: string | null;
+  metrics_updated_at?: string | null;
+  lastSelectedAt?: string | null;
+  lastUsedAt?: string | null;
+  lastSuccessfulCandidateAt?: string | null;
+  lastExhaustedAt?: string | null;
+  exhaustionReason?: string | null;
+  cooldownUntil?: string | null;
+  metricsUpdatedAt?: string | null;
   added_at?: string | null;
   deleted_at?: string | null;
   archived_at?: string | null;
@@ -79,14 +100,47 @@ function readBooleanNullable(value: unknown) {
   return null;
 }
 
+function performanceStatusFromTargetMetrics(
+  qualityStatus: string,
+  fbrPercent: number | null,
+  followsSent: number | null,
+): SafeTargetRow["performance_status"] {
+  if (qualityStatus !== "eligible") return "not_applicable";
+  if (followsSent === null || followsSent <= 0) return "pending";
+  if (followsSent < 100) return "insufficient_data";
+  if (fbrPercent === null) return "pending";
+  if (fbrPercent <= 8) return "bad";
+  if (fbrPercent < 15) return "avg";
+  return "good";
+}
+
 function safeTargetRow(row: SupabaseRecord): SafeTargetRow {
   const createdAt = readString(row.created_at, "");
   const followersCount = readNumber(row.followers_count ?? row.followers, Number.NaN);
-  const followbackRatio = readNumber(row.followback_ratio ?? row.fbr_percent, Number.NaN);
+  const followsSentCount = readNumber(row.follows_sent_count, Number.NaN);
+  const followbacksCount = readNumber(row.followbacks_count, Number.NaN);
+  const storedFollowbackRatio = readNumber(row.followback_ratio ?? row.fbr_percent, Number.NaN);
+  const followbackRatio = Number.isFinite(storedFollowbackRatio)
+    ? storedFollowbackRatio
+    : Number.isFinite(followsSentCount) && followsSentCount > 0 && Number.isFinite(followbacksCount)
+      ? (followbacksCount / followsSentCount) * 100
+      : Number.NaN;
   const id = readString(row.id ?? row.target_id, "");
   const targetUsername = normalizeTargetUsername(
     readString(row.normalized_username, readString(row.target_username, readString(row.input_username, ""))),
   );
+  const qualityStatus = readString(row.quality_status, "unknown");
+  const safeFbr = Number.isFinite(followbackRatio) ? followbackRatio : null;
+  const safeFollowsSent = Number.isFinite(followsSentCount) ? followsSentCount : null;
+  const safeFollowbacks = Number.isFinite(followbacksCount) ? followbacksCount : null;
+  const performanceStatus = performanceStatusFromTargetMetrics(qualityStatus, safeFbr, safeFollowsSent);
+  const lastSelectedAt = readDateString(row, "last_selected_at");
+  const lastUsedAt = readDateString(row, "last_used_at");
+  const lastSuccessfulCandidateAt = readDateString(row, "last_successful_candidate_at");
+  const lastExhaustedAt = readDateString(row, "last_exhausted_at");
+  const exhaustionReason = readString(row.exhaustion_reason, "") || null;
+  const cooldownUntil = readDateString(row, "cooldown_until");
+  const metricsUpdatedAt = readDateString(row, "metrics_updated_at");
 
   return {
     target_id: id,
@@ -99,7 +153,7 @@ function safeTargetRow(row: SupabaseRecord): SafeTargetRow {
     status: readString(row.status, "unknown"),
     verification_status: readString(row.verification_status, "pending"),
     verification_reason: readString(row.verification_reason, "") || null,
-    quality_status: readString(row.quality_status, "unknown"),
+    quality_status: qualityStatus,
     avatar_url: safeInstagramPublicAvatarUrl(readString(row.avatar_url, "")),
     source: readString(row.source, "unknown"),
     actor_type: readString(row.actor_type, "") || null,
@@ -112,7 +166,28 @@ function safeTargetRow(row: SupabaseRecord): SafeTargetRow {
     followers_count: Number.isFinite(followersCount) ? followersCount : null,
     is_verified: readBooleanNullable(row.is_verified),
     is_private: readBooleanNullable(row.is_private),
-    followback_ratio: Number.isFinite(followbackRatio) ? followbackRatio : null,
+    followback_ratio: safeFbr,
+    follows_sent_count: safeFollowsSent,
+    followbacks_count: safeFollowbacks,
+    performance_status: performanceStatus,
+    followsSent: safeFollowsSent,
+    followbacks: safeFollowbacks,
+    fbrPercent: safeFbr,
+    performanceStatus,
+    last_selected_at: lastSelectedAt,
+    last_used_at: lastUsedAt,
+    last_successful_candidate_at: lastSuccessfulCandidateAt,
+    last_exhausted_at: lastExhaustedAt,
+    exhaustion_reason: exhaustionReason,
+    cooldown_until: cooldownUntil,
+    metrics_updated_at: metricsUpdatedAt,
+    lastSelectedAt,
+    lastUsedAt,
+    lastSuccessfulCandidateAt,
+    lastExhaustedAt,
+    exhaustionReason,
+    cooldownUntil,
+    metricsUpdatedAt,
     added_at: readDateString(row, "added_at"),
     deleted_at: readDateString(row, "deleted_at"),
     archived_at: readDateString(row, "archived_at"),

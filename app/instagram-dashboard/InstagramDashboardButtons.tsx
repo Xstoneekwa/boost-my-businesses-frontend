@@ -3564,6 +3564,15 @@ function SourcesPolicyPanel({
   const nextTarget = eligibleTargets[0] ?? null;
   const fbrTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.fbrPercent !== null);
   const followsSentTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.followsSent !== null);
+  const insufficientDataTargets = items.filter(
+    (item) => !isArchivedOrDeletedTarget(item) && item.followsSent !== null && item.followsSent > 0 && item.followsSent < 100,
+  );
+  const pendingRuntimeTargets = items.filter(
+    (item) => !isArchivedOrDeletedTarget(item) && (item.followsSent === null || item.followsSent <= 0),
+  );
+  const recentlyExhaustedTargets = items.filter(
+    (item) => !isArchivedOrDeletedTarget(item) && item.lastExhaustedAt !== null,
+  );
   const avgFbr = fbrTargets.length
     ? fbrTargets.reduce((total, item) => total + (item.fbrPercent ?? 0), 0) / fbrTargets.length
     : null;
@@ -3585,8 +3594,11 @@ function SourcesPolicyPanel({
   const performanceItems = [
     ["Followback ratio by target", avgFbr === null ? "pending runtime data" : `${targetFbrLabel(avgFbr)} avg across ${sourceMetricCount(fbrTargets.length, "target", "targets")}`],
     ["Follows sent by target", followsSentTargets.length ? `Available on ${sourceMetricCount(followsSentTargets.length, "target", "targets")}` : "pending runtime data"],
-    ["Auto-archive rule", "Planned: flag/archive if ratio <= 8% after at least 100 follows sent"],
-    ["Performance verdicts", "Not shown until runtime metrics are reliable"],
+    ["Insufficient data", insufficientDataTargets.length ? sourceMetricCount(insufficientDataTargets.length, "target", "targets") : "none"],
+    ["Pending runtime data", pendingRuntimeTargets.length ? sourceMetricCount(pendingRuntimeTargets.length, "target", "targets") : "none"],
+    ["Recently exhausted", recentlyExhaustedTargets.length ? sourceMetricCount(recentlyExhaustedTargets.length, "target", "targets") : "none"],
+    ["Auto-archive rule", "Disabled in P1c; review candidate only after enough evidence"],
+    ["Performance verdicts", "Bad only after at least 100 follows sent"],
   ];
 
   return (
@@ -3705,9 +3717,9 @@ function SourcesPolicyPanel({
         <div className="ig-filters-section-head">
           <div className="ig-filters-section-title-row">
             <h3>Followback ratio / Target performance</h3>
-            <span className="ig-filters-badge ig-filters-badge-planned">Metrics pending</span>
+            <span className="ig-filters-badge ig-filters-badge-readonly">Read-only metrics</span>
           </div>
-          <p>Performance data stays pending until the worker reliably writes per-target runtime metrics.</p>
+          <p>Performance is read-only. FBR can be displayed early, but verdicts require at least 100 follows sent and never auto-archive in P1c.</p>
         </div>
         <div className="ig-schedule-assignment-grid">
           {performanceItems.map(([label, value]) => (
@@ -3725,13 +3737,13 @@ function SourcesPolicyPanel({
             <h3>Future source policy</h3>
             <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
           </div>
-          <p>Later patches will add durable per-target metrics, FBR, cooldowns, and source health automation.</p>
+          <p>P1c prepares durable per-target metrics, FBR, and cooldown display. Automation remains disabled until controlled runs validate it.</p>
         </div>
         <ul className="ig-source-policy-list">
           <li>Metrics per target and followback ratio by target.</li>
-          <li>Cooldown or archive decisions after enough evidence.</li>
+          <li>Cooldown display only until P2 controlled runs validate exclusion policy.</li>
           <li>Attribution by target for every follow.</li>
-          <li>Followback ratio by target with threshold-based archive/flag.</li>
+          <li>Followback ratio by target with threshold-based review flag, not auto-archive.</li>
         </ul>
         <p className="ig-settings-message">Outreach sources are managed in DM/Outreach.</p>
       </section>

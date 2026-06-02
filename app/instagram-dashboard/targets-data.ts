@@ -1,5 +1,5 @@
 export type TargetHealthStatus = "good" | "monitor" | "poor" | "unknown" | "pending_source";
-export type TargetPerformanceStatus = "good" | "avg" | "poor" | "pending" | "not_applicable";
+export type TargetPerformanceStatus = "good" | "avg" | "bad" | "insufficient_data" | "pending" | "not_applicable";
 export type TargetQualityStatus =
   | "unknown"
   | "eligible"
@@ -36,6 +36,27 @@ export type TargetSafeRow = {
   is_verified?: boolean | null;
   is_private?: boolean | null;
   followback_ratio?: number | null;
+  follows_sent_count?: number | null;
+  followbacks_count?: number | null;
+  performance_status?: TargetPerformanceStatus | null;
+  followsSent?: number | null;
+  followbacks?: number | null;
+  fbrPercent?: number | null;
+  performanceStatus?: TargetPerformanceStatus | null;
+  last_selected_at?: string | null;
+  last_used_at?: string | null;
+  last_successful_candidate_at?: string | null;
+  last_exhausted_at?: string | null;
+  exhaustion_reason?: string | null;
+  cooldown_until?: string | null;
+  metrics_updated_at?: string | null;
+  lastSelectedAt?: string | null;
+  lastUsedAt?: string | null;
+  lastSuccessfulCandidateAt?: string | null;
+  lastExhaustedAt?: string | null;
+  exhaustionReason?: string | null;
+  cooldownUntil?: string | null;
+  metricsUpdatedAt?: string | null;
   added_at?: string | null;
   deleted_at?: string | null;
   archived_at?: string | null;
@@ -71,6 +92,12 @@ export type TargetAccountItem = {
   batchId: string | null;
   providerCheckedAt: string | null;
   lastUsedAt: string | null;
+  lastSelectedAt: string | null;
+  lastSuccessfulCandidateAt: string | null;
+  lastExhaustedAt: string | null;
+  exhaustionReason: string | null;
+  cooldownUntil: string | null;
+  metricsUpdatedAt: string | null;
   actor: string | null;
   actorType: "client" | "admin" | "botapp" | "automation" | "system" | null;
   sourceSurface: "client_dashboard" | "admin_dashboard" | "botapp" | "backend" | "automation" | null;
@@ -202,9 +229,10 @@ function countByStatus(items: TargetAccountItem[], status: string) {
   return items.filter((item) => item.status.toLowerCase() === status).length;
 }
 
-export function targetHealthFromFbr(fbrPercent: number | null): TargetHealthStatus {
+export function targetHealthFromFbr(fbrPercent: number | null, followsSent: number | null = null): TargetHealthStatus {
   if (fbrPercent === null) return "pending_source";
-  if (fbrPercent < 8) return "poor";
+  if (followsSent !== null && followsSent < 100) return "pending_source";
+  if (fbrPercent < 8) return "monitor";
   if (fbrPercent < 13) return "monitor";
   return "good";
 }
@@ -240,49 +268,64 @@ export function targetHealthHelper(healthStatus: TargetQualityStatus | TargetHea
 export function targetPerformanceFromFbr(
   qualityStatus: TargetQualityStatus,
   fbrPercent: number | null,
+  followsSent: number | null = null,
 ): TargetPerformanceStatus {
   if (qualityStatus !== "eligible") return "not_applicable";
+  if (followsSent === null || followsSent <= 0) return "pending";
+  if (followsSent < 100) return "insufficient_data";
   if (fbrPercent === null) return "pending";
-  if (fbrPercent <= 8) return "poor";
-  if (fbrPercent < 13) return "avg";
+  if (fbrPercent <= 8) return "bad";
+  if (fbrPercent < 15) return "avg";
   return "good";
 }
 
 export function targetPerformanceLabel(status: TargetPerformanceStatus) {
   if (status === "good") return "Good";
   if (status === "avg") return "Avg";
-  if (status === "poor") return "Poor";
+  if (status === "bad") return "Bad";
+  if (status === "insufficient_data") return "Insufficient data";
   if (status === "pending") return "Pending";
   return "—";
 }
 
 export function targetPerformanceHelper(status: TargetPerformanceStatus) {
   if (status === "not_applicable") return "Performance applies only to eligible active CTs.";
-  if (status === "pending") return "Waiting for enough runtime follow data from this CT.";
-  if (status === "poor") return "Low followback ratio after enough CT usage.";
-  if (status === "avg") return "Average followback ratio after enough CT usage.";
-  return "Good followback ratio after enough CT usage.";
+  if (status === "pending") return "Pending runtime data from this CT.";
+  if (status === "insufficient_data") return "FBR needs at least 100 follows sent from this target before a verdict. No auto-archive in P1c.";
+  if (status === "bad") return "FBR <= 8% after at least 100 follows sent. Review candidate only; no auto-archive in P1c.";
+  if (status === "avg") return "FBR is > 8% and < 15% after at least 100 follows sent.";
+  return "FBR is >= 15% after at least 100 follows sent.";
 }
 
-export function targetFbrLabel(fbrPercent: number | null) {
+export function targetFbrLabel(fbrPercent: number | null, followsSent: number | null = null) {
   if (fbrPercent === null) return "—";
+  if (followsSent !== null && followsSent > 0 && followsSent < 100) return "Insufficient";
   return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(fbrPercent)}%`;
 }
 
-export function targetFbrHelper(fbrPercent: number | null) {
+export function targetFbrHelper(fbrPercent: number | null, followsSent: number | null = null) {
   if (fbrPercent === null) return "FBR is followers gained divided by follows sent from this CT. No runtime data yet.";
+  if (followsSent !== null && followsSent < 100) return "FBR is calculable, but fewer than 100 follows have been sent from this CT.";
   return "Exact followback ratio from runtime CT usage.";
 }
 
 export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const followersCount = typeof row.followers_count === "number" ? row.followers_count : null;
-  const fbrPercent = typeof row.followback_ratio === "number" ? row.followback_ratio : null;
+  const followsSent = typeof row.follows_sent_count === "number" ? row.follows_sent_count : typeof row.followsSent === "number" ? row.followsSent : null;
+  const followbacks = typeof row.followbacks_count === "number" ? row.followbacks_count : typeof row.followbacks === "number" ? row.followbacks : null;
+  const fbrPercent = typeof row.followback_ratio === "number"
+    ? row.followback_ratio
+    : typeof row.fbrPercent === "number"
+      ? row.fbrPercent
+    : followsSent && followsSent > 0 && followbacks !== null
+      ? (followbacks / followsSent) * 100
+      : null;
   const addedAt = row.added_at || row.created_at;
   const deletedAt = row.deleted_at ?? null;
   const archivedAt = row.archived_at ?? null;
   const qualityStatus = (row.quality_status || "unknown") as TargetQualityStatus;
-  const healthStatus = qualityStatus !== "unknown" ? (qualityStatus === "eligible" ? "good" : qualityStatus.startsWith("review_") ? "monitor" : "poor") : targetHealthFromFbr(fbrPercent);
-  const performanceStatus = targetPerformanceFromFbr(qualityStatus, fbrPercent);
+  const healthStatus = qualityStatus !== "unknown" ? (qualityStatus === "eligible" ? "good" : qualityStatus.startsWith("review_") ? "monitor" : "poor") : targetHealthFromFbr(fbrPercent, followsSent);
+  const performanceStatus = row.performance_status || row.performanceStatus || targetPerformanceFromFbr(qualityStatus, fbrPercent, followsSent);
   const sourceSurface = row.source === "manual_single" || row.source === "manual_bulk" || row.source === "admin"
     ? "admin_dashboard"
     : row.source === "client"
@@ -313,23 +356,29 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
     performanceStatus,
     performanceLabel: targetPerformanceLabel(performanceStatus),
     fbrPercent,
-    followsSent: null,
-    followbacks: null,
+    followsSent,
+    followbacks,
     followersCount,
     isVerified: typeof row.is_verified === "boolean" ? row.is_verified : null,
     isPrivate: typeof row.is_private === "boolean" ? row.is_private : null,
     batchId: row.batch_id ?? null,
     providerCheckedAt: row.provider_checked_at ?? null,
-    lastUsedAt: null,
+    lastUsedAt: row.last_used_at ?? row.lastUsedAt ?? null,
+    lastSelectedAt: row.last_selected_at ?? row.lastSelectedAt ?? null,
+    lastSuccessfulCandidateAt: row.last_successful_candidate_at ?? row.lastSuccessfulCandidateAt ?? null,
+    lastExhaustedAt: row.last_exhausted_at ?? row.lastExhaustedAt ?? null,
+    exhaustionReason: row.exhaustion_reason ?? row.exhaustionReason ?? null,
+    cooldownUntil: row.cooldown_until ?? row.cooldownUntil ?? null,
+    metricsUpdatedAt: row.metrics_updated_at ?? row.metricsUpdatedAt ?? null,
     actor: null,
     actorType: row.actor_type === "admin" || row.actor_type === "client" || row.actor_type === "system" ? row.actor_type : null,
     sourceSurface,
-    reason: row.rejected_reason || row.verification_reason || null,
+    reason: row.exhaustion_reason || row.rejected_reason || row.verification_reason || null,
     syncStatus: "unknown",
     archivedAt,
     deletedAt,
     auditEventId: null,
-    isFutureMetricPending: row.verification_status !== "found" || fbrPercent === null,
+    isFutureMetricPending: row.verification_status !== "found" || followsSent === null || followsSent <= 0,
     isSyncPending: row.status === "pending_verification",
   };
 }
@@ -367,7 +416,7 @@ export function buildTargetsOverview(rows: TargetSafeRow[]): TargetsOverview {
       failed: countByStatus(items, "failed") + countByStatus(items, "rejected"),
       skipped: countByStatus(items, "skipped"),
       qualityPending: items.filter((item) => item.isFutureMetricPending).length,
-      poorPerformanceCount: items.filter((item) => item.performanceStatus === "poor").length,
+      poorPerformanceCount: items.filter((item) => item.performanceStatus === "bad").length,
       archivedCount,
       deletedCount,
       syncPendingCount: items.filter((item) => item.isSyncPending).length,
