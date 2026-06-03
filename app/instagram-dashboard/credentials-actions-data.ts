@@ -8,13 +8,15 @@ export type CredentialsActionType =
   | "reconnect_instagram"
   | "complete_two_factor"
   | "resolve_checkpoint"
+  | "enter_email_verification_code"
+  | "review_login_challenge"
   | "review_login_failure"
   | "review_account_mismatch"
   | "review_credentials"
   | "unknown";
 
 export type DashboardActionSeverity = "info" | "warning" | "error" | "critical" | "unknown";
-export type DashboardActionStatus = "pending" | "acknowledged" | "pending_verification" | "resolved" | "dismissed" | "ignored" | "unknown";
+export type DashboardActionStatus = "pending" | "acknowledged" | "pending_verification" | "code_submitted" | "resolved" | "dismissed" | "ignored" | "unknown";
 export type DashboardActionAudience = "client" | "admin" | "assistant" | "ops" | "internal" | "unknown";
 export type BackendMutationStatus = "pending_backend" | "connected" | "disabled";
 export type CredentialsSourceStatus = "connected" | "pending" | "unknown" | "disabled";
@@ -155,6 +157,8 @@ function asActionType(value: unknown): CredentialsActionType {
     normalized === "reconnect_instagram" ||
     normalized === "complete_two_factor" ||
     normalized === "resolve_checkpoint" ||
+    normalized === "enter_email_verification_code" ||
+    normalized === "review_login_challenge" ||
     normalized === "review_login_failure" ||
     normalized === "review_account_mismatch" ||
     normalized === "review_credentials"
@@ -178,6 +182,7 @@ function asStatus(value: unknown): DashboardActionStatus {
     normalized === "pending" ||
     normalized === "acknowledged" ||
     normalized === "pending_verification" ||
+    normalized === "code_submitted" ||
     normalized === "resolved" ||
     normalized === "dismissed" ||
     normalized === "ignored"
@@ -287,6 +292,14 @@ function buildActionsForAccount(account: CredentialsActionAccount): DashboardAct
 
   if (includesAny(credentialText, ["2fa", "two_factor", "needs_2fa"])) {
     actions.push(action(account, "complete_two_factor", "Complete 2FA", "Two-factor completion is required from a safe credential workflow.", "critical", "client", true));
+  }
+
+  if (includesAny(loginText, ["verification_pending", "email_verification"])) {
+    actions.push(action(account, "enter_email_verification_code", "Enter email verification code", "Instagram is waiting for the email verification code.", "critical", "client", true));
+  }
+
+  if (includesAny(loginText, ["unsupported_post_submit", "review_login_challenge"])) {
+    actions.push(action(account, "review_login_challenge", "Review login challenge", "Instagram shows an unsupported verification step that needs human review.", "warning", "admin", false));
   }
 
   if (includesAny(loginText, ["checkpoint", "challenge"])) {

@@ -4,11 +4,13 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
+import VerificationCodeActionModal from "../VerificationCodeActionModal";
 import {
   getCredentialsActionsData,
   type CredentialsActionAccount,
   type CredentialsActionsSourceDetail,
   type DashboardActionGroup,
+  type DashboardActionItem,
 } from "../credentials-actions-data";
 import { formatDateTime, formatInteger, getRadarData, statusTone } from "../radar-data";
 
@@ -67,7 +69,7 @@ export default async function InstagramCredentialsActionsPage() {
         title="Dashboard actions"
         description="Action worklist derived from safe dashboard status."
       >
-        <ActionsList groups={data.actionGroups} />
+        <ActionsList groups={data.actionGroups} actions={data.actions} />
       </AnalyticsSectionCard>
 
       <style>{`
@@ -449,7 +451,7 @@ function AccountWorklist({ accounts }: { accounts: CredentialsActionAccount[] })
   );
 }
 
-function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
+function ActionsList({ groups, actions }: { groups: DashboardActionGroup[]; actions: DashboardActionItem[] }) {
   if (!groups.length) {
     return (
       <div className="ig-credentials-empty">
@@ -462,7 +464,12 @@ function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
 
   return (
     <div className="ig-credentials-actions-list">
-      {groups.map((group) => (
+      {groups.map((group) => {
+        const interactiveActions = actions.filter(
+          (item) => item.accountId === group.accountId
+            && (item.actionType === "enter_email_verification_code" || item.actionType === "review_login_challenge"),
+        );
+        return (
         <article className="ig-credentials-action" key={group.accountId || group.username}>
           <div>
             <div className="ig-credentials-action-header">
@@ -502,10 +509,23 @@ function ActionsList({ groups }: { groups: DashboardActionGroup[] }) {
             </div>
           </div>
           <div className="ig-credentials-action-buttons">
+            {interactiveActions.map((item) => (
+              <VerificationCodeActionModal
+                key={item.id}
+                actionId={item.id}
+                accountId={item.accountId}
+                username={item.username}
+                title={item.title}
+                description={item.description}
+                actionType={item.actionType === "review_login_challenge" ? "review_login_challenge" : "enter_email_verification_code"}
+                status={item.status}
+              />
+            ))}
             <Link href={group.deepLink ?? `/instagram-dashboard/accounts/${encodeURIComponent(group.accountId || group.username)}`}>View Account</Link>
           </div>
         </article>
-      ))}
+        );
+      })}
     </div>
   );
 }
