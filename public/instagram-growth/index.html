@@ -8,6 +8,36 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
+<style>
+.btn-dashboard {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: 11px 26px;
+  border-radius: 100px;
+  font-family: var(--font-display);
+  font-size: .92rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  color: #f0f0ef;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.15);
+  white-space: nowrap;
+}
+.btn-dashboard .db-icon {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5px;
+  width: 13px;
+  height: 13px;
+  opacity: .75;
+}
+.btn-dashboard .db-icon span {
+  background: currentColor;
+  border-radius: 2px;
+}
+</style>
 </head>
 <body class="dir-neon">
 
@@ -29,6 +59,10 @@
       </div>
       <a class="nav-cta-soft" href="#how" data-en="Book a call">Réserver un appel</a>
       <a class="btn btn-primary btn-sm" href="#pricing" data-en="Get started">Démarrer</a>
+      <a class="btn-dashboard" href="/instagram-login" data-en="Access dashboard">
+        <span class="db-icon" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span data-en="Access dashboard">Accéder au dashboard</span>
+      </a>
     </div>
   </div>
 </header>
