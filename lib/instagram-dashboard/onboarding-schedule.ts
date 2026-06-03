@@ -9,7 +9,10 @@ function readRpcObject(value: unknown): SupabaseRecord {
   return {};
 }
 
-export async function tryAutoAssignOnboardingSchedule(accountId: string) {
+export async function tryAutoAssignOnboardingSchedule(
+  accountId: string,
+  target: { deviceId?: string; appInstanceId?: string; startsAt?: string; endsAt?: string } = {},
+) {
   const supabase = createSupabaseClient();
   const { data: subscriptionAccount, error: subscriptionError } = await supabase
     .from("client_subscription_accounts")
@@ -24,28 +27,37 @@ export async function tryAutoAssignOnboardingSchedule(accountId: string) {
     return { assigned: false, reason: "subscription_account_missing" };
   }
 
-  const { data: slotCatalog, error: slotError } = await supabase.rpc("list_available_assignment_slots", {
-    p_account_id: accountId,
-  });
-  if (slotError) {
-    return { assigned: false, reason: "slot_catalog_unavailable" };
-  }
+  let deviceId = target.deviceId || "";
+  let startsAt = target.startsAt || "";
+  let endsAt = target.endsAt || "";
+  if (!deviceId || !startsAt || !endsAt) {
+    const { data: slotCatalog, error: slotError } = await supabase.rpc("list_available_assignment_slots", {
+      p_account_id: accountId,
+      p_device_id: target.deviceId || null,
+    });
+    if (slotError) {
+      return { assigned: false, reason: "slot_catalog_unavailable" };
+    }
 
-  const slotPayload = readRpcObject(slotCatalog);
-  const deviceId = readString(slotPayload.device_id, "");
-  const slots = Array.isArray(slotPayload.slots)
-    ? slotPayload.slots.map((row) => readScheduleSlot(row as SupabaseRecord))
-    : [];
-  const firstAvailable = slots.find((slot) => slot.available);
-  if (!deviceId || !firstAvailable) {
-    return { assigned: false, reason: "no_available_slot" };
+    const slotPayload = readRpcObject(slotCatalog);
+    deviceId = readString(slotPayload.device_id, "");
+    const slots = Array.isArray(slotPayload.slots)
+      ? slotPayload.slots.map((row) => readScheduleSlot(row as SupabaseRecord))
+      : [];
+    const firstAvailable = slots.find((slot) => slot.available);
+    if (!deviceId || !firstAvailable) {
+      return { assigned: false, reason: "no_available_slot" };
+    }
+    startsAt = firstAvailable.starts_at;
+    endsAt = firstAvailable.ends_at;
   }
 
   const { data: assignResult, error: assignError } = await supabase.rpc("assign_account_slot", {
     p_account_id: accountId,
     p_device_id: deviceId,
-    p_starts_at: firstAvailable.starts_at,
-    p_ends_at: firstAvailable.ends_at,
+    p_starts_at: startsAt,
+    p_ends_at: endsAt,
+    p_clone_id: target.appInstanceId || null,
     p_assignment_source: "onboarding_auto",
   });
 

@@ -7,8 +7,8 @@ export function jsonOk<T>(data: T, status = 200) {
   return NextResponse.json({ ok: true, data }, { status });
 }
 
-export function jsonError(message: string, status = 500) {
-  return NextResponse.json({ ok: false, error: message }, { status });
+export function jsonError(message: string, status = 500, meta?: Record<string, unknown>) {
+  return NextResponse.json({ ok: false, error: message, ...(meta ?? {}) }, { status });
 }
 
 function canBypassInstagramAdminLocally() {

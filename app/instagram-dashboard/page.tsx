@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
-import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import AddProfileWizard from "./AddProfileWizard";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
 import InstagramDashboardViewNav from "./InstagramDashboardViewNav";
@@ -20,7 +20,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function InstagramAutomationDashboardPage() {
-  const userContext = await requireDashboardUserContext();
+  const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
     notFound();
@@ -248,6 +248,43 @@ export default async function InstagramAutomationDashboardPage() {
           color: #f0f0ef;
           font-weight: 900;
           text-decoration: none;
+        }
+
+        .ig-dashboard-account-identity,
+        .ig-dashboard-mobile-identity {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .ig-dashboard-mobile-identity {
+          align-items: flex-start;
+        }
+
+        .ig-dashboard-account-avatar {
+          width: 32px;
+          height: 32px;
+          flex: 0 0 auto;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 999px;
+          object-fit: cover;
+          background: rgba(255,255,255,0.06);
+        }
+
+        .ig-dashboard-account-avatar-fallback {
+          display: inline-grid;
+          place-items: center;
+          color: rgba(255,255,255,0.78);
+          font-size: 12px;
+          font-weight: 900;
+        }
+
+        .ig-dashboard-canonical-username {
+          display: block;
+          margin-top: 2px;
+          color: rgba(255,255,255,0.40);
+          font-size: 11px;
+          font-weight: 700;
         }
 
         .ig-dashboard-account-link:hover,
@@ -634,10 +671,7 @@ function AccountList({
             {accounts.map((account) => (
               <tr key={account.accountId || account.username}>
                 <td>
-                  <Link className="ig-dashboard-account-link" href={accountDetailHref(account)}>
-                    {account.username}
-                  </Link>
-                  <UsernameVerificationStatus account={account} />
+                  <AccountIdentity account={account} />
                 </td>
                 <td>{account.clientName ?? account.emailDisplay}</td>
                 <td>
@@ -658,7 +692,15 @@ function AccountList({
                     {account.loginStatus}
                   </span>
                 </td>
-                <td>{account.phoneName}</td>
+                <td>
+                  {account.phoneName}
+                  {account.appPackageName ? (
+                    <>
+                      <br />
+                      <small>{account.assignmentStatus ?? "assigned"} · {account.appPackageName}</small>
+                    </>
+                  ) : null}
+                </td>
                 <td>{account.macHostName}</td>
                 <td>{mode === "archived" ? formatDateTime(account.scheduledTrashAt) : mode === "trashed" ? formatDateTime(account.scheduledDeleteAt) : formatDateTime(account.createdAt)}</td>
                 <td>
@@ -680,7 +722,8 @@ function AccountList({
         {accounts.map((account) => (
           <article className="ig-dashboard-mobile-card" key={`${account.accountId || account.username}-mobile`}>
             <div className="ig-dashboard-mobile-card-head">
-              <div>
+              <div className="ig-dashboard-mobile-identity">
+                <AccountAvatar account={account} />
                 <strong>{account.username}</strong>
                 <Link className="ig-dashboard-mobile-detail-link" href={accountDetailHref(account)}>
                   Details
@@ -720,7 +763,7 @@ function AccountList({
               </div>
               <div>
                 <dt>Phone</dt>
-                <dd>{account.phoneName}</dd>
+                <dd>{account.phoneName}{account.appPackageName ? ` · ${account.appPackageName}` : ""}</dd>
               </div>
               <div>
                 <dt>Mac/host</dt>
@@ -758,6 +801,32 @@ function UsernameVerificationStatus({ account }: { account: ManageAccount }) {
   return (
     <div className="ig-dashboard-username-verification" style={{ color: statusTone(status) }}>
       {label}
+    </div>
+  );
+}
+
+function AccountAvatar({ account }: { account: ManageAccount }) {
+  const initial = (account.instagramCanonicalUsername || account.username || "?").slice(0, 1).toUpperCase();
+  if (account.profileImageUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={`/api/instagram-dashboard/avatar?kind=account&id=${encodeURIComponent(account.accountId)}`} alt="" className="ig-dashboard-account-avatar" />;
+  }
+  return <span className="ig-dashboard-account-avatar ig-dashboard-account-avatar-fallback" aria-hidden>{initial}</span>;
+}
+
+function AccountIdentity({ account }: { account: ManageAccount }) {
+  return (
+    <div className="ig-dashboard-account-identity">
+      <AccountAvatar account={account} />
+      <div>
+        <Link className="ig-dashboard-account-link" href={accountDetailHref(account)}>
+          {account.instagramCanonicalUsername || account.username}
+        </Link>
+        {account.instagramCanonicalUsername && account.instagramCanonicalUsername !== account.username ? (
+          <small className="ig-dashboard-canonical-username">@{account.username}</small>
+        ) : null}
+        <UsernameVerificationStatus account={account} />
+      </div>
     </div>
   );
 }

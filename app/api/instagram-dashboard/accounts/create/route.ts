@@ -7,8 +7,14 @@ import {
   type InstagramPublicProfileLookupResult,
 } from "@/lib/instagram-public-profile-lookup";
 import { canAccessTenantPages, getDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import {
+  defaultAddProfileCommercialPackage,
+  isAddProfileAddonCode,
+  isAddProfileCommercialPackage,
+} from "@/lib/instagram-dashboard/add-profile-packages";
+import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
-import { jsonError, jsonOk, readJsonBody, readString, type SupabaseRecord } from "../../_utils";
+import { jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +28,16 @@ type CreateProfilePayload = {
   login_method?: unknown;
   clone_mode?: unknown;
   device_id?: unknown;
+  app_instance_id?: unknown;
   device_name?: unknown;
   device_udid?: unknown;
   template_mode?: unknown;
   template_id?: unknown;
+  runtime_mode?: unknown;
+  commercial_package?: unknown;
+  addons?: unknown;
+  starts_at?: unknown;
+  ends_at?: unknown;
 };
 
 type AddProfileCredentialsResponse = {
@@ -59,6 +71,8 @@ const defaultWelcomeDmSessionCap = 10;
 const defaultOutreachDmSessionCap = 5;
 const defaultTotalDmDayCap = defaultWelcomeDmDayCap + defaultOutreachDmDayCap;
 const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
+const loginMethods = new Set(["manual", "credentials"]);
+const runtimeModes = new Set(["safe_setup", "follow_only_test", "full_cycle", "outreach_only"]);
 const sensitivePayloadKeys = new Set([
   "password",
   "email",
@@ -315,6 +329,70 @@ async function markCredentialFailureWithSupportAction(
   }
 }
 
+function readAddonCodes(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => readString(entry, ""))
+    .filter((entry) => isAddProfileAddonCode(entry));
+}
+
+function readCommercialPackage(value: unknown) {
+  const normalized = readString(value, defaultAddProfileCommercialPackage());
+  return isAddProfileCommercialPackage(normalized) ? normalized : defaultAddProfileCommercialPackage();
+}
+
+function addProfilePartialMeta(input: {
+  accountId: string;
+  accountCreated: boolean;
+  credentialsSaved: boolean;
+  assignmentFailed?: boolean;
+  reason?: string;
+  repairPossible?: boolean;
+}) {
+  return {
+    partial: {
+      account_created: input.accountCreated,
+      account_id: input.accountId,
+      credentials_saved: input.credentialsSaved,
+      assignment_failed: input.assignmentFailed ?? false,
+      reason: input.reason ?? null,
+      repair_possible: input.repairPossible ?? false,
+    },
+  };
+}
+
+async function loadRepairableAddProfileAccount(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  username: string,
+) {
+  const { data: account, error } = await supabase
+    .from("ig_accounts")
+    .select("*")
+    .eq("username", username)
+    .maybeSingle<SupabaseRecord>();
+
+  if (error || !account) return { kind: "new" as const };
+  if (readString(account.status, "") === activeAccountStatus) {
+    return { kind: "duplicate_active" as const, account };
+  }
+
+  const { count } = await supabase
+    .from("account_assignments")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", readString(account.id, ""))
+    .in("status", ["reserved", "active"]);
+
+  if ((count ?? 0) > 0) {
+    return { kind: "duplicate_assigned" as const, account };
+  }
+
+  if (readString(account.status, "") !== supportRequiredStatus) {
+    return { kind: "duplicate_active" as const, account };
+  }
+
+  return { kind: "repair" as const, account };
+}
+
 async function compensateNewProfile(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
@@ -437,24 +515,61 @@ async function fetchTemplate(
   return result.data ?? null;
 }
 
-async function fetchDeviceUdid(
+async function fetchOnboardingTarget(
   supabase: ReturnType<typeof createSupabaseClient>,
   deviceId: string,
+  appInstanceId: string,
 ) {
-  if (!isUuid(deviceId)) return "";
-  const { data } = await supabase
-    .from("ig_devices")
-    .select("device_udid")
-    .eq("id", deviceId)
-    .maybeSingle<SupabaseRecord>();
+  if (!isUuid(deviceId) || !isUuid(appInstanceId)) {
+    throw new Error("manual_target_required");
+  }
 
-  return readString(data?.device_udid, "").trim();
+  const [{ data: phone, error: phoneError }, { data: appInstance, error: appError }] = await Promise.all([
+    supabase
+      .from("phone_devices")
+      .select("id,name,device_name,adb_serial,status,pool_type,timezone")
+      .eq("id", deviceId)
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
+    supabase
+      .from("phone_app_instances")
+      .select("id,device_id,instance_type,instance_index,visible_label,package_name,status,current_account_id,usable_for_auto_login,is_launchable")
+      .eq("id", appInstanceId)
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
+  ]);
+
+  if (phoneError || !phone) throw new Error("device_unavailable");
+  if (appError || !appInstance) throw new Error("app_instance_unavailable");
+  if (readString(appInstance.device_id, "") !== deviceId) throw new Error("app_instance_device_mismatch");
+  if (readString(appInstance.status, "") !== "available" || readString(appInstance.current_account_id, "")) {
+    throw new Error("app_instance_occupied");
+  }
+  if (appInstance.usable_for_auto_login !== true || appInstance.is_launchable !== true) {
+    throw new Error("app_instance_not_launchable");
+  }
+
+  return {
+    phone,
+    appInstance,
+    deviceName: readString(phone.name, readString(phone.device_name, "Unknown phone")),
+    packageName: readString(appInstance.package_name, ""),
+    appInstanceLabel: readString(appInstance.visible_label, `Clone ${readString(appInstance.instance_index, "")}`),
+    appInstanceIndex: Number(appInstance.instance_index ?? 0),
+  };
 }
 
 function safeCreateResponse(
   account: SupabaseRecord,
-  credentials: AddProfileCredentialsResponse,
-  scheduleMeta?: { onboarding_schedule_assigned?: boolean; onboarding_schedule_reason?: string },
+  credentials: AddProfileCredentialsResponse | null,
+  scheduleMeta?: {
+    onboarding_schedule_assigned?: boolean;
+    onboarding_schedule_reason?: string;
+    assignment?: SupabaseRecord;
+    device_id?: string;
+    app_instance_id?: string;
+    package_name?: string;
+  },
 ) {
   return {
     account: {
@@ -465,34 +580,55 @@ function safeCreateResponse(
     },
     settings: {
       status: "created",
-      password_status: "write_only",
+      password_status: credentials ? "write_only" : "not_submitted",
       device_assignment: readString(account.device_name, "pending source"),
       onboarding_schedule_assigned: scheduleMeta?.onboarding_schedule_assigned ?? false,
       onboarding_schedule_reason: scheduleMeta?.onboarding_schedule_reason ?? "not_attempted",
     },
-    credentials: {
-      request_id: credentials.request_id,
-      account_id: credentials.account_id,
-      provider: credentials.provider,
-      credentials_version: credentials.credentials_version,
-      credentials_status: credentials.credentials_status,
-      status: credentials.status,
-      reauth_required: credentials.reauth_required,
-      next_action: credentials.next_action,
-      password_status: "write_only",
+    credentials: credentials
+      ? {
+        request_id: credentials.request_id,
+        account_id: credentials.account_id,
+        provider: credentials.provider,
+        credentials_version: credentials.credentials_version,
+        credentials_status: credentials.credentials_status,
+        status: credentials.status,
+        reauth_required: credentials.reauth_required,
+        next_action: credentials.next_action,
+        password_status: "write_only",
+      }
+      : {
+        credentials_status: "not_submitted",
+        status: "manual_login_pending",
+        password_status: "not_submitted",
+      },
+    assignment: {
+      status: scheduleMeta?.onboarding_schedule_assigned ? "reserved" : "not_created",
+      reason: scheduleMeta?.onboarding_schedule_reason ?? "not_attempted",
+      assignment_id: readString(scheduleMeta?.assignment?.assignment_id, "") || null,
+      device_id: scheduleMeta?.device_id ?? null,
+      app_instance_id: scheduleMeta?.app_instance_id ?? null,
+      package_name: scheduleMeta?.package_name ?? null,
     },
     filters: { status: "created" },
     template: { status: "applied_server_side" },
+    automation: {
+      provisioning_started: false,
+      login_started: false,
+      run_started: false,
+    },
   };
 }
 
 export async function POST(request: Request) {
   try {
+    const unauthorizedResponse = await requireInstagramAdmin();
+    if (unauthorizedResponse) return unauthorizedResponse;
     const adminContext = await getDashboardUserContext();
-    if (!adminContext) return jsonError("Authentication required.", 401);
-    if (!canAccessTenantPages(adminContext)) {
+    if (adminContext && !canAccessTenantPages(adminContext)) {
       return jsonError("You are not authorized to access the Instagram dashboard.", 403);
     }
+    const actorId = adminContext?.userId ?? null;
 
     const body = await readJsonBody<CreateProfilePayload>(request);
     if (!body) return jsonError("Invalid profile payload.", 400);
@@ -500,9 +636,9 @@ export async function POST(request: Request) {
     const username = normalizeInstagramPublicUsername(readString(body.username, ""));
     if (!username) return jsonError("Instagram username is required.", 400);
     if (!isPlausibleInstagramPublicUsername(username)) return jsonError("username_verification_failed", 400);
+    const loginMethod = readString(body.login_method, "manual").trim();
+    if (!loginMethods.has(loginMethod)) return jsonError("Invalid login method.", 400);
     const password = readString(body.password, "");
-    if (!password) return jsonError("Instagram password is required for secure credential setup.", 400);
-    if (!credentialsConfig()) return jsonError("credentials_api_not_configured", 500);
 
     const externalRequestId = crypto.randomUUID();
     const supabase = createSupabaseClient();
@@ -511,7 +647,7 @@ export async function POST(request: Request) {
       await tryRecordAddProfileAudit(supabase, {
         username,
         externalRequestId,
-        actorId: adminContext.userId,
+        actorId,
         resultStatus: "failed",
         failureReason: "username_verification_failed",
       });
@@ -521,7 +657,7 @@ export async function POST(request: Request) {
       await tryRecordAddProfileAudit(supabase, {
         username,
         externalRequestId,
-        actorId: adminContext.userId,
+        actorId,
         resultStatus: "failed",
         failureReason: "username_not_found",
       });
@@ -533,15 +669,55 @@ export async function POST(request: Request) {
       isPlausibleInstagramPublicUsername(profileLookup.canonical_username)
       ? profileLookup.canonical_username
       : username;
+
+    const earlyRepairState = await loadRepairableAddProfileAccount(supabase, accountUsername);
+    let repairCredentialsAlreadySaved = false;
+    if (earlyRepairState.kind === "repair") {
+      const repairAccountId = readString(earlyRepairState.account.id, "");
+      const { data: repairCredentials } = await supabase
+        .from("account_credentials")
+        .select("id")
+        .eq("account_id", repairAccountId)
+        .eq("status", "active")
+        .limit(1)
+        .maybeSingle<SupabaseRecord>();
+      repairCredentialsAlreadySaved = Boolean(repairCredentials?.id);
+    }
+
+    if (loginMethod === "credentials" && !password && !repairCredentialsAlreadySaved) {
+      return jsonError("Instagram password is required for secure credential setup.", 400);
+    }
+    if (loginMethod === "credentials" && password && !credentialsConfig()) {
+      return jsonError("credentials_api_not_configured", 500);
+    }
+    if (loginMethod === "credentials" && !password && repairCredentialsAlreadySaved && !credentialsConfig()) {
+      return jsonError("credentials_api_not_configured", 500);
+    }
+
     const displayName = readString(body.display_name, "").trim();
     const deviceId = readString(body.device_id, "").trim();
-    const deviceName = readString(body.device_name, "Local Android Emulator").trim();
+    const appInstanceId = readString(body.app_instance_id, "").trim();
+    const targetResult = await fetchOnboardingTarget(supabase, deviceId, appInstanceId)
+      .then((target) => ({ ok: true as const, target }))
+      .catch((error) => ({
+        ok: false as const,
+        reason: error instanceof Error ? error.message : "manual_target_invalid",
+      }));
+    if (!targetResult.ok) return jsonError(targetResult.reason, 409);
+    const target = targetResult.target;
+    const deviceName = target.deviceName;
     const cloneMode = readString(body.clone_mode, "off").trim();
-    const loginMethod = readString(body.login_method, "manual").trim();
     const templateMode = readString(body.template_mode, "default").trim();
     const templateId = readString(body.template_id, "").trim();
+    const runtimeMode = readString(body.runtime_mode, "safe_setup").trim();
+    if (!runtimeModes.has(runtimeMode)) return jsonError("Invalid runtime mode.", 400);
+    const commercialPackage = readCommercialPackage(body.commercial_package);
+    const selectedAddons = readAddonCodes(body.addons);
+    const startsAt = readString(body.starts_at, "").trim();
+    const endsAt = readString(body.ends_at, "").trim();
+    if (!startsAt || !endsAt) return jsonError("Schedule slot is required.", 400);
     const template = await fetchTemplate(supabase, templateMode, templateId);
-    const deviceUdid = await fetchDeviceUdid(supabase, deviceId);
+    const deviceUdid = "";
     const settingsPayload = isRecord(template?.settings_payload) ? redactTemplatePayload(template.settings_payload) : {};
     const filtersPayload = isRecord(template?.filters_payload) ? redactTemplatePayload(template.filters_payload) : {};
 
@@ -549,7 +725,8 @@ export async function POST(request: Request) {
       username: accountUsername,
       display_name: displayName,
       status: supportRequiredStatus,
-      device_id: isUuid(deviceId) ? deviceId : null,
+      // ig_accounts.device_id FK still points at legacy ig_devices; phone placement uses assign_account_slot.
+      device_id: null,
       device_name: deviceName,
       device_udid: deviceUdid,
       clone_mode: cloneMode,
@@ -559,31 +736,57 @@ export async function POST(request: Request) {
       ...profileVerificationPayload(profileLookup),
     };
 
-    const { data: account, error: accountError } = await supabase
-      .from("ig_accounts")
-      .insert(accountPayload)
-      .select("*")
-      .single<SupabaseRecord>();
-
-    if (accountError) {
-      if (isDuplicateAccountError(accountError)) {
-        await tryRecordAddProfileAudit(supabase, {
-          username: accountUsername,
-          externalRequestId,
-          actorId: adminContext.userId,
-          resultStatus: "duplicate",
-          failureReason: "account_already_exists",
-        });
-        return jsonError("account_already_exists", 409);
-      }
+    const repairState = earlyRepairState;
+    if (repairState.kind === "duplicate_active" || repairState.kind === "duplicate_assigned") {
       await tryRecordAddProfileAudit(supabase, {
         username: accountUsername,
         externalRequestId,
-        actorId: adminContext.userId,
-        resultStatus: "failed",
-        failureReason: "account_create_failed",
+        actorId,
+        resultStatus: "duplicate",
+        failureReason: "account_already_exists",
       });
-      return jsonError("account_create_failed", 500);
+      return jsonError("account_already_exists", 409);
+    }
+
+    let account: SupabaseRecord;
+    let accountCreated = false;
+    if (repairState.kind === "repair") {
+      account = repairState.account;
+    } else {
+      const { data: insertedAccount, error: accountError } = await supabase
+        .from("ig_accounts")
+        .insert(accountPayload)
+        .select("*")
+        .single<SupabaseRecord>();
+
+      if (accountError) {
+        if (isDuplicateAccountError(accountError)) {
+          const duplicateRepair = await loadRepairableAddProfileAccount(supabase, accountUsername);
+          if (duplicateRepair.kind !== "repair") {
+            await tryRecordAddProfileAudit(supabase, {
+              username: accountUsername,
+              externalRequestId,
+              actorId,
+              resultStatus: "duplicate",
+              failureReason: "account_already_exists",
+            });
+            return jsonError("account_already_exists", 409);
+          }
+          account = duplicateRepair.account;
+        } else {
+          await tryRecordAddProfileAudit(supabase, {
+            username: accountUsername,
+            externalRequestId,
+            actorId,
+            resultStatus: "failed",
+            failureReason: "account_create_failed",
+          });
+          return jsonError("account_create_failed", 500);
+        }
+      } else {
+        account = insertedAccount;
+        accountCreated = true;
+      }
     }
 
     const accountId = readString(account.id, "");
@@ -607,11 +810,19 @@ export async function POST(request: Request) {
       account_id: accountId,
     };
 
-    const settingsResult = await supabase
+    const { data: existingSettings } = await supabase
       .from("ig_account_settings")
-      .insert(settings)
-      .select("*")
-      .single<SupabaseRecord>();
+      .select("account_id")
+      .eq("account_id", accountId)
+      .maybeSingle<SupabaseRecord>();
+
+    const settingsResult = existingSettings
+      ? { data: existingSettings, error: null }
+      : await supabase
+        .from("ig_account_settings")
+        .insert(settings)
+        .select("*")
+        .single<SupabaseRecord>();
 
     if (settingsResult.error) {
       const compensated = await compensateNewProfile(supabase, accountId);
@@ -619,21 +830,29 @@ export async function POST(request: Request) {
         accountId,
         username: accountUsername,
         externalRequestId,
-        actorId: adminContext.userId,
+        actorId,
         resultStatus: compensated ? "compensated" : "failed",
         failureReason: compensated ? "profile_settings_create_failed" : "profile_settings_compensation_failed",
       });
       if (!compensated) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_settings_compensation_failed", externalRequestId, adminContext.userId);
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_settings_compensation_failed", externalRequestId, actorId);
       }
       return jsonError("profile_setup_failed", 500);
     }
 
-    const filtersResult = await supabase
+    const { data: existingFilters } = await supabase
       .from("ig_account_filters")
-      .insert(filters)
-      .select("*")
-      .single<SupabaseRecord>();
+      .select("account_id")
+      .eq("account_id", accountId)
+      .maybeSingle<SupabaseRecord>();
+
+    const filtersResult = existingFilters
+      ? { data: existingFilters, error: null }
+      : await supabase
+        .from("ig_account_filters")
+        .insert(filters)
+        .select("*")
+        .single<SupabaseRecord>();
 
     if (filtersResult.error) {
       const compensated = await compensateNewProfile(supabase, accountId);
@@ -641,28 +860,36 @@ export async function POST(request: Request) {
         accountId,
         username: accountUsername,
         externalRequestId,
-        actorId: adminContext.userId,
+        actorId,
         resultStatus: compensated ? "compensated" : "failed",
         failureReason: compensated ? "profile_filters_create_failed" : "profile_filters_compensation_failed",
       });
       if (!compensated) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_filters_compensation_failed", externalRequestId, adminContext.userId);
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_filters_compensation_failed", externalRequestId, actorId);
       }
       return jsonError("profile_setup_failed", 500);
     }
 
-    const dmSettingsResult = await supabase
+    const { data: existingDmSettings } = await supabase
       .from("ig_account_dm_settings")
-      .insert({
-        account_id: accountId,
-        welcome_enabled: false,
-        outreach_enabled: false,
-        welcome_per_session_limit: defaultWelcomeDmSessionCap,
-        welcome_per_day_limit: defaultWelcomeDmDayCap,
-        outreach_per_session_limit: defaultOutreachDmSessionCap,
-        outreach_per_day_limit: defaultOutreachDmDayCap,
-        total_dm_per_day_limit: defaultTotalDmDayCap,
-      });
+      .select("account_id")
+      .eq("account_id", accountId)
+      .maybeSingle<SupabaseRecord>();
+
+    const dmSettingsResult = existingDmSettings
+      ? { error: null }
+      : await supabase
+        .from("ig_account_dm_settings")
+        .insert({
+          account_id: accountId,
+          welcome_enabled: false,
+          outreach_enabled: false,
+          welcome_per_session_limit: defaultWelcomeDmSessionCap,
+          welcome_per_day_limit: defaultWelcomeDmDayCap,
+          outreach_per_session_limit: defaultOutreachDmSessionCap,
+          outreach_per_day_limit: defaultOutreachDmDayCap,
+          total_dm_per_day_limit: defaultTotalDmDayCap,
+        });
 
     if (dmSettingsResult.error) {
       const compensated = await compensateNewProfile(supabase, accountId);
@@ -670,103 +897,218 @@ export async function POST(request: Request) {
         accountId,
         username: accountUsername,
         externalRequestId,
-        actorId: adminContext.userId,
+        actorId,
         resultStatus: compensated ? "compensated" : "failed",
         failureReason: compensated ? "profile_dm_settings_create_failed" : "profile_dm_settings_compensation_failed",
       });
       if (!compensated) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_dm_settings_compensation_failed", externalRequestId, adminContext.userId);
+        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_dm_settings_compensation_failed", externalRequestId, actorId);
       }
       return jsonError("profile_setup_failed", 500);
     }
 
-    try {
-      const credentials = await callSubmitAddProfileCredentials({
-        accountId,
-        expectedUsername: accountUsername,
-        password,
-        actorType: "admin",
-        externalRequestId,
-      });
+    let credentials: AddProfileCredentialsResponse | null = null;
+    const { data: existingCredentials } = await supabase
+      .from("account_credentials")
+      .select("id,status")
+      .eq("account_id", accountId)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle<SupabaseRecord>();
+    const credentialsAlreadySaved = Boolean(existingCredentials?.id);
+
+    if (loginMethod === "credentials") {
+      if (credentialsAlreadySaved) {
+        credentials = null;
+      } else if (!password) {
+        await tryRecordAddProfileAudit(supabase, {
+          accountId,
+          username: accountUsername,
+          externalRequestId,
+          actorId,
+          resultStatus: "failed",
+          failureReason: "credentials_required_for_repair",
+        });
+        return jsonError("credentials_required_for_repair", 400, addProfilePartialMeta({
+          accountId,
+          accountCreated: accountCreated || Boolean(accountId),
+          credentialsSaved: false,
+          repairPossible: true,
+        }));
+      }
+    }
+
+    if (loginMethod === "credentials" && !credentialsAlreadySaved) {
+      try {
+        credentials = await callSubmitAddProfileCredentials({
+          accountId,
+          expectedUsername: accountUsername,
+          password,
+          actorType: "admin",
+          externalRequestId,
+        });
+      } catch (credentialsError) {
+        const reason = credentialsError instanceof Error && credentialsError.message === "credentials_ingestion_timeout"
+          ? "credentials_ingestion_timeout"
+          : "credentials_ingestion_failed";
+        await markCredentialFailureWithSupportAction(supabase, accountId, reason, externalRequestId, actorId);
+        await tryRecordAddProfileAudit(supabase, {
+          accountId,
+          username: accountUsername,
+          externalRequestId,
+          actorId,
+          resultStatus: "failed",
+          failureReason: reason,
+        });
+        return jsonError(reason, 502);
+      }
 
       if (!isActiveCredentials(credentials)) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId, adminContext.userId);
+        await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId, actorId);
         await tryRecordAddProfileAudit(supabase, {
           accountId,
           username: accountUsername,
           externalRequestId,
           credentialRequestId: credentials.request_id,
-          actorId: adminContext.userId,
+          actorId,
           resultStatus: "failed",
           failureReason: "credentials_not_active",
         });
         return jsonError("credentials_ingestion_failed", 502);
       }
+    }
 
-      const finalized = await finalizeActiveProfile(supabase, accountId);
-      if (!finalized) {
-        await markCredentialFailureWithSupportAction(supabase, accountId, "profile_status_finalize_failed", externalRequestId, adminContext.userId);
-        await tryRecordAddProfileAudit(supabase, {
-          accountId,
-          username: accountUsername,
-          externalRequestId,
-          credentialRequestId: credentials.request_id,
-          actorId: adminContext.userId,
-          resultStatus: "failed",
-          failureReason: "profile_status_finalize_failed",
-        });
-        return jsonError("profile_status_finalize_failed", 502);
-      }
+    const ownership = await ensureAddProfileOwnership(supabase, {
+      accountId,
+      accountUsername,
+      commercialPackage,
+      runtimeMode,
+    });
+    if (!ownership.ok) {
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username: accountUsername,
+        externalRequestId,
+        credentialRequestId: credentials?.request_id,
+        actorId,
+        resultStatus: "failed",
+        failureReason: ownership.reason,
+        metadataSafe: {
+          commercial_package: commercialPackage,
+          runtime_mode: runtimeMode,
+          addons_selected: selectedAddons.join(","),
+        },
+      });
+      return jsonError(`ownership_failed:${ownership.reason}`, 409, addProfilePartialMeta({
+        accountId,
+        accountCreated: accountCreated || Boolean(accountId),
+        credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
+        assignmentFailed: true,
+        reason: ownership.reason,
+        repairPossible: true,
+      }));
+    }
 
+    const onboardingSchedule = await tryAutoAssignOnboardingSchedule(accountId, {
+      deviceId,
+      appInstanceId,
+      startsAt,
+      endsAt,
+    }).catch((error) => ({
+      assigned: false,
+      reason: error instanceof Error ? error.message : "onboarding_schedule_failed",
+      assignment: {},
+    }));
+    if (!onboardingSchedule.assigned) {
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username: accountUsername,
+        externalRequestId,
+        credentialRequestId: credentials?.request_id,
+        actorId,
+        resultStatus: "failed",
+        failureReason: onboardingSchedule.reason,
+        metadataSafe: {
+          app_instance_id: appInstanceId,
+          device_id: deviceId,
+          package_name: target.packageName,
+          runtime_mode: runtimeMode,
+          starts_at: startsAt,
+          ends_at: endsAt,
+        },
+      });
+      return jsonError(`assignment_failed:${onboardingSchedule.reason}`, 409, addProfilePartialMeta({
+        accountId,
+        accountCreated: accountCreated || Boolean(accountId),
+        credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
+        assignmentFailed: true,
+        reason: onboardingSchedule.reason,
+        repairPossible: true,
+      }));
+    }
+
+    const finalized = await finalizeActiveProfile(supabase, accountId);
+    if (!finalized) {
+      await markCredentialFailureWithSupportAction(supabase, accountId, "profile_status_finalize_failed", externalRequestId, actorId);
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username: accountUsername,
+        externalRequestId,
+        credentialRequestId: credentials?.request_id,
+        actorId,
+        resultStatus: "failed",
+        failureReason: "profile_status_finalize_failed",
+      });
+      return jsonError("profile_status_finalize_failed", 502);
+    }
+
+    if (credentials) {
       try {
-        await resolveCredentialDashboardActions(supabase, accountId, externalRequestId, adminContext.userId);
+        await resolveCredentialDashboardActions(supabase, accountId, externalRequestId, actorId);
       } catch {
         // Credential state is authoritative; dashboard actions can be reconciled later.
       }
+    }
 
-      const onboardingSchedule = await tryAutoAssignOnboardingSchedule(accountId).catch(() => ({
-        assigned: false,
-        reason: "onboarding_schedule_failed",
-      }));
-
-      await tryRecordAddProfileAudit(supabase, {
-        accountId,
-        username: accountUsername,
-        externalRequestId,
-        credentialRequestId: credentials.request_id,
-        actorId: adminContext.userId,
-        resultStatus: "success",
-        metadataSafe: {
+    await tryRecordAddProfileAudit(supabase, {
+      accountId,
+      username: accountUsername,
+      externalRequestId,
+      credentialRequestId: credentials?.request_id,
+      actorId,
+      resultStatus: "success",
+      metadataSafe: {
+        onboarding_schedule_assigned: onboardingSchedule.assigned,
+        onboarding_schedule_reason: onboardingSchedule.reason,
+        app_instance_id: appInstanceId,
+        device_id: deviceId,
+        package_name: target.packageName,
+        runtime_mode: runtimeMode,
+        commercial_package: commercialPackage,
+        commercial_package_code: ownership.commercialPackageCode,
+        addons_selected: selectedAddons.join(","),
+        starts_at: startsAt,
+        ends_at: endsAt,
+        login_method: loginMethod,
+        provisioning_started: false,
+        run_started: false,
+      },
+    });
+    return jsonOk(
+      safeCreateResponse(
+        { ...account, status: activeAccountStatus },
+        credentials,
+        {
           onboarding_schedule_assigned: onboardingSchedule.assigned,
           onboarding_schedule_reason: onboardingSchedule.reason,
+          assignment: onboardingSchedule.assignment,
+          device_id: deviceId,
+          app_instance_id: appInstanceId,
+          package_name: target.packageName,
         },
-      });
-      return jsonOk(
-        safeCreateResponse(
-          { ...account, status: activeAccountStatus },
-          credentials,
-          {
-            onboarding_schedule_assigned: onboardingSchedule.assigned,
-            onboarding_schedule_reason: onboardingSchedule.reason,
-          },
-        ),
-        201,
-      );
-    } catch (credentialsError) {
-      const reason = credentialsError instanceof Error && credentialsError.message === "credentials_ingestion_timeout"
-        ? "credentials_ingestion_timeout"
-        : "credentials_ingestion_failed";
-      await markCredentialFailureWithSupportAction(supabase, accountId, reason, externalRequestId, adminContext.userId);
-      await tryRecordAddProfileAudit(supabase, {
-        accountId,
-        username: accountUsername,
-        externalRequestId,
-        actorId: adminContext.userId,
-        resultStatus: "failed",
-        failureReason: reason,
-      });
-      return jsonError(reason, 502);
-    }
+      ),
+      201,
+    );
   } catch {
     return jsonError("Could not create profile.", 500);
   }

@@ -43,6 +43,9 @@ export type ManageAccount = {
   lastSafeUpdate: string | null;
   phoneName: string;
   macHostName: string;
+  assignmentStatus?: string | null;
+  appInstanceLabel?: string | null;
+  appPackageName?: string | null;
   profileImageUrl?: string | null;
   profileImageSource?: string | null;
   instagramVerificationStatus?: string | null;
@@ -313,6 +316,22 @@ function lifecycleStatus(account: ManageAccount) {
   return "active";
 }
 
+function overviewWithAccounts(
+  overview: ManageOverview,
+  accounts: ManageAccount[],
+  errors = overview.errors,
+): ManageOverview {
+  return {
+    ...overview,
+    activeAccounts: accounts.filter((account) => lifecycleStatus(account) === "active"),
+    archivedAccounts: accounts.filter((account) => lifecycleStatus(account) === "archived"),
+    trashedAccounts: accounts.filter((account) => lifecycleStatus(account) === "trashed"),
+    allAccounts: accounts,
+    errors,
+    summary: buildSummary(accounts, overview.summary.sourceStatus),
+  };
+}
+
 function sourceStatusWithBackend(backendApi: ManageSourceStatus, overview: ManageOverview): ManageOverview {
   return {
     ...overview,
@@ -355,19 +374,110 @@ async function enrichWithPublicProfileMetadata(overview: ManageOverview): Promis
         usernameVerificationReason: readOptionalString(row, ["username_verification_reason"]) ?? account.usernameVerificationReason ?? null,
       };
     };
-
-    const activeAccounts = overview.activeAccounts.map(enrich);
-    const archivedAccounts = overview.archivedAccounts.map(enrich);
-    const trashedAccounts = overview.trashedAccounts.map(enrich);
-    return {
-      ...overview,
-      activeAccounts,
-      archivedAccounts,
-      trashedAccounts,
-      allAccounts: [...activeAccounts, ...archivedAccounts, ...trashedAccounts],
-    };
+    return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
   } catch {
     return { ...overview, errors: ["Public profile metadata unavailable.", ...overview.errors] };
+  }
+}
+
+async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview): Promise<ManageOverview> {
+  const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return overview;
+
+  try {
+    const supabase = createSupabaseClient();
+    const [credentialsResult, assignmentsResult, clientAccountsResult] = await Promise.all([
+      supabase
+        .from("account_credentials")
+        .select("account_id,status,created_at")
+        .in("account_id", accountIds)
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("account_assignments")
+        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at")
+        .in("account_id", accountIds)
+        .in("status", ["reserved", "active"])
+        .order("starts_at", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("client_instagram_accounts")
+        .select("account_id,login_status,provisioning_status,onboarding_status")
+        .in("account_id", accountIds)
+        .limit(1000),
+    ]);
+
+    if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error) {
+      return { ...overview, errors: ["Assignment or credential projection unavailable.", ...overview.errors] };
+    }
+
+    const credentialsByAccount = new Map<string, SupabaseRecord>();
+    for (const row of (credentialsResult.data ?? []) as SupabaseRecord[]) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId && !credentialsByAccount.has(accountId)) credentialsByAccount.set(accountId, row);
+    }
+
+    const clientAccountByAccount = new Map<string, SupabaseRecord>();
+    for (const row of (clientAccountsResult.data ?? []) as SupabaseRecord[]) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId && !clientAccountByAccount.has(accountId)) clientAccountByAccount.set(accountId, row);
+    }
+
+    const assignments = ((assignmentsResult.data ?? []) as SupabaseRecord[]);
+    const assignmentByAccount = new Map<string, SupabaseRecord>();
+    for (const row of assignments) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId && !assignmentByAccount.has(accountId)) assignmentByAccount.set(accountId, row);
+    }
+
+    const deviceIds = [...new Set(assignments.map((row) => readString(row, ["device_id"], "")).filter(Boolean))];
+    const appInstanceIds = [...new Set(assignments.map((row) => readString(row, ["app_instance_id"], "")).filter(Boolean))];
+    const [devicesResult, appInstancesResult] = await Promise.all([
+      deviceIds.length
+        ? supabase.from("phone_devices").select("id,name,device_name,status").in("id", deviceIds)
+        : Promise.resolve({ data: [], error: null }),
+      appInstanceIds.length
+        ? supabase.from("phone_app_instances").select("id,visible_label,instance_index,package_name,status").in("id", appInstanceIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (devicesResult.error || appInstancesResult.error) {
+      return { ...overview, errors: ["Phone assignment projection unavailable.", ...overview.errors] };
+    }
+
+    const deviceById = new Map(((devicesResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row, ["id"], ""), row]));
+    const appInstanceById = new Map(((appInstancesResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row, ["id"], ""), row]));
+
+    const enrich = (account: ManageAccount): ManageAccount => {
+      const credential = credentialsByAccount.get(account.accountId);
+      const clientAccount = clientAccountByAccount.get(account.accountId);
+      const assignment = assignmentByAccount.get(account.accountId);
+      const device = deviceById.get(readString(assignment, ["device_id"], ""));
+      const appInstance = appInstanceById.get(readString(assignment, ["app_instance_id"], ""));
+      const phoneLabel = readString(device, ["name", "device_name"], account.phoneName);
+      const appLabel = readString(appInstance, ["visible_label"], "");
+      const packageName = readString(appInstance, ["package_name"], "");
+      const credentialsStatus = readString(credential, ["status"], account.credentialsStatus);
+      const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
+
+      return {
+        ...account,
+        credentialsConfigured: credentialsStatus === "active" ? true : account.credentialsConfigured,
+        credentialsStatus: credentialsStatus === "active" ? "active" : account.credentialsStatus,
+        reauthRequired: credentialsStatus === "active" ? false : account.reauthRequired,
+        loginStatus: loginStatus === "unknown" && credentialsStatus === "active" ? "pending_login" : loginStatus,
+        provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
+        onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
+        phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
+        assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
+        appInstanceLabel: appLabel || account.appInstanceLabel || null,
+        appPackageName: packageName || account.appPackageName || null,
+      };
+    };
+
+    return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
+  } catch {
+    return { ...overview, errors: ["Assignment or credential projection unavailable.", ...overview.errors] };
   }
 }
 
@@ -398,16 +508,7 @@ async function enrichWithCommercialPackageSummaries(overview: ManageOverview): P
       };
     };
 
-    const activeAccounts = overview.activeAccounts.map(enrich);
-    const archivedAccounts = overview.archivedAccounts.map(enrich);
-    const trashedAccounts = overview.trashedAccounts.map(enrich);
-    return {
-      ...overview,
-      activeAccounts,
-      archivedAccounts,
-      trashedAccounts,
-      allAccounts: [...activeAccounts, ...archivedAccounts, ...trashedAccounts],
-    };
+    return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
   } catch {
     return {
       ...overview,
@@ -745,7 +846,7 @@ export async function getManageData() {
   if (!adminDashboardConfig()) {
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(overview));
+    return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview)));
   }
 
   try {
@@ -757,5 +858,5 @@ export async function getManageData() {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(overview));
+  return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview)));
 }

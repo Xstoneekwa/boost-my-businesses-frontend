@@ -62,6 +62,10 @@ function formatAddedDate(iso: string) {
   }).format(date);
 }
 
+function targetInitial(username: string) {
+  return (username || "?").slice(0, 1).toUpperCase();
+}
+
 const targetFilters: Array<{ key: TargetListFilter; label: string }> = [
   { key: "all", label: "All" },
   { key: "active", label: "Active / valid" },
@@ -770,8 +774,12 @@ export default function InstagramAccountTargetsPanel({
                         <div className="flex items-center gap-2">
                           {row.avatarUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={row.avatarUrl} alt="" className="size-7 rounded-full border border-white/10 object-cover" />
-                          ) : null}
+                            <img src={`/api/instagram-dashboard/avatar?kind=target&id=${encodeURIComponent(row.id)}`} alt="" className="size-7 rounded-full border border-white/10 bg-white/5 object-cover" />
+                          ) : (
+                            <span className="grid size-7 place-items-center rounded-full border border-white/10 bg-white/8 text-[10px] font-black text-slate-300" aria-hidden>
+                              {targetInitial(row.targetUsername)}
+                            </span>
+                          )}
                           <div>
                             <strong className="block font-extrabold text-slate-100">@{row.targetUsername}</strong>
                             {row.canonicalUsername && row.canonicalUsername !== row.targetUsername ? (
