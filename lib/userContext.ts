@@ -15,6 +15,9 @@ export type TenantUserRow = {
 export const RESTAURANT_AUTH_ACCESS_COOKIE = "restaurant_auth_access_token";
 export const RESTAURANT_AUTH_REFRESH_COOKIE = "restaurant_auth_refresh_token";
 
+export const INSTAGRAM_AUTH_ACCESS_COOKIE = "instagram_auth_access_token";
+export const INSTAGRAM_AUTH_REFRESH_COOKIE = "instagram_auth_refresh_token";
+
 export function isUserRole(value: unknown): value is UserRole {
   return value === "superadmin" || value === "tenant";
 }
