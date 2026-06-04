@@ -156,6 +156,7 @@ test("live view routes and UI avoid server token exposure", () => {
   ];
   const source = files.map((file) => readFileSync(file, "utf8")).join("\n");
   const managerSource = readFileSync(new URL("../../../instagram-dashboard/InstagramDashboardButtons.tsx", import.meta.url), "utf8");
+  const utilsSource = readFileSync(new URL("../_utils.ts", import.meta.url), "utf8");
 
   assert.match(source, /Live view/);
   assert.match(managerSource, /LivePhoneViewPanel/);
@@ -166,4 +167,27 @@ test("live view routes and UI avoid server token exposure", () => {
   assert.equal(source.includes("adb_serial"), false);
   assert.equal(source.includes("device_udid"), false);
   assert.equal(source.includes("hub_port"), false);
+
+  for (const routeFile of files.slice(0, 4)) {
+    const routeSource = readFileSync(routeFile, "utf8");
+    assert.match(routeSource, /requireInstagramAdmin\(\)/);
+    assert.doesNotMatch(routeSource, /getDashboardUserContext/);
+    assert.doesNotMatch(routeSource, /requireDashboardUserContext/);
+  }
+
+  assert.match(utilsSource, /getInstagramUserContext/);
+  assert.doesNotMatch(utilsSource, /getDashboardUserContext/);
+});
+
+test("live view browser client sends instagram session cookies", () => {
+  const clientSource = readFileSync(
+    new URL("../../../instagram-dashboard/live-view-client.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(clientSource, /credentials:\s*"include"/);
+  assert.match(clientSource, /live-view\/start/);
+  assert.match(clientSource, /live-view\/stop/);
+  assert.match(clientSource, /live-view\/status/);
+  assert.match(clientSource, /live-view\/token/);
 });

@@ -75,11 +75,20 @@ export function liveViewTooltip(input: {
   return "Open live view";
 }
 
+const liveViewFetchInit: RequestInit = {
+  credentials: "include",
+  headers: { Accept: "application/json" },
+};
+
 export async function startLiveView(accountId: string) {
   return readLiveViewApi<LiveViewSessionSafe>(
     await fetch("/api/instagram-dashboard/live-view/start", {
+      ...liveViewFetchInit,
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        ...liveViewFetchInit.headers,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         account_id: accountId,
         mode: "view_only",
@@ -96,8 +105,12 @@ export async function stopLiveView(input: {
 }) {
   return readLiveViewApi<LiveViewSessionSafe>(
     await fetch("/api/instagram-dashboard/live-view/stop", {
+      ...liveViewFetchInit,
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        ...liveViewFetchInit.headers,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         account_id: input.accountId,
         live_view_session_id: input.liveViewSessionId ?? null,
@@ -110,7 +123,7 @@ export async function stopLiveView(input: {
 export async function loadLiveViewStatus(accountId: string) {
   return readLiveViewApi<LiveViewSessionSafe>(
     await fetch(`/api/instagram-dashboard/live-view/status?account_id=${encodeURIComponent(accountId)}`, {
-      headers: { Accept: "application/json" },
+      ...liveViewFetchInit,
     }),
     "Could not load live view status.",
   );
@@ -119,8 +132,12 @@ export async function loadLiveViewStatus(accountId: string) {
 export async function requestLiveViewToken(liveViewSessionId: string) {
   return readLiveViewApi<LiveViewTokenSafe>(
     await fetch("/api/instagram-dashboard/live-view/token", {
+      ...liveViewFetchInit,
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        ...liveViewFetchInit.headers,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ live_view_session_id: liveViewSessionId }),
     }),
     "Could not reconnect live view.",

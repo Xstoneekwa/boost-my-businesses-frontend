@@ -1,9 +1,11 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
-  INSTAGRAM_AUTH_ACCESS_COOKIE,
-  INSTAGRAM_AUTH_REFRESH_COOKIE,
+  clearInstagramAuthCookies,
+  writeInstagramAuthCookies,
+} from "@/lib/instagram-auth/cookies";
+import { resolveInstagramUserContextFromCookies } from "@/lib/instagram-auth/resolve-user-context";
+import {
   createUserContextFromTenantUser,
   isUserRole,
   type TenantUserRow,
@@ -87,17 +89,7 @@ export async function POST(request: Request) {
     }
 
     const context = createUserContextFromTenantUser(normalizedTenantUser);
-    const cookieStore = await cookies();
-    const cookieOptions = {
-      httpOnly: true,
-      sameSite: "lax" as const,
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
-    };
-
-    cookieStore.set(INSTAGRAM_AUTH_ACCESS_COOKIE, accessToken, cookieOptions);
-    cookieStore.set(INSTAGRAM_AUTH_REFRESH_COOKIE, refreshToken, cookieOptions);
+    await writeInstagramAuthCookies(accessToken, refreshToken);
 
     return NextResponse.json(
       { user: context },
@@ -117,11 +109,24 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE() {
-  const cookieStore = await cookies();
+export async function GET() {
+  const context = await resolveInstagramUserContextFromCookies();
 
-  cookieStore.delete(INSTAGRAM_AUTH_ACCESS_COOKIE);
-  cookieStore.delete(INSTAGRAM_AUTH_REFRESH_COOKIE);
+  if (!context) {
+    return NextResponse.json(
+      { error: "Instagram session expired or invalid." },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  return NextResponse.json(
+    { user: context },
+    { status: 200, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+export async function DELETE() {
+  await clearInstagramAuthCookies();
 
   return NextResponse.json(
     { ok: true },

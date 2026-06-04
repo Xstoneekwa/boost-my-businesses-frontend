@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canAccessTenantPages, getDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages, getInstagramUserContext } from "@/lib/restaurant-analytics/session";
 
 export type SupabaseRecord = Record<string, unknown>;
 
@@ -19,12 +19,16 @@ function canBypassInstagramAdminLocally() {
   return process.env.NODE_ENV === "development" || process.env.INSTAGRAM_DASHBOARD_LOCAL_ADMIN === "true";
 }
 
+export async function getInstagramAdminUserContext() {
+  return getInstagramUserContext();
+}
+
 export async function requireInstagramAdmin() {
   if (canBypassInstagramAdminLocally()) {
     return null;
   }
 
-  const userContext = await getDashboardUserContext();
+  const userContext = await getInstagramUserContext();
 
   if (!userContext) {
     return jsonError("Authentication required.", 401);
