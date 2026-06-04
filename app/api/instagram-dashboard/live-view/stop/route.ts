@@ -1,5 +1,4 @@
 import {
-  getInstagramAdminUserContext,
   jsonError,
   jsonOk,
   readJsonBody,
@@ -34,12 +33,10 @@ export async function POST(request: Request) {
     const config = adminDashboardConfig();
     if (!config) return jsonError("Admin dashboard API config is missing.", 500);
 
-    const adminContext = await getInstagramAdminUserContext();
     const forwarded = await forwardLiveViewToAdminDashboard(
       liveViewStopPayload({
         accountId,
         liveViewSessionId,
-        actorId: adminContext?.userId ?? null,
       }),
       config,
     );
