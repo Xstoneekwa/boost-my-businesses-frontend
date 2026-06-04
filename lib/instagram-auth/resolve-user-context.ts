@@ -89,7 +89,12 @@ export async function resolveInstagramUserContextFromCookies(): Promise<UserCont
     effectiveAccessToken = refreshed.accessToken;
     effectiveRefreshToken = refreshed.refreshToken;
     userId = refreshed.userId;
-    await writeInstagramAuthCookies(effectiveAccessToken, effectiveRefreshToken);
+    try {
+      await writeInstagramAuthCookies(effectiveAccessToken, effectiveRefreshToken);
+    } catch {
+      // Cookie write not available from Server Component context.
+      // Tokens are refreshed in memory for this request; next request will re-refresh silently.
+    }
   }
 
   if (!userId) {
