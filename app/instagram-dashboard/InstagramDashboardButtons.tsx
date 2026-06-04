@@ -3815,7 +3815,6 @@ function SourcesPolicyPanel({
     ["Rotation settings source", followSources.source.replaceAll("_", " ")],
     ["Max follows / target / run", String(followSources.max_follows_per_target_per_run)],
     ["Max targets / run", String(followSources.max_targets_per_run)],
-    ["Switch on exhaustion or budget", "Active in worker P1b"],
   ];
   const performanceItems = [
     ["Followback ratio by target", avgFbr === null ? "pending runtime data" : `${targetFbrLabel(avgFbr)} avg across ${sourceMetricCount(fbrTargets.length, "target", "targets")}`],
@@ -3823,29 +3822,16 @@ function SourcesPolicyPanel({
     ["Insufficient data", insufficientDataTargets.length ? sourceMetricCount(insufficientDataTargets.length, "target", "targets") : "none"],
     ["Pending runtime data", pendingRuntimeTargets.length ? sourceMetricCount(pendingRuntimeTargets.length, "target", "targets") : "none"],
     ["Recently exhausted", recentlyExhaustedTargets.length ? sourceMetricCount(recentlyExhaustedTargets.length, "target", "targets") : "none"],
-    ["Auto-archive rule", "Disabled in P1c; review candidate only after enough evidence"],
-    ["Performance verdicts", "Bad only after at least 100 follows sent"],
   ];
 
   return (
     <div className="ig-filters-target-panel">
-      <section className="ig-filters-section ig-filters-section-info">
-        <div className="ig-filters-section-head">
-          <div className="ig-filters-section-title-row">
-            <h3>Follow sources / Target policy</h3>
-            <span className="ig-filters-badge ig-filters-badge-active">Runtime active</span>
-          </div>
-          <p>Follow sources are managed in Targets. This panel edits only per-run rotation limits for this account.</p>
-        </div>
-      </section>
-
       <section className="ig-filters-section">
         <div className="ig-filters-section-head">
           <div className="ig-filters-section-title-row">
             <h3>Current Follow source</h3>
             <span className="ig-filters-badge ig-filters-badge-active">P1b active</span>
           </div>
-          <p>The worker can rotate across eligible targets when a target is exhausted or reaches its per-run budget.</p>
         </div>
         <div className="ig-schedule-assignment-grid">
           {runtimeItems.map(([label, value]) => (
@@ -3875,7 +3861,7 @@ function SourcesPolicyPanel({
               type: "number",
               min: followSources.bounds.max_follows_per_target_per_run.min,
               runtimeStatus: "active",
-              helper: `Maximum follows to send from one target during a single run before trying the next target. This does not increase the global follow cap. Allowed: ${followSources.bounds.max_follows_per_target_per_run.min}-${followSources.bounds.max_follows_per_target_per_run.max}.`,
+              hideHelper: true,
             }}
             value={followSources.max_follows_per_target_per_run}
             onChange={(value) => updateFollowSourceSetting("max_follows_per_target_per_run", Number(value))}
@@ -3887,17 +3873,12 @@ function SourcesPolicyPanel({
               type: "number",
               min: followSources.bounds.max_targets_per_run.min,
               runtimeStatus: "active",
-              helper: `Maximum number of targets the worker can try during one run. Allowed: ${followSources.bounds.max_targets_per_run.min}-${followSources.bounds.max_targets_per_run.max}.`,
+              hideHelper: true,
             }}
             value={followSources.max_targets_per_run}
             onChange={(value) => updateFollowSourceSetting("max_targets_per_run", Number(value))}
           />
         </div>
-        <ul className="ig-source-policy-list">
-          <li>Defaults remain conservative: 2 follows per target and 3 targets per run.</li>
-          <li>Values above 10 follows per target are opt-in only after controlled P2 tests.</li>
-          <li>No environment file is edited from the dashboard.</li>
-        </ul>
       </section>
 
       <section className="ig-filters-section">
@@ -3906,7 +3887,6 @@ function SourcesPolicyPanel({
             <h3>Target accounts / Sources</h3>
             <span className="ig-filters-badge ig-filters-badge-readonly">Managed in Targets</span>
           </div>
-          <p>Counts come from real target account rows when the Targets API is available. Add, archive, restore, and verify stay in Targets.</p>
         </div>
         <div className="ig-schedule-assignment-grid">
           {targetCountItems.map(([label, value]) => (
@@ -3926,26 +3906,9 @@ function SourcesPolicyPanel({
       <section className="ig-filters-section">
         <div className="ig-filters-section-head">
           <div className="ig-filters-section-title-row">
-            <h3>Scroll / exhaustion rules</h3>
-            <span className="ig-filters-badge ig-filters-badge-readonly">Runtime read-only</span>
-          </div>
-          <p>Switch conditions are owned by the worker and are not editable in this dashboard section.</p>
-        </div>
-        <ul className="ig-source-policy-list">
-          <li>Switch when a target is exhausted or bounded exploration finds no candidates.</li>
-          <li>Switch when the target reaches its per-run budget and another target is available.</li>
-          <li>Source exhaustion reasons are worker logs, not editable dashboard policy.</li>
-          <li>Runtime blockers such as login, checkpoint, rate limit, wrong surface or crash do not switch targets.</li>
-        </ul>
-      </section>
-
-      <section className="ig-filters-section">
-        <div className="ig-filters-section-head">
-          <div className="ig-filters-section-title-row">
             <h3>Followback ratio / Target performance</h3>
             <span className="ig-filters-badge ig-filters-badge-readonly">Read-only metrics</span>
           </div>
-          <p>Performance is read-only. FBR can be displayed early, but verdicts require at least 100 follows sent and never auto-archive in P1c.</p>
         </div>
         <div className="ig-schedule-assignment-grid">
           {performanceItems.map(([label, value]) => (
@@ -3956,35 +3919,6 @@ function SourcesPolicyPanel({
           ))}
         </div>
       </section>
-
-      <section className="ig-filters-section">
-        <div className="ig-filters-section-head">
-          <div className="ig-filters-section-title-row">
-            <h3>Future source policy</h3>
-            <span className="ig-filters-badge ig-filters-badge-planned">Planned</span>
-          </div>
-          <p>P1c prepares durable per-target metrics, FBR, and cooldown display. Automation remains disabled until controlled runs validate it.</p>
-        </div>
-        <ul className="ig-source-policy-list">
-          <li>Metrics per target and followback ratio by target.</li>
-          <li>Cooldown display only until P2 controlled runs validate exclusion policy.</li>
-          <li>Attribution by target for every follow.</li>
-          <li>Followback ratio by target with threshold-based review flag, not auto-archive.</li>
-        </ul>
-        <p className="ig-settings-message">Outreach sources are managed in DM/Outreach.</p>
-      </section>
-
-      <section className="ig-filters-section">
-        <div className="ig-filters-section-head">
-          <div className="ig-filters-section-title-row">
-            <h3>Runtime readiness gate</h3>
-            <span className="ig-filters-badge ig-filters-badge-planned">Required before ready</span>
-          </div>
-          <p>Do not mark Follow runtime-ready until a controlled multi-target run proves selection, target attribution, exhaustion/budget switch, per-target metrics, dashboard reflection, and no mono-target regression.</p>
-        </div>
-      </section>
-
-      <p className="ig-settings-message ig-filters-legacy-note">Legacy Sources controls remain hidden. Only target rotation settings can be saved here.</p>
     </div>
   );
 }

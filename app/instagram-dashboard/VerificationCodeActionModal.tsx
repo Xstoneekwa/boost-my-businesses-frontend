@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Props = {
   actionId: string;
@@ -10,7 +11,23 @@ type Props = {
   description: string;
   actionType: "enter_email_verification_code" | "review_login_challenge";
   status: string;
+  resumeStatus?: string | null;
+  autoOpen?: boolean;
 };
+
+function resumeMessage(status: string, resumeStatus?: string | null) {
+  if (resumeStatus === "running") return "Login resume is running on the assigned device.";
+  if (resumeStatus === "queued" || status === "code_submitted") {
+    return "Login resume queued. The worker will enter the code automatically.";
+  }
+  if (resumeStatus === "needs_new_code") {
+    return "Instagram still needs a verification code. Enter the latest code.";
+  }
+  if (resumeStatus === "preflight_failed") {
+    return "Resume could not start because the device is not on the email code screen.";
+  }
+  return null;
+}
 
 export default function VerificationCodeActionModal({
   actionId,
@@ -20,19 +37,42 @@ export default function VerificationCodeActionModal({
   description,
   actionType,
   status,
+  resumeStatus = null,
+  autoOpen = false,
 }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [autoOpenConsumed, setAutoOpenConsumed] = useState(false);
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmitCode = actionType === "enter_email_verification_code" && status !== "code_submitted";
+  const canSubmitCode =
+    actionType === "enter_email_verification_code" &&
+    (status === "pending" ||
+      status === "acknowledged" ||
+      status === "pending_verification" ||
+      resumeStatus === "needs_new_code");
+  const resumeInProgress =
+    actionType === "enter_email_verification_code" &&
+    !canSubmitCode &&
+    (status === "code_submitted" || resumeStatus === "queued" || resumeStatus === "running");
+
   const buttonLabel = useMemo(() => {
     if (actionType === "review_login_challenge") return "View details";
-    if (status === "code_submitted") return "Code submitted";
+    if (resumeInProgress) {
+      return resumeStatus === "running" ? "Resume running" : "Resume queued";
+    }
+    if (!canSubmitCode && status === "code_submitted") return "Code submitted";
     return "Enter code";
-  }, [actionType, status]);
+  }, [actionType, canSubmitCode, resumeInProgress, resumeStatus, status]);
+
+  useEffect(() => {
+    if (!autoOpen || autoOpenConsumed || !canSubmitCode) return;
+    setOpen(true);
+    setAutoOpenConsumed(true);
+  }, [autoOpen, autoOpenConsumed, canSubmitCode]);
 
   async function submitCode() {
     setSubmitting(true);
@@ -52,9 +92,18 @@ export default function VerificationCodeActionModal({
       if (!res.ok || body.ok === false) {
         throw new Error(String(body.error || "submit_failed"));
       }
-      setMessage("Code submitted securely. The worker can now resume login.");
+      const queued = body.data?.resume_queued === true;
+      const alreadyQueued = body.data?.resume_already_queued === true;
+      setMessage(
+        queued
+          ? "Code submitted. Login resume queued."
+          : alreadyQueued
+          ? "Code submitted. Login resume was already queued."
+          : "Code submitted. Resume provisioning.",
+      );
       setCode("");
       setOpen(false);
+      router.refresh();
     } catch (err) {
       setError(String((err as Error)?.message || "submit_failed"));
     } finally {
@@ -62,12 +111,14 @@ export default function VerificationCodeActionModal({
     }
   }
 
+  const statusMessage = resumeMessage(status, resumeStatus);
+
   return (
     <>
       <button
         type="button"
         className="ig-credentials-link-button"
-        disabled={!canSubmitCode && actionType === "enter_email_verification_code" && status === "code_submitted"}
+        disabled={!canSubmitCode && !resumeInProgress && actionType === "enter_email_verification_code"}
         onClick={() => setOpen(true)}
       >
         {buttonLabel}
@@ -90,18 +141,21 @@ export default function VerificationCodeActionModal({
 
             {actionType === "review_login_challenge" ? (
               <p>This challenge is not automated yet. An operator must review the device screen and follow the manual recovery workflow.</p>
+            ) : resumeInProgress ? (
+              <p>{statusMessage}</p>
             ) : (
               <>
                 <label htmlFor={`verification-code-${actionId}`}>Email verification code</label>
                 <input
                   id={`verification-code-${actionId}`}
                   type="text"
-                  inputMode="text"
+                  inputMode="numeric"
                   autoComplete="one-time-code"
                   value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                  placeholder="Enter the code from email"
-                  maxLength={32}
+                  onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="6-digit code"
+                  maxLength={6}
+                  pattern="[0-9]{6}"
                 />
                 <p className="ig-verification-modal-hint">The code is sent securely and is not stored in the dashboard UI after submission.</p>
               </>
@@ -109,11 +163,12 @@ export default function VerificationCodeActionModal({
 
             {error ? <p className="ig-verification-modal-error">{error}</p> : null}
             {message ? <p className="ig-verification-modal-success">{message}</p> : null}
+            {statusMessage && !message ? <p className="ig-verification-modal-hint">{statusMessage}</p> : null}
 
             <div className="ig-verification-modal-actions">
               <button type="button" onClick={() => setOpen(false)} disabled={submitting}>Close</button>
-              {actionType === "enter_email_verification_code" ? (
-                <button type="button" onClick={submitCode} disabled={submitting || !code.trim()}>
+              {canSubmitCode ? (
+                <button type="button" onClick={submitCode} disabled={submitting || !/^\d{6}$/.test(code.trim())}>
                   {submitting ? "Sending..." : "Send code"}
                 </button>
               ) : null}

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
-import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import {
   getAutoRestartData,
@@ -40,7 +40,7 @@ function quotaTone(quota: AutoRestartQuotaPreview) {
 }
 
 export default async function InstagramAutoRestartPage() {
-  const userContext = await requireDashboardUserContext();
+  const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
     notFound();

@@ -1,4 +1,3 @@
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control";
 import {
   FOLLOW_SOURCE_ROTATION_BOUNDS,
@@ -11,6 +10,7 @@ import {
 import { createSupabaseClient } from "@/lib/supabase";
 import {
   getAccountId,
+  getInstagramAdminUserContext,
   jsonError,
   jsonOk,
   readJsonBody,
@@ -229,7 +229,7 @@ export async function PATCH(request: Request) {
       return jsonOk({ ...before, changed_fields: [] });
     }
 
-    const actorContext = await getDashboardUserContext();
+    const actorContext = await getInstagramAdminUserContext();
     const actorId = actorContext?.userId ?? null;
     const now = new Date().toISOString();
     const { error } = await supabase.from("account_follow_source_settings").upsert(

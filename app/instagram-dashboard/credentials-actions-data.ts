@@ -124,7 +124,7 @@ export type CredentialsActionsOverview = {
 
 const derivedSourceLabel = "derived from dashboard overview";
 const persistedSourceLabel = "account_dashboard_actions";
-const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
+const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification", "code_submitted"];
 
 type PersistedDashboardActionRow = {
   id?: unknown;

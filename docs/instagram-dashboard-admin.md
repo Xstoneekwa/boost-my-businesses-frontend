@@ -197,7 +197,8 @@ Source de donnees:
 
 Statut actuel:
 
-- Read-only.
+- Inventaire principalement read-only.
+- Add phone actif via route server-side safe labels only.
 - Controls restart/stop/order notes desactives ou pending.
 
 Safe:
@@ -764,6 +765,32 @@ Projection safe:
 Etat:
 
 - Disponible, inventory source encore partielle/pending.
+
+#### `/api/instagram-dashboard/devices/add-phone`
+
+Methode: `POST`
+
+Role:
+
+- Ajouter un phone a l'inventaire depuis l'onglet Devices.
+- Accepte uniquement des labels safe: `phone_name`, `host_name`, `platform`, `status`, `notes`.
+
+Mutations:
+
+- Insert `ig_devices`.
+
+D donnees sensibles interdites:
+
+- `device_udid`, `adb_serial`, USB/hub ports, clone internals, `app_package`, tokens, Authorization.
+
+Projection safe:
+
+- Meme projection safe que `/api/instagram-dashboard/devices`.
+
+Etat:
+
+- Actif pour labels inventory admin.
+- Ne prouve pas la disponibilite runtime du telephone.
 
 #### `/api/instagram-dashboard/runs`
 

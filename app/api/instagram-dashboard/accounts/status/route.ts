@@ -1,6 +1,13 @@
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
-import { jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
+import {
+  getInstagramAdminUserContext,
+  jsonError,
+  jsonOk,
+  readJsonBody,
+  readString,
+  requireInstagramAdmin,
+  type SupabaseRecord,
+} from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -152,12 +159,12 @@ export async function PATCH(request: Request) {
         p_account_id: accountId,
         p_reason: "account_cancelled_release",
         p_source: "accounts_status_api",
-        p_actor_id: (await getDashboardUserContext())?.userId ?? null,
+        p_actor_id: (await getInstagramAdminUserContext())?.userId ?? null,
       });
       capacityReleaseStatus = releaseError ? "pending_schema" : "released";
     }
 
-    const actorContext = await getDashboardUserContext();
+    const actorContext = await getInstagramAdminUserContext();
     await auditStatusChange(supabase, {
       accountId,
       actorId: actorContext?.userId ?? null,

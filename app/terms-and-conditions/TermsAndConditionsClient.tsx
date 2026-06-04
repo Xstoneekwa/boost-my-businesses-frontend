@@ -20,11 +20,12 @@ const sections: LegalSection[] = [
       "We reserve the right to update, modify, or discontinue any service at any time.",
     ],
     list: [
-      "AI call assistants",
-      "lead generation systems",
-      "workflow automations",
-      "AI-powered business tools",
-      "consulting and implementation services",
+      "Instagram Growth — automated social media growth using AI and physical device infrastructure",
+      "UGC Ads Engine — AI-generated marketing content and video production workflows",
+      "WhatsApp Lead System — automated lead qualification, response, and routing",
+      "AI Call Assistant — automated phone call handling for restaurants and local businesses",
+      "Personal AI Swarm — multi-agent orchestration for business automation",
+      "consulting and custom implementation services",
     ],
   },
   {
@@ -34,21 +35,34 @@ const sections: LegalSection[] = [
       "provide accurate and complete information",
       "use our services in a lawful manner",
       "not misuse, interfere with, or attempt to disrupt our systems or services",
-      "not use our services for fraudulent, abusive, or unauthorized purposes",
+      "not use our services for fraudulent, abusive, or unauthorised purposes",
+      "comply with the terms of service of any third-party platforms connected through our services (including Instagram/Meta)",
     ],
   },
   {
-    title: "Payments",
+    title: "Subscriptions, Billing, and Automatic Renewal",
     body: [
-      "Payments for our services are processed securely through third-party payment providers, including Paddle.",
-      "By purchasing a service or subscription, you agree to pay all applicable fees and charges.",
-      "If a service is subscription-based, you authorize recurring billing according to the plan selected at checkout.",
+      "Payments are processed securely through Paddle (paddle.com), our authorised reseller and Merchant of Record.",
+      "By purchasing a subscription, you authorise recurring billing at the frequency selected at checkout — monthly, quarterly (3 months), semi-annual (6 months), or annual (12 months).",
+      "Subscriptions renew automatically at the end of each billing period. You will be charged the same amount unless you cancel in advance.",
+      "To cancel, email growth@boostmybusinesses.com at least 7 days before your next renewal date. Include your name, email address, and the plan you wish to cancel.",
+      "Upon cancellation, your access continues until the end of the current paid period. No partial refunds are issued for unused time within an active billing period.",
+      "For multi-month plans (3, 6, or 12 months), the same notice applies: email us at least 7 days before the scheduled renewal date to prevent the next charge.",
+    ],
+  },
+  {
+    title: "Third-Party Platforms",
+    body: [
+      "Our Instagram Growth service operates in connection with the Instagram platform, owned by Meta Platforms Inc. Use of this service is also subject to Instagram's Terms of Use and Community Guidelines.",
+      "BoostMyBusinesses is not affiliated with, endorsed by, or sponsored by Meta or Instagram.",
+      "You are responsible for ensuring that your use of our service complies with Instagram's terms and any applicable laws in your jurisdiction.",
+      "BoostMyBusinesses does not accept liability for any restriction, suspension, or termination of your Instagram account by Meta.",
     ],
   },
   {
     title: "No Guarantee of Results",
     body: [
-      "We do not guarantee specific business outcomes, including but not limited to revenue growth, number of leads, bookings, conversions, or sales. Results depend on many factors outside our control.",
+      "We do not guarantee specific business outcomes, including but not limited to revenue growth, number of leads, bookings, conversions, follower counts, or sales. Results depend on many factors outside our control.",
     ],
   },
   {
@@ -84,7 +98,7 @@ export default function TermsAndConditionsClient() {
   return (
     <LegalPageShell
       title="Terms of Service"
-      intro="These Terms of Service govern your access to and use of the BoostMyBusinesses website and services. By using our website or purchasing our services, you agree to these terms."
+      intro="These Terms of Service govern your access to and use of the website and all services operated by Dibu Business Trading (trading as BoostMyBusinesses), including Instagram Growth, UGC Ads Engine, WhatsApp Lead System, AI Call Assistant, and other digital products. By using our website or purchasing our services, you agree to these terms. Effective date: 2 June 2026."
       sections={sections}
     />
   );

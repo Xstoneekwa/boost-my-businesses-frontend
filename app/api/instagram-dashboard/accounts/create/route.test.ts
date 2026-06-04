@@ -7,7 +7,7 @@ const scheduleSource = readFileSync(new URL("../../../../../lib/instagram-dashbo
 
 test("accounts create route uses admin auth helper with local dev bypass", () => {
   assert.match(source, /requireInstagramAdmin\(\)/);
-  assert.match(source, /getDashboardUserContext\(\)/);
+  assert.match(source, /getInstagramAdminUserContext\(\)/);
 });
 
 test("accounts create route requires credentials password only for credentials login method", () => {

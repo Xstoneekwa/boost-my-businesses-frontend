@@ -7,6 +7,8 @@ import { validateUnfollowDomainInput } from "../api/instagram-dashboard/settings
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, normalizeDmTemplateMessage } from "../../lib/instagram-dashboard/dm-formatting";
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
+  evaluateAccountSessionExecutablePhaseGate,
+  evaluateAccountSessionExecutablePhases,
   evaluateDmStartGate,
   evaluateMiniRunCapsPreflight,
   evaluateUnfollowStartGate,
@@ -115,6 +117,74 @@ test("Follow target gate message is explicit", () => {
     runStartBlockMessage("no_eligible_targets"),
     "Manual run is blocked because no eligible target account is available.",
   );
+});
+
+test("account_session follow-only passes when unfollow is disabled but follow is executable", () => {
+  const phases = evaluateAccountSessionExecutablePhases({
+    requestedRunType: "account_session",
+    welcomeEnabled: false,
+    welcomePassedPreflight: false,
+    eligibleFollowTargets: 4,
+    followExecutableByCap: true,
+    unfollowEnabled: false,
+    unfollowPassedPreflight: false,
+  });
+  assert.equal(evaluateAccountSessionExecutablePhaseGate(phases), null);
+  assert.equal(evaluateUnfollowStartGate({
+    requestedRunType: "account_session",
+    unfollowEntitlementActive: true,
+    unfollowEnabled: false,
+    unfollowMode: "unfollow-any",
+    unfollowPerSessionLimit: 1,
+    unfollowPerDayLimit: 120,
+    unfollowDayRemaining: 120,
+    realHandoffEnabled: true,
+    realMaxActions: 1,
+    realHardMax: 1,
+    h3RealSupported: true,
+    safeCandidateStrategyProven: true,
+  }), "unfollow_disabled");
+});
+
+test("account_session blocks when no automation phase is executable", () => {
+  const phases = evaluateAccountSessionExecutablePhases({
+    requestedRunType: "account_session",
+    welcomeEnabled: false,
+    welcomePassedPreflight: false,
+    eligibleFollowTargets: 0,
+    followExecutableByCap: false,
+    unfollowEnabled: false,
+    unfollowPassedPreflight: false,
+  });
+  assert.equal(evaluateAccountSessionExecutablePhaseGate(phases), "no_executable_phase");
+  assert.equal(
+    runStartBlockMessage("no_executable_phase"),
+    "Manual run is blocked because no executable automation phase is enabled for this account.",
+  );
+});
+
+test("account_session legacy mix still allows welcome or unfollow phases", () => {
+  const welcomeOnly = evaluateAccountSessionExecutablePhases({
+    requestedRunType: "account_session",
+    welcomeEnabled: true,
+    welcomePassedPreflight: true,
+    eligibleFollowTargets: 0,
+    followExecutableByCap: false,
+    unfollowEnabled: false,
+    unfollowPassedPreflight: false,
+  });
+  assert.equal(evaluateAccountSessionExecutablePhaseGate(welcomeOnly), null);
+
+  const unfollowOnly = evaluateAccountSessionExecutablePhases({
+    requestedRunType: "account_session",
+    welcomeEnabled: false,
+    welcomePassedPreflight: false,
+    eligibleFollowTargets: 0,
+    followExecutableByCap: false,
+    unfollowEnabled: true,
+    unfollowPassedPreflight: true,
+  });
+  assert.equal(evaluateAccountSessionExecutablePhaseGate(unfollowOnly), null);
 });
 
 test("Follow target eligibility uses ig_targets lifecycle fields", () => {

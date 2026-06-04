@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
-import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
+import EmailVerificationActionBanner from "../EmailVerificationActionBanner";
 import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import VerificationCodeActionModal from "../VerificationCodeActionModal";
 import {
@@ -17,13 +18,26 @@ import { formatDateTime, formatInteger, getRadarData, statusTone } from "../rada
 export const dynamic = "force-dynamic";
 
 export default async function InstagramCredentialsActionsPage() {
-  const userContext = await requireDashboardUserContext();
+  const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
     notFound();
   }
 
   const [data, radarData] = await Promise.all([getCredentialsActionsData(), getRadarData()]);
+  const emailVerificationActions = data.actions.filter(
+    (action) => action.actionType === "enter_email_verification_code"
+      && (action.status === "pending" || action.status === "acknowledged" || action.status === "pending_verification"),
+  );
+  const emailVerificationBannerActions = emailVerificationActions.map((action) => ({
+    id: action.id,
+    accountId: action.accountId,
+    username: action.username,
+    actionType: "enter_email_verification_code" as const,
+    status: action.status,
+    title: action.title || "Email verification code required",
+    description: action.description,
+  }));
 
   return (
     <main className="dashboard-page ig-credentials-page">
@@ -33,6 +47,8 @@ export default async function InstagramCredentialsActionsPage() {
         description="Safe credential status and pending account actions."
         action={<InstagramDashboardViewNav active="credentials" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
+
+      <EmailVerificationActionBanner initialActions={emailVerificationBannerActions} />
 
       {data.errors.length > 0 && (
         <section className="ig-credentials-alert" role="alert">
@@ -55,6 +71,35 @@ export default async function InstagramCredentialsActionsPage() {
         <Kpi label="Blocking campaigns" value={formatInteger(data.summary.blockingCampaignCount)} detail="No mutation from this view" tone={data.summary.blockingCampaignCount ? "danger" : "good"} />
         <Kpi label="Client action required" value={formatInteger(data.summary.clientActionRequiredCount)} detail="Actions requiring client input" tone={data.summary.clientActionRequiredCount ? "warning" : "good"} />
       </section>
+
+      {emailVerificationActions.length > 0 && (
+        <AnalyticsSectionCard
+          eyebrow="Immediate action"
+          title="Email verification code required"
+          description="Instagram is waiting for an email code. Enter it here, then resume the worker from the dashboard action."
+        >
+          <div className="ig-email-code-actions" aria-label="Email verification code actions">
+            {emailVerificationActions.map((action) => (
+              <article className="ig-email-code-action" key={action.id}>
+                <div>
+                  <span>Email verification code required</span>
+                  <strong>{action.username}</strong>
+                  <p>{action.description}</p>
+                </div>
+                <VerificationCodeActionModal
+                  actionId={action.id}
+                  accountId={action.accountId}
+                  username={action.username}
+                  title={action.title || "Email verification code required"}
+                  description={action.description}
+                  actionType="enter_email_verification_code"
+                  status={action.status}
+                />
+              </article>
+            ))}
+          </div>
+        </AnalyticsSectionCard>
+      )}
 
       <AnalyticsSectionCard
         eyebrow="Worklist"
@@ -178,6 +223,43 @@ export default async function InstagramCredentialsActionsPage() {
 
         .ig-credentials-table-wrap {
           overflow-x: auto;
+        }
+
+        .ig-email-code-actions {
+          display: grid;
+          gap: 10px;
+        }
+
+        .ig-email-code-action {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          border: 1px solid rgba(251,191,36,0.24);
+          border-radius: 16px;
+          background: rgba(251,191,36,0.08);
+          padding: 14px;
+        }
+
+        .ig-email-code-action span {
+          color: #FBBF24;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .ig-email-code-action strong {
+          display: block;
+          color: #f0f0ef;
+          font-size: 16px;
+          margin-top: 4px;
+        }
+
+        .ig-email-code-action p {
+          margin: 4px 0 0;
+          color: rgba(255,255,255,0.68);
+          font-size: 12px;
         }
 
         .ig-credentials-table {

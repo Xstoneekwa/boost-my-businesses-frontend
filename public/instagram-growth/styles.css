@@ -149,14 +149,14 @@ a { color: inherit; text-decoration: none; }
 /* ---------- HERO ---------- */
 .hero { background: var(--hero-bg); color: var(--hero-ink); padding: 78px 0 64px; position: relative; overflow: hidden; }
 .hero-inner { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
-.hero-inner.hero-solo { grid-template-columns: 1fr; max-width: 1180px; margin: 0 auto; text-align: center; }
+.hero-inner.hero-solo { grid-template-columns: 1fr; max-width: none; text-align: center; }
 .hero-inner.hero-solo .hero-trustline { justify-content: center; }
 .hero-inner.hero-solo p.lead { margin-left: auto; margin-right: auto; max-width: 760px; }
 .hero-inner.hero-solo .hero-cta { justify-content: center; }
 .hero-inner.hero-solo .hero-micro { justify-content: center; }
 .hero-inner.hero-solo h1 {
   font-size: clamp(2.4rem, 5.2vw, 4.4rem); line-height: 1.0; letter-spacing: -0.02em;
-  max-width: none; text-wrap: balance;
+  max-width: none; text-wrap: pretty;
 }
 .hero-trustline { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
 .rating { display: inline-flex; align-items: center; gap: 9px; }

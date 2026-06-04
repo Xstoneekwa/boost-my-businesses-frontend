@@ -9,9 +9,9 @@ import {
   type UnfollowRuntimeCapMode,
 } from "@/lib/instagram-dashboard/run-control";
 import { createSupabaseClient } from "@/lib/supabase";
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import {
   getAccountId,
+  getInstagramAdminUserContext,
   jsonError,
   jsonOk,
   readBoolean,
@@ -394,7 +394,7 @@ export async function PATCH(request: Request) {
     );
     if (error) return jsonError(sanitizeRunControlReason(error.message, "Could not save Unfollow settings."), 500);
 
-    const actorContext = await getDashboardUserContext();
+    const actorContext = await getInstagramAdminUserContext();
     await recordAudit(supabase, {
       accountId,
       actorId: actorContext?.userId ?? null,

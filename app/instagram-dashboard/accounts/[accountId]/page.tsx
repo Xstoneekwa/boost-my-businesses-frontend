@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
-import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
 import InstagramDashboardViewNav from "../../InstagramDashboardViewNav";
 import {
@@ -132,7 +132,7 @@ export default async function InstagramAccountDetailPage({
   params: Promise<{ accountId: string }>;
   searchParams?: Promise<{ from?: string | string[] }>;
 }) {
-  const userContext = await requireDashboardUserContext();
+  const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
     notFound();

@@ -1,0 +1,1141 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { LogOut } from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Lang = "fr" | "en";
+type Theme = "dark" | "light";
+type View = "overview" | "activity" | "targeting" | "account";
+type ChartRange = 7 | 30 | 90;
+type FeedType = "fo" | "li" | "dm" | "st";
+
+interface Props { userId: string; tenantId: string }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const LANG_KEY = "bmb_dash_lang";
+const THEME_KEY = "bmb_th";
+
+// ─── Mock data ────────────────────────────────────────────────────────────────
+const DS: Record<ChartRange, number[]> = {
+  7:  [3508,3522,3536,3548,3561,3578,3594],
+  30: [3500,3502,3508,3514,3519,3522,3530,3536,3540,3544,3548,3553,3557,3561,3565,3569,3573,3578,3582,3585,3589,3592,3596,3600,3604,3609,3614,3618,3624,3630],
+  90: Array.from({ length: 90 }, (_, i) => 3200 + Math.floor(i * 4.8) + Math.floor(Math.sin(i) * 6)),
+};
+
+const FD: { t: FeedType; fr: string; en: string; n: number; time: string; timeEn: string }[] = [
+  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:47, time:"Aujourd'hui · 14:32", timeEn:"Today · 2:32 PM" },
+  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:62, time:"Aujourd'hui · 12:15", timeEn:"Today · 12:15 PM" },
+  { t:"st", fr:"Vues de stories",      en:"Story views",     n:31, time:"Aujourd'hui · 09:40", timeEn:"Today · 9:40 AM" },
+  { t:"dm", fr:"DMs de bienvenue",     en:"Welcome DMs",     n:8,  time:"Aujourd'hui · 08:00", timeEn:"Today · 8:00 AM" },
+  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:45, time:"Hier · 18:22",        timeEn:"Yesterday · 6:22 PM" },
+  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:58, time:"Hier · 15:10",        timeEn:"Yesterday · 3:10 PM" },
+  { t:"st", fr:"Vues de stories",      en:"Story views",     n:29, time:"Hier · 11:05",        timeEn:"Yesterday · 11:05 AM" },
+  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:50, time:"2 juin · 17:30",      timeEn:"Jun 2 · 5:30 PM" },
+  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:65, time:"2 juin · 13:20",      timeEn:"Jun 2 · 1:20 PM" },
+  { t:"dm", fr:"DMs de bienvenue",     en:"Welcome DMs",     n:6,  time:"2 juin · 09:15",      timeEn:"Jun 2 · 9:15 AM" },
+  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:44, time:"1 juin · 20:00",      timeEn:"Jun 1 · 8:00 PM" },
+  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:55, time:"1 juin · 16:45",      timeEn:"Jun 1 · 4:45 PM" },
+];
+
+const INIT_TARGETS = ["mode_paris_fr","luxeboutique_fr","styliste_officiel","fashionweek_fr","createur_mode","parisienne_style","atelier_couture_fr","galerie_lafayette"];
+const INIT_WHITE   = ["christine_leclerc","mon_compte_perso","client_vip_fr","partenaire_officiel"];
+const INIT_BLACK   = ["spam_follow4follow","giveaway_daily","dropship_eushop","bot_network_99"];
+
+type DwrRow = {
+  h: string; ver: string; elig: "eligible"|"verified"|"pending"|"rejected"|"archived";
+  f: number|null; perf: string|null; fbr: number|null; sent: number;
+  last: string|null; lastEn: string|null; lastTag: string;
+  added: string; addedEn: string; src: string; srcEn: string;
+};
+const DTL: DwrRow[] = [
+  { h:"mode_paris_fr",        ver:"found",     elig:"eligible",  f:4900,   perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
+  { h:"transcendanse_style",  ver:"found",     elig:"eligible",  f:519,    perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
+  { h:"atelier_couture_fr",   ver:"found",     elig:"eligible",  f:871,    perf:"pending",  fbr:null, sent:0,   last:"2 juin", lastEn:"Jun 02",  lastTag:"metrics",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
+  { h:"galerie_lafayette",    ver:"found",     elig:"verified",  f:46200,  perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
+  { h:"fashionweek_fr",       ver:"found",     elig:"eligible",  f:1300,   perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
+  { h:"luxeboutique_fr",      ver:"found",     elig:"verified",  f:12300,  perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"1 juin",  addedEn:"Jun 01", src:"IA",     srcEn:"AI" },
+  { h:"styliste_officiel",    ver:"found",     elig:"eligible",  f:8700,   perf:"running",  fbr:9.2,  sent:142, last:"1 juin", lastEn:"Jun 01",  lastTag:"sent",     added:"1 juin",  addedEn:"Jun 01", src:"IA",     srcEn:"AI" },
+  { h:"parisienne_style",     ver:"found",     elig:"eligible",  f:1300,   perf:"running",  fbr:4.1,  sent:86,  last:"31 mai", lastEn:"May 31",  lastTag:"sent",     added:"31 mai",  addedEn:"May 31", src:"Manuel", srcEn:"Manual" },
+  { h:"createur_mode",        ver:"found",     elig:"pending",   f:3400,   perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"review",   added:"30 mai",  addedEn:"May 30", src:"IA",     srcEn:"AI" },
+  { h:"shop_dropship_eu",     ver:"found",     elig:"rejected",  f:120000, perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"—",        added:"29 mai",  addedEn:"May 29", src:"IA",     srcEn:"AI" },
+  { h:"compte_introuvable",   ver:"not_found", elig:"rejected",  f:null,   perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"—",        added:"28 mai",  addedEn:"May 28", src:"Manuel", srcEn:"Manual" },
+  { h:"fastfashion_promo",    ver:"found",     elig:"archived",  f:88000,  perf:null,       fbr:0.4,  sent:30,  last:"20 mai", lastEn:"May 20",  lastTag:"archived", added:"18 mai",  addedEn:"May 18", src:"Manuel", srcEn:"Manual" },
+];
+
+const AVPAL = [
+  ["#f58529","#dd2a7b"],["#8a3ab9","#cd486b"],["#5a6cf5","#e8a030"],["#fbbf24","#dd2a7b"],
+  ["#34d399","#5a6cf5"],["#dd2a7b","#fbbf24"],["#e8a030","#8a3ab9"],["#5851db","#e1306c"],
+];
+function avPal(h: string) { return AVPAL[h.charCodeAt(0) % AVPAL.length]; }
+
+// ─── i18n ─────────────────────────────────────────────────────────────────────
+const T = {
+  fr: {
+    views: { overview:"Vue d'ensemble", activity:"Activité", targeting:"Ciblage", account:"Mon compte" },
+    nav: { dashboard:"Tableau de bord", campaign:"Campagne", myaccount:"Mon compte" },
+    topbar: { active:"Campagne active" },
+    stats: [
+      { lbl:"Ce mois-ci",     val:"+342",  sub:"▲ 12% vs mois dernier" },
+      { lbl:"Total gagné",    val:"+1 847",sub:"depuis jan. 2026" },
+      { lbl:"Aujourd'hui",    val:"94",    sub:"follows + likes + stories" },
+      { lbl:"Moy. / jour",    val:"14,3",  sub:"abonnés qualifiés réels" },
+    ],
+    chart: { title:"Abonnés · @christine_leclerc", all:"Tout", d30:"30 jours", daily:"Quotidien" },
+    feed: { title:"Activité récente", seeAll:"Tout voir →" },
+    plan: { name:"Pro", price:"197€", period:"/mois", growth:"Croissance estimée", growthVal:"300–500 / mois", nextBill:"Prochain prélèvement", nextBillVal:"3 juil. 2026", support:"Support", supportVal:"7j / 7", manage:"Gérer mon abonnement" },
+    mgr: { name:"Mythyl E.", sub:"Votre account manager", text:"Votre manager dédié surveille votre campagne chaque jour, ajuste le paramétrage chaque semaine et est disponible pour répondre à vos questions 7j/7.", email:"Envoyer un email", call:"Prendre RDV" },
+    activity: { title:"Journal complet · 30 derniers jours" },
+    targeting: {
+      intro:"Organisez votre campagne : les comptes que nous ciblons, votre liste blanche protégée et la liste noire que nous excluons.",
+      detailBtn:"Ajouter les comptes cibles",
+      targets:"Comptes cibles", white:"Liste blanche", black:"Liste noire",
+      placeholderW:"compte_protege", placeholderB:"compte_exclu",
+      emptyT:"Aucun compte cible pour l'instant.", emptyW:"Aucun compte protégé.", emptyB:"Aucun compte exclu.",
+    },
+    account: {
+      profile:"Mon profil", subscription:"Abonnement",
+      fname:"Prénom", lname:"Nom", phone:"Numéro de téléphone", email:"Email", ig:"Compte Instagram",
+      save:"Enregistrer les modifications",
+      planLabel:"Formule active", planVal:"Pro — 197€/mois",
+      since:"Membre depuis", sinceVal:"15 janvier 2026",
+      next:"Prochain prélèvement", nextVal:"3 juillet 2026 — 197€",
+      pay:"Moyen de paiement", payVal:"•••• •••• •••• 4242",
+      changePlan:"Changer de formule",
+    },
+    drawer: {
+      kicker:"Cibles", title:"@christine_leclerc",
+      total:"Total", valid:"Valides / éligibles", archived:"Archivés",
+      searchPh:"Filtrer par nom, santé, statut…",
+      chips:["Tout","Actifs / valides","En attente","Rejetés","Archivés"],
+      refresh:"Actualiser", export:"Exporter", del:"Supprimer la sélection",
+      addLbl:"Ajouter une cible", addPh:"Nom d'utilisateur Instagram", addBtn:"Ajouter",
+      bulkLbl:"Ajout groupé (un par ligne)", importBtn:"Importer",
+      aiLbl:"Trouver mes comptes cibles avec l'IA", aiBtn:"Lancer la recherche",
+      cols:["","Compte","Vérification","Éligibilité","Abonnés","Perf","FBR","Envoyés","Dern. usage","Ajouté"],
+      elig:{ eligible:"Éligible", verified:"Vérifié", pending:"En attente", rejected:"Rejeté", archived:"Archivé" },
+      perf:{ running:"En cours", pending:"En attente" },
+      found:"trouvé", notFound:"introuvable",
+    },
+    servicePage:"Page du service",
+  },
+  en: {
+    views: { overview:"Overview", activity:"Activity", targeting:"Targeting", account:"My account" },
+    nav: { dashboard:"Dashboard", campaign:"Campaign", myaccount:"Account" },
+    topbar: { active:"Campaign active" },
+    stats: [
+      { lbl:"This month",   val:"+342",  sub:"▲ 12% vs last month" },
+      { lbl:"Total gained", val:"+1 847",sub:"since Jan 2026" },
+      { lbl:"Today",        val:"94",    sub:"follows + likes + stories" },
+      { lbl:"Daily avg.",   val:"14.3",  sub:"real qualified followers" },
+    ],
+    chart: { title:"Followers · @christine_leclerc", all:"All time", d30:"30 days", daily:"Daily" },
+    feed: { title:"Recent activity", seeAll:"View all →" },
+    plan: { name:"Pro", price:"€197", period:"/mo", growth:"Estimated growth", growthVal:"300–500 / mo", nextBill:"Next billing", nextBillVal:"Jul 3, 2026", support:"Support", supportVal:"7 days / week", manage:"Manage plan" },
+    mgr: { name:"Mythyl E.", sub:"Your account manager", text:"Your dedicated manager monitors your campaign daily, fine-tunes settings weekly, and is available to answer your questions 7 days a week.", email:"Send email", call:"Book a call" },
+    activity: { title:"Full activity log · last 30 days" },
+    targeting: {
+      intro:"Organise your campaign: the accounts we target, your protected whitelist, and the blacklist we exclude.",
+      detailBtn:"Add target accounts",
+      targets:"Target accounts", white:"Whitelist", black:"Blacklist",
+      placeholderW:"protected_account", placeholderB:"excluded_account",
+      emptyT:"No target accounts yet.", emptyW:"No protected accounts.", emptyB:"No excluded accounts.",
+    },
+    account: {
+      profile:"My profile", subscription:"Subscription",
+      fname:"First name", lname:"Last name", phone:"Phone number", email:"Email", ig:"Instagram handle",
+      save:"Save changes",
+      planLabel:"Active plan", planVal:"Pro — €197/mo",
+      since:"Member since", sinceVal:"January 15, 2026",
+      next:"Next billing", nextVal:"July 3, 2026 — €197",
+      pay:"Billing method", payVal:"•••• •••• •••• 4242",
+      changePlan:"Change plan",
+    },
+    drawer: {
+      kicker:"Targets", title:"@christine_leclerc",
+      total:"Total", valid:"Valid / eligible", archived:"Archived",
+      searchPh:"Filter by username, health, status…",
+      chips:["All","Active / valid","Pending","Rejected","Archived / deleted"],
+      refresh:"Refresh", export:"Export", del:"Delete selected",
+      addLbl:"Add target", addPh:"Instagram username", addBtn:"Add",
+      bulkLbl:"Bulk add (one per line)", importBtn:"Import",
+      aiLbl:"Find my target accounts with AI", aiBtn:"Start search",
+      cols:["","Username","Verification","Eligibility","Followers","Perf","FBR","Sent","Last used","Added"],
+      elig:{ eligible:"Eligible", verified:"Verified", pending:"Pending", rejected:"Rejected", archived:"Archived" },
+      perf:{ running:"Running", pending:"Pending" },
+      found:"found", notFound:"not found",
+    },
+    servicePage:"Service page",
+  },
+};
+
+// ─── Chart helpers ────────────────────────────────────────────────────────────
+function smoothPath(pts: [number,number][]) {
+  if (pts.length < 2) return "";
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i-1)], p1 = pts[i], p2 = pts[i+1], p3 = pts[Math.min(pts.length-1, i+2)];
+    const t = 0.18;
+    const c1x = p1[0] + (p2[0]-p0[0])*t, c1y = p1[1] + (p2[1]-p0[1])*t;
+    const c2x = p2[0] - (p3[0]-p1[0])*t, c2y = p2[1] - (p3[1]-p1[1])*t;
+    d += `C${c1x},${c1y} ${c2x},${c2y} ${p2[0]},${p2[1]}`;
+  }
+  return d;
+}
+
+function fmtDate(daysBack: number, lang: Lang) {
+  const today = new Date(2026, 5, 2);
+  const d = new Date(today);
+  d.setDate(d.getDate() - daysBack);
+  const MFR = ["jan","fév","mar","avr","mai","jun","jui","aoû","sep","oct","nov","déc"];
+  const MEN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return lang === "en"
+    ? `${MEN[d.getMonth()]} ${d.getDate()}`
+    : `${d.getDate()} ${MFR[d.getMonth()]}`;
+}
+
+// ─── Feed icons ───────────────────────────────────────────────────────────────
+const FeedIcon = ({ type }: { type: FeedType }) => {
+  const props = { width:14, height:14, fill:"none", strokeWidth:2, strokeLinecap:"round" as const, strokeLinejoin:"round" as const };
+  if (type === "fo") return <svg viewBox="0 0 24 24" {...props}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>;
+  if (type === "li") return <svg viewBox="0 0 24 24" {...props}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>;
+  if (type === "dm") return <svg viewBox="0 0 24 24" {...props}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+  return <svg viewBox="0 0 24 24" {...props}><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>;
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function FeedList({ items, lang }: { items: typeof FD; lang: Lang }) {
+  return (
+    <div className="cd-feed">
+      {items.map((d, i) => (
+        <div key={i} className="cd-fi">
+          <div className={`cd-fi-ic cd-fi-${d.t}`}><FeedIcon type={d.t} /></div>
+          <div className="cd-fi-body">
+            <div className="cd-fi-title">{lang === "en" ? d.en : d.fr}</div>
+            <div className="cd-fi-meta">{lang === "en" ? d.timeEn : d.time}</div>
+          </div>
+          <div className="cd-fi-n">{d.n}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FollowerChart({ range, lang, onRangeChange, t }: {
+  range: ChartRange; lang: Lang;
+  onRangeChange: (r: ChartRange) => void;
+  t: typeof T["fr"];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(800);
+  const [hoverIdx, setHoverIdx] = useState<number|null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(([e]) => setW(Math.max(e.contentRect.width || 400, 400)));
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const data = DS[range];
+  const H = 240, padL = 44, padR = 18, padT = 14, padB = 34;
+  const cw = W - padL - padR, ch = H - padT - padB;
+  const rawMin = Math.min(...data), rawMax = Math.max(...data);
+  const pad = Math.max(1, Math.round((rawMax - rawMin) * 0.12));
+  const minV = rawMin - pad, maxV = rawMax + pad;
+  const rng = maxV - minV || 1;
+  const xp = (i: number) => padL + i * cw / (data.length - 1);
+  const yp = (v: number) => padT + (1 - (v - minV) / rng) * ch;
+
+  const pts = data.map((v, i) => [xp(i), yp(v)] as [number,number]);
+  const linePath = smoothPath(pts);
+  const areaPath = `${linePath} L${xp(data.length-1)},${padT+ch} L${xp(0)},${padT+ch} Z`;
+  const net = data[data.length-1] - data[0];
+  const activeIdx = hoverIdx ?? data.length - 1;
+  const diff = data[activeIdx] - (activeIdx > 0 ? data[activeIdx-1] : data[activeIdx]);
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width;
+    setHoverIdx(Math.max(0, Math.min(Math.round(relX * (data.length-1)), data.length-1)));
+  };
+
+  // Y gridlines
+  const gridSteps = 4;
+  const gridLines = Array.from({ length: gridSteps+1 }, (_, i) => {
+    const v = minV + i * (rng / gridSteps);
+    const y = yp(v);
+    return { v, y };
+  });
+
+  // X labels
+  const xTicks = Math.min(7, data.length);
+  const xLabels = Array.from({ length: xTicks }, (_, xi) => {
+    const idx = Math.round(xi * (data.length-1) / (xTicks-1));
+    const anchor = xi === 0 ? "start" : xi === xTicks-1 ? "end" : "middle";
+    return { idx, anchor, label: fmtDate(data.length-1-idx, lang) };
+  });
+
+  // Tooltip position
+  const tipLeftPct = (xp(activeIdx) / W * 100);
+  const tipLeft = tipLeftPct > 75 ? `${tipLeftPct - 22}%` : `${tipLeftPct}%`;
+
+  return (
+    <div className="cd-chart-card">
+      <div className="cd-c-hd">
+        <div className="cd-c-hd-left">
+          <div className="cd-c-titlerow">
+            <span className="cd-c-badge">
+              <svg viewBox="0 0 24 24" fill="none" width={18} height={18}><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/><circle cx="9.5" cy="7" r="4" stroke="#fff" strokeWidth={2}/><path d="M19 8v6M22 11h-6" stroke="#fff" strokeWidth={2} strokeLinecap="round"/></svg>
+            </span>
+            <h3 className="cd-c-title">{t.chart.title}</h3>
+          </div>
+          <div className="cd-c-bignum">
+            <span className="cd-c-foll-n">{data[data.length-1].toLocaleString("fr-FR")}</span>
+            <span className="cd-c-delta" style={{ color: net < 0 ? "var(--bad)" : "var(--good)", background: net < 0 ? "var(--bad-bg)" : "var(--good-bg)", borderColor: net < 0 ? "var(--bad-line)" : "var(--good-line)" }}>
+              <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" style={{ transform: net < 0 ? "scaleY(-1)" : "none" }}><polyline points="6 14 12 8 18 14"/></svg>
+              {(net >= 0 ? "+" : "") + net.toLocaleString("fr-FR")}
+            </span>
+          </div>
+        </div>
+        <div className="cd-range-tabs">
+          {([90, 30, 7] as ChartRange[]).map((r) => {
+            const label = r === 90 ? t.chart.all : r === 30 ? t.chart.d30 : t.chart.daily;
+            return (
+              <button key={r} className={range === r ? "on" : ""} onClick={() => onRangeChange(r)}>{label}</button>
+            );
+          })}
+        </div>
+      </div>
+      <div ref={containerRef} style={{ position: "relative", marginTop: 8 }}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ display: "block", width: "100%", overflow: "visible" }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHoverIdx(null)}
+        >
+          <defs>
+            <linearGradient id="cd-lg" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#f7a52b"/>
+              <stop offset="34%" stopColor="#f4506b"/>
+              <stop offset="62%" stopColor="#d23db0"/>
+              <stop offset="100%" stopColor="#8b3df5"/>
+            </linearGradient>
+            <linearGradient id="cd-ag" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#f4506b" stopOpacity={0.16}/>
+              <stop offset="100%" stopColor="#8b3df5" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          {gridLines.map(({ v, y }) => (
+            <g key={v}>
+              <line x1={padL} y1={y} x2={W-padR} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
+              <text x={padL-10} y={y+4} textAnchor="end" fontSize={11} fill="var(--ink-mute)" fontFamily="var(--font-d)" fontWeight={600}>
+                {Math.round(v).toLocaleString("fr-FR")}
+              </text>
+            </g>
+          ))}
+          <path d={areaPath} fill="url(#cd-ag)"/>
+          <path d={linePath} fill="none" stroke="url(#cd-lg)" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"/>
+          {pts.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={4} fill="#fff" stroke="url(#cd-lg)" strokeWidth={2.4}/>
+          ))}
+          <circle cx={xp(activeIdx)} cy={yp(data[activeIdx])} r={6} fill="#fff" stroke="url(#cd-lg)" strokeWidth={3}/>
+          {xLabels.map(({ idx, anchor, label }) => (
+            <text key={idx} x={xp(idx)} y={H-8} textAnchor={anchor as "start"|"middle"|"end"} fontSize={11} fill="var(--ink-mute)" fontFamily="var(--font-d)" fontWeight={600}>
+              {label}
+            </text>
+          ))}
+        </svg>
+        {hoverIdx !== null && (
+          <div className="cd-chart-tip" style={{ opacity: 1, left: tipLeft, top: 8 }}>
+            <span className="cd-tv">{(diff >= 0 ? "+" : "") + diff + (lang === "en" ? " followers" : " abonnés")}</span>
+            <span>{fmtDate(data.length-1-activeIdx, lang)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TargetDrawer({ open, onClose, lang, t }: {
+  open: boolean; onClose: () => void; lang: Lang; t: typeof T["fr"];
+}) {
+  const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [singleInput, setSingleInput] = useState("");
+  const [bulkText, setBulkText] = useState("");
+
+  const td = t.drawer;
+  const filterKeys = ["all","eligible","pending","rejected","archived"];
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape" && open) onClose(); };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, [open, onClose]);
+
+  const eligMap: Record<string, { cls: string; label: string }> = {
+    eligible: { cls:"cd-elig", label: td.elig.eligible },
+    verified: { cls:"cd-ver",  label: td.elig.verified },
+    pending:  { cls:"cd-pend", label: td.elig.pending },
+    rejected: { cls:"cd-rej",  label: td.elig.rejected },
+    archived: { cls:"cd-arch", label: td.elig.archived },
+  };
+
+  const rows = DTL.filter(r => {
+    if (filter === "eligible" && r.elig !== "eligible" && r.elig !== "verified") return false;
+    if (filter === "pending"  && r.elig !== "pending")  return false;
+    if (filter === "rejected" && r.elig !== "rejected") return false;
+    if (filter === "archived" && r.elig !== "archived") return false;
+    if (query) { const q = query.toLowerCase(); if (!r.h.toLowerCase().includes(q) && !r.elig.includes(q)) return false; }
+    return true;
+  });
+
+  const totalValid   = DTL.filter(r => r.elig === "eligible" || r.elig === "verified").length;
+  const totalArch    = DTL.filter(r => r.elig === "archived").length;
+  const nSelected    = Object.values(sel).filter(Boolean).length;
+
+  function fmtK(n: number|null) {
+    if (n == null) return "—";
+    if (n >= 1000) { const v = n/1000; return (v >= 10 ? Math.round(v) : v.toFixed(1)).toString().replace(".",",") + (lang === "en" ? "K" : " k"); }
+    return n.toLocaleString("fr-FR");
+  }
+
+  return (
+    <>
+      <div className={`cd-dwr-scrim${open ? " open" : ""}`} onClick={onClose}/>
+      <aside className={`cd-dwr${open ? " open" : ""}`} aria-hidden={!open}>
+        <header className="cd-dwr-hd">
+          <div className="cd-dwr-hd-l">
+            <span className="cd-dwr-hd-ic">
+              <svg viewBox="0 0 24 24" width={20} height={20} stroke="var(--accent)" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </span>
+            <div>
+              <div className="cd-dwr-kicker">{td.kicker}</div>
+              <div className="cd-dwr-title" style={{ color:"var(--accent)" }}>{td.title}</div>
+            </div>
+          </div>
+          <button className="cd-dwr-x" onClick={onClose}>
+            <svg viewBox="0 0 24 24" width={17} height={17} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+
+        <div className="cd-dwr-body">
+          {/* Stats */}
+          <div className="cd-dwr-stats">
+            <div className="cd-dwr-stat"><div className="cd-dwr-stat-l">{td.total}</div><div className="cd-dwr-stat-v">{DTL.length}</div></div>
+            <div className="cd-dwr-stat"><div className="cd-dwr-stat-l">{td.valid}</div><div className="cd-dwr-stat-v" style={{color:"var(--good)"}}>{totalValid}</div></div>
+            <div className="cd-dwr-stat"><div className="cd-dwr-stat-l">{td.archived}</div><div className="cd-dwr-stat-v" style={{color:"var(--ink-dim)"}}>{totalArch}</div></div>
+          </div>
+
+          {/* Search + chips */}
+          <div className="cd-dwr-controls">
+            <div className="cd-dwr-search">
+              <svg viewBox="0 0 24 24" width={15} height={15} stroke="var(--ink-mute)" fill="none" strokeWidth={2} strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" placeholder={td.searchPh} value={query} onChange={e => setQuery(e.target.value)}/>
+            </div>
+            <div className="cd-dwr-chips">
+              {filterKeys.map((k, i) => (
+                <button key={k} className={`cd-dwr-chip${filter === k ? " on" : ""}`} onClick={() => setFilter(k)}>{td.chips[i]}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="cd-dwr-actions">
+            <button className="cd-dwr-act"><svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>{td.refresh}</button>
+            <button className="cd-dwr-act"><svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>{td.export}</button>
+            <button className="cd-dwr-act" style={{color:"var(--bad)"}} disabled={nSelected === 0}><svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{td.del}</button>
+          </div>
+
+          {/* Add panels */}
+          <div className="cd-dwr-add">
+            <div className="cd-dwr-add-card">
+              <div className="cd-dwr-add-lbl">{td.addLbl}</div>
+              <div className="cd-dwr-add-row">
+                <input type="text" className="cd-dwr-in" placeholder={td.addPh} value={singleInput} onChange={e => setSingleInput(e.target.value)}/>
+                <button className="cd-dwr-add-btn" onClick={() => setSingleInput("")}>
+                  <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={2.2} strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  {td.addBtn}
+                </button>
+              </div>
+            </div>
+            <div className="cd-dwr-add-card">
+              <div className="cd-dwr-add-lbl">{td.bulkLbl}</div>
+              <textarea className="cd-dwr-ta" placeholder={"user_one\n@user_two\nuser_three"} value={bulkText} onChange={e => setBulkText(e.target.value)}/>
+              <button className="cd-dwr-import" onClick={() => setBulkText("")}>{td.importBtn}</button>
+            </div>
+          </div>
+
+          {/* AI panel */}
+          <div className="cd-dwr-add-card" style={{textAlign:"center"}}>
+            <div className="cd-dwr-add-lbl" style={{marginBottom:12}}>{td.aiLbl}</div>
+            <button className="cd-dwr-import">{td.aiBtn}</button>
+          </div>
+
+          {/* Table */}
+          <div className="cd-dwr-table">
+            <div className="cd-dwr-trow cd-dwr-thead">
+              {td.cols.map((c, i) => <span key={i} className={i >= 4 && i <= 7 ? "cd-dwr-num" : ""}>{c}</span>)}
+            </div>
+            <div>
+              {rows.length === 0 ? (
+                <div className="cd-dwr-empty">{lang === "en" ? "No targets match your filter." : "Aucune cible ne correspond à votre filtre."}</div>
+              ) : rows.map((r) => {
+                const pal = avPal(r.h);
+                const e = eligMap[r.elig] || { cls:"cd-arch", label: r.elig };
+                const foll = r.f == null ? "—" : fmtK(r.f);
+                const verTxt = r.ver === "found" ? td.found : td.notFound;
+                const last = r.last ? (lang === "en" ? (r.lastEn || r.last) : r.last) : "—";
+                const fbr = r.fbr == null ? "—" : r.fbr.toFixed(1).replace(".",",")+"%";
+                const perfTxt = r.perf === "running" ? td.perf.running : r.perf === "pending" ? td.perf.pending : null;
+                const addedDisplay = lang === "en" ? r.addedEn : r.added;
+                const srcDisplay = lang === "en" ? r.srcEn : r.src;
+                const isSelected = !!sel[r.h];
+                return (
+                  <div key={r.h} className="cd-dwr-trow cd-dwr-rrow">
+                    <span className={`cd-dwr-cb${isSelected ? " on" : ""}`} onClick={() => setSel(s => ({...s, [r.h]: !s[r.h]}))}/>
+                    <div className="cd-dwr-u">
+                      <span className="cd-dwr-u-av" style={{background:`linear-gradient(135deg,${pal[0]},${pal[1]})`}}/>
+                      <span className="cd-dwr-u-h">@{r.h}</span>
+                    </div>
+                    <span className={`cd-dwr-ver${r.ver === "not_found" ? " cd-nf" : ""}`}>{verTxt}</span>
+                    <span><span className={`cd-dwr-pill ${e.cls}`}>{e.label}</span></span>
+                    <span className="cd-dwr-num">{foll}</span>
+                    <span>{perfTxt ? <span className="cd-dwr-tag">{perfTxt}</span> : <span className="cd-dwr-dash">—</span>}</span>
+                    <span className="cd-dwr-num">{fbr}</span>
+                    <span className="cd-dwr-num">{r.sent}</span>
+                    <span><span className="cd-dwr-last">{last}</span></span>
+                    <span><span className="cd-dwr-added">{addedDisplay}</span><span className="cd-dwr-added-s">{srcDisplay}</span></span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ─── Main export ──────────────────────────────────────────────────────────────
+export default function ClientDashboard({ userId: _userId, tenantId: _tenantId }: Props) {
+  const [activeView, setActiveView]     = useState<View>("overview");
+  const [lang,       setLang]           = useState<Lang>("fr");
+  const [theme,      setTheme]          = useState<Theme>("dark");
+  const [chartRange, setChartRange]     = useState<ChartRange>(7);
+  const [drawerOpen, setDrawerOpen]     = useState(false);
+  const [loggingOut, setLoggingOut]     = useState(false);
+  const router = useRouter();
+
+  // Targeting lists
+  const [targets,   setTargets]   = useState(INIT_TARGETS);
+  const [whitelist, setWhitelist] = useState(INIT_WHITE);
+  const [blacklist, setBlacklist] = useState(INIT_BLACK);
+  const [addW, setAddW] = useState("");
+  const [addB, setAddB] = useState("");
+
+  const t = T[lang];
+
+  useEffect(() => {
+    const l = localStorage.getItem(LANG_KEY) as Lang|null;
+    if (l === "fr" || l === "en") setLang(l);
+    const th = localStorage.getItem(THEME_KEY) as Theme|null;
+    if (th === "dark" || th === "light") setTheme(th);
+  }, []);
+
+  useEffect(() => { localStorage.setItem(LANG_KEY, lang); }, [lang]);
+  useEffect(() => { localStorage.setItem(THEME_KEY, theme); }, [theme]);
+
+  const handleNavigate = useCallback((view: View) => setActiveView(view), []);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/instagram-auth/session", { method: "DELETE" });
+    } finally {
+      router.push("/instagram-login");
+    }
+  }
+
+  function tgClean(v: string) { return v.trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase(); }
+
+  function addToList(list: "white"|"black", value: string) {
+    const h = tgClean(value);
+    if (!h) return;
+    if (list === "white") { if (!whitelist.includes(h)) setWhitelist(p => [h,...p]); setAddW(""); }
+    else { if (!blacklist.includes(h)) setBlacklist(p => [h,...p]); setAddB(""); }
+  }
+
+  const navItems: { view: View; label: string; icon: React.ReactNode; badge?: number; section?: string }[] = [
+    { view:"overview",  label:t.views.overview,  section:t.nav.dashboard, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
+    { view:"activity",  label:t.views.activity,  icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>, badge:12 },
+    { view:"targeting", label:t.views.targeting, section:t.nav.campaign, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg> },
+    { view:"account",   label:t.views.account,   section:t.nav.myaccount, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+  ];
+
+  return (
+    <div className={`cd-shell${theme === "light" ? " cd-light" : ""}`}>
+      <style>{CSS}</style>
+
+      {/* ── SIDEBAR ── */}
+      <aside className="cd-sidebar">
+        <div className="cd-sb-brand">
+          <div className="cd-sb-mark"><span className="cd-sb-mark-b">B</span></div>
+          <div className="cd-sb-name">
+            <div className="cd-sb-name-main">Boost<span>My</span>Businesses</div>
+            <div className="cd-sb-name-sub" style={{color:"var(--accent)"}}>Espace client</div>
+          </div>
+        </div>
+        <nav className="cd-sb-nav">
+          {navItems.map((item) => (
+            <span key={item.view}>
+              {item.section && <span className="cd-nl">{item.section}</span>}
+              <a className={`cd-nav-link${activeView === item.view ? " active" : ""}`} href="#" onClick={e => { e.preventDefault(); handleNavigate(item.view); }}>
+                {item.icon}
+                <span>{item.label}</span>
+                {item.badge && <span className="cd-bdg">{item.badge}</span>}
+              </a>
+            </span>
+          ))}
+          <a className="cd-nav-link" href="/instagram-growth" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            <span>{t.servicePage}</span>
+          </a>
+        </nav>
+        <div className="cd-sb-logout-wrap">
+          <button className="cd-sb-logout" onClick={handleLogout} disabled={loggingOut}>
+            <LogOut size={15} strokeWidth={1.8} />
+            <span>{loggingOut ? (lang === "fr" ? "Déconnexion…" : "Signing out…") : (lang === "fr" ? "Se déconnecter" : "Sign out")}</span>
+          </button>
+        </div>
+        <div className="cd-sb-foot">
+          <div className="cd-sb-acct">
+            <div className="cd-sb-av">C</div>
+            <div>
+              <div className="cd-sb-aname">Christine Leclerc</div>
+              <div className="cd-sb-aplan">Plan Pro</div>
+            </div>
+            <div className="cd-sb-live"><div className="cd-sb-dot"/></div>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── TOPBAR ── */}
+      <header className="cd-topbar">
+        <h1 className="cd-tb-title">{t.views[activeView]}</h1>
+        <div className="cd-tb-right">
+          <div className="cd-stat-pill"><span className="cd-dot"/><span>{t.topbar.active}</span></div>
+          <button className="cd-ic-btn" onClick={() => setTheme(th => th === "dark" ? "light" : "dark")} title="Toggle theme">
+            <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <div className="cd-lang-t">
+            {(["fr","en"] as Lang[]).map(l => (
+              <button key={l} className={lang === l ? "on" : ""} onClick={() => setLang(l)}>{l.toUpperCase()}</button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* ── MAIN ── */}
+      <main className="cd-main">
+
+        {/* OVERVIEW */}
+        {activeView === "overview" && (
+          <div className="cd-view">
+            {/* Stats */}
+            <div className="cd-stats-row">
+              {t.stats.map((s, i) => (
+                <div key={i} className="cd-sc">
+                  <div className="cd-sc-lbl">{s.lbl}</div>
+                  <div className={`cd-sc-val${i === 0 ? " cd-grad" : ""}`}>{s.val}</div>
+                  <div className="cd-sc-sub"><span className={i === 0 ? "cd-up" : ""}>{s.sub}</span></div>
+                </div>
+              ))}
+            </div>
+
+            {/* Chart */}
+            <FollowerChart range={chartRange} lang={lang} onRangeChange={setChartRange} t={t}/>
+
+            {/* Two-col */}
+            <div className="cd-two-col">
+              <div className="cd-card">
+                <div className="cd-card-hd">
+                  <h3>{t.feed.title}</h3>
+                  <a href="#" onClick={e => { e.preventDefault(); handleNavigate("activity"); }}>{t.feed.seeAll}</a>
+                </div>
+                <FeedList items={FD.slice(0,5)} lang={lang}/>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                {/* Plan card */}
+                <div className="cd-card cd-plan-wrap">
+                  <div className="cd-plan-top">
+                    <div className="cd-plan-name">{t.plan.name}</div>
+                    <span className="cd-plan-tag">{lang === "fr" ? "Actif" : "Active"}</span>
+                  </div>
+                  <div className="cd-plan-price">{t.plan.price}<small>{t.plan.period}</small></div>
+                  <div className="cd-plan-rows">
+                    <div className="cd-pr"><span className="cd-pr-l">{t.plan.growth}</span><span className="cd-pr-v cd-a">{t.plan.growthVal}</span></div>
+                    <div className="cd-pr"><span className="cd-pr-l">{t.plan.nextBill}</span><span className="cd-pr-v">{t.plan.nextBillVal}</span></div>
+                    <div className="cd-pr"><span className="cd-pr-l">{t.plan.support}</span><span className="cd-pr-v cd-g">{t.plan.supportVal}</span></div>
+                  </div>
+                  <button className="cd-btn cd-btn-primary cd-btn-full" onClick={() => handleNavigate("account")}>
+                    <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    {t.plan.manage}
+                  </button>
+                </div>
+                {/* Manager card */}
+                <div className="cd-manager-card">
+                  <div className="cd-mgr-hd">
+                    <div className="cd-mgr-av">B</div>
+                    <div><div className="cd-mgr-name">{t.mgr.name}</div><div className="cd-mgr-sub">{t.mgr.sub}</div></div>
+                  </div>
+                  <p className="cd-mgr-text">{t.mgr.text}</p>
+                  <div className="cd-mgr-btns">
+                    <button className="cd-btn cd-btn-soft" style={{fontSize:".78rem",padding:"7px 13px"}}>
+                      <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                      {t.mgr.email}
+                    </button>
+                    <button className="cd-btn cd-btn-primary" style={{fontSize:".78rem",padding:"7px 13px"}}>
+                      <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      {t.mgr.call}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ACTIVITY */}
+        {activeView === "activity" && (
+          <div className="cd-view">
+            <div className="cd-card">
+              <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
+              <FeedList items={FD} lang={lang}/>
+            </div>
+          </div>
+        )}
+
+        {/* TARGETING */}
+        {activeView === "targeting" && (
+          <div className="cd-view">
+            <div className="cd-tg2-topbar">
+              <p className="cd-tg2-intro">{t.targeting.intro}</p>
+              <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)}>
+                <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+                {t.targeting.detailBtn}
+              </button>
+            </div>
+
+            <div className="cd-tg2-cols">
+              {/* Cibles */}
+              <div className="cd-tg2-col cd-col-cibles">
+                <div className="cd-tg2-col-hd">
+                  <span className="cd-tg2-col-ic"><svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></span>
+                  <span className="cd-tg2-col-ttl">{t.targeting.targets}</span>
+                  <span className="cd-tg2-col-ct">{targets.length}</span>
+                </div>
+                <div className="cd-tg2-col-rows">
+                  {targets.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyT}</div> : targets.map(h => (
+                    <div key={h} className="cd-tg2-li">
+                      <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
+                      <span className="cd-tg2-handle">@{h}</span>
+                      <button className="cd-tg2-li-x" onClick={() => setTargets(p => p.filter(x => x !== h))} title="Retirer">
+                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Whitelist */}
+              <div className="cd-tg2-col cd-col-white">
+                <div className="cd-tg2-col-hd">
+                  <span className="cd-tg2-col-ic"><svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 9"/></svg></span>
+                  <span className="cd-tg2-col-ttl">{t.targeting.white}</span>
+                  <span className="cd-tg2-col-ct">{whitelist.length}</span>
+                </div>
+                <div className="cd-tg2-col-add">
+                  <input type="text" placeholder={t.targeting.placeholderW} value={addW} onChange={e => setAddW(e.target.value)} onKeyDown={e => e.key === "Enter" && addToList("white", addW)}/>
+                  <button onClick={() => addToList("white", addW)}>+</button>
+                </div>
+                <div className="cd-tg2-col-rows">
+                  {whitelist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyW}</div> : whitelist.map(h => (
+                    <div key={h} className="cd-tg2-li">
+                      <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
+                      <span className="cd-tg2-handle">@{h}</span>
+                      <button className="cd-tg2-li-x" onClick={() => setWhitelist(p => p.filter(x => x !== h))} title="Retirer">
+                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Blacklist */}
+              <div className="cd-tg2-col cd-col-black">
+                <div className="cd-tg2-col-hd">
+                  <span className="cd-tg2-col-ic"><svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg></span>
+                  <span className="cd-tg2-col-ttl">{t.targeting.black}</span>
+                  <span className="cd-tg2-col-ct">{blacklist.length}</span>
+                </div>
+                <div className="cd-tg2-col-add">
+                  <input type="text" placeholder={t.targeting.placeholderB} value={addB} onChange={e => setAddB(e.target.value)} onKeyDown={e => e.key === "Enter" && addToList("black", addB)}/>
+                  <button onClick={() => addToList("black", addB)}>+</button>
+                </div>
+                <div className="cd-tg2-col-rows">
+                  {blacklist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyB}</div> : blacklist.map(h => (
+                    <div key={h} className="cd-tg2-li">
+                      <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
+                      <span className="cd-tg2-handle">@{h}</span>
+                      <button className="cd-tg2-li-x" onClick={() => setBlacklist(p => p.filter(x => x !== h))} title="Retirer">
+                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ACCOUNT */}
+        {activeView === "account" && (
+          <div className="cd-view">
+            <div className="cd-acc-grid">
+              <div className="cd-card">
+                <div className="cd-s-title">{t.account.profile}</div>
+                {[
+                  { lbl:t.account.fname, val:"Christine",              ro:false },
+                  { lbl:t.account.lname, val:"Leclerc",                ro:false },
+                  { lbl:t.account.phone, val:"+33 6 12 34 56 78",      ro:false },
+                  { lbl:t.account.email, val:"christine@example.com",  ro:false },
+                  { lbl:t.account.ig,    val:"@christine_leclerc",     ro:true  },
+                ].map(({ lbl, val, ro }) => (
+                  <div key={lbl} className="cd-fg">
+                    <label className="cd-fl">{lbl}</label>
+                    <input className="cd-fi-in" defaultValue={val} readOnly={ro}/>
+                  </div>
+                ))}
+                <button className="cd-btn cd-btn-primary">{t.account.save}</button>
+              </div>
+              <div className="cd-card">
+                <div className="cd-s-title">{t.account.subscription}</div>
+                {[
+                  { lbl:t.account.planLabel, val:t.account.planVal  },
+                  { lbl:t.account.since,     val:t.account.sinceVal },
+                  { lbl:t.account.next,      val:t.account.nextVal  },
+                  { lbl:t.account.pay,       val:t.account.payVal   },
+                ].map(({ lbl, val }) => (
+                  <div key={lbl} className="cd-fg">
+                    <label className="cd-fl">{lbl}</label>
+                    <input className="cd-fi-in" defaultValue={val} readOnly/>
+                  </div>
+                ))}
+                <button className="cd-btn cd-btn-soft">{t.account.changePlan}</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ── DRAWER ── */}
+      <TargetDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} lang={lang} t={t}/>
+    </div>
+  );
+}
+
+// ─── CSS ──────────────────────────────────────────────────────────────────────
+const CSS = `
+.cd-shell {
+  --bg:#080b12; --surface:#0d1018; --surface-2:#131820; --surface-3:#1a2030;
+  --ink:#e6eaf4; --ink-dim:#8a94a8; --ink-mute:#454f68;
+  --line:rgba(255,255,255,.065); --line-2:rgba(255,255,255,.03);
+  --accent:#e8a030; --accent-2:#5a6cf5;
+  --a-soft:rgba(232,160,48,.12); --a-ring:rgba(232,160,48,.28); --a-tint:rgba(232,160,48,.06);
+  --good:#34d399; --good-bg:rgba(52,211,153,.10); --good-line:rgba(52,211,153,.25);
+  --bad:#f87171;  --bad-bg:rgba(248,113,113,.10); --bad-line:rgba(248,113,113,.25);
+  --warn:#fbbf24; --warn-bg:rgba(251,191,36,.10); --warn-line:rgba(251,191,36,.25);
+  --shadow:0 8px 32px -8px rgba(0,0,0,.6); --shadow-sm:0 2px 12px rgba(0,0,0,.35);
+  --r:14px; --r-sm:9px; --font-d:"Archivo",system-ui,sans-serif; --font-b:"Plus Jakarta Sans",system-ui,sans-serif;
+  --tr:.16s ease;
+  position:fixed;inset:0;overflow:hidden;
+  display:grid;grid-template-columns:220px 1fr;grid-template-rows:58px 1fr;
+  background:var(--bg);color:var(--ink);font-family:var(--font-b);-webkit-font-smoothing:antialiased;
+  transition:background var(--tr),color var(--tr);
+}
+.cd-shell.cd-light {
+  --bg:#faf8f3;--surface:#fff;--surface-2:#f5f0e8;--surface-3:#ede5d4;
+  --ink:#14120d;--ink-dim:#5a5040;--ink-mute:#8c8070;
+  --line:rgba(20,18,13,.09);--line-2:rgba(20,18,13,.05);
+  --accent:#c97c10;--accent-2:#4361ee;
+  --a-soft:rgba(201,124,16,.10);--a-ring:rgba(201,124,16,.30);--a-tint:#fef3dc;
+  --good:#16a34a;--good-bg:#ecfdf3;--good-line:rgba(22,163,74,.22);
+  --bad:#e11d48;--bad-bg:#fff1f3;--bad-line:rgba(225,29,72,.18);
+  --shadow:0 16px 40px -16px rgba(100,60,0,.18);--shadow-sm:0 4px 16px -8px rgba(100,60,0,.12);
+}
+.cd-shell *{box-sizing:border-box;margin:0;padding:0}
+.cd-shell a{color:inherit;text-decoration:none}
+.cd-shell button{cursor:pointer;border:none;background:none;font-family:var(--font-b)}
+
+/* Sidebar */
+.cd-sidebar{grid-row:1/3;background:color-mix(in srgb,var(--bg) 60%,var(--surface));border-right:1px solid var(--line);display:flex;flex-direction:column;transition:background var(--tr)}
+.cd-sb-brand{display:flex;align-items:center;gap:12px;padding:0 18px;height:58px;border-bottom:1px solid var(--line)}
+.cd-sb-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(155deg,#f7d774,#e8a030 55%,#d8881e);display:grid;place-items:center;flex:none;box-shadow:0 0 16px -2px rgba(232,160,48,.55)}
+.cd-sb-mark-b{font-family:var(--font-d);font-weight:900;font-size:1.35rem;line-height:1;color:#14100a;letter-spacing:-.02em}
+.cd-sb-name-main{font-family:var(--font-d);font-weight:800;font-size:.92rem;line-height:1;letter-spacing:-.01em;color:var(--ink)}
+.cd-sb-name-main span{color:var(--accent)}
+.cd-sb-name-sub{font-size:.65rem;font-weight:600;color:var(--ink-mute);letter-spacing:.04em;text-transform:uppercase;margin-top:2px}
+.cd-sb-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.cd-nl{font-family:var(--font-d);font-weight:700;font-size:.64rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute);padding:10px 10px 4px;margin-top:4px;display:block}
+.cd-nav-link{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r-sm);font-size:.88rem;font-weight:600;color:var(--ink-dim);transition:all var(--tr);white-space:nowrap;position:relative;text-decoration:none}
+.cd-nav-link svg{opacity:.75;flex:none}
+.cd-nav-link:hover{background:var(--surface-3);color:var(--ink)}
+.cd-nav-link.active{background:var(--a-soft);color:var(--accent)}
+.cd-nav-link.active svg{opacity:1}
+.cd-nav-link.active::before{content:"";position:absolute;left:0;top:20%;height:60%;width:2.5px;border-radius:0 2px 2px 0;background:var(--accent)}
+.cd-bdg{margin-left:auto;background:var(--accent);color:#fff;font-family:var(--font-d);font-weight:700;font-size:.65rem;padding:1px 6px;border-radius:100px}
+.cd-sb-foot{padding:12px;border-top:1px solid var(--line)}
+.cd-sb-acct{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:var(--r-sm);background:var(--surface-2)}
+.cd-sb-av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-family:var(--font-d);font-weight:800;font-size:.85rem;color:#fff;flex:none}
+.cd-sb-aname{font-size:.83rem;font-weight:700;line-height:1.2;color:var(--ink)}
+.cd-sb-aplan{font-size:.7rem;color:var(--accent);font-weight:700}
+.cd-sb-live{display:flex;align-items:center;gap:4px;margin-left:auto}
+.cd-sb-dot{width:7px;height:7px;border-radius:50%;background:var(--good);animation:cd-blink 2s ease-in-out infinite}
+.cd-sb-logout-wrap{padding:0 10px 4px}
+.cd-sb-logout{width:100%;display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r-sm);font-size:.88rem;font-weight:600;color:var(--ink-mute);background:transparent;border:none;cursor:pointer;transition:all var(--tr);text-align:left;font-family:var(--font-b)}
+.cd-sb-logout:hover:not(:disabled){background:rgba(248,113,113,.10);color:var(--bad)}
+.cd-sb-logout:disabled{opacity:.55;cursor:wait}
+@keyframes cd-blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* Topbar */
+.cd-topbar{background:color-mix(in srgb,var(--bg) 80%,var(--surface));backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 24px;transition:background var(--tr)}
+.cd-tb-title{font-family:var(--font-d);font-weight:800;font-size:1.05rem;flex:1;color:var(--ink)}
+.cd-tb-right{display:flex;align-items:center;gap:8px}
+.cd-stat-pill{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;font-weight:700;padding:4px 10px;border-radius:100px;background:var(--good-bg);color:var(--good);border:1px solid var(--good-line)}
+.cd-dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:cd-blink 2s ease-in-out infinite}
+.cd-ic-btn{width:33px;height:33px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-dim);display:grid;place-items:center;transition:all var(--tr)}
+.cd-ic-btn:hover{border-color:var(--a-ring);color:var(--accent)}
+.cd-lang-t{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:100px;padding:3px}
+.cd-lang-t button{border:none;background:transparent;color:var(--ink-mute);cursor:pointer;padding:3px 9px;border-radius:100px;font-family:var(--font-d);font-weight:700;font-size:.72rem;transition:all var(--tr)}
+.cd-lang-t button.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff}
+
+/* Main */
+.cd-main{overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:20px}
+.cd-view{display:flex;flex-direction:column;gap:18px}
+
+/* Stat cards */
+.cd-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.cd-sc{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px 16px;transition:border-color var(--tr),transform var(--tr)}
+.cd-sc:hover{border-color:var(--a-ring);transform:translateY(-2px)}
+.cd-sc-lbl{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:9px}
+.cd-sc-val{font-family:var(--font-d);font-weight:900;font-size:1.85rem;letter-spacing:-.03em;line-height:1;color:var(--ink)}
+.cd-sc-val.cd-grad{background:linear-gradient(125deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.cd-sc-sub{font-size:.75rem;color:var(--ink-mute);margin-top:5px}
+.cd-up{color:var(--good);font-weight:700}
+
+/* Chart */
+.cd-chart-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:22px 22px 14px}
+.cd-c-hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:16px;flex-wrap:wrap}
+.cd-c-hd-left{display:flex;flex-direction:column;gap:12px}
+.cd-c-titlerow{display:flex;align-items:center;gap:11px}
+.cd-c-badge{width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,#f7a52b 0%,#f4506b 45%,#8b3df5 100%);box-shadow:0 6px 16px -6px rgba(214,61,176,.55)}
+.cd-c-title{font-family:var(--font-d);font-weight:800;font-size:1.05rem;letter-spacing:-.01em;color:var(--ink)}
+.cd-c-bignum{display:flex;align-items:center;gap:12px}
+.cd-c-foll-n{font-family:var(--font-d);font-weight:900;font-size:1.7rem;letter-spacing:-.03em;color:var(--ink);line-height:.9}
+.cd-c-delta{display:inline-flex;align-items:center;gap:4px;font-family:var(--font-d);font-weight:800;font-size:.86rem;padding:5px 11px 5px 8px;border-radius:100px;transition:all var(--tr)}
+.cd-range-tabs{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:100px;padding:4px;gap:2px}
+.cd-range-tabs button{border:none;background:transparent;color:var(--ink-mute);cursor:pointer;padding:7px 16px;border-radius:100px;font-family:var(--font-d);font-weight:700;font-size:.78rem;transition:all var(--tr)}
+.cd-range-tabs button:hover{color:var(--ink-dim)}
+.cd-range-tabs button.on{background:color-mix(in srgb,var(--bg) 35%,var(--surface));color:var(--ink);box-shadow:var(--shadow-sm)}
+.cd-chart-tip{position:absolute;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:.75rem;font-family:var(--font-d);font-weight:700;pointer-events:none;box-shadow:var(--shadow-sm);white-space:nowrap;z-index:10;color:var(--ink)}
+.cd-tv{color:var(--accent);font-size:.95rem;display:block}
+
+/* Two-col */
+.cd-two-col{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+
+/* Card */
+.cd-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.cd-card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.cd-card-hd h3{font-family:var(--font-d);font-weight:800;font-size:.95rem;color:var(--ink)}
+.cd-card-hd a{font-size:.78rem;font-weight:700;color:var(--accent);opacity:.85;transition:opacity var(--tr)}
+.cd-card-hd a:hover{opacity:1}
+
+/* Feed */
+.cd-feed{display:flex;flex-direction:column}
+.cd-fi{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-2)}
+.cd-fi:last-child{border-bottom:none;padding-bottom:0}
+.cd-fi-ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none}
+.cd-fi-fo{background:rgba(90,108,245,.14)} .cd-fi-fo svg{stroke:#5a6cf5}
+.cd-fi-li{background:rgba(232,160,48,.14)} .cd-fi-li svg{stroke:var(--accent)}
+.cd-fi-dm{background:rgba(52,211,153,.14)} .cd-fi-dm svg{stroke:var(--good)}
+.cd-fi-st{background:rgba(251,191,36,.14)} .cd-fi-st svg{stroke:var(--warn)}
+.cd-fi-body{flex:1;min-width:0}
+.cd-fi-title{font-size:.84rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.cd-fi-meta{font-size:.72rem;color:var(--ink-mute);margin-top:1px}
+.cd-fi-n{font-family:var(--font-d);font-weight:800;font-size:.9rem;color:var(--ink)}
+
+/* Plan + manager */
+.cd-plan-wrap{display:flex;flex-direction:column;gap:14px}
+.cd-plan-top{display:flex;align-items:center;justify-content:space-between}
+.cd-plan-name{font-family:var(--font-d);font-weight:900;font-size:1.3rem;color:var(--ink)}
+.cd-plan-tag{font-family:var(--font-d);font-weight:700;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:100px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff}
+.cd-plan-price{font-family:var(--font-d);font-weight:900;font-size:1.6rem;color:var(--accent)}
+.cd-plan-price small{font-size:.85rem;color:var(--ink-mute);font-weight:600}
+.cd-plan-rows{display:flex;flex-direction:column;gap:7px}
+.cd-pr{display:flex;justify-content:space-between;align-items:center;font-size:.84rem}
+.cd-pr-l{color:var(--ink-mute)} .cd-pr-v{font-weight:700;color:var(--ink)}
+.cd-pr-v.cd-g{color:var(--good)} .cd-pr-v.cd-a{color:var(--accent)}
+.cd-manager-card{background:linear-gradient(135deg,var(--a-tint),var(--surface-2));border:1px solid var(--a-ring);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px}
+.cd-mgr-hd{display:flex;align-items:center;gap:10px}
+.cd-mgr-av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);display:grid;place-items:center;font-family:var(--font-d);font-weight:800;font-size:.9rem;color:#fff;flex:none;border:2px solid var(--a-ring)}
+.cd-mgr-name{font-family:var(--font-d);font-weight:800;font-size:.95rem;color:var(--ink)}
+.cd-mgr-sub{font-size:.75rem;color:var(--ink-mute)}
+.cd-mgr-text{font-size:.82rem;color:var(--ink-dim);line-height:1.5}
+.cd-mgr-btns{display:flex;gap:8px}
+
+/* Buttons */
+.cd-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:var(--font-d);font-weight:700;font-size:.82rem;padding:9px 16px;border-radius:100px;border:none;cursor:pointer;transition:transform var(--tr),box-shadow var(--tr);text-decoration:none}
+.cd-btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;box-shadow:0 6px 20px -8px var(--a-ring)}
+.cd-btn-primary:hover{transform:translateY(-1px);box-shadow:0 10px 26px -8px var(--a-ring)}
+.cd-btn-soft{background:var(--surface-2);color:var(--ink);border:1px solid var(--line)}
+.cd-btn-soft:hover{border-color:var(--a-ring);transform:translateY(-1px)}
+.cd-btn-full{width:100%;justify-content:center}
+
+/* Targeting */
+.cd-tg2-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.cd-tg2-intro{font-size:.84rem;color:var(--ink-dim);line-height:1.5;max-width:640px}
+.cd-tg2-detailbtn{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-d);font-weight:700;font-size:.8rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);padding:8px 14px;border-radius:var(--r-sm);transition:all var(--tr)}
+.cd-tg2-detailbtn:hover{border-color:var(--a-ring);color:var(--accent);transform:translateY(-1px)}
+.cd-tg2-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start}
+.cd-tg2-col{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+.cd-tg2-col-hd{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.cd-tg2-col-ic{width:28px;height:28px;border-radius:8px;flex:none;display:grid;place-items:center}
+.cd-col-cibles .cd-tg2-col-ic{background:var(--a-soft);color:var(--accent)}
+.cd-col-white  .cd-tg2-col-ic{background:var(--good-bg);color:var(--good)}
+.cd-col-black  .cd-tg2-col-ic{background:var(--bad-bg);color:var(--bad)}
+.cd-tg2-col-ttl{font-family:var(--font-d);font-weight:800;font-size:.92rem;color:var(--ink)}
+.cd-tg2-col-ct{margin-left:auto;font-family:var(--font-d);font-weight:800;font-size:.7rem;padding:2px 9px;border-radius:100px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-dim)}
+.cd-tg2-col-add{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line-2)}
+.cd-tg2-col-add input{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 11px;color:var(--ink);font-family:var(--font-b);font-size:.82rem;outline:none;transition:border-color var(--tr)}
+.cd-tg2-col-add input:focus{border-color:var(--a-ring)}
+.cd-tg2-col-add input::placeholder{color:var(--ink-mute)}
+.cd-tg2-col-add button{flex:none;width:38px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface-2);color:var(--accent);font-size:1.25rem;font-weight:600;line-height:1;cursor:pointer;transition:all var(--tr)}
+.cd-tg2-col-add button:hover{border-color:var(--a-ring);background:var(--a-soft)}
+.cd-tg2-col-rows{display:flex;flex-direction:column;max-height:400px;overflow-y:auto}
+.cd-tg2-li{display:flex;align-items:center;gap:11px;padding:10px 16px;border-bottom:1px solid var(--line-2);transition:background var(--tr)}
+.cd-tg2-li:last-child{border-bottom:none}
+.cd-tg2-li:hover{background:var(--a-tint)}
+.cd-tg2-av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none}
+.cd-tg2-av i{width:100%;height:100%;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-family:var(--font-d);font-weight:800;font-size:.82rem;color:var(--ink);font-style:normal}
+.cd-tg2-handle{flex:1;font-size:.85rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.cd-tg2-li-x{flex:none;width:26px;height:26px;border-radius:7px;border:1px solid transparent;background:none;color:var(--ink-mute);display:grid;place-items:center;cursor:pointer;opacity:0;transition:all var(--tr)}
+.cd-tg2-li:hover .cd-tg2-li-x{opacity:1}
+.cd-tg2-li-x:hover{color:var(--bad);border-color:var(--bad-line);background:var(--bad-bg)}
+.cd-tg2-col-empty{padding:30px 16px;text-align:center;color:var(--ink-mute);font-size:.8rem;line-height:1.5}
+
+/* Account */
+.cd-acc-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cd-s-title{font-family:var(--font-d);font-weight:800;font-size:.95rem;margin-bottom:14px;color:var(--ink)}
+.cd-fg{margin-bottom:12px}
+.cd-fl{font-size:.72rem;font-weight:700;color:var(--ink-mute);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;display:block}
+.cd-fi-in{width:100%;padding:9px 13px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);font-family:var(--font-b);font-size:.88rem;color:var(--ink);outline:none;transition:border-color var(--tr)}
+.cd-fi-in:focus{border-color:var(--a-ring)}
+.cd-fi-in[readonly]{color:var(--ink-mute);cursor:default}
+
+/* Drawer scrim */
+.cd-dwr-scrim{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity var(--tr),visibility var(--tr);z-index:90}
+.cd-dwr-scrim.open{opacity:1;visibility:visible}
+
+/* Drawer */
+.cd-dwr{position:fixed;top:0;right:0;height:100vh;width:min(1080px,94vw);background:var(--bg);border-left:1px solid var(--line);box-shadow:-24px 0 60px -20px rgba(0,0,0,.7);transform:translateX(100%);transition:transform .32s cubic-bezier(.4,0,.2,1);z-index:100;display:flex;flex-direction:column}
+.cd-dwr.open{transform:translateX(0)}
+.cd-dwr-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 26px;border-bottom:1px solid var(--line);flex:none}
+.cd-dwr-hd-l{display:flex;align-items:center;gap:14px}
+.cd-dwr-hd-ic{width:44px;height:44px;border-radius:12px;background:var(--a-soft);border:1px solid var(--a-ring);display:grid;place-items:center;flex:none}
+.cd-dwr-kicker{font-family:var(--font-d);font-weight:800;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-mute)}
+.cd-dwr-title{font-family:var(--font-d);font-weight:900;font-size:1.45rem;letter-spacing:-.02em;line-height:1.1;margin-top:2px}
+.cd-dwr-x{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-dim);display:grid;place-items:center;transition:all var(--tr)}
+.cd-dwr-x:hover{border-color:var(--bad-line);color:var(--bad)}
+.cd-dwr-body{flex:1;overflow-y:auto;padding:22px 26px 40px;display:flex;flex-direction:column;gap:18px}
+.cd-dwr-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.cd-dwr-stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+.cd-dwr-stat-l{font-family:var(--font-d);font-weight:800;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute)}
+.cd-dwr-stat-v{font-family:var(--font-d);font-weight:900;font-size:2rem;letter-spacing:-.03em;line-height:1;margin-top:10px;color:var(--ink)}
+.cd-dwr-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cd-dwr-search{flex:1;min-width:240px;display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:0 13px;transition:border-color var(--tr)}
+.cd-dwr-search:focus-within{border-color:var(--a-ring)}
+.cd-dwr-search input{flex:1;border:none;background:none;outline:none;color:var(--ink);font-family:var(--font-b);font-size:.86rem;padding:11px 0}
+.cd-dwr-search input::placeholder{color:var(--ink-mute)}
+.cd-dwr-chips{display:flex;gap:7px;flex-wrap:wrap}
+.cd-dwr-chip{font-family:var(--font-d);font-weight:700;font-size:.78rem;color:var(--ink-dim);background:var(--surface);border:1px solid var(--line);padding:8px 14px;border-radius:var(--r-sm);transition:all var(--tr);cursor:pointer}
+.cd-dwr-chip:hover{color:var(--ink)}
+.cd-dwr-chip.on{color:var(--accent);border-color:var(--a-ring);background:var(--a-soft)}
+.cd-dwr-actions{display:flex;gap:9px;flex-wrap:wrap}
+.cd-dwr-act{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-d);font-weight:700;font-size:.8rem;color:var(--ink);background:var(--surface);border:1px solid var(--line);padding:9px 14px;border-radius:var(--r-sm);transition:all var(--tr);cursor:pointer}
+.cd-dwr-act:hover:not(:disabled){border-color:var(--a-ring);color:var(--accent)}
+.cd-dwr-act:disabled{opacity:.45;cursor:not-allowed}
+.cd-dwr-add{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cd-dwr-add-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.cd-dwr-add-lbl{font-family:var(--font-d);font-weight:800;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:12px}
+.cd-dwr-add-row{display:flex;gap:9px}
+.cd-dwr-in{flex:1;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;color:var(--ink);font-family:var(--font-b);font-size:.85rem;outline:none;transition:border-color var(--tr)}
+.cd-dwr-in:focus{border-color:var(--a-ring)}
+.cd-dwr-in::placeholder{color:var(--ink-mute)}
+.cd-dwr-add-btn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-d);font-weight:700;font-size:.82rem;color:var(--accent);background:var(--a-soft);border:1px solid var(--a-ring);padding:0 16px;border-radius:var(--r-sm);transition:all var(--tr);flex:none;cursor:pointer}
+.cd-dwr-add-btn:hover{background:var(--a-ring);color:#fff}
+.cd-dwr-ta{width:100%;min-height:96px;resize:vertical;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;color:var(--ink);font-size:.82rem;line-height:1.6;outline:none;transition:border-color var(--tr)}
+.cd-dwr-ta:focus{border-color:var(--a-ring)}
+.cd-dwr-ta::placeholder{color:var(--ink-mute)}
+.cd-dwr-import{width:100%;margin-top:11px;font-family:var(--font-d);font-weight:800;font-size:.85rem;color:#fff;background:linear-gradient(110deg,var(--accent-2),var(--accent));padding:12px;border-radius:var(--r-sm);box-shadow:0 8px 22px -10px var(--a-ring);transition:transform var(--tr);cursor:pointer;border:none;display:block}
+.cd-dwr-import:hover{transform:translateY(-1px)}
+.cd-dwr-table{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto}
+.cd-dwr-trow{display:grid;grid-template-columns:34px minmax(180px,1.5fr) 100px 110px 92px 92px 64px 64px 96px 86px;align-items:center;gap:10px;padding:13px 18px;min-width:1000px}
+.cd-dwr-thead{border-bottom:1px solid var(--line)}
+.cd-dwr-thead span{font-family:var(--font-d);font-weight:800;font-size:.64rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.cd-dwr-num{text-align:right;font-family:var(--font-d);font-weight:700;font-size:.84rem}
+.cd-dwr-rrow{border-bottom:1px solid var(--line-2);transition:background var(--tr)}
+.cd-dwr-rrow:last-child{border-bottom:none}
+.cd-dwr-rrow:hover{background:var(--a-tint)}
+.cd-dwr-cb{width:17px;height:17px;border-radius:5px;border:1.5px solid var(--ink-mute);background:transparent;cursor:pointer;display:grid;place-items:center;transition:all var(--tr)}
+.cd-dwr-cb.on{background:var(--accent);border-color:var(--accent)}
+.cd-dwr-cb.on::after{content:"";width:9px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translateY(-1px)}
+.cd-dwr-u{display:flex;align-items:center;gap:10px;min-width:0}
+.cd-dwr-u-av{width:30px;height:30px;border-radius:50%;flex:none}
+.cd-dwr-u-h{font-family:var(--font-d);font-weight:700;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.cd-dwr-ver{font-size:.8rem;color:var(--ink-dim)}
+.cd-dwr-ver.cd-nf{color:var(--ink-mute)}
+.cd-dwr-pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-d);font-weight:700;font-size:.72rem;padding:4px 10px;border-radius:100px;border:1px solid}
+.cd-dwr-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.cd-elig{color:var(--good);background:var(--good-bg);border-color:var(--good-line)}
+.cd-ver{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
+.cd-pend{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
+.cd-rej{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
+.cd-arch{color:var(--ink-mute);background:var(--surface-2);border-color:var(--line)}
+.cd-dwr-tag{display:inline-block;font-family:var(--font-d);font-weight:700;font-size:.74rem;padding:3px 10px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-dim)}
+.cd-dwr-dash{color:var(--ink-mute)}
+.cd-dwr-last{font-size:.82rem;font-weight:700;color:var(--ink)}
+.cd-dwr-added{font-family:var(--font-d);font-weight:800;font-size:.82rem;color:var(--ink)}
+.cd-dwr-added-s{display:block;font-size:.7rem;color:var(--ink-mute);font-weight:600;margin-top:1px}
+.cd-dwr-empty{padding:40px;text-align:center;color:var(--ink-mute);font-size:.88rem}
+
+/* Responsive */
+@media(max-width:1100px){
+  .cd-stats-row{grid-template-columns:1fr 1fr}
+  .cd-two-col{grid-template-columns:1fr}
+  .cd-tg2-cols{grid-template-columns:1fr}
+  .cd-dwr-add{grid-template-columns:1fr}
+  .cd-dwr-stats{grid-template-columns:1fr}
+}
+@media(max-width:720px){
+  .cd-shell{grid-template-columns:1fr}
+  .cd-sidebar{display:none}
+  .cd-acc-grid{grid-template-columns:1fr}
+}
+`;

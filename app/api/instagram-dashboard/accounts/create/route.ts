@@ -6,7 +6,7 @@ import {
   normalizeInstagramPublicUsername,
   type InstagramPublicProfileLookupResult,
 } from "@/lib/instagram-public-profile-lookup";
-import { canAccessTenantPages, getDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages } from "@/lib/restaurant-analytics/session";
 import {
   defaultAddProfileCommercialPackage,
   isAddProfileAddonCode,
@@ -14,7 +14,15 @@ import {
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
-import { jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
+import {
+  getInstagramAdminUserContext,
+  jsonError,
+  jsonOk,
+  readJsonBody,
+  readString,
+  requireInstagramAdmin,
+  type SupabaseRecord,
+} from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -624,7 +632,7 @@ export async function POST(request: Request) {
   try {
     const unauthorizedResponse = await requireInstagramAdmin();
     if (unauthorizedResponse) return unauthorizedResponse;
-    const adminContext = await getDashboardUserContext();
+    const adminContext = await getInstagramAdminUserContext();
     if (adminContext && !canAccessTenantPages(adminContext)) {
       return jsonError("You are not authorized to access the Instagram dashboard.", 403);
     }

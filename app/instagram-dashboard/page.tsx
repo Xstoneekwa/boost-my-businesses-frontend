@@ -4,8 +4,10 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import AddProfileWizard from "./AddProfileWizard";
+import EmailVerificationActionBanner from "./EmailVerificationActionBanner";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
 import InstagramDashboardViewNav from "./InstagramDashboardViewNav";
+import { getCredentialsActionsData } from "./credentials-actions-data";
 import {
   buildManageKpis,
   formatDateTime,
@@ -26,8 +28,20 @@ export default async function InstagramAutomationDashboardPage() {
     notFound();
   }
 
-  const data = await getManageData();
+  const [data, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
   const manageKpis = buildManageKpis(data);
+  const emailVerificationActions = credentialsData.actions
+    .filter((action) => action.actionType === "enter_email_verification_code"
+      && (action.status === "pending" || action.status === "acknowledged" || action.status === "pending_verification"))
+    .map((action) => ({
+      id: action.id,
+      accountId: action.accountId,
+      username: action.username,
+      actionType: "enter_email_verification_code" as const,
+      status: action.status,
+      title: action.title || "Email verification code required",
+      description: action.description,
+    }));
 
   return (
     <main className="dashboard-page ig-dashboard-page">
@@ -37,6 +51,8 @@ export default async function InstagramAutomationDashboardPage() {
         description="Manage internal Instagram Accounts, device assignments, campaigns, recent run health, and automation activity from one private workspace."
         action={<InstagramDashboardViewNav active="manage" />}
       />
+
+      <EmailVerificationActionBanner initialActions={emailVerificationActions} />
 
       {data.errors.length > 0 && (
         <section className="ig-dashboard-alert" role="alert">

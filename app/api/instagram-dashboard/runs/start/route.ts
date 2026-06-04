@@ -1,4 +1,3 @@
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import {
   DEFAULT_ALLOWED_RUN_TYPES,
   evaluateRunStartEligibility,
@@ -7,7 +6,16 @@ import {
   runStartBlockMessage,
   sanitizeRunControlReason,
 } from "@/lib/instagram-dashboard/run-control";
-import { getAccountId, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, validateAccountId } from "../../_utils";
+import {
+  getAccountId,
+  getInstagramAdminUserContext,
+  jsonError,
+  jsonOk,
+  readJsonBody,
+  readString,
+  requireInstagramAdmin,
+  validateAccountId,
+} from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +99,7 @@ export async function POST(request: Request) {
       return jsonError(runStartBlockMessage(eligibility.reason), status);
     }
 
-    const adminContext = await getDashboardUserContext();
+    const adminContext = await getInstagramAdminUserContext();
     const actorId = adminContext?.userId ?? null;
     const effectiveIdempotencyKey =
       idempotencyKey ??
@@ -110,7 +118,7 @@ export async function POST(request: Request) {
       p_metadata_safe: {
         requested_from: "instagram_dashboard",
         requested_run_type: eligibility.normalizedRunType,
-        follow_filters: eligibility.followFiltersSummary,
+        follow_filters: "followFiltersSummary" in eligibility ? eligibility.followFiltersSummary : undefined,
       },
     });
 

@@ -1,8 +1,8 @@
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control";
 import { createSupabaseClient } from "@/lib/supabase";
 import {
   getAccountId,
+  getInstagramAdminUserContext,
   jsonError,
   jsonOk,
   readBoolean,
@@ -233,7 +233,7 @@ export async function PATCH(request: Request) {
       return jsonError(sanitizeRunControlReason(error.message, "Could not save Follow filter settings."), 500);
     }
 
-    const actorContext = await getDashboardUserContext();
+    const actorContext = await getInstagramAdminUserContext();
     await recordAudit(supabase, {
       accountId,
       actorId: actorContext?.userId ?? null,

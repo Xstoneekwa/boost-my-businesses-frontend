@@ -4,7 +4,12 @@ import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_
 
 export const ACTIVE_IG_RUN_STATUSES = ["running", "queued", "pending", "in_progress", "active", "starting"] as const;
 export const ACTIVE_RUN_REQUEST_STATUSES = ["queued", "claimed", "starting", "running"] as const;
-export const DEFAULT_ALLOWED_RUN_TYPES = ["account_session", "outreach_session"] as const;
+export const LOGIN_RUN_TYPES = ["login_provisioning", "login_email_code_resume"] as const;
+export const DEFAULT_ALLOWED_RUN_TYPES = [
+  "account_session",
+  "outreach_session",
+  ...LOGIN_RUN_TYPES,
+] as const;
 const TERMINAL_IG_RUN_STATUSES = new Set(["completed", "failed", "stopped", "canceled", "blocked", "aborted"]);
 
 export type LinkedIgRunTerminalOutcome = "completed" | "failed" | "stopped" | "canceled";
@@ -55,6 +60,7 @@ export type RunStartBlockReason =
   | "mini_run_welcome_cap_unproven"
   | "mini_run_follow_cap_unproven"
   | "no_eligible_targets"
+  | "no_executable_phase"
   | "follow_day_quota_exhausted"
   | "follow_warmup_pending"
   | "follow_filter_invalid_range"
@@ -429,6 +435,11 @@ export function runControlDispatcherAllowedRunTypes(env: MiniRunEnv = process.en
     .filter(Boolean);
 }
 
+export function isLoginRunType(runType: string) {
+  const normalized = runType.trim().toLowerCase();
+  return LOGIN_RUN_TYPES.includes(normalized as (typeof LOGIN_RUN_TYPES)[number]);
+}
+
 export function dispatcherAllowsOnlyAccountSession(env: MiniRunEnv = process.env) {
   const allowed = runControlDispatcherAllowedRunTypes(env);
   return Boolean(allowed && allowed.length === 1 && allowed[0] === "account_session");
@@ -540,6 +551,51 @@ export function evaluateUnfollowStartGate({
   }
 
   return null;
+}
+
+export type AccountSessionExecutablePhases = {
+  follow: boolean;
+  welcome: boolean;
+  unfollow: boolean;
+};
+
+export function evaluateAccountSessionExecutablePhases({
+  requestedRunType,
+  welcomeEnabled,
+  welcomePassedPreflight,
+  eligibleFollowTargets,
+  followExecutableByCap,
+  followWarmupPending = false,
+  unfollowEnabled,
+  unfollowPassedPreflight,
+}: {
+  requestedRunType: string;
+  welcomeEnabled: boolean;
+  welcomePassedPreflight: boolean;
+  eligibleFollowTargets: number;
+  followExecutableByCap: boolean;
+  followWarmupPending?: boolean;
+  unfollowEnabled: boolean;
+  unfollowPassedPreflight: boolean;
+}): AccountSessionExecutablePhases {
+  if (requestedRunType !== "account_session") {
+    return { follow: false, welcome: false, unfollow: false };
+  }
+
+  return {
+    welcome: welcomeEnabled && welcomePassedPreflight,
+    follow: eligibleFollowTargets >= 1 && followExecutableByCap && !followWarmupPending,
+    unfollow: unfollowEnabled && unfollowPassedPreflight,
+  };
+}
+
+export function evaluateAccountSessionExecutablePhaseGate(
+  phases: AccountSessionExecutablePhases,
+): RunStartBlockReason | null {
+  if (phases.follow || phases.welcome || phases.unfollow) {
+    return null;
+  }
+  return "no_executable_phase";
 }
 
 export function evaluateUnfollowAnyStartGate(args: {
@@ -1029,8 +1085,151 @@ export async function getActiveRunRequest(accountId: string) {
   return ((data ?? []) as SupabaseRecord[])[0] ?? null;
 }
 
+export async function evaluateLoginChallengeRunEligibility(
+  accountId: string,
+  requestedRunType: string,
+) {
+  const normalizedRunType = requestedRunType.trim().toLowerCase();
+  if (!isLoginRunType(normalizedRunType)) {
+    return { ok: false as const, reason: "invalid_run_type" as RunStartBlockReason };
+  }
+
+  const health = await getRunControlHealth();
+  if (!health.playEnabled || !health.healthy) {
+    return { ok: false as const, reason: "dispatcher_unhealthy" as RunStartBlockReason, health };
+  }
+  if (health.dispatcherLaunchEnabled === false) {
+    return { ok: false as const, reason: "dispatcher_launch_disabled" as RunStartBlockReason, health };
+  }
+
+  const supabase = createSupabaseClient();
+  const { data: accountRow, error: accountError } = await supabase
+    .from("ig_accounts")
+    .select("id,status,admin_lifecycle_status")
+    .eq("id", accountId)
+    .limit(1)
+    .maybeSingle();
+
+  if (accountError || !accountRow) {
+    return { ok: false as const, reason: "account_archived" as RunStartBlockReason, health };
+  }
+
+  const accountStatus = readString(accountRow.status, "active").toLowerCase();
+  const adminLifecycleStatus = readString(accountRow.admin_lifecycle_status, accountStatus).toLowerCase();
+  if (adminLifecycleStatus === "paused") {
+    return { ok: false as const, reason: "account_paused" as RunStartBlockReason, health };
+  }
+  if (BLOCKED_ACCOUNT_STATUSES.has(accountStatus)) {
+    return { ok: false as const, reason: "account_canceled" as RunStartBlockReason, health };
+  }
+
+  const activeRequest = await getActiveRunRequest(accountId);
+  if (activeRequest) {
+    return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
+  }
+
+  return { ok: true as const, health, normalizedRunType };
+}
+
+export type LoginEmailCodeResumeRunRequestResult = {
+  queued: boolean;
+  idempotent: boolean;
+  requestId: string | null;
+  requestStatus: string | null;
+  reason: string | null;
+};
+
+export async function createLoginEmailCodeResumeRunRequest({
+  accountId,
+  actionId,
+  submissionId,
+  actorId,
+  actorType = "system",
+}: {
+  accountId: string;
+  actionId: string;
+  submissionId: string;
+  actorId?: string | null;
+  actorType?: "admin" | "assistant" | "ops" | "system" | "internal";
+}): Promise<LoginEmailCodeResumeRunRequestResult> {
+  const supabase = createSupabaseClient();
+  const idempotencyKey = `login_email_code_resume:${actionId}:${submissionId}`;
+  const { data: existingRequest } = await supabase
+    .from("account_run_requests")
+    .select("id,status")
+    .eq("idempotency_key", idempotencyKey)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingRequest) {
+    return {
+      queued: false,
+      idempotent: true,
+      requestId: readString(existingRequest.id, "") || null,
+      requestStatus: readString(existingRequest.status, "") || null,
+      reason: "already_queued",
+    };
+  }
+
+  const { data, error } = await supabase.rpc("create_account_run_request", {
+    p_account_id: accountId,
+    p_requested_by: actorId ?? null,
+    p_actor_type: actorType,
+    p_source_surface: "instagram_dashboard",
+    p_requested_run_type: "login_email_code_resume",
+    p_idempotency_key: idempotencyKey,
+    p_priority: 1,
+    p_metadata_safe: {
+      action_id: actionId,
+      account_id: accountId,
+      source: "dashboard_code_submit",
+      challenge_type: "email_code_challenge",
+      submission_id: submissionId,
+    },
+  });
+
+  if (error) {
+    if (/account_run_already_requested/i.test(error.message)) {
+      const activeRequest = await getActiveRunRequest(accountId);
+      const requestId = readString(activeRequest?.id, "");
+      const requestStatus = readString(activeRequest?.status, "");
+      if (requestId && readString(activeRequest?.requested_run_type, "") === "login_email_code_resume") {
+        return {
+          queued: false,
+          idempotent: true,
+          requestId,
+          requestStatus,
+          reason: "already_requested",
+        };
+      }
+    }
+    return {
+      queued: false,
+      idempotent: false,
+      requestId: null,
+      requestStatus: null,
+      reason: sanitizeRunControlReason(error.message, "resume_queue_failed"),
+    };
+  }
+
+  const requestRow = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
+  const requestId = readString(requestRow?.id, "");
+  const requestStatus = readString(requestRow?.status, "queued");
+
+  return {
+    queued: Boolean(requestId),
+    idempotent: false,
+    requestId: requestId || null,
+    requestStatus: requestStatus || null,
+    reason: "queued",
+  };
+}
+
 export async function evaluateRunStartEligibility(accountId: string, requestedRunType: string) {
   const normalizedRunType = requestedRunType.trim().toLowerCase();
+  if (isLoginRunType(normalizedRunType)) {
+    return evaluateLoginChallengeRunEligibility(accountId, normalizedRunType);
+  }
   if (!DEFAULT_ALLOWED_RUN_TYPES.includes(normalizedRunType as (typeof DEFAULT_ALLOWED_RUN_TYPES)[number])) {
     return { ok: false as const, reason: "invalid_run_type" as RunStartBlockReason };
   }
@@ -1202,7 +1401,11 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
       }
       if (eligibleFollowTargets < 1) {
-        return { ok: false as const, reason: "no_eligible_targets" as RunStartBlockReason, health };
+        if (welcomeEnabled) {
+          // Welcome-only account_session may still be executable without follow targets.
+        } else {
+          return { ok: false as const, reason: "no_eligible_targets" as RunStartBlockReason, health };
+        }
       }
 
       const { data: packageSummary, error: packageSummaryError } = await supabase
@@ -1215,6 +1418,8 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
       }
       const followCaps = resolveFollowCapPreview(packageSummary);
+      let followExecutableByCap = eligibleFollowTargets >= 1;
+      let followWarmupPending = false;
       if (followCaps.packageCap > 0) {
         let followsDoneToday = 0;
         try {
@@ -1225,10 +1430,11 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         const remaining = Math.max(0, followCaps.followDay - followsDoneToday);
         const effectiveFollowCap = Math.min(followCaps.followSession, remaining);
         if (effectiveFollowCap < 1 && followCaps.followDay > 0) {
-          return { ok: false as const, reason: "follow_day_quota_exhausted" as RunStartBlockReason, health };
+          followExecutableByCap = false;
         }
         if (followCaps.warmupStatus === "pending_package_start" && followCaps.warmupApplied) {
-          return { ok: false as const, reason: "follow_warmup_pending" as RunStartBlockReason, health };
+          followWarmupPending = true;
+          followExecutableByCap = false;
         }
       }
 
@@ -1279,23 +1485,55 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
         return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
       }
 
-      const unfollowBlock = evaluateUnfollowStartGate({
+      const unfollowEnabled = unfollowSettings?.unfollow_enabled === true;
+      let unfollowPassedPreflight = false;
+      if (unfollowEnabled) {
+        const unfollowBlock = evaluateUnfollowStartGate({
+          requestedRunType: normalizedRunType,
+          unfollowEntitlementActive,
+          unfollowEnabled: true,
+          unfollowMode: readString(unfollowSettings?.unfollow_mode, ""),
+          unfollowPerSessionLimit: unfollowSessionLimit,
+          unfollowPerDayLimit: unfollowDayLimit,
+          unfollowDayRemaining:
+            unfollowDayLimit === null ? null : Math.max(0, unfollowDayLimit - unfollowsDoneToday),
+          realHandoffEnabled: handoffEnabled,
+          realMaxActions: runtimeCap.cap,
+          realHardMax: runtimeCap.hardCap,
+          h3RealSupported: runControlUnfollowAnyH3RealSupported(),
+          safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
+        });
+        if (unfollowBlock) {
+          return { ok: false as const, reason: unfollowBlock, health };
+        }
+        unfollowPassedPreflight = true;
+      }
+
+      const executablePhases = evaluateAccountSessionExecutablePhases({
         requestedRunType: normalizedRunType,
-        unfollowEntitlementActive,
-        unfollowEnabled: unfollowSettings?.unfollow_enabled === true,
-        unfollowMode: readString(unfollowSettings?.unfollow_mode, ""),
-        unfollowPerSessionLimit: unfollowSessionLimit,
-        unfollowPerDayLimit: unfollowDayLimit,
-        unfollowDayRemaining:
-          unfollowDayLimit === null ? null : Math.max(0, unfollowDayLimit - unfollowsDoneToday),
-        realHandoffEnabled: handoffEnabled,
-        realMaxActions: runtimeCap.cap,
-        realHardMax: runtimeCap.hardCap,
-        h3RealSupported: runControlUnfollowAnyH3RealSupported(),
-        safeCandidateStrategyProven: runControlUnfollowAnySafeStrategyProven(),
+        welcomeEnabled,
+        welcomePassedPreflight: welcomeEnabled,
+        eligibleFollowTargets,
+        followExecutableByCap,
+        followWarmupPending,
+        unfollowEnabled,
+        unfollowPassedPreflight,
       });
-      if (unfollowBlock) {
-        return { ok: false as const, reason: unfollowBlock, health };
+      const executablePhaseBlock = evaluateAccountSessionExecutablePhaseGate(executablePhases);
+      if (executablePhaseBlock) {
+        return { ok: false as const, reason: executablePhaseBlock, health };
+      }
+
+      if (followWarmupPending && !executablePhases.welcome && !executablePhases.unfollow) {
+        return { ok: false as const, reason: "follow_warmup_pending" as RunStartBlockReason, health };
+      }
+      if (
+        !followExecutableByCap &&
+        followCaps.packageCap > 0 &&
+        !executablePhases.welcome &&
+        !executablePhases.unfollow
+      ) {
+        return { ok: false as const, reason: "follow_day_quota_exhausted" as RunStartBlockReason, health };
       }
     }
   }
@@ -1454,6 +1692,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual mini-run is blocked because Follow caps are not proven to be at most 1.";
     case "no_eligible_targets":
       return "Manual run is blocked because no eligible target account is available.";
+    case "no_executable_phase":
+      return "Manual run is blocked because no executable automation phase is enabled for this account.";
     case "follow_day_quota_exhausted":
       return "Manual run is blocked because the effective Follow day quota is exhausted.";
     case "follow_warmup_pending":

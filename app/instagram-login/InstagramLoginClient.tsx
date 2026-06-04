@@ -92,13 +92,13 @@ export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }
         }),
       });
 
-      const payload = (await res.json()) as { error?: string; details?: string };
+      const payload = (await res.json()) as { error?: string; details?: string; user?: { role?: string } };
 
       if (!res.ok) {
         throw new Error(payload.details || payload.error || "Accès refusé.");
       }
 
-      const dashboardPath = "/instagram-dashboard";
+      const dashboardPath = payload.user?.role === "superadmin" ? "/instagram-dashboard" : "/instagram-client";
       const topWindow = typeof window !== "undefined" ? window.top ?? window : null;
       if (topWindow && topWindow !== window) {
         topWindow.location.assign(dashboardPath);

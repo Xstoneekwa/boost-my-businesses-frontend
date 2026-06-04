@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
-import { canAccessTenantPages, requireDashboardUserContext } from "@/lib/restaurant-analytics/session";
+import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import {
   formatDateTime,
@@ -16,7 +16,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function InstagramServerCheckPage() {
-  const userContext = await requireDashboardUserContext();
+  const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
     notFound();

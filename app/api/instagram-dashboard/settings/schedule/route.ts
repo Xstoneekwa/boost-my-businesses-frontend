@@ -1,4 +1,3 @@
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import {
   formatScheduleLocalLabel,
   readScheduleSlot,
@@ -14,6 +13,7 @@ import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control"
 import { createSupabaseClient } from "@/lib/supabase";
 import {
   getAccountId,
+  getInstagramAdminUserContext,
   jsonError,
   jsonOk,
   readJsonBody,
@@ -287,7 +287,7 @@ export async function PATCH(request: Request) {
     if (!before.save_ready) {
       return jsonError("Schedule slot assignment is unavailable until Schedule RPCs are applied.", 409);
     }
-    const actorContext = await getDashboardUserContext();
+    const actorContext = await getInstagramAdminUserContext();
     const actorId = actorContext?.userId ?? null;
 
     const { data, error } = await supabase.rpc("assign_account_slot", {

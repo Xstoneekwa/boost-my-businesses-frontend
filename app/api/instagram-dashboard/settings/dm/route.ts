@@ -1,4 +1,3 @@
-import { getDashboardUserContext } from "@/lib/restaurant-analytics/session";
 import {
   runControlLegacyDmSenderRealSendEnabled,
   runControlOutreachRealSendEnabled,
@@ -8,7 +7,19 @@ import {
 import { dmTemplateLengthError, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import { dmTemplateHasBody, dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 import { createSupabaseClient } from "@/lib/supabase";
-import { getAccountId, jsonError, jsonOk, readBoolean, readJsonBody, readNumber, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../../_utils";
+import {
+  getAccountId,
+  getInstagramAdminUserContext,
+  jsonError,
+  jsonOk,
+  readBoolean,
+  readJsonBody,
+  readNumber,
+  readString,
+  requireInstagramAdmin,
+  validateAccountId,
+  type SupabaseRecord,
+} from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -431,7 +442,7 @@ export async function PATCH(request: Request) {
       .upsert(settingsPatch, { onConflict: "account_id" });
     if (settingsError) return jsonError(sanitizeRunControlReason(settingsError.message, "Could not save DM settings."), 500);
 
-    const actorContext = await getDashboardUserContext();
+    const actorContext = await getInstagramAdminUserContext();
     await recordDmAudit(supabase, {
       accountId,
       actorId: actorContext?.userId ?? null,

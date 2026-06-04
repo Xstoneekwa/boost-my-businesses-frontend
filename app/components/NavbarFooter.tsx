@@ -49,7 +49,6 @@ const COPY = {
     terms: "Conditions d'utilisation",
     refund: "Refund policy",
     copy: "© 2025 BoostMyBusinesses. Tous droits réservés.",
-    made: "Fait avec IA — conçu pour les humains.",
     pricing: "Tarifs",
     about: "À propos",
     contact: "Contact",
@@ -63,7 +62,6 @@ const COPY = {
     terms: "Terms of service",
     refund: "Refund policy",
     copy: "© 2025 BoostMyBusinesses. All rights reserved.",
-    made: "Made with AI — built for humans.",
     pricing: "Pricing",
     about: "About",
     contact: "Contact",
@@ -478,8 +476,8 @@ export default function NavbarFooter({
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "rgba(255,255,255,0.22)" }}>
               {t.copy}
             </p>
-            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "rgba(255,255,255,0.22)" }}>
-              {t.made}
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "rgba(255,255,255,0.22)", textAlign: "right" }}>
+              Dibu Business Trading t/a BoostMyBusinesses · 13E Nola Avenue, Buccluech, Sandton, Gauteng 2196, South Africa
             </p>
           </div>
         </div>

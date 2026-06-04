@@ -15,6 +15,22 @@ const sections: LegalSection[] = [
     ],
   },
   {
+    title: "Instagram Growth Service — Social Media Data",
+    body: [
+      "If you use our Instagram Growth service, we collect and process additional data to operate and optimise your campaign, including:",
+    ],
+    list: [
+      "Instagram account credentials or access tokens you provide",
+      "Instagram account activity data (follower counts, engagement metrics, follow/unfollow logs)",
+      "target audience parameters you configure (competitor accounts, geographic zones, hashtags)",
+      "campaign performance reports and analytics generated through the service",
+    ],
+    bodyAfterList: [
+      "This data is used solely to deliver, monitor, and report on your Instagram Growth campaign. Your credentials are transmitted over encrypted connections and are never shared with third parties except as required to operate the service (e.g. proxy and infrastructure providers).",
+      "You may request deletion of this data at any time by contacting us at growth@boostmybusinesses.com.",
+    ],
+  },
+  {
     title: "How We Use Your Information",
     body: ["We use your information to:"],
     list: [
@@ -23,14 +39,14 @@ const sections: LegalSection[] = [
       "respond to inquiries",
       "deliver purchased services",
       "manage subscriptions and billing",
-      "analyze website usage and service performance",
+      "analyse website usage and service performance",
       "protect our business against fraud or misuse",
     ],
   },
   {
     title: "Payments",
     body: [
-      "Payments are processed securely by third-party payment providers, including Paddle.",
+      "Payments are processed securely by Paddle (paddle.com), our authorised reseller and Merchant of Record.",
       "We do not store your full payment card details on our own servers.",
     ],
   },
@@ -41,10 +57,11 @@ const sections: LegalSection[] = [
       "We may share information with trusted third-party providers only when necessary to operate our business, including:",
     ],
     list: [
-      "payment processors",
-      "hosting providers",
+      "payment processors (Paddle)",
+      "hosting and infrastructure providers",
       "analytics tools",
       "communication and automation platforms",
+      "proxy and device infrastructure providers (Instagram Growth service only)",
     ],
   },
   {
@@ -56,7 +73,7 @@ const sections: LegalSection[] = [
   {
     title: "Data Security",
     body: [
-      "We implement reasonable technical and organizational measures to protect your personal information against unauthorized access, loss, misuse, or disclosure. However, no method of transmission or storage is completely secure.",
+      "We implement reasonable technical and organisational measures to protect your personal information against unauthorised access, loss, misuse, or disclosure. However, no method of transmission or storage is completely secure.",
     ],
   },
   {
@@ -73,13 +90,13 @@ const sections: LegalSection[] = [
   {
     title: "Cookies and Analytics",
     body: [
-      "Our website may use cookies and similar technologies to improve user experience, understand website traffic, and analyze performance.",
+      "Our website may use cookies and similar technologies to improve user experience, understand website traffic, and analyse performance.",
     ],
   },
   {
     title: "Third-Party Links",
     body: [
-      "Our website may contain links to third-party websites. We are not responsible for the privacy practices of those external websites.",
+      "Our website may contain links to third-party websites, including Meta and Instagram. We are not responsible for the privacy practices of those external websites.",
     ],
   },
   {
@@ -99,7 +116,7 @@ export default function PrivacyPolicyClient() {
   return (
     <LegalPageShell
       title="Privacy Policy"
-      intro="This Privacy Policy explains how BoostMyBusinesses collects, uses, stores, and protects your information when you visit our website or use our services."
+      intro="This Privacy Policy explains how Dibu Business Trading (trading as BoostMyBusinesses) collects, uses, stores, and protects your information when you visit our website or use our services — including our Instagram Growth service, UGC Ads Engine, WhatsApp Lead System, AI Call Assistant, and all other digital products. Effective date: 2 June 2026."
       sections={sections}
     />
   );
