@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   requestLiveViewToken,
   stopLiveView,
   type LiveViewSessionSafe,
 } from "./live-view-client";
+import { buildLiveViewFrameUrl, liveViewPanelMessage } from "./live-view-frame-data";
 
 type LivePhoneViewPanelProps = {
   accountId: string;
@@ -15,6 +16,8 @@ type LivePhoneViewPanelProps = {
   onSessionChange: (session: LiveViewSessionSafe | null) => void;
   onRefresh: () => Promise<void>;
 };
+
+const SCREENSHOT_POLL_MS = 2000;
 
 export default function LivePhoneViewPanel({
   accountId,
@@ -27,15 +30,53 @@ export default function LivePhoneViewPanel({
   const dragRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [position, setPosition] = useState({ left: 96, top: 96 });
   const [size, setSize] = useState({ width: 420, height: 620 });
-  const [message, setMessage] = useState("Waiting for stream");
+  const [message, setMessage] = useState(() =>
+    liveViewPanelMessage({
+      status: session.status,
+      streamTransport: session.stream_transport,
+      failureReason: session.failure_reason,
+    }),
+  );
   const [isBusy, setIsBusy] = useState(false);
+  const [frameTick, setFrameTick] = useState(0);
+
+  const isScreenshotPolling =
+    session.status === "active" && session.stream_transport === "screenshot_polling";
+  const showScreenshotStream = isScreenshotPolling && Boolean(session.live_view_session_id);
+  const frameUrl = showScreenshotStream
+    ? buildLiveViewFrameUrl({
+        accountId,
+        liveViewSessionId: session.live_view_session_id,
+        cacheBuster: frameTick,
+      })
+    : null;
+
+  useEffect(() => {
+    setMessage(liveViewPanelMessage({
+      status: session.status,
+      streamTransport: session.stream_transport,
+      failureReason: session.failure_reason,
+    }));
+  }, [session.failure_reason, session.status, session.stream_transport]);
+
+  useEffect(() => {
+    if (!showScreenshotStream) return undefined;
+    const timer = window.setInterval(() => {
+      setFrameTick((current) => current + 1);
+    }, SCREENSHOT_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [showScreenshotStream, session.live_view_session_id]);
 
   async function handleReconnect() {
     if (!session.live_view_session_id) return;
+    if (session.stream_transport === "screenshot_polling") {
+      setFrameTick((current) => current + 1);
+      return;
+    }
     setIsBusy(true);
     try {
       await requestLiveViewToken(session.live_view_session_id);
-      setMessage("Stream token ready. LV-Web-2 will attach the WebRTC player here.");
+      setMessage("Stream token ready. LV-Web-2B will attach the WebRTC player here.");
     } catch (error) {
       if (error instanceof Error && error.name === "livekit_not_configured") {
         setMessage("LiveKit is not configured yet. Session foundation is ready.");
@@ -114,18 +155,36 @@ export default function LivePhoneViewPanel({
         </div>
         <div className="ig-live-view-panel-actions" data-live-view-no-drag="true">
           <button type="button" onClick={() => void onRefresh()} disabled={isBusy}>Refresh</button>
-          <button type="button" onClick={() => void handleReconnect()} disabled={isBusy}>Reconnect</button>
+          {session.stream_transport !== "screenshot_polling" ? (
+            <button type="button" onClick={() => void handleReconnect()} disabled={isBusy}>Reconnect</button>
+          ) : null}
           <button type="button" onClick={() => void handleClose()} disabled={isBusy}>Close</button>
         </div>
       </header>
 
-      <div className="ig-live-view-placeholder">
-        <strong>{message}</strong>
-        <small>No video stream or interactive controls are enabled in LV-Web-1B.</small>
-        {session.run_active_at_start ? (
-          <em>Run active - view only. Manual control can disrupt automation.</em>
-        ) : null}
-      </div>
+      {showScreenshotStream && frameUrl ? (
+        <div className="ig-live-view-stream" aria-label="Live phone screenshot stream">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={frameUrl}
+            alt={`Live view for ${username}`}
+            draggable={false}
+            style={{ pointerEvents: "none", userSelect: "none", width: "100%", height: "auto" }}
+          />
+        </div>
+      ) : (
+        <div className="ig-live-view-placeholder">
+          <strong>{message}</strong>
+          <small>
+            {session.stream_transport === "screenshot_polling"
+              ? "View-only screenshot polling. No interactive controls are enabled."
+              : "No video stream or interactive controls are enabled in LV-Web-1B."}
+          </small>
+          {session.run_active_at_start ? (
+            <em>Run active - view only. Manual control can disrupt automation.</em>
+          ) : null}
+        </div>
+      )}
 
       <span
         className="ig-live-view-resize"

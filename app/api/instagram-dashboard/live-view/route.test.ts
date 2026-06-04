@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  buildLiveViewFrameUrl,
+  canServeLiveViewFrame,
+  liveViewPanelMessage,
+} from "../../../instagram-dashboard/live-view-frame-data.ts";
+import {
   forwardLiveViewToAdminDashboard,
   isLiveViewActiveStatus,
   liveViewEyeTone,
@@ -26,7 +31,7 @@ function assertNoLeak(value: unknown) {
     "adb_serial",
     "device_udid",
     "hub_port",
-    "rfgl145",
+    "testserial",
     "secret",
     "service_role",
   ]) {
@@ -71,8 +76,8 @@ test("start proxy calls admin-dashboard with apikey only", async () => {
         run_active_at_start: false,
         interaction_enabled: false,
         expires_at: "2026-06-04T14:00:00Z",
-        adb_serial: "RFGL145VCKE",
-        device_udid: "RFGL145VCKE",
+        adb_serial: "TESTSERIAL0001",
+        device_udid: "TESTSERIAL0001",
         hub_port: "usb:2-1",
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     },
@@ -124,8 +129,8 @@ test("safeLiveViewSession whitelists response fields", () => {
     run_active_at_start: true,
     interaction_enabled: false,
     expires_at: "2026-06-04T14:00:00Z",
-    adb_serial: "RFGL145VCKE",
-    device_udid: "RFGL145VCKE",
+    adb_serial: "TESTSERIAL0001",
+    device_udid: "TESTSERIAL0001",
     hub_port: "usb:2-1",
     secret: "never",
   });
@@ -151,6 +156,7 @@ test("live view routes and UI avoid server token exposure", () => {
     new URL("./stop/route.ts", import.meta.url),
     new URL("./status/route.ts", import.meta.url),
     new URL("./token/route.ts", import.meta.url),
+    new URL("./frame/route.ts", import.meta.url),
     new URL("../../../instagram-dashboard/LivePhoneViewPanel.tsx", import.meta.url),
     new URL("../../../instagram-dashboard/live-view-client.ts", import.meta.url),
   ];
@@ -190,4 +196,53 @@ test("live view browser client sends instagram session cookies", () => {
   assert.match(clientSource, /live-view\/stop/);
   assert.match(clientSource, /live-view\/status/);
   assert.match(clientSource, /live-view\/token/);
+  assert.match(clientSource, /buildLiveViewFrameUrl/);
+});
+
+test("live view screenshot polling helpers stay view-only and safe", () => {
+  assert.equal(
+    liveViewPanelMessage({ status: "pending", streamTransport: "screenshot_polling" }),
+    "Waiting for stream",
+  );
+  assert.equal(
+    liveViewPanelMessage({ status: "active", streamTransport: "screenshot_polling" }),
+    "Live view stream",
+  );
+  assert.equal(
+    canServeLiveViewFrame({ status: "active", streamTransport: "screenshot_polling" }),
+    true,
+  );
+  assert.equal(
+    canServeLiveViewFrame({ status: "active", streamTransport: "webrtc" }),
+    false,
+  );
+  const frameUrl = buildLiveViewFrameUrl({
+    accountId,
+    liveViewSessionId: sessionId,
+    cacheBuster: 42,
+  });
+  assert.match(frameUrl, /live-view\/frame/);
+  assert.match(frameUrl, /account_id=/);
+  assert.match(frameUrl, /live_view_session_id=/);
+  assert.match(frameUrl, /t=42/);
+  assertNoLeak(frameUrl);
+});
+
+test("live view frame route and panel avoid leaks and interactive controls", () => {
+  const frameRoute = readFileSync(new URL("./frame/route.ts", import.meta.url), "utf8");
+  const panelSource = readFileSync(
+    new URL("../../../instagram-dashboard/LivePhoneViewPanel.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(frameRoute, /requireInstagramAdmin\(\)/);
+  assert.match(frameRoute, /live_view_session_id/);
+  assert.match(frameRoute, /NODE_ENV === "production"/);
+  assert.equal(frameRoute.includes("adb_serial"), false);
+  assert.equal(frameRoute.includes("SUPABASE_SERVICE_ROLE_KEY"), false);
+
+  assert.match(panelSource, /screenshot_polling/);
+  assert.match(panelSource, /pointerEvents:\s*"none"/);
+  assert.doesNotMatch(panelSource, /onClick=\{.*tap/i);
+  assert.doesNotMatch(panelSource, /scroll/i);
 });

@@ -75,6 +75,8 @@ export function liveViewTooltip(input: {
   return "Open live view";
 }
 
+export { buildLiveViewFrameUrl, liveViewPanelMessage } from "./live-view-frame-data";
+
 const liveViewFetchInit: RequestInit = {
   credentials: "include",
   headers: { Accept: "application/json" },
