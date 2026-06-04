@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 type NavItem = {
@@ -172,6 +173,8 @@ function ChevronRight() {
 
 export default function AdminSidebar({ collapsed = false, onToggle }: AdminSidebarProps) {
   const pathname = usePathname();
+  const [ready, setReady] = useState(false);
+  useEffect(() => { setReady(true); }, []);
 
   return (
     <aside style={{
@@ -184,8 +187,8 @@ export default function AdminSidebar({ collapsed = false, onToggle }: AdminSideb
       position: "relative",
     }}>
 
-      {/* ── Toggle button — overlaps the right border ── */}
-      {onToggle && (
+      {/* ── Toggle button — rendered only after hydration to avoid SSR mismatch ── */}
+      {ready && onToggle && (
         <button
           type="button"
           onClick={onToggle}

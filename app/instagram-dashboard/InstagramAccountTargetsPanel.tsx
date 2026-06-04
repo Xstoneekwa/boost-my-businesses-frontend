@@ -78,7 +78,7 @@ function qualityBadgeClass(status: TargetQualityStatus) {
   if (status === "eligible") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
   if (status.startsWith("rejected_")) return "border-red-400/35 bg-red-400/12 text-red-200";
   if (status.startsWith("review_")) return "border-amber-400/35 bg-amber-400/15 text-amber-200";
-  return "border-slate-400/25 bg-slate-400/10 text-slate-300";
+  return "border-slate-400/25 bg-slate-400/10 text-[#8a8f98]";
 }
 
 function qualityDotClass(status: TargetQualityStatus) {
@@ -104,8 +104,8 @@ function performanceBadgeClass(status: TargetPerformanceStatus) {
   if (status === "good") return "border-emerald-400/35 bg-emerald-400/12 text-emerald-200";
   if (status === "avg") return "border-amber-400/35 bg-amber-400/15 text-amber-200";
   if (status === "bad") return "border-red-400/35 bg-red-400/12 text-red-200";
-  if (status === "insufficient_data" || status === "pending") return "border-slate-400/25 bg-slate-400/10 text-slate-300";
-  return "border-transparent bg-transparent text-slate-500";
+  if (status === "insufficient_data" || status === "pending") return "border-slate-400/25 bg-slate-400/10 text-[#8a8f98]";
+  return "border-transparent bg-transparent text-[#f0f0ee]0";
 }
 
 function PerformanceBadge({ row }: { row: TargetsOverview["items"][number] }) {
@@ -193,15 +193,15 @@ function compactSourceLabel(value: string) {
 
 function EmptyTargetsState({ hasRows }: { hasRows: boolean }) {
   return (
-    <div className="grid min-h-[180px] place-items-center rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center">
+    <div className="grid min-h-[180px] place-items-center rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#1e2028] px-4 py-8 text-center">
       <div className="max-w-sm">
-        <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-500">
+        <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#f0f0ee]0">
           {hasRows ? "Empty filter" : "Empty state"}
         </span>
-        <strong className="mt-2 block text-base font-extrabold text-slate-100">
+        <strong className="mt-2 block text-base font-extrabold text-[#f0f0ee]">
           {hasRows ? "No targets match this filter" : "No target accounts yet"}
         </strong>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+        <p className="mt-2 text-sm leading-relaxed text-[#8a8f98]">
           {hasRows
             ? "Clear filters or refresh."
             : "Add usernames manually or bulk import one per line."}
@@ -506,32 +506,32 @@ export default function InstagramAccountTargetsPanel({
   return (
     <>
       <div
-        className="fixed inset-0 z-[120] flex justify-center overflow-y-auto bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
+        className="fixed inset-0 z-[120] flex justify-center overflow-y-auto bg-[#0c0d10]/80 px-4 py-6 backdrop-blur-sm"
         role="presentation"
         onMouseDown={onClose}
       >
         <aside
-          className="my-auto flex max-h-[min(92vh,900px)] min-h-0 w-full max-w-[920px] flex-col gap-3.5 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-950 shadow-[0_28px_80px_rgba(0,0,0,0.45)]"
+          className="my-auto flex max-h-[min(92vh,900px)] min-h-0 w-full max-w-[95vw] flex-col gap-3.5 overflow-x-hidden overflow-y-hidden rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#161820] shadow-[0_20px_60px_rgba(0,0,0,0.55)]"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <header className="shrink-0 flex items-start justify-between gap-3 px-5 pt-5">
-            <div className="flex items-center gap-3 text-slate-100">
-              <Users className="shrink-0 text-slate-300" size={22} aria-hidden />
+            <div className="flex items-center gap-3 text-[#f0f0ee]">
+              <Users className="shrink-0 text-[#8a8f98]" size={22} aria-hidden />
               <div>
-                <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">
+                <span className="block text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#8a8f98]">
                   Targets
                 </span>
-                <h2 id={titleId} className="mt-1 text-xl font-extrabold tracking-tight text-slate-50">
+                <h2 id={titleId} className="mt-1 text-xl font-extrabold tracking-tight text-[#f0f0ee]">
                   @{accountUsername}
                 </h2>
               </div>
             </div>
             <button
               type="button"
-              className="grid size-[38px] place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:text-white"
+              className="grid size-[38px] place-items-center rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#1e2028] text-[#8a8f98] hover:border-[rgba(248,113,113,0.28)] hover:text-[#f87171]"
               aria-label="Close"
               onClick={onClose}
             >
@@ -541,15 +541,15 @@ export default function InstagramAccountTargetsPanel({
 
           <div className="grid shrink-0 grid-cols-1 gap-2.5 px-5 sm:grid-cols-3">
             {[
-              { label: "Total", value: counts.total, color: "text-slate-50" },
+              { label: "Total", value: counts.total, color: "text-[#f0f0ee]" },
               { label: "Valid / eligible", value: counts.validEligible, color: "text-emerald-300" },
               { label: "Archived", value: counts.archivedCount, color: "text-sky-300" },
             ].map((c) => (
               <div
                 key={c.label}
-                className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+                className="rounded-xl border border-[rgba(255,255,255,0.07)] bg-white/[0.03] px-3 py-2.5"
               >
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8a8f98]">
                   {c.label}
                 </span>
                 <strong className={`mt-1.5 block text-xl font-extrabold ${c.color}`}>{c.value}</strong>
@@ -558,14 +558,14 @@ export default function InstagramAccountTargetsPanel({
           </div>
 
           <div className="shrink-0 flex flex-wrap items-center gap-2.5 px-5">
-            <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-slate-400">
+            <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#0c0d10] px-3 py-2 text-[#8a8f98]">
               <Search size={14} aria-hidden />
               <input
                 type="search"
                 placeholder="Filter by username, health, status…"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-50 outline-none placeholder:text-slate-500"
+                className="min-w-0 flex-1 border-0 bg-transparent text-sm text-[#f0f0ee] outline-none placeholder:text-[#4a4f5c]"
                 aria-label="Filter targets"
               />
             </label>
@@ -576,8 +576,8 @@ export default function InstagramAccountTargetsPanel({
                   type="button"
                   className={
                     listFilter === item.key
-                      ? "rounded-lg border border-amber-400/45 bg-amber-500/18 px-2.5 py-1.5 text-[11px] font-extrabold text-amber-100"
-                      : "rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-extrabold text-slate-300 hover:bg-white/10"
+                      ? "rounded-lg border border-[rgba(101,88,245,0.35)] bg-[rgba(101,88,245,0.18)] px-2.5 py-1.5 text-[11px] font-extrabold text-[#a594f9]"
+                      : "rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#1e2028] px-2.5 py-1.5 text-[11px] font-extrabold text-[#8a8f98] hover:bg-[#252832]"
                   }
                   onClick={() => setListFilter(item.key)}
                 >
@@ -588,7 +588,7 @@ export default function InstagramAccountTargetsPanel({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-xs font-extrabold text-slate-200 hover:bg-white/10 disabled:opacity-45"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#1e2028] px-3 py-2 text-xs font-extrabold text-[#f0f0ee] hover:bg-[#252832] disabled:opacity-45"
                 onClick={() => void loadTargets()}
                 disabled={loading || saving}
               >
@@ -598,7 +598,7 @@ export default function InstagramAccountTargetsPanel({
               <div className="relative">
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-xs font-extrabold text-slate-200 hover:bg-white/10 disabled:opacity-45"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#1e2028] px-3 py-2 text-xs font-extrabold text-[#f0f0ee] hover:bg-[#252832] disabled:opacity-45"
                   onClick={() => setExportOpen((v) => !v)}
                   disabled={rows.length === 0 || saving}
                 >
@@ -606,17 +606,17 @@ export default function InstagramAccountTargetsPanel({
                   Export
                 </button>
                 {exportOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+6px)] z-10 min-w-[120px] overflow-hidden rounded-lg border border-white/10 bg-slate-900 shadow-xl">
+                  <div className="absolute right-0 top-[calc(100%+6px)] z-10 min-w-[120px] overflow-hidden rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#1e2028] shadow-[0_8px_32px_-8px_rgba(0,0,0,0.6)]">
                     <button
                       type="button"
-                      className="block w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-200 hover:bg-white/6"
+                      className="block w-full px-3.5 py-2.5 text-left text-xs font-bold text-[#f0f0ee] hover:bg-[rgba(101,88,245,0.12)] hover:text-[#6558f5]"
                       onClick={exportCsv}
                     >
                       CSV
                     </button>
                     <button
                       type="button"
-                      className="block w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-200 hover:bg-white/6"
+                      className="block w-full px-3.5 py-2.5 text-left text-xs font-bold text-[#f0f0ee] hover:bg-[rgba(101,88,245,0.12)] hover:text-[#6558f5]"
                       onClick={exportJson}
                     >
                       JSON
@@ -658,9 +658,9 @@ export default function InstagramAccountTargetsPanel({
           <div className="grid shrink-0 gap-3 px-5 md:grid-cols-2">
             <form
               onSubmit={addSingle}
-              className="flex flex-col gap-2.5 rounded-xl border border-white/8 bg-white/[0.02] p-3.5"
+              className="flex flex-col gap-2.5 rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#1e2028] p-3.5"
             >
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Add target</h3>
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#8a8f98]">Add target</h3>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -668,11 +668,11 @@ export default function InstagramAccountTargetsPanel({
                   value={singleUsername}
                   onChange={(e) => setSingleUsername(e.target.value)}
                   autoComplete="off"
-                  className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/55 px-3 py-2.5 text-sm text-slate-50 outline-none placeholder:text-slate-500"
+                  className="min-w-0 flex-1 rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#0c0d10] px-3 py-2.5 text-sm text-[#f0f0ee] outline-none placeholder:text-[#4a4f5c]"
                 />
                 <button
                   type="submit"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/18 px-3 py-2 text-xs font-extrabold text-amber-100 hover:bg-amber-500/28 disabled:opacity-45"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[rgba(101,88,245,0.35)] bg-[rgba(101,88,245,0.18)] px-3 py-2 text-xs font-extrabold text-[#a594f9] hover:bg-[rgba(101,88,245,0.28)] disabled:opacity-45"
                   disabled={saving || !singleUsername.trim()}
                 >
                   <Plus size={14} aria-hidden />
@@ -682,9 +682,9 @@ export default function InstagramAccountTargetsPanel({
             </form>
             <form
               onSubmit={addBulk}
-              className="flex flex-col gap-2.5 rounded-xl border border-white/8 bg-white/[0.02] p-3.5"
+              className="flex flex-col gap-2.5 rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#1e2028] p-3.5"
             >
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#8a8f98]">
                 Bulk add (one per line)
               </h3>
               <textarea
@@ -692,11 +692,11 @@ export default function InstagramAccountTargetsPanel({
                 placeholder={"user_one\n@user_two\nuser_three"}
                 value={bulkText}
                 onChange={(e) => setBulkText(e.target.value)}
-                className="resize-y rounded-lg border border-white/10 bg-slate-950/55 px-3 py-2.5 font-mono text-sm text-slate-50 outline-none placeholder:text-slate-500"
+                className="resize-y rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#0c0d10] px-3 py-2.5 font-mono text-sm text-[#f0f0ee] outline-none placeholder:text-[#4a4f5c]"
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/18 px-3 py-2 text-xs font-extrabold text-amber-100 hover:bg-amber-500/28 disabled:opacity-45"
+                className="inline-flex items-center justify-center gap-1 rounded-lg border border-[rgba(101,88,245,0.35)] bg-[rgba(101,88,245,0.18)] px-3 py-2 text-xs font-extrabold text-[#a594f9] hover:bg-[rgba(101,88,245,0.28)] disabled:opacity-45"
                 disabled={saving || bulkUsernames.length === 0}
               >
                 {saving ? "Importing…" : "Import"}
@@ -704,16 +704,16 @@ export default function InstagramAccountTargetsPanel({
             </form>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto overscroll-contain px-5 pb-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-5 pb-5">
             {loading ? (
-              <p className="py-10 text-center text-sm text-slate-400">Loading targets…</p>
+              <p className="py-10 text-center text-sm text-[#8a8f98]">Loading targets…</p>
             ) : filteredRows.length === 0 ? (
               <EmptyTargetsState hasRows={rows.length > 0} />
             ) : (
-              <table className="min-w-[1040px] w-full border-separate border-spacing-y-1.5 text-sm">
+              <table className="min-w-[860px] w-full border-separate border-spacing-y-1.5 text-sm">
                 <thead>
                   <tr>
-                    <th className="sticky top-0 z-[1] w-10 bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Select">
+                    <th className="sticky top-0 z-[1] w-10 bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]" title="Select">
                       <input
                         type="checkbox"
                         checked={
@@ -724,34 +724,34 @@ export default function InstagramAccountTargetsPanel({
                         className="accent-emerald-500"
                       />
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]">
                       Username
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]">
                       Verification
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]">
                       Eligibility
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]">
                       Followers
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Performance after CT usage">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]" title="Performance after CT usage">
                       Perf
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Followback Ratio: followers gained / follows sent from this CT">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]" title="Followback Ratio: followers gained / follows sent from this CT">
                       FBR
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Real follows sent from this CT source">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-center text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]" title="Real follows sent from this CT source">
                       Sent
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400" title="Last target metrics activity">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]" title="Last target metrics activity">
                       Last used
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]">
                       Added
                     </th>
-                    <th className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="sticky top-0 z-[1] bg-[#161820] px-2 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#8a8f98]">
                       Actions
                     </th>
                   </tr>
@@ -761,7 +761,7 @@ export default function InstagramAccountTargetsPanel({
                     const isArchived = Boolean(row.archivedAt || row.deletedAt || row.status === "archived" || row.status === "deleted");
                     return (
                     <tr key={row.id}>
-                      <td className="rounded-l-lg border-y border-l border-white/6 bg-white/[0.03] px-2 py-2.5">
+                      <td className="rounded-l-lg border-y border-l border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5">
                         <input
                           type="checkbox"
                           checked={selected.has(row.id)}
@@ -770,63 +770,63 @@ export default function InstagramAccountTargetsPanel({
                           className="accent-emerald-500"
                         />
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5">
                         <div className="flex items-center gap-2">
                           {row.avatarUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={`/api/instagram-dashboard/avatar?kind=target&id=${encodeURIComponent(row.id)}`} alt="" className="size-7 rounded-full border border-white/10 bg-white/5 object-cover" />
+                            <img src={`/api/instagram-dashboard/avatar?kind=target&id=${encodeURIComponent(row.id)}`} alt="" className="size-7 rounded-full border border-[rgba(255,255,255,0.07)] bg-[#1e2028] object-cover" />
                           ) : (
-                            <span className="grid size-7 place-items-center rounded-full border border-white/10 bg-white/8 text-[10px] font-black text-slate-300" aria-hidden>
+                            <span className="grid size-7 place-items-center rounded-full border border-[rgba(255,255,255,0.07)] bg-[#252832] text-[10px] font-black text-[#8a8f98]" aria-hidden>
                               {targetInitial(row.targetUsername)}
                             </span>
                           )}
                           <div>
-                            <strong className="block font-extrabold text-slate-100">@{row.targetUsername}</strong>
+                            <strong className="block font-extrabold text-[#f0f0ee]">@{row.targetUsername}</strong>
                             {row.canonicalUsername && row.canonicalUsername !== row.targetUsername ? (
                               <small className="block text-[11px] text-amber-200">canonical @{row.canonicalUsername}</small>
                             ) : null}
                           </div>
                         </div>
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
-                        <span className="block text-xs font-bold text-slate-200" title={row.verificationReason || undefined}>{row.verificationStatus}</span>
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5">
+                        <span className="block text-xs font-bold text-[#f0f0ee]" title={row.verificationReason || undefined}>{row.verificationStatus}</span>
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5">
                         <EligibilityBadge status={row.qualityStatus} />
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs font-semibold text-slate-300">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5 text-xs font-semibold text-[#8a8f98]">
                         {metricText(row.followersCount)}
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5 text-center">
                         <PerformanceBadge row={row} />
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5 text-center text-xs font-bold text-[#8a8f98]">
                         <span title={targetFbrHelper(row.fbrPercent, row.followsSent)}>{targetFbrLabel(row.fbrPercent, row.followsSent)}</span>
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5 text-center text-xs font-bold text-[#8a8f98]">
                         <span title={row.followbacks !== null ? `${metricText(row.followbacks)} followbacks attributed` : "Followbacks pending attribution"}>
                           {metricText(row.followsSent)}
                         </span>
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs text-slate-400">
-                        <span className="block font-semibold text-slate-300">
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5 text-xs text-[#8a8f98]">
+                        <span className="block font-semibold text-[#8a8f98]">
                           {row.lastUsedAt ? formatAddedDate(row.lastUsedAt) : "—"}
                         </span>
-                        <small className="block text-[10px] text-slate-500" title={row.exhaustionReason || row.cooldownUntil || "Runtime metrics"}>
+                        <small className="block text-[10px] text-[#f0f0ee]0" title={row.exhaustionReason || row.cooldownUntil || "Runtime metrics"}>
                           {row.lastExhaustedAt ? "exhausted" : row.cooldownUntil ? "cooldown set" : row.metricsUpdatedAt ? "metrics" : "pending"}
                         </small>
                       </td>
-                      <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-xs text-slate-400">
-                        <span className="block font-semibold text-slate-300">{formatAddedDate(row.createdAt)}</span>
-                        <small className="block text-[10px] text-slate-500" title={row.batchId ? `Batch ${shortId(row.batchId)}` : row.sourceLabel}>
+                      <td className="border-y border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5 text-xs text-[#8a8f98]">
+                        <span className="block font-semibold text-[#8a8f98]">{formatAddedDate(row.createdAt)}</span>
+                        <small className="block text-[10px] text-[#f0f0ee]0" title={row.batchId ? `Batch ${shortId(row.batchId)}` : row.sourceLabel}>
                           {compactSourceLabel(row.sourceLabel)}{row.batchId ? ` · ${shortId(row.batchId)}` : ""}
                         </small>
                       </td>
-                      <td className="rounded-r-lg border-y border-r border-white/6 bg-white/[0.03] px-2 py-2.5">
+                      <td className="rounded-r-lg border-y border-r border-[rgba(255,255,255,0.04)] bg-[#1e2028] px-2 py-2.5">
                         <div className="flex flex-wrap gap-1.5">
                           <button
                             type="button"
-                            className="inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/5 px-2 py-1 text-[11px] font-bold text-slate-200 hover:bg-white/10 disabled:opacity-45"
+                            className="inline-flex items-center gap-1 rounded-md border border-[rgba(255,255,255,0.07)] bg-[#1e2028] px-2 py-1 text-[11px] font-bold text-[#f0f0ee] hover:bg-[#252832] disabled:opacity-45"
                             disabled={saving || isArchived}
                             onClick={() =>
                               setConfirm({
@@ -884,22 +884,22 @@ export default function InstagramAccountTargetsPanel({
 
       {confirm ? (
         <div
-          className="fixed inset-0 z-[130] grid place-items-center bg-slate-950/55 p-4"
+          className="fixed inset-0 z-[130] grid place-items-center bg-[#0c0d10]/75 p-4"
           role="presentation"
           onMouseDown={() => !saving && setConfirm(null)}
         >
           <section
-            className="w-full max-w-md rounded-2xl border border-white/12 bg-slate-900 p-5 text-slate-100 shadow-xl"
+            className="w-full max-w-md rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#161820] p-5 text-[#f0f0ee] shadow-[0_8px_32px_-8px_rgba(0,0,0,0.6)]"
             role="dialog"
             aria-modal="true"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-extrabold">{confirm.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-slate-400">{confirm.description}</p>
+            <p className="mt-2 text-sm leading-relaxed text-[#8a8f98]">{confirm.description}</p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-xs font-extrabold text-slate-200 hover:bg-white/10 disabled:opacity-45"
+                className="rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#1e2028] px-3 py-2 text-xs font-extrabold text-[#f0f0ee] hover:bg-[#252832] disabled:opacity-45"
                 disabled={saving}
                 onClick={() => setConfirm(null)}
               >

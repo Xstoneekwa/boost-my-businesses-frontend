@@ -51,13 +51,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         transition: ready ? "grid-template-columns 200ms ease-in-out" : "none",
       }}
     >
-      {/* overflow: visible lets the toggle button extend past the sidebar edge */}
-      <div style={{ overflow: "visible", position: "relative", height: "100%" }}>
-        <AdminSidebar
-          collapsed={collapsed}
-          onToggle={() => setCollapsed((c) => !c)}
-        />
-      </div>
+      <AdminSidebar
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((c) => !c)}
+      />
       <div
         style={{
           overflowY: "auto",
