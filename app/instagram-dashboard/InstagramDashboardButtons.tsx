@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BarChart3, Clipboard, Download, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { Archive, BarChart3, Clipboard, Download, Eye, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import type { ScheduleProjection, ScheduleSlotProjection } from "@/lib/instagram-dashboard/schedule";
 import {
@@ -16,6 +16,16 @@ import {
   type TargetsOverview,
 } from "./targets-data";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
+import LivePhoneViewPanel from "./LivePhoneViewPanel";
+import {
+  isLiveViewActiveStatus,
+  liveViewEyeTone,
+  liveViewTooltip,
+  loadLiveViewStatus,
+  shouldKeepLiveViewSession,
+  startLiveView,
+  type LiveViewSessionSafe,
+} from "./live-view-client";
 
 type InstagramDashboardButtonsProps = {
   accountId: string;
@@ -202,6 +212,7 @@ type AccountTool = {
     | "Logs"
     | "Run manually"
     | "Stop run"
+    | "Live view"
     | "Settings"
     | "Filters"
     | "Targets"
@@ -213,6 +224,7 @@ type AccountTool = {
   tone?: "success" | "neutral" | "danger";
   disabled?: boolean;
   disabledReason?: string;
+  tooltip?: string;
 };
 
 const DRAFT_SETTINGS_BANNER =
@@ -267,6 +279,7 @@ const baseActiveAccountTools: AccountTool[] = [
     tone: "success",
   },
   { label: "Stop run", Icon: Square, tone: "danger" },
+  { label: "Live view", Icon: Eye, tone: "neutral" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
   { label: "Filters", Icon: Funnel },
   { label: "Targets", Icon: Users, tone: "neutral" },
@@ -274,7 +287,11 @@ const baseActiveAccountTools: AccountTool[] = [
   { label: "Move to trash", Icon: Trash2, tone: "danger" },
 ];
 
-function buildActiveAccountTools(health: RunControlHealth | null, isStartingRun: boolean): AccountTool[] {
+function buildActiveAccountTools(
+  health: RunControlHealth | null,
+  isStartingRun: boolean,
+  liveViewSession: LiveViewSessionSafe | null,
+): AccountTool[] {
   const playDisabled = isStartingRun || !health?.playEnabled || !health?.healthy;
   const playDisabledReason = isStartingRun
     ? "Starting run..."
@@ -285,6 +302,18 @@ function buildActiveAccountTools(health: RunControlHealth | null, isStartingRun:
         : undefined;
 
   return baseActiveAccountTools.map((tool) => {
+    if (tool.label === "Live view") {
+      return {
+        ...tool,
+        tone: liveViewEyeTone(liveViewSession?.status),
+        tooltip: liveViewTooltip({
+          status: liveViewSession?.status,
+          runActive: liveViewSession?.run_active_at_start,
+          livekitNotConfigured: liveViewSession?.status === "livekit_not_configured",
+          phoneUnavailable: liveViewSession?.failure_reason === "device_unavailable",
+        }),
+      };
+    }
     if (tool.label !== "Run manually") return tool;
     return {
       ...tool,
@@ -1119,6 +1148,8 @@ export default function InstagramDashboardButtons({
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [templateDialog, setTemplateDialog] = useState<TemplateDialog>(null);
   const [targetsOpen, setTargetsOpen] = useState(false);
+  const [liveViewOpen, setLiveViewOpen] = useState(false);
+  const [liveViewSession, setLiveViewSession] = useState<LiveViewSessionSafe | null>(null);
   const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
@@ -1126,6 +1157,51 @@ export default function InstagramDashboardButtons({
   useEffect(() => {
     setStyleReady(true);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialLiveViewStatus() {
+      try {
+        const session = await loadLiveViewStatus(accountId);
+        if (!cancelled) {
+          setLiveViewSession(shouldKeepLiveViewSession(session.status) ? session : null);
+        }
+      } catch {
+        if (!cancelled) setLiveViewSession(null);
+      }
+    }
+
+    void loadInitialLiveViewStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+
+  useEffect(() => {
+    if (!liveViewOpen) return undefined;
+    let cancelled = false;
+
+    async function pollLiveViewStatus() {
+      try {
+        const session = await loadLiveViewStatus(accountId);
+        if (!cancelled) {
+          setLiveViewSession(shouldKeepLiveViewSession(session.status) ? session : null);
+        }
+      } catch {
+        if (!cancelled) setLiveViewSession(null);
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void pollLiveViewStatus();
+    }, 7000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [accountId, liveViewOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1811,7 +1887,29 @@ export default function InstagramDashboardButtons({
     });
   }
 
-  const activeAccountTools = buildActiveAccountTools(runControlHealth, isStartingRun);
+  async function refreshLiveViewStatus() {
+    const session = await loadLiveViewStatus(accountId);
+    setLiveViewSession(shouldKeepLiveViewSession(session.status) ? session : null);
+  }
+
+  async function openLiveView() {
+    setError("");
+    setSuccess("");
+    if (liveViewSession && isLiveViewActiveStatus(liveViewSession.status)) {
+      setLiveViewOpen(true);
+      return;
+    }
+
+    try {
+      const session = await startLiveView(accountId);
+      setLiveViewSession(session);
+      setLiveViewOpen(true);
+    } catch (liveViewError) {
+      setError(liveViewError instanceof Error ? liveViewError.message : "Could not open live view.");
+    }
+  }
+
+  const activeAccountTools = buildActiveAccountTools(runControlHealth, isStartingRun, liveViewSession);
 
   async function updateLifecycle(action: "archive" | "trash" | "restore") {
     setError("");
@@ -1883,6 +1981,7 @@ export default function InstagramDashboardButtons({
               else if (tool.label === "Logs") void loadPanel("logs");
               else if (tool.label === "Filters") void loadPanel("filters");
               else if (tool.label === "Targets") setTargetsOpen(true);
+              else if (tool.label === "Live view") void openLiveView();
               else if (tool.label === "Stop run") requestStopRun();
               else if (tool.label === "Run manually") requestStartRun();
               else if (tool.label === "Archive") requestLifecycle("archive");
@@ -1981,6 +2080,17 @@ export default function InstagramDashboardButtons({
         open={targetsOpen}
         onClose={() => setTargetsOpen(false)}
       />
+
+      {liveViewOpen && liveViewSession ? (
+        <LivePhoneViewPanel
+          accountId={accountId}
+          username={username}
+          session={liveViewSession}
+          onClose={() => setLiveViewOpen(false)}
+          onSessionChange={setLiveViewSession}
+          onRefresh={refreshLiveViewStatus}
+        />
+      ) : null}
 
       {confirmation ? (
         <ConfirmationModal
@@ -2085,6 +2195,122 @@ export default function InstagramDashboardButtons({
           cursor: pointer;
           font-size: 22px;
           line-height: 1;
+        }
+
+        .ig-live-view-panel {
+          position: fixed;
+          z-index: 150;
+          display: grid;
+          grid-template-rows: auto 1fr;
+          overflow: hidden;
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 18px;
+          background: #07111f;
+          color: #f0f0ef;
+          box-shadow: 0 28px 90px rgba(0,0,0,0.44);
+          touch-action: none;
+        }
+
+        .ig-live-view-panel-header {
+          display: flex;
+          justify-content: space-between;
+          gap: 14px;
+          padding: 14px;
+          border-bottom: 1px solid rgba(255,255,255,0.09);
+          background: rgba(255,255,255,0.035);
+          cursor: grab;
+        }
+
+        .ig-live-view-panel-header span {
+          display: block;
+          color: rgba(255,255,255,0.42);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .ig-live-view-panel-header h3 {
+          margin: 5px 0 4px;
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 1rem;
+          line-height: 1.15;
+        }
+
+        .ig-live-view-panel-header p {
+          margin: 0;
+          color: rgba(255,255,255,0.55);
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .ig-live-view-panel-actions {
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+        }
+
+        .ig-live-view-panel-actions button {
+          min-height: 30px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 9px;
+          background: rgba(255,255,255,0.055);
+          color: rgba(255,255,255,0.78);
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 900;
+          padding: 0 9px;
+        }
+
+        .ig-live-view-panel-actions button:disabled {
+          cursor: wait;
+          opacity: 0.58;
+        }
+
+        .ig-live-view-placeholder {
+          display: grid;
+          place-items: center;
+          gap: 10px;
+          min-height: 0;
+          padding: 22px;
+          text-align: center;
+          background:
+            radial-gradient(circle at top, rgba(34,197,94,0.14), transparent 36%),
+            linear-gradient(180deg, rgba(15,23,42,0.24), rgba(2,6,23,0.42));
+        }
+
+        .ig-live-view-placeholder strong {
+          color: #BBF7D0;
+          font-size: 1rem;
+        }
+
+        .ig-live-view-placeholder small {
+          max-width: 280px;
+          color: rgba(255,255,255,0.50);
+          line-height: 1.45;
+        }
+
+        .ig-live-view-placeholder em {
+          border: 1px solid rgba(245,158,11,0.24);
+          border-radius: 999px;
+          background: rgba(245,158,11,0.10);
+          color: #FCD34D;
+          font-size: 11px;
+          font-style: normal;
+          font-weight: 900;
+          padding: 7px 10px;
+        }
+
+        .ig-live-view-resize {
+          position: absolute;
+          right: 6px;
+          bottom: 6px;
+          width: 18px;
+          height: 18px;
+          border-right: 2px solid rgba(255,255,255,0.30);
+          border-bottom: 2px solid rgba(255,255,255,0.30);
+          cursor: nwse-resize;
         }
 
         .ig-settings-form {
@@ -2854,7 +3080,7 @@ function ActionButton({ tool, username, onClick }: { tool: AccountTool; username
       type="button"
       className={`ig-dashboard-tool ${toneClass}`.trim()}
       aria-label={`${tool.label} for ${username}`}
-      data-tooltip={tool.disabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : tool.label}
+      data-tooltip={tool.disabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : (tool.tooltip ?? tool.label)}
       onClick={onClick}
       disabled={tool.disabled}
     >
