@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
@@ -25,7 +25,7 @@ export default async function InstagramAutomationDashboardPage() {
   const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
-    notFound();
+    redirect("/instagram-client");
   }
 
   const [data, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
