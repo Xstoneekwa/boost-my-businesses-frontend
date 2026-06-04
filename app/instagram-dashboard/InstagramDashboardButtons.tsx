@@ -2144,18 +2144,18 @@ export default function InstagramDashboardButtons({
           z-index: 120;
           display: flex;
           justify-content: flex-end;
-          background: rgba(2, 6, 23, 0.58);
-          backdrop-filter: blur(10px);
+          background: rgba(0,0,0,0.55);
+          backdrop-filter: blur(3px);
         }
 
         .ig-settings-panel {
           width: min(100%, 760px);
           height: 100vh;
           overflow-y: auto;
-          border-left: 1px solid rgba(255,255,255,0.10);
-          background: #07111f;
-          box-shadow: -24px 0 80px rgba(0,0,0,0.36);
-          color: #f0f0ef;
+          border-left: 1px solid rgba(255,255,255,0.07);
+          background: #161820;
+          box-shadow: -20px 0 60px rgba(0,0,0,0.50);
+          color: #f0f0ee;
           padding: 24px;
         }
 
@@ -2164,37 +2164,49 @@ export default function InstagramDashboardButtons({
           align-items: flex-start;
           justify-content: space-between;
           gap: 16px;
-          margin-bottom: 22px;
+          margin-bottom: 20px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid rgba(255,255,255,0.07);
         }
 
         .ig-settings-header span,
         .ig-settings-field span {
           display: block;
-          color: rgba(255,255,255,0.42);
+          color: #6558f5;
           font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
+          font-size: 9.5px;
           letter-spacing: 0.1em;
           text-transform: uppercase;
+          font-weight: 500;
         }
 
         .ig-settings-header h2 {
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          font-size: clamp(1.35rem, 4vw, 2rem);
+          color: #f0f0ee;
+          font-size: 17px;
+          font-weight: 700;
+          letter-spacing: -0.02em;
           line-height: 1.1;
-          margin: 8px 0 0;
+          margin: 3px 0 0;
         }
 
         .ig-settings-icon-button {
-          width: 36px;
-          height: 36px;
-          border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 10px;
-          background: rgba(255,255,255,0.05);
-          color: rgba(255,255,255,0.72);
+          width: 28px;
+          height: 28px;
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 6px;
+          background: #1e2028;
+          color: #8a8f98;
           cursor: pointer;
-          font-size: 22px;
+          font-size: 16px;
           line-height: 1;
+          display: grid;
+          place-items: center;
+          transition: border-color .13s ease, color .13s ease, background .13s ease;
+        }
+        .ig-settings-icon-button:hover {
+          border-color: rgba(248,113,113,0.28);
+          color: #f87171;
+          background: rgba(220,38,38,0.13);
         }
 
         .ig-live-view-panel {
@@ -2326,21 +2338,26 @@ export default function InstagramDashboardButtons({
         }
 
         .ig-settings-tab {
-          min-height: 32px;
-          border: 1px solid rgba(255,255,255,0.08);
+          min-height: 28px;
+          border: 1px solid rgba(255,255,255,0.07);
           border-radius: 999px;
-          background: rgba(255,255,255,0.035);
-          color: rgba(255,255,255,0.58);
+          background: transparent;
+          color: #8a8f98;
           cursor: pointer;
-          font-size: 12px;
-          font-weight: 800;
+          font-size: 11.5px;
+          font-weight: 600;
           padding: 0 11px;
+          transition: all .13s ease;
+        }
+        .ig-settings-tab:hover {
+          background: #1e2028;
+          color: #f0f0ee;
         }
 
         .ig-settings-tab-active {
-          border-color: rgba(245,158,11,0.40);
-          background: rgba(245,158,11,0.14);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,0.35);
+          background: rgba(101,88,245,0.18);
+          color: #6558f5;
         }
 
         .ig-settings-grid {
@@ -2753,10 +2770,10 @@ export default function InstagramDashboardButtons({
           justify-content: flex-end;
           gap: 10px;
           margin: 6px -24px -24px;
-          padding: 16px 24px 24px;
-          border-top: 1px solid rgba(255,255,255,0.08);
-          background: rgba(7,17,31,0.92);
-          backdrop-filter: blur(14px);
+          padding: 14px 24px 24px;
+          border-top: 1px solid rgba(255,255,255,0.07);
+          background: rgba(22,24,32,0.96);
+          backdrop-filter: blur(12px);
         }
 
         .ig-template-actions {
@@ -2777,15 +2794,24 @@ export default function InstagramDashboardButtons({
         }
 
         .ig-settings-primary {
-          border: 1px solid rgba(245,158,11,0.50);
-          background: #F59E0B;
-          color: #160b02;
+          border: 1px solid rgba(101,88,245,0.50);
+          background: #6558f5;
+          color: #fff;
+          transition: opacity .13s ease;
+        }
+        .ig-settings-primary:hover:not(:disabled) {
+          opacity: 0.88;
         }
 
         .ig-settings-secondary {
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.045);
-          color: rgba(255,255,255,0.76);
+          border: 1px solid rgba(255,255,255,0.07);
+          background: #1e2028;
+          color: #8a8f98;
+          transition: border-color .13s ease, color .13s ease;
+        }
+        .ig-settings-secondary:hover:not(:disabled) {
+          border-color: rgba(255,255,255,0.18);
+          color: #f0f0ee;
         }
 
         .ig-settings-primary:disabled,
