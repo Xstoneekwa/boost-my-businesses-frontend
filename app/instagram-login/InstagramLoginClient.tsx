@@ -98,8 +98,15 @@ export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }
         throw new Error(payload.details || payload.error || "Accès refusé.");
       }
 
+      const dashboardPath = "/instagram-dashboard";
+      const topWindow = typeof window !== "undefined" ? window.top ?? window : null;
+      if (topWindow && topWindow !== window) {
+        topWindow.location.assign(dashboardPath);
+        return;
+      }
+
       router.refresh();
-      router.push("/instagram-dashboard");
+      router.push(dashboardPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connexion échouée. Réessayez.");
       setSubmitting(false);
