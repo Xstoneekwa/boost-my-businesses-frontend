@@ -102,7 +102,7 @@ export default async function InstagramClientAccountsPage({
         .ig-client-accounts-page {
           max-width: 1480px;
           margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
+          padding: 22px 22px 48px;
         }
 
         .ig-client-accounts-page .dashboard-page-copy {
@@ -117,14 +117,14 @@ export default async function InstagramClientAccountsPage({
           margin-bottom: 18px;
           padding: 12px 14px;
           border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 14px;
+          border-radius: 8px;
           background: rgba(248,113,113,0.08);
-          color: rgba(255,255,255,0.74);
+          color: #8a8f98;
           font-size: 13px;
         }
 
         .ig-client-accounts-alert strong {
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-client-accounts-kpis {
@@ -139,9 +139,9 @@ export default async function InstagramClientAccountsPage({
 
         .ig-client-accounts-kpi,
         .ig-client-accounts-empty {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
         }
 
         .ig-client-accounts-empty {
@@ -160,7 +160,7 @@ export default async function InstagramClientAccountsPage({
         .ig-client-accounts-table th,
         .ig-client-accounts-status-select-label,
         .ig-client-accounts-empty span {
-          color: rgba(255,255,255,0.36);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.07em;
@@ -168,22 +168,22 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-empty strong {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 14px;
         }
 
         .ig-client-accounts-kpi small,
         .ig-client-accounts-table td,
         .ig-client-accounts-empty p {
-          color: rgba(255,255,255,0.62);
+          color: #8a8f98;
           font-size: 12px;
           line-height: 1.5;
         }
 
         .ig-client-accounts-kpi strong {
           display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
+          color: #f0f0ee;
+          
           font-size: 1.55rem;
           line-height: 1;
           margin: 16px 0 10px;
@@ -196,9 +196,9 @@ export default async function InstagramClientAccountsPage({
           gap: 8px;
           margin-bottom: 14px;
           padding: 8px;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 18px;
-          background: rgba(255,255,255,0.025);
+          background: #161820;
         }
 
         .ig-client-accounts-filter {
@@ -207,7 +207,7 @@ export default async function InstagramClientAccountsPage({
           justify-content: space-between;
           gap: 8px;
           min-height: 36px;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
           color: rgba(255,255,255,0.68);
           font-size: 12px;
@@ -224,9 +224,9 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-filter-active {
-          border-color: rgba(245,158,11,0.42);
-          background: rgba(245,158,11,0.16);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,.28);
+          background: rgba(101,88,245,.12);
+          color: #a594f9;
         }
 
         .ig-client-accounts-table-wrap {
@@ -248,9 +248,9 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-table td {
-          background: rgba(255,255,255,0.035);
-          border-bottom: 1px solid rgba(255,255,255,0.06);
-          border-top: 1px solid rgba(255,255,255,0.06);
+          background: #1e2028;
+          border-bottom: 1px solid rgba(255,255,255,.04);
+          border-top: 1px solid rgba(255,255,255,.04);
           padding: 14px 12px;
           vertical-align: middle;
         }
@@ -280,13 +280,13 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-table td:first-child {
-          border-left: 1px solid rgba(255,255,255,0.06);
-          border-radius: 14px 0 0 14px;
+          border-left: 1px solid rgba(255,255,255,.04);
+          border-radius: 8px 0 0 8px;
         }
 
         .ig-client-accounts-table td:last-child {
-          border-right: 1px solid rgba(255,255,255,0.06);
-          border-radius: 0 14px 14px 0;
+          border-right: 1px solid rgba(255,255,255,.04);
+          border-radius: 0 8px 8px 0;
         }
 
         .ig-client-accounts-account-row {
@@ -304,10 +304,10 @@ export default async function InstagramClientAccountsPage({
           width: 36px;
           height: 36px;
           overflow: hidden;
-          border: 1px solid rgba(255,255,255,0.12);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          background: linear-gradient(135deg, rgba(245,158,11,0.20), rgba(255,255,255,0.06));
-          color: rgba(255,255,255,0.76);
+          background: linear-gradient(135deg, rgba(101,88,245,.16), rgba(255,255,255,.04));
+          color: #8a8f98;
           font-size: 13px;
           font-weight: 900;
           line-height: 1;
@@ -335,7 +335,7 @@ export default async function InstagramClientAccountsPage({
 
         .ig-client-accounts-account-link,
         .ig-client-accounts-action-link {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-weight: 900;
           text-decoration: none;
         }
@@ -344,7 +344,7 @@ export default async function InstagramClientAccountsPage({
         .ig-client-accounts-account-link:focus-visible,
         .ig-client-accounts-action-link:hover,
         .ig-client-accounts-action-link:focus-visible {
-          color: #FBBF24;
+          color: #a594f9;
           outline: none;
         }
 
@@ -364,7 +364,7 @@ export default async function InstagramClientAccountsPage({
           border: 1px solid rgba(255,255,255,0.09);
           border-radius: 999px;
           background: rgba(255,255,255,0.045);
-          color: rgba(255,255,255,0.76);
+          color: #8a8f98;
           font-size: 11px;
           font-weight: 900;
           padding: 0 10px;
@@ -377,21 +377,21 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-badge-warning {
-          border-color: rgba(245,158,11,0.32);
-          background: rgba(245,158,11,0.12);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,.28);
+          background: rgba(101,88,245,.12);
+          color: #a594f9;
         }
 
         .ig-client-accounts-badge-danger {
           border-color: rgba(248,113,113,0.34);
           background: rgba(248,113,113,0.12);
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-client-accounts-badge-good {
           border-color: rgba(52,211,153,0.30);
           background: rgba(52,211,153,0.12);
-          color: #86EFAC;
+          color: #86efac;
         }
 
         .ig-client-accounts-actions {
@@ -417,17 +417,17 @@ export default async function InstagramClientAccountsPage({
           min-height: 34px;
           border: 1px solid rgba(255,255,255,0.09);
           border-radius: 10px;
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.72);
+          background: #1e2028;
+          color: #8a8f98;
           padding: 0;
           transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
         }
 
         .ig-client-accounts-action-link:hover,
         .ig-client-accounts-action-link:focus-visible {
-          border-color: rgba(245,158,11,0.36);
-          background: rgba(245,158,11,0.12);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,.32);
+          background: rgba(101,88,245,.12);
+          color: #a594f9;
         }
 
         .ig-client-accounts-action-link svg,
@@ -451,8 +451,8 @@ export default async function InstagramClientAccountsPage({
           gap: 6px;
           width: 238px;
           padding: 8px;
-          border: 1px solid rgba(255,255,255,0.12);
-          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
           background: rgba(9,14,28,0.98);
           box-shadow: 0 18px 40px rgba(0,0,0,0.34);
         }
@@ -463,9 +463,9 @@ export default async function InstagramClientAccountsPage({
           align-items: center;
           gap: 9px;
           width: 100%;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 10px;
-          background: rgba(255,255,255,0.035);
+          background: #1e2028;
           color: rgba(255,255,255,0.78);
           cursor: pointer;
           padding: 8px;
@@ -474,8 +474,8 @@ export default async function InstagramClientAccountsPage({
 
         .ig-client-accounts-status-menu-item:hover,
         .ig-client-accounts-status-menu-item:focus-visible {
-          border-color: rgba(245,158,11,0.34);
-          background: rgba(245,158,11,0.10);
+          border-color: rgba(101,88,245,.20);
+          background: rgba(101,88,245,.14);
           outline: none;
         }
 
@@ -495,7 +495,7 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-status-menu-item strong {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 12px;
         }
 
@@ -517,7 +517,7 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-status-menu-error {
-          color: #FCA5A5;
+          color: #fca5a5;
           font-size: 11px;
           line-height: 1.35;
           padding: 2px 4px;

@@ -42,123 +42,49 @@ export default async function InstagramActivityLogPage() {
       </AnalyticsSectionCard>
 
       <style>{`
-        .ig-activity-page {
-          max-width: 1440px;
-          margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
-        }
-
+        .ig-activity-page { max-width: 1440px; margin: 0 auto; padding: 22px 22px 48px; }
         .ig-activity-kpis {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 18px;
+          display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px; margin-bottom: 18px;
         }
-
-        .ig-activity-kpi,
-        .ig-activity-empty {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
+        .ig-activity-kpi, .ig-activity-empty {
+          border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: #161820;
         }
-
-        .ig-activity-empty {
-          display: grid;
-          gap: 8px;
-          padding: 14px;
+        .ig-activity-empty { display: grid; gap: 8px; padding: 14px; }
+        .ig-activity-kpi { min-height: 120px; padding: 14px 16px; }
+        .ig-activity-kpi span, .ig-activity-table th, .ig-activity-empty span {
+          color: #4a4f5c; font-family: 'JetBrains Mono', monospace;
+          font-size: 10px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
         }
-
-        .ig-activity-kpi {
-          min-height: 126px;
-          padding: 16px;
+        .ig-activity-empty strong { color: #f0f0ee; font-size: 15px; font-weight: 700; }
+        .ig-activity-kpi small, .ig-activity-empty p, .ig-activity-table td {
+          color: #8a8f98; font-size: 12px; line-height: 1.5;
         }
-
-        .ig-activity-kpi span,
-        .ig-activity-table th,
-        .ig-activity-empty span {
-          color: rgba(255,255,255,0.36);
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-        }
-
-        .ig-activity-empty strong {
-          color: #f0f0ef;
-          font-size: 15px;
-        }
-
-        .ig-activity-kpi small,
-        .ig-activity-empty p,
-        .ig-activity-table td {
-          color: rgba(255,255,255,0.60);
-          font-size: 12px;
-          line-height: 1.5;
-        }
-
         .ig-activity-kpi strong {
-          display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          font-size: 1.65rem;
-          line-height: 1;
-          margin: 16px 0 10px;
-          overflow-wrap: anywhere;
+          display: block; color: #f0f0ee; font-size: 1.65rem;
+          font-weight: 700; line-height: 1; margin: 14px 0 8px; overflow-wrap: anywhere;
         }
-
-        .ig-activity-table-wrap {
-          overflow-x: auto;
+        .ig-activity-table-wrap { overflow-x: auto; }
+        .ig-activity-table { width: 100%; min-width: 1180px; border-collapse: collapse; }
+        .ig-activity-table th {
+          font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+          letter-spacing: .08em; text-transform: uppercase; color: #4a4f5c;
+          padding: 8px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.07);
         }
-
-        .ig-activity-table {
-          width: 100%;
-          min-width: 1180px;
-          border-collapse: collapse;
-        }
-
-        .ig-activity-table th,
         .ig-activity-table td {
-          padding: 12px 10px;
-          border-bottom: 1px solid rgba(255,255,255,0.06);
-          text-align: left;
-          vertical-align: top;
+          padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.04);
+          text-align: left; vertical-align: top;
         }
-
-        .ig-activity-table td strong,
-        .ig-activity-table td small {
-          display: block;
-        }
-
-        .ig-activity-table td strong {
-          color: rgba(255,255,255,0.82);
-          font-size: 12px;
-        }
-
-        .ig-activity-empty {
-          place-items: center;
-          min-height: 210px;
-          text-align: center;
-        }
-
-        .ig-activity-empty p {
-          max-width: 560px;
-          margin: 0;
-        }
-
-        @media (max-width: 1120px) {
-          .ig-activity-kpis {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-        }
-
+        .ig-activity-table tbody tr:last-child td { border-bottom: none; }
+        .ig-activity-table tbody tr:hover { background: rgba(255,255,255,.02); }
+        .ig-activity-table td strong, .ig-activity-table td small { display: block; }
+        .ig-activity-table td strong { color: #f0f0ee; font-size: 12px; font-weight: 700; }
+        .ig-activity-empty { place-items: center; min-height: 210px; text-align: center; }
+        .ig-activity-empty p { max-width: 560px; margin: 0; }
+        @media (max-width: 1120px) { .ig-activity-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 760px) {
-          .ig-activity-page {
-            padding: 22px 14px 40px;
-          }
-
-          .ig-activity-kpis {
-            grid-template-columns: 1fr;
-          }
+          .ig-activity-page { padding: 16px 14px 40px; }
+          .ig-activity-kpis { grid-template-columns: 1fr; }
         }
       `}</style>
     </main>

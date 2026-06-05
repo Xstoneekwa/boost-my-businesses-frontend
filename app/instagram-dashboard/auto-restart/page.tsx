@@ -187,7 +187,7 @@ export default async function InstagramAutoRestartPage() {
         .ig-auto-restart-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
+          padding: 22px 22px 48px;
         }
 
         .ig-ar-alert {
@@ -197,14 +197,14 @@ export default async function InstagramAutoRestartPage() {
           margin-bottom: 18px;
           padding: 12px 14px;
           border: 1px solid rgba(248, 113, 113, 0.28);
-          border-radius: 14px;
+          border-radius: 8px;
           background: rgba(248, 113, 113, 0.08);
-          color: rgba(255,255,255,0.74);
+          color: #8a8f98;
           font-size: 13px;
         }
 
         .ig-ar-alert strong {
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-ar-status-grid,
@@ -224,9 +224,9 @@ export default async function InstagramAutoRestartPage() {
         .ig-ar-card,
         .ig-ar-gate,
         .ig-ar-decision {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.035);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #1e2028;
           padding: 14px;
         }
 
@@ -236,7 +236,7 @@ export default async function InstagramAutoRestartPage() {
         .ig-ar-field span,
         .ig-ar-threshold span {
           display: block;
-          color: rgba(255,255,255,0.52);
+          color: #8a8f98;
           font-size: 11px;
           font-weight: 900;
           letter-spacing: 0.08em;
@@ -264,22 +264,22 @@ export default async function InstagramAutoRestartPage() {
 
         .ig-ar-card-ready strong,
         .ig-ar-quota-ready strong {
-          color: #86EFAC;
+          color: #86efac;
         }
 
         .ig-ar-card-watch strong,
         .ig-ar-quota-watch strong {
-          color: #FDE68A;
+          color: #8a8f98;
         }
 
         .ig-ar-card-blocked strong,
         .ig-ar-quota-blocked strong {
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-ar-card-muted strong,
         .ig-ar-quota-muted strong {
-          color: rgba(255,255,255,0.66);
+          color: #8a8f98;
         }
 
         .ig-ar-rule-grid {
@@ -289,8 +289,8 @@ export default async function InstagramAutoRestartPage() {
         }
 
         .ig-ar-field {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
           padding: 12px;
           background: rgba(15,23,42,0.35);
         }
@@ -298,10 +298,10 @@ export default async function InstagramAutoRestartPage() {
         .ig-ar-field input {
           width: 100%;
           margin-top: 8px;
-          border: 1px solid rgba(255,255,255,0.12);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.72);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #1e2028;
+          color: #8a8f98;
           padding: 10px;
         }
 
@@ -315,8 +315,8 @@ export default async function InstagramAutoRestartPage() {
           width: 34px;
           height: 20px;
           border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,.07);
+          background: rgba(255,255,255,.07);
           position: relative;
           flex: 0 0 auto;
         }
@@ -339,13 +339,13 @@ export default async function InstagramAutoRestartPage() {
 
         .ig-ar-switch-on .ig-ar-switch-dot::after {
           left: 16px;
-          background: #86EFAC;
+          background: #86efac;
         }
 
         .ig-ar-pending-note,
         .ig-ar-empty,
         .ig-ar-rule-list {
-          color: rgba(255,255,255,0.62);
+          color: #8a8f98;
           font-size: 13px;
           line-height: 1.7;
         }
@@ -358,10 +358,10 @@ export default async function InstagramAutoRestartPage() {
         }
 
         .ig-ar-threshold {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
           padding: 12px;
-          background: rgba(255,255,255,0.035);
+          background: #1e2028;
         }
 
         .ig-ar-threshold strong {
@@ -383,7 +383,7 @@ export default async function InstagramAutoRestartPage() {
         .ig-ar-table th,
         .ig-ar-table td {
           padding: 12px;
-          border-bottom: 1px solid rgba(255,255,255,0.08);
+          border-bottom: 1px solid rgba(255,255,255,.07);
           vertical-align: top;
           text-align: left;
         }
@@ -415,7 +415,7 @@ export default async function InstagramAutoRestartPage() {
         }
 
         .ig-ar-tag {
-          border: 1px solid rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
           padding: 4px 8px;
           color: rgba(255,255,255,0.68);
@@ -431,7 +431,7 @@ export default async function InstagramAutoRestartPage() {
         .ig-ar-quota small {
           display: block;
           margin-top: 4px;
-          color: rgba(255,255,255,0.48);
+          color: #8a8f98;
           font-size: 11px;
         }
 

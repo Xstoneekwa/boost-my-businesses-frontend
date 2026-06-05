@@ -59,7 +59,7 @@ export default async function InstagramDevicesPage() {
         .ig-devices-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
+          padding: 22px 22px 48px;
         }
 
         .ig-devices-alert {
@@ -70,14 +70,14 @@ export default async function InstagramDevicesPage() {
           margin-bottom: 18px;
           padding: 12px 14px;
           border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 14px;
+          border-radius: 8px;
           background: rgba(248,113,113,0.08);
-          color: rgba(255,255,255,0.74);
+          color: #8a8f98;
           font-size: 13px;
         }
 
         .ig-devices-alert strong {
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-devices-kpis,
@@ -101,9 +101,9 @@ export default async function InstagramDevicesPage() {
         .ig-devices-host,
         .ig-devices-pending,
         .ig-add-phone-explainer {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
         }
 
         .ig-devices-host,
@@ -120,13 +120,13 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-add-phone-explainer h3 {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 13px;
           margin: 0 0 8px;
         }
 
         .ig-add-phone-explainer ul {
-          color: rgba(255,255,255,0.62);
+          color: #8a8f98;
           display: grid;
           font-size: 12px;
           gap: 5px;
@@ -151,7 +151,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-add-phone-field span {
-          color: rgba(255,255,255,0.42);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.08em;
@@ -162,10 +162,10 @@ export default async function InstagramDevicesPage() {
         .ig-add-phone-field select,
         .ig-add-phone-field textarea {
           width: 100%;
-          border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 12px;
-          background: rgba(0,0,0,0.18);
-          color: #f0f0ef;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #0c0d10;
+          color: #f0f0ee;
           font: inherit;
           font-size: 13px;
           padding: 11px 12px;
@@ -179,7 +179,7 @@ export default async function InstagramDevicesPage() {
         .ig-add-phone-field input:focus-visible,
         .ig-add-phone-field select:focus-visible,
         .ig-add-phone-field textarea:focus-visible {
-          border-color: rgba(251,191,36,0.52);
+          border-color: rgba(101,88,245,.35);
           outline: none;
         }
 
@@ -191,10 +191,10 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-add-phone-actions button {
-          border: 1px solid rgba(245,158,11,0.45);
+          border: 1px solid rgba(101,88,245,.40);
           border-radius: 999px;
-          background: linear-gradient(135deg, #F59E0B, #FBBF24);
-          color: #1c1204;
+          background: #6558f5;
+          color: #fff;
           cursor: pointer;
           font-size: 13px;
           font-weight: 900;
@@ -212,7 +212,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-add-phone-message {
-          border-radius: 12px;
+          border-radius: 8px;
           margin: 0;
           padding: 10px 12px;
           font-size: 12px;
@@ -230,13 +230,13 @@ export default async function InstagramDevicesPage() {
         .ig-add-phone-error {
           border: 1px solid rgba(248,113,113,0.28);
           background: rgba(248,113,113,0.08);
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-add-phone-success {
           border: 1px solid rgba(52,211,153,0.24);
           background: rgba(52,211,153,0.08);
-          color: #86EFAC;
+          color: #86efac;
         }
 
         .ig-devices-kpi {
@@ -247,7 +247,7 @@ export default async function InstagramDevicesPage() {
         .ig-devices-kpi span,
         .ig-devices-host span,
         .ig-devices-pending span {
-          color: rgba(255,255,255,0.36);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.08em;
@@ -256,8 +256,8 @@ export default async function InstagramDevicesPage() {
 
         .ig-devices-kpi strong {
           display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
+          color: #f0f0ee;
+          
           font-size: 1.8rem;
           line-height: 1;
           margin: 16px 0 10px;
@@ -266,7 +266,7 @@ export default async function InstagramDevicesPage() {
         .ig-devices-kpi small,
         .ig-devices-host p,
         .ig-devices-pending p {
-          color: rgba(255,255,255,0.60);
+          color: #8a8f98;
           font-size: 12px;
         }
 
@@ -276,9 +276,9 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-accordion {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
           overflow: hidden;
         }
 
@@ -299,12 +299,12 @@ export default async function InstagramDevicesPage() {
 
         .ig-devices-accordion summary:hover,
         .ig-devices-accordion summary:focus-visible {
-          background: rgba(245,158,11,0.06);
+          background: rgba(101,88,245,.08);
           outline: none;
         }
 
         .ig-devices-chevron {
-          color: rgba(255,255,255,0.44);
+          color: #4a4f5c;
           font-size: 16px;
           font-weight: 900;
           transition: transform 160ms ease;
@@ -321,7 +321,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-summary-title strong {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 14px;
           overflow-wrap: anywhere;
         }
@@ -334,7 +334,7 @@ export default async function InstagramDevicesPage() {
 
         .ig-devices-summary-metric span,
         .ig-devices-detail-label {
-          color: rgba(255,255,255,0.36);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.08em;
@@ -342,7 +342,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-summary-metric strong {
-          color: rgba(255,255,255,0.72);
+          color: #8a8f98;
           font-size: 12px;
           overflow-wrap: anywhere;
         }
@@ -354,7 +354,7 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-phone-nested {
-          background: rgba(255,255,255,0.025);
+          background: #161820;
         }
 
         .ig-devices-phone-nested summary {
@@ -374,10 +374,10 @@ export default async function InstagramDevicesPage() {
         }
 
         .ig-devices-badge {
-          border: 1px solid rgba(251,191,36,0.24);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          background: rgba(251,191,36,0.08);
-          color: #FDE68A;
+          background: rgba(255,255,255,.025);
+          color: #8a8f98;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.02em;
@@ -387,13 +387,13 @@ export default async function InstagramDevicesPage() {
         .ig-devices-badge-good {
           border-color: rgba(52,211,153,0.24);
           background: rgba(52,211,153,0.08);
-          color: #86EFAC;
+          color: #86efac;
         }
 
         .ig-devices-badge-warning {
           border-color: rgba(248,113,113,0.26);
           background: rgba(248,113,113,0.08);
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-devices-account-row {
@@ -401,9 +401,9 @@ export default async function InstagramDevicesPage() {
           grid-template-columns: minmax(160px, 1.4fr) repeat(5, minmax(110px, 1fr));
           gap: 10px;
           align-items: start;
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,.04);
+          border-radius: 8px;
+          background: #161820;
           padding: 10px 12px;
         }
 
@@ -416,27 +416,27 @@ export default async function InstagramDevicesPage() {
         .ig-devices-safe-detail {
           display: grid;
           gap: 6px;
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,.04);
+          border-radius: 8px;
+          background: #161820;
           padding: 12px;
         }
 
         .ig-devices-host strong,
         .ig-devices-pending strong {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 15px;
         }
 
         .ig-devices-account-link {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-weight: 900;
           text-decoration: none;
         }
 
         .ig-devices-account-link:hover,
         .ig-devices-account-link:focus-visible {
-          color: #FBBF24;
+          color: #a594f9;
           outline: none;
         }
 
@@ -465,7 +465,7 @@ export default async function InstagramDevicesPage() {
 
         @media (max-width: 760px) {
           .ig-devices-page {
-            padding: 22px 14px 40px;
+            padding: 16px 14px 40px;
           }
 
           .ig-devices-kpis,
@@ -479,7 +479,7 @@ export default async function InstagramDevicesPage() {
 }
 
 function Kpi({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: "neutral" | "good" | "warning" }) {
-  const color = tone === "good" ? "#34D399" : tone === "warning" ? "#FBBF24" : "#f0f0ef";
+  const color = tone === "good" ? "#34D399" : tone === "warning" ? "#a594f9" : "#f0f0ee";
 
   return (
     <article className="ig-devices-kpi">

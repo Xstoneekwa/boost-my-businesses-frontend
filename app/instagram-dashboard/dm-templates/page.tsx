@@ -71,7 +71,7 @@ export default async function InstagramDmTemplatesPage() {
         .ig-dm-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
+          padding: 22px 22px 48px;
         }
 
         .ig-dm-source-strip,
@@ -97,9 +97,9 @@ export default async function InstagramDmTemplatesPage() {
         .ig-dm-accordion,
         .ig-dm-template-card,
         .ig-dm-empty {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
         }
 
         .ig-dm-source-pill,
@@ -120,7 +120,7 @@ export default async function InstagramDmTemplatesPage() {
         .ig-dm-template-card span,
         .ig-dm-accordion-summary span,
         .ig-dm-empty span {
-          color: rgba(255,255,255,0.36);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.08em;
@@ -131,7 +131,7 @@ export default async function InstagramDmTemplatesPage() {
         .ig-dm-account-row strong,
         .ig-dm-accordion-summary strong,
         .ig-dm-empty strong {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 15px;
         }
 
@@ -142,15 +142,15 @@ export default async function InstagramDmTemplatesPage() {
         .ig-dm-template-card li,
         .ig-dm-helper,
         .ig-dm-empty p {
-          color: rgba(255,255,255,0.60);
+          color: #8a8f98;
           font-size: 12px;
           line-height: 1.5;
         }
 
         .ig-dm-kpi strong {
           display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
+          color: #f0f0ee;
+          
           font-size: 1.65rem;
           line-height: 1;
           margin: 16px 0 10px;
@@ -173,10 +173,10 @@ export default async function InstagramDmTemplatesPage() {
         .ig-dm-edit-disabled {
           justify-self: start;
           min-height: 28px;
-          border: 1px solid rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.72);
+          background: #1e2028;
+          color: #8a8f98;
           display: inline-flex;
           align-items: center;
           padding: 0 10px;
@@ -186,7 +186,7 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-row-chevron {
-          color: rgba(255,255,255,0.48);
+          color: #8a8f98;
           font-size: 18px;
           line-height: 1;
         }
@@ -224,7 +224,7 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-accordion-panel {
-          border-top: 1px solid rgba(255,255,255,0.06);
+          border-top: 1px solid rgba(255,255,255,.04);
           display: grid;
           gap: 12px;
           padding: 12px;
@@ -237,9 +237,9 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-meta-panel {
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 12px;
-          background: rgba(0,0,0,0.12);
+          border: 1px solid rgba(255,255,255,.04);
+          border-radius: 8px;
+          background: #0c0d10;
           padding: 12px;
         }
 
@@ -257,7 +257,7 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-template-head h4 {
-          color: #f0f0ef;
+          color: #f0f0ee;
           margin: 4px 0 0;
         }
 
@@ -265,9 +265,9 @@ export default async function InstagramDmTemplatesPage() {
           display: inline-flex;
           align-items: center;
           border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,.07);
           padding: 4px 8px;
-          color: rgba(255,255,255,0.76);
+          color: #8a8f98;
           font-size: 11px;
           font-weight: 900;
           white-space: nowrap;
@@ -280,8 +280,8 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-status-warning {
-          border-color: rgba(251,191,36,0.30);
-          background: rgba(251,191,36,0.10);
+          border-color: rgba(101,88,245,.22);
+          background: rgba(101,88,245,.10);
           color: #fcd34d;
         }
 
@@ -293,10 +293,10 @@ export default async function InstagramDmTemplatesPage() {
 
         .ig-dm-message {
           min-height: 70px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 12px;
-          background: rgba(0,0,0,0.16);
-          color: rgba(255,255,255,0.72);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #0c0d10;
+          color: #8a8f98;
           padding: 12px;
           white-space: pre-wrap;
         }
@@ -308,9 +308,9 @@ export default async function InstagramDmTemplatesPage() {
         }
 
         .ig-dm-meta code {
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          background: rgba(255,255,255,0.04);
+          background: #1e2028;
           color: rgba(255,255,255,0.64);
           padding: 4px 8px;
           font-size: 11px;
@@ -348,7 +348,7 @@ export default async function InstagramDmTemplatesPage() {
 
         @media (max-width: 760px) {
           .ig-dm-page {
-            padding: 22px 14px 40px;
+            padding: 16px 14px 40px;
           }
 
           .ig-dm-source-strip,

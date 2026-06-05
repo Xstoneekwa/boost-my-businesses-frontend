@@ -168,7 +168,7 @@ export default async function InstagramRadarPage({
         .ig-radar-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
+          padding: 22px 22px 48px;
           scroll-behavior: smooth;
         }
 
@@ -180,21 +180,18 @@ export default async function InstagramRadarPage({
           margin-bottom: 18px;
           padding: 12px 14px;
           border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 14px;
+          border-radius: 8px;
           background: rgba(248,113,113,0.08);
           color: rgba(255,255,255,0.74);
           font-size: 13px;
         }
-
-        .ig-radar-alert strong {
-          color: #FCA5A5;
-        }
+        .ig-radar-alert strong { color: #fca5a5; }
 
         .ig-radar-source-strip,
         .ig-radar-kpis,
         .ig-radar-grid {
           display: grid;
-          gap: 14px;
+          gap: 12px;
         }
 
         .ig-radar-source-strip {
@@ -208,9 +205,9 @@ export default async function InstagramRadarPage({
           align-items: center;
           flex-wrap: wrap;
           margin-bottom: 14px;
-          border: 1px solid rgba(251,191,36,0.22);
-          border-radius: 12px;
-          background: rgba(251,191,36,0.055);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: rgba(255,255,255,.025);
           padding: 10px 12px;
         }
 
@@ -218,9 +215,9 @@ export default async function InstagramRadarPage({
           display: flex;
           justify-content: space-between;
           gap: 10px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.026);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
           padding: 10px 12px;
         }
 
@@ -232,22 +229,19 @@ export default async function InstagramRadarPage({
         .ig-radar-kpi,
         .ig-radar-empty,
         .ig-radar-list article {
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.028);
-          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,.07);
+          background: #161820;
+          border-radius: 8px;
         }
 
         .ig-radar-kpi {
           display: block;
-          min-height: 132px;
-          padding: 16px;
+          min-height: 120px;
+          padding: 14px 16px;
           text-decoration: none;
         }
 
-        .ig-radar-account-kpi {
-          display: grid;
-          gap: 12px;
-        }
+        .ig-radar-account-kpi { display: grid; gap: 12px; }
 
         .ig-radar-kpi-link {
           cursor: pointer;
@@ -256,47 +250,42 @@ export default async function InstagramRadarPage({
 
         .ig-radar-kpi-link:hover,
         .ig-radar-kpi-link:focus-visible {
-          border-color: rgba(245,158,11,0.34);
-          background: rgba(245,158,11,0.07);
+          border-color: rgba(101,88,245,.28);
+          background: rgba(101,88,245,.08);
           outline: none;
           transform: translateY(-1px);
         }
 
         .ig-radar-kpi-active {
-          border-color: rgba(245,158,11,0.46);
-          background: rgba(245,158,11,0.08);
+          border-color: rgba(101,88,245,.35);
+          background: rgba(101,88,245,.10);
         }
 
-        .ig-radar-account-total {
-          text-decoration: none;
-        }
+        .ig-radar-account-total { text-decoration: none; }
 
-        .ig-radar-account-pills {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
+        .ig-radar-account-pills { display: flex; flex-wrap: wrap; gap: 8px; }
 
         .ig-radar-account-pill {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-height: 28px;
-          border: 1px solid rgba(255,255,255,0.08);
+          min-height: 26px;
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          color: rgba(255,255,255,0.68);
+          color: #8a8f98;
           font-size: 11px;
-          font-weight: 900;
+          font-weight: 700;
           padding: 0 10px;
           text-decoration: none;
+          transition: all .13s ease;
         }
 
         .ig-radar-account-pill:hover,
         .ig-radar-account-pill:focus-visible,
         .ig-radar-account-pill-active {
-          border-color: rgba(245,158,11,0.42);
-          background: rgba(245,158,11,0.10);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,.35);
+          background: rgba(101,88,245,.14);
+          color: #a594f9;
           outline: none;
         }
 
@@ -307,20 +296,21 @@ export default async function InstagramRadarPage({
         .ig-radar-empty span,
         .ig-radar-list span,
         .ig-radar-field-label {
-          color: rgba(255,255,255,0.36);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          letter-spacing: 0.08em;
+          font-weight: 500;
+          letter-spacing: .08em;
           text-transform: uppercase;
         }
 
         .ig-radar-kpi strong {
           display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          font-size: 2rem;
+          color: #f0f0ee;
+          font-size: 1.85rem;
+          font-weight: 700;
           line-height: 1;
-          margin: 16px 0 10px;
+          margin: 14px 0 8px;
         }
 
         .ig-radar-kpi small,
@@ -329,12 +319,12 @@ export default async function InstagramRadarPage({
         .ig-radar-table td,
         .ig-radar-list p,
         .ig-radar-list small {
-          color: rgba(255,255,255,0.60);
+          color: #8a8f98;
           font-size: 12px;
         }
 
         .ig-radar-api-note strong {
-          color: #FBBF24;
+          color: #8a8f98;
           font-size: 12px;
           text-transform: uppercase;
         }
@@ -345,10 +335,7 @@ export default async function InstagramRadarPage({
           align-items: start;
         }
 
-        #account-drilldown {
-          margin-bottom: 18px;
-          scroll-margin-top: 20px;
-        }
+        #account-drilldown { margin-bottom: 18px; scroll-margin-top: 20px; }
 
         .ig-radar-drilldown-header {
           display: flex;
@@ -363,26 +350,25 @@ export default async function InstagramRadarPage({
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-height: 32px;
-          border: 1px solid rgba(255,255,255,0.10);
+          min-height: 30px;
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          color: rgba(255,255,255,0.72);
+          color: #8a8f98;
           font-size: 12px;
-          font-weight: 900;
+          font-weight: 700;
           padding: 0 12px;
           text-decoration: none;
+          transition: all .13s ease;
         }
 
         .ig-radar-back-link:hover,
         .ig-radar-back-link:focus-visible {
-          border-color: rgba(245,158,11,0.42);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,.35);
+          color: #a594f9;
           outline: none;
         }
 
-        .ig-radar-table-wrap {
-          overflow-x: auto;
-        }
+        .ig-radar-table-wrap { overflow-x: auto; }
 
         .ig-radar-table {
           width: 100%;
@@ -390,18 +376,31 @@ export default async function InstagramRadarPage({
           border-collapse: collapse;
         }
 
-        .ig-radar-table th,
-        .ig-radar-table td {
-          padding: 12px 10px;
-          border-bottom: 1px solid rgba(255,255,255,0.06);
+        .ig-radar-table th {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 500;
+          letter-spacing: .08em;
+          text-transform: uppercase;
+          color: #4a4f5c;
+          padding: 8px 10px;
           text-align: left;
-          vertical-align: top;
+          border-bottom: 1px solid rgba(255,255,255,.07);
         }
 
-        .ig-radar-list {
-          display: grid;
-          gap: 10px;
+        .ig-radar-table td {
+          padding: 9px 10px;
+          border-bottom: 1px solid rgba(255,255,255,.04);
+          text-align: left;
+          vertical-align: top;
+          color: #8a8f98;
+          font-size: 12px;
         }
+
+        .ig-radar-table tbody tr:last-child td { border-bottom: none; }
+        .ig-radar-table tbody tr:hover { background: rgba(255,255,255,.02); }
+
+        .ig-radar-list { display: grid; gap: 10px; }
 
         .ig-radar-list article {
           display: grid;
@@ -422,40 +421,36 @@ export default async function InstagramRadarPage({
           gap: 8px 12px;
         }
 
-        .ig-radar-fields div {
-          min-width: 0;
-        }
+        .ig-radar-fields div { min-width: 0; }
 
         .ig-radar-field-value {
           display: block;
           margin-top: 4px;
-          color: rgba(255,255,255,0.66);
+          color: #8a8f98;
           font-size: 12px;
           overflow-wrap: anywhere;
         }
 
         .ig-radar-list strong,
         .ig-radar-table td:first-child {
-          color: #f0f0ef;
-          font-weight: 900;
+          color: #f0f0ee;
+          font-weight: 700;
         }
 
         .ig-radar-account-link {
-          color: #f0f0ef;
-          font-weight: 900;
+          color: #f0f0ee;
+          font-weight: 700;
           text-decoration: none;
+          transition: color .13s ease;
         }
 
         .ig-radar-account-link:hover,
         .ig-radar-account-link:focus-visible {
-          color: #FBBF24;
+          color: #a594f9;
           outline: none;
         }
 
-        .ig-radar-list p {
-          margin: 0;
-          line-height: 1.5;
-        }
+        .ig-radar-list p { margin: 0; line-height: 1.5; }
 
         .ig-radar-empty {
           display: grid;
@@ -467,13 +462,13 @@ export default async function InstagramRadarPage({
         }
 
         .ig-radar-empty strong {
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          font-size: 20px;
+          color: #f0f0ee;
+          font-size: 17px;
+          font-weight: 700;
         }
 
         .ig-radar-empty p {
-          color: rgba(255,255,255,0.48);
+          color: #8a8f98;
           font-size: 13px;
           line-height: 1.6;
           margin: 0;
@@ -489,10 +484,7 @@ export default async function InstagramRadarPage({
         }
 
         @media (max-width: 760px) {
-          .ig-radar-page {
-            padding: 22px 14px 40px;
-          }
-
+          .ig-radar-page { padding: 16px 14px 40px; }
           .ig-radar-source-strip,
           .ig-radar-kpis,
           .ig-radar-grid,

@@ -76,7 +76,7 @@ export default async function InstagramGrowthSettingsPage() {
         .ig-growth-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
+          padding: 22px 22px 48px;
         }
 
         .ig-growth-alert {
@@ -87,14 +87,14 @@ export default async function InstagramGrowthSettingsPage() {
           margin-bottom: 18px;
           padding: 12px 14px;
           border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 14px;
+          border-radius: 8px;
           background: rgba(248,113,113,0.08);
-          color: rgba(255,255,255,0.74);
+          color: #8a8f98;
           font-size: 13px;
         }
 
         .ig-growth-alert strong {
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-growth-source-strip,
@@ -121,9 +121,9 @@ export default async function InstagramGrowthSettingsPage() {
         .ig-growth-item,
         .ig-growth-summary-card,
         .ig-growth-empty {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
         }
 
         .ig-growth-source-pill,
@@ -151,7 +151,7 @@ export default async function InstagramGrowthSettingsPage() {
         .ig-growth-summary-card span,
         .ig-growth-item span,
         .ig-growth-empty span {
-          color: rgba(255,255,255,0.36);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.06em;
@@ -165,7 +165,7 @@ export default async function InstagramGrowthSettingsPage() {
         .ig-growth-summary-card strong,
         .ig-growth-item strong,
         .ig-growth-empty strong {
-          color: #f0f0ef;
+          color: #f0f0ee;
           font-size: 14px;
         }
 
@@ -177,15 +177,15 @@ export default async function InstagramGrowthSettingsPage() {
         .ig-growth-summary-card small,
         .ig-growth-item small,
         .ig-growth-empty p {
-          color: rgba(255,255,255,0.60);
+          color: #8a8f98;
           font-size: 12px;
           line-height: 1.5;
         }
 
         .ig-growth-kpi strong {
           display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
+          color: #f0f0ee;
+          
           font-size: 1.65rem;
           line-height: 1;
           margin: 16px 0 10px;
@@ -237,7 +237,7 @@ export default async function InstagramGrowthSettingsPage() {
         }
 
         .ig-growth-chevron {
-          color: rgba(255,255,255,0.48);
+          color: #8a8f98;
           font-weight: 900;
           padding-top: 4px;
         }
@@ -251,10 +251,10 @@ export default async function InstagramGrowthSettingsPage() {
           align-items: center;
           justify-content: center;
           min-height: 28px;
-          border: 1px solid rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.72);
+          background: #1e2028;
+          color: #8a8f98;
           font-size: 10px;
           font-weight: 900;
           line-height: 1.15;
@@ -276,9 +276,9 @@ export default async function InstagramGrowthSettingsPage() {
           align-items: center;
           justify-content: center;
           min-height: 30px;
-          border: 1px solid rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          background: rgba(255,255,255,0.04);
+          background: #1e2028;
           color: rgba(255,255,255,0.70);
           font-size: 12px;
           font-weight: 900;
@@ -288,8 +288,8 @@ export default async function InstagramGrowthSettingsPage() {
 
         .ig-growth-link-row a:hover,
         .ig-growth-link-row a:focus-visible {
-          border-color: rgba(245,158,11,0.38);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,.28);
+          color: #a594f9;
           outline: none;
         }
 
@@ -350,7 +350,7 @@ export default async function InstagramGrowthSettingsPage() {
 
         .ig-growth-item-warning {
           grid-column: 1 / -1;
-          color: rgba(251,191,36,0.80);
+          color: #a594f9;
           font-size: 12px;
           line-height: 1.4;
         }
@@ -390,7 +390,7 @@ export default async function InstagramGrowthSettingsPage() {
 
         @media (max-width: 760px) {
           .ig-growth-page {
-            padding: 22px 14px 40px;
+            padding: 16px 14px 40px;
           }
 
           .ig-growth-source-strip,
@@ -425,7 +425,7 @@ function Kpi({ label, value, detail, tone = "neutral" }: { label: string; value:
   return (
     <article className="ig-growth-kpi">
       <span>{label}</span>
-      <strong style={{ color: tone === "warning" ? "#FBBF24" : "#f0f0ef" }}>{value}</strong>
+      <strong style={{ color: tone === "warning" ? "#a594f9" : "#f0f0ee" }}>{value}</strong>
       <small>{detail}</small>
     </article>
   );
@@ -531,9 +531,9 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 
 function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "good" | "warning" | "danger" }) {
   const colors = {
-    neutral: "rgba(255,255,255,0.72)",
+    neutral: "#8a8f98",
     good: "#34D399",
-    warning: "#FBBF24",
+    warning: "#a594f9",
     danger: "#F87171",
   };
 

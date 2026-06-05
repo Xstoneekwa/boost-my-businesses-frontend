@@ -76,158 +76,74 @@ export default async function InstagramServerCheckPage() {
       </AnalyticsSectionCard>
 
       <style>{`
-        .ig-server-check-page {
-          max-width: 1440px;
-          margin: 0 auto;
-          padding: 28px clamp(16px, 3vw, 36px) 48px;
-        }
+        .ig-server-check-page { max-width: 1440px; margin: 0 auto; padding: 22px 22px 48px; }
 
         .ig-server-check-alert {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-          flex-wrap: wrap;
-          margin-bottom: 18px;
-          padding: 12px 14px;
-          border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 14px;
-          background: rgba(248,113,113,0.08);
-          color: rgba(255,255,255,0.74);
-          font-size: 13px;
+          display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+          margin-bottom: 18px; padding: 12px 14px;
+          border: 1px solid rgba(248,113,113,0.28); border-radius: 8px;
+          background: rgba(248,113,113,0.08); color: rgba(255,255,255,0.74); font-size: 13px;
         }
-
-        .ig-server-check-alert strong {
-          color: #FCA5A5;
-        }
+        .ig-server-check-alert strong { color: #fca5a5; }
 
         .ig-server-check-summary {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 18px;
+          display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px; margin-bottom: 18px;
         }
-
         .ig-server-check-source-strip {
-          display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 14px;
+          display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 12px; margin-bottom: 14px;
         }
-
         .ig-server-check-source-pill {
-          display: flex;
-          justify-content: space-between;
-          gap: 10px;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.026);
-          padding: 10px 12px;
+          display: flex; justify-content: space-between; gap: 10px;
+          border: 1px solid rgba(255,255,255,.07); border-radius: 8px;
+          background: #161820; padding: 10px 12px;
         }
-
-        .ig-server-check-summary article,
-        .ig-server-check-empty {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          background: rgba(255,255,255,0.028);
-          padding: 16px;
+        .ig-server-check-summary article, .ig-server-check-empty {
+          border: 1px solid rgba(255,255,255,.07); border-radius: 8px;
+          background: #161820; padding: 14px 16px;
         }
-
-        .ig-server-check-summary span,
-        .ig-server-check-source-pill span,
-        .ig-server-check-table th,
-        .ig-server-check-empty span {
-          color: rgba(255,255,255,0.36);
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
+        .ig-server-check-summary span, .ig-server-check-source-pill span,
+        .ig-server-check-table th, .ig-server-check-empty span {
+          color: #4a4f5c; font-family: 'JetBrains Mono', monospace;
+          font-size: 10px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
         }
-
         .ig-server-check-summary strong {
-          display: block;
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          font-size: 2rem;
-          line-height: 1;
-          margin: 16px 0 10px;
+          display: block; color: #f0f0ee; font-size: 1.85rem;
+          font-weight: 700; line-height: 1; margin: 14px 0 8px;
         }
+        .ig-server-check-summary small, .ig-server-check-source-pill strong,
+        .ig-server-check-table td { color: #8a8f98; font-size: 12px; }
 
-        .ig-server-check-summary small,
-        .ig-server-check-source-pill strong,
+        .ig-server-check-table-wrap { overflow-x: auto; }
+        .ig-server-check-table { width: 100%; min-width: 1180px; border-collapse: collapse; }
+        .ig-server-check-table th {
+          font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+          letter-spacing: .08em; text-transform: uppercase; color: #4a4f5c;
+          padding: 8px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.07);
+        }
         .ig-server-check-table td {
-          color: rgba(255,255,255,0.60);
-          font-size: 12px;
+          padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.04);
+          text-align: left; vertical-align: top;
         }
+        .ig-server-check-table tbody tr:last-child td { border-bottom: none; }
+        .ig-server-check-table tbody tr:hover { background: rgba(255,255,255,.02); }
+        .ig-server-check-table td:first-child { color: #f0f0ee; font-weight: 700; }
 
-        .ig-server-check-table-wrap {
-          overflow-x: auto;
-        }
-
-        .ig-server-check-table {
-          width: 100%;
-          min-width: 1180px;
-          border-collapse: collapse;
-        }
-
-        .ig-server-check-table th,
-        .ig-server-check-table td {
-          padding: 12px 10px;
-          border-bottom: 1px solid rgba(255,255,255,0.06);
-          text-align: left;
-          vertical-align: top;
-        }
-
-        .ig-server-check-table td:first-child {
-          color: #f0f0ef;
-          font-weight: 900;
-        }
-
-        .ig-server-check-account-link {
-          color: #f0f0ef;
-          font-weight: 900;
-          text-decoration: none;
-        }
-
-        .ig-server-check-account-link:hover,
-        .ig-server-check-account-link:focus-visible {
-          color: #FBBF24;
-          outline: none;
+        .ig-server-check-account-link { color: #f0f0ee; font-weight: 700; text-decoration: none; }
+        .ig-server-check-account-link:hover, .ig-server-check-account-link:focus-visible {
+          color: #a594f9; outline: none;
         }
 
         .ig-server-check-empty {
-          display: grid;
-          gap: 8px;
-          place-items: center;
-          min-height: 180px;
-          text-align: center;
+          display: grid; gap: 8px; place-items: center; min-height: 180px; text-align: center;
         }
-
-        .ig-server-check-empty strong {
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          font-size: 20px;
-        }
-
-        .ig-server-check-empty p {
-          color: rgba(255,255,255,0.48);
-          font-size: 13px;
-          line-height: 1.6;
-          margin: 0;
-          max-width: 420px;
-        }
+        .ig-server-check-empty strong { color: #f0f0ee; font-size: 17px; font-weight: 700; }
+        .ig-server-check-empty p { color: #8a8f98; font-size: 13px; line-height: 1.6; margin: 0; max-width: 420px; }
 
         @media (max-width: 760px) {
-          .ig-server-check-page {
-            padding: 22px 14px 40px;
-          }
-
-          .ig-server-check-summary {
-            grid-template-columns: 1fr;
-          }
-
-          .ig-server-check-source-strip {
-            grid-template-columns: 1fr;
-          }
+          .ig-server-check-page { padding: 16px 14px 40px; }
+          .ig-server-check-summary, .ig-server-check-source-strip { grid-template-columns: 1fr; }
         }
       `}</style>
     </main>
