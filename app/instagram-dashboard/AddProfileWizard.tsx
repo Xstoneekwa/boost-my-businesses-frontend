@@ -594,23 +594,27 @@ export default function AddProfileWizard() {
         .ig-add-profile-button,
         .ig-profile-primary,
         .ig-profile-secondary {
-          min-height: 38px;
+          min-height: 34px;
           border-radius: 999px;
-          font-size: 13px;
-          font-weight: 900;
+          font-size: 12.5px;
+          font-weight: 700;
           cursor: pointer;
+          transition: opacity .13s ease, border-color .13s ease, color .13s ease, background .13s ease;
         }
 
+        /* ── Trigger button in the tab toolbar ── */
         .ig-add-profile-button {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          border: 1px solid rgba(245,158,11,0.48);
-          background: #F59E0B;
-          color: #160b02;
-          padding: 0 14px;
+          border: 1px solid rgba(101,88,245,0.40);
+          background: #6558f5;
+          color: #fff;
+          padding: 0 13px;
         }
+        .ig-add-profile-button:hover { opacity: .88; }
 
+        /* ── Overlay ── */
         .ig-profile-overlay {
           position: fixed;
           inset: 0;
@@ -618,20 +622,21 @@ export default function AddProfileWizard() {
           display: grid;
           place-items: center;
           padding: 18px;
-          background: rgba(2,6,23,0.72);
-          backdrop-filter: blur(12px);
+          background: rgba(0,0,0,0.75);
+          backdrop-filter: blur(4px);
         }
 
+        /* ── Modal / Confirm card ── */
         .ig-profile-modal,
         .ig-profile-confirm {
           width: min(100%, 760px);
           max-height: min(90vh, 760px);
           overflow-y: auto;
-          border: 1px solid rgba(255,255,255,0.12);
-          border-radius: 16px;
-          background: #07111f;
-          color: #f0f0ef;
-          box-shadow: 0 24px 90px rgba(0,0,0,0.46);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #161820;
+          color: #f0f0ee;
+          box-shadow: 0 8px 32px -8px rgba(0,0,0,.6);
           padding: 22px;
         }
 
@@ -639,238 +644,262 @@ export default function AddProfileWizard() {
           width: min(100%, 440px);
         }
 
+        /* ── Header ── */
         .ig-profile-header {
           display: flex;
           justify-content: space-between;
           gap: 16px;
           margin-bottom: 18px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid rgba(255,255,255,.07);
         }
 
         .ig-profile-header span,
         .ig-profile-field span,
         .ig-profile-review dt {
           display: block;
-          color: rgba(255,255,255,0.42);
+          color: #4a4f5c;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          letter-spacing: 0.1em;
+          font-weight: 500;
+          letter-spacing: .1em;
           text-transform: uppercase;
         }
 
         .ig-profile-header h2,
         .ig-profile-confirm h3 {
-          color: #f0f0ef;
-          font-family: 'Syne', sans-serif;
-          margin: 6px 0 0;
+          color: #f0f0ee;
+          font-size: 17px;
+          font-weight: 700;
+          letter-spacing: -.01em;
+          margin: 4px 0 0;
         }
 
         .ig-profile-header button {
-          width: 36px;
-          height: 36px;
-          border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 10px;
-          background: rgba(255,255,255,0.05);
-          color: rgba(255,255,255,0.72);
+          width: 28px;
+          height: 28px;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 6px;
+          background: #1e2028;
+          color: #8a8f98;
           cursor: pointer;
-          font-size: 22px;
+          font-size: 16px;
+          display: grid;
+          place-items: center;
+          transition: border-color .13s ease, color .13s ease, background .13s ease;
+        }
+        .ig-profile-header button:hover {
+          border-color: rgba(248,113,113,0.28);
+          color: #f87171;
+          background: rgba(220,38,38,0.13);
         }
 
+        /* ── Step progress bar ── */
         .ig-profile-steps {
           display: grid;
           grid-template-columns: repeat(6, minmax(0, 1fr));
-          gap: 8px;
+          gap: 6px;
           margin-bottom: 18px;
         }
 
         .ig-profile-steps span {
-          min-height: 30px;
-          border: 1px solid rgba(255,255,255,0.08);
+          min-height: 28px;
+          border: 1px solid rgba(255,255,255,.07);
           border-radius: 999px;
-          color: rgba(255,255,255,0.48);
+          color: #4a4f5c;
           display: grid;
           place-items: center;
           font-size: 11px;
-          font-weight: 900;
+          font-weight: 600;
         }
 
         .ig-profile-steps .ig-profile-step-active {
-          border-color: rgba(245,158,11,0.42);
-          background: rgba(245,158,11,0.14);
-          color: #FBBF24;
+          border-color: rgba(101,88,245,0.35);
+          background: rgba(101,88,245,0.18);
+          color: #a594f9;
         }
 
+        /* ── Package step ── */
         .ig-profile-package-step {
           display: grid;
-          gap: 18px;
+          gap: 16px;
         }
 
         .ig-profile-section h3 {
           margin: 0 0 10px;
-          font-size: 13px;
-          letter-spacing: 0.08em;
+          font-size: 11px;
+          letter-spacing: .1em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.58);
+          color: #4a4f5c;
+          font-family: 'JetBrains Mono', monospace;
+          font-weight: 500;
         }
 
+        /* ── Grids ── */
         .ig-profile-grid,
         .ig-profile-options,
         .ig-profile-review {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
+          gap: 10px;
         }
 
+        /* ── Option cards + form inputs ── */
         .ig-profile-option,
         .ig-profile-field input,
         .ig-profile-field select,
         .ig-profile-field textarea {
           width: 100%;
-          border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.045);
-          color: #f0f0ef;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #1e2028;
+          color: #f0f0ee;
           font: inherit;
           outline: none;
-          padding: 12px;
+          padding: 11px 12px;
+          transition: border-color .13s ease;
         }
+        .ig-profile-field input:focus,
+        .ig-profile-field select:focus,
+        .ig-profile-field textarea:focus { border-color: rgba(101,88,245,.35); }
 
         .ig-profile-option {
-          min-height: 74px;
+          min-height: 70px;
           cursor: pointer;
           text-align: left;
         }
+        .ig-profile-option:hover:not(:disabled) { border-color: rgba(255,255,255,.14); }
 
         .ig-profile-option strong,
         .ig-profile-review dd {
-          color: #f0f0ef;
+          color: #f0f0ee;
           margin: 0;
+          font-weight: 600;
         }
 
         .ig-profile-option span {
           display: block;
-          color: rgba(255,255,255,0.52);
-          font-size: 12px;
-          margin-top: 5px;
+          color: #8a8f98;
+          font-size: 11.5px;
+          margin-top: 4px;
         }
 
         .ig-profile-option-active {
-          border-color: rgba(245,158,11,0.46);
-          background: rgba(245,158,11,0.13);
+          border-color: rgba(101,88,245,0.35);
+          background: rgba(101,88,245,0.14);
         }
 
-        .ig-profile-field {
-          display: grid;
-          gap: 8px;
-        }
+        /* ── Field layout ── */
+        .ig-profile-field { display: grid; gap: 8px; }
+        .ig-profile-input-wrap { position: relative; }
+        .ig-profile-field-wide { grid-column: 1 / -1; }
 
-        .ig-profile-input-wrap {
-          position: relative;
-        }
-
-        .ig-profile-field-wide {
-          grid-column: 1 / -1;
-        }
-
-        .ig-profile-review {
-          margin: 0;
-        }
+        /* ── Review step ── */
+        .ig-profile-review { margin: 0; }
 
         .ig-profile-review div {
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.035);
-          padding: 12px;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #1e2028;
+          padding: 11px 12px;
         }
 
         .ig-profile-review dd {
-          margin-top: 6px;
+          margin-top: 5px;
           overflow-wrap: anywhere;
+          color: #f0f0ee;
         }
 
+        /* ── Footer actions ── */
         .ig-profile-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 10px;
-          margin-top: 18px;
+          gap: 8px;
+          margin-top: 16px;
         }
 
         .ig-profile-primary {
-          border: 1px solid rgba(245,158,11,0.50);
-          background: #F59E0B;
-          color: #160b02;
+          border: 1px solid rgba(101,88,245,0.40);
+          background: #6558f5;
+          color: #fff;
           padding: 0 16px;
         }
+        .ig-profile-primary:hover:not(:disabled) { opacity: .88; }
 
         .ig-profile-secondary {
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.045);
-          color: rgba(255,255,255,0.76);
+          border: 1px solid rgba(255,255,255,.07);
+          background: #1e2028;
+          color: #8a8f98;
           padding: 0 16px;
+        }
+        .ig-profile-secondary:hover:not(:disabled) {
+          border-color: rgba(255,255,255,.18);
+          color: #f0f0ee;
         }
 
         .ig-profile-primary:disabled,
         .ig-profile-secondary:disabled,
         .ig-profile-option:disabled {
           cursor: not-allowed;
-          opacity: 0.58;
+          opacity: 0.45;
         }
 
+        /* ── Warning badge (kept amber — semantic) ── */
         .ig-profile-warning {
           display: block;
-          color: #FBBF24;
+          color: #fbbf24;
           font-size: 11px;
           font-style: normal;
-          font-weight: 900;
+          font-weight: 700;
           margin-top: 6px;
         }
 
+        /* ── Note + verification card ── */
         .ig-profile-note,
         .ig-profile-verification {
-          border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 12px;
-          background: rgba(255,255,255,0.035);
-          color: rgba(255,255,255,0.72);
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #1e2028;
+          color: #8a8f98;
           padding: 12px;
         }
 
-        .ig-profile-note {
-          display: grid;
-          gap: 6px;
-        }
+        .ig-profile-note { display: grid; gap: 6px; }
 
         .ig-profile-field small {
-          color: rgba(255,255,255,0.52);
+          color: #8a8f98;
           font-size: 12px;
           line-height: 1.4;
         }
 
+        /* ── Inline "Verify" action button ── */
         .ig-profile-inline-action {
           position: absolute;
           right: 8px;
           top: 50%;
           transform: translateY(-50%);
-          border: 1px solid rgba(245,158,11,0.42);
+          border: 1px solid rgba(101,88,245,0.35);
           border-radius: 999px;
-          background: rgba(245,158,11,0.14);
-          color: #FBBF24;
+          background: rgba(101,88,245,0.14);
+          color: #a594f9;
           cursor: pointer;
           font-size: 11px;
-          font-weight: 900;
-          padding: 5px 9px;
+          font-weight: 700;
+          padding: 4px 9px;
+          transition: background .13s ease;
         }
+        .ig-profile-inline-action:hover:not(:disabled) { background: rgba(101,88,245,0.24); }
 
-        .ig-profile-verification {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
+        /* ── Verification preview ── */
+        .ig-profile-verification { display: flex; align-items: center; gap: 10px; }
 
         .ig-profile-avatar-preview,
         .ig-profile-avatar-placeholder {
-          width: 42px;
-          height: 42px;
+          width: 40px;
+          height: 40px;
           border-radius: 999px;
           object-fit: cover;
+          flex-shrink: 0;
         }
 
         .ig-profile-avatar-preview {
@@ -882,36 +911,37 @@ export default function AddProfileWizard() {
         .ig-profile-avatar-placeholder {
           display: grid;
           place-items: center;
-          background: rgba(255,255,255,0.08);
-          color: rgba(255,255,255,0.48);
+          background: #252832;
+          color: #8a8f98;
           font-size: 9px;
           text-align: center;
         }
 
+        /* ── Messages ── */
         .ig-profile-message,
         .ig-profile-loading {
-          border-radius: 12px;
+          border-radius: 8px;
           font-size: 13px;
-          font-weight: 800;
+          font-weight: 600;
           margin: 0 0 14px;
-          padding: 11px 12px;
+          padding: 10px 12px;
         }
 
         .ig-profile-error {
           border: 1px solid rgba(248,113,113,0.28);
           background: rgba(248,113,113,0.08);
-          color: #FCA5A5;
+          color: #fca5a5;
         }
 
         .ig-profile-success {
           border: 1px solid rgba(52,211,153,0.24);
           background: rgba(52,211,153,0.08);
-          color: #86EFAC;
+          color: #86efac;
         }
 
         .ig-profile-loading,
         .ig-profile-confirm p {
-          color: rgba(255,255,255,0.62);
+          color: #8a8f98;
         }
 
         @media (max-width: 720px) {
