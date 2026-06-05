@@ -4,7 +4,7 @@ import {
   clearInstagramAuthCookies,
   writeInstagramAuthCookies,
 } from "@/lib/instagram-auth/cookies";
-import { resolveInstagramUserContextFromCookies } from "@/lib/instagram-auth/resolve-user-context";
+import { refreshInstagramUserContextFromCookies } from "@/lib/instagram-auth/resolve-user-context";
 import {
   createUserContextFromTenantUser,
   isUserRole,
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const context = await resolveInstagramUserContextFromCookies();
+  const context = await refreshInstagramUserContextFromCookies();
 
   if (!context) {
     return NextResponse.json(

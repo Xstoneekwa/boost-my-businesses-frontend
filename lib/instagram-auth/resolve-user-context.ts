@@ -64,36 +64,40 @@ async function resolveAuthUserId(accessToken: string): Promise<string | null> {
   return userData.user.id;
 }
 
+export type ResolveInstagramUserContextOptions = {
+  /** When true, refresh/clear cookies (route handlers only). Server Components must keep false. */
+  allowCookieMutation?: boolean;
+};
+
 /**
  * Resolve Instagram dashboard user context from httpOnly cookies.
- * Refreshes Supabase session when the access JWT is expired but refresh token is valid.
+ * When the access JWT is expired but the refresh token is valid, refreshes in memory.
+ * Cookie writes/clears happen only when `allowCookieMutation` is true (route handlers).
  */
-export async function resolveInstagramUserContextFromCookies(): Promise<UserContext | null> {
+export async function resolveInstagramUserContextFromCookies(
+  options: ResolveInstagramUserContextOptions = {},
+): Promise<UserContext | null> {
+  const { allowCookieMutation = false } = options;
   const { accessToken, refreshToken } = await readInstagramAuthCookies();
 
   if (!accessToken && !refreshToken) {
     return null;
   }
 
-  let effectiveAccessToken = accessToken;
-  let effectiveRefreshToken = refreshToken;
-  let userId = await resolveAuthUserId(effectiveAccessToken);
+  let userId = await resolveAuthUserId(accessToken);
 
-  if (!userId && effectiveRefreshToken) {
-    const refreshed = await refreshInstagramAuthSession(effectiveRefreshToken);
+  if (!userId && refreshToken) {
+    const refreshed = await refreshInstagramAuthSession(refreshToken);
     if (!refreshed) {
-      await clearInstagramAuthCookies();
+      if (allowCookieMutation) {
+        await clearInstagramAuthCookies();
+      }
       return null;
     }
 
-    effectiveAccessToken = refreshed.accessToken;
-    effectiveRefreshToken = refreshed.refreshToken;
     userId = refreshed.userId;
-    try {
-      await writeInstagramAuthCookies(effectiveAccessToken, effectiveRefreshToken);
-    } catch {
-      // Cookie write not available from Server Component context.
-      // Tokens are refreshed in memory for this request; next request will re-refresh silently.
+    if (allowCookieMutation) {
+      await writeInstagramAuthCookies(refreshed.accessToken, refreshed.refreshToken);
     }
   }
 
@@ -102,4 +106,9 @@ export async function resolveInstagramUserContextFromCookies(): Promise<UserCont
   }
 
   return loadTenantUserContext(userId);
+}
+
+/** Route-handler helper: resolve context and persist refreshed Supabase session cookies. */
+export async function refreshInstagramUserContextFromCookies(): Promise<UserContext | null> {
+  return resolveInstagramUserContextFromCookies({ allowCookieMutation: true });
 }

@@ -72,12 +72,18 @@ export async function requireDashboardUserContext(): Promise<UserContext> {
   return context;
 }
 
+/** Read-only Instagram auth for Server Component page renders (no cookie mutation). */
+export async function getInstagramUserContextReadOnly(): Promise<UserContext | null> {
+  return resolveInstagramUserContextFromCookies({ allowCookieMutation: false });
+}
+
+/** Instagram auth for route handlers; may refresh and persist httpOnly session cookies. */
 export async function getInstagramUserContext(): Promise<UserContext | null> {
-  return resolveInstagramUserContextFromCookies();
+  return resolveInstagramUserContextFromCookies({ allowCookieMutation: true });
 }
 
 export async function requireInstagramDashboardAccess(): Promise<UserContext> {
-  const context = await getInstagramUserContext();
+  const context = await getInstagramUserContextReadOnly();
 
   if (!context) {
     redirect("/instagram-login");
