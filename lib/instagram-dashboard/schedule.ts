@@ -1,4 +1,5 @@
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
+import { normalizeBusinessTimezone } from "@/lib/instagram-dashboard/business-timezone";
 
 export type ScheduleSlotReason =
   | "available"
@@ -155,11 +156,12 @@ export function mapScheduleGateReasonToRunStart(reason: string): ScheduleBlockRe
 export function formatScheduleLocalLabel(startsAt: string, endsAt: string, timezone: string | null) {
   if (!startsAt || !endsAt) return null;
   try {
+    const businessTimezone = normalizeBusinessTimezone(timezone);
     const formatter = new Intl.DateTimeFormat("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-      timeZone: timezone || "UTC",
+      timeZone: businessTimezone,
     });
     return `${formatter.format(new Date(startsAt))} - ${formatter.format(new Date(endsAt))}`;
   } catch {
@@ -190,13 +192,13 @@ export function assignmentWindowContainsNow(startsAt: string, endsAt: string, no
 export function phoneRestActiveNow(
   restWindows: ScheduleRestWindowProjection[],
   now = new Date(),
-  timezone = "UTC",
+  timezone = normalizeBusinessTimezone(),
 ) {
   for (const window of restWindows) {
     if (window.status !== "active") continue;
     try {
       const formatter = new Intl.DateTimeFormat("en-US", {
-        timeZone: window.timezone || timezone,
+        timeZone: normalizeBusinessTimezone(window.timezone || timezone),
         weekday: "short",
         hour: "2-digit",
         minute: "2-digit",

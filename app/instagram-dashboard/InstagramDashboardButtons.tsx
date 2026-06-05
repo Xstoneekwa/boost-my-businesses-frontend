@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, BarChart3, Clipboard, Download, Eye, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
+import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/instagram-dashboard/business-timezone";
 import type { ScheduleProjection, ScheduleSlotProjection } from "@/lib/instagram-dashboard/schedule";
 import {
   buildTargetsOverview,
@@ -3577,11 +3578,26 @@ function scheduleSlotReasonLabel(slot: ScheduleSlotProjection) {
 }
 
 function scheduleGateStatusLabel(status: string, reason: string) {
+  if (status === "ready") return "Window open now";
   return status === "blocked" ? `blocked - ${reason || "unknown"}` : status;
 }
 
 function scheduleNextEligibleLabel(schedule: ScheduleProjection) {
-  if (schedule.gates.next_eligible_starts_at) return schedule.gates.next_eligible_starts_at;
+  const timezone = schedule.device_timezone || DEFAULT_BUSINESS_TIMEZONE;
+  if (schedule.gates.ok) return "Window open now";
+  if (schedule.gates.next_eligible_starts_at) {
+    try {
+      const formatter = new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: timezone,
+      });
+      return `Blocked until ${formatter.format(new Date(schedule.gates.next_eligible_starts_at))} ${timezone}`;
+    } catch {
+      return `Blocked until ${schedule.gates.next_eligible_starts_at}`;
+    }
+  }
   if (schedule.gates.reason === "assignment_missing" || !schedule.current_assignment) return "Select a slot first";
   return "None";
 }
@@ -3699,7 +3715,7 @@ function ScheduleActivePanel({
     ["App instances", appInstanceSummary],
     ["Assignment status", assignment?.status || "Pending"],
     ["Assignment source", assignment?.assignment_source || "Unknown"],
-    ["Device timezone", schedule.device_timezone || "UTC"],
+    ["Device timezone", schedule.device_timezone || DEFAULT_BUSINESS_TIMEZONE],
   ];
 
   return (

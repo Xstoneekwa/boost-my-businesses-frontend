@@ -11,6 +11,7 @@ import {
   defaultAddProfileCommercialPackage,
   packageLabelForSelection,
 } from "@/lib/instagram-dashboard/add-profile-packages";
+import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/instagram-dashboard/business-timezone";
 
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
 type AppInstance = {
@@ -168,6 +169,7 @@ export default function AddProfileWizard() {
     () => scheduleSlots?.slots.find((slot) => slot.starts_at === form.starts_at && slot.ends_at === form.ends_at) ?? null,
     [scheduleSlots, form.starts_at, form.ends_at],
   );
+  const scheduleTimezone = scheduleSlots?.timezone || DEFAULT_BUSINESS_TIMEZONE;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -524,7 +526,7 @@ export default function AddProfileWizard() {
                           disabled={!slot.available}
                         >
                           <strong>{slot.local_label || `Slot ${slot.slot_index}`}</strong>
-                          <span>{slot.slot_kind_label || slot.slot_kind} · {scheduleSlots?.timezone || "UTC"}</span>
+                          <span>{slot.slot_kind_label || slot.slot_kind} · {scheduleTimezone}</span>
                           <span>{slot.available ? "available" : slot.occupied_by ? `occupied by @${slot.occupied_by}` : slot.reason || "unavailable"}</span>
                         </button>
                       ))}
@@ -549,7 +551,7 @@ export default function AddProfileWizard() {
                     <div><dt>Add-ons</dt><dd>{selectedAddons.length ? selectedAddons.map((addon) => addon.label).join(", ") : "none"} · planned add-ons are not wired to runtime</dd></div>
                     <div><dt>Quotas preview</dt><dd>Package caps apply after assignment; no runtime quota is activated from Add Profile.</dd></div>
                     <div><dt>Entitlements preview</dt><dd>{selectedPackage.commercialCode} · subscription type follows runtime mode · no auto entitlement run</dd></div>
-                    <div><dt>Schedule</dt><dd>{selectedScheduleSlot?.local_label || "—"} · {scheduleSlots?.timezone || "UTC"} · visible later in Schedule drawer</dd></div>
+                    <div><dt>Schedule</dt><dd>{selectedScheduleSlot?.local_label || "—"} · {scheduleTimezone} · visible later in Schedule drawer</dd></div>
                     <div><dt>Safety</dt><dd>No login, provisioning, runner, DM, Welcome, Outreach or Unfollow is launched.</dd></div>
                     <div><dt>No run auto</dt><dd>Provisioning, login, and runner stay off.</dd></div>
                     <div><dt>No login/provisioning auto</dt><dd>Credentials remain write-only when selected; no device login is started.</dd></div>

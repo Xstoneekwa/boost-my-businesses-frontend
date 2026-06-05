@@ -9,6 +9,7 @@ import {
   type ScheduleRestWindowProjection,
   type ScheduleSlotProjection,
 } from "@/lib/instagram-dashboard/schedule";
+import { normalizeLegacyScheduleTimezone } from "@/lib/instagram-dashboard/business-timezone";
 import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control";
 import { createSupabaseClient } from "@/lib/supabase";
 import {
@@ -179,10 +180,13 @@ async function buildScheduleProjection(
 
   const slotPayload = readRpcObject(slotData);
   const deviceId = readString(slotPayload.device_id, "") || null;
-  const deviceTimezone = readString(slotPayload.device_timezone, "") || null;
+  const deviceTimezone = normalizeLegacyScheduleTimezone(readString(slotPayload.device_timezone, ""));
   const deviceLabel = await fetchDeviceLabel(supabase, deviceId);
   const restWindows = await fetchRestWindows(supabase, deviceId);
-  const availableSlots = readSlotArray(slotPayload.slots);
+  const availableSlots = readSlotArray(slotPayload.slots).map((slot) => ({
+    ...slot,
+    local_label: formatScheduleLocalLabel(slot.starts_at, slot.ends_at, deviceTimezone) ?? slot.local_label,
+  }));
   const currentAssignmentRaw = readCurrentAssignment(slotPayload.current_assignment, deviceLabel);
   const currentAssignment = currentAssignmentRaw
     ? {

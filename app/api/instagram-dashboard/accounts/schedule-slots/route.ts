@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { normalizeBusinessTimezone, normalizeLegacyScheduleTimezone } from "@/lib/instagram-dashboard/business-timezone";
 import { jsonError, jsonOk, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +12,10 @@ const runtimeToAssignmentType: Record<string, "full_cycle" | "outreach_only"> = 
 };
 
 function readDateForTimezone(timezone: string) {
+  const businessTimezone = normalizeBusinessTimezone(timezone);
   try {
     const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone || "UTC",
+      timeZone: businessTimezone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -23,9 +25,18 @@ function readDateForTimezone(timezone: string) {
     const day = parts.find((part) => part.type === "day")?.value;
     if (year && month && day) return `${year}-${month}-${day}`;
   } catch {
-    // UTC fallback keeps the route deterministic if a stored timezone is invalid.
+    // Business timezone fallback keeps the route deterministic if a stored timezone is invalid.
   }
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: normalizeBusinessTimezone(),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : new Date().toISOString().slice(0, 10);
 }
 
 function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
@@ -79,7 +90,7 @@ export async function GET(request: Request) {
       .maybeSingle<SupabaseRecord>();
     if (deviceError || !device) return jsonError("device_unavailable", 404);
 
-    const timezone = readString(device.timezone, "UTC") || "UTC";
+    const timezone = normalizeLegacyScheduleTimezone(readString(device.timezone, ""));
     const slotDate = readDateForTimezone(timezone);
     const { data: slotRows, error: slotError } = await supabase.rpc("generate_assignment_slot_catalog", {
       p_assignment_type: assignmentType,

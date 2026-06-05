@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./AddProfileWizard.tsx", import.meta.url), "utf8");
+const scheduleRouteSource = readFileSync(
+  new URL("../api/instagram-dashboard/accounts/schedule-slots/route.ts", import.meta.url),
+  "utf8",
+);
 
 test("Add Profile wizard loads real devices and app instances", () => {
   assert.match(source, /fetch\("\/api\/instagram-dashboard\/devices"/);
@@ -38,6 +42,14 @@ test("Add Profile wizard has Package and Add-ons step plus Schedule", () => {
   assert.equal(source.includes("Start from scratch"), false);
   assert.equal(source.includes("Select settings template"), false);
   assert.equal(source.includes("Default settings template"), false);
+});
+
+test("Add Profile schedule slots use the business timezone helper", () => {
+  assert.match(scheduleRouteSource, /normalizeBusinessTimezone/);
+  assert.match(scheduleRouteSource, /generate_assignment_slot_catalog/);
+  assert.doesNotMatch(scheduleRouteSource, /readString\(device\.timezone, "UTC"\)/);
+  assert.match(source, /DEFAULT_BUSINESS_TIMEZONE/);
+  assert.doesNotMatch(source, /scheduleSlots\?\.timezone \|\| "UTC"/);
 });
 
 test("Add Profile review states no runtime action is launched", () => {
