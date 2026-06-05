@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import { getDmTemplatesData, type DmTemplateAccount, type DmTemplateItem } from "../dm-templates-data";
 import { getRadarData } from "../radar-data";
 
@@ -28,7 +27,6 @@ export default async function InstagramDmTemplatesPage() {
         eyebrow="Messaging"
         title="DM Templates"
         description="Personalized welcome and cold outreach messages by account/client."
-        action={<InstagramDashboardViewNav active="dm-templates" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       <section className="ig-dm-source-strip" aria-label="DM Templates source status">

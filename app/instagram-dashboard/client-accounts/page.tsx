@@ -4,7 +4,6 @@ import { KeyRound, LifeBuoy, RefreshCw, UserRound, type LucideIcon } from "lucid
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import AccountStatusActionMenu from "./AccountStatusActionMenu";
 import {
   getClientAccountsOperationsData,
@@ -70,7 +69,6 @@ export default async function InstagramClientAccountsPage({
         eyebrow="Accounts"
         title="Client Accounts"
         description=""
-        action={<InstagramDashboardViewNav active="client-accounts" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (

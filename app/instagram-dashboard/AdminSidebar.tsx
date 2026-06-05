@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import type { NotificationItem } from "./radar-data";
 
 type NavItem = {
   key: string;
@@ -17,9 +18,17 @@ type NavGroup = {
   items: NavItem[];
 };
 
+type BadgeKey = "radar" | "server-check";
+
+interface PopoverPosition { top: number; left: number; width: number; }
+
 interface AdminSidebarProps {
   collapsed?: boolean;
   onToggle?: () => void;
+  radarBadge?: number;
+  serverCheckBadge?: number;
+  radarNotifications?: NotificationItem[];
+  serverCheckNotifications?: NotificationItem[];
 }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -171,12 +180,99 @@ function ChevronRight() {
   );
 }
 
-export default function AdminSidebar({ collapsed = false, onToggle }: AdminSidebarProps) {
+export default function AdminSidebar({
+  collapsed = false,
+  onToggle,
+  radarBadge = 0,
+  serverCheckBadge = 0,
+  radarNotifications = [],
+  serverCheckNotifications = [],
+}: AdminSidebarProps) {
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
   useEffect(() => { setReady(true); }, []);
 
+  // Popover state — mirrors InstagramDashboardViewNav behavior
+  const [openKey, setOpenKey] = useState<BadgeKey | null>(null);
+  const [popoverPos, setPopoverPos] = useState<PopoverPosition | null>(null);
+  const badgeRefs = useRef<Partial<Record<BadgeKey, HTMLButtonElement | null>>>({});
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const badges: Partial<Record<BadgeKey, number>> = {
+    radar: radarBadge,
+    "server-check": serverCheckBadge,
+  };
+  const notificationItems: Partial<Record<BadgeKey, NotificationItem[]>> = {
+    radar: radarNotifications,
+    "server-check": serverCheckNotifications,
+  };
+
+  function clearCloseTimer() {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+  }
+
+  function positionPopover(key: BadgeKey) {
+    const el = badgeRefs.current[key];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const maxWidth = 360;
+    const gutter = 14;
+    const width = Math.min(maxWidth, window.innerWidth - gutter * 2);
+    // Place popover to the right of the sidebar
+    const left = Math.min(Math.max(gutter, rect.right + 8), window.innerWidth - width - gutter);
+    setPopoverPos({ top: rect.top, left, width });
+  }
+
+  function openPopover(key: BadgeKey) {
+    clearCloseTimer();
+    setOpenKey(key);
+    positionPopover(key);
+  }
+
+  function scheduleClose() {
+    clearCloseTimer();
+    closeTimer.current = setTimeout(() => { setOpenKey(null); setPopoverPos(null); }, 180);
+  }
+
+  function togglePopover(key: BadgeKey) {
+    clearCloseTimer();
+    if (openKey === key) { setOpenKey(null); setPopoverPos(null); return; }
+    setOpenKey(key);
+    positionPopover(key);
+  }
+
+  useEffect(() => {
+    if (!openKey) return;
+    const currentKey = openKey;
+    function handlePointerDown(e: PointerEvent) {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (t.closest(".iad-sb-nav") || t.closest(".iad-notification-popover")) return;
+      setOpenKey(null); setPopoverPos(null);
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setOpenKey(null); setPopoverPos(null);
+    }
+    function handleReposition() { positionPopover(currentKey); }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+    };
+  }, [openKey]);
+
+  useEffect(() => { return () => clearCloseTimer(); }, []);
+
+  const openItems = openKey ? (notificationItems[openKey] ?? []) : [];
+
   return (
+  <>
     <aside style={{
       background: "#111213",
       borderRight: "1px solid rgba(255,255,255,.07)",
@@ -284,9 +380,17 @@ export default function AdminSidebar({ collapsed = false, onToggle }: AdminSideb
             )}
             {group.items.map((item) => {
               const active = isActive(item.href, pathname, item.exact);
+              const badgeKey = (item.key === "radar" || item.key === "server-check") ? item.key as BadgeKey : null;
+              const badgeCount = badgeKey ? (badges[badgeKey] ?? 0) : 0;
+              const hasItems = badgeKey ? (notificationItems[badgeKey]?.length ?? 0) > 0 : false;
               return (
-                <Link
+                <div
                   key={item.key}
+                  style={{ position: "relative", display: "flex", alignItems: "center" }}
+                  onMouseEnter={hasItems ? () => openPopover(badgeKey!) : undefined}
+                  onMouseLeave={hasItems ? scheduleClose : undefined}
+                >
+                <Link
                   href={item.href}
                   title={collapsed ? item.label : undefined}
                   style={{
@@ -330,6 +434,45 @@ export default function AdminSidebar({ collapsed = false, onToggle }: AdminSideb
                   </span>
                   {!collapsed && <span>{item.label}</span>}
                 </Link>
+                {/* Badge pill — only on radar and server-check, only when count > 0 */}
+                {badgeKey && badgeCount > 0 && (
+                  <button
+                    ref={(node) => { badgeRefs.current[badgeKey] = node; }}
+                    type="button"
+                    aria-expanded={openKey === badgeKey}
+                    aria-haspopup="dialog"
+                    aria-label={`${item.label}: ${badgeCount} open notifications`}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); togglePopover(badgeKey); }}
+                    onFocus={hasItems ? () => openPopover(badgeKey) : undefined}
+                    style={{
+                      position: "absolute",
+                      right: 6,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      minWidth: 18,
+                      height: 18,
+                      borderRadius: 9999,
+                      border: openKey === badgeKey
+                        ? "1px solid rgba(248,113,113,0.38)"
+                        : "1px solid rgba(248,113,113,0.20)",
+                      background: openKey === badgeKey
+                        ? "rgba(248,113,113,0.24)"
+                        : "rgba(248,113,113,0.16)",
+                      color: openKey === badgeKey ? "#FECACA" : "#FCA5A5",
+                      cursor: "pointer",
+                      fontSize: 10,
+                      fontFamily: "var(--font-d, 'Archivo', sans-serif)",
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      padding: "0 5px",
+                      display: "grid",
+                      placeItems: "center",
+                    }}
+                  >
+                    {badgeCount}
+                  </button>
+                )}
+                </div>
               );
             })}
           </div>
@@ -419,5 +562,72 @@ export default function AdminSidebar({ collapsed = false, onToggle }: AdminSideb
         </div>
       </div>
     </aside>
+
+    {/* ── Notification popover — same behavior as InstagramDashboardViewNav ── */}
+    {openKey && openItems.length > 0 && popoverPos && (
+      <div
+        className="iad-notification-popover"
+        role="dialog"
+        aria-label="Open notifications"
+        onMouseEnter={clearCloseTimer}
+        onMouseLeave={scheduleClose}
+        style={{
+          position: "fixed",
+          top: popoverPos.top,
+          left: popoverPos.left,
+          width: popoverPos.width,
+          zIndex: 999,
+          display: "grid",
+          gap: 8,
+          maxHeight: "min(420px, calc(100vh - 28px))",
+          overflow: "auto",
+          border: "1px solid rgba(255,255,255,.10)",
+          borderRadius: 14,
+          background: "rgba(14,14,15,0.98)",
+          boxShadow: "0 18px 50px rgba(0,0,0,0.36)",
+          padding: 10,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "4px 4px 8px" }}>
+          <span style={{ color: "rgba(255,255,255,0.42)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            Open cases
+          </span>
+          <strong style={{ color: "#f0f0ef", fontSize: 12 }}>{openItems.length}</strong>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {openItems.slice(0, 8).map((item) => (
+            <Link
+              key={item.id}
+              href={item.targetHref}
+              style={{
+                display: "grid",
+                gap: 7,
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.035)",
+                padding: 10,
+                textDecoration: "none",
+              }}
+            >
+              <span style={{ color: "rgba(255,255,255,0.42)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                {item.severity} · {item.status}
+              </span>
+              <strong style={{ color: "#f0f0ef", fontSize: 12 }}>{item.title}</strong>
+              <p style={{ color: "rgba(255,255,255,0.64)", fontSize: 12, lineHeight: 1.45, margin: 0 }}>{item.reason}</p>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[item.phoneName, item.macHostName, item.sourceLabel,
+                  item.backendResolutionStatus === "pending" ? "Needs backend resolution" : "Resolution available",
+                ].map((meta) => (
+                  <small key={meta} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 999, padding: "4px 7px", color: "rgba(255,255,255,0.42)", fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>
+                    {meta}
+                  </small>
+                ))}
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    )}
+  </>
   );
 }

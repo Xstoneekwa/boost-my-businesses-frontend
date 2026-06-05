@@ -4,7 +4,6 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import EmailVerificationActionBanner from "../EmailVerificationActionBanner";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import VerificationCodeActionModal from "../VerificationCodeActionModal";
 import {
   getCredentialsActionsData,
@@ -45,7 +44,6 @@ export default async function InstagramCredentialsActionsPage() {
         eyebrow="Credentials"
         title="Credentials / Dashboard Actions"
         description="Safe credential status and pending account actions."
-        action={<InstagramDashboardViewNav active="credentials" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       <EmailVerificationActionBanner initialActions={emailVerificationBannerActions} />

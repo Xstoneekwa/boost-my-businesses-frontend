@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import {
   formatDateTime,
   formatInteger,
@@ -31,7 +30,6 @@ export default async function InstagramServerCheckPage() {
         eyebrow="Daily worklist"
         title="Instagram Server Check"
         description="Read-only worklist for accounts that need operator review. No worker, phone, or settings actions run from this view."
-        action={<InstagramDashboardViewNav active="server-check" badges={{ radar: data.notificationSummary.radarBadgeCount, "server-check": data.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: data.notificationItems.radar, "server-check": data.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (

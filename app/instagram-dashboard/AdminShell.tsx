@@ -2,10 +2,25 @@
 
 import { useEffect, useState } from "react";
 import AdminSidebar from "./AdminSidebar";
+import type { NotificationItem } from "./radar-data";
 
 const COLLAPSE_KEY = "iad_sidebar_collapsed";
 
-export default function AdminShell({ children }: { children: React.ReactNode }) {
+interface AdminShellProps {
+  children: React.ReactNode;
+  radarBadge?: number;
+  serverCheckBadge?: number;
+  radarNotifications?: NotificationItem[];
+  serverCheckNotifications?: NotificationItem[];
+}
+
+export default function AdminShell({
+  children,
+  radarBadge = 0,
+  serverCheckBadge = 0,
+  radarNotifications = [],
+  serverCheckNotifications = [],
+}: AdminShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   // `ready` delays the CSS transition until after hydration to prevent
   // an animate-on-load flash when restoring a collapsed state from localStorage.
@@ -54,6 +69,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       <AdminSidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed((c) => !c)}
+        radarBadge={radarBadge}
+        serverCheckBadge={serverCheckBadge}
+        radarNotifications={radarNotifications}
+        serverCheckNotifications={serverCheckNotifications}
       />
       <div
         style={{

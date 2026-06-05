@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import {
   formatDateTime,
   formatInteger,
@@ -67,7 +66,6 @@ export default async function InstagramRadarPage({
         eyebrow="Admin radar"
         title="Instagram Radar"
         description="Traceable diagnostic view for run health, account risk, device readiness, and recent automation warnings."
-        action={<InstagramDashboardViewNav active="radar" badges={{ radar: data.notificationSummary.radarBadgeCount, "server-check": data.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: data.notificationItems.radar, "server-check": data.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (

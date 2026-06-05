@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import { formatDateTime, formatInteger, statusTone } from "../manage-data";
 import { getLiveDevicesOverviewData, type LivePhoneAppInstance, type LivePhoneDevice, type LivePhoneInventorySummary } from "../devices-live-data";
 import { getRadarData } from "../radar-data";
@@ -26,7 +25,6 @@ export default async function InstagramDevicesPage() {
         eyebrow="Inventory"
         title="Devices / Phones"
         description="Register and monitor physical phones used by the Instagram automation runtime."
-        action={<InstagramDashboardViewNav active="devices" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (

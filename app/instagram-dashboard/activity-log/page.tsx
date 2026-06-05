@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import { getActivityLogData, type ActivityLogItem } from "../activity-log-data";
 import { getRadarData } from "../radar-data";
 
@@ -23,7 +22,6 @@ export default async function InstagramActivityLogPage() {
         eyebrow="Audit"
         title="Activity Log"
         description="Safe target audit activity for admin review."
-        action={<InstagramDashboardViewNav active="activity-log" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       <section className="ig-activity-kpis" aria-label="Activity Log summary">

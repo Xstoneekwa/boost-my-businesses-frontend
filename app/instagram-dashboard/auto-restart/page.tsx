@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import {
   getAutoRestartData,
   type AutoRestartCandidate,
@@ -55,7 +54,6 @@ export default async function InstagramAutoRestartPage() {
         eyebrow="Admin scheduler"
         title="Auto Restart"
         description="Dry-run preview for quota resume, restart eligibility, phone-farm gates, and no-overrun planning."
-        action={<InstagramDashboardViewNav active="auto-restart" />}
       />
 
       {data.errors.length > 0 ? (

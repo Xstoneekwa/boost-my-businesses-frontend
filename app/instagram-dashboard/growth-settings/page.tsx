@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
-import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import {
   getGrowthSettingsData,
   type GrowthAccountOverview,
@@ -30,7 +29,6 @@ export default async function InstagramGrowthSettingsPage() {
         eyebrow="Growth"
         title="Growth Settings"
         description="Read-only settings audit. Runtime wiring and client-safe defaults are not connected here."
-        action={<InstagramDashboardViewNav active="growth" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       {data.errors.length > 0 && (
