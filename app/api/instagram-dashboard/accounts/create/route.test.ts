@@ -16,6 +16,7 @@ test("accounts create route requires credentials password only for credentials l
 });
 
 test("accounts create route validates explicit phone app instance target", () => {
+  assert.match(source, /resolveAddProfileAssignmentPolicy/);
   assert.match(source, /fetchOnboardingTarget/);
   assert.match(source, /phone_app_instances/);
   assert.match(source, /app_instance_occupied/);
@@ -59,4 +60,18 @@ test("accounts create route ensures ownership subscription before assignment", (
 test("accounts create route accepts commercial package payload", () => {
   assert.match(source, /commercial_package/);
   assert.match(source, /readCommercialPackage/);
+});
+
+test("accounts create route applies package runtime defaults after ownership", () => {
+  assert.match(source, /resolveAddProfilePackagePreset/);
+  assert.match(source, /applyAddProfileRuntimeDefaults/);
+  assert.match(source, /ensureAddProfileOwnership\(supabase, \{[\s\S]*addons: selectedAddons/);
+  assert.match(source, /runtime_defaults_applied/);
+});
+
+test("accounts create safe response does not expose raw assignment ids", () => {
+  const safeResponseSource = source.slice(source.indexOf("function safeCreateResponse"), source.indexOf("export async function POST"));
+  assert.doesNotMatch(safeResponseSource, /device_id/);
+  assert.doesNotMatch(safeResponseSource, /app_instance_id/);
+  assert.doesNotMatch(safeResponseSource, /assignment_id/);
 });

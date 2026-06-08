@@ -2,9 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   commercialPackageCodeForSelection,
   defaultAddProfileCommercialPackage,
+  isAddProfileAddonCode,
   isAddProfileCommercialPackage,
   isAddProfileRuntimeMode,
+  resolveAddProfilePackagePreset,
   subscriptionTypeForRuntimeMode,
+  type AddProfileAddonCode,
   type AddProfileCommercialPackage,
   type AddProfileRuntimeMode,
 } from "@/lib/instagram-dashboard/add-profile-packages";
@@ -23,6 +26,7 @@ export type EnsureAddProfileOwnershipInput = {
   accountId: string;
   accountUsername: string;
   commercialPackage?: string;
+  addons?: string[];
   runtimeMode: AddProfileRuntimeMode | string;
   clientId?: string;
 };
@@ -36,6 +40,7 @@ export type EnsureAddProfileOwnershipResult =
     clientInstagramAccountId: string;
     subscriptionId: string;
     subscriptionAccountId: string;
+    addonCodes: string[];
     repaired: boolean;
   }
   | { ok: false; reason: string };
@@ -52,33 +57,35 @@ function normalizeCommercialPackage(value: string | undefined): AddProfileCommer
   return defaultAddProfileCommercialPackage();
 }
 
-async function ensureInternalTestCommercialPackage(
+async function ensureCommercialPackagePreset(
   supabase: SupabaseClient,
-  commercialPackageCode: string,
+  preset: ReturnType<typeof resolveAddProfilePackagePreset>,
 ) {
-  if (commercialPackageCode !== "internal_test") return;
-
   const { error } = await supabase.from("commercial_packages").upsert(
     {
-      code: "internal_test",
-      label: "Internal Test",
-      default_follow_day_cap: 20,
-      default_unfollow_day_cap: 20,
-      default_follow_session_cap: 20,
-      default_unfollow_session_cap: 20,
-      default_welcome_enabled: false,
-      default_outreach_enabled: false,
-      default_welcome_day_cap: null,
-      default_outreach_day_cap: null,
-      advanced_ct_enabled: false,
-      ai_comment_enabled: false,
-      ai_targeting_enabled: false,
+      code: preset.commercialPackageCode,
+      label: preset.label,
+      default_follow_day_cap: preset.defaultFollowDayCap,
+      default_unfollow_day_cap: preset.defaultUnfollowDayCap,
+      default_follow_session_cap: preset.defaultFollowSessionCap,
+      default_unfollow_session_cap: preset.defaultUnfollowSessionCap,
+      default_welcome_enabled: preset.defaultWelcomeEnabled,
+      default_outreach_enabled: preset.defaultOutreachEnabled,
+      default_welcome_day_cap: preset.defaultWelcomeDayCap,
+      default_outreach_day_cap: preset.defaultOutreachDayCap,
+      advanced_ct_enabled: preset.advancedCtEnabled,
+      ai_comment_enabled: preset.aiCommentEnabled,
+      ai_targeting_enabled: preset.aiTargetingEnabled,
       active: true,
     },
     { onConflict: "code" },
   );
 
   if (error) throw new Error("commercial_package_upsert_failed");
+}
+
+function normalizeAddonCodes(addons: string[] | undefined): AddProfileAddonCode[] {
+  return [...new Set((addons ?? []).filter((addon): addon is AddProfileAddonCode => isAddProfileAddonCode(addon)))];
 }
 
 async function ensureAccountCommercialPackage(
@@ -118,6 +125,40 @@ async function ensureAccountCommercialPackage(
   });
 
   if (error) throw new Error("commercial_package_assign_failed");
+}
+
+async function ensureAccountCommercialAddons(
+  supabase: SupabaseClient,
+  accountId: string,
+  addonCodes: AddProfileAddonCode[],
+) {
+  for (const addonCode of addonCodes) {
+    const { data: existing, error: existingError } = await supabase
+      .from("account_commercial_addons")
+      .select("id")
+      .eq("account_id", accountId)
+      .eq("addon_code", addonCode)
+      .eq("status", "active")
+      .is("ends_at", null)
+      .limit(1)
+      .maybeSingle<OwnershipRow>();
+
+    if (existingError) throw new Error("commercial_addon_lookup_failed");
+    if (existing?.id) continue;
+
+    const { error } = await supabase.from("account_commercial_addons").insert({
+      account_id: accountId,
+      addon_code: addonCode,
+      status: "active",
+      source: "add_profile",
+      source_type: "admin_dashboard",
+      metadata_safe: {
+        source: "add_profile",
+        source_surface: "admin_dashboard",
+      },
+    });
+    if (error) throw new Error("commercial_addon_assign_failed");
+  }
 }
 
 async function ensureClientInstagramAccount(
@@ -240,6 +281,8 @@ export async function ensureAddProfileOwnership(
   const commercialPackageCode = commercialPackageCodeForSelection(commercialPackage);
   const runtimeMode = isAddProfileRuntimeMode(input.runtimeMode) ? input.runtimeMode : "safe_setup";
   const subscriptionType = subscriptionTypeForRuntimeMode(runtimeMode);
+  const addonCodes = normalizeAddonCodes(input.addons);
+  const preset = resolveAddProfilePackagePreset({ commercialPackage, runtimeMode, addons: addonCodes });
 
   try {
     const { data: client, error: clientError } = await supabase
@@ -254,8 +297,9 @@ export async function ensureAddProfileOwnership(
       return { ok: false, reason: "add_profile_client_unavailable" };
     }
 
-    await ensureInternalTestCommercialPackage(supabase, commercialPackageCode);
+    await ensureCommercialPackagePreset(supabase, preset);
     await ensureAccountCommercialPackage(supabase, input.accountId, commercialPackageCode, "add_profile");
+    await ensureAccountCommercialAddons(supabase, input.accountId, addonCodes);
     const clientInstagramAccountId = await ensureClientInstagramAccount(
       supabase,
       input.accountId,
@@ -277,6 +321,7 @@ export async function ensureAddProfileOwnership(
       clientInstagramAccountId,
       subscriptionId,
       subscriptionAccountId,
+      addonCodes,
       repaired: false,
     };
   } catch (error) {

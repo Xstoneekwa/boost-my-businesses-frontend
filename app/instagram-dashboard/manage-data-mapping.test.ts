@@ -21,6 +21,17 @@ test("Manage maps active credentials separately from login status", () => {
   assert.match(manageSource, /pending_login/);
 });
 
+test("Manage exposes server-side readiness projection without raw device or secret fields", () => {
+  assert.match(manageSource, /buildAdminReadinessProjection/);
+  assert.match(manageSource, /from\("account_dashboard_actions"\)/);
+  assert.match(manageSource, /from\("ig_account_dm_settings"\)/);
+  assert.match(manageSource, /from\("ig_account_unfollow_settings"\)/);
+  assert.match(manageSource, /is_launchable,usable_for_auto_login/);
+  assert.match(pageSource, /ReadinessSummary/);
+  assert.match(pageSource, /readinessLabel/);
+  assert.doesNotMatch(pageSource, /device_id|app_instance_id|secret_ref|Vault|service_role|raw XML|screenshot|ADB serial/);
+});
+
 test("Manage renders account avatar with canonical username fallback", () => {
   assert.match(pageSource, /function AccountAvatar/);
   assert.match(pageSource, /profileImageUrl/);

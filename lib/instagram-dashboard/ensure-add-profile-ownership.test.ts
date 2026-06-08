@@ -9,9 +9,12 @@ const routeSource = readFileSync(
   "utf8",
 );
 
-test("internal test package maps to internal_test commercial code", () => {
-  assert.match(packageSource, /value: "internal_test"/);
-  assert.match(packageSource, /commercialCode: "internal_test"/);
+test("Growth Pro Premium package presets are production selectable", () => {
+  assert.match(packageSource, /value: "growth"/);
+  assert.match(packageSource, /value: "pro"/);
+  assert.match(packageSource, /value: "premium"/);
+  assert.match(packageSource, /selectable: true/);
+  assert.match(packageSource, /defaultAddProfileCommercialPackage\(\)[\s\S]*"growth"/);
 });
 
 test("runtime modes map to subscription types for assignment", () => {
@@ -24,6 +27,8 @@ test("ensure ownership module creates client and subscription links before assig
   assert.match(ensureSource, /client_subscription_accounts/);
   assert.match(ensureSource, /account_commercial_packages/);
   assert.match(ensureSource, /commercial_packages/);
+  assert.match(ensureSource, /account_commercial_addons/);
+  assert.match(ensureSource, /ensureCommercialPackagePreset/);
 });
 
 test("accounts create route ensures ownership before assign_account_slot", () => {

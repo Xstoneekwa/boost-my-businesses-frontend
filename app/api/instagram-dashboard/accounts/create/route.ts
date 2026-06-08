@@ -11,7 +11,11 @@ import {
   defaultAddProfileCommercialPackage,
   isAddProfileAddonCode,
   isAddProfileCommercialPackage,
+  resolveAddProfilePackagePreset,
+  type AddProfileRuntimeMode,
 } from "@/lib/instagram-dashboard/add-profile-packages";
+import { resolveAddProfileAssignmentPolicy } from "@/lib/instagram-dashboard/add-profile-assignment-policy";
+import { applyAddProfileRuntimeDefaults } from "@/lib/instagram-dashboard/add-profile-runtime-defaults";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
 import {
@@ -574,9 +578,9 @@ function safeCreateResponse(
     onboarding_schedule_assigned?: boolean;
     onboarding_schedule_reason?: string;
     assignment?: SupabaseRecord;
-    device_id?: string;
-    app_instance_id?: string;
     package_name?: string;
+    runtime_defaults_applied?: boolean;
+    runtime_defaults_reason?: string | null;
   },
 ) {
   return {
@@ -613,9 +617,6 @@ function safeCreateResponse(
     assignment: {
       status: scheduleMeta?.onboarding_schedule_assigned ? "reserved" : "not_created",
       reason: scheduleMeta?.onboarding_schedule_reason ?? "not_attempted",
-      assignment_id: readString(scheduleMeta?.assignment?.assignment_id, "") || null,
-      device_id: scheduleMeta?.device_id ?? null,
-      app_instance_id: scheduleMeta?.app_instance_id ?? null,
       package_name: scheduleMeta?.package_name ?? null,
     },
     filters: { status: "created" },
@@ -624,6 +625,8 @@ function safeCreateResponse(
       provisioning_started: false,
       login_started: false,
       run_started: false,
+      runtime_defaults_applied: scheduleMeta?.runtime_defaults_applied ?? false,
+      runtime_defaults_reason: scheduleMeta?.runtime_defaults_reason ?? null,
     },
   };
 }
@@ -705,6 +708,30 @@ export async function POST(request: Request) {
     const displayName = readString(body.display_name, "").trim();
     const deviceId = readString(body.device_id, "").trim();
     const appInstanceId = readString(body.app_instance_id, "").trim();
+    const cloneMode = readString(body.clone_mode, "off").trim();
+    const templateMode = readString(body.template_mode, "default").trim();
+    const templateId = readString(body.template_id, "").trim();
+    const runtimeMode = readString(body.runtime_mode, "safe_setup").trim();
+    if (!runtimeModes.has(runtimeMode)) return jsonError("Invalid runtime mode.", 400);
+    const commercialPackage = readCommercialPackage(body.commercial_package);
+    const selectedAddons = readAddonCodes(body.addons);
+    const packagePreset = resolveAddProfilePackagePreset({
+      commercialPackage,
+      runtimeMode: runtimeMode as AddProfileRuntimeMode,
+      addons: selectedAddons,
+    });
+    const startsAt = readString(body.starts_at, "").trim();
+    const endsAt = readString(body.ends_at, "").trim();
+    const assignmentPolicy = resolveAddProfileAssignmentPolicy({
+      runtimeMode: runtimeMode as AddProfileRuntimeMode,
+      deviceId,
+      appInstanceId,
+      startsAt,
+      endsAt,
+      allowScheduledWait: false,
+    });
+    if (!assignmentPolicy.shouldAssignNow) return jsonError(assignmentPolicy.reason, 409);
+    if (!startsAt || !endsAt) return jsonError("Schedule slot is required.", 400);
     const targetResult = await fetchOnboardingTarget(supabase, deviceId, appInstanceId)
       .then((target) => ({ ok: true as const, target }))
       .catch((error) => ({
@@ -714,16 +741,6 @@ export async function POST(request: Request) {
     if (!targetResult.ok) return jsonError(targetResult.reason, 409);
     const target = targetResult.target;
     const deviceName = target.deviceName;
-    const cloneMode = readString(body.clone_mode, "off").trim();
-    const templateMode = readString(body.template_mode, "default").trim();
-    const templateId = readString(body.template_id, "").trim();
-    const runtimeMode = readString(body.runtime_mode, "safe_setup").trim();
-    if (!runtimeModes.has(runtimeMode)) return jsonError("Invalid runtime mode.", 400);
-    const commercialPackage = readCommercialPackage(body.commercial_package);
-    const selectedAddons = readAddonCodes(body.addons);
-    const startsAt = readString(body.starts_at, "").trim();
-    const endsAt = readString(body.ends_at, "").trim();
-    if (!startsAt || !endsAt) return jsonError("Schedule slot is required.", 400);
     const template = await fetchTemplate(supabase, templateMode, templateId);
     const deviceUdid = "";
     const settingsPayload = isRecord(template?.settings_payload) ? redactTemplatePayload(template.settings_payload) : {};
@@ -990,6 +1007,7 @@ export async function POST(request: Request) {
       accountId,
       accountUsername,
       commercialPackage,
+      addons: selectedAddons,
       runtimeMode,
     });
     if (!ownership.ok) {
@@ -1017,6 +1035,37 @@ export async function POST(request: Request) {
       }));
     }
 
+    const runtimeDefaults = await applyAddProfileRuntimeDefaults(supabase, {
+      accountId,
+      username: accountUsername,
+      appPackageName: target.packageName,
+      preset: packagePreset,
+    });
+    if (!runtimeDefaults.ok) {
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username: accountUsername,
+        externalRequestId,
+        credentialRequestId: credentials?.request_id,
+        actorId,
+        resultStatus: "failed",
+        failureReason: runtimeDefaults.reason,
+        metadataSafe: {
+          commercial_package: commercialPackage,
+          runtime_mode: runtimeMode,
+          addons_selected: selectedAddons.join(","),
+          phase: "runtime_defaults",
+        },
+      });
+      return jsonError(`runtime_defaults_failed:${runtimeDefaults.reason}`, 409, addProfilePartialMeta({
+        accountId,
+        accountCreated: accountCreated || Boolean(accountId),
+        credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
+        reason: runtimeDefaults.reason,
+        repairPossible: true,
+      }));
+    }
+
     const onboardingSchedule = await tryAutoAssignOnboardingSchedule(accountId, {
       deviceId,
       appInstanceId,
@@ -1037,8 +1086,6 @@ export async function POST(request: Request) {
         resultStatus: "failed",
         failureReason: onboardingSchedule.reason,
         metadataSafe: {
-          app_instance_id: appInstanceId,
-          device_id: deviceId,
           package_name: target.packageName,
           runtime_mode: runtimeMode,
           starts_at: startsAt,
@@ -1088,13 +1135,16 @@ export async function POST(request: Request) {
       metadataSafe: {
         onboarding_schedule_assigned: onboardingSchedule.assigned,
         onboarding_schedule_reason: onboardingSchedule.reason,
-        app_instance_id: appInstanceId,
-        device_id: deviceId,
         package_name: target.packageName,
         runtime_mode: runtimeMode,
         commercial_package: commercialPackage,
         commercial_package_code: ownership.commercialPackageCode,
         addons_selected: selectedAddons.join(","),
+        runtime_defaults_applied: runtimeDefaults.ok,
+        welcome_enabled: runtimeDefaults.welcome_enabled,
+        outreach_enabled: runtimeDefaults.outreach_enabled,
+        follow_enabled: runtimeDefaults.follow_enabled,
+        unfollow_enabled: runtimeDefaults.unfollow_enabled,
         starts_at: startsAt,
         ends_at: endsAt,
         login_method: loginMethod,
@@ -1110,9 +1160,9 @@ export async function POST(request: Request) {
           onboarding_schedule_assigned: onboardingSchedule.assigned,
           onboarding_schedule_reason: onboardingSchedule.reason,
           assignment: onboardingSchedule.assignment,
-          device_id: deviceId,
-          app_instance_id: appInstanceId,
           package_name: target.packageName,
+          runtime_defaults_applied: true,
+          runtime_defaults_reason: null,
         },
       ),
       201,

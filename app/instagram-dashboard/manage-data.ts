@@ -1,4 +1,8 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import {
+  buildAdminReadinessProjection,
+  type AdminReadinessProjection,
+} from "@/lib/instagram-dashboard/readiness-projection";
 import { getAccountPackageSummaries } from "./package-summary-data";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -46,6 +50,12 @@ export type ManageAccount = {
   assignmentStatus?: string | null;
   appInstanceLabel?: string | null;
   appPackageName?: string | null;
+  assignmentStartsAt?: string | null;
+  phoneStatus?: string | null;
+  appInstanceStatus?: string | null;
+  appInstanceLaunchable?: boolean | null;
+  appInstanceUsableForAutoLogin?: boolean | null;
+  readinessProjection?: AdminReadinessProjection;
   profileImageUrl?: string | null;
   profileImageSource?: string | null;
   instagramVerificationStatus?: string | null;
@@ -437,7 +447,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         ? supabase.from("phone_devices").select("id,name,device_name,status").in("id", deviceIds)
         : Promise.resolve({ data: [], error: null }),
       appInstanceIds.length
-        ? supabase.from("phone_app_instances").select("id,visible_label,instance_index,package_name,status").in("id", appInstanceIds)
+        ? supabase.from("phone_app_instances").select("id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login").in("id", appInstanceIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -470,14 +480,122 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
         phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
         assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
+        assignmentStartsAt: readIso(assignment, ["starts_at"]),
+        phoneStatus: readString(device, ["status"], account.phoneStatus ?? "") || account.phoneStatus || null,
         appInstanceLabel: appLabel || account.appInstanceLabel || null,
         appPackageName: packageName || account.appPackageName || null,
+        appInstanceStatus: readString(appInstance, ["status"], account.appInstanceStatus ?? "") || account.appInstanceStatus || null,
+        appInstanceLaunchable: readNullableBoolean(appInstance, ["is_launchable"]) ?? account.appInstanceLaunchable ?? null,
+        appInstanceUsableForAutoLogin: readNullableBoolean(appInstance, ["usable_for_auto_login"]) ?? account.appInstanceUsableForAutoLogin ?? null,
       };
     };
 
     return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
   } catch {
     return { ...overview, errors: ["Assignment or credential projection unavailable.", ...overview.errors] };
+  }
+}
+
+async function enrichWithReadinessProjection(overview: ManageOverview): Promise<ManageOverview> {
+  const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return overview;
+
+  try {
+    const supabase = createSupabaseClient();
+    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult] = await Promise.all([
+      supabase
+        .from("account_dashboard_actions")
+        .select("account_id,status,blocking_campaign")
+        .in("account_id", accountIds)
+        .in("status", ["pending", "acknowledged", "pending_verification"])
+        .limit(1000),
+      supabase
+        .from("ig_account_dm_settings")
+        .select("account_id,welcome_enabled,outreach_enabled")
+        .in("account_id", accountIds)
+        .limit(1000),
+      supabase
+        .from("ig_account_unfollow_settings")
+        .select("account_id,unfollow_enabled,unfollow_mode")
+        .in("account_id", accountIds)
+        .limit(1000),
+    ]);
+
+    const errors = [...overview.errors];
+    if (dashboardActionsResult.error || dmSettingsResult.error || unfollowSettingsResult.error) {
+      errors.unshift("Readiness projection partially unavailable.");
+    }
+
+    const actionCountsByAccount = new Map<string, { total: number; blocking: number }>();
+    for (const row of ((dashboardActionsResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["account_id"], "");
+      if (!accountId) continue;
+      const current = actionCountsByAccount.get(accountId) ?? { total: 0, blocking: 0 };
+      current.total += 1;
+      if (readBoolean(row, ["blocking_campaign"], false)) current.blocking += 1;
+      actionCountsByAccount.set(accountId, current);
+    }
+
+    const dmSettingsByAccount = new Set<string>();
+    const welcomeSettingsByAccount = new Set<string>();
+    for (const row of ((dmSettingsResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["account_id"], "");
+      if (!accountId) continue;
+      dmSettingsByAccount.add(accountId);
+      welcomeSettingsByAccount.add(accountId);
+    }
+
+    const unfollowSettingsByAccount = new Set<string>();
+    for (const row of ((unfollowSettingsResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId) unfollowSettingsByAccount.add(accountId);
+    }
+
+    const enrich = (account: ManageAccount): ManageAccount => {
+      const actionCounts = actionCountsByAccount.get(account.accountId) ?? {
+        total: account.pendingActionsCount,
+        blocking: account.blockingCampaign ? 1 : 0,
+      };
+      return {
+        ...account,
+        readinessProjection: buildAdminReadinessProjection({
+          accountId: account.accountId,
+          username: account.username,
+          clientId: account.clientId,
+          clientName: account.clientName,
+          adminStatus: account.adminStatus,
+          customerStatus: account.customerStatus,
+          subscriptionStatus: account.subscriptionStatus,
+          packageName: account.packageLabel,
+          runtimeProfilesLabel: account.runtimeProfilesLabel,
+          credentialsConfigured: account.credentialsConfigured,
+          credentialsStatus: account.credentialsStatus,
+          reauthRequired: account.reauthRequired,
+          loginStatus: account.loginStatus,
+          provisioningStatus: account.provisioningStatus,
+          onboardingStatus: account.onboardingStatus,
+          assignmentStatus: account.assignmentStatus ?? null,
+          assignmentStartsAt: account.assignmentStartsAt ?? null,
+          phoneStatus: account.phoneStatus ?? null,
+          appInstanceStatus: account.appInstanceStatus ?? null,
+          appPackageName: account.appPackageName ?? null,
+          appInstanceLaunchable: account.appInstanceLaunchable ?? null,
+          appInstanceUsableForAutoLogin: account.appInstanceUsableForAutoLogin ?? null,
+          dmSettingsPresent: dmSettingsByAccount.has(account.accountId),
+          welcomeSettingsPresent: welcomeSettingsByAccount.has(account.accountId),
+          unfollowSettingsPresent: unfollowSettingsByAccount.has(account.accountId),
+          dashboardActionsCount: actionCounts.total,
+          blockingActionsCount: actionCounts.blocking,
+        }),
+      };
+    };
+
+    return overviewWithAccounts({ ...overview, errors }, overview.allAccounts.map(enrich), errors);
+  } catch {
+    return {
+      ...overview,
+      errors: ["Readiness projection unavailable.", ...overview.errors],
+    };
   }
 }
 
@@ -846,7 +964,7 @@ export async function getManageData() {
   if (!adminDashboardConfig()) {
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview)));
+    return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview))));
   }
 
   try {
@@ -858,5 +976,5 @@ export async function getManageData() {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  return await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview)));
+  return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview))));
 }

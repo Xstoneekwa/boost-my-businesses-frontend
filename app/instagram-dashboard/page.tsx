@@ -1,7 +1,9 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
+import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
+import { readinessLabel, readinessTone } from "@/lib/instagram-dashboard/readiness-projection";
 import AddProfileWizard from "./AddProfileWizard";
 import EmailVerificationActionBanner from "./EmailVerificationActionBanner";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
@@ -24,7 +26,7 @@ export default async function InstagramAutomationDashboardPage() {
   const userContext = await requireInstagramDashboardAccess();
 
   if (!canAccessTenantPages(userContext)) {
-    redirect("/instagram-client");
+    notFound();
   }
 
   const [data, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
@@ -60,32 +62,29 @@ export default async function InstagramAutomationDashboardPage() {
         </section>
       )}
 
-      <div className="iad-kpi-row" aria-label="Instagram account totals">
+      <section className="ig-dashboard-kpis" aria-label="Instagram account totals">
         {manageKpis.map((kpi) => (
-          <div key={kpi.label} className="iad-kc">
-            <div className="iad-kc-lbl">{kpi.label}</div>
-            <div className="iad-kc-val" style={{ color: manageKpiTone(kpi) }}>{kpi.value}</div>
-            <div className="iad-kc-sub">{kpi.detail}</div>
-          </div>
+          <article key={kpi.label}>
+            <span>{kpi.label}</span>
+            <strong style={{ color: manageKpiTone(kpi) }}>{kpi.value}</strong>
+            <small>{kpi.detail}</small>
+          </article>
         ))}
-      </div>
-
-      <section className="iad-sc">
-        <div className="iad-sc-hd">
-          <div>
-            <div className="iad-sc-ey">Accounts</div>
-            <h3 className="iad-sc-title">Instagram Accounts</h3>
-            <p className="iad-sc-desc">Server-rendered account inventory with safe archive, trash, restore, and per-account control drawers.</p>
-          </div>
-        </div>
-        <AccountLifecycleTabs data={data} />
       </section>
+
+      <AnalyticsSectionCard
+        eyebrow="Accounts"
+        title="Instagram Accounts"
+        description="Server-rendered account inventory with safe archive, trash, restore, and per-account control drawers."
+      >
+        <AccountLifecycleTabs data={data} />
+      </AnalyticsSectionCard>
 
       <style>{`
         .ig-dashboard-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 22px 22px 48px;
+          padding: 28px clamp(16px, 3vw, 36px) 48px;
         }
 
         .ig-dashboard-alert {
@@ -95,91 +94,68 @@ export default async function InstagramAutomationDashboardPage() {
           flex-wrap: wrap;
           margin-bottom: 18px;
           padding: 12px 14px;
-          border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 8px;
-          background: rgba(248,113,113,0.08);
+          border: 1px solid rgba(248, 113, 113, 0.28);
+          border-radius: 14px;
+          background: rgba(248, 113, 113, 0.08);
           color: rgba(255,255,255,0.74);
           font-size: 13px;
         }
-        .ig-dashboard-alert strong { color: #FCA5A5; }
 
-        /* ── KPI cards ─────────────────────────────── */
-        .iad-kpi-row {
+        .ig-dashboard-alert strong {
+          color: #FCA5A5;
+        }
+
+        .ig-dashboard-kpis {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 12px;
+          gap: 14px;
           margin-bottom: 18px;
         }
-        .iad-kc {
-          background: #161820;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          padding: 14px 16px;
-          transition: border-color .13s ease;
+
+        .ig-dashboard-kpis article,
+        .ig-dashboard-mobile-card,
+        .ig-dashboard-empty {
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.028);
+          border-radius: 16px;
         }
-        .iad-kc:hover { border-color: rgba(255,255,255,.12); }
-        .iad-kc-lbl {
+
+        .ig-dashboard-kpis article {
+          min-height: 132px;
+          padding: 16px;
+        }
+
+        .ig-dashboard-kpis span,
+        .ig-dashboard-table th,
+        .ig-dashboard-mobile-card dt,
+        .ig-dashboard-empty span,
+        .ig-dashboard-readiness-detail {
+          color: rgba(255,255,255,0.36);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .08em;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
-          color: #4a4f5c;
-          margin-bottom: 8px;
         }
-        .iad-kc-val {
-          font-size: 26px;
-          font-weight: 700;
-          letter-spacing: -.03em;
+
+        .ig-dashboard-kpis strong {
+          display: block;
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 2rem;
           line-height: 1;
-        }
-        .iad-kc-sub {
-          font-size: 11px;
-          color: #8a8f98;
-          margin-top: 5px;
+          margin: 16px 0 10px;
         }
 
-        /* ── Section card ──────────────────────────── */
-        .iad-sc {
-          background: #161820;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          overflow: visible;
-        }
-        .iad-sc-hd {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          padding: 14px 16px;
-          border-bottom: 1px solid rgba(255,255,255,.07);
-          gap: 10px;
-        }
-        .iad-sc-ey {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .1em;
-          text-transform: uppercase;
-          color: #6558f5;
-          margin-bottom: 3px;
-        }
-        .iad-sc-title {
-          font-size: 14px;
-          font-weight: 600;
-          letter-spacing: -.01em;
-          color: #f0f0ee;
-          margin: 0;
-        }
-        .iad-sc-desc {
-          font-size: 11px;
-          color: #8a8f98;
-          margin-top: 2px;
+        .ig-dashboard-kpis small,
+        .ig-dashboard-table td,
+        .ig-dashboard-mobile-card dd {
+          color: rgba(255,255,255,0.60);
+          font-size: 12px;
         }
 
-        /* ── Tabs ──────────────────────────────────── */
         .ig-dashboard-account-tabs {
           display: grid;
-          gap: 0;
+          gap: 16px;
         }
 
         .ig-dashboard-tab-input {
@@ -194,46 +170,39 @@ export default async function InstagramAutomationDashboardPage() {
           justify-content: space-between;
           gap: 8px;
           flex-wrap: wrap;
-          padding: 10px 16px;
-          border-bottom: 1px solid rgba(255,255,255,.07);
         }
 
         .ig-dashboard-tab-list {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           flex-wrap: wrap;
         }
 
         .ig-dashboard-tab-label {
           display: inline-flex;
           align-items: center;
-          gap: 7px;
-          padding: 5px 11px;
-          border-radius: 9999px;
-          border: 1px solid rgba(255,255,255,.07);
-          background: transparent;
-          color: #8a8f98;
+          gap: 9px;
+          min-height: 36px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 999px;
+          background: rgba(255,255,255,0.035);
+          color: rgba(255,255,255,0.58);
           cursor: pointer;
           font-size: 12px;
-          font-weight: 600;
-          transition: all .13s ease;
-        }
-        .ig-dashboard-tab-label:hover {
-          background: #1e2028;
-          color: #f0f0ee;
+          font-weight: 900;
+          padding: 0 13px;
         }
 
         .ig-dashboard-tab-label strong {
           display: inline-grid;
           place-items: center;
-          min-width: 18px;
-          height: 18px;
-          border-radius: 9999px;
-          background: #252832;
-          color: #8a8f98;
-          font-size: 10px;
-          font-weight: 700;
+          min-width: 22px;
+          height: 22px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.08);
+          color: rgba(255,255,255,0.72);
+          font-size: 11px;
         }
 
         .ig-dashboard-tab-panel {
@@ -243,15 +212,9 @@ export default async function InstagramAutomationDashboardPage() {
         #ig-account-tab-active:checked ~ .ig-dashboard-tab-list label[for="ig-account-tab-active"],
         #ig-account-tab-archives:checked ~ .ig-dashboard-tab-list label[for="ig-account-tab-archives"],
         #ig-account-tab-trash:checked ~ .ig-dashboard-tab-list label[for="ig-account-tab-trash"] {
-          border-color: rgba(217,119,6,.28);
-          background: rgba(217,119,6,.14);
-          color: #fbbf24;
-        }
-        #ig-account-tab-active:checked ~ .ig-dashboard-tab-list label[for="ig-account-tab-active"] strong,
-        #ig-account-tab-archives:checked ~ .ig-dashboard-tab-list label[for="ig-account-tab-archives"] strong,
-        #ig-account-tab-trash:checked ~ .ig-dashboard-tab-list label[for="ig-account-tab-trash"] strong {
-          background: #fbbf24;
-          color: #000;
+          border-color: rgba(245,158,11,0.40);
+          background: rgba(245,158,11,0.14);
+          color: #FBBF24;
         }
 
         #ig-account-tab-active:checked ~ .ig-dashboard-tab-panel-active,
@@ -260,103 +223,72 @@ export default async function InstagramAutomationDashboardPage() {
           display: block;
         }
 
-        /* ── Table ─────────────────────────────────── */
         .ig-dashboard-table-wrap {
           overflow-x: auto;
         }
 
         .ig-dashboard-table {
           width: 100%;
-          min-width: 920px;
-          border-collapse: collapse;
-          table-layout: fixed;
+          min-width: 1200px;
+          border-collapse: separate;
+          border-spacing: 0 8px;
         }
 
-        /* ── Column widths (total ≈ 960px at fixed layout) ─── */
-        .ig-dashboard-table th:nth-child(1),
-        .ig-dashboard-table td:nth-child(1)  { width: 150px; }  /* Username */
-        .ig-dashboard-table th:nth-child(2),
-        .ig-dashboard-table td:nth-child(2)  { width: 90px; }   /* Client */
-        .ig-dashboard-table th:nth-child(3),
-        .ig-dashboard-table td:nth-child(3)  { width: 76px; }   /* Subscription */
-        .ig-dashboard-table th:nth-child(4),
-        .ig-dashboard-table td:nth-child(4)  { width: 60px; }   /* Package */
-        .ig-dashboard-table th:nth-child(5),
-        .ig-dashboard-table td:nth-child(5)  { width: 100px; }  /* Add-ons */
-        .ig-dashboard-table th:nth-child(6),
-        .ig-dashboard-table td:nth-child(6)  { width: 70px; }   /* Runtime */
-        .ig-dashboard-table th:nth-child(7),
-        .ig-dashboard-table td:nth-child(7)  { width: 80px; }   /* Credentials */
-        .ig-dashboard-table th:nth-child(8),
-        .ig-dashboard-table td:nth-child(8)  { width: 68px; }   /* Login */
-        .ig-dashboard-table th:nth-child(9),
-        .ig-dashboard-table td:nth-child(9)  { width: 76px; }   /* Phone */
-        .ig-dashboard-table th:nth-child(10),
-        .ig-dashboard-table td:nth-child(10) { width: 76px; }   /* Mac/host */
-        .ig-dashboard-table th:nth-child(11),
-        .ig-dashboard-table td:nth-child(11) { width: 80px; }   /* Date */
-        .ig-dashboard-table th:nth-child(12),
-        .ig-dashboard-table td:nth-child(12) { width: 178px; }  /* Controls */
-
-        /* Truncate verbose text cells with ellipsis */
-        .ig-dashboard-table td:nth-child(2),
-        .ig-dashboard-table td:nth-child(5),
-        .ig-dashboard-table td:nth-child(6),
-        .ig-dashboard-table td:nth-child(9),
-        .ig-dashboard-table td:nth-child(10) {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .ig-dashboard-table th {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .08em;
-          text-transform: uppercase;
-          color: #4a4f5c;
-          padding: 8px 10px;
-          text-align: center;
-          white-space: nowrap;
-          border-bottom: 1px solid rgba(255,255,255,.07);
-        }
-
+        .ig-dashboard-table th,
         .ig-dashboard-table td {
-          padding: 10px 10px;
-          border-bottom: 1px solid rgba(255,255,255,.04);
+          padding: 12px 10px;
+          text-align: left;
           vertical-align: middle;
-          white-space: nowrap;
-          color: #8a8f98;
-          font-size: 12px;
-          line-height: 1.5;
         }
 
         .ig-dashboard-table tbody tr {
-          background: #1e2028;
-          transition: background .13s ease;
-        }
-        .ig-dashboard-table tbody tr:hover {
-          background: #252832;
+          background: rgba(255,255,255,0.025);
+          outline: 1px solid rgba(255,255,255,0.07);
+          outline-offset: -1px;
         }
 
-        .ig-dashboard-table td .ig-dashboard-tool {
-          color: rgba(226,232,240,0.72);
+        .ig-dashboard-table tbody td:first-child {
+          border-radius: 14px 0 0 14px;
         }
-        .ig-dashboard-table tbody tr:last-child td {
-          border-bottom: none;
+
+        .ig-dashboard-table tbody td:last-child {
+          border-radius: 0 14px 14px 0;
         }
 
         .ig-dashboard-table strong,
         .ig-dashboard-mobile-card strong {
-          color: #f0f0ee;
-          font-weight: 600;
+          color: #f0f0ef;
+          font-weight: 800;
+        }
+
+        .ig-dashboard-readiness {
+          display: grid;
+          gap: 5px;
+          min-width: 150px;
+        }
+
+        .ig-dashboard-readiness-badge {
+          display: inline-flex;
+          width: fit-content;
+          align-items: center;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 999px;
+          background: rgba(255,255,255,0.045);
+          font-size: 11px;
+          font-weight: 900;
+          padding: 5px 9px;
+        }
+
+        .ig-dashboard-readiness-detail {
+          line-height: 1.4;
+          overflow-wrap: anywhere;
+          text-transform: none;
         }
 
         .ig-dashboard-account-link,
         .ig-dashboard-mobile-detail-link {
-          color: #f0f0ee;
-          font-weight: 600;
+          color: #f0f0ef;
+          font-weight: 900;
           text-decoration: none;
         }
 
@@ -401,12 +333,12 @@ export default async function InstagramAutomationDashboardPage() {
         .ig-dashboard-account-link:focus-visible,
         .ig-dashboard-mobile-detail-link:hover,
         .ig-dashboard-mobile-detail-link:focus-visible {
-          color: #6558f5;
+          color: #FBBF24;
           outline: none;
         }
 
         .ig-dashboard-mobile-detail-link {
-          color: rgba(101,88,245,0.92);
+          color: rgba(251,191,36,0.92);
           font-size: 12px;
         }
 
@@ -424,9 +356,9 @@ export default async function InstagramAutomationDashboardPage() {
         .ig-dashboard-row-tools {
           display: flex;
           align-items: center;
-          gap: 3px;
+          gap: 7px;
           flex-wrap: wrap;
-          min-width: 0;
+          min-width: 176px;
         }
 
         .ig-dashboard-tool {
@@ -434,11 +366,11 @@ export default async function InstagramAutomationDashboardPage() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 26px;
-          height: 26px;
+          width: 34px;
+          height: 34px;
           flex: 0 0 auto;
           border: 1px solid rgba(255,255,255,0.09);
-          border-radius: 7px;
+          border-radius: 10px;
           background: rgba(15,23,42,0.58);
           color: rgba(226,232,240,0.72);
           cursor: pointer;
@@ -458,11 +390,6 @@ export default async function InstagramAutomationDashboardPage() {
           box-shadow: 0 0 0 1px rgba(148,163,184,0.10), 0 10px 26px rgba(15,23,42,0.28);
           transform: translateY(-1px);
           outline: none;
-        }
-
-        .ig-dashboard-tool svg {
-          width: 13px;
-          height: 13px;
         }
 
         .ig-dashboard-tool:disabled {
@@ -625,12 +552,20 @@ export default async function InstagramAutomationDashboardPage() {
         }
 
         @media (max-width: 1120px) {
-          .iad-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .ig-dashboard-kpis {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
         }
 
         @media (max-width: 760px) {
-          .ig-dashboard-page { padding: 16px 14px 40px; }
-          .iad-kpi-row { grid-template-columns: 1fr; }
+          .ig-dashboard-page {
+            padding: 22px 14px 40px;
+          }
+
+          .ig-dashboard-kpis {
+            grid-template-columns: 1fr;
+          }
 
           .ig-dashboard-table-wrap {
             display: none;
@@ -650,8 +585,8 @@ export default async function InstagramAutomationDashboardPage() {
           }
 
           .ig-dashboard-tool {
-            width: 28px;
-            height: 28px;
+            width: 36px;
+            height: 36px;
           }
         }
       `}</style>
@@ -766,6 +701,7 @@ function AccountList({
               <th>Package</th>
               <th>Add-ons</th>
               <th>Runtime profile</th>
+              <th>Readiness</th>
               <th>Credentials</th>
               <th>Login</th>
               <th>Phone</th>
@@ -793,6 +729,9 @@ function AccountList({
                   <small>Outreach: {account.outreachSourceLabel}</small>
                 </td>
                 <td>{account.runtimeProfilesLabel}</td>
+                <td>
+                  <ReadinessSummary account={account} />
+                </td>
                 <td style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</td>
                 <td>
                   <span className="ig-dashboard-status" style={{ color: statusTone(account.loginStatus) }}>
@@ -861,6 +800,10 @@ function AccountList({
                 <dd>{account.runtimeProfilesLabel}</dd>
               </div>
               <div>
+                <dt>Readiness</dt>
+                <dd><ReadinessSummary account={account} /></dd>
+              </div>
+              <div>
                 <dt>Credentials</dt>
                 <dd style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</dd>
               </div>
@@ -892,6 +835,33 @@ function AccountList({
         ))}
       </div>
     </>
+  );
+}
+
+function ReadinessSummary({ account }: { account: ManageAccount }) {
+  const projection = account.readinessProjection;
+  if (!projection) {
+    return (
+      <div className="ig-dashboard-readiness">
+        <span className="ig-dashboard-readiness-badge" style={{ color: readinessTone("unknown") }}>
+          Unknown
+        </span>
+        <span className="ig-dashboard-readiness-detail">readiness_projection_missing</span>
+      </div>
+    );
+  }
+
+  const detail = projection.pending_backend_wiring.length
+    ? projection.pending_backend_wiring.join(", ")
+    : projection.overall_readiness_reason;
+
+  return (
+    <div className="ig-dashboard-readiness">
+      <span className="ig-dashboard-readiness-badge" style={{ color: readinessTone(projection.overall_readiness_status) }}>
+        {readinessLabel(projection.overall_readiness_status)}
+      </span>
+      <span className="ig-dashboard-readiness-detail">{detail}</span>
+    </div>
   );
 }
 

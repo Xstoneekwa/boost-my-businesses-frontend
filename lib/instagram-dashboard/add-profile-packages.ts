@@ -1,4 +1,5 @@
 export type AddProfileCommercialPackage =
+  | "growth"
   | "starter"
   | "pro"
   | "premium"
@@ -28,28 +29,36 @@ export const addProfilePackageOptions: Array<{
   planned: boolean;
 }> = [
   {
+    value: "growth",
+    label: "Growth",
+    detail: "Production Growth package. Full-cycle ready; Outreach remains optional.",
+    commercialCode: "growth",
+    selectable: true,
+    planned: false,
+  },
+  {
     value: "starter",
-    label: "Starter",
-    detail: "Planned — maps to Growth caps when wired.",
+    label: "Starter (legacy)",
+    detail: "Legacy alias for Growth; kept for existing payload compatibility.",
     commercialCode: "growth",
     selectable: false,
-    planned: true,
+    planned: false,
   },
   {
     value: "pro",
     label: "Pro",
-    detail: "Planned — commercial Pro package.",
+    detail: "Production Pro package with Welcome enabled by default. Outreach remains optional.",
     commercialCode: "pro",
-    selectable: false,
-    planned: true,
+    selectable: true,
+    planned: false,
   },
   {
     value: "premium",
     label: "Premium",
-    detail: "Planned — commercial Premium package.",
+    detail: "Production Premium package with advanced targeting defaults. Outreach remains optional.",
     commercialCode: "premium",
-    selectable: false,
-    planned: true,
+    selectable: true,
+    planned: false,
   },
   {
     value: "custom",
@@ -86,7 +95,7 @@ export const addProfileAddonOptions: Array<{
   wired: boolean;
 }> = [
   { value: "extra_ct_research", label: "Extra CT research", wired: false },
-  { value: "extra_outreach_volume", label: "Extra outreach volume", wired: false },
+  { value: "extra_outreach_volume", label: "Extra outreach volume", wired: true },
   { value: "priority_warmup", label: "Priority warmup", wired: false },
   { value: "advanced_reporting", label: "Advanced reporting", wired: false },
   { value: "manual_ops_support", label: "Manual ops support", wired: false },
@@ -96,6 +105,121 @@ export const addProfileAddonOptions: Array<{
 const commercialPackages = new Set(addProfilePackageOptions.map((row) => row.value));
 const runtimeModes = new Set(addProfileRuntimeOptions.map((row) => row.value));
 const addonCodes = new Set(addProfileAddonOptions.map((row) => row.value));
+
+export type AddProfilePackagePreset = {
+  selection: AddProfileCommercialPackage;
+  commercialPackageCode: "growth" | "pro" | "premium" | "internal_test";
+  label: string;
+  defaultFollowDayCap: number;
+  defaultUnfollowDayCap: number;
+  defaultFollowSessionCap: number;
+  defaultUnfollowSessionCap: number;
+  defaultWelcomeEnabled: boolean;
+  defaultOutreachEnabled: boolean;
+  defaultWelcomeDayCap: number | null;
+  defaultOutreachDayCap: number | null;
+  advancedCtEnabled: boolean;
+  aiCommentEnabled: boolean;
+  aiTargetingEnabled: boolean;
+  followEnabled: boolean;
+  likeEnabled: boolean;
+  muteAfterFollowEnabled: boolean;
+  unfollowEnabled: boolean;
+  welcomeEnabled: boolean;
+  outreachEnabled: boolean;
+  welcomePerSessionLimit: number;
+  welcomePerDayLimit: number;
+  outreachPerSessionLimit: number;
+  outreachPerDayLimit: number;
+  totalDmPerDayLimit: number;
+  unfollowAfterDays: number;
+  unfollowMode: "unfollow" | "unfollow-any";
+  followFilters: {
+    dontFollowPrivateAccounts: boolean;
+    minFollowers: number;
+    maxFollowers: number;
+    minPosts: number;
+  };
+  metadataSafe: Record<string, string | number | boolean | null>;
+};
+
+const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCode"], Pick<
+  AddProfilePackagePreset,
+  | "commercialPackageCode"
+  | "label"
+  | "defaultFollowDayCap"
+  | "defaultUnfollowDayCap"
+  | "defaultFollowSessionCap"
+  | "defaultUnfollowSessionCap"
+  | "defaultWelcomeEnabled"
+  | "defaultOutreachEnabled"
+  | "defaultWelcomeDayCap"
+  | "defaultOutreachDayCap"
+  | "advancedCtEnabled"
+  | "aiCommentEnabled"
+  | "aiTargetingEnabled"
+>> = {
+  growth: {
+    commercialPackageCode: "growth",
+    label: "Growth",
+    defaultFollowDayCap: 80,
+    defaultUnfollowDayCap: 80,
+    defaultFollowSessionCap: 80,
+    defaultUnfollowSessionCap: 80,
+    defaultWelcomeEnabled: false,
+    defaultOutreachEnabled: false,
+    defaultWelcomeDayCap: null,
+    defaultOutreachDayCap: null,
+    advancedCtEnabled: false,
+    aiCommentEnabled: false,
+    aiTargetingEnabled: false,
+  },
+  pro: {
+    commercialPackageCode: "pro",
+    label: "Pro",
+    defaultFollowDayCap: 120,
+    defaultUnfollowDayCap: 120,
+    defaultFollowSessionCap: 120,
+    defaultUnfollowSessionCap: 120,
+    defaultWelcomeEnabled: true,
+    defaultOutreachEnabled: false,
+    defaultWelcomeDayCap: 10,
+    defaultOutreachDayCap: null,
+    advancedCtEnabled: true,
+    aiCommentEnabled: false,
+    aiTargetingEnabled: false,
+  },
+  premium: {
+    commercialPackageCode: "premium",
+    label: "Premium",
+    defaultFollowDayCap: 120,
+    defaultUnfollowDayCap: 120,
+    defaultFollowSessionCap: 120,
+    defaultUnfollowSessionCap: 120,
+    defaultWelcomeEnabled: true,
+    defaultOutreachEnabled: false,
+    defaultWelcomeDayCap: 10,
+    defaultOutreachDayCap: null,
+    advancedCtEnabled: true,
+    aiCommentEnabled: true,
+    aiTargetingEnabled: true,
+  },
+  internal_test: {
+    commercialPackageCode: "internal_test",
+    label: "Internal Test",
+    defaultFollowDayCap: 20,
+    defaultUnfollowDayCap: 20,
+    defaultFollowSessionCap: 20,
+    defaultUnfollowSessionCap: 20,
+    defaultWelcomeEnabled: false,
+    defaultOutreachEnabled: false,
+    defaultWelcomeDayCap: null,
+    defaultOutreachDayCap: null,
+    advancedCtEnabled: false,
+    aiCommentEnabled: false,
+    aiTargetingEnabled: false,
+  },
+};
 
 export function isAddProfileCommercialPackage(value: string): value is AddProfileCommercialPackage {
   return commercialPackages.has(value as AddProfileCommercialPackage);
@@ -118,9 +242,56 @@ export function subscriptionTypeForRuntimeMode(runtimeMode: AddProfileRuntimeMod
 }
 
 export function defaultAddProfileCommercialPackage() {
-  return "internal_test" as const;
+  return "growth" as const;
 }
 
 export function packageLabelForSelection(value: AddProfileCommercialPackage) {
   return addProfilePackageOptions.find((row) => row.value === value)?.label ?? value;
+}
+
+export function resolveAddProfilePackagePreset(input: {
+  commercialPackage: AddProfileCommercialPackage;
+  runtimeMode: AddProfileRuntimeMode;
+  addons?: AddProfileAddonCode[];
+}): AddProfilePackagePreset {
+  const commercialCode = commercialPackageCodeForSelection(input.commercialPackage) as AddProfilePackagePreset["commercialPackageCode"];
+  const base = baseCommercialPresets[commercialCode] ?? baseCommercialPresets.growth;
+  const addonSet = new Set(input.addons ?? []);
+  const fullCycleRuntime = input.runtimeMode === "full_cycle";
+  const followRuntime = input.runtimeMode === "follow_only_test" || fullCycleRuntime;
+  const outreachAddonEnabled = addonSet.has("extra_outreach_volume") || addonSet.has("custom_package_addon");
+  const outreachEnabled = input.runtimeMode === "outreach_only" && outreachAddonEnabled;
+  const welcomeEnabled = fullCycleRuntime && base.defaultWelcomeEnabled;
+  const unfollowEnabled = fullCycleRuntime;
+
+  return {
+    ...base,
+    selection: input.commercialPackage,
+    followEnabled: followRuntime,
+    likeEnabled: followRuntime,
+    muteAfterFollowEnabled: followRuntime,
+    unfollowEnabled,
+    welcomeEnabled,
+    outreachEnabled,
+    welcomePerSessionLimit: Math.min(base.defaultWelcomeDayCap ?? 10, 10),
+    welcomePerDayLimit: base.defaultWelcomeDayCap ?? 10,
+    outreachPerSessionLimit: outreachEnabled ? 5 : 0,
+    outreachPerDayLimit: outreachEnabled ? (base.defaultOutreachDayCap ?? 30) : 0,
+    totalDmPerDayLimit: (base.defaultWelcomeDayCap ?? 10) + (outreachEnabled ? (base.defaultOutreachDayCap ?? 30) : 0),
+    unfollowAfterDays: 3,
+    unfollowMode: "unfollow-any",
+    followFilters: {
+      dontFollowPrivateAccounts: true,
+      minFollowers: 1,
+      maxFollowers: 1000000000000,
+      minPosts: 1,
+    },
+    metadataSafe: {
+      source: "add_profile",
+      source_surface: "admin_dashboard",
+      package_code: base.commercialPackageCode,
+      runtime_mode: input.runtimeMode,
+      outreach_enabled_by_addon: outreachEnabled,
+    },
+  };
 }
