@@ -25,7 +25,13 @@ type SupabaseLike = Parameters<typeof runReadinessNow>[0];
 type Row = Record<string, unknown>;
 
 const ACTIVE_EMAIL_CODE_STATUSES = ["pending", "acknowledged", "pending_verification", "code_submitted"];
+const ACTIVE_RUN_REQUEST_STATUSES = ["queued", "claimed", "starting", "running"];
 export const CONNECT_EMAIL_CODE_ACTION_TTL_MS = 10 * 60 * 1000;
+
+function isActiveRunRequestStatus(status: unknown) {
+  const normalized = readString(status).toLowerCase();
+  return ACTIVE_RUN_REQUEST_STATUSES.includes(normalized);
+}
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
@@ -120,20 +126,30 @@ function statusMessage(status: ConnectNowStatus) {
       return "Phone ou app Instagram indisponible.";
     case "assignment_required":
       return "Assignment phone/app requis avant connexion.";
+    case "try_again_later":
+      return "Connexion indisponible. Réessayez plus tard.";
     default:
       return "Connexion indisponible. Réessayez plus tard.";
   }
 }
 
+function readinessReasonMessage(reason: string) {
+  if (reason === "login_preflight_request_not_active") {
+    return "La connexion précédente a échoué ou expiré. Relancez la connexion.";
+  }
+  return "";
+}
+
 export function connectNowFromReadiness(readiness: ReadinessNowResult): ConnectNowResult {
-  const requestQueued = readiness.preflight_request_created === true;
   const idempotent = readiness.idempotent === true;
+  const requestActive = isActiveRunRequestStatus(readiness.run_request_status);
+  const requestQueued = (readiness.preflight_request_created === true || idempotent) && requestActive;
   let status: ConnectNowStatus;
 
   if (readiness.client_status === "connected_ready") {
     status = "connected";
   } else if (readiness.client_status === "checking_connection") {
-    status = "connecting";
+    status = requestQueued || (idempotent && requestActive) ? "connecting" : "try_again_later";
   } else if (readiness.client_status === "action_required_2fa") {
     status = "two_factor_required";
   } else if (readiness.client_status === "action_required_checkpoint") {
@@ -148,10 +164,11 @@ export function connectNowFromReadiness(readiness: ReadinessNowResult): ConnectN
     status = "try_again_later";
   }
 
+  const reasonMessage = readinessReasonMessage(readiness.reason);
   return {
     status,
     reason: readiness.reason,
-    message: statusMessage(status),
+    message: reasonMessage || statusMessage(status),
     request_queued: requestQueued,
     idempotent,
     next_action: readiness.next_action,

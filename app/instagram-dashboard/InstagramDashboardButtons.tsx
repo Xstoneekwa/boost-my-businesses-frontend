@@ -2297,7 +2297,13 @@ export default function InstagramDashboardButtons({
         }),
         "Could not connect Instagram now.",
       );
-      setSuccess(connectNowSuccessMessage(payload));
+      if (payload.status === "connecting" && !payload.request_queued) {
+        setError(payload.message || "Connexion non démarrée. Relancez la connexion.");
+      } else if (payload.status === "try_again_later") {
+        setError(payload.message || "Connexion indisponible. Réessayez plus tard.");
+      } else {
+        setSuccess(connectNowSuccessMessage(payload));
+      }
       window.dispatchEvent(new CustomEvent(EMAIL_VERIFICATION_REFRESH_EVENT));
       await refreshRunEligibility({ loading: true });
       router.refresh();

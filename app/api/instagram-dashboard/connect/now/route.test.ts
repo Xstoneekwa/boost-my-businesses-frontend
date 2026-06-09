@@ -55,6 +55,17 @@ test("Connect button is separate from Credentials OK Assign now Readiness and Pl
   assert.doesNotMatch(connectSection, /\/api\/instagram-dashboard\/assignments\/now/);
 });
 
+
+test("Connect UI does not show stale connecting when no backend request is active", () => {
+  const connectSection = buttonsSource.slice(
+    buttonsSource.indexOf("async function connectNow"),
+    buttonsSource.indexOf("function requestConnectNow"),
+  );
+  assert.match(connectSection, /payload\.status === "try_again_later"/);
+  assert.match(connectSection, /payload\.status === "connecting" && !payload\.request_queued/);
+  assert.match(connectSection, /setError\(/);
+});
+
 test("2FA popup uses dashboard action polling and secure submit route", () => {
   assert.match(bannerSource, /dashboard-actions\/email-verification/);
   assert.match(bannerSource, /setInterval/);

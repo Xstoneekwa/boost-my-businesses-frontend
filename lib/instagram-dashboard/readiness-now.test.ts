@@ -183,6 +183,30 @@ test("readiness now creates login preflight request when assignment is free", as
   assert.equal(supabase.rpcCalls[0].args.p_idempotency_key, "login-preflight-now:assignment-1");
 });
 
+test("readiness now retries when idempotent key returns a terminal request", async () => {
+  let createCalls = 0;
+  const supabase = makeSupabase();
+  const baseRpc = supabase.client.rpc.bind(supabase.client);
+  supabase.client.rpc = (name: string, args: Record<string, unknown>) => {
+    if (name !== "create_account_run_request") return baseRpc(name, args);
+    createCalls += 1;
+    if (createCalls === 1) {
+      return Promise.resolve({ data: { id: "stale-failed", status: "failed" }, error: null });
+    }
+    return Promise.resolve({ data: { id: "request-safe-retry", status: "queued" }, error: null });
+  };
+
+  const result = await runReadinessNow(supabase.client, {
+    accountId,
+    now: new Date("2026-06-09T08:01:00.000Z"),
+  });
+
+  assert.equal(createCalls, 2);
+  assert.equal(result.preflight_request_created, true);
+  assert.equal(result.run_request_status, "queued");
+  assert.equal(result.request_id, "request-safe-retry");
+});
+
 test("readiness now duplicate click is idempotent and does not create another request", async () => {
   const supabase = makeSupabase(baseRows({
     account_run_requests: [{

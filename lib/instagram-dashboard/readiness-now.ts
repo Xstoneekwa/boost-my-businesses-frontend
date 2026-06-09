@@ -454,13 +454,12 @@ export async function runReadinessNow(
     });
   }
 
-  const { data, error } = await supabase.rpc("create_account_run_request", {
+  const enqueueArgs = {
     p_account_id: input.accountId,
     p_requested_by: input.actorId ?? null,
     p_actor_type: audience === "admin" ? "admin" : "client",
     p_source_surface: audience === "admin" ? "instagram_dashboard_readiness_now" : "instagram_client_check_connect_now",
     p_requested_run_type: "login_provisioning",
-    p_idempotency_key: idempotencyKey,
     p_priority: 0,
     p_metadata_safe: {
       source: "readiness_now",
@@ -468,21 +467,45 @@ export async function runReadinessNow(
       assignment_id: assignmentId,
       deadline_at: deadline.toISOString(),
     },
+  };
+
+  let request = await createPreflightRunRequest(supabase, {
+    ...enqueueArgs,
+    p_idempotency_key: idempotencyKey,
   });
-  if (error) throw new Error(error.message || "readiness_now_enqueue_failed");
-  const request = Array.isArray(data) ? data[0] as Row | undefined : data as Row | undefined;
+  let requestStatus = readString(request?.status, "queued");
+  if (!activeRequestStatuses.includes(requestStatus)) {
+    request = await createPreflightRunRequest(supabase, {
+      ...enqueueArgs,
+      p_idempotency_key: `${idempotencyKey}:retry:${now.getTime()}`,
+    });
+    requestStatus = readString(request?.status, "queued");
+  }
+
+  const requestActive = activeRequestStatuses.includes(requestStatus);
   return safeResult({
     audience,
-    readiness_status: "checking_connection",
-    client_status: "checking_connection",
+    readiness_status: requestActive ? "checking_connection" : "retry_later",
+    client_status: requestActive ? "checking_connection" : "try_again_later",
     assignment_status: "ready",
     phone_available: true,
     app_instance_available: true,
-    preflight_request_created: true,
+    preflight_request_created: requestActive,
     idempotent: false,
     request_id: audience === "admin" ? readString(request?.id) || null : null,
-    run_request_status: readString(request?.status, "queued"),
-    next_action: "monitor_preflight",
-    reason: "login_preflight_now_queued",
+    run_request_status: requestStatus,
+    next_action: requestActive ? "monitor_preflight" : "retry_connect",
+    reason: requestActive ? "login_preflight_now_queued" : "login_preflight_request_not_active",
   });
+}
+
+async function createPreflightRunRequest(
+  supabase: ReadinessNowSupabase,
+  args: Record<string, unknown>,
+) {
+  const { data, error } = await supabase.rpc("create_account_run_request", args);
+  if (error) throw new Error(error.message || "readiness_now_enqueue_failed");
+  const request = Array.isArray(data) ? data[0] as Row | undefined : data as Row | undefined;
+  if (!request) throw new Error("readiness_now_enqueue_failed");
+  return request;
 }
