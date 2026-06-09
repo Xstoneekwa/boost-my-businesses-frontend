@@ -1,0 +1,108 @@
+import { getManageData } from "@/app/instagram-dashboard/manage-data";
+import {
+  evaluateRunStartEligibility,
+  getRunControlHealthProjection,
+  runStartBlockMessage,
+  type RunControlHealthProjection,
+} from "@/lib/instagram-dashboard/run-control";
+
+export type RunEligibilityOverviewItem = {
+  account_id: string;
+  username: string;
+  readiness_status: string;
+  play_enabled: boolean;
+  reason: string;
+  message: string;
+};
+
+export type RunEligibilityOverviewSummary = {
+  total: number;
+  play_ready: number;
+  blocked: number;
+  needs_assignment: number;
+  needs_credentials_or_login: number;
+};
+
+export type RunEligibilityOverview = {
+  run_control: RunControlHealthProjection;
+  requested_run_type: string;
+  accounts: RunEligibilityOverviewItem[];
+  summary: RunEligibilityOverviewSummary;
+};
+
+const assignmentReasons = new Set([
+  "assignment_missing",
+  "assignment_window_closed",
+  "assignment_slot_conflict",
+  "phone_rest_active",
+  "outreach_rest_reserved",
+  "no_app_instance_available",
+  "device_unavailable",
+  "assignment_profile_mismatch",
+]);
+
+const credentialsOrLoginReasons = new Set([
+  "credentials_review_required",
+  "reauth_required",
+  "support_required",
+  "account_needs_assistance",
+]);
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const current = nextIndex;
+      nextIndex += 1;
+      results[current] = await mapper(items[current]);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+export async function buildRunEligibilityOverview(
+  requestedRunType = "account_session",
+  concurrency = 5,
+): Promise<RunEligibilityOverview> {
+  const [runControl, manageData] = await Promise.all([
+    getRunControlHealthProjection(),
+    getManageData(),
+  ]);
+
+  const activeAccounts = manageData.activeAccounts.filter((account) => Boolean(account.accountId));
+  const accounts = await mapWithConcurrency(activeAccounts, concurrency, async (account) => {
+    const eligibility = await evaluateRunStartEligibility(account.accountId, requestedRunType);
+    return {
+      account_id: account.accountId,
+      username: account.username,
+      readiness_status: account.readinessProjection?.overall_readiness_status ?? "unknown",
+      play_enabled: eligibility.ok === true,
+      reason: eligibility.ok ? "ready" : eligibility.reason,
+      message: eligibility.ok ? "Manual run is ready." : runStartBlockMessage(eligibility.reason),
+    } satisfies RunEligibilityOverviewItem;
+  });
+
+  const summary: RunEligibilityOverviewSummary = {
+    total: accounts.length,
+    play_ready: accounts.filter((account) => account.play_enabled).length,
+    blocked: accounts.filter((account) => !account.play_enabled).length,
+    needs_assignment: accounts.filter((account) => assignmentReasons.has(account.reason)).length,
+    needs_credentials_or_login: accounts.filter((account) => credentialsOrLoginReasons.has(account.reason)).length,
+  };
+
+  return {
+    run_control: runControl,
+    requested_run_type: requestedRunType,
+    accounts,
+    summary,
+  };
+}

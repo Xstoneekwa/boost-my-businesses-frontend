@@ -32,8 +32,24 @@ export type RunControlHealth = {
   reason: string;
 };
 
+export type RunControlDisplayState =
+  | "ready"
+  | "offline"
+  | "stale"
+  | "launch_disabled"
+  | "maintenance_disabled"
+  | "unconfigured";
+
+export type RunControlHealthProjection = RunControlHealth & {
+  displayState: RunControlDisplayState;
+  label: string;
+  message: string;
+  heartbeatAgeSeconds: number | null;
+};
+
 export type RunStartBlockReason =
   | "dispatcher_unhealthy"
+  | "dispatcher_unconfigured"
   | "dispatcher_launch_disabled"
   | "play_disabled"
   | "account_archived"
@@ -90,12 +106,98 @@ const CHECKPOINT_ACTIONS = new Set(["complete_two_factor", "review_checkpoint", 
 export const DEFAULT_WELCOME_DM_DAY_CAP = 10;
 export const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
 
-export function runControlPlayFeatureEnabled() {
-  return process.env.INSTAGRAM_RUN_CONTROL_PLAY_ENABLED === "true";
+export function runControlPlayFeatureEnabled(env: MiniRunEnv = process.env) {
+  const raw = readString(env.INSTAGRAM_RUN_CONTROL_PLAY_ENABLED, "").trim().toLowerCase();
+  if (raw === "false") return false;
+  return true;
 }
 
-export function runControlDispatcherWorkerId() {
-  return process.env.INSTAGRAM_RUN_CONTROL_DISPATCHER_WORKER_ID?.trim() || null;
+export function runControlDispatcherWorkerId(env: MiniRunEnv = process.env) {
+  return (
+    readString(env.INSTAGRAM_RUN_CONTROL_DISPATCHER_WORKER_ID, "").trim() ||
+    readString(env.RUN_CONTROL_DISPATCHER_WORKER_ID, "").trim() ||
+    null
+  );
+}
+
+export function runControlHeartbeatAgeSeconds(lastSeenAt: string | null): number | null {
+  if (!lastSeenAt) return null;
+  const lastSeenMs = Date.parse(lastSeenAt);
+  if (!Number.isFinite(lastSeenMs)) return null;
+  return Math.max(0, Math.round((Date.now() - lastSeenMs) / 1000));
+}
+
+export function projectRunControlHealthState(health: RunControlHealth): RunControlHealthProjection {
+  const heartbeatAgeSeconds = runControlHeartbeatAgeSeconds(health.lastSeenAt);
+  if (!health.playEnabled || health.reason === "play_disabled") {
+    return {
+      ...health,
+      displayState: "maintenance_disabled",
+      label: "Play disabled by maintenance",
+      message: runStartBlockMessage("play_disabled"),
+      heartbeatAgeSeconds,
+    };
+  }
+  if (health.reason === "dispatcher_unconfigured" || !health.dispatcherWorkerId) {
+    return {
+      ...health,
+      displayState: "unconfigured",
+      label: "Dispatcher offline",
+      message: runStartBlockMessage("dispatcher_unconfigured"),
+      heartbeatAgeSeconds,
+    };
+  }
+  if (health.reason === "dispatcher_health_read_failed" || (!health.lastSeenAt && !health.healthy)) {
+    return {
+      ...health,
+      displayState: "offline",
+      label: "Dispatcher offline",
+      message: "Manual run dispatcher heartbeat is unavailable.",
+      heartbeatAgeSeconds,
+    };
+  }
+  if (!health.healthy) {
+    return {
+      ...health,
+      displayState: "stale",
+      label: "Dispatcher stale",
+      message: runStartBlockMessage("dispatcher_unhealthy"),
+      heartbeatAgeSeconds,
+    };
+  }
+  if (health.dispatcherLaunchEnabled === false) {
+    return {
+      ...health,
+      displayState: "launch_disabled",
+      label: "Launch disabled",
+      message: runStartBlockMessage("dispatcher_launch_disabled"),
+      heartbeatAgeSeconds,
+    };
+  }
+  return {
+    ...health,
+    displayState: "ready",
+    label: "RunControl ready",
+    message: "Manual run dispatcher is healthy and ready.",
+    heartbeatAgeSeconds,
+  };
+}
+
+export async function getRunControlHealthProjection(env: MiniRunEnv = process.env): Promise<RunControlHealthProjection> {
+  return projectRunControlHealthState(await getRunControlHealth(env));
+}
+
+export function resolveRunControlHealthBlockReason(health: RunControlHealth): RunStartBlockReason | null {
+  if (!health.playEnabled || health.reason === "play_disabled") {
+    return "play_disabled";
+  }
+  if (health.reason === "dispatcher_unconfigured") {
+    return "dispatcher_unconfigured";
+  }
+  if (!health.healthy) {
+    return "dispatcher_unhealthy";
+  }
+  return null;
 }
 
 export function runControlDispatcherHealthMaxAgeSeconds() {
@@ -885,9 +987,9 @@ export function sanitizeRunControlReason(value: unknown, fallback = "blocked") {
   return raw;
 }
 
-export async function getRunControlHealth(): Promise<RunControlHealth> {
-  const playEnabled = runControlPlayFeatureEnabled();
-  const dispatcherWorkerId = runControlDispatcherWorkerId();
+export async function getRunControlHealth(env: MiniRunEnv = process.env): Promise<RunControlHealth> {
+  const playEnabled = runControlPlayFeatureEnabled(env);
+  const dispatcherWorkerId = runControlDispatcherWorkerId(env);
 
   if (!playEnabled) {
     return {
@@ -1095,8 +1197,9 @@ export async function evaluateLoginChallengeRunEligibility(
   }
 
   const health = await getRunControlHealth();
-  if (!health.playEnabled || !health.healthy) {
-    return { ok: false as const, reason: "dispatcher_unhealthy" as RunStartBlockReason, health };
+  const healthBlock = resolveRunControlHealthBlockReason(health);
+  if (healthBlock) {
+    return { ok: false as const, reason: healthBlock, health };
   }
   if (health.dispatcherLaunchEnabled === false) {
     return { ok: false as const, reason: "dispatcher_launch_disabled" as RunStartBlockReason, health };
@@ -1235,8 +1338,9 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   }
 
   const health = await getRunControlHealth();
-  if (!health.playEnabled || !health.healthy) {
-    return { ok: false as const, reason: "dispatcher_unhealthy" as RunStartBlockReason, health };
+  const healthBlock = resolveRunControlHealthBlockReason(health);
+  if (healthBlock) {
+    return { ok: false as const, reason: healthBlock, health };
   }
   if (health.dispatcherLaunchEnabled === false) {
     return { ok: false as const, reason: "dispatcher_launch_disabled" as RunStartBlockReason, health };
@@ -1639,11 +1743,13 @@ export async function insertManualRunAudit(
 export function runStartBlockMessage(reason: RunStartBlockReason) {
   switch (reason) {
     case "dispatcher_unhealthy":
-      return "Manual run requires a healthy runtime dispatcher.";
+      return "Manual run requires a healthy runtime dispatcher with a fresh heartbeat.";
+    case "dispatcher_unconfigured":
+      return "Manual run is unavailable because no runtime dispatcher worker is configured on the dashboard host.";
     case "dispatcher_launch_disabled":
       return "Manual run is blocked because dispatcher launch is disabled.";
     case "play_disabled":
-      return "Manual run is not enabled for this environment.";
+      return "Manual run is disabled for this environment (maintenance mode).";
     case "account_archived":
       return "Archived accounts cannot be started.";
     case "account_trashed":

@@ -865,9 +865,53 @@ Projection safe:
 
 - `healthy`, `playEnabled`, `dispatcherWorkerId`, `dispatcherStatus`, `lastSeenAt`, `reason`
 
+Variables dashboard host (voir aussi `docs/instagram-dashboard-run-control.env.example`) :
+
+- `INSTAGRAM_RUN_CONTROL_PLAY_ENABLED` : opt-out maintenance only (`false` desactive Play ; absent = active)
+- `INSTAGRAM_RUN_CONTROL_DISPATCHER_WORKER_ID` : doit matcher le worker heartbeat du dispatcher Python
+- `RUN_CONTROL_DISPATCHER_WORKER_ID` : alias accepte si la variable Instagram-prefixed est absente
+- `INSTAGRAM_RUN_CONTROL_DISPATCHER_HEALTH_MAX_AGE_SECONDS` : fraicheur heartbeat (defaut 60)
+
 Etat:
 
-- Play reste disabled tant que `healthy=false` ou `playEnabled=false`.
+- Play reste disabled tant que `/runs/eligibility` retourne `ok_to_start=false`.
+- Raisons run-control explicites : `play_disabled`, `dispatcher_unconfigured`, `dispatcher_unhealthy`, `dispatcher_launch_disabled`.
+- Les gates compte (credentials, schedule, phases, DM, etc.) restent evalues apres le health dispatcher.
+
+#### `/api/instagram-dashboard/runs/eligibility`
+
+Methode: `GET`
+
+Role:
+
+- Projection read-only par compte pour le bouton Play (sans creer `account_run_request`).
+
+Projection safe:
+
+- `ok_to_start`, `reason`, `message`, `requested_run_type`, `health`
+
+Etat:
+
+- Le bouton Play suit uniquement `ok_to_start` (+ loading/error UI), pas un gate health global legacy cote client.
+
+#### `/api/instagram-dashboard/runs/eligibility/overview`
+
+Methode: `GET`
+
+Role:
+
+- Projection read-only pour tous les comptes actifs du dashboard admin.
+
+Projection safe:
+
+- `run_control` (`displayState`, `label`, `message`, `healthy`, `playEnabled`, `reason`)
+- `accounts[]` : `account_id`, `username`, `readiness_status`, `play_enabled`, `reason`, `message`
+- `summary` : `total`, `play_ready`, `blocked`, `needs_assignment`, `needs_credentials_or_login`
+
+Etat:
+
+- Aucune mutation, aucun `account_run_request`, aucun lancement de run.
+- Sert a identifier les comptes Play-ready, ceux qui ont besoin d'Assign now, et ceux bloques credentials/login.
 
 #### `/api/instagram-dashboard/runs/start`
 

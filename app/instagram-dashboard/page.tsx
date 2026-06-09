@@ -3,11 +3,13 @@ import Link from "next/link";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
+import { getRunControlHealthProjection } from "@/lib/instagram-dashboard/run-control";
 import { readinessLabel, readinessTone } from "@/lib/instagram-dashboard/readiness-projection";
 import AddProfileWizard from "./AddProfileWizard";
 import EmailVerificationActionBanner from "./EmailVerificationActionBanner";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
 import InstagramDashboardViewNav from "./InstagramDashboardViewNav";
+import RunControlStatusBanner from "./RunControlStatusBanner";
 import { getCredentialsActionsData } from "./credentials-actions-data";
 import {
   buildManageKpis,
@@ -29,7 +31,11 @@ export default async function InstagramAutomationDashboardPage() {
     notFound();
   }
 
-  const [data, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
+  const [data, credentialsData, runControlHealth] = await Promise.all([
+    getManageData(),
+    getCredentialsActionsData(),
+    getRunControlHealthProjection(),
+  ]);
   const manageKpis = buildManageKpis(data);
   const emailVerificationActions = credentialsData.actions
     .filter((action) => action.actionType === "enter_email_verification_code"
@@ -54,6 +60,7 @@ export default async function InstagramAutomationDashboardPage() {
       />
 
       <EmailVerificationActionBanner initialActions={emailVerificationActions} />
+      <RunControlStatusBanner health={runControlHealth} />
 
       {data.errors.length > 0 && (
         <section className="ig-dashboard-alert" role="alert">
@@ -87,6 +94,7 @@ export default async function InstagramAutomationDashboardPage() {
           padding: 28px clamp(16px, 3vw, 36px) 48px;
         }
 
+        .ig-dashboard-runcontrol-banner,
         .ig-dashboard-alert {
           display: flex;
           gap: 10px;
@@ -99,6 +107,21 @@ export default async function InstagramAutomationDashboardPage() {
           background: rgba(248, 113, 113, 0.08);
           color: rgba(255,255,255,0.74);
           font-size: 13px;
+        }
+
+        .ig-dashboard-runcontrol-banner {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 4px;
+        }
+
+        .ig-dashboard-runcontrol-banner strong {
+          font-size: 13px;
+        }
+
+        .ig-dashboard-runcontrol-banner small {
+          color: rgba(255,255,255,0.48);
+          font-size: 11px;
         }
 
         .ig-dashboard-alert strong {
