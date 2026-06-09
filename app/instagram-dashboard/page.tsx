@@ -779,6 +779,10 @@ function AccountList({
                     mode={mode}
                     packageLabel={account.packageLabel}
                     entitlementSummary={account.entitlementSummary}
+                    credentialsStatus={account.credentialsStatus}
+                    reauthRequired={account.reauthRequired}
+                    loginStatus={account.loginStatus}
+                    provisioningStatus={account.provisioningStatus}
                   />
                 </td>
               </tr>
@@ -853,6 +857,10 @@ function AccountList({
               mode={mode}
               packageLabel={account.packageLabel}
               entitlementSummary={account.entitlementSummary}
+              credentialsStatus={account.credentialsStatus}
+              reauthRequired={account.reauthRequired}
+              loginStatus={account.loginStatus}
+              provisioningStatus={account.provisioningStatus}
             />
           </article>
         ))}

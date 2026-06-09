@@ -61,6 +61,8 @@ export type RunStartBlockReason =
   | "support_required"
   | "credentials_review_required"
   | "reauth_required"
+  | "login_not_connected"
+  | "login_verification_required"
   | "welcome_template_missing"
   | "welcome_real_send_disabled"
   | "welcome_cap_unproven"
@@ -103,6 +105,9 @@ export type RunStartBlockReason =
 const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
 const CREDENTIAL_REVIEW_ACTIONS = new Set(["review_credentials", "submit_instagram_credentials"]);
 const CHECKPOINT_ACTIONS = new Set(["complete_two_factor", "review_checkpoint", "review_account_mismatch"]);
+const CONNECTED_LOGIN_STATUSES = new Set(["connected"]);
+const READY_PROVISIONING_STATUSES = new Set(["ready"]);
+const LOGIN_ACTION_REQUIRED_STATUSES = new Set(["needs_2fa", "2fa_required", "checkpoint", "password_invalid", "bad_password", "login_failed", "failed", "mismatch", "logged_out"]);
 export const DEFAULT_WELCOME_DM_DAY_CAP = 10;
 export const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
 
@@ -1328,6 +1333,30 @@ export async function createLoginEmailCodeResumeRunRequest({
   };
 }
 
+export async function evaluateLoginConnectionStartGate(
+  accountId: string,
+): Promise<Extract<RunStartBlockReason, "login_not_connected" | "login_verification_required" | "support_required"> | null> {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase
+    .from("client_instagram_accounts")
+    .select("login_status,provisioning_status")
+    .eq("account_id", accountId)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+
+  if (error) return "support_required";
+
+  const loginStatus = readString(data?.login_status, "unknown").toLowerCase();
+  const provisioningStatus = readString(data?.provisioning_status, "unknown").toLowerCase();
+  if (CONNECTED_LOGIN_STATUSES.has(loginStatus) && READY_PROVISIONING_STATUSES.has(provisioningStatus)) {
+    return null;
+  }
+  if (LOGIN_ACTION_REQUIRED_STATUSES.has(loginStatus)) {
+    return "login_verification_required";
+  }
+  return "login_not_connected";
+}
+
 export async function evaluateRunStartEligibility(accountId: string, requestedRunType: string) {
   const normalizedRunType = requestedRunType.trim().toLowerCase();
   if (isLoginRunType(normalizedRunType)) {
@@ -1683,6 +1712,11 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     }
   }
 
+  const loginConnectionBlock = await evaluateLoginConnectionStartGate(accountId);
+  if (loginConnectionBlock) {
+    return { ok: false as const, reason: loginConnectionBlock, health };
+  }
+
   if (await accountHasActiveIgRun(accountId)) {
     return { ok: false as const, reason: "already_running" as RunStartBlockReason, health };
   }
@@ -1768,6 +1802,10 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Credentials review is required before manual run.";
     case "reauth_required":
       return "Credential re-authentication is required before manual run.";
+    case "login_not_connected":
+      return "Manual run is blocked until Instagram is connected on the assigned phone/app.";
+    case "login_verification_required":
+      return "Manual run is blocked because Instagram login needs verification first.";
     case "welcome_template_missing":
       return "Manual run is blocked because no active Welcome DM template is configured.";
     case "welcome_real_send_disabled":

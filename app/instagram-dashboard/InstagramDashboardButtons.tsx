@@ -27,6 +27,14 @@ import {
   startLiveView,
   type LiveViewSessionSafe,
 } from "./live-view-client";
+import {
+  isPlayDisabled,
+  isRunEligibilityPending,
+  resolveActionButtonDisabled,
+  shouldShowAssignNow,
+  shouldShowConnect,
+  shouldShowCredentialsConfirm,
+} from "@/lib/instagram-dashboard/dashboard-action-button-state";
 
 type ReadinessNowStatus =
   | "ready"
@@ -74,6 +82,24 @@ type AssignNowResponse = {
   message: string;
 };
 
+type ConnectNowResponse = {
+  status:
+    | "connected"
+    | "connecting"
+    | "two_factor_required"
+    | "checkpoint_required"
+    | "update_password"
+    | "credentials_missing"
+    | "phone_unavailable"
+    | "assignment_required"
+    | "try_again_later";
+  reason: string;
+  message: string;
+  request_queued: boolean;
+  idempotent: boolean;
+  next_action: string;
+};
+
 type ConfirmValidCredentialsResponse = {
   account_id: string;
   status:
@@ -97,6 +123,10 @@ type InstagramDashboardButtonsProps = {
   mode?: "active" | "archived" | "trashed";
   packageLabel?: string | null;
   entitlementSummary?: string | null;
+  credentialsStatus?: string | null;
+  reauthRequired?: boolean | null;
+  loginStatus?: string | null;
+  provisioningStatus?: string | null;
 };
 
 type ConfigValue = string | number | boolean;
@@ -277,6 +307,7 @@ type AccountTool = {
     | "Run manually"
     | "Run readiness now"
     | "Credentials OK"
+    | "Connect"
     | "Assign now"
     | "Stop run"
     | "Live view"
@@ -366,6 +397,20 @@ export function readinessNowSuccessMessage(payload: ReadinessNowResponse) {
   return `${label}.${requestSuffix}`;
 }
 
+export function connectNowSuccessMessage(payload: ConnectNowResponse) {
+  return payload.message || (
+    payload.status === "connected"
+      ? "Compte connecté."
+      : payload.status === "connecting"
+        ? "Connexion en cours."
+        : payload.status === "two_factor_required"
+          ? "Code requis."
+          : payload.status === "checkpoint_required"
+            ? "Checkpoint requis."
+            : "Try again later."
+  );
+}
+
 export function confirmValidCredentialsSuccessMessage(payload: ConfirmValidCredentialsResponse) {
   if (payload.status === "credentials_inactive") return "Credentials not active.";
   if (payload.status === "account_lifecycle_blocked") return "Account cannot be updated.";
@@ -408,6 +453,12 @@ const baseActiveAccountTools: AccountTool[] = [
     tooltip: "Confirm active credentials are valid. This does not start a run.",
   },
   {
+    label: "Connect",
+    Icon: KeyRound,
+    tone: "success",
+    tooltip: "Connect Instagram on the assigned phone/app. This does not start Growth.",
+  },
+  {
     label: "Assign now",
     Icon: CalendarClock,
     tone: "neutral",
@@ -426,53 +477,72 @@ function buildActiveAccountTools(
   eligibility: RunEligibilityProjection | null,
   eligibilityLoading: boolean,
   eligibilityError: string,
+  accountConnection: {
+    credentialsStatus?: string | null;
+    reauthRequired?: boolean | null;
+    loginStatus?: string | null;
+    provisioningStatus?: string | null;
+  },
   isStartingRun: boolean,
   isCheckingReadiness: boolean,
   isConfirmingCredentials: boolean,
+  isConnectingNow: boolean,
   isAssigningNow: boolean,
   liveViewSession: LiveViewSessionSafe | null,
 ): AccountTool[] {
-  const playDisabled = isStartingRun || eligibilityLoading || Boolean(eligibilityError) || eligibility?.ok_to_start !== true;
+  const eligibilityPending = isRunEligibilityPending(eligibilityLoading, eligibility);
+  const playDisabled = isPlayDisabled(isStartingRun, eligibilityPending, eligibilityError, eligibility);
   const playDisabledReason = isStartingRun
     ? "Starting run..."
-    : eligibilityLoading
+    : eligibilityPending
       ? "Checking run eligibility..."
       : eligibilityError
         ? "Unable to verify run eligibility."
         : eligibility?.ok_to_start === false
           ? eligibility.message
           : undefined;
-  const assignNowReasons = new Set([
-    "assignment_missing",
-    "assignment_window_closed",
-    "needs_phone_assignment",
-    "waiting_scheduled_assignment",
-    "no_app_instance_available",
-    "device_unavailable",
-  ]);
-  const credentialsConfirmReasons = new Set(["reauth_required", "credentials_reauth_required"]);
-  const showCredentialsConfirm = eligibility?.ok_to_start === false && credentialsConfirmReasons.has(eligibility.reason);
-  const credentialsConfirmDisabled = isConfirmingCredentials || isStartingRun || isCheckingReadiness || eligibilityLoading || Boolean(eligibilityError);
+  const showCredentialsConfirm = shouldShowCredentialsConfirm(eligibility);
+  const credentialsConfirmDisabled = isConfirmingCredentials || isStartingRun || isCheckingReadiness || eligibilityPending || Boolean(eligibilityError);
   const credentialsConfirmDisabledReason = isConfirmingCredentials
     ? "Confirming credentials..."
     : isStartingRun
       ? "A manual run is starting."
       : isCheckingReadiness
         ? "Checking readiness..."
-        : eligibilityLoading
+        : eligibilityPending
           ? "Checking run eligibility..."
           : eligibilityError
             ? "Unable to verify credential eligibility."
             : undefined;
-  const showAssignNow = eligibility?.ok_to_start === false && assignNowReasons.has(eligibility.reason);
-  const assignNowDisabled = isAssigningNow || isStartingRun || isCheckingReadiness || eligibilityLoading || Boolean(eligibilityError);
+  const credentialStatus = `${accountConnection.credentialsStatus ?? ""}`.trim().toLowerCase();
+  const loginStatus = `${accountConnection.loginStatus ?? ""}`.trim().toLowerCase();
+  const provisioningStatus = `${accountConnection.provisioningStatus ?? ""}`.trim().toLowerCase();
+  const connectionMissingFromProjection =
+    (credentialStatus === "active" || credentialStatus === "configured") &&
+    accountConnection.reauthRequired !== true &&
+    (loginStatus !== "connected" || provisioningStatus !== "ready");
+  const showConnect = shouldShowConnect(eligibility) || connectionMissingFromProjection;
+  const connectDisabled = isConnectingNow || isStartingRun || isCheckingReadiness || eligibilityPending || Boolean(eligibilityError);
+  const connectDisabledReason = isConnectingNow
+    ? "Connecting..."
+    : isStartingRun
+      ? "A manual run is starting."
+      : isCheckingReadiness
+        ? "Checking readiness..."
+        : eligibilityPending
+          ? "Checking run eligibility..."
+          : eligibilityError
+            ? "Unable to verify connection eligibility."
+            : undefined;
+  const showAssignNow = shouldShowAssignNow(eligibility);
+  const assignNowDisabled = isAssigningNow || isStartingRun || isCheckingReadiness || eligibilityPending || Boolean(eligibilityError);
   const assignNowDisabledReason = isAssigningNow
     ? "Assigning now..."
     : isStartingRun
       ? "A manual run is starting."
       : isCheckingReadiness
         ? "Checking readiness..."
-        : eligibilityLoading
+        : eligibilityPending
           ? "Checking run eligibility..."
           : eligibilityError
             ? "Unable to verify assignment eligibility."
@@ -482,6 +552,7 @@ function buildActiveAccountTools(
     if (tool.label === "Live view") {
       return {
         ...tool,
+        disabled: false,
         tone: liveViewEyeTone(liveViewSession?.status),
         tooltip: liveViewTooltip({
           status: liveViewSession?.status,
@@ -502,14 +573,6 @@ function buildActiveAccountTools(
             : undefined,
       };
     }
-    if (tool.label === "Credentials OK") {
-      return {
-        ...tool,
-        hidden: !showCredentialsConfirm,
-        disabled: credentialsConfirmDisabled,
-        disabledReason: credentialsConfirmDisabledReason,
-      };
-    }
     if (tool.label === "Assign now") {
       return {
         ...tool,
@@ -518,12 +581,30 @@ function buildActiveAccountTools(
         disabledReason: assignNowDisabledReason,
       };
     }
-    if (tool.label !== "Run manually") return tool;
-    return {
-      ...tool,
-      disabled: playDisabled,
-      disabledReason: playDisabledReason,
-    };
+    if (tool.label === "Connect") {
+      return {
+        ...tool,
+        hidden: !showConnect,
+        disabled: connectDisabled,
+        disabledReason: connectDisabledReason,
+      };
+    }
+    if (tool.label === "Credentials OK") {
+      return {
+        ...tool,
+        hidden: !showCredentialsConfirm,
+        disabled: credentialsConfirmDisabled,
+        disabledReason: credentialsConfirmDisabledReason,
+      };
+    }
+    if (tool.label === "Run manually") {
+      return {
+        ...tool,
+        disabled: playDisabled,
+        disabledReason: playDisabledReason,
+      };
+    }
+    return { ...tool, disabled: false };
   });
 }
 
@@ -1324,6 +1405,10 @@ export default function InstagramDashboardButtons({
   mode = "active",
   packageLabel = null,
   entitlementSummary = null,
+  credentialsStatus = null,
+  reauthRequired = null,
+  loginStatus = null,
+  provisioningStatus = null,
 }: InstagramDashboardButtonsProps) {
   const router = useRouter();
   const [styleReady, setStyleReady] = useState(false);
@@ -1356,11 +1441,12 @@ export default function InstagramDashboardButtons({
   const [liveViewSession, setLiveViewSession] = useState<LiveViewSessionSafe | null>(null);
   const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
   const [runEligibility, setRunEligibility] = useState<RunEligibilityProjection | null>(null);
-  const [runEligibilityLoading, setRunEligibilityLoading] = useState(true);
+  const [runEligibilityLoading, setRunEligibilityLoading] = useState(false);
   const [runEligibilityError, setRunEligibilityError] = useState("");
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
   const [isConfirmingCredentials, setIsConfirmingCredentials] = useState(false);
+  const [isConnectingNow, setIsConnectingNow] = useState(false);
   const [isAssigningNow, setIsAssigningNow] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
 
@@ -2193,6 +2279,40 @@ export default function InstagramDashboardButtons({
     });
   }
 
+  async function connectNow() {
+    setIsConnectingNow(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = await readApiResponse<ConnectNowResponse>(
+        await fetch("/api/instagram-dashboard/connect/now", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        }),
+        "Could not connect Instagram now.",
+      );
+      setSuccess(connectNowSuccessMessage(payload));
+      await refreshRunEligibility({ loading: true });
+      router.refresh();
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : "Could not connect Instagram now.");
+    } finally {
+      setIsConnectingNow(false);
+    }
+  }
+
+  function requestConnectNow() {
+    requestConfirmation({
+      title: "Connect Instagram now?",
+      description: "This launches only login/provisioning on the assigned phone/app. It will not start Growth, Follow, DM, Outreach, or Unfollow.",
+      confirmTone: "primary",
+      confirmLabel: "Connect",
+      onConfirm: connectNow,
+    });
+  }
+
   async function assignNow() {
     setIsAssigningNow(true);
     setError("");
@@ -2262,9 +2382,11 @@ export default function InstagramDashboardButtons({
     runEligibility,
     runEligibilityLoading,
     runEligibilityError,
+    { credentialsStatus, reauthRequired, loginStatus, provisioningStatus },
     isStartingRun,
     isCheckingReadiness,
     isConfirmingCredentials,
+    isConnectingNow,
     isAssigningNow,
     liveViewSession,
   );
@@ -2344,6 +2466,7 @@ export default function InstagramDashboardButtons({
               else if (tool.label === "Run manually") requestStartRun();
               else if (tool.label === "Run readiness now") requestReadinessNow();
               else if (tool.label === "Credentials OK") requestConfirmCredentialsValid();
+              else if (tool.label === "Connect") requestConnectNow();
               else if (tool.label === "Assign now") requestAssignNow();
               else if (tool.label === "Archive") requestLifecycle("archive");
               else if (tool.label === "Move to trash") requestLifecycle("trash");
@@ -3500,15 +3623,16 @@ export default function InstagramDashboardButtons({
 function ActionButton({ tool, username, onClick }: { tool: AccountTool; username: string; onClick: () => void }) {
   const Icon = tool.Icon;
   const toneClass = tool.tone ? `ig-dashboard-tool-${tool.tone}` : "";
+  const disabled = resolveActionButtonDisabled(tool.disabled);
 
   return (
     <button
       type="button"
       className={`ig-dashboard-tool ${toneClass}`.trim()}
       aria-label={`${tool.label} for ${username}`}
-      data-tooltip={tool.disabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : (tool.tooltip ?? tool.label)}
+      data-tooltip={disabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : (tool.tooltip ?? tool.label)}
       onClick={onClick}
-      disabled={tool.disabled}
+      disabled={disabled}
     >
       <Icon aria-hidden="true" size={16} strokeWidth={2.2} />
     </button>

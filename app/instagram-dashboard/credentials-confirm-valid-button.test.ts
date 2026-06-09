@@ -6,10 +6,10 @@ const source = readFileSync(new URL("./InstagramDashboardButtons.tsx", import.me
 
 test("credentials confirmation button is shown only for reauth eligibility reasons", () => {
   assert.match(source, /label:\s*"Credentials OK"/);
-  assert.match(source, /new Set\(\["reauth_required", "credentials_reauth_required"\]\)/);
-  assert.match(source, /const showCredentialsConfirm = eligibility\?\.ok_to_start === false && credentialsConfirmReasons\.has\(eligibility\.reason\);/);
-  assert.doesNotMatch(source, /credentialsConfirmReasons[\s\S]{0,180}account_cancelled/);
-  assert.doesNotMatch(source, /credentialsConfirmReasons[\s\S]{0,180}assignment_window_closed/);
+  assert.match(source, /shouldShowCredentialsConfirm/);
+  assert.match(source, /const showCredentialsConfirm = shouldShowCredentialsConfirm\(eligibility\);/);
+  assert.doesNotMatch(source, /shouldShowCredentialsConfirm[\s\S]{0,180}account_cancelled/);
+  assert.doesNotMatch(source, /shouldShowCredentialsConfirm[\s\S]{0,180}assignment_window_closed/);
 });
 
 test("credentials confirmation button has dedicated loading and disabled state", () => {
