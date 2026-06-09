@@ -32,3 +32,8 @@ test("readiness connect assign now and play actions stay separate", () => {
   assert.doesNotMatch(buttonsSource, /Connect[\s\S]{0,500}\/api\/instagram-dashboard\/runs\/start/);
   assert.doesNotMatch(buttonsSource, /Assign now[\s\S]{0,500}\/api\/instagram-dashboard\/runs\/start/);
 });
+
+test("connect triggers immediate email verification banner refresh", () => {
+  assert.match(buttonsSource, /EMAIL_VERIFICATION_REFRESH_EVENT/);
+  assert.match(buttonsSource, /dispatchEvent\(new CustomEvent\(EMAIL_VERIFICATION_REFRESH_EVENT\)\)/);
+});

@@ -18,6 +18,7 @@ test("Connect route is admin-gated and uses login provisioning helper", () => {
 test("Connect helper maps readiness to safe statuses", () => {
   assert.match(helperSource, /connected/);
   assert.match(helperSource, /connecting/);
+  assert.match(helperSource, /code_required/);
   assert.match(helperSource, /two_factor_required/);
   assert.match(helperSource, /checkpoint_required/);
   assert.match(helperSource, /credentials_missing/);
@@ -29,6 +30,16 @@ test("Connect helper maps readiness to safe statuses", () => {
 test("Connect queues only login_provisioning through readiness-now", () => {
   assert.match(readinessSource, /p_requested_run_type:\s*"login_provisioning"/);
   assert.doesNotMatch(helperSource, /account_session|full_cycle|outreach_session|ig_dm_jobs|dm_job|follow|unfollow/i);
+});
+
+test("Connect reuses recent email-code actions and dismisses stale ones before retry", () => {
+  assert.match(helperSource, /CONNECT_EMAIL_CODE_ACTION_TTL_MS = 10 \* 60 \* 1000/);
+  assert.match(helperSource, /email_verification_code_action_pending/);
+  assert.match(helperSource, /next_action: "enter_email_verification_code"/);
+  assert.match(helperSource, /\.eq\("action_type", "enter_email_verification_code"\)/);
+  assert.match(helperSource, /dismissStaleEmailCodeActions/);
+  assert.match(helperSource, /status: "dismissed"/);
+  assert.match(helperSource, /runReadinessNow/);
 });
 
 test("Connect button is separate from Credentials OK Assign now Readiness and Play", () => {

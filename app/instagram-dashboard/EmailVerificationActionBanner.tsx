@@ -22,6 +22,7 @@ type Props = {
 
 const POLL_INTERVAL_MS = 15_000;
 const AUTO_OPEN_STORAGE_KEY = "instagram-dashboard-email-code-auto-opened-actions";
+export const EMAIL_VERIFICATION_REFRESH_EVENT = "instagram-dashboard:refresh-email-verification";
 
 function normalizeActions(value: unknown): EmailVerificationAction[] {
   if (!Array.isArray(value)) return [];
@@ -121,7 +122,14 @@ export default function EmailVerificationActionBanner({ initialActions = [] }: P
     const timer = window.setInterval(() => {
       void refreshActions();
     }, POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    const onRefreshRequested = () => {
+      void refreshActions();
+    };
+    window.addEventListener(EMAIL_VERIFICATION_REFRESH_EVENT, onRefreshRequested);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener(EMAIL_VERIFICATION_REFRESH_EVENT, onRefreshRequested);
+    };
   }, [refreshActions]);
 
   useEffect(() => {

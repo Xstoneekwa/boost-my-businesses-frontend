@@ -89,6 +89,8 @@ test("dashboard email verification banner polls and exposes Enter code modal", (
   const credentialsSource = source("./credentials-actions/page.tsx");
 
   assert.match(bannerSource, /POLL_INTERVAL_MS = 15_000/);
+  assert.match(bannerSource, /EMAIL_VERIFICATION_REFRESH_EVENT/);
+  assert.match(bannerSource, /addEventListener\(EMAIL_VERIFICATION_REFRESH_EVENT/);
   assert.match(bannerSource, /Email verification code required for/);
   assert.match(bannerSource, /Email verification codes required/);
   assert.match(bannerSource, /Choose the matching account before entering a code/);
@@ -118,6 +120,14 @@ test("email verification polling route returns safe action metadata only", () =>
 
   assert.match(routeSource, /enter_email_verification_code/);
   assert.match(routeSource, /code_submitted/);
+  assert.match(routeSource, /EMAIL_CODE_ACTION_TTL_MS = 10 \* 60 \* 1000/);
+  assert.match(routeSource, /BLOCKED_ACCOUNT_STATUSES/);
+  assert.match(routeSource, /archived/);
+  assert.match(routeSource, /trashed/);
+  assert.match(routeSource, /cancelled/);
+  assert.match(routeSource, /isFreshAction/);
+  assert.match(routeSource, /isResumeActionable/);
+  assert.match(routeSource, /isAccountVisible/);
   assert.match(routeSource, /resumeStatus/);
   assert.match(routeSource, /resumeRequestId/);
   assert.match(routeSource, /requireInstagramAdmin/);
@@ -129,4 +139,14 @@ test("email verification polling route returns safe action metadata only", () =>
   assert.equal(routeSource.includes("secret_ref"), false);
   assert.equal(routeSource.includes("vault"), false);
   assert.equal(routeSource.includes("console.log"), false);
+});
+
+test("email verification route excludes stale and out-of-scope accounts", () => {
+  const routeSource = source("../api/instagram-dashboard/dashboard-actions/email-verification/route.ts");
+
+  assert.match(routeSource, /visibleActions = actions\.filter/);
+  assert.match(routeSource, /isAccountVisible\(accountById\.get\(accountId\)\)/);
+  assert.match(routeSource, /isFreshAction\(row, nowMs\)/);
+  assert.match(routeSource, /isResumeActionable\(row\)/);
+  assert.doesNotMatch(routeSource, /metadata\}\)/);
 });

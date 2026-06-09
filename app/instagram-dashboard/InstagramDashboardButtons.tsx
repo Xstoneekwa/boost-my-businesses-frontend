@@ -17,6 +17,7 @@ import {
   type TargetsOverview,
 } from "./targets-data";
 import InstagramAccountTargetsPanel from "./InstagramAccountTargetsPanel";
+import { EMAIL_VERIFICATION_REFRESH_EVENT } from "./EmailVerificationActionBanner";
 import LivePhoneViewPanel from "./LivePhoneViewPanel";
 import {
   isLiveViewActiveStatus,
@@ -86,6 +87,7 @@ type ConnectNowResponse = {
   status:
     | "connected"
     | "connecting"
+    | "code_required"
     | "two_factor_required"
     | "checkpoint_required"
     | "update_password"
@@ -403,7 +405,7 @@ export function connectNowSuccessMessage(payload: ConnectNowResponse) {
       ? "Compte connecté."
       : payload.status === "connecting"
         ? "Connexion en cours."
-        : payload.status === "two_factor_required"
+        : payload.status === "code_required" || payload.status === "two_factor_required"
           ? "Code requis."
           : payload.status === "checkpoint_required"
             ? "Checkpoint requis."
@@ -2294,6 +2296,7 @@ export default function InstagramDashboardButtons({
         "Could not connect Instagram now.",
       );
       setSuccess(connectNowSuccessMessage(payload));
+      window.dispatchEvent(new CustomEvent(EMAIL_VERIFICATION_REFRESH_EVENT));
       await refreshRunEligibility({ loading: true });
       router.refresh();
     } catch (connectError) {

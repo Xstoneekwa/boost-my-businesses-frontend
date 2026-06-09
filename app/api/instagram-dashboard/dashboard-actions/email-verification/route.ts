@@ -17,6 +17,8 @@ type DashboardActionRow = {
 type AccountRow = {
   id?: unknown;
   username?: unknown;
+  status?: unknown;
+  admin_lifecycle_status?: unknown;
 };
 
 type DeletePayload = {
@@ -25,6 +27,39 @@ type DeletePayload = {
 };
 
 const ACTIVE_EMAIL_CODE_STATUSES = ["pending", "acknowledged", "pending_verification", "code_submitted"] as const;
+const EMAIL_CODE_ACTION_TTL_MS = 10 * 60 * 1000;
+const BLOCKED_ACCOUNT_STATUSES = new Set(["archived", "trashed", "cancelled", "canceled", "deleted"]);
+const NON_ACTIONABLE_RESUME_STATUSES = new Set(["completed", "failed", "preflight_failed"]);
+
+function readMetadata(row: DashboardActionRow) {
+  return row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? (row.metadata as Record<string, unknown>)
+    : {};
+}
+
+function isFreshAction(row: DashboardActionRow, nowMs: number) {
+  const metadata = readMetadata(row);
+  const explicitExpiry = Date.parse(readString(metadata.action_expires_at, readString(metadata.expires_at, "")));
+  if (Number.isFinite(explicitExpiry)) return explicitExpiry > nowMs;
+
+  const updatedAt = Date.parse(readString(row.updated_at, ""));
+  return Number.isFinite(updatedAt) && nowMs - updatedAt <= EMAIL_CODE_ACTION_TTL_MS;
+}
+
+function isResumeActionable(row: DashboardActionRow) {
+  const status = readString(row.status, "pending");
+  const resumeStatus = readString(readMetadata(row).resume_status, "");
+  if (resumeStatus === "needs_new_code") return true;
+  if (status === "code_submitted") return resumeStatus === "queued" || resumeStatus === "running";
+  return !NON_ACTIONABLE_RESUME_STATUSES.has(resumeStatus);
+}
+
+function isAccountVisible(row: AccountRow | undefined) {
+  if (!row) return false;
+  const status = readString(row.status, "").toLowerCase();
+  const lifecycle = readString(row.admin_lifecycle_status, status).toLowerCase();
+  return !BLOCKED_ACCOUNT_STATUSES.has(status) && !BLOCKED_ACCOUNT_STATUSES.has(lifecycle);
+}
 
 export async function GET() {
   const unauthorizedResponse = await requireInstagramAdmin();
@@ -45,37 +80,40 @@ export async function GET() {
 
   const actions = Array.isArray(actionRows) ? (actionRows as DashboardActionRow[]) : [];
   const accountIds = [...new Set(actions.map((row) => readString(row.account_id)).filter(Boolean))];
-  let accountById = new Map<string, string>();
+  let accountById = new Map<string, AccountRow>();
 
   if (accountIds.length > 0) {
     const { data: accountsData, error: accountsError } = await supabase
       .from("ig_accounts")
-      .select("id,username")
+      .select("id,username,status,admin_lifecycle_status")
       .in("id", accountIds);
 
     if (!accountsError && Array.isArray(accountsData)) {
-      const accountEntries: Array<[string, string]> = [];
+      const accountEntries: Array<[string, AccountRow]> = [];
       for (const row of accountsData as AccountRow[]) {
         const id = readString(row.id);
-        const username = readString(row.username);
-        if (id && username) accountEntries.push([id, username]);
+        if (id) accountEntries.push([id, row]);
       }
       accountById = new Map(accountEntries);
     }
   }
 
+  const nowMs = Date.now();
+  const visibleActions = actions.filter((row) => {
+    const accountId = readString(row.account_id);
+    return isAccountVisible(accountById.get(accountId)) && isFreshAction(row, nowMs) && isResumeActionable(row);
+  });
+
   return jsonOk({
-    actions: actions.map((row) => {
+    actions: visibleActions.map((row) => {
       const accountId = readString(row.account_id);
-      const metadata =
-        row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
-          ? (row.metadata as Record<string, unknown>)
-          : {};
+      const metadata = readMetadata(row);
       const resumeStatus = readString(metadata.resume_status, "");
+      const account = accountById.get(accountId);
       return {
         id: readString(row.id),
         accountId,
-        username: accountById.get(accountId) || "Instagram account",
+        username: readString(account?.username, "Instagram account"),
         actionType: "enter_email_verification_code",
         status: readString(row.status, "pending"),
         resumeStatus: resumeStatus || null,
