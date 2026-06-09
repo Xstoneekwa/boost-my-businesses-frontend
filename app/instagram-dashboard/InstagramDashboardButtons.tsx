@@ -28,6 +28,37 @@ import {
   type LiveViewSessionSafe,
 } from "./live-view-client";
 
+type ReadinessNowStatus =
+  | "ready"
+  | "needs_credentials"
+  | "needs_login_verification"
+  | "waiting_scheduled_assignment"
+  | "capacity_unavailable"
+  | "retry_later"
+  | "checking_connection";
+
+type ReadinessNowClientStatus =
+  | "connected_ready"
+  | "checking_connection"
+  | "action_required_2fa"
+  | "action_required_checkpoint"
+  | "update_password"
+  | "capacity_unavailable"
+  | "waiting_next_slot"
+  | "try_again_later";
+
+type ReadinessNowResponse = {
+  readiness_status?: ReadinessNowStatus;
+  client_status?: ReadinessNowClientStatus;
+  client_message?: string;
+  preflight_request_created?: boolean;
+  idempotent?: boolean;
+  request_id?: string | null;
+  run_request_status?: string | null;
+  next_action?: string;
+  reason?: string;
+};
+
 type InstagramDashboardButtonsProps = {
   accountId: string;
   username: string;
@@ -212,6 +243,7 @@ type AccountTool = {
     | "Stats"
     | "Logs"
     | "Run manually"
+    | "Run readiness now"
     | "Stop run"
     | "Live view"
     | "Settings"
@@ -271,6 +303,27 @@ export function runStartSuccessMessage(payload: RunStartResponse) {
   return payload.message || `Run request ${payload.request_id.slice(0, 8)} queued (${payload.status}).`;
 }
 
+export function readinessNowSuccessMessage(payload: ReadinessNowResponse) {
+  const status = payload.client_status ?? payload.readiness_status ?? "try_again_later";
+  const label = {
+    connected_ready: "Ready",
+    checking_connection: "Checking connection",
+    action_required_2fa: "2FA required",
+    action_required_checkpoint: "Checkpoint required",
+    update_password: "Update password",
+    capacity_unavailable: "Capacity unavailable",
+    waiting_next_slot: "Waiting next slot",
+    try_again_later: "Try again later",
+    ready: "Ready",
+    needs_credentials: "Needs credentials",
+    needs_login_verification: "Needs login verification",
+    waiting_scheduled_assignment: "Waiting next slot",
+    retry_later: "Try again later",
+  }[status] ?? "Try again later";
+  const requestSuffix = payload.request_id ? ` Request ${payload.request_id.slice(0, 8)} queued.` : "";
+  return `${label}.${requestSuffix}`;
+}
+
 const baseActiveAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
@@ -278,6 +331,12 @@ const baseActiveAccountTools: AccountTool[] = [
     label: "Run manually",
     Icon: Play,
     tone: "success",
+  },
+  {
+    label: "Run readiness now",
+    Icon: RotateCcw,
+    tone: "neutral",
+    tooltip: "Check login/readiness now. This does not start a full Growth session.",
   },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Live view", Icon: Eye, tone: "neutral" },
@@ -291,6 +350,7 @@ const baseActiveAccountTools: AccountTool[] = [
 function buildActiveAccountTools(
   health: RunControlHealth | null,
   isStartingRun: boolean,
+  isCheckingReadiness: boolean,
   liveViewSession: LiveViewSessionSafe | null,
 ): AccountTool[] {
   const playDisabled = isStartingRun || !health?.playEnabled || !health?.healthy;
@@ -313,6 +373,17 @@ function buildActiveAccountTools(
           livekitNotConfigured: liveViewSession?.status === "livekit_not_configured",
           phoneUnavailable: liveViewSession?.failure_reason === "device_unavailable",
         }),
+      };
+    }
+    if (tool.label === "Run readiness now") {
+      return {
+        ...tool,
+        disabled: isCheckingReadiness || isStartingRun,
+        disabledReason: isCheckingReadiness
+          ? "Checking readiness..."
+          : isStartingRun
+            ? "A manual run is starting."
+            : undefined,
       };
     }
     if (tool.label !== "Run manually") return tool;
@@ -1153,6 +1224,7 @@ export default function InstagramDashboardButtons({
   const [liveViewSession, setLiveViewSession] = useState<LiveViewSessionSafe | null>(null);
   const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
+  const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
 
   useEffect(() => {
@@ -1879,6 +1951,39 @@ export default function InstagramDashboardButtons({
     });
   }
 
+  async function runReadinessNow() {
+    setIsCheckingReadiness(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = await readApiResponse<ReadinessNowResponse>(
+        await fetch("/api/instagram-dashboard/readiness/now", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId, audience: "admin" }),
+        }),
+        "Could not check login readiness.",
+      );
+      setSuccess(readinessNowSuccessMessage(payload));
+      router.refresh();
+    } catch (readinessError) {
+      setError(readinessError instanceof Error ? readinessError.message : "Try again later.");
+    } finally {
+      setIsCheckingReadiness(false);
+    }
+  }
+
+  function requestReadinessNow() {
+    requestConfirmation({
+      title: "Run readiness now?",
+      description: "This checks Instagram login/readiness now. It will not start a full Growth session.",
+      confirmTone: "primary",
+      confirmLabel: "Run readiness now",
+      onConfirm: runReadinessNow,
+    });
+  }
+
   function requestStopRun() {
     requestConfirmation({
       title: "🚨 Stop current run? ⚠️",
@@ -1910,7 +2015,7 @@ export default function InstagramDashboardButtons({
     }
   }
 
-  const activeAccountTools = buildActiveAccountTools(runControlHealth, isStartingRun, liveViewSession);
+  const activeAccountTools = buildActiveAccountTools(runControlHealth, isStartingRun, isCheckingReadiness, liveViewSession);
 
   async function updateLifecycle(action: "archive" | "trash" | "restore") {
     setError("");
@@ -1985,6 +2090,7 @@ export default function InstagramDashboardButtons({
               else if (tool.label === "Live view") void openLiveView();
               else if (tool.label === "Stop run") requestStopRun();
               else if (tool.label === "Run manually") requestStartRun();
+              else if (tool.label === "Run readiness now") requestReadinessNow();
               else if (tool.label === "Archive") requestLifecycle("archive");
               else if (tool.label === "Move to trash") requestLifecycle("trash");
               else if (tool.label === "Restore account") requestLifecycle("restore");
