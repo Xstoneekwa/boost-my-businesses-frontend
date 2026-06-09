@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BarChart3, Clipboard, Download, Eye, FileText, Funnel, KeyRound, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { Archive, BarChart3, CalendarClock, Clipboard, Download, Eye, FileText, Funnel, KeyRound, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/instagram-dashboard/business-timezone";
 import type { ScheduleProjection, ScheduleSlotProjection } from "@/lib/instagram-dashboard/schedule";
@@ -57,6 +57,21 @@ type ReadinessNowResponse = {
   run_request_status?: string | null;
   next_action?: string;
   reason?: string;
+};
+
+type AssignNowResponse = {
+  assignment_created: boolean;
+  assignment_repaired: boolean;
+  status:
+    | "assigned_now"
+    | "assignment_repaired"
+    | "already_assigned"
+    | "capacity_unavailable"
+    | "not_ready"
+    | "active_run_exists"
+    | "active_request_exists";
+  reason: string;
+  message: string;
 };
 
 type ConfirmValidCredentialsResponse = {
@@ -262,6 +277,7 @@ type AccountTool = {
     | "Run manually"
     | "Run readiness now"
     | "Credentials OK"
+    | "Assign now"
     | "Stop run"
     | "Live view"
     | "Settings"
@@ -357,6 +373,20 @@ export function confirmValidCredentialsSuccessMessage(payload: ConfirmValidCrede
   return "Credentials confirmed. Recheck readiness or assign now.";
 }
 
+export function assignNowSuccessMessage(payload: AssignNowResponse) {
+  return payload.message || (
+    payload.status === "already_assigned"
+      ? "Account already has a valid assignment window."
+      : payload.status === "capacity_unavailable"
+        ? "No phone is available right now."
+        : payload.status === "assignment_repaired"
+          ? "Assignment window repaired for now."
+          : payload.status === "assigned_now"
+            ? "Assignment created for now."
+            : "Assign now could not complete."
+  );
+}
+
 const baseActiveAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
@@ -377,6 +407,12 @@ const baseActiveAccountTools: AccountTool[] = [
     tone: "neutral",
     tooltip: "Confirm active credentials are valid. This does not start a run.",
   },
+  {
+    label: "Assign now",
+    Icon: CalendarClock,
+    tone: "neutral",
+    tooltip: "Create or repair the current assignment window. This does not start a run.",
+  },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Live view", Icon: Eye, tone: "neutral" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
@@ -393,6 +429,7 @@ function buildActiveAccountTools(
   isStartingRun: boolean,
   isCheckingReadiness: boolean,
   isConfirmingCredentials: boolean,
+  isAssigningNow: boolean,
   liveViewSession: LiveViewSessionSafe | null,
 ): AccountTool[] {
   const playDisabled = isStartingRun || eligibilityLoading || Boolean(eligibilityError) || eligibility?.ok_to_start !== true;
@@ -405,6 +442,14 @@ function buildActiveAccountTools(
         : eligibility?.ok_to_start === false
           ? eligibility.message
           : undefined;
+  const assignNowReasons = new Set([
+    "assignment_missing",
+    "assignment_window_closed",
+    "needs_phone_assignment",
+    "waiting_scheduled_assignment",
+    "no_app_instance_available",
+    "device_unavailable",
+  ]);
   const credentialsConfirmReasons = new Set(["reauth_required", "credentials_reauth_required"]);
   const showCredentialsConfirm = eligibility?.ok_to_start === false && credentialsConfirmReasons.has(eligibility.reason);
   const credentialsConfirmDisabled = isConfirmingCredentials || isStartingRun || isCheckingReadiness || eligibilityLoading || Boolean(eligibilityError);
@@ -418,6 +463,19 @@ function buildActiveAccountTools(
           ? "Checking run eligibility..."
           : eligibilityError
             ? "Unable to verify credential eligibility."
+            : undefined;
+  const showAssignNow = eligibility?.ok_to_start === false && assignNowReasons.has(eligibility.reason);
+  const assignNowDisabled = isAssigningNow || isStartingRun || isCheckingReadiness || eligibilityLoading || Boolean(eligibilityError);
+  const assignNowDisabledReason = isAssigningNow
+    ? "Assigning now..."
+    : isStartingRun
+      ? "A manual run is starting."
+      : isCheckingReadiness
+        ? "Checking readiness..."
+        : eligibilityLoading
+          ? "Checking run eligibility..."
+          : eligibilityError
+            ? "Unable to verify assignment eligibility."
             : undefined;
 
   return baseActiveAccountTools.map((tool) => {
@@ -450,6 +508,14 @@ function buildActiveAccountTools(
         hidden: !showCredentialsConfirm,
         disabled: credentialsConfirmDisabled,
         disabledReason: credentialsConfirmDisabledReason,
+      };
+    }
+    if (tool.label === "Assign now") {
+      return {
+        ...tool,
+        hidden: !showAssignNow,
+        disabled: assignNowDisabled,
+        disabledReason: assignNowDisabledReason,
       };
     }
     if (tool.label !== "Run manually") return tool;
@@ -1295,6 +1361,7 @@ export default function InstagramDashboardButtons({
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
   const [isConfirmingCredentials, setIsConfirmingCredentials] = useState(false);
+  const [isAssigningNow, setIsAssigningNow] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
 
   useEffect(() => {
@@ -2126,6 +2193,40 @@ export default function InstagramDashboardButtons({
     });
   }
 
+  async function assignNow() {
+    setIsAssigningNow(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = await readApiResponse<AssignNowResponse>(
+        await fetch("/api/instagram-dashboard/assignments/now", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        }),
+        "Could not assign account now.",
+      );
+      setSuccess(assignNowSuccessMessage(payload));
+      await refreshRunEligibility({ loading: true });
+      router.refresh();
+    } catch (assignError) {
+      setError(assignError instanceof Error ? assignError.message : "Could not assign account now.");
+    } finally {
+      setIsAssigningNow(false);
+    }
+  }
+
+  function requestAssignNow() {
+    requestConfirmation({
+      title: "Assign phone slot now?",
+      description: "This creates or repairs the current phone assignment window. It will not start a run.",
+      confirmTone: "primary",
+      confirmLabel: "Assign now",
+      onConfirm: assignNow,
+    });
+  }
+
   function requestStopRun() {
     requestConfirmation({
       title: "🚨 Stop current run? ⚠️",
@@ -2164,6 +2265,7 @@ export default function InstagramDashboardButtons({
     isStartingRun,
     isCheckingReadiness,
     isConfirmingCredentials,
+    isAssigningNow,
     liveViewSession,
   );
 
@@ -2242,6 +2344,7 @@ export default function InstagramDashboardButtons({
               else if (tool.label === "Run manually") requestStartRun();
               else if (tool.label === "Run readiness now") requestReadinessNow();
               else if (tool.label === "Credentials OK") requestConfirmCredentialsValid();
+              else if (tool.label === "Assign now") requestAssignNow();
               else if (tool.label === "Archive") requestLifecycle("archive");
               else if (tool.label === "Move to trash") requestLifecycle("trash");
               else if (tool.label === "Restore account") requestLifecycle("restore");

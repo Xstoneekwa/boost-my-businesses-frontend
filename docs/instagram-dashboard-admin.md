@@ -913,6 +913,30 @@ Etat:
 - Aucune mutation, aucun `account_run_request`, aucun lancement de run.
 - Sert a identifier les comptes Play-ready, ceux qui ont besoin d'Assign now, et ceux bloques credentials/login.
 
+#### `/api/instagram-dashboard/assignments/now`
+
+Methode: `POST`
+
+Role:
+
+- Creer ou reparer une assignment actuelle pour un compte admin sans lancer de run.
+
+Payload:
+
+- `account_id`
+
+Projection safe:
+
+- `assignment_created`, `assignment_repaired`, `status`, `reason`, `message`
+
+Etat:
+
+- Utilise les gates schedule existants et `assign_account_slot`.
+- Ne cree jamais `account_run_request`.
+- Ne route jamais vers `/runs/start`.
+- Retourne `already_assigned` si la fenetre courante est deja valide.
+- Retourne `capacity_unavailable` si aucun phone/app slot courant n'est disponible.
+
 #### `/api/instagram-dashboard/runs/start`
 
 Methode: `POST`
