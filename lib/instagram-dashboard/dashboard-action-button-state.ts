@@ -13,11 +13,47 @@ const assignNowReasons = new Set([
   "device_unavailable",
 ]);
 
-export function resolveActionButtonDisabled(disabled?: boolean) {
+export function resolveActionButtonDisabled(disabled?: boolean | null) {
   return disabled === true;
 }
 
-export function isRunEligibilityPending(loading: boolean, eligibility: DashboardRunEligibility | null) {
+export function buildConnectButtonDisabledState(input: {
+  isConnectingNow: boolean;
+  isStartingRun: boolean;
+  isCheckingReadiness: boolean;
+  eligibilityLoading: boolean;
+  eligibilityError: string;
+  eligibility: DashboardRunEligibility | null;
+}) {
+  const eligibilityPending = isRunEligibilityPending(input.eligibilityLoading, input.eligibility);
+  const disabled = resolveActionButtonDisabled(
+    input.isConnectingNow
+      || input.isStartingRun
+      || input.isCheckingReadiness
+      || eligibilityPending
+      || Boolean(input.eligibilityError),
+  );
+  const disabledReason = input.isConnectingNow
+    ? "Connecting..."
+    : input.isStartingRun
+      ? "A manual run is starting."
+      : input.isCheckingReadiness
+        ? "Checking readiness..."
+        : eligibilityPending
+          ? "Checking run eligibility..."
+          : input.eligibilityError
+            ? "Unable to verify connection eligibility."
+            : undefined;
+
+  return { disabled, disabledReason, eligibilityPending };
+}
+
+export function isRunEligibilityPending(
+  loading: boolean,
+  eligibility: DashboardRunEligibility | null,
+  hasHydrated = true,
+) {
+  if (!hasHydrated) return true;
   return loading || eligibility === null;
 }
 

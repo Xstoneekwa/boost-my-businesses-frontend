@@ -29,6 +29,7 @@ import {
   type LiveViewSessionSafe,
 } from "./live-view-client";
 import {
+  buildConnectButtonDisabledState,
   isPlayDisabled,
   isRunEligibilityPending,
   resolveActionButtonDisabled,
@@ -491,8 +492,9 @@ function buildActiveAccountTools(
   isConnectingNow: boolean,
   isAssigningNow: boolean,
   liveViewSession: LiveViewSessionSafe | null,
+  hasHydrated: boolean,
 ): AccountTool[] {
-  const eligibilityPending = isRunEligibilityPending(eligibilityLoading, eligibility);
+  const eligibilityPending = isRunEligibilityPending(eligibilityLoading, eligibility, hasHydrated);
   const playDisabled = isPlayDisabled(isStartingRun, eligibilityPending, eligibilityError, eligibility);
   const playDisabledReason = isStartingRun
     ? "Starting run..."
@@ -524,18 +526,16 @@ function buildActiveAccountTools(
     accountConnection.reauthRequired !== true &&
     (loginStatus !== "connected" || provisioningStatus !== "ready");
   const showConnect = shouldShowConnect(eligibility) || connectionMissingFromProjection;
-  const connectDisabled = isConnectingNow || isStartingRun || isCheckingReadiness || eligibilityPending || Boolean(eligibilityError);
-  const connectDisabledReason = isConnectingNow
-    ? "Connecting..."
-    : isStartingRun
-      ? "A manual run is starting."
-      : isCheckingReadiness
-        ? "Checking readiness..."
-        : eligibilityPending
-          ? "Checking run eligibility..."
-          : eligibilityError
-            ? "Unable to verify connection eligibility."
-            : undefined;
+  const connectButtonState = buildConnectButtonDisabledState({
+    isConnectingNow,
+    isStartingRun,
+    isCheckingReadiness,
+    eligibilityLoading: eligibilityLoading || !hasHydrated,
+    eligibilityError,
+    eligibility: hasHydrated ? eligibility : null,
+  });
+  const connectDisabled = connectButtonState.disabled;
+  const connectDisabledReason = connectButtonState.disabledReason;
   const showAssignNow = shouldShowAssignNow(eligibility);
   const assignNowDisabled = isAssigningNow || isStartingRun || isCheckingReadiness || eligibilityPending || Boolean(eligibilityError);
   const assignNowDisabledReason = isAssigningNow
@@ -554,7 +554,7 @@ function buildActiveAccountTools(
     if (tool.label === "Live view") {
       return {
         ...tool,
-        disabled: false,
+        disabled: resolveActionButtonDisabled(false),
         tone: liveViewEyeTone(liveViewSession?.status),
         tooltip: liveViewTooltip({
           status: liveViewSession?.status,
@@ -567,7 +567,7 @@ function buildActiveAccountTools(
     if (tool.label === "Run readiness now") {
       return {
         ...tool,
-        disabled: isCheckingReadiness || isStartingRun,
+        disabled: resolveActionButtonDisabled(isCheckingReadiness || isStartingRun),
         disabledReason: isCheckingReadiness
           ? "Checking readiness..."
           : isStartingRun
@@ -579,7 +579,7 @@ function buildActiveAccountTools(
       return {
         ...tool,
         hidden: !showAssignNow,
-        disabled: assignNowDisabled,
+        disabled: resolveActionButtonDisabled(assignNowDisabled),
         disabledReason: assignNowDisabledReason,
       };
     }
@@ -587,7 +587,7 @@ function buildActiveAccountTools(
       return {
         ...tool,
         hidden: !showConnect,
-        disabled: connectDisabled,
+        disabled: resolveActionButtonDisabled(connectDisabled),
         disabledReason: connectDisabledReason,
       };
     }
@@ -595,18 +595,18 @@ function buildActiveAccountTools(
       return {
         ...tool,
         hidden: !showCredentialsConfirm,
-        disabled: credentialsConfirmDisabled,
+        disabled: resolveActionButtonDisabled(credentialsConfirmDisabled),
         disabledReason: credentialsConfirmDisabledReason,
       };
     }
     if (tool.label === "Run manually") {
       return {
         ...tool,
-        disabled: playDisabled,
+        disabled: resolveActionButtonDisabled(playDisabled),
         disabledReason: playDisabledReason,
       };
     }
-    return { ...tool, disabled: false };
+    return { ...tool, disabled: resolveActionButtonDisabled(false) };
   });
 }
 
@@ -1443,7 +1443,8 @@ export default function InstagramDashboardButtons({
   const [liveViewSession, setLiveViewSession] = useState<LiveViewSessionSafe | null>(null);
   const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
   const [runEligibility, setRunEligibility] = useState<RunEligibilityProjection | null>(null);
-  const [runEligibilityLoading, setRunEligibilityLoading] = useState(false);
+  const [runEligibilityLoading, setRunEligibilityLoading] = useState(true);
+  const [hasHydratedActionButtons, setHasHydratedActionButtons] = useState(false);
   const [runEligibilityError, setRunEligibilityError] = useState("");
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
@@ -1454,6 +1455,7 @@ export default function InstagramDashboardButtons({
 
   useEffect(() => {
     setStyleReady(true);
+    setHasHydratedActionButtons(true);
   }, []);
 
   useEffect(() => {
@@ -2392,6 +2394,7 @@ export default function InstagramDashboardButtons({
     isConnectingNow,
     isAssigningNow,
     liveViewSession,
+    hasHydratedActionButtons,
   );
 
   async function updateLifecycle(action: "archive" | "trash" | "restore") {
@@ -2458,7 +2461,7 @@ export default function InstagramDashboardButtons({
             tool={tool}
             username={username}
             onClick={() => {
-              if (tool.disabled) return;
+              if (resolveActionButtonDisabled(tool.disabled)) return;
               if (tool.label === "Settings") void loadPanel("settings");
               else if (tool.label === "Stats") void loadPanel("stats");
               else if (tool.label === "Logs") void loadPanel("logs");
@@ -3626,16 +3629,16 @@ export default function InstagramDashboardButtons({
 function ActionButton({ tool, username, onClick }: { tool: AccountTool; username: string; onClick: () => void }) {
   const Icon = tool.Icon;
   const toneClass = tool.tone ? `ig-dashboard-tool-${tool.tone}` : "";
-  const disabled = resolveActionButtonDisabled(tool.disabled);
+  const isDisabled = resolveActionButtonDisabled(tool.disabled) === true;
 
   return (
     <button
       type="button"
       className={`ig-dashboard-tool ${toneClass}`.trim()}
       aria-label={`${tool.label} for ${username}`}
-      data-tooltip={disabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : (tool.tooltip ?? tool.label)}
+      data-tooltip={isDisabled ? (tool.disabledReason ?? `${tool.label} is not available yet`) : (tool.tooltip ?? tool.label)}
       onClick={onClick}
-      disabled={disabled}
+      disabled={isDisabled ? true : false}
     >
       <Icon aria-hidden="true" size={16} strokeWidth={2.2} />
     </button>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildConnectButtonDisabledState,
   isPlayDisabled,
   isRunEligibilityPending,
   resolveActionButtonDisabled,
@@ -12,13 +13,32 @@ import {
 
 test("resolveActionButtonDisabled never treats nullish values as enabled mismatch", () => {
   assert.equal(resolveActionButtonDisabled(undefined), false);
+  assert.equal(resolveActionButtonDisabled(null), false);
   assert.equal(resolveActionButtonDisabled(false), false);
   assert.equal(resolveActionButtonDisabled(true), true);
+});
+
+test("connect button stays disabled with a boolean while eligibility is unknown", () => {
+  const pending = buildConnectButtonDisabledState({
+    isConnectingNow: false,
+    isStartingRun: false,
+    isCheckingReadiness: false,
+    eligibilityLoading: false,
+    eligibilityError: "",
+    eligibility: null,
+  });
+
+  assert.equal(pending.disabled, true);
+  assert.equal(pending.disabledReason, "Checking run eligibility...");
+  assert.equal(typeof pending.disabled, "boolean");
+  assert.notEqual(pending.disabled, null);
+  assert.equal(resolveActionButtonDisabled(pending.disabled), true);
 });
 
 test("initial SSR and client treat unknown eligibility as pending", () => {
   assert.equal(isRunEligibilityPending(false, null), true);
   assert.equal(isRunEligibilityPending(true, null), true);
+  assert.equal(isRunEligibilityPending(false, { ok_to_start: true, reason: "ready", message: "ready" }, false), true);
   assert.equal(
     isPlayDisabled(false, isRunEligibilityPending(false, null), "", null),
     true,
