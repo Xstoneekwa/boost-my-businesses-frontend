@@ -279,7 +279,7 @@ export function resolveAddProfilePackagePreset(input: {
     outreachPerDayLimit: outreachEnabled ? (base.defaultOutreachDayCap ?? 30) : 0,
     totalDmPerDayLimit: (base.defaultWelcomeDayCap ?? 10) + (outreachEnabled ? (base.defaultOutreachDayCap ?? 30) : 0),
     unfollowAfterDays: 3,
-    unfollowMode: "unfollow-any",
+    unfollowMode: "unfollow",
     followFilters: {
       dontFollowPrivateAccounts: true,
       minFollowers: 1,

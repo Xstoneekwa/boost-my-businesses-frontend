@@ -28,7 +28,17 @@ test("ensure ownership module creates client and subscription links before assig
   assert.match(ensureSource, /account_commercial_packages/);
   assert.match(ensureSource, /commercial_packages/);
   assert.match(ensureSource, /account_commercial_addons/);
+  assert.match(ensureSource, /client_subscription_modules/);
+  assert.match(ensureSource, /sync_client_subscription_entitlements/);
   assert.match(ensureSource, /ensureCommercialPackagePreset/);
+});
+
+test("Pro subscription modules include Follow Unfollow Welcome but not Outreach without add-on", () => {
+  assert.match(ensureSource, /feature_code: "follow", enabled: preset\.followEnabled/);
+  assert.match(ensureSource, /feature_code: "unfollow", enabled: preset\.unfollowEnabled/);
+  assert.match(ensureSource, /feature_code: "welcome", enabled: preset\.welcomeEnabled/);
+  assert.match(ensureSource, /feature_code: "outreach", enabled: preset\.outreachEnabled, entitlement_type: "addon"/);
+  assert.match(packageSource, /outreachEnabled = input\.runtimeMode === "outreach_only" && outreachAddonEnabled/);
 });
 
 test("accounts create route ensures ownership before assign_account_slot", () => {

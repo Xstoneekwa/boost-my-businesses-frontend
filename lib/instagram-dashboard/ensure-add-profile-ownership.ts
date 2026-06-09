@@ -264,6 +264,33 @@ async function ensureClientSubscriptionAccount(
   return readString(created.id);
 }
 
+async function ensureClientSubscriptionModules(
+  supabase: SupabaseClient,
+  subscriptionId: string,
+  preset: ReturnType<typeof resolveAddProfilePackagePreset>,
+) {
+  const modules = [
+    { feature_code: "follow", enabled: preset.followEnabled, entitlement_type: "included" },
+    { feature_code: "unfollow", enabled: preset.unfollowEnabled, entitlement_type: "included" },
+    { feature_code: "welcome", enabled: preset.welcomeEnabled, entitlement_type: "included" },
+    { feature_code: "outreach", enabled: preset.outreachEnabled, entitlement_type: "addon" },
+  ];
+
+  const { error } = await supabase.from("client_subscription_modules").upsert(
+    modules.map((module) => ({
+      subscription_id: subscriptionId,
+      ...module,
+      updated_at: new Date().toISOString(),
+    })),
+    { onConflict: "subscription_id,feature_code" },
+  );
+  if (error) throw new Error("client_subscription_modules_upsert_failed");
+
+  await supabase.rpc("sync_client_subscription_entitlements", {
+    p_subscription_id: subscriptionId,
+  });
+}
+
 function readString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
@@ -312,6 +339,7 @@ export async function ensureAddProfileOwnership(
       clientInstagramAccountId,
       accountId: input.accountId,
     });
+    await ensureClientSubscriptionModules(supabase, subscriptionId, preset);
 
     return {
       ok: true,

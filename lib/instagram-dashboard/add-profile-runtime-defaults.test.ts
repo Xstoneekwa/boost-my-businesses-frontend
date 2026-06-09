@@ -72,3 +72,37 @@ test("applyAddProfileRuntimeDefaults writes domain rows without device ids or se
   assert.equal(serialized.includes("mute_after_follow_enabled"), true);
   assert.equal(serialized.includes("outreach_enabled"), true);
 });
+
+test("Pro runtime defaults write coherent Follow Unfollow Welcome settings without Outreach", async () => {
+  const supabase = makeSupabase();
+  const preset = resolveAddProfilePackagePreset({
+    commercialPackage: "pro",
+    runtimeMode: "full_cycle",
+    addons: [],
+  });
+
+  const result = await applyAddProfileRuntimeDefaults(supabase.client as never, {
+    accountId: "account-1",
+    username: "safeuser",
+    appPackageName: "com.instagram.android.clone1",
+    preset,
+  });
+
+  assert.equal(result.ok, true);
+  const settings = supabase.calls.find((call) => call.table === "ig_account_settings")?.payload as Record<string, unknown>;
+  const dm = supabase.calls.find((call) => call.table === "ig_account_dm_settings")?.payload as Record<string, unknown>;
+  const unfollow = supabase.calls.find((call) => call.table === "ig_account_unfollow_settings")?.payload as Record<string, unknown>;
+
+  assert.equal(settings.follow_enabled, true);
+  assert.equal(settings.unfollow_enabled, true);
+  assert.equal(settings.welcome_dm_enabled, true);
+  assert.equal(settings.cold_dm_enabled, false);
+  assert.equal(dm.welcome_enabled, true);
+  assert.equal(dm.outreach_enabled, false);
+  assert.equal(unfollow.unfollow_enabled, true);
+  assert.equal(unfollow.unfollow_mode, "unfollow");
+  assert.equal(unfollow.unfollow_per_session_limit, 120);
+  assert.equal(unfollow.unfollow_per_day_limit, 120);
+  assert.equal(unfollow.runtime_cap_mode, "prod_normal");
+  assert.equal(unfollow.runtime_safety_cap, null);
+});

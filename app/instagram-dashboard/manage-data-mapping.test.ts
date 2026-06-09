@@ -26,6 +26,8 @@ test("Manage exposes server-side readiness projection without raw device or secr
   assert.match(manageSource, /from\("account_dashboard_actions"\)/);
   assert.match(manageSource, /from\("ig_account_dm_settings"\)/);
   assert.match(manageSource, /from\("ig_account_unfollow_settings"\)/);
+  assert.match(manageSource, /commercialAddonsLabel: account\.commercialAddonsLabel/);
+  assert.match(manageSource, /entitlementSummary: account\.entitlementSummary/);
   assert.match(manageSource, /is_launchable,usable_for_auto_login/);
   assert.match(pageSource, /ReadinessSummary/);
   assert.match(pageSource, /readinessLabel/);

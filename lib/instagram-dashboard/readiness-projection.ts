@@ -22,6 +22,8 @@ export type AdminReadinessInput = {
   customerStatus: string;
   subscriptionStatus: string;
   packageName: string;
+  commercialAddonsLabel?: string;
+  entitlementSummary?: string;
   runtimeProfilesLabel: string;
   credentialsConfigured: boolean | null;
   credentialsStatus: string;
@@ -110,6 +112,17 @@ function hasRuntimeProfile(input: AdminReadinessInput) {
   return !pendingRuntimeLabels.has(normalize(input.runtimeProfilesLabel));
 }
 
+function textHasUnfollow(value: string | null | undefined) {
+  return normalize(value).split(/[\s,;|/]+/).some((part) => part === "unfollow" || part.startsWith("unfollow_"));
+}
+
+function unfollowSettingsRequired(input: AdminReadinessInput) {
+  return (
+    textHasUnfollow(input.commercialAddonsLabel) ||
+    textHasUnfollow(input.entitlementSummary)
+  );
+}
+
 function credentialNextAction(input: AdminReadinessInput) {
   if (input.reauthRequired) return "update_credentials";
   if (!input.credentialsConfigured || !activeCredentialStatuses.has(normalize(input.credentialsStatus))) {
@@ -149,7 +162,11 @@ function dmSettingsStatus(input: AdminReadinessInput): ComponentReadinessStatus 
 }
 
 function runtimeGatesStatus(input: AdminReadinessInput): ComponentReadinessStatus {
-  if (!input.welcomeSettingsPresent || !input.unfollowSettingsPresent || packageStatus(input) !== "ready") {
+  if (
+    !input.welcomeSettingsPresent ||
+    (unfollowSettingsRequired(input) && !input.unfollowSettingsPresent) ||
+    packageStatus(input) !== "ready"
+  ) {
     return "pending_backend_wiring";
   }
   return "ready";
@@ -181,7 +198,7 @@ function pendingBackendWiring(input: AdminReadinessInput) {
   if (packageStatus(input) === "pending_backend_wiring") pending.push("package_runtime_preset");
   if (!input.dmSettingsPresent) pending.push("dm_settings_projection");
   if (!input.welcomeSettingsPresent) pending.push("welcome_settings_projection");
-  if (!input.unfollowSettingsPresent) pending.push("unfollow_settings_projection");
+  if (unfollowSettingsRequired(input) && !input.unfollowSettingsPresent) pending.push("missing_unfollow_settings");
   if (normalize(input.onboardingStatus) === "unknown") pending.push("onboarding_status_projection");
   return [...new Set(pending)].sort();
 }

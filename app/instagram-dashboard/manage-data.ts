@@ -567,6 +567,8 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           customerStatus: account.customerStatus,
           subscriptionStatus: account.subscriptionStatus,
           packageName: account.packageLabel,
+          commercialAddonsLabel: account.commercialAddonsLabel,
+          entitlementSummary: account.entitlementSummary,
           runtimeProfilesLabel: account.runtimeProfilesLabel,
           credentialsConfigured: account.credentialsConfigured,
           credentialsStatus: account.credentialsStatus,

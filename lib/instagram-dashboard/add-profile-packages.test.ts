@@ -38,6 +38,26 @@ test("Pro and Premium presets enable Welcome but keep Outreach disabled without 
   }
 });
 
+test("Pro preset enables Follow Unfollow Welcome with coherent caps but no Outreach add-on", () => {
+  const preset = resolveAddProfilePackagePreset({
+    commercialPackage: "pro",
+    runtimeMode: "full_cycle",
+    addons: [],
+  });
+
+  assert.equal(preset.commercialPackageCode, "pro");
+  assert.equal(preset.followEnabled, true);
+  assert.equal(preset.unfollowEnabled, true);
+  assert.equal(preset.welcomeEnabled, true);
+  assert.equal(preset.outreachEnabled, false);
+  assert.equal(preset.defaultFollowSessionCap, 120);
+  assert.equal(preset.defaultFollowDayCap, 120);
+  assert.equal(preset.defaultUnfollowSessionCap, 120);
+  assert.equal(preset.defaultUnfollowDayCap, 120);
+  assert.equal(preset.defaultUnfollowSessionCap <= preset.defaultUnfollowDayCap, true);
+  assert.equal(preset.unfollowMode, "unfollow");
+});
+
 test("Outreach only becomes enabled with explicit outreach add-on", () => {
   const withoutAddon = resolveAddProfilePackagePreset({
     commercialPackage: "premium",

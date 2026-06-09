@@ -86,6 +86,8 @@ export async function applyAddProfileRuntimeDefaults(
         unfollow_mode: input.preset.unfollowMode,
         unfollow_per_session_limit: input.preset.defaultUnfollowSessionCap,
         unfollow_per_day_limit: input.preset.defaultUnfollowDayCap,
+        runtime_cap_mode: "prod_normal",
+        runtime_safety_cap: null,
         package_default_snapshot: snapshot,
       }, { onConflict: "account_id" }),
   ]);

@@ -82,6 +82,39 @@ test("connected account with assignment and settings is ready", () => {
   assert.equal(projection.overall_readiness_reason, "all_required_readiness_checks_passed");
 });
 
+test("connected account without unfollow add-on does not block on missing unfollow settings", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    commercialAddonsLabel: "No add-ons",
+    entitlementSummary: "follow, welcome",
+    unfollowSettingsPresent: false,
+  }));
+
+  assert.equal(projection.overall_readiness_status, "ready");
+  assert.equal(projection.overall_readiness_reason, "all_required_readiness_checks_passed");
+  assert.equal(projection.pending_backend_wiring.includes("unfollow_settings_projection"), false);
+});
+
+test("unfollow enabled without settings returns actionable readiness reason", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    entitlementSummary: "follow, unfollow",
+    unfollowSettingsPresent: false,
+  }));
+
+  assert.equal(projection.overall_readiness_status, "pending_backend_wiring");
+  assert.equal(projection.overall_readiness_reason, "missing_unfollow_settings");
+  assert.deepEqual(projection.pending_backend_wiring, ["missing_unfollow_settings"]);
+});
+
+test("unfollow enabled with settings does not return pending backend wiring", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    entitlementSummary: "follow, unfollow",
+    unfollowSettingsPresent: true,
+  }));
+
+  assert.equal(projection.overall_readiness_status, "ready");
+  assert.equal(projection.pending_backend_wiring.includes("missing_unfollow_settings"), false);
+});
+
 test("login needs_2fa returns needs_login_verification", () => {
   const projection = buildAdminReadinessProjection(readyInput({
     loginStatus: "needs_2fa",
@@ -104,6 +137,7 @@ test("paused and cancelled override otherwise ready accounts", () => {
 
 test("pending backend wiring is visible when domain settings are missing", () => {
   const projection = buildAdminReadinessProjection(readyInput({
+    entitlementSummary: "follow, unfollow",
     dmSettingsPresent: false,
     welcomeSettingsPresent: false,
     unfollowSettingsPresent: false,
@@ -112,7 +146,7 @@ test("pending backend wiring is visible when domain settings are missing", () =>
   assert.equal(projection.overall_readiness_status, "pending_backend_wiring");
   assert.deepEqual(projection.pending_backend_wiring, [
     "dm_settings_projection",
-    "unfollow_settings_projection",
+    "missing_unfollow_settings",
     "welcome_settings_projection",
   ]);
 });
