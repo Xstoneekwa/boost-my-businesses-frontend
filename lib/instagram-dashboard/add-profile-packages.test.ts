@@ -23,6 +23,7 @@ test("Growth preset keeps Outreach optional and enables normal post-follow actio
   assert.equal(preset.muteAfterFollowEnabled, true);
   assert.equal(preset.unfollowEnabled, true);
   assert.equal(preset.outreachEnabled, false);
+  assert.equal(preset.followFilters.maxFollowers, 2147483647);
 });
 
 test("Pro and Premium presets enable Welcome but keep Outreach disabled without add-on", () => {

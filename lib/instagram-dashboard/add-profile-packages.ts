@@ -283,7 +283,7 @@ export function resolveAddProfilePackagePreset(input: {
     followFilters: {
       dontFollowPrivateAccounts: true,
       minFollowers: 1,
-      maxFollowers: 1000000000000,
+      maxFollowers: 2147483647,
       minPosts: 1,
     },
     metadataSafe: {

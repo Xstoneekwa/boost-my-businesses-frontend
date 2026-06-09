@@ -2,6 +2,7 @@ import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import {
   evaluateRunStartEligibility,
   getRunControlHealthProjection,
+  runStartBlockDescription,
   runStartBlockMessage,
   type RunControlHealthProjection,
 } from "@/lib/instagram-dashboard/run-control";
@@ -10,8 +11,12 @@ export type RunEligibilityOverviewItem = {
   account_id: string;
   username: string;
   readiness_status: string;
+  eligibility_status: "ready" | "blocked";
   play_enabled: boolean;
   reason: string;
+  primary_block_reason: string | null;
+  reason_label: string;
+  reason_description: string;
   message: string;
 };
 
@@ -81,13 +86,21 @@ export async function buildRunEligibilityOverview(
   const activeAccounts = manageData.activeAccounts.filter((account) => Boolean(account.accountId));
   const accounts = await mapWithConcurrency(activeAccounts, concurrency, async (account) => {
     const eligibility = await evaluateRunStartEligibility(account.accountId, requestedRunType);
+    const readinessStatus = account.readinessProjection?.overall_readiness_status ?? "unknown";
+    const message = eligibility.ok ? "Manual run is ready." : runStartBlockMessage(eligibility.reason);
     return {
       account_id: account.accountId,
       username: account.username,
-      readiness_status: account.readinessProjection?.overall_readiness_status ?? "unknown",
+      readiness_status: readinessStatus,
+      eligibility_status: eligibility.ok ? "ready" : "blocked",
       play_enabled: eligibility.ok === true,
       reason: eligibility.ok ? "ready" : eligibility.reason,
-      message: eligibility.ok ? "Manual run is ready." : runStartBlockMessage(eligibility.reason),
+      primary_block_reason: eligibility.ok ? null : eligibility.reason,
+      reason_label: eligibility.ok ? "Ready" : message,
+      reason_description: eligibility.ok
+        ? "Account settings and run eligibility are ready for this manual run."
+        : runStartBlockDescription(eligibility.reason),
+      message,
     } satisfies RunEligibilityOverviewItem;
   });
 

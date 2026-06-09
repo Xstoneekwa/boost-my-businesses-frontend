@@ -18,14 +18,20 @@ test("eligibility overview returns safe account projection fields only", () => {
   assert.match(overviewSource, /account_id/);
   assert.match(overviewSource, /username/);
   assert.match(overviewSource, /readiness_status/);
+  assert.match(overviewSource, /eligibility_status/);
   assert.match(overviewSource, /play_enabled/);
   assert.match(overviewSource, /reason/);
+  assert.match(overviewSource, /primary_block_reason/);
+  assert.match(overviewSource, /reason_label/);
+  assert.match(overviewSource, /reason_description/);
   assert.match(overviewSource, /message/);
   assert.doesNotMatch(overviewSource, /device_id|app_instance_id|assignment_id|adb_serial|secret_ref|service_role/i);
 });
 
 test("eligibility overview reason comes from run eligibility not readiness placeholder", () => {
   assert.match(overviewSource, /reason: eligibility\.ok \? "ready" : eligibility\.reason/);
+  assert.match(overviewSource, /primary_block_reason: eligibility\.ok \? null : eligibility\.reason/);
+  assert.match(overviewSource, /reason_description:[\s\S]*runStartBlockDescription\(eligibility\.reason\)/);
   assert.doesNotMatch(overviewSource, /reason:\s*account\.readinessProjection\?\.overall_readiness_reason/);
   assert.doesNotMatch(overviewSource, /pending_backend_wiring:\s*account\.readinessProjection/);
 });

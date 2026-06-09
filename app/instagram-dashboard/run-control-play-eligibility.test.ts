@@ -55,6 +55,14 @@ test("account business block messages stay separate from run-control health", ()
   assert.match(runControlSource, /case "assignment_window_closed":[\s\S]*schedule window/i);
 });
 
+test("eligibility payload distinguishes config readiness from start eligibility", () => {
+  assert.match(eligibilityRouteSource, /eligibility_status: "blocked"/);
+  assert.match(eligibilityRouteSource, /primary_block_reason: eligibility\.reason/);
+  assert.match(eligibilityRouteSource, /reason_description: runStartBlockDescription\(eligibility\.reason\)/);
+  assert.match(runControlSource, /Account settings are ready, but this run cannot start because Welcome DM is enabled/);
+  assert.match(runControlSource, /Account settings are ready, but this run cannot start outside the assigned schedule window/);
+});
+
 test("eligibility route and dashboard UI do not expose unsafe identifiers", () => {
   const eligibilityUi = buttonsSource.slice(
     buttonsSource.indexOf("type RunEligibilityProjection"),

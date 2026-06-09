@@ -1886,3 +1886,14 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual run is blocked.";
   }
 }
+
+export function runStartBlockDescription(reason: RunStartBlockReason) {
+  switch (reason) {
+    case "welcome_real_send_disabled":
+      return "Account settings are ready, but this run cannot start because Welcome DM is enabled and real sending is disabled by the ops safety flag.";
+    case "assignment_window_closed":
+      return "Account settings are ready, but this run cannot start outside the assigned schedule window.";
+    default:
+      return "Account settings may be ready, but this run cannot start until the run eligibility block is resolved.";
+  }
+}

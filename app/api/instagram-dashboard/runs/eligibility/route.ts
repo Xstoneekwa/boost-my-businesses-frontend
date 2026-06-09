@@ -1,5 +1,6 @@
 import {
   evaluateRunStartEligibility,
+  runStartBlockDescription,
   runStartBlockMessage,
   sanitizeRunControlReason,
 } from "@/lib/instagram-dashboard/run-control";
@@ -30,7 +31,11 @@ export async function GET(request: Request) {
     if (eligibility.ok) {
       return jsonOk({
         ok_to_start: true,
+        eligibility_status: "ready",
         reason: "ready",
+        primary_block_reason: null,
+        reason_label: "Ready",
+        reason_description: "Account settings and run eligibility are ready for this manual run.",
         message: "Manual run is ready.",
         requested_run_type: eligibility.normalizedRunType,
         health: eligibility.health,
@@ -39,7 +44,11 @@ export async function GET(request: Request) {
 
     return jsonOk({
       ok_to_start: false,
+      eligibility_status: "blocked",
       reason: eligibility.reason,
+      primary_block_reason: eligibility.reason,
+      reason_label: runStartBlockMessage(eligibility.reason),
+      reason_description: runStartBlockDescription(eligibility.reason),
       message: runStartBlockMessage(eligibility.reason),
       requested_run_type: requestedRunType,
       health: "health" in eligibility ? eligibility.health : null,
