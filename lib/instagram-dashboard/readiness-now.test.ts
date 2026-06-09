@@ -101,6 +101,20 @@ test("readiness now returns needs_credentials when credentials are missing", asy
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
+test("readiness now returns needs_credentials when active credentials require reauth", async () => {
+  const supabase = makeSupabase(baseRows({
+    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
+  }));
+
+  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+
+  assert.equal(result.readiness_status, "needs_credentials");
+  assert.equal(result.client_status, "update_password");
+  assert.equal(result.reason, "credentials_reauth_required");
+  assert.equal(result.preflight_request_created, false);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
 test("readiness now returns action required for 2FA", async () => {
   const supabase = makeSupabase(baseRows({
     client_instagram_accounts: [{ account_id: accountId, login_status: "needs_2fa", provisioning_status: "login_pending" }],

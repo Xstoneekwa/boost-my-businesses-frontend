@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BarChart3, Clipboard, Download, Eye, FileText, Funnel, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
+import { Archive, BarChart3, Clipboard, Download, Eye, FileText, Funnel, KeyRound, Play, RotateCcw, Settings, Square, Trash2, Users, type LucideIcon } from "lucide-react";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, dmTemplateLengthError, dmTemplateLineCount, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/instagram-dashboard/business-timezone";
 import type { ScheduleProjection, ScheduleSlotProjection } from "@/lib/instagram-dashboard/schedule";
@@ -57,6 +57,23 @@ type ReadinessNowResponse = {
   run_request_status?: string | null;
   next_action?: string;
   reason?: string;
+};
+
+type ConfirmValidCredentialsResponse = {
+  account_id: string;
+  status:
+    | "confirmed"
+    | "already_confirmed"
+    | "account_not_found"
+    | "account_lifecycle_blocked"
+    | "credentials_missing"
+    | "credentials_inactive"
+    | "update_failed";
+  credentials_status: string | null;
+  reauth_required: boolean | null;
+  reauth_reason: string | null;
+  next_action: string;
+  message: string;
 };
 
 type InstagramDashboardButtonsProps = {
@@ -244,6 +261,7 @@ type AccountTool = {
     | "Logs"
     | "Run manually"
     | "Run readiness now"
+    | "Credentials OK"
     | "Stop run"
     | "Live view"
     | "Settings"
@@ -258,6 +276,7 @@ type AccountTool = {
   disabled?: boolean;
   disabledReason?: string;
   tooltip?: string;
+  hidden?: boolean;
 };
 
 const DRAFT_SETTINGS_BANNER =
@@ -282,6 +301,13 @@ type RunControlHealth = {
   healthy: boolean;
   playEnabled: boolean;
   reason: string;
+};
+
+type RunEligibilityProjection = {
+  ok_to_start: boolean;
+  reason: string;
+  message: string;
+  requested_run_type?: string;
 };
 
 type RunStartResponse = {
@@ -324,6 +350,13 @@ export function readinessNowSuccessMessage(payload: ReadinessNowResponse) {
   return `${label}.${requestSuffix}`;
 }
 
+export function confirmValidCredentialsSuccessMessage(payload: ConfirmValidCredentialsResponse) {
+  if (payload.status === "credentials_inactive") return "Credentials not active.";
+  if (payload.status === "account_lifecycle_blocked") return "Account cannot be updated.";
+  if (payload.status === "update_failed") return "Try again later.";
+  return "Credentials confirmed. Recheck readiness or assign now.";
+}
+
 const baseActiveAccountTools: AccountTool[] = [
   { label: "Stats", Icon: BarChart3 },
   { label: "Logs", Icon: FileText },
@@ -338,6 +371,12 @@ const baseActiveAccountTools: AccountTool[] = [
     tone: "neutral",
     tooltip: "Check login/readiness now. This does not start a full Growth session.",
   },
+  {
+    label: "Credentials OK",
+    Icon: KeyRound,
+    tone: "neutral",
+    tooltip: "Confirm active credentials are valid. This does not start a run.",
+  },
   { label: "Stop run", Icon: Square, tone: "danger" },
   { label: "Live view", Icon: Eye, tone: "neutral" },
   { label: "Settings", Icon: Settings, tone: "neutral" },
@@ -348,19 +387,38 @@ const baseActiveAccountTools: AccountTool[] = [
 ];
 
 function buildActiveAccountTools(
-  health: RunControlHealth | null,
+  eligibility: RunEligibilityProjection | null,
+  eligibilityLoading: boolean,
+  eligibilityError: string,
   isStartingRun: boolean,
   isCheckingReadiness: boolean,
+  isConfirmingCredentials: boolean,
   liveViewSession: LiveViewSessionSafe | null,
 ): AccountTool[] {
-  const playDisabled = isStartingRun || !health?.playEnabled || !health?.healthy;
+  const playDisabled = isStartingRun || eligibilityLoading || Boolean(eligibilityError) || eligibility?.ok_to_start !== true;
   const playDisabledReason = isStartingRun
     ? "Starting run..."
-    : !health?.playEnabled
-      ? "Manual run requires runtime consumer."
-      : !health?.healthy
-        ? "Manual run requires a healthy runtime dispatcher."
-        : undefined;
+    : eligibilityLoading
+      ? "Checking run eligibility..."
+      : eligibilityError
+        ? "Unable to verify run eligibility."
+        : eligibility?.ok_to_start === false
+          ? eligibility.message
+          : undefined;
+  const credentialsConfirmReasons = new Set(["reauth_required", "credentials_reauth_required"]);
+  const showCredentialsConfirm = eligibility?.ok_to_start === false && credentialsConfirmReasons.has(eligibility.reason);
+  const credentialsConfirmDisabled = isConfirmingCredentials || isStartingRun || isCheckingReadiness || eligibilityLoading || Boolean(eligibilityError);
+  const credentialsConfirmDisabledReason = isConfirmingCredentials
+    ? "Confirming credentials..."
+    : isStartingRun
+      ? "A manual run is starting."
+      : isCheckingReadiness
+        ? "Checking readiness..."
+        : eligibilityLoading
+          ? "Checking run eligibility..."
+          : eligibilityError
+            ? "Unable to verify credential eligibility."
+            : undefined;
 
   return baseActiveAccountTools.map((tool) => {
     if (tool.label === "Live view") {
@@ -384,6 +442,14 @@ function buildActiveAccountTools(
           : isStartingRun
             ? "A manual run is starting."
             : undefined,
+      };
+    }
+    if (tool.label === "Credentials OK") {
+      return {
+        ...tool,
+        hidden: !showCredentialsConfirm,
+        disabled: credentialsConfirmDisabled,
+        disabledReason: credentialsConfirmDisabledReason,
       };
     }
     if (tool.label !== "Run manually") return tool;
@@ -1223,8 +1289,12 @@ export default function InstagramDashboardButtons({
   const [liveViewOpen, setLiveViewOpen] = useState(false);
   const [liveViewSession, setLiveViewSession] = useState<LiveViewSessionSafe | null>(null);
   const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
+  const [runEligibility, setRunEligibility] = useState<RunEligibilityProjection | null>(null);
+  const [runEligibilityLoading, setRunEligibilityLoading] = useState(true);
+  const [runEligibilityError, setRunEligibilityError] = useState("");
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
+  const [isConfirmingCredentials, setIsConfirmingCredentials] = useState(false);
   const titleId = `ig-panel-title-${accountId.replace(/[^a-zA-Z0-9_-]/g, "-") || "account"}`;
 
   useEffect(() => {
@@ -1275,6 +1345,38 @@ export default function InstagramDashboardButtons({
       window.clearInterval(interval);
     };
   }, [accountId, liveViewOpen]);
+
+  async function refreshRunEligibility(options: { cancelled?: () => boolean; loading?: boolean } = {}) {
+    if (options.loading !== false) setRunEligibilityLoading(true);
+    setRunEligibilityError("");
+    try {
+      const payload = await readApiResponse<RunEligibilityProjection>(
+        await fetch(`/api/instagram-dashboard/runs/eligibility?account_id=${encodeURIComponent(accountId)}&requested_run_type=account_session`, {
+          headers: { Accept: "application/json" },
+        }),
+        "Could not load run eligibility.",
+      );
+      if (!options.cancelled?.()) {
+        setRunEligibility(payload);
+        setRunEligibilityLoading(false);
+      }
+    } catch (eligibilityError) {
+      if (!options.cancelled?.()) {
+        setRunEligibility(null);
+        setRunEligibilityError(eligibilityError instanceof Error ? eligibilityError.message : "Manual run eligibility is unknown.");
+        setRunEligibilityLoading(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void refreshRunEligibility({ cancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1934,6 +2036,12 @@ export default function InstagramDashboardButtons({
         "Could not start the run."
       );
       setSuccess(runStartSuccessMessage(payload));
+      setRunEligibility({
+        ok_to_start: false,
+        reason: "already_requested",
+        message: "A manual run is already requested for this account.",
+        requested_run_type: "account_session",
+      });
       router.refresh();
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "Could not start the run.");
@@ -1984,6 +2092,40 @@ export default function InstagramDashboardButtons({
     });
   }
 
+  async function confirmCredentialsValid() {
+    setIsConfirmingCredentials(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = await readApiResponse<ConfirmValidCredentialsResponse>(
+        await fetch("/api/instagram-dashboard/credentials/confirm-valid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        }),
+        "Could not confirm credentials.",
+      );
+      setSuccess(confirmValidCredentialsSuccessMessage(payload));
+      await refreshRunEligibility({ loading: true });
+      router.refresh();
+    } catch (credentialsError) {
+      setError(credentialsError instanceof Error ? credentialsError.message : "Try again later.");
+    } finally {
+      setIsConfirmingCredentials(false);
+    }
+  }
+
+  function requestConfirmCredentialsValid() {
+    requestConfirmation({
+      title: "Confirm credentials valid?",
+      description: "This confirms the active credentials are valid and clears the re-authentication block. It will not start a run.",
+      confirmTone: "primary",
+      confirmLabel: "Credentials OK",
+      onConfirm: confirmCredentialsValid,
+    });
+  }
+
   function requestStopRun() {
     requestConfirmation({
       title: "🚨 Stop current run? ⚠️",
@@ -2015,7 +2157,15 @@ export default function InstagramDashboardButtons({
     }
   }
 
-  const activeAccountTools = buildActiveAccountTools(runControlHealth, isStartingRun, isCheckingReadiness, liveViewSession);
+  const activeAccountTools = buildActiveAccountTools(
+    runEligibility,
+    runEligibilityLoading,
+    runEligibilityError,
+    isStartingRun,
+    isCheckingReadiness,
+    isConfirmingCredentials,
+    liveViewSession,
+  );
 
   async function updateLifecycle(action: "archive" | "trash" | "restore") {
     setError("");
@@ -2075,7 +2225,7 @@ export default function InstagramDashboardButtons({
   return (
     <>
       <div className="ig-dashboard-row-tools" aria-label={`Controls for ${username}`}>
-        {(mode === "archived" ? archivedAccountTools : mode === "trashed" ? trashedAccountTools : activeAccountTools).map((tool) => (
+        {(mode === "archived" ? archivedAccountTools : mode === "trashed" ? trashedAccountTools : activeAccountTools).filter((tool) => !tool.hidden).map((tool) => (
           <ActionButton
             key={tool.label}
             tool={tool}
@@ -2091,6 +2241,7 @@ export default function InstagramDashboardButtons({
               else if (tool.label === "Stop run") requestStopRun();
               else if (tool.label === "Run manually") requestStartRun();
               else if (tool.label === "Run readiness now") requestReadinessNow();
+              else if (tool.label === "Credentials OK") requestConfirmCredentialsValid();
               else if (tool.label === "Archive") requestLifecycle("archive");
               else if (tool.label === "Move to trash") requestLifecycle("trash");
               else if (tool.label === "Restore account") requestLifecycle("restore");
