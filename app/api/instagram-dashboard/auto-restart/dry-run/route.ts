@@ -13,13 +13,18 @@ async function requireRelayOrAdmin(request: Request) {
   return requireInstagramAdmin();
 }
 
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
     const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
-    return jsonOk(await getAutoRestartData());
+    return jsonOk({
+      dry_run: true,
+      mutation_executed: false,
+      backend_status: "preview_only",
+      overview: await getAutoRestartData(),
+    });
   } catch {
-    return jsonError("Could not load Auto Restart overview.", 500);
+    return jsonError("Could not run Auto Restart dry-run preview.", 500);
   }
 }

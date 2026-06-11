@@ -1,5 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
+import { verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -135,13 +136,18 @@ export function safePhoneDevice(row: SupabaseRecord, appInstances: AppInstanceRo
   };
 }
 
-export async function GET() {
-  try {
-    const unauthorizedResponse = await requireInstagramAdmin();
-    if (unauthorizedResponse) return unauthorizedResponse;
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
+  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
+    return jsonError("Devices relay authentication failed.", 403, { reason: relayAuth.reason });
+  }
+  return requireInstagramAdmin();
+}
 
-    const supabase = createSupabaseClient();
-    const [{ data: phones, error: phoneError }, { data: appInstances, error: appError }, { data: heartbeats }] = await Promise.all([
+export async function getDashboardDevices() {
+  const supabase = createSupabaseClient();
+  const [{ data: phones, error: phoneError }, { data: appInstances, error: appError }, { data: heartbeats }] = await Promise.all([
       supabase
         .from("phone_devices")
         .select("id,device_kind,name,device_name,adb_serial,host_machine,pool_type,max_clones,status,timezone,updated_at")
@@ -154,19 +160,27 @@ export async function GET() {
         .from("device_heartbeats")
         .select("device_id,adb_serial,status,last_seen_at,current_account_id,current_clone_id")
         .order("last_seen_at", { ascending: false }),
-    ]);
+  ]);
 
-    if (phoneError || appError) {
-      return jsonOk([localDevice]);
-    }
+  if (phoneError || appError) {
+    return [localDevice];
+  }
 
-    const heartbeatByDevice = new Map(
-      ((heartbeats ?? []) as HeartbeatRow[]).map((row) => [readString(row.device_id, ""), row]),
-    );
-    const devices = ((phones ?? []) as SupabaseRecord[])
-      .map((phone) => safePhoneDevice(phone, (appInstances ?? []) as AppInstanceRow[], heartbeatByDevice.get(readString(phone.id, ""))))
-      .filter((phone) => phone.id);
-    return jsonOk(devices.length ? devices : [localDevice]);
+  const heartbeatByDevice = new Map(
+    ((heartbeats ?? []) as HeartbeatRow[]).map((row) => [readString(row.device_id, ""), row]),
+  );
+  const devices = ((phones ?? []) as SupabaseRecord[])
+    .map((phone) => safePhoneDevice(phone, (appInstances ?? []) as AppInstanceRow[], heartbeatByDevice.get(readString(phone.id, ""))))
+    .filter((phone) => phone.id);
+  return devices.length ? devices : [localDevice];
+}
+
+export async function GET(request: Request) {
+  try {
+    const unauthorizedResponse = await requireRelayOrAdmin(request);
+    if (unauthorizedResponse) return unauthorizedResponse;
+
+    return jsonOk(await getDashboardDevices());
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load devices.";
     return jsonError(message, 500);
