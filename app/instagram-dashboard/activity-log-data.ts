@@ -4,9 +4,21 @@ export type ActivityActorType = "admin" | "system" | "client" | "unknown";
 export type ActivityDomain = "settings" | "targets" | "lifecycle" | "device" | "credentials" | "incident" | "run" | "account" | "unknown";
 export type ActivityResult = "success" | "failed" | "pending" | "accepted" | "duplicate" | "rejected" | "review" | "archived" | "restored" | "unknown";
 export type ActivityMetadataStatus = "redacted" | "unavailable" | "safe_projection";
+export type ActivityInvestigationMode = "search_by_ct" | "search_by_account" | "recent_interactions" | "disputes_evidence";
+export type ActivityInvestigationPeriod = "24h" | "7d" | "30d";
+export type ActivityInvestigationQuery = {
+  mode: ActivityInvestigationMode;
+  search: string;
+  period: ActivityInvestigationPeriod;
+  actionType: string;
+  clientAccount: string;
+  status: string;
+};
 
 export type ActivityLogItem = {
   id: string;
+  sourceRecordId?: string | null;
+  evidenceSourceTable?: string | null;
   timestamp: string | null;
   actor: string;
   actorType: ActivityActorType;
@@ -24,6 +36,20 @@ export type ActivityLogItem = {
   safeSummary: string;
   sourceLabel: string;
   metadataStatus: ActivityMetadataStatus;
+  clientId?: string | null;
+  clientAccountUsername?: string | null;
+  ctId?: string | null;
+  ctUsername?: string | null;
+  interactedUsername?: string | null;
+  actionType?: string | null;
+  actionStatus?: string | null;
+  occurredAt?: string | null;
+  runId?: string | null;
+  requestId?: string | null;
+  safeDeviceLabel?: string | null;
+  evidenceSource?: string | null;
+  evidenceConfidence?: string | null;
+  isEvidenceProjection?: boolean;
 };
 
 export type ActivityLogSummary = {
@@ -107,6 +133,64 @@ function shortId(value: string | null | undefined) {
   return value ? value.slice(0, 8) : null;
 }
 
+export function normalizeActivitySearchTerm(value: string) {
+  return readString(value, "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+}
+
+function readableActivityText(value: string | null | undefined) {
+  return readString(value, "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+}
+
+function periodMs(period: ActivityInvestigationPeriod) {
+  if (period === "24h") return 24 * 60 * 60 * 1000;
+  if (period === "7d") return 7 * 24 * 60 * 60 * 1000;
+  return 30 * 24 * 60 * 60 * 1000;
+}
+
+function itemTimestampMs(item: ActivityLogItem) {
+  const timestamp = item.occurredAt ?? item.timestamp;
+  const ms = timestamp ? new Date(timestamp).getTime() : Number.NaN;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function buildNoInteractionMessage(search: string) {
+  const term = normalizeActivitySearchTerm(search);
+  return `No interaction found for ${term ? `@${term}` : "the selected filters"} in the selected period.`;
+}
+
+export function itemMatchesInvestigationQuery(
+  item: ActivityLogItem,
+  query: ActivityInvestigationQuery,
+  now = new Date(),
+) {
+  const occurredAtMs = itemTimestampMs(item);
+  if (occurredAtMs && occurredAtMs < now.getTime() - periodMs(query.period)) return false;
+
+  if (query.actionType !== "all" && readableActivityText(item.actionType ?? item.action) !== query.actionType) return false;
+  if (query.status !== "all" && readableActivityText(item.actionStatus ?? item.result) !== query.status) return false;
+  if (query.clientAccount !== "all") {
+    const clientAccount = readableActivityText(item.clientAccountUsername ?? item.username);
+    if (clientAccount !== query.clientAccount) return false;
+  }
+
+  const term = normalizeActivitySearchTerm(query.search);
+  if (!term) return query.mode === "recent_interactions" || query.mode === "disputes_evidence";
+
+  const ctUsername = readableActivityText(item.ctUsername);
+  const interactedUsername = readableActivityText(item.interactedUsername ?? item.targetLabel);
+  const clientAccountUsername = readableActivityText(item.clientAccountUsername ?? item.username);
+
+  if (query.mode === "search_by_ct") return ctUsername.includes(term);
+  if (query.mode === "search_by_account") return interactedUsername.includes(term);
+  return ctUsername.includes(term) || interactedUsername.includes(term) || clientAccountUsername.includes(term);
+}
+
 function safeReason(value: unknown) {
   return readString(value, "")
     .trim()
@@ -162,6 +246,7 @@ function sourceLabel(surface: string | null, operation: string) {
 export function mapInteractionEvidenceRow(row: InteractionEvidenceRow): ActivityLogItem {
   const id = readString(row.source_record_id, "unknown");
   const accountId = readString(row.account_id, "") || null;
+  const clientId = readString(row.client_id, "") || null;
   const ctId = readString(row.ct_id, "") || null;
   const ctUsername = readString(row.ct_username, "").trim().replace(/^@+/, "");
   const interactedUsername = readString(row.interacted_username, "").trim().replace(/^@+/, "");
@@ -182,6 +267,8 @@ export function mapInteractionEvidenceRow(row: InteractionEvidenceRow): Activity
 
   return {
     id,
+    sourceRecordId: id,
+    evidenceSourceTable: sourceTable,
     timestamp: readString(row.occurred_at, "") || null,
     actor: "worker",
     actorType: "system",
@@ -199,6 +286,20 @@ export function mapInteractionEvidenceRow(row: InteractionEvidenceRow): Activity
     safeSummary: evidenceSummary || `${interactionActionLabel(actionType)}.${interactedText}${ctText}${runText}${requestText}${deviceText}`.trim(),
     sourceLabel: `${sourceTable} · ${confidence}`,
     metadataStatus: "safe_projection",
+    clientId,
+    clientAccountUsername: accountUsername || null,
+    ctId,
+    ctUsername: ctUsername || null,
+    interactedUsername: interactedUsername || null,
+    actionType,
+    actionStatus,
+    occurredAt: readString(row.occurred_at, "") || null,
+    runId,
+    requestId,
+    safeDeviceLabel: safeDeviceLabel || null,
+    evidenceSource: readString(row.evidence_source, "") || null,
+    evidenceConfidence: confidence,
+    isEvidenceProjection: true,
   };
 }
 
@@ -245,6 +346,16 @@ export function mapCtTargetAuditEvent(
     safeSummary: `${actionLabel(operation)} ${result}.${targetText}${batchText}${statusText}${reason ? ` Reason: ${reason}.` : ""}`.trim(),
     sourceLabel: sourceLabel(sourceSurface, operation),
     metadataStatus: "safe_projection",
+    clientAccountUsername: accountLabel?.replace(/^@+/, "") ?? null,
+    ctId: targetId,
+    ctUsername: targetLabel?.replace(/^@+/, "") ?? null,
+    interactedUsername: targetLabel?.replace(/^@+/, "") ?? null,
+    actionType: operation,
+    actionStatus: result,
+    occurredAt: readString(row.created_at, "") || null,
+    evidenceSource: "ct_target_audit_events",
+    evidenceConfidence: "best_effort",
+    isEvidenceProjection: false,
   };
 }
 
@@ -342,8 +453,8 @@ async function loadInteractionEvidenceItems(supabase: ReturnType<typeof createSu
       p_account_id: null,
       p_search: null,
       p_mode: "all",
-      p_period: "7d",
-      p_limit: 100,
+      p_period: "30d",
+      p_limit: 500,
     });
 
     if (error) return null;

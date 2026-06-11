@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { mapCtTargetAuditEvent, mapInteractionEvidenceRow } from "../app/instagram-dashboard/activity-log-data.ts";
+import {
+  buildNoInteractionMessage,
+  itemMatchesInvestigationQuery,
+  mapCtTargetAuditEvent,
+  mapInteractionEvidenceRow,
+} from "../app/instagram-dashboard/activity-log-data.ts";
 
 const activityLogDataSource = readFileSync(new URL("../app/instagram-dashboard/activity-log-data.ts", import.meta.url), "utf8");
 
@@ -105,4 +110,60 @@ test("loads interaction evidence projection before legacy CT audit fallback", ()
   assert.notEqual(fallbackIndex, -1);
   assert.ok(evidenceIndex < fallbackIndex);
   assert.ok(activityLogDataSource.includes('rpc("get_activity_log_interaction_evidence_admin"'));
+});
+
+test("filters interaction evidence by CT and interacted account", () => {
+  const item = mapInteractionEvidenceRow({
+    source_record_id: "22222222-3333-4444-8555-666666666666",
+    evidence_source_table: "ig_interaction_events",
+    account_id: "account-1",
+    client_account_username: "client_account",
+    ct_id: "33333333-4444-4555-8666-777777777777",
+    ct_username: "source_ct",
+    interacted_username: "target_user",
+    action_type: "follow",
+    action_status: "success",
+    occurred_at: "2026-06-11T09:00:00.000Z",
+    evidence_confidence: "high",
+    evidence_summary: "Follow sent by @client_account via CT @source_ct.",
+  });
+  const now = new Date("2026-06-11T12:00:00.000Z");
+
+  assert.equal(itemMatchesInvestigationQuery(item, {
+    mode: "search_by_ct",
+    search: "@source_ct",
+    period: "24h",
+    actionType: "follow",
+    clientAccount: "all",
+    status: "success",
+  }, now), true);
+
+  assert.equal(itemMatchesInvestigationQuery(item, {
+    mode: "search_by_account",
+    search: "target_user",
+    period: "24h",
+    actionType: "all",
+    clientAccount: "client_account",
+    status: "all",
+  }, now), true);
+
+  assert.equal(itemMatchesInvestigationQuery(item, {
+    mode: "search_by_ct",
+    search: "other_ct",
+    period: "24h",
+    actionType: "all",
+    clientAccount: "all",
+    status: "all",
+  }, now), false);
+});
+
+test("builds exact no-result wording for investigation searches", () => {
+  assert.equal(
+    buildNoInteractionMessage("@missing_user"),
+    "No interaction found for @missing_user in the selected period.",
+  );
+  assert.equal(
+    buildNoInteractionMessage(""),
+    "No interaction found for the selected filters in the selected period.",
+  );
 });
