@@ -32,6 +32,7 @@ export async function GET(request: Request) {
   if (!aiEnabled()) {
     return NextResponse.json({
       ok: false,
+      service: "compass_ai_relay",
       reason: "compass_ai_disabled",
       compass_ai_enabled: false,
       provider: defaultProvider,
@@ -44,6 +45,7 @@ export async function GET(request: Request) {
   if (!providerKeyConfigured) {
     return NextResponse.json({
       ok: false,
+      service: "compass_ai_relay",
       reason: "provider_key_missing",
       compass_ai_enabled: true,
       provider: defaultProvider,
@@ -55,6 +57,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     ok: true,
+    service: "compass_ai_relay",
     compass_ai_enabled: true,
     provider: defaultProvider,
     model: aiModel(),

@@ -28,6 +28,7 @@ test("relay auth is optional unless server key is configured", () => {
 });
 
 test("health route exposes safe provider configuration only", () => {
+  assert.match(healthRouteSource, /service: "compass_ai_relay"/);
   assert.match(healthRouteSource, /provider_key_configured/);
   assert.match(healthRouteSource, /provider_key_missing/);
   assert.match(healthRouteSource, /schema_version/);
