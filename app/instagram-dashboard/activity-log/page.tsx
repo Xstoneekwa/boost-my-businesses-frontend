@@ -19,22 +19,22 @@ export default async function InstagramActivityLogPage() {
   return (
     <main className="dashboard-page ig-activity-page">
       <DashboardPageHeader
-        eyebrow="Audit"
+        eyebrow="Investigation"
         title="Activity Log"
-        description="Safe target audit activity for admin review."
+        description="Investigate safe interaction evidence across client accounts, CT sources, runs and device labels."
       />
 
       <section className="ig-activity-kpis" aria-label="Activity Log summary">
-        <Kpi label="Total CT events" value={String(data.summary.totalItems)} detail={data.sourceDetails.activityLog.label} />
-        <Kpi label="Admin actions" value={String(data.summary.adminActionsCount)} detail="Target add, verify, archive, restore and reset events" />
-        <Kpi label="System events" value={String(data.summary.systemActionsCount)} detail="System-written CT audit events when present" />
-        <Kpi label="Failed / rejected" value={String(data.summary.failedActionsCount)} detail="Failed or rejected CT audit results" tone="warning" />
+        <Kpi label="Evidence records" value={String(data.summary.totalItems)} detail={data.sourceDetails.activityLog.label} />
+        <Kpi label="Admin actions" value={String(data.summary.adminActionsCount)} detail="CT lifecycle actions when the fallback audit source is active" />
+        <Kpi label="Worker events" value={String(data.summary.systemActionsCount)} detail="Interaction evidence written by the runtime when projection is active" />
+        <Kpi label="Failed / rejected" value={String(data.summary.failedActionsCount)} detail="Failed interactions or rejected CT audit results" tone="warning" />
       </section>
 
       <AnalyticsSectionCard
-        eyebrow="Activity"
-        title="Target activity"
-        description="Newest CT audit events first. Raw metadata and provider payloads are never rendered."
+        eyebrow="Investigation"
+        title="Interaction evidence"
+        description="Newest safe evidence first. Technical logs, worker payloads and sensitive runtime artifacts are kept out of this view."
       >
         <ActivityList items={data.items} />
       </AnalyticsSectionCard>
@@ -105,9 +105,9 @@ function ActivityList({ items }: { items: ActivityLogItem[] }) {
   if (!items.length) {
     return (
       <div className="ig-activity-empty">
-        <span>No CT events</span>
-        <strong>No target audit events found.</strong>
-        <p>No target audit events are available from the safe CT audit source.</p>
+        <span>No evidence</span>
+        <strong>No interaction evidence found.</strong>
+        <p>No safe interaction evidence is available from the current Activity Log source.</p>
       </div>
     );
   }

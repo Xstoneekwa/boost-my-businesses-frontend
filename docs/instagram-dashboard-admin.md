@@ -222,8 +222,9 @@ Route: `/instagram-dashboard/activity-log`
 
 Objectif:
 
-- Future vue d'audit produit pour actions admin/system/client.
-- Prepare les domaines settings, targets, lifecycle, device, credentials, incidents, runs, accounts.
+- Vue produit d'investigation interaction/CT, alignee avec BotApp Activity Log.
+- Repondre a deux questions: un compte interagi vient de quel CT, et l'outil a-t-il reellement interagi avec un username donne.
+- Les logs runtime/system/worker/device ne doivent plus etre le coeur de cette route; ils iront dans `Server Check`.
 
 Source de donnees:
 
@@ -232,8 +233,9 @@ Source de donnees:
 Statut actuel:
 
 - Read-only.
-- Source dediee pending.
-- N'affiche pas encore de vrais audit events.
+- Source interactions complete pending.
+- La projection CT actuelle lit `ct_target_audit_events`, mais ne suffit pas pour prouver toutes les interactions.
+- Remplacement cible: projection safe combinant `ig_interacted_users`, `ig_targets`, `ct_target_audit_events`, `ig_runs`, `account_run_requests` et labels compte client.
 
 Safe:
 
@@ -241,12 +243,14 @@ Safe:
 
 Pending:
 
-- Backend audit events.
-- `source_surface`, `actor_type`, `actor_id`, `event_id`, `sync_status`, result, retry/failure.
+- Projection interaction evidence: `interacted_username`, `action_type`, `action_status`, `occurred_at`, `source_target_id`, `ct_username`, `run_id`, `request_id`, device label safe.
+- Migration si necessaire pour persister le lien CT -> interaction directement dans `ig_interacted_users`.
+- Variante client-safe sans device IDs internes, payload worker, logs bruts ou donnees cross-client.
 
 Ne pas casser:
 
 - Ne jamais remplacer cette vue par des raw logs techniques.
+- Deplacer plus tard les logs techniques/admin/system/failed vers `Server Check`.
 
 ### DM Templates
 
@@ -1224,33 +1228,44 @@ Mapping admin/client/BotApp:
 - Toute action client future autorisee doit apparaitre cote admin/BotApp avec le
   meme audit safe et sans divergence silencieuse.
 
-### CT Activity Log
+### Interaction Investigation Activity Log
 
 Source:
 
-- Activity Log admin lit une projection safe de `ct_target_audit_events`.
-- Les events affiches couvrent `target_add_single`, `target_add_bulk`,
-  `target_verify`, `target_archive`, `target_restore` et `target_reset`.
-- `metadata_safe` n'est jamais rendu brut. Seuls `source_surface`,
-  `previous_status` et `next_status` sont projetes quand disponibles.
+- Activity Log admin doit devenir une projection safe d'investigation interactions/CT.
+- Source cible preparee: `activity_log_interaction_evidence_admin_v1` via RPC read-only `get_activity_log_interaction_evidence_admin`.
+- Sources combinees: `ig_interaction_events`, `ig_interacted_users`, `ig_targets`, `ig_runs`, `account_run_requests`, `account_assignments`, `phone_devices` et labels compte client.
+- Migration additive preparee cote worker/backend: `20260611123000_activity_log_interaction_evidence.sql`.
+- `ct_target_audit_events` reste utile pour les operations CT (`target_add_single`, `target_add_bulk`, `target_verify`, `target_archive`, `target_restore`, `target_reset`), mais ne prouve pas a lui seul follow/like/DM/story/unfollow.
+- `metadata_safe` n'est jamais rendu brut. Seuls des champs allowlistes et des summaries safe doivent etre exposes.
+- La page admin conserve un fallback legacy `ct_target_audit_events` tant que la projection evidence n'est pas appliquee/validee.
 
 Champs affiches:
 
 - timestamp;
-- actor type;
-- action label;
-- account username ou account id court;
-- target username ou target id court;
+- compte client;
+- CT source;
+- username interagi;
+- action type;
 - result/status;
 - reason safe;
-- batch id court si present;
-- source surface.
+- run/request;
+- device label safe cote admin/BotApp, masque cote client;
+- evidence summary.
 
 Hors scope:
 
-- client dashboard CT Activity Log;
-- BotApp Activity Log;
-- FBR runtime, auto-archive performance, raw provider metadata.
+- raw provider metadata;
+- raw worker payloads;
+- device IDs internes cote client;
+- logs techniques/runtime/system. Ces logs appartiennent au futur `Server Check`.
+
+Client-safe future:
+
+- Reutiliser la meme projection avec filtrage strict `client_id`/`account_id`.
+- Afficher seulement compte, CT, username interagi, action, date, status et summary safe.
+- Masquer `run_id`, `request_id`, device interne, payloads runtime et toute donnee autre client.
+- Les actions remove/archive CT doivent passer par le contrat Targets avec `source = activity_log_investigation`.
 
 ## 4. Add Profile Patch 2B
 

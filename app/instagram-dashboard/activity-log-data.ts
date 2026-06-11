@@ -72,6 +72,27 @@ export type CtTargetAuditEventRow = {
   metadata_safe?: SafeRecord | null;
 };
 
+export type InteractionEvidenceRow = {
+  source_record_id?: string | null;
+  evidence_source_table?: string | null;
+  account_id?: string | null;
+  client_id?: string | null;
+  client_account_username?: string | null;
+  ct_id?: string | null;
+  ct_username?: string | null;
+  interacted_username?: string | null;
+  action_type?: string | null;
+  action_status?: string | null;
+  occurred_at?: string | null;
+  run_id?: string | null;
+  request_id?: string | null;
+  safe_device_label?: string | null;
+  evidence_source?: string | null;
+  evidence_confidence?: "high" | "medium" | "best_effort" | "unknown" | string | null;
+  evidence_summary?: string | null;
+  metadata_safe?: SafeRecord | null;
+};
+
 type AccountLookup = Map<string, string>;
 type TargetLookup = Map<string, string>;
 
@@ -112,6 +133,19 @@ function actionLabel(operation: string) {
   return labels[operation] ?? operation.replace(/^target_/, "").replace(/_/g, " ");
 }
 
+function interactionActionLabel(actionType: string) {
+  const labels: Record<string, string> = {
+    follow: "Follow",
+    unfollow: "Unfollow",
+    like: "Like",
+    dm: "DM",
+    story_view: "Story view",
+    profile_visit: "Profile visit",
+    followback: "Followback",
+  };
+  return labels[actionType] ?? actionType.replace(/_/g, " ");
+}
+
 function activityResult(result: string): ActivityResult {
   if (result === "accepted" || result === "duplicate" || result === "rejected" || result === "review" || result === "archived" || result === "restored") return result;
   if (result === "failed") return "failed";
@@ -123,6 +157,49 @@ function activityResult(result: string): ActivityResult {
 function sourceLabel(surface: string | null, operation: string) {
   const readableSurface = surface ? surface.replace(/_/g, " ") : "unknown surface";
   return `${readableSurface} · ${operation}`;
+}
+
+export function mapInteractionEvidenceRow(row: InteractionEvidenceRow): ActivityLogItem {
+  const id = readString(row.source_record_id, "unknown");
+  const accountId = readString(row.account_id, "") || null;
+  const ctId = readString(row.ct_id, "") || null;
+  const ctUsername = readString(row.ct_username, "").trim().replace(/^@+/, "");
+  const interactedUsername = readString(row.interacted_username, "").trim().replace(/^@+/, "");
+  const actionType = safeReason(row.action_type) ?? "unknown";
+  const actionStatus = safeReason(row.action_status) ?? "unknown";
+  const confidence = safeReason(row.evidence_confidence) ?? "unknown";
+  const sourceTable = safeReason(row.evidence_source_table) ?? "interaction_evidence";
+  const accountUsername = readString(row.client_account_username, "").trim().replace(/^@+/, "");
+  const safeDeviceLabel = readString(row.safe_device_label, "").trim();
+  const evidenceSummary = readString(row.evidence_summary, "").trim();
+  const runId = readString(row.run_id, "") || null;
+  const requestId = readString(row.request_id, "") || null;
+  const deviceText = safeDeviceLabel ? ` Device ${safeDeviceLabel}.` : "";
+  const runText = runId ? ` Run ${shortId(runId)}.` : "";
+  const requestText = requestId ? ` Request ${shortId(requestId)}.` : "";
+  const ctText = ctUsername ? ` CT @${ctUsername}.` : ctId ? ` CT ${shortId(ctId)}.` : " CT unknown.";
+  const interactedText = interactedUsername ? ` Interacted @${interactedUsername}.` : " Interacted account unknown.";
+
+  return {
+    id,
+    timestamp: readString(row.occurred_at, "") || null,
+    actor: "worker",
+    actorType: "system",
+    domain: "account",
+    action: interactionActionLabel(actionType),
+    result: activityResult(actionStatus),
+    accountId,
+    username: accountUsername ? `@${accountUsername}` : accountId ? shortId(accountId) : null,
+    targetType: "interaction_evidence",
+    targetLabel: interactedUsername ? `@${interactedUsername}` : null,
+    targetIdShort: shortId(ctId),
+    batchIdShort: null,
+    sourceSurface: "activity_log_investigation",
+    reason: confidence,
+    safeSummary: evidenceSummary || `${interactionActionLabel(actionType)}.${interactedText}${ctText}${runText}${requestText}${deviceText}`.trim(),
+    sourceLabel: `${sourceTable} · ${confidence}`,
+    metadataStatus: "safe_projection",
+  };
 }
 
 export function mapCtTargetAuditEvent(
@@ -184,6 +261,33 @@ function buildSummary(items: ActivityLogItem[]): ActivityLogSummary {
 export async function getActivityLogData(): Promise<ActivityLogOverview> {
   try {
     const supabase = createSupabaseClient();
+    const evidenceItems = await loadInteractionEvidenceItems(supabase);
+    if (evidenceItems) {
+      return {
+        items: evidenceItems,
+        summary: buildSummary(evidenceItems),
+        sourceStatus: {
+          activityLog: "connected",
+          technicalLogs: "available",
+          auditBackend: "connected",
+        },
+        sourceDetails: {
+          activityLog: {
+            label: "Interaction evidence connected",
+            description: "Activity Log is reading the safe interaction evidence projection.",
+          },
+          technicalLogs: {
+            label: "Server Check boundary",
+            description: "Runtime, worker, delivery and process logs remain outside Activity Log and belong in future Server Check.",
+          },
+          auditBackend: {
+            label: "Safe evidence projection",
+            description: "Only allowlisted interaction, CT, run and device-label fields are rendered.",
+          },
+        },
+      };
+    }
+
     const { data, error } = await supabase
       .from("ct_target_audit_events")
       .select("id, created_at, account_id, target_id, operation, result, reason, actor_type, batch_id, counts, metadata_safe")
@@ -229,6 +333,23 @@ export async function getActivityLogData(): Promise<ActivityLogOverview> {
     };
   } catch {
     return unavailableActivityLog();
+  }
+}
+
+async function loadInteractionEvidenceItems(supabase: ReturnType<typeof createSupabaseClient>): Promise<ActivityLogItem[] | null> {
+  try {
+    const { data, error } = await supabase.rpc("get_activity_log_interaction_evidence_admin", {
+      p_account_id: null,
+      p_search: null,
+      p_mode: "all",
+      p_period: "7d",
+      p_limit: 100,
+    });
+
+    if (error) return null;
+    return ((data ?? []) as InteractionEvidenceRow[]).map(mapInteractionEvidenceRow);
+  } catch {
+    return null;
   }
 }
 
