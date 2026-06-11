@@ -180,6 +180,103 @@ Ne pas casser:
 
 - Le comportement non-auth doit rester une redirection vers `/restaurant-login`.
 
+### Compass AI Advisor API
+
+Routes API:
+
+- `POST /api/instagram-dashboard/compass/analyze`
+- `GET /api/instagram-dashboard/compass/health`
+
+Objectif:
+
+- Analyse server-side d'un snapshot Compass deja calcule et redige.
+- Appel OpenAI uniquement depuis le dashboard admin / relay.
+- Retourne un JSON structure exploitable par BotApp et le futur Compass admin.
+
+Configuration:
+
+- `COMPASS_AI_ENABLED=true`
+- `COMPASS_AI_PROVIDER=openai`
+- `COMPASS_AI_MODEL=gpt-5.5` par defaut si absent
+- `OPENAI_API_KEY` cote serveur uniquement
+- `BOTAPP_RELAY_API_KEY` optionnel pour autoriser BotApp sans session dashboard
+
+Safe:
+
+- BotApp renderer ne recoit jamais la cle provider.
+- BotApp ne stocke pas et ne lit pas `OPENAI_API_KEY`; il configure seulement `BOTAPP_COMPASS_AI_RELAY_URL`.
+- Le snapshot est redige avant appel provider.
+- L'IA ne peut executer aucune action; elle recommande seulement.
+- Les diagnostics bruts client-sensitive restent des signaux internes et non des recommandations client visibles.
+- `/compass/health` expose uniquement `provider_key_configured: true/false`, jamais la valeur.
+
+Fallback:
+
+- Si la configuration provider manque, `/compass/health` et `/compass/analyze` retournent `reason: provider_key_missing`.
+- Si le provider echoue ou si le JSON est invalide, la route retourne un etat safe `ai_unavailable` / `invalid_ai_output` avec les faits rules-only conserves.
+- Si `BOTAPP_RELAY_API_KEY` est configure cote serveur, BotApp doit envoyer `Authorization: Bearer <key>` ou `X-BotApp-Relay-Key`.
+
+### BotApp API Gateway / relay contracts
+
+Objectif:
+
+- Permettre a chaque installation BotApp packagée de configurer un relay stable sans `npm run dev`.
+- Centraliser les integrations server-side: Compass AI, scoped keys, webhooks, recent safe API call audit, public relay endpoint.
+- Garder toutes les valeurs secretes cote serveur/relay ou Electron main, jamais dans le renderer.
+
+Routes deja actives:
+
+- `GET /api/instagram-dashboard/compass/health`
+- `POST /api/instagram-dashboard/compass/analyze`
+
+Routes/contrats a brancher quand le stockage API Gateway est pret:
+
+- `GET /api/botapp/gateway/health` -> status global, version, schema, relay/dashboard reachability, last health check.
+- `GET /api/botapp/gateway/api-keys` -> prefixes only, name, scopes, status, created_at, last_used_at, call_count_today, production_call_count.
+- `POST /api/botapp/gateway/api-keys` -> create scoped key; full key may be returned once only if policy allows it.
+- `POST /api/botapp/gateway/api-keys/:id/rotate` -> rotate and return new one-time secret only if policy allows it.
+- `POST /api/botapp/gateway/api-keys/:id/revoke` -> revoke key, audited.
+- `GET /api/botapp/gateway/webhooks` -> masked URL, provider, events, status, last delivery, latest safe error.
+- `POST /api/botapp/gateway/webhooks` -> save webhook URL/signing value server-side.
+- `POST /api/botapp/gateway/webhooks/:id/test` -> dry-run or signed test delivery.
+- `POST /api/botapp/gateway/webhooks/:id/retry` -> retry latest failed delivery.
+- `POST /api/botapp/gateway/webhooks/:id/disable` -> disable delivery.
+- `DELETE /api/botapp/gateway/webhooks/:id` -> remove webhook metadata and secret reference.
+- `GET /api/botapp/gateway/api-calls?window=24h` -> safe request summaries only, no headers, no raw payloads.
+- `GET /api/botapp/gateway/openapi.json` -> public contract docs if exposed.
+
+Webhook events prepared:
+
+- `slack.incident`
+- `discord.incident`
+- `credential.action_required`
+- `account.blocked`
+- `device.offline`
+- `run.failed`
+- `compass.critical_recommendation`
+- `ct.quality_alert`
+- `profile.created`
+- `profile.updated`
+- `profile.archived`
+- `profile.targets.updated`
+- `profile.session_status.changed`
+
+Required relay headers / fields:
+
+- `Authorization: Bearer <scoped token>` or `X-BotApp-Relay-Key` when relay auth is enabled.
+- `X-Request-Id` on every request.
+- `X-External-User-Id` for operator/client attribution.
+- `X-Idempotency-Key` for writes and retries.
+- `dry_run=true` for tests/previews.
+- Response shape: `{ ok: true, data }` or `{ ok: false, error: { code, message } }`.
+
+Security:
+
+- API key lists return prefixes only.
+- Webhook lists return masked URLs and safe errors only.
+- Recent API calls never include raw payloads, bearer headers, webhook signatures, service role values, passwords, XML, screenshots, or log paths.
+- OpenAI remains server-side only through the Compass relay.
+
 ### Devices / Phones
 
 Route: `/instagram-dashboard/devices`
