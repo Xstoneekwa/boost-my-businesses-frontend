@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, readString, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
+import { verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -44,8 +45,17 @@ async function readAvatarUrl(kind: string, id: string) {
   return null;
 }
 
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
+  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
+    return jsonError("Avatar relay authentication failed.", 403, { reason: relayAuth.reason });
+  }
+  return requireInstagramAdmin();
+}
+
 export async function GET(request: Request) {
-  const unauthorizedResponse = await requireInstagramAdmin();
+  const unauthorizedResponse = await requireRelayOrAdmin(request);
   if (unauthorizedResponse) return unauthorizedResponse;
 
   const url = new URL(request.url);

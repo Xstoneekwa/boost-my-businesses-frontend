@@ -2,6 +2,7 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { getActivityLogData } from "@/app/instagram-dashboard/activity-log-data";
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import type { SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
+import { safeInstagramPublicAvatarUrl } from "@/lib/instagram-public-profile-lookup";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value;
@@ -27,11 +28,20 @@ function safeSettingsRecord(row: SupabaseRecord | null, accountId: string) {
 }
 
 function safeTargetRow(row: SupabaseRecord) {
+  const id = readString(row.id, "");
+  const rawAvatarUrl = readString(row.avatar_url, readString(row.profile_picture_url, readString(row.profile_image_url, "")));
+  const avatarUrl = id && safeInstagramPublicAvatarUrl(rawAvatarUrl)
+    ? `/api/instagram-dashboard/avatar?kind=target&id=${encodeURIComponent(id)}`
+    : null;
   return {
-    id: readString(row.id, ""),
+    id,
     account_id: readString(row.account_id, ""),
     target_username: readString(row.target_username, readString(row.normalized_username, "")),
     normalized_username: readString(row.normalized_username, ""),
+    display_name: readString(row.display_name, ""),
+    avatar_url: avatarUrl || null,
+    avatar_source: avatarUrl ? "dashboard_avatar_proxy" : "not_available",
+    avatar_last_checked_at: readString(row.provider_checked_at, readString(row.avatar_last_checked_at, "")) || null,
     status: readString(row.status, "unknown"),
     quality_status: readString(row.quality_status, "unknown"),
     source: readString(row.source, "unknown"),
@@ -87,12 +97,13 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [settingsResult, filtersResult, targetsResult, runsResult, logsResult, activityResult] = await Promise.all([
+  const [settingsResult, filtersResult, targetsResult, runsResult, logsResult, packageResult, activityResult] = await Promise.all([
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_filters").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_targets").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
     supabase.from("ig_runs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(50),
     supabase.from("ig_action_logs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
+    supabase.from("account_package_summary").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     getActivityLogData().catch(() => null),
   ]);
 
@@ -135,6 +146,11 @@ export async function getProfileDetailsData(accountId: string) {
       status: settingsResult.error ? "backend_pending" : settingsResult.data ? "connected" : "not_available",
       error: settingsResult.error?.message ?? null,
     },
+    packageSummary: {
+      data: packageResult.data ? redactRecord(packageResult.data) : { account_id: accountId, status: "not_available" },
+      status: packageResult.error ? "backend_pending" : packageResult.data ? "connected" : "not_available",
+      error: packageResult.error?.message ?? null,
+    },
     filters: {
       data: filtersResult.data ? redactRecord(filtersResult.data) : { account_id: accountId, status: "not_available" },
       status: filtersResult.error ? "backend_pending" : filtersResult.data ? "connected" : "not_available",
@@ -154,6 +170,7 @@ export async function getProfileDetailsData(accountId: string) {
       logs: logsResult.error ? "backend_pending" : "ig_action_logs+activity_log",
       targets: targetsResult.error ? "backend_pending" : "ig_targets",
       settings: settingsResult.error ? "backend_pending" : "ig_account_settings",
+      packageSummary: packageResult.error ? "backend_pending" : "account_package_summary",
       filters: filtersResult.error ? "backend_pending" : "ig_account_filters",
     },
   };

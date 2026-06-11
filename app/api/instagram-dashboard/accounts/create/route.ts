@@ -27,6 +27,7 @@ import {
   requireInstagramAdmin,
   type SupabaseRecord,
 } from "../../_utils";
+import { verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,7 @@ type CreateProfilePayload = {
   addons?: unknown;
   starts_at?: unknown;
   ends_at?: unknown;
+  dry_run?: unknown;
 };
 
 type AddProfileCredentialsResponse = {
@@ -105,6 +107,22 @@ const sensitivePayloadFragments = ["password", "secret", "vault", "token", "auth
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return { mode: "relay_key" as const, userId: null };
+  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
+    const response = jsonError("Add profile relay authentication failed.", 403, { reason: relayAuth.reason });
+    return { mode: "unauthorized" as const, response };
+  }
+  const unauthorizedResponse = await requireInstagramAdmin();
+  if (unauthorizedResponse) return { mode: "unauthorized" as const, response: unauthorizedResponse };
+  const adminContext = await getInstagramAdminUserContext();
+  if (adminContext && !canAccessTenantPages(adminContext)) {
+    return { mode: "unauthorized" as const, response: jsonError("You are not authorized to access the Instagram dashboard.", 403) };
+  }
+  return { mode: "admin_session" as const, userId: adminContext?.userId ?? null };
 }
 
 function isRecord(value: unknown): value is Record<string, string | number | boolean> {
@@ -633,16 +651,13 @@ function safeCreateResponse(
 
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
-    if (unauthorizedResponse) return unauthorizedResponse;
-    const adminContext = await getInstagramAdminUserContext();
-    if (adminContext && !canAccessTenantPages(adminContext)) {
-      return jsonError("You are not authorized to access the Instagram dashboard.", 403);
-    }
-    const actorId = adminContext?.userId ?? null;
+    const auth = await requireRelayOrAdmin(request);
+    if (auth.mode === "unauthorized") return auth.response;
+    const actorId = auth.userId;
 
     const body = await readJsonBody<CreateProfilePayload>(request);
     if (!body) return jsonError("Invalid profile payload.", 400);
+    const dryRun = body.dry_run === true || readString(body.dry_run, "").toLowerCase() === "true";
 
     const username = normalizeInstagramPublicUsername(readString(body.username, ""));
     if (!username) return jsonError("Instagram username is required.", 400);
@@ -698,10 +713,10 @@ export async function POST(request: Request) {
     if (loginMethod === "credentials" && !password && !repairCredentialsAlreadySaved) {
       return jsonError("Instagram password is required for secure credential setup.", 400);
     }
-    if (loginMethod === "credentials" && password && !credentialsConfig()) {
+    if (!dryRun && loginMethod === "credentials" && password && !credentialsConfig()) {
       return jsonError("credentials_api_not_configured", 500);
     }
-    if (loginMethod === "credentials" && !password && repairCredentialsAlreadySaved && !credentialsConfig()) {
+    if (!dryRun && loginMethod === "credentials" && !password && repairCredentialsAlreadySaved && !credentialsConfig()) {
       return jsonError("credentials_api_not_configured", 500);
     }
 
@@ -745,6 +760,39 @@ export async function POST(request: Request) {
     const deviceUdid = "";
     const settingsPayload = isRecord(template?.settings_payload) ? redactTemplatePayload(template.settings_payload) : {};
     const filtersPayload = isRecord(template?.filters_payload) ? redactTemplatePayload(template.filters_payload) : {};
+
+    if (dryRun) {
+      return jsonOk({
+        dry_run: true,
+        would_create: earlyRepairState.kind === "repair" ? "repair_existing_support_required_account" : "new_account",
+        account: {
+          account_id: earlyRepairState.kind === "repair" ? readString(earlyRepairState.account.id, "") : null,
+          username: accountUsername,
+          status: supportRequiredStatus,
+          credential_status: loginMethod === "credentials" ? "would_submit_write_only" : "not_submitted",
+          assignment_status: "would_assign",
+        },
+        assignment: {
+          device_id: deviceId,
+          app_instance_id: appInstanceId,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          device_name: deviceName,
+        },
+        settings: {
+          defaults: "would_apply_server_defaults",
+          template: template ? "would_apply_server_template" : "default_template",
+          dry_run_enabled: true,
+        },
+        automation: {
+          provisioning_started: false,
+          login_started: false,
+          run_started: false,
+        },
+        source: auth.mode === "relay_key" ? "botapp_relay" : "admin_dashboard",
+        sensitive_values_excluded: true,
+      });
+    }
 
     const accountPayload = {
       username: accountUsername,

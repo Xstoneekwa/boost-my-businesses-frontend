@@ -37,8 +37,18 @@ import {
   requireInstagramAdmin,
   type SupabaseRecord,
 } from "../_utils";
+import { verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
+
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
+  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
+    return jsonError("Targets relay authentication failed.", 403, { reason: relayAuth.reason });
+  }
+  return requireInstagramAdmin();
+}
 
 type SafeTargetRow = {
   target_id: string;
@@ -317,7 +327,7 @@ async function tryEnqueueTargetVerificationJobs(
 
 export async function GET(request: Request) {
   try {
-    const unauthorized = await requireInstagramAdmin();
+    const unauthorized = await requireRelayOrAdmin(request);
     if (unauthorized) return unauthorized;
 
     const accountId = getAccountId(request);
@@ -348,7 +358,7 @@ type PostBody = {
 
 export async function POST(request: Request) {
   try {
-    const unauthorized = await requireInstagramAdmin();
+    const unauthorized = await requireRelayOrAdmin(request);
     if (unauthorized) return unauthorized;
 
     const body = await readJsonBody<PostBody>(request);
@@ -543,7 +553,7 @@ type DeleteBody = {
 
 export async function DELETE(request: Request) {
   try {
-    const unauthorized = await requireInstagramAdmin();
+    const unauthorized = await requireRelayOrAdmin(request);
     if (unauthorized) return unauthorized;
 
     const body = await readJsonBody<DeleteBody>(request);
@@ -618,7 +628,7 @@ type PatchBody = {
 
 export async function PATCH(request: Request) {
   try {
-    const unauthorized = await requireInstagramAdmin();
+    const unauthorized = await requireRelayOrAdmin(request);
     if (unauthorized) return unauthorized;
 
     const body = await readJsonBody<PatchBody>(request);
