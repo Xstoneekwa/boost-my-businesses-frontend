@@ -225,8 +225,9 @@ function buildTransitions(from: ClientAccountOperationsStatus): ClientAccountSta
   }));
 }
 
-function buildActions(account: ManageAccount): ClientAccountOperationAction[] {
+function buildActions(account: ManageAccount, passwordUpdateAlreadyRequested: boolean): ClientAccountOperationAction[] {
   const detailHref = `/instagram-dashboard/accounts/${encodeURIComponent(account.accountId || account.username)}`;
+  const canRequestPasswordUpdate = Boolean(account.accountId) && !["archived", "trashed"].includes(lifecycleStatus(account));
 
   return [
     {
@@ -250,11 +251,15 @@ function buildActions(account: ManageAccount): ClientAccountOperationAction[] {
     {
       key: "request_password_update",
       label: "Request password update",
-      description: "Future secure update link flow. Password values are never displayed.",
-      disabled: true,
-      disabledReason: "Requires credential assistance backend.",
+      description: "Notify the client in their dashboard and prepare the password update email.",
+      disabled: !canRequestPasswordUpdate || passwordUpdateAlreadyRequested,
+      disabledReason: passwordUpdateAlreadyRequested
+        ? "Password update already requested."
+        : canRequestPasswordUpdate
+          ? null
+          : "Account cannot receive a client request.",
       targetHref: null,
-      backendStatus: "pending_backend",
+      backendStatus: "connected",
     },
   ];
 }
@@ -271,7 +276,7 @@ function isAssistanceNeeded(account: ManageAccount, hasDashboardAction: boolean)
   );
 }
 
-function mapAccount(account: ManageAccount, hasDashboardAction: boolean): ClientAccountOperationsItem {
+function mapAccount(account: ManageAccount, hasDashboardAction: boolean, passwordUpdateAlreadyRequested: boolean): ClientAccountOperationsItem {
   const status = operationsStatus(account);
   const profileImageUrl = safeProfileImageUrl(account);
 
@@ -293,7 +298,7 @@ function mapAccount(account: ManageAccount, hasDashboardAction: boolean): Client
     operationsStatus: status,
     lifecycleStatus: lifecycleStatus(account),
     availableStatusTransitions: buildTransitions(status),
-    actions: buildActions(account),
+    actions: buildActions(account, passwordUpdateAlreadyRequested),
     sourceLabel: account.sourceLabel,
     lastSafeUpdate: account.lastSafeUpdate,
     needsAssistance: isAssistanceNeeded(account, hasDashboardAction),
@@ -317,7 +322,14 @@ function buildSummary(items: ClientAccountOperationsItem[]): ClientAccountsOpera
 export async function getClientAccountsOperationsData(): Promise<ClientAccountsOperationsOverview> {
   const [manageData, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
   const actionAccountIds = new Set(credentialsData.actionGroups.map((group) => group.accountId || group.username));
-  const items = manageData.allAccounts.map((account) => mapAccount(account, actionAccountIds.has(account.accountId || account.username)));
+  const passwordUpdateAccountIds = new Set(credentialsData.actions
+    .filter((action) => action.actionType === "update_instagram_password" && action.sourceLabel === "account_dashboard_actions")
+    .map((action) => action.accountId || action.username));
+  const items = manageData.allAccounts.map((account) => mapAccount(
+    account,
+    actionAccountIds.has(account.accountId || account.username),
+    passwordUpdateAccountIds.has(account.accountId || account.username),
+  ));
 
   return {
     items,

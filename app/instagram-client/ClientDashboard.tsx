@@ -12,7 +12,22 @@ type View = "overview" | "activity" | "targeting" | "account";
 type ChartRange = 7 | 30 | 90;
 type FeedType = "fo" | "li" | "dm" | "st";
 
-interface Props { userId: string; tenantId: string }
+type ClientDashboardActionNotification = {
+  id: string;
+  accountId: string;
+  username: string;
+  type: "password_update_required";
+  status: string;
+  message: string;
+  createdAt: string | null;
+  actionHref: string;
+};
+
+interface Props {
+  userId: string;
+  tenantId: string;
+  initialNotifications?: ClientDashboardActionNotification[];
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LANG_KEY = "bmb_dash_lang";
@@ -523,7 +538,7 @@ function TargetDrawer({ open, onClose, lang, t }: {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function ClientDashboard({ userId: _userId, tenantId: _tenantId }: Props) {
+export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, initialNotifications = [] }: Props) {
   const [activeView, setActiveView]     = useState<View>("overview");
   const [lang,       setLang]           = useState<Lang>("fr");
   const [theme,      setTheme]          = useState<Theme>("dark");
@@ -644,6 +659,30 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId }
 
       {/* ── MAIN ── */}
       <main className="cd-main">
+        {initialNotifications.length > 0 && (
+          <section className="cd-action-alerts" aria-label="Required account actions">
+            {initialNotifications.map((notification) => (
+              <article className="cd-action-alert" key={notification.id}>
+                <div className="cd-action-alert-ic">
+                  <svg viewBox="0 0 24 24" width={16} height={16} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="7.5" cy="15.5" r="4.5" />
+                    <path d="M11 12l9-9" />
+                    <path d="M15 7l2 2" />
+                    <path d="M17 5l2 2" />
+                  </svg>
+                </div>
+                <div>
+                  <span>{lang === "fr" ? "Action requise" : "Action required"} · {notification.status}</span>
+                  <strong>{lang === "fr" ? "Mise à jour du mot de passe Instagram requise" : "Instagram password update required"}</strong>
+                  <p>{notification.message}</p>
+                </div>
+                <button className="cd-btn cd-btn-primary" onClick={() => handleNavigate("account")}>
+                  {lang === "fr" ? "Mettre à jour" : "Update password"}
+                </button>
+              </article>
+            ))}
+          </section>
+        )}
 
         {/* OVERVIEW */}
         {activeView === "overview" && (
@@ -929,6 +968,13 @@ const CSS = `
 /* Main */
 .cd-main{overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:20px}
 .cd-view{display:flex;flex-direction:column;gap:18px}
+
+.cd-action-alerts{display:grid;gap:12px}
+.cd-action-alert{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.28);border-radius:var(--r);padding:14px 16px}
+.cd-action-alert-ic{width:38px;height:38px;border-radius:14px;display:grid;place-items:center;background:rgba(245,158,11,.14);color:#fbbf24}
+.cd-action-alert span{display:block;font-family:var(--font-d);font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#fbbf24;margin-bottom:4px}
+.cd-action-alert strong{display:block;color:var(--ink);font-family:var(--font-d);font-size:.95rem}
+.cd-action-alert p{margin:4px 0 0;color:var(--muted);font-size:.82rem;line-height:1.45}
 
 /* Stat cards */
 .cd-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}

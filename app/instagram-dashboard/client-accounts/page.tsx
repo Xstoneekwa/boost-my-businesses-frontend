@@ -5,6 +5,7 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import AccountStatusActionMenu from "./AccountStatusActionMenu";
+import RequestPasswordUpdateButton from "./RequestPasswordUpdateButton";
 import {
   getClientAccountsOperationsData,
   type ClientAccountOperationsItem,
@@ -405,6 +406,27 @@ export default async function InstagramClientAccountsPage({
           display: inline-flex;
         }
 
+        .ig-client-accounts-request-password {
+          position: relative;
+          display: inline-flex;
+        }
+
+        .ig-client-accounts-action-message {
+          position: absolute;
+          z-index: 25;
+          right: 0;
+          top: calc(100% + 8px);
+          width: 260px;
+          border: 1px solid rgba(52,211,153,0.24);
+          border-radius: 10px;
+          background: rgba(9,14,28,0.98);
+          color: #86efac;
+          font-size: 11px;
+          line-height: 1.4;
+          padding: 8px;
+          box-shadow: 0 18px 40px rgba(0,0,0,0.28);
+        }
+
         .ig-client-accounts-action-link,
         .ig-client-accounts-action-disabled {
           display: inline-flex;
@@ -670,6 +692,17 @@ function ActionList({ item }: { item: ClientAccountOperationsItem }) {
       {item.actions.map((action) => {
         const Icon = actionIcon(action.key);
         const title = action.disabledReason ? `${action.label}: ${action.disabledReason}` : `${action.label}: ${action.description}`;
+
+        if (action.key === "request_password_update") {
+          return (
+            <RequestPasswordUpdateButton
+              key={action.key}
+              accountId={item.accountId}
+              username={item.username}
+              disabledReason={action.disabledReason}
+            />
+          );
+        }
 
         return action.disabled || !action.targetHref ? (
           <button
