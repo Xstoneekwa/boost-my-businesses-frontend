@@ -58,10 +58,19 @@ function safeProviderErrorCode(data: unknown, fallback: string) {
   return fallback;
 }
 
+function modelSupportsSampling(model: string) {
+  const normalized = model.trim().toLowerCase();
+  if (/^o\d/.test(normalized)) return false;
+  if (/^gpt-5(?!-chat)/.test(normalized)) return false;
+  return true;
+}
+
 function fallbackReasonForProviderCode(code: string) {
-  if (/model_not_found|invalid_model|unsupported_model|model/i.test(code)) return "model_unavailable";
-  if (/rate_limit|quota|insufficient_quota/i.test(code)) return "provider_rate_limited";
+  if (/model_not_found|invalid_model|unsupported_model/i.test(code)) return "model_unavailable";
+  if (/unsupported_value/i.test(code)) return "unsupported_model_parameter";
+  if (/rate_limit|quota|insufficient_quota|billing/i.test(code)) return "provider_rate_limited";
   if (/timeout|timed_out/i.test(code)) return "provider_timeout";
+  if (/invalid_api_key/i.test(code)) return "provider_key_invalid";
   return "provider_error";
 }
 
@@ -74,6 +83,8 @@ function fallbackMessage(reason: string) {
   if (reason === "payload_invalid") return "Relay analyze payload invalid.";
   if (reason === "compass_ai_disabled") return "AI provider disabled on relay.";
   if (reason === "provider_key_missing") return "AI provider is not configured on the relay server.";
+  if (reason === "provider_key_invalid") return "AI provider key is invalid on the relay server.";
+  if (reason === "unsupported_model_parameter") return "AI provider model does not support a requested API parameter.";
   return "AI provider returned an error.";
 }
 
@@ -118,6 +129,15 @@ async function callOpenAi(snapshot: unknown, period: CompassAiPeriod, request_id
   }
 
   const safeSnapshot = sanitizeCompassSnapshot({ period, ...sanitizeCompassSnapshot(snapshot) });
+  const model = aiModel();
+  const providerRequest: Record<string, unknown> = {
+    model,
+    response_format: { type: "json_object" },
+    messages: buildCompassAiPrompt(safeSnapshot),
+  };
+  if (modelSupportsSampling(model)) {
+    providerRequest.temperature = 0.2;
+  }
   let response: Response;
   try {
     response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -126,12 +146,7 @@ async function callOpenAi(snapshot: unknown, period: CompassAiPeriod, request_id
         "Content-Type": "application/json",
         [["Authoriza", "tion"].join("")]: `${["Bear", "er"].join("")} ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: aiModel(),
-        response_format: { type: "json_object" },
-        temperature: 0.2,
-        messages: buildCompassAiPrompt(safeSnapshot),
-      }),
+      body: JSON.stringify(providerRequest),
     });
   } catch (error) {
     const reason = error instanceof Error && /timeout|timed/i.test(error.message) ? "provider_timeout" : "provider_error";
