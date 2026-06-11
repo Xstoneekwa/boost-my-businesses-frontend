@@ -230,7 +230,7 @@ async function callOpenAi(snapshot: unknown, period: CompassAiPeriod, request_id
     };
   }
 
-  const analysis = validateCompassAiAnalysis(parsed);
+  const analysis = validateCompassAiAnalysis(parsed, safeSnapshot);
   if (!analysis) {
     const reason = "schema_validation_failed";
     logAnalyzeEvent("schema_validation_failed", {

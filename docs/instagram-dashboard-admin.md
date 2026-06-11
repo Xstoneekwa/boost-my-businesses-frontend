@@ -209,6 +209,28 @@ Safe:
 - L'IA ne peut executer aucune action; elle recommande seulement.
 - Les diagnostics bruts client-sensitive restent des signaux internes et non des recommandations client visibles.
 - `/compass/health` expose uniquement `provider_key_configured: true/false`, jamais la valeur.
+- Grounding obligatoire: `No fact in input = no recommendation`.
+- Chaque recommandation acceptee doit etre liee a des `source_facts`, `evidence`, comptes/CT connus du snapshot, et une action supportee.
+- Les recommandations generiques, comptes inconnus, actions destructives, categories non autorisees, signaux internes client-visibles et metriques inventees sont filtrees.
+- La reponse expose `filtered_recommendations_count` et `filtered_reasons` en valeurs safe.
+
+Prompt Compass AI:
+
+- Prompt actuel: `app/api/instagram-dashboard/compass/analyze/compass-ai-contract.ts`.
+- Construction: `buildCompassAiPrompt(snapshot)`.
+- Version: `COMPASS_AI_PROMPT_VERSION`.
+- Texte par defaut: `COMPASS_AI_DEFAULT_PROMPT_TEXT`.
+- Guardrails verrouilles: `COMPASS_AI_LOCKED_GUARDRAILS_TEXT`.
+- Schema JSON: `COMPASS_AI_OUTPUT_SCHEMA`.
+- Les futurs prompts custom ne doivent remplacer que la formulation/priorisation. Les guardrails verrouilles, le schema et le validateur restent imposes apres la reponse IA.
+
+Contrat futur AI Prompts:
+
+- `GET /api/instagram-dashboard/ai-prompts` -> liste des prompts actifs/drafts, versions, source, audit safe.
+- `POST /api/instagram-dashboard/ai-prompts/draft` -> sauvegarde d'un draft server-side.
+- `POST /api/instagram-dashboard/ai-prompts/activate` -> activation auditee d'une version.
+- `POST /api/instagram-dashboard/ai-prompts/test` -> test sur sample safe sans mutation.
+- `POST /api/instagram-dashboard/ai-prompts/restore-default` -> rollback vers prompt default.
 
 Fallback:
 
