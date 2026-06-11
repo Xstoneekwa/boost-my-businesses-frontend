@@ -97,7 +97,8 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [settingsResult, filtersResult, targetsResult, runsResult, logsResult, packageResult, activityResult] = await Promise.all([
+  const [accountResult, settingsResult, filtersResult, targetsResult, runsResult, logsResult, packageResult, activityResult] = await Promise.all([
+    supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_filters").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_targets").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
@@ -108,10 +109,23 @@ export async function getProfileDetailsData(accountId: string) {
   ]);
 
   const activityItems = activityResult?.items?.filter((item) => item.accountId === accountId || item.username === account.username) ?? [];
+  const lifecycleRow = accountResult.data ?? null;
+  const lifecycleAccount = lifecycleRow
+    ? {
+        ...account,
+        adminStatus: readString(lifecycleRow.admin_lifecycle_status, account.adminStatus),
+        lifecycleStatus: readString(lifecycleRow.status, account.adminStatus),
+        archivedAt: readString(lifecycleRow.archived_at, "") || null,
+        trashedAt: readString(lifecycleRow.trashed_at, "") || null,
+        scheduledTrashAt: readString(lifecycleRow.scheduled_trash_at, "") || null,
+        scheduledDeleteAt: readString(lifecycleRow.scheduled_delete_at, "") || null,
+        restoredAt: readString(lifecycleRow.restored_at, "") || null,
+      }
+    : account;
 
   return {
     ok: true as const,
-    account,
+    account: lifecycleAccount,
     stats: {
       summary: safeStatsSummary((runsResult.data ?? []) as SupabaseRecord[], (logsResult.data ?? []) as SupabaseRecord[]),
       runs: ((runsResult.data ?? []) as SupabaseRecord[]).map(redactRecord),
@@ -165,7 +179,7 @@ export async function getProfileDetailsData(accountId: string) {
       reauthRequired: account.reauthRequired,
     },
     source: {
-      account: "manage_overview",
+      account: accountResult.error ? "manage_overview" : "manage_overview+ig_accounts_lifecycle",
       stats: runsResult.error ? "backend_pending" : "ig_runs+ig_action_logs",
       logs: logsResult.error ? "backend_pending" : "ig_action_logs+activity_log",
       targets: targetsResult.error ? "backend_pending" : "ig_targets",

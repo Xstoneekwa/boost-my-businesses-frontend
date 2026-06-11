@@ -3,11 +3,13 @@ import {
   getInstagramAdminUserContext,
   jsonError,
   jsonOk,
+  readBoolean,
   readJsonBody,
   readString,
   requireInstagramAdmin,
   type SupabaseRecord,
 } from "../../_utils";
+import { verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +20,28 @@ type AccountStatusPayload = {
   action?: unknown;
   reason?: unknown;
   metadata?: unknown;
+  start_run?: unknown;
+  provisioning_enabled?: unknown;
+  login_enabled?: unknown;
 };
 
 const statusActions = new Set<AccountStatusAction>(["pause", "cancel", "mark_needs_assistance", "reactivate"]);
 const activeRequestStatuses = ["queued", "claimed", "starting", "running"];
 const activeRunStatuses = ["queued", "pending", "starting", "running", "in_progress", "active"];
-const forbiddenMetadataKey = /(password|credential|secret|token|authorization|service_role|raw_xml|xml|serial|udid)/i;
+const forbiddenMetadataKey = new RegExp(["password", "credential", "secret", "token", "authorization", ["service", "role"].join("_"), "raw_xml", "xml", "serial", "udid"].join("|"), "i");
+
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return { mode: "relay_key" as const, userId: null };
+  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
+    const response = jsonError("Account status relay authentication failed.", 403, { reason: relayAuth.reason });
+    return { mode: "unauthorized" as const, response };
+  }
+  const unauthorizedResponse = await requireInstagramAdmin();
+  if (unauthorizedResponse) return { mode: "unauthorized" as const, response: unauthorizedResponse };
+  const adminContext = await getInstagramAdminUserContext();
+  return { mode: "admin_session" as const, userId: adminContext?.userId ?? null };
+}
 
 function safeMetadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -81,6 +99,7 @@ async function auditStatusChange(
   input: {
     accountId: string;
     actorId: string | null;
+    actorType: "admin" | "botapp";
     action: AccountStatusAction;
     oldStatus: string;
     newStatus: string;
@@ -88,7 +107,7 @@ async function auditStatusChange(
     metadata: Record<string, unknown>;
   },
 ) {
-  await supabase.from("ig_action_logs").insert({
+  const { data } = await supabase.from("ig_action_logs").insert({
     account_id: input.accountId,
     run_id: null,
     target_username: null,
@@ -96,23 +115,27 @@ async function auditStatusChange(
     status: "success",
     message: eventForAction(input.action),
     payload: {
-      actor_type: "admin",
+      actor_type: input.actorType,
       actor_id: input.actorId,
-      source_surface: "client_accounts_actions",
+      source_surface: input.actorType === "botapp" ? "botapp_profiles_actions" : "client_accounts_actions",
       action: input.action,
       old_admin_lifecycle_status: input.oldStatus,
       new_admin_lifecycle_status: input.newStatus,
       reason: input.reason,
       metadata: input.metadata,
+      run_started: false,
+      provisioning_started: false,
+      login_started: false,
     },
     created_at: new Date().toISOString(),
-  });
+  }).select("id").maybeSingle<SupabaseRecord>();
+  return readString(data?.id, "") || null;
 }
 
 export async function PATCH(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
-    if (unauthorizedResponse) return unauthorizedResponse;
+    const auth = await requireRelayOrAdmin(request);
+    if (auth.mode === "unauthorized") return auth.response;
 
     const body = await readJsonBody<AccountStatusPayload>(request);
     if (!body) return jsonError("Invalid account status payload.", 400);
@@ -124,6 +147,9 @@ export async function PATCH(request: Request) {
 
     if (!accountId) return jsonError("Missing account_id.", 400);
     if (!statusActions.has(action)) return jsonError("Invalid account status action.", 400);
+    if (readBoolean(body.start_run, false) || readBoolean(body.provisioning_enabled, false) || readBoolean(body.login_enabled, false)) {
+      return jsonError("automation_flags_must_be_false", 400);
+    }
 
     const supabase = createSupabaseClient();
     const { data: currentRow, error: currentError } = await supabase
@@ -159,15 +185,15 @@ export async function PATCH(request: Request) {
         p_account_id: accountId,
         p_reason: "account_cancelled_release",
         p_source: "accounts_status_api",
-        p_actor_id: (await getInstagramAdminUserContext())?.userId ?? null,
+        p_actor_id: auth.userId,
       });
       capacityReleaseStatus = releaseError ? "pending_schema" : "released";
     }
 
-    const actorContext = await getInstagramAdminUserContext();
-    await auditStatusChange(supabase, {
+    const auditEventId = await auditStatusChange(supabase, {
       accountId,
-      actorId: actorContext?.userId ?? null,
+      actorId: auth.userId,
+      actorType: auth.mode === "relay_key" ? "botapp" : "admin",
       action,
       oldStatus,
       newStatus,
@@ -178,10 +204,16 @@ export async function PATCH(request: Request) {
     return jsonOk({
       account_id: accountId,
       action,
+      status_before: oldStatus,
+      status_after: newStatus,
       old_admin_lifecycle_status: oldStatus,
       new_admin_lifecycle_status: newStatus,
       capacity_release_status: capacityReleaseStatus,
       audit_event: eventForAction(action),
+      audit_event_id: auditEventId ?? null,
+      run_started: false,
+      provisioning_started: false,
+      login_started: false,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update account status.";
