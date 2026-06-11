@@ -52,6 +52,9 @@ type CreateProfilePayload = {
   starts_at?: unknown;
   ends_at?: unknown;
   dry_run?: unknown;
+  provisioning_enabled?: unknown;
+  login_enabled?: unknown;
+  start_run?: unknown;
 };
 
 type AddProfileCredentialsResponse = {
@@ -127,6 +130,14 @@ async function requireRelayOrAdmin(request: Request) {
 
 function isRecord(value: unknown): value is Record<string, string | number | boolean> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readCreateBoolean(value: unknown, fallback: boolean) {
+  if (typeof value === "boolean") return value;
+  const normalized = readString(value, "").trim().toLowerCase();
+  if (["true", "1", "yes", "enabled"].includes(normalized)) return true;
+  if (["false", "0", "no", "disabled"].includes(normalized)) return false;
+  return fallback;
 }
 
 function truncateSafe(value: string, maxLength = 120) {
@@ -600,8 +611,10 @@ function safeCreateResponse(
     runtime_defaults_applied?: boolean;
     runtime_defaults_reason?: string | null;
   },
+  source = "admin_dashboard",
 ) {
   return {
+    source,
     account: {
       id: readString(account.id, ""),
       username: readString(account.username, ""),
@@ -658,6 +671,12 @@ export async function POST(request: Request) {
     const body = await readJsonBody<CreateProfilePayload>(request);
     if (!body) return jsonError("Invalid profile payload.", 400);
     const dryRun = body.dry_run === true || readString(body.dry_run, "").toLowerCase() === "true";
+    const botAppNoAutomationCreate =
+      auth.mode === "relay_key" &&
+      !dryRun &&
+      readCreateBoolean(body.provisioning_enabled, true) === false &&
+      readCreateBoolean(body.login_enabled, true) === false &&
+      readCreateBoolean(body.start_run, true) === false;
 
     const username = normalizeInstagramPublicUsername(readString(body.username, ""));
     if (!username) return jsonError("Instagram username is required.", 400);
@@ -1114,6 +1133,53 @@ export async function POST(request: Request) {
       }));
     }
 
+    if (botAppNoAutomationCreate) {
+      await tryRecordAddProfileAudit(supabase, {
+        accountId,
+        username: accountUsername,
+        externalRequestId,
+        credentialRequestId: credentials?.request_id,
+        actorId,
+        resultStatus: "success",
+        metadataSafe: {
+          onboarding_schedule_assigned: false,
+          onboarding_schedule_reason: "botapp_no_automation_create",
+          package_name: target.packageName,
+          runtime_mode: runtimeMode,
+          commercial_package: commercialPackage,
+          commercial_package_code: ownership.commercialPackageCode,
+          addons_selected: selectedAddons.join(","),
+          runtime_defaults_applied: runtimeDefaults.ok,
+          welcome_enabled: runtimeDefaults.welcome_enabled,
+          outreach_enabled: runtimeDefaults.outreach_enabled,
+          follow_enabled: runtimeDefaults.follow_enabled,
+          unfollow_enabled: runtimeDefaults.unfollow_enabled,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          login_method: loginMethod,
+          provisioning_started: false,
+          login_started: false,
+          run_started: false,
+        },
+      });
+      return jsonOk(
+        safeCreateResponse(
+          { ...account, status: supportRequiredStatus },
+          credentials,
+          {
+            onboarding_schedule_assigned: false,
+            onboarding_schedule_reason: "botapp_no_automation_create",
+            assignment: {},
+            package_name: target.packageName,
+            runtime_defaults_applied: true,
+            runtime_defaults_reason: null,
+          },
+          "botapp_relay",
+        ),
+        accountCreated ? 201 : 200,
+      );
+    }
+
     const onboardingSchedule = await tryAutoAssignOnboardingSchedule(accountId, {
       deviceId,
       appInstanceId,
@@ -1212,6 +1278,7 @@ export async function POST(request: Request) {
           runtime_defaults_applied: true,
           runtime_defaults_reason: null,
         },
+        auth.mode === "relay_key" ? "botapp_relay" : "admin_dashboard",
       ),
       201,
     );
