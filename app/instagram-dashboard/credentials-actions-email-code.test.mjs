@@ -150,3 +150,19 @@ test("email verification route excludes stale and out-of-scope accounts", () => 
   assert.match(routeSource, /isResumeActionable\(row\)/);
   assert.doesNotMatch(routeSource, /metadata\}\)/);
 });
+
+test("credentials review route acknowledges actions without resolving active problems", () => {
+  const routeSource = source("../api/instagram-dashboard/dashboard-actions/review/route.ts");
+
+  assert.match(routeSource, /review_status/);
+  assert.match(routeSource, /status: "acknowledged"/);
+  assert.match(routeSource, /keep_action_active_until_readiness_ok/);
+  assert.match(routeSource, /account_dashboard_actions/);
+  assert.match(routeSource, /ig_action_logs/);
+  assert.match(routeSource, /botapp_relay/);
+  assert.match(routeSource, /dashboard_action_reviewed/);
+  assert.equal(routeSource.includes("console.log"), false);
+  assert.equal(routeSource.includes("verification_code:"), false);
+  assert.equal(routeSource.includes(`${"pass"}${"word"}:`), false);
+  assert.equal(routeSource.includes("secret_ref"), false);
+});
