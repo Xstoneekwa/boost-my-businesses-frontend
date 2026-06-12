@@ -23,6 +23,7 @@ import {
   validateAccountId,
   type SupabaseRecord,
 } from "../../_utils";
+import { verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,146 @@ function readRpcObject(value: unknown): SupabaseRecord {
 function readSlotArray(value: unknown): ScheduleSlotProjection[] {
   if (!Array.isArray(value)) return [];
   return value.map((row) => readScheduleSlot(row as SupabaseRecord));
+}
+
+function normalizeSlotLabel(value: string | null | undefined) {
+  return (value ?? "").replace(/\s+/g, "").trim();
+}
+
+function slotLabel(startsAt: string, endsAt: string, timezone: string) {
+  return normalizeSlotLabel(formatScheduleLocalLabel(startsAt, endsAt, timezone));
+}
+
+function slotMatches(startsA: string, endsA: string, startsB: string, endsB: string, timezone: string) {
+  const labelA = slotLabel(startsA, endsA, timezone);
+  const labelB = slotLabel(startsB, endsB, timezone);
+  return Boolean(labelA && labelA === labelB);
+}
+
+async function fetchScheduledAssignmentsForDevice(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  deviceId: string | null,
+) {
+  if (!deviceId) return [];
+  const { data, error } = await supabase
+    .from("account_assignments")
+    .select("id,account_id,device_id,starts_at,ends_at,status,schedule_mode,ig_accounts(username,status)")
+    .eq("device_id", deviceId)
+    .eq("schedule_mode", "scheduled")
+    .in("status", ["pending", "reserved", "active"])
+    .limit(200);
+  if (error) return [];
+  return (data ?? []) as SupabaseRecord[];
+}
+
+function assignmentUsername(row: SupabaseRecord) {
+  const account = row.ig_accounts as SupabaseRecord | SupabaseRecord[] | undefined;
+  const first = Array.isArray(account) ? account[0] : account;
+  return readString(first?.username, readString(row.account_id, "assigned account"));
+}
+
+function applyEditSlotAvailability(input: {
+  slots: ScheduleSlotProjection[];
+  assignments: SupabaseRecord[];
+  accountId: string;
+  currentAssignment: ScheduleAssignmentProjection | null;
+  timezone: string;
+}) {
+  return input.slots.map((slot) => {
+    const baseSlot = {
+      ...slot,
+      slot_id: slot.slot_id ?? `${slot.slot_kind}:${slot.starts_at}:${slot.ends_at}`,
+      selectable: slot.available,
+      availability: slot.available ? "available" as const : "blocked" as const,
+      is_current: false,
+      is_conflict: false,
+    };
+    if (slot.slot_kind === "manual_only") return baseSlot;
+    const occupants = input.assignments.filter((assignment) => {
+      if (readString(assignment.account_id, "") === input.accountId) return false;
+      return slotMatches(
+        slot.starts_at,
+        slot.ends_at,
+        readString(assignment.starts_at, ""),
+        readString(assignment.ends_at, ""),
+        input.timezone,
+      );
+    });
+    const isCurrent = input.currentAssignment?.schedule_mode === "scheduled" && slotMatches(
+      slot.starts_at,
+      slot.ends_at,
+      input.currentAssignment.starts_at,
+      input.currentAssignment.ends_at,
+      input.timezone,
+    );
+    if (isCurrent && occupants.length) {
+      return {
+        ...baseSlot,
+        available: true,
+        selectable: true,
+        availability: "conflict" as const,
+        is_current: true,
+        is_conflict: true,
+        reason: "current_conflict" as const,
+        occupied_by: assignmentUsername(occupants[0]),
+      };
+    }
+    if (isCurrent) {
+      return {
+        ...baseSlot,
+        available: true,
+        selectable: true,
+        availability: "current" as const,
+        is_current: true,
+        is_conflict: false,
+        reason: "current" as const,
+        occupied_by: null,
+      };
+    }
+    if (occupants.length) {
+      return {
+        ...baseSlot,
+        available: false,
+        selectable: false,
+        availability: "occupied" as const,
+        is_current: false,
+        is_conflict: false,
+        reason: "occupied" as const,
+        occupied_by: assignmentUsername(occupants[0]),
+      };
+    }
+    if (slot.reason === "phone_rest" || slot.reason === "outreach_rest_reserved") return {
+      ...baseSlot,
+      available: false,
+      selectable: false,
+      availability: "blocked" as const,
+    };
+    return {
+      ...baseSlot,
+      available: true,
+      selectable: true,
+      availability: "available" as const,
+      reason: "available" as const,
+      occupied_by: null,
+    };
+  });
+}
+
+async function findDeviceSlotConflict(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: { accountId: string; deviceId: string; startsAt: string; endsAt: string; timezone: string },
+) {
+  const assignments = await fetchScheduledAssignmentsForDevice(supabase, input.deviceId);
+  return assignments.find((assignment) => {
+    if (readString(assignment.account_id, "") === input.accountId) return false;
+    return slotMatches(
+      input.startsAt,
+      input.endsAt,
+      readString(assignment.starts_at, ""),
+      readString(assignment.ends_at, ""),
+      input.timezone,
+    );
+  }) ?? null;
 }
 
 function isScheduleSchemaPending(message: string) {
@@ -77,6 +218,7 @@ function readCurrentAssignment(value: unknown, deviceLabel: string | null): Sche
   if (!assignmentId) return null;
   const startsAt = readString(row.starts_at, "");
   const endsAt = readString(row.ends_at, "");
+  const scheduleMode = readString(row.schedule_mode, "scheduled");
   return {
     assignment_id: assignmentId,
     device_id: readString(row.device_id, ""),
@@ -84,12 +226,13 @@ function readCurrentAssignment(value: unknown, deviceLabel: string | null): Sche
     app_instance_id: readString(row.app_instance_id, "") || null,
     assignment_type: readString(row.assignment_type, ""),
     slot_kind: readString(row.slot_kind, ""),
+    schedule_mode: scheduleMode,
     status: readString(row.status, ""),
     starts_at: startsAt,
     ends_at: endsAt,
     assignment_source: readString(row.assignment_source, "manual_dashboard"),
     device_label: deviceLabel,
-    local_label: formatScheduleLocalLabel(startsAt, endsAt, null),
+    local_label: scheduleMode === "manual_only" ? "Manual-only · no scheduled window" : formatScheduleLocalLabel(startsAt, endsAt, null),
   };
 }
 
@@ -191,7 +334,7 @@ async function buildScheduleProjection(
   const currentAssignment = currentAssignmentRaw
     ? {
         ...currentAssignmentRaw,
-        local_label: formatScheduleLocalLabel(
+        local_label: currentAssignmentRaw.schedule_mode === "manual_only" ? "Manual-only · no scheduled window" : formatScheduleLocalLabel(
           currentAssignmentRaw.starts_at,
           currentAssignmentRaw.ends_at,
           deviceTimezone,
@@ -199,18 +342,49 @@ async function buildScheduleProjection(
       }
     : null;
   const gates = buildGateProjection(readRpcObject(gateData));
-  const saveReady = slotPayload.ok === true && availableSlots.some((slot) => slot.available);
+  const scheduledAssignments = await fetchScheduledAssignmentsForDevice(supabase, deviceId);
+  const editAvailableSlots = applyEditSlotAvailability({
+    slots: availableSlots,
+    assignments: scheduledAssignments,
+    accountId,
+    currentAssignment,
+    timezone: deviceTimezone,
+  });
+  const slotsWithManual = [
+    ...editAvailableSlots,
+    {
+      slot_id: "manual_only",
+      slot_index: 999,
+      slot_kind: "manual_only",
+      slot_kind_label: "Manual-only",
+      local_label: "Run manually",
+      starts_at: "",
+      ends_at: "",
+      available: currentAssignmentRaw?.schedule_mode !== "manual_only",
+      selectable: true,
+      availability: "manual_only" as const,
+      is_current: currentAssignmentRaw?.schedule_mode === "manual_only",
+      is_conflict: false,
+      reason: (currentAssignmentRaw?.schedule_mode === "manual_only" ? "current" : "manual_only") as ScheduleSlotProjection["reason"],
+      occupied_by: null,
+    } satisfies ScheduleSlotProjection,
+  ];
+  const saveReady = slotPayload.ok === true && (
+    editAvailableSlots.some((slot) => slot.available)
+    || currentAssignmentRaw?.schedule_mode === "manual_only"
+    || slotsWithManual.some((slot) => slot.available)
+  );
 
   return {
     account_id: accountId,
     assignment_type: readString(slotPayload.assignment_type, "") || null,
-    slot_kind: readString(slotPayload.slot_kind, "") || availableSlots.find((slot) => slot.slot_kind)?.slot_kind || null,
+    slot_kind: readString(slotPayload.slot_kind, "") || editAvailableSlots.find((slot) => slot.slot_kind)?.slot_kind || null,
     device_id: deviceId,
     device_label: deviceLabel,
     device_timezone: deviceTimezone,
     slot_date: readString(slotPayload.slot_date, "") || null,
     current_assignment: currentAssignment,
-    available_slots: availableSlots,
+    available_slots: slotsWithManual,
     rest_windows: restWindows,
     app_instance_availability: readAppInstanceAvailability(slotPayload.app_instance_availability),
     gates,
@@ -249,9 +423,18 @@ async function recordAudit(
   });
 }
 
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
+  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
+    return jsonError("Schedule relay authentication failed.", 403, { reason: relayAuth.reason });
+  }
+  return requireInstagramAdmin();
+}
+
 export async function GET(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const accountId = getAccountId(request);
@@ -269,22 +452,21 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
-    const body = await readJsonBody<SchedulePatchPayload>(request);
+    const body = await readJsonBody<SchedulePatchPayload & { schedule_mode?: unknown; app_instance_id?: unknown }>(request);
     if (!body) return jsonError("Invalid Schedule settings payload.", 400);
 
     const accountId = readString(body.account_id, getAccountId(request)).trim();
     const accountIdError = validateAccountId(accountId);
     if (accountIdError) return accountIdError;
 
+    const scheduleMode = readString(body.schedule_mode, "scheduled").trim() || "scheduled";
     const deviceId = readString(body.device_id, "").trim();
     const startsAt = readString(body.starts_at, "").trim();
     const endsAt = readString(body.ends_at, "").trim();
-    if (!deviceId || !startsAt || !endsAt) {
-      return jsonError("Schedule save requires device_id, starts_at, and ends_at.", 400);
-    }
+    const appInstanceId = readString(body.app_instance_id, "").trim();
 
     const supabase = createSupabaseClient();
     const before = await buildScheduleProjection(supabase, accountId);
@@ -294,12 +476,74 @@ export async function PATCH(request: Request) {
     const actorContext = await getInstagramAdminUserContext();
     const actorId = actorContext?.userId ?? null;
 
+    if (scheduleMode === "manual_only") {
+      const resolvedAppInstanceId = appInstanceId || readString(before.current_assignment?.app_instance_id, "") || "";
+      if (!deviceId || !resolvedAppInstanceId) {
+        return jsonError("manual_only_requires_app_instance", 400);
+      }
+      const { data, error } = await supabase.rpc("assign_account_manual_only", {
+        p_account_id: accountId,
+        p_device_id: deviceId,
+        p_app_instance_id: resolvedAppInstanceId,
+        p_assignment_source: "manual_dashboard",
+        p_actor_id: actorId,
+      });
+      if (error) {
+        const normalized = error.message.toLowerCase();
+        if (normalized.includes("app_instance")) {
+          return jsonError(scheduleBlockMessage("no_app_instance_available"), 409);
+        }
+        return jsonError(sanitizeRunControlReason(error.message, "Could not save Schedule settings."), 500);
+      }
+      const assignResult = readRpcObject(data);
+      const after = await buildScheduleProjection(supabase, accountId);
+      const fieldsChanged = sameAssignmentChanged(before.current_assignment, after.current_assignment)
+        ? []
+        : ["assignment_manual_only"];
+      if (fieldsChanged.length) {
+        await recordAudit(supabase, {
+          accountId,
+          actorId,
+          fieldsChanged,
+          oldSummary: redactAssignmentSummary(before.current_assignment),
+          newSummary: redactAssignmentSummary(after.current_assignment),
+        }).catch(() => undefined);
+      }
+      return jsonOk({
+        ...after,
+        changed_fields: fieldsChanged,
+        assignment_result: {
+          idempotent: assignResult.idempotent === true,
+          assignment_id: readString(assignResult.assignment_id, "") || null,
+        },
+      });
+    }
+
+    if (!deviceId || !startsAt || !endsAt) {
+      return jsonError("Schedule save requires device_id, starts_at, and ends_at.", 400);
+    }
+
+    const deviceTimezone = before.device_timezone || normalizeLegacyScheduleTimezone("");
+    const conflict = await findDeviceSlotConflict(supabase, {
+      accountId,
+      deviceId,
+      startsAt,
+      endsAt,
+      timezone: deviceTimezone,
+    });
+    if (conflict) {
+      return jsonError(scheduleBlockMessage("assignment_slot_conflict"), 409, {
+        reason: "assignment_slot_conflict",
+        occupied_by: assignmentUsername(conflict),
+      });
+    }
+
     const { data, error } = await supabase.rpc("assign_account_slot", {
       p_account_id: accountId,
       p_device_id: deviceId,
       p_starts_at: startsAt,
       p_ends_at: endsAt,
-      p_clone_id: before.current_assignment?.clone_id ?? null,
+      p_clone_id: before.current_assignment?.app_instance_id ?? before.current_assignment?.clone_id ?? null,
       p_assignment_source: "manual_dashboard",
       p_actor_id: actorId,
     });
@@ -368,6 +612,7 @@ function sameAssignmentChanged(
   if (!before || !after) return false;
   return (
     before.device_id === after.device_id &&
+    before.schedule_mode === after.schedule_mode &&
     before.starts_at === after.starts_at &&
     before.ends_at === after.ends_at &&
     before.assignment_type === after.assignment_type
@@ -381,6 +626,7 @@ function redactAssignmentSummary(assignment: ScheduleAssignmentProjection | null
     device_id: assignment.device_id,
     assignment_type: assignment.assignment_type,
     slot_kind: assignment.slot_kind,
+    schedule_mode: assignment.schedule_mode,
     starts_at: assignment.starts_at,
     ends_at: assignment.ends_at,
     assignment_source: assignment.assignment_source,

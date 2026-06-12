@@ -9,9 +9,12 @@ export type ScheduleSlotReason =
   | "no_clone_available"
   | "no_app_instance_available"
   | "current"
+  | "current_conflict"
+  | "manual_only"
   | null;
 
 export type ScheduleSlotProjection = {
+  slot_id?: string;
   slot_index: number;
   slot_kind: string;
   slot_kind_label: string;
@@ -19,6 +22,10 @@ export type ScheduleSlotProjection = {
   starts_at: string;
   ends_at: string;
   available: boolean;
+  selectable?: boolean;
+  availability?: "available" | "current" | "conflict" | "occupied" | "blocked" | "manual_only";
+  is_current?: boolean;
+  is_conflict?: boolean;
   reason: ScheduleSlotReason;
   occupied_by: string | null;
 };
@@ -30,6 +37,7 @@ export type ScheduleAssignmentProjection = {
   app_instance_id?: string | null;
   assignment_type: string;
   slot_kind: string;
+  schedule_mode: string;
   status: string;
   starts_at: string;
   ends_at: string;
@@ -90,6 +98,8 @@ export type ScheduleProjection = {
 export type SchedulePatchPayload = {
   account_id?: unknown;
   device_id?: unknown;
+  app_instance_id?: unknown;
+  schedule_mode?: unknown;
   starts_at?: unknown;
   ends_at?: unknown;
   slot_index?: unknown;
@@ -104,12 +114,14 @@ export const SCHEDULE_BLOCK_REASONS = [
   "no_app_instance_available",
   "device_unavailable",
   "assignment_profile_mismatch",
+  "manual_only_runtime_disabled",
 ] as const;
 
 export type ScheduleBlockReason = (typeof SCHEDULE_BLOCK_REASONS)[number];
 
 export function readScheduleSlot(row: SupabaseRecord): ScheduleSlotProjection {
   return {
+    slot_id: readString(row.slot_id, "") || undefined,
     slot_index: Number(row.slot_index ?? 0),
     slot_kind: readString(row.slot_kind, ""),
     slot_kind_label: readString(row.slot_kind_label, readString(row.slot_kind, "")),
@@ -117,6 +129,10 @@ export function readScheduleSlot(row: SupabaseRecord): ScheduleSlotProjection {
     starts_at: readString(row.starts_at, ""),
     ends_at: readString(row.ends_at, ""),
     available: row.available === true,
+    selectable: typeof row.selectable === "boolean" ? row.selectable : row.available === true,
+    availability: readString(row.availability, "") as ScheduleSlotProjection["availability"],
+    is_current: row.is_current === true,
+    is_conflict: row.is_conflict === true,
     reason: (readString(row.reason, "") || null) as ScheduleSlotReason,
     occupied_by: readString(row.occupied_by, "") || null,
   };
@@ -140,6 +156,8 @@ export function scheduleBlockMessage(reason: string) {
       return "Manual run is blocked because the assigned phone/device is unavailable.";
     case "assignment_profile_mismatch":
       return "Manual run is blocked because the assignment profile does not match this run type.";
+    case "manual_only_runtime_disabled":
+      return "Manual-only runtime is not enabled yet. This account has placement reserved but no Phase 2 manual run path.";
     default:
       return "Manual run is blocked by schedule gates.";
   }

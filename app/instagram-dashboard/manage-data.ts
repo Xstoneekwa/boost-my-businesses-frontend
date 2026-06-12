@@ -54,6 +54,9 @@ export type ManageAccount = {
   appPackageName?: string | null;
   assignmentStartsAt?: string | null;
   assignmentEndsAt?: string | null;
+  scheduleMode?: string | null;
+  scheduleLabel?: string | null;
+  timezone?: string | null;
   slotKind?: string | null;
   phoneStatus?: string | null;
   appInstanceStatus?: string | null;
@@ -272,6 +275,41 @@ function readIso(row: SupabaseRecord | undefined, keys: string[]) {
   return value || null;
 }
 
+function formatAssignmentTime(value: string | null | undefined, timezone: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: timezone || "UTC",
+      }).format(date);
+    } catch {
+      return date.toISOString().slice(11, 16);
+    }
+  }
+  const match = String(value).match(/\b([01]\d|2[0-3]):([0-5]\d)\b/);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
+function buildScheduleLabel(input: {
+  scheduleMode: string | null | undefined;
+  startsAt: string | null | undefined;
+  endsAt: string | null | undefined;
+  timezone: string | null | undefined;
+  hasAssignment: boolean;
+}) {
+  if (!input.hasAssignment) return "Unassigned";
+  if (input.scheduleMode === "manual_only") return "Manual";
+  if (input.scheduleMode !== "scheduled") return "No schedule";
+  const startsAt = formatAssignmentTime(input.startsAt, input.timezone);
+  const endsAt = formatAssignmentTime(input.endsAt, input.timezone);
+  if (!startsAt || !endsAt || startsAt === endsAt) return "Schedule invalid";
+  return `${startsAt}-${endsAt}`;
+}
+
 function normalize(value: string) {
   return value.trim().toLowerCase();
 }
@@ -409,9 +447,9 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .limit(1000),
       supabase
         .from("account_assignments")
-        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,slot_kind")
+        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,schedule_mode,slot_kind")
         .in("account_id", accountIds)
-        .in("status", ["reserved", "active"])
+        .in("status", ["pending", "reserved", "active"])
         .order("starts_at", { ascending: false })
         .limit(1000),
       supabase
@@ -448,7 +486,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     const appInstanceIds = [...new Set(assignments.map((row) => readString(row, ["app_instance_id"], "")).filter(Boolean))];
     const [devicesResult, appInstancesResult] = await Promise.all([
       deviceIds.length
-        ? supabase.from("phone_devices").select("id,name,device_name,status").in("id", deviceIds)
+        ? supabase.from("phone_devices").select("id,name,device_name,status,timezone").in("id", deviceIds)
         : Promise.resolve({ data: [], error: null }),
       appInstanceIds.length
         ? supabase.from("phone_app_instances").select("id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login").in("id", appInstanceIds)
@@ -475,6 +513,19 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
       const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
       const assignedDeviceId = readString(assignment, ["device_id"], "");
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
+      const assignmentStartsAt = readIso(assignment, ["starts_at"]);
+      const assignmentEndsAt = readIso(assignment, ["ends_at"]);
+      const scheduleMode = assignment
+        ? readString(assignment, ["schedule_mode"], "scheduled") || "scheduled"
+        : account.scheduleMode ?? null;
+      const timezone = readString(device, ["timezone"], "") || null;
+      const scheduleLabel = buildScheduleLabel({
+        scheduleMode,
+        startsAt: assignmentStartsAt,
+        endsAt: assignmentEndsAt,
+        timezone,
+        hasAssignment: Boolean(assignment),
+      });
 
       return {
         ...account,
@@ -488,8 +539,11 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         deviceId: assignedDeviceId || account.deviceId || null,
         appInstanceId: assignedAppInstanceId || account.appInstanceId || null,
         assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
-        assignmentStartsAt: readIso(assignment, ["starts_at"]),
-        assignmentEndsAt: readIso(assignment, ["ends_at"]),
+        assignmentStartsAt,
+        assignmentEndsAt,
+        scheduleMode,
+        scheduleLabel,
+        timezone,
         slotKind: readString(assignment, ["slot_kind"], account.slotKind ?? "") || account.slotKind || null,
         phoneStatus: readString(device, ["status"], account.phoneStatus ?? "") || account.phoneStatus || null,
         appInstanceLabel: appLabel || account.appInstanceLabel || null,
@@ -588,6 +642,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           onboardingStatus: account.onboardingStatus,
           assignmentStatus: account.assignmentStatus ?? null,
           assignmentStartsAt: account.assignmentStartsAt ?? null,
+          scheduleMode: account.scheduleMode ?? null,
           phoneStatus: account.phoneStatus ?? null,
           appInstanceStatus: account.appInstanceStatus ?? null,
           appPackageName: account.appPackageName ?? null,
