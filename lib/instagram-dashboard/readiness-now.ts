@@ -52,6 +52,14 @@ export type ReadinessNowSupabase = {
 };
 
 type Row = Record<string, unknown>;
+type TargetCounts = {
+  total: number;
+  valid: number;
+  eligible: number;
+  pending: number;
+  rejected: number;
+  archived: number;
+};
 
 const activeRequestStatuses = ["queued", "claimed", "starting", "running"];
 const activeRunStatuses = ["queued", "pending", "starting", "running", "in_progress", "active"];
@@ -147,25 +155,37 @@ async function selectOneOptional(supabase: ReadinessNowSupabase, table: string, 
   }
 }
 
-async function countAccountTargets(supabase: ReadinessNowSupabase, accountId: string) {
+async function countAccountTargets(supabase: ReadinessNowSupabase, accountId: string): Promise<TargetCounts> {
+  const empty = { total: 0, valid: 0, eligible: 0, pending: 0, rejected: 0, archived: 0 };
   try {
     const result = await query(supabase, "ig_targets")
       .select("id,status,quality_status,verification_status,archived_at,deleted_at")
       .eq("account_id", accountId)
       .limit(500) as QueryResult;
-    if (result.error) return 0;
-    return readRows(result.data).filter((row) => {
+    if (result.error) return empty;
+    const rows = readRows(result.data);
+    const activeRows = rows.filter((row) => {
+      const status = normalize(row.status);
+      return status !== "archived" && status !== "deleted" && !readString(row.archived_at) && !readString(row.deleted_at);
+    });
+    const eligibleRows = activeRows.filter((row) => {
       const status = normalize(row.status);
       const quality = normalize(row.quality_status);
       const verification = normalize(row.verification_status);
       return ["valid", "active"].includes(status)
         && (!quality || quality === "eligible")
-        && (!verification || verification === "found")
-        && !readString(row.archived_at)
-        && !readString(row.deleted_at);
-    }).length;
+        && (!verification || verification === "found");
+    });
+    return {
+      total: activeRows.length,
+      valid: activeRows.filter((row) => ["valid", "active"].includes(normalize(row.status))).length,
+      eligible: eligibleRows.length,
+      pending: activeRows.filter((row) => ["pending", "pending_verification", "review"].includes(normalize(row.status)) || normalize(row.quality_status) === "unknown" || normalize(row.quality_status).startsWith("review_")).length,
+      rejected: activeRows.filter((row) => normalize(row.status) === "rejected" || normalize(row.quality_status).startsWith("rejected_")).length,
+      archived: rows.length - activeRows.length,
+    };
   } catch {
-    return 0;
+    return empty;
   }
 }
 
@@ -354,7 +374,7 @@ export async function runReadinessNow(
     });
   }
 
-  const [credential, clientStatus, packageSummary, settingsRow, filtersRow, dmSettingsRow, targetCount, blockingDashboardActionCount] = await Promise.all([
+  const [credential, clientStatus, packageSummary, settingsRow, filtersRow, dmSettingsRow, targetCounts, blockingDashboardActionCount] = await Promise.all([
     selectOne(supabase, "account_credentials", input.accountId, "status,reauth_required"),
     selectOne(supabase, "client_instagram_accounts", input.accountId, "account_id,login_status,provisioning_status,onboarding_status"),
     selectOneOptional(supabase, "account_package_summary", input.accountId, "account_id,commercial_package_code,runtime_profiles,package_caps,entitlements"),
@@ -365,12 +385,19 @@ export async function runReadinessNow(
     countBlockingDashboardActions(supabase, input.accountId),
   ]);
   const targetsRequired = accountPackageRequiresTargets(packageSummary);
+  const targetBlocker = targetsRequired && targetCounts.total <= 0
+    ? "missing_ct"
+    : targetsRequired && targetCounts.eligible <= 0 && targetCounts.pending > 0
+      ? "ct_pending_verification"
+      : targetsRequired && targetCounts.eligible <= 0
+        ? "no_eligible_ct"
+        : null;
   const blockers = [
     !packageSummary ? "missing_package" : null,
     !settingsRow ? "missing_settings" : null,
     !filtersRow ? "missing_filters" : null,
     !dmSettingsRow ? "missing_dm_settings" : null,
-    targetsRequired && targetCount <= 0 ? "missing_ct" : null,
+    targetBlocker,
     blockingDashboardActionCount > 0 ? "blocking_dashboard_action" : null,
   ].filter((item): item is string => Boolean(item));
   const checks = {
@@ -380,7 +407,13 @@ export async function runReadinessNow(
     settings_connected: Boolean(settingsRow),
     filters_connected: Boolean(filtersRow),
     dm_settings_connected: Boolean(dmSettingsRow),
-    ct_count: targetCount,
+    ct_count: targetCounts.eligible,
+    ct_count_total: targetCounts.total,
+    ct_count_valid: targetCounts.valid,
+    ct_count_eligible: targetCounts.eligible,
+    ct_count_pending: targetCounts.pending,
+    ct_count_rejected: targetCounts.rejected,
+    ct_count_archived: targetCounts.archived,
     ct_required: targetsRequired,
     blocking_dashboard_action_count: blockingDashboardActionCount,
     no_blocking_dashboard_action: blockingDashboardActionCount === 0,

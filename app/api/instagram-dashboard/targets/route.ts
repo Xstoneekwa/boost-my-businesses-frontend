@@ -3,6 +3,7 @@ import {
   safeInstagramPublicAvatarUrl,
 } from "@/lib/instagram-public-profile-lookup";
 import {
+  buildTargetVerificationJobDecision,
   buildTargetVerificationJobPayloads,
 } from "@/lib/instagram-target-verification-jobs";
 import {
@@ -40,6 +41,7 @@ import {
 import { verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
+const defaultInlineBulkVerificationLimit = 5;
 
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
@@ -325,6 +327,82 @@ async function tryEnqueueTargetVerificationJobs(
   return { queued: error ? 0 : jobRows.length, error: error?.message ?? null };
 }
 
+function inlineBulkVerificationLimit(insertedCount: number) {
+  const raw = process.env.CT_TARGET_BULK_INLINE_VERIFY_LIMIT?.trim();
+  const parsed = raw ? Number(raw) : defaultInlineBulkVerificationLimit;
+  const bounded = Number.isFinite(parsed) ? Math.trunc(parsed) : defaultInlineBulkVerificationLimit;
+  return Math.min(Math.max(bounded, 0), Math.min(insertedCount, 10));
+}
+
+async function tryProcessQueuedTargetVerificationJobs(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: { rows: SupabaseRecord[]; batchId: string | null },
+) {
+  const limit = inlineBulkVerificationLimit(input.rows.length);
+  if (limit <= 0) return null;
+  const summary = {
+    processed_count: 0,
+    succeeded_count: 0,
+    rejected_count: 0,
+    review_count: 0,
+    retry_scheduled_count: 0,
+    provider_error_count: 0,
+  };
+
+  for (const row of input.rows.slice(0, limit)) {
+    const targetId = readString(row.id, "");
+    const accountId = readString(row.account_id, "");
+    const normalizedUsername = readString(row.normalized_username, readString(row.target_username, ""));
+    if (!targetId || !accountId || !normalizedUsername) continue;
+
+    const now = new Date();
+    try {
+      const decision = await verifySingleTargetUsername(normalizedUsername);
+      const jobDecision = buildTargetVerificationJobDecision({
+        decision,
+        attemptCount: 1,
+        maxAttempts: 3,
+        now,
+      });
+      await supabase
+        .from("ig_targets")
+        .update({
+          ...jobDecision.targetPatch,
+          updated_at: now.toISOString(),
+        })
+        .eq("id", targetId)
+        .eq("account_id", accountId);
+      await supabase
+        .from("ct_target_verification_jobs")
+        .update({
+          status: jobDecision.jobStatus,
+          next_attempt_at: jobDecision.nextAttemptAt,
+          locked_at: null,
+          locked_by: null,
+          last_error_code: jobDecision.lastErrorCode,
+          last_error_message: jobDecision.lastErrorMessage,
+          provider_status: decision.verification_status,
+          updated_at: now.toISOString(),
+        })
+        .eq("target_id", targetId);
+      summary.processed_count += 1;
+      if (jobDecision.jobStatus === "retry_scheduled") summary.retry_scheduled_count += 1;
+      else if (jobDecision.targetPatch.status === "valid") summary.succeeded_count += 1;
+      else if (jobDecision.targetPatch.status === "rejected") summary.rejected_count += 1;
+      else if (jobDecision.targetPatch.status === "review") summary.review_count += 1;
+    } catch {
+      summary.provider_error_count += 1;
+    }
+  }
+
+  return {
+    batch_id: input.batchId,
+    inline_limit: limit,
+    summary,
+    remaining_queued: Math.max(0, input.rows.length - summary.processed_count),
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const unauthorized = await requireRelayOrAdmin(request);
@@ -436,6 +514,10 @@ export async function POST(request: Request) {
         });
         return jsonError("Targets were inserted, but verification jobs could not be queued.", 500);
       }
+      const verificationRun = await tryProcessQueuedTargetVerificationJobs(supabase, {
+        rows: (insertResult.data ?? []) as SupabaseRecord[],
+        batchId,
+      });
 
       await tryRecordTargetAudit(supabase, {
         accountId,
@@ -455,6 +537,8 @@ export async function POST(request: Request) {
         skipped_invalid: summary.invalid,
         validation_pending: insertResult.data?.length ?? 0,
         jobs_queued: jobResult.queued,
+        job_status: verificationRun ? "processed_inline_or_remaining_queued" : jobResult.queued > 0 ? "queued" : "not_created",
+        verification_run: verificationRun,
         summary,
         lines: classified,
         rows: ((insertResult.data ?? []) as SupabaseRecord[]).map(safeTargetRow),

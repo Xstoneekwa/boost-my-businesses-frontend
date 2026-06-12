@@ -28,7 +28,7 @@ function safeSettingsRecord(row: SupabaseRecord | null, accountId: string) {
   return redactRecord(row);
 }
 
-function safeTargetRow(row: SupabaseRecord) {
+function safeTargetRow(row: SupabaseRecord, job: SupabaseRecord | null = null) {
   const id = readString(row.id, "");
   const rawAvatarUrl = readString(row.avatar_url, readString(row.profile_picture_url, readString(row.profile_image_url, "")));
   const avatarUrl = id && safeInstagramPublicAvatarUrl(rawAvatarUrl)
@@ -45,15 +45,35 @@ function safeTargetRow(row: SupabaseRecord) {
     avatar_last_checked_at: readString(row.provider_checked_at, readString(row.avatar_last_checked_at, "")) || null,
     status: readString(row.status, "unknown"),
     quality_status: readString(row.quality_status, "unknown"),
+    verification_status: readString(row.verification_status, "pending"),
+    verification_reason: readString(row.verification_reason, "") || null,
     source: readString(row.source, "unknown"),
     followers_count: row.followers_count ?? null,
+    is_private: typeof row.is_private === "boolean" ? row.is_private : null,
+    is_verified: typeof row.is_verified === "boolean" ? row.is_verified : null,
     followbacks_count: row.followbacks_count ?? null,
     follows_sent_count: row.follows_sent_count ?? null,
+    followback_ratio: row.followback_ratio ?? null,
+    performance_status: readString(row.performance_status, "") || null,
     archived_at: readString(row.archived_at, "") || null,
     deleted_at: readString(row.deleted_at, "") || null,
     last_used_at: readString(row.last_used_at, "") || null,
     last_selected_at: readString(row.last_selected_at, "") || null,
-    rejection_reason: readString(row.rejection_reason, "") || null,
+    last_successful_candidate_at: readString(row.last_successful_candidate_at, "") || null,
+    last_exhausted_at: readString(row.last_exhausted_at, "") || null,
+    exhaustion_reason: readString(row.exhaustion_reason, "") || null,
+    cooldown_until: readString(row.cooldown_until, "") || null,
+    metrics_updated_at: readString(row.metrics_updated_at, "") || null,
+    rejected_reason: readString(row.rejected_reason, "") || null,
+    rejection_reason: readString(row.rejected_reason, "") || null,
+    batch_id: readString(row.batch_id, "") || null,
+    provider_checked_at: readString(row.provider_checked_at, "") || null,
+    last_verified_at: readString(row.provider_checked_at, "") || null,
+    job_status: readString(job?.status, "") || null,
+    job_provider_status: readString(job?.provider_status, "") || null,
+    job_attempt_count: job?.attempt_count ?? null,
+    job_next_attempt_at: readString(job?.next_attempt_at, "") || null,
+    job_last_error_code: readString(job?.last_error_code, "") || null,
     updated_at: readString(row.updated_at, "") || null,
   };
 }
@@ -98,11 +118,12 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [accountResult, settingsResult, filtersResult, targetsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
+  const [accountResult, settingsResult, filtersResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
     supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_filters").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_targets").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
+    supabase.from("ct_target_verification_jobs").select("target_id,status,provider_status,attempt_count,next_attempt_at,last_error_code,updated_at").eq("account_id", accountId).limit(500),
     supabase.from("ig_runs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(50),
     supabase.from("ig_action_logs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
     supabase.from("account_package_summary").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
@@ -125,6 +146,7 @@ export async function getProfileDetailsData(accountId: string) {
   ]);
 
   const activityItems = activityResult?.items?.filter((item) => item.accountId === accountId || item.username === account.username) ?? [];
+  const targetJobs = new Map(((targetJobsResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row.target_id, ""), row]));
   const lifecycleRow = accountResult.data ?? null;
   const lifecycleAccount = lifecycleRow
     ? {
@@ -167,9 +189,9 @@ export async function getProfileDetailsData(accountId: string) {
       error: logsResult.error?.message ?? null,
     },
     targets: {
-      items: ((targetsResult.data ?? []) as SupabaseRecord[]).map(safeTargetRow),
+      items: ((targetsResult.data ?? []) as SupabaseRecord[]).map((row) => safeTargetRow(row, targetJobs.get(readString(row.id, "")) ?? null)),
       status: targetsResult.error ? "backend_pending" : "connected",
-      error: targetsResult.error?.message ?? null,
+      error: targetsResult.error?.message ?? targetJobsResult.error?.message ?? null,
     },
     settings: {
       data: safeSettingsRecord(settingsResult.data ?? null, accountId),

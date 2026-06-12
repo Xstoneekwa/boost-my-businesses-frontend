@@ -8,6 +8,7 @@ type PatchBody = {
   account_id?: string;
   ids?: string[];
   actor_type?: "admin" | "client" | "system";
+  mode?: "reset_state_only" | "reset_and_requeue_verification";
 };
 
 async function requireRelayOrAdmin(request: Request) {
@@ -31,6 +32,7 @@ async function tryRecordTargetResetAudit(
     targetId: string;
     actorType: "admin" | "client" | "system";
     previousStatus: string;
+    jobsQueued: number;
   },
 ) {
   try {
@@ -39,13 +41,14 @@ async function tryRecordTargetResetAudit(
       target_id: input.targetId,
       operation: "target_reset",
       result: "accepted",
-      reason: "manual_reset",
+      reason: input.jobsQueued > 0 ? "manual_reset_requeued" : "manual_reset_state_only",
       actor_type: input.actorType,
       metadata_safe: {
         source: "target_reset",
         source_surface: "admin_dashboard",
         previous_status: input.previousStatus,
         next_status: "pending_verification",
+        jobs_queued: input.jobsQueued,
       },
     });
   } catch {
@@ -64,6 +67,7 @@ export async function PATCH(request: Request) {
     const accountId = readString(body.account_id, "").trim();
     if (!accountId) return jsonError("Missing account_id.", 400);
     const actorType = body.actor_type === "client" ? "client" : "admin";
+    const mode = body.mode === "reset_state_only" ? "reset_state_only" : "reset_and_requeue_verification";
 
     const ids = Array.isArray(body.ids)
       ? body.ids.map((id) => readString(id, "").trim()).filter(Boolean)
@@ -75,7 +79,7 @@ export async function PATCH(request: Request) {
 
     const { data: owned, error: selError } = await supabase
       .from("ig_targets")
-      .select("id, status, archived_at, deleted_at")
+      .select("id, account_id, target_username, normalized_username, batch_id, status, archived_at, deleted_at")
       .eq("account_id", accountId)
       .in("id", ids);
 
@@ -92,12 +96,13 @@ export async function PATCH(request: Request) {
     }
 
     const now = new Date().toISOString();
+    const resetReason = mode === "reset_and_requeue_verification" ? "manual_reset_requeued" : "manual_reset";
     const { data: resetRows, error } = await supabase
       .from("ig_targets")
       .update({
         status: "pending_verification",
         verification_status: "pending",
-        verification_reason: "manual_reset",
+        verification_reason: resetReason,
         quality_status: "unknown",
         rejected_reason: null,
         updated_at: now,
@@ -107,6 +112,32 @@ export async function PATCH(request: Request) {
       .select("id, status");
 
     if (error) return jsonError(error.message, 500);
+    let jobsQueued = 0;
+    if (mode === "reset_and_requeue_verification") {
+      const jobRows = ((owned ?? []) as SupabaseRecord[]).map((row) => ({
+        target_id: readString(row.id, ""),
+        account_id: accountId,
+        batch_id: readString(row.batch_id, "") || null,
+        normalized_username: readString(row.normalized_username, readString(row.target_username, "")),
+        status: "pending",
+        attempt_count: 0,
+        next_attempt_at: null,
+        locked_at: null,
+        locked_by: null,
+        last_error_code: null,
+        last_error_message: null,
+        provider_status: "pending",
+        metadata_safe: { source: "target_reset", mode },
+        updated_at: now,
+      })).filter((row) => row.target_id && row.account_id && row.normalized_username);
+      if (jobRows.length > 0) {
+        const { error: jobError } = await supabase
+          .from("ct_target_verification_jobs")
+          .upsert(jobRows, { onConflict: "target_id" });
+        if (jobError) return jsonError("Targets were reset, but verification could not be queued.", 500);
+        jobsQueued = jobRows.length;
+      }
+    }
     await Promise.all(((resetRows ?? []) as SupabaseRecord[]).map((row) => {
       const original = ((owned ?? []) as SupabaseRecord[]).find((candidate) => readString(candidate.id, "") === readString(row.id, ""));
       return tryRecordTargetResetAudit(supabase, {
@@ -114,9 +145,10 @@ export async function PATCH(request: Request) {
         targetId: readString(row.id, ""),
         actorType,
         previousStatus: readString(original?.status, "unknown"),
+        jobsQueued,
       });
     }));
-    return jsonOk({ reset: ids.length });
+    return jsonOk({ reset: ids.length, mode, jobs_queued: jobsQueued });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to reset targets.";
     return jsonError(message, 500);
