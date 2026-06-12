@@ -13,6 +13,11 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
     ig_accounts: [{ id: accountId, username: "demo", status: "active", admin_lifecycle_status: "active" }],
     account_credentials: [{ account_id: accountId, status: "active", reauth_required: false }],
     client_instagram_accounts: [{ account_id: accountId, login_status: "unknown", provisioning_status: "not_started", onboarding_status: "pending" }],
+    account_package_summary: [{ account_id: accountId, runtime_profiles: ["full_cycle"], package_caps: { follow_day: 20, follow_session: 20 }, entitlements: [] }],
+    ig_account_settings: [{ account_id: accountId }],
+    ig_account_filters: [{ account_id: accountId }],
+    ig_dm_settings: [{ account_id: accountId }],
+    ig_targets: [{ account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" }],
     account_assignments: [{
       id: assignmentId,
       account_id: accountId,

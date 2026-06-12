@@ -33,6 +33,8 @@ export type ReadinessNowResult = {
   app_instance_available?: boolean | null;
   request_id?: string | null;
   run_request_status?: string | null;
+  blockers?: string[];
+  checks?: Record<string, unknown>;
 };
 
 type QueryResult = { data?: unknown; error?: { message?: string } | null };
@@ -135,6 +137,61 @@ async function selectOne(supabase: ReadinessNowSupabase, table: string, accountI
     .limit(1) as QueryResult;
   if (result.error) throw new Error(result.error.message || `${table}_unavailable`);
   return firstRow(result.data);
+}
+
+async function selectOneOptional(supabase: ReadinessNowSupabase, table: string, accountId: string, columns: string) {
+  try {
+    return await selectOne(supabase, table, accountId, columns);
+  } catch {
+    return null;
+  }
+}
+
+async function countAccountTargets(supabase: ReadinessNowSupabase, accountId: string) {
+  try {
+    const result = await query(supabase, "ig_targets")
+      .select("id,status,quality_status,verification_status,archived_at,deleted_at")
+      .eq("account_id", accountId)
+      .limit(500) as QueryResult;
+    if (result.error) return 0;
+    return readRows(result.data).filter((row) => {
+      const status = normalize(row.status);
+      const quality = normalize(row.quality_status);
+      const verification = normalize(row.verification_status);
+      return ["valid", "active"].includes(status)
+        && (!quality || quality === "eligible")
+        && (!verification || verification === "found")
+        && !readString(row.archived_at)
+        && !readString(row.deleted_at);
+    }).length;
+  } catch {
+    return 0;
+  }
+}
+
+async function countBlockingDashboardActions(supabase: ReadinessNowSupabase, accountId: string) {
+  try {
+    const result = await query(supabase, "account_dashboard_actions")
+      .select("id,status,blocking_campaign")
+      .eq("account_id", accountId)
+      .in("status", ["pending", "acknowledged", "pending_verification"])
+      .limit(100) as QueryResult;
+    if (result.error) return 0;
+    return readRows(result.data).filter((row) => row.blocking_campaign === true).length;
+  } catch {
+    return 0;
+  }
+}
+
+function accountPackageRequiresTargets(packageSummary: Row | null) {
+  if (!packageSummary) return false;
+  const caps = packageSummary.package_caps && typeof packageSummary.package_caps === "object" && !Array.isArray(packageSummary.package_caps)
+    ? packageSummary.package_caps as Row
+    : {};
+  const runtimeProfiles = Array.isArray(packageSummary.runtime_profiles) ? packageSummary.runtime_profiles.map((value) => readString(value).toLowerCase()) : [];
+  const followDay = Number(caps.follow_day ?? 0);
+  const followSession = Number(caps.follow_session ?? 0);
+  return followDay > 0 || followSession > 0 || runtimeProfiles.some((profile) => profile.includes("follow") || profile.includes("full_cycle"));
 }
 
 async function loadAccount(supabase: ReadinessNowSupabase, accountId: string) {
@@ -255,6 +312,7 @@ export async function runReadinessNow(
     audience?: ReadinessNowAudience;
     actorId?: string | null;
     now?: Date;
+    dryRun?: boolean;
   },
 ): Promise<ReadinessNowResult> {
   const audience = input.audience ?? "admin";
@@ -296,17 +354,48 @@ export async function runReadinessNow(
     });
   }
 
-  const [credential, clientStatus] = await Promise.all([
+  const [credential, clientStatus, packageSummary, settingsRow, filtersRow, dmSettingsRow, targetCount, blockingDashboardActionCount] = await Promise.all([
     selectOne(supabase, "account_credentials", input.accountId, "status,reauth_required"),
     selectOne(supabase, "client_instagram_accounts", input.accountId, "account_id,login_status,provisioning_status,onboarding_status"),
+    selectOneOptional(supabase, "account_package_summary", input.accountId, "account_id,commercial_package_code,runtime_profiles,package_caps,entitlements"),
+    selectOneOptional(supabase, "ig_account_settings", input.accountId, "account_id"),
+    selectOneOptional(supabase, "ig_account_filters", input.accountId, "account_id"),
+    selectOneOptional(supabase, "ig_dm_settings", input.accountId, "account_id"),
+    countAccountTargets(supabase, input.accountId),
+    countBlockingDashboardActions(supabase, input.accountId),
   ]);
+  const targetsRequired = accountPackageRequiresTargets(packageSummary);
+  const blockers = [
+    !packageSummary ? "missing_package" : null,
+    !settingsRow ? "missing_settings" : null,
+    !filtersRow ? "missing_filters" : null,
+    !dmSettingsRow ? "missing_dm_settings" : null,
+    targetsRequired && targetCount <= 0 ? "missing_ct" : null,
+    blockingDashboardActionCount > 0 ? "blocking_dashboard_action" : null,
+  ].filter((item): item is string => Boolean(item));
+  const checks = {
+    account_exists: true,
+    package_configured: Boolean(packageSummary),
+    credentials_active: Boolean(credential && activeCredentialStatuses.has(normalize(credential.status)) && credential.reauth_required !== true),
+    settings_connected: Boolean(settingsRow),
+    filters_connected: Boolean(filtersRow),
+    dm_settings_connected: Boolean(dmSettingsRow),
+    ct_count: targetCount,
+    ct_required: targetsRequired,
+    blocking_dashboard_action_count: blockingDashboardActionCount,
+    no_blocking_dashboard_action: blockingDashboardActionCount === 0,
+    account_not_archived: !["archived", "trashed", "deleted"].includes(accountStatus),
+    account_not_paused: lifecycleStatus !== "paused",
+  };
+  const assignment = await loadAssignment(supabase, input.accountId);
+  const assignmentReady = Boolean(assignment && readString(assignment.id) && readString(assignment.device_id) && readString(assignment.app_instance_id));
   const credentialStatus = normalize(credential?.status);
   if (!credential || !activeCredentialStatuses.has(credentialStatus) || credential.reauth_required === true) {
     return safeResult({
       audience,
       readiness_status: "needs_credentials",
       client_status: "update_password",
-      assignment_status: "missing",
+      assignment_status: assignmentReady ? "ready" : "missing",
       phone_available: null,
       app_instance_available: null,
       preflight_request_created: false,
@@ -315,6 +404,30 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: "submit_or_update_credentials",
       reason: credential?.reauth_required === true ? "credentials_reauth_required" : "credentials_missing_or_inactive",
+      blockers: [
+        credential?.reauth_required === true ? "credentials_reauth_required" : "missing_credentials",
+        ...blockers,
+      ],
+      checks,
+    });
+  }
+
+  if (blockers.length) {
+    return safeResult({
+      audience,
+      readiness_status: "retry_later",
+      client_status: "try_again_later",
+      assignment_status: "blocked",
+      phone_available: null,
+      app_instance_available: null,
+      preflight_request_created: false,
+      idempotent: false,
+      request_id: null,
+      run_request_status: null,
+      next_action: "complete_onboarding_requirements",
+      reason: blockers[0],
+      blockers,
+      checks,
     });
   }
 
@@ -334,6 +447,8 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: "none",
       reason: "already_connected_ready",
+      blockers: [],
+      checks,
     });
   }
 
@@ -352,10 +467,11 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: loginAction.nextAction,
       reason: loginAction.reason,
+      blockers: [],
+      checks,
     });
   }
 
-  const assignment = await loadAssignment(supabase, input.accountId);
   if (!assignment || !readString(assignment.id) || !readString(assignment.device_id) || !readString(assignment.app_instance_id)) {
     const capacityAvailable = await hasAvailableSlot(supabase, input.accountId);
     return safeResult({
@@ -371,6 +487,8 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: capacityAvailable ? "wait_for_scheduler_assignment" : "try_again_later",
       reason: capacityAvailable ? "waiting_scheduled_assignment" : "capacity_unavailable",
+      blockers: ["missing_assignment"],
+      checks,
     });
   }
 
@@ -389,6 +507,8 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: "try_again_later",
       reason: "phone_or_app_unavailable",
+      blockers: ["unsafe_assignment"],
+      checks,
     });
   }
 
@@ -415,6 +535,8 @@ export async function runReadinessNow(
       run_request_status: readString(duplicate.status, "queued"),
       next_action: "monitor_preflight",
       reason: "already_requested",
+      blockers: [],
+      checks,
     });
   }
   const activeForAccount = activeRequests.some((row) => readString(row.account_id) === input.accountId) || activeRuns.some((row) => readString(row.account_id) === input.accountId);
@@ -433,6 +555,8 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: "try_again_later",
       reason: activeForPeer ? "skipped_phone_busy" : "account_busy",
+      blockers: ["blocking_dashboard_action"],
+      checks,
     });
   }
 
@@ -451,6 +575,27 @@ export async function runReadinessNow(
       run_request_status: null,
       next_action: "try_again_later",
       reason: "deadline_too_close",
+      blockers: ["deadline_too_close"],
+      checks,
+    });
+  }
+
+  if (input.dryRun === true) {
+    return safeResult({
+      audience,
+      readiness_status: "checking_connection",
+      client_status: "checking_connection",
+      assignment_status: "ready",
+      phone_available: true,
+      app_instance_available: true,
+      preflight_request_created: false,
+      idempotent: false,
+      request_id: null,
+      run_request_status: "not_created_dry_run",
+      next_action: "prepare_login_preflight",
+      reason: "login_preflight_ready_dry_run",
+      blockers: [],
+      checks,
     });
   }
 
@@ -496,6 +641,8 @@ export async function runReadinessNow(
     run_request_status: requestStatus,
     next_action: requestActive ? "monitor_preflight" : "retry_connect",
     reason: requestActive ? "login_preflight_now_queued" : "login_preflight_request_not_active",
+    blockers: requestActive ? [] : ["login_preflight_request_not_active"],
+    checks,
   });
 }
 

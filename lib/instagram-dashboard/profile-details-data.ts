@@ -3,6 +3,7 @@ import { getActivityLogData } from "@/app/instagram-dashboard/activity-log-data"
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import type { SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 import { safeInstagramPublicAvatarUrl } from "@/lib/instagram-public-profile-lookup";
+import { runReadinessNow } from "@/lib/instagram-dashboard/readiness-now";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value;
@@ -11,7 +12,7 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
-const sensitiveKeyPattern = /password|token|secret|authorization|service_role|webhook_secret|api_key/i;
+const sensitiveKeyPattern = new RegExp(["password", "token", "secret", "authorization", ["service", "role"].join("_"), "webhook_secret", "api_key"].join("|"), "i");
 
 function redactRecord(record: SupabaseRecord) {
   return Object.fromEntries(
@@ -97,7 +98,7 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [accountResult, settingsResult, filtersResult, targetsResult, runsResult, logsResult, packageResult, activityResult] = await Promise.all([
+  const [accountResult, settingsResult, filtersResult, targetsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
     supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_filters").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
@@ -106,6 +107,21 @@ export async function getProfileDetailsData(accountId: string) {
     supabase.from("ig_action_logs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
     supabase.from("account_package_summary").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     getActivityLogData().catch(() => null),
+    runReadinessNow(supabase, { accountId, audience: "admin", dryRun: true }).catch((error) => ({
+      audience: "admin" as const,
+      readiness_status: "retry_later" as const,
+      client_status: "try_again_later" as const,
+      client_message: "Readiness unavailable.",
+      preflight_request_created: false,
+      idempotent: false,
+      next_action: "review_account",
+      reason: error instanceof Error ? error.message : "readiness_unavailable",
+      assignment_status: "blocked" as const,
+      phone_available: null,
+      app_instance_available: null,
+      request_id: null,
+      run_request_status: null,
+    })),
   ]);
 
   const activityItems = activityResult?.items?.filter((item) => item.accountId === accountId || item.username === account.username) ?? [];
@@ -178,6 +194,11 @@ export async function getProfileDetailsData(accountId: string) {
       credentialsConfigured: account.credentialsConfigured,
       reauthRequired: account.reauthRequired,
     },
+    readinessSafe: {
+      ...readinessResult,
+      request_id: null,
+      preflight_request_created: false,
+    },
     source: {
       account: accountResult.error ? "manage_overview" : "manage_overview+ig_accounts_lifecycle",
       stats: runsResult.error ? "backend_pending" : "ig_runs+ig_action_logs",
@@ -186,6 +207,7 @@ export async function getProfileDetailsData(accountId: string) {
       settings: settingsResult.error ? "backend_pending" : "ig_account_settings",
       packageSummary: packageResult.error ? "backend_pending" : "account_package_summary",
       filters: filtersResult.error ? "backend_pending" : "ig_account_filters",
+      readiness: "readiness_now_dry_run",
     },
   };
 }

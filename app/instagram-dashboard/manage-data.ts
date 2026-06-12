@@ -47,10 +47,14 @@ export type ManageAccount = {
   lastSafeUpdate: string | null;
   phoneName: string;
   macHostName: string;
+  deviceId?: string | null;
   assignmentStatus?: string | null;
+  appInstanceId?: string | null;
   appInstanceLabel?: string | null;
   appPackageName?: string | null;
   assignmentStartsAt?: string | null;
+  assignmentEndsAt?: string | null;
+  slotKind?: string | null;
   phoneStatus?: string | null;
   appInstanceStatus?: string | null;
   appInstanceLaunchable?: boolean | null;
@@ -405,7 +409,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .limit(1000),
       supabase
         .from("account_assignments")
-        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at")
+        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,slot_kind")
         .in("account_id", accountIds)
         .in("status", ["reserved", "active"])
         .order("starts_at", { ascending: false })
@@ -469,18 +473,24 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
       const packageName = readString(appInstance, ["package_name"], "");
       const credentialsStatus = readString(credential, ["status"], account.credentialsStatus);
       const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
+      const assignedDeviceId = readString(assignment, ["device_id"], "");
+      const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
 
       return {
         ...account,
         credentialsConfigured: credentialsStatus === "active" ? true : account.credentialsConfigured,
         credentialsStatus: credentialsStatus === "active" ? "active" : account.credentialsStatus,
-        reauthRequired: credentialsStatus === "active" ? false : account.reauthRequired,
+        reauthRequired: credential ? readNullableBoolean(credential, ["reauth_required"]) ?? account.reauthRequired : account.reauthRequired,
         loginStatus: loginStatus === "unknown" && credentialsStatus === "active" ? "pending_login" : loginStatus,
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
         phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
+        deviceId: assignedDeviceId || account.deviceId || null,
+        appInstanceId: assignedAppInstanceId || account.appInstanceId || null,
         assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
         assignmentStartsAt: readIso(assignment, ["starts_at"]),
+        assignmentEndsAt: readIso(assignment, ["ends_at"]),
+        slotKind: readString(assignment, ["slot_kind"], account.slotKind ?? "") || account.slotKind || null,
         phoneStatus: readString(device, ["status"], account.phoneStatus ?? "") || account.phoneStatus || null,
         appInstanceLabel: appLabel || account.appInstanceLabel || null,
         appPackageName: packageName || account.appPackageName || null,
