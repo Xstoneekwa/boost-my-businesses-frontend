@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
 import {
   addProfileAddonOptions,
   addProfilePackageOptions,
@@ -49,6 +50,8 @@ type UsernameVerification = {
   reason: string;
 };
 type ScheduleSlot = {
+  slot_id?: string;
+  schedule_mode?: string;
   slot_index: number;
   slot_kind: string;
   slot_kind_label: string;
@@ -57,7 +60,8 @@ type ScheduleSlot = {
   ends_at: string;
   available: boolean;
   reason: string | null;
-  occupied_by: string | null;
+  availability?: string;
+  occupied_by: string | { username?: string | null; account_id?: string | null; status?: string | null } | null;
 };
 type ScheduleSlotsResponse = {
   device_id: string;
@@ -68,8 +72,27 @@ type ScheduleSlotsResponse = {
   slots: ScheduleSlot[];
 };
 type WizardStep = 0 | 1 | 2 | 3 | 4 | 5;
+type SetupProgressStatus = "pending" | "running" | "done" | "failed" | "skipped";
+type SetupProgressStep = { id: string; label: string; subtitle: string; status: SetupProgressStatus };
+type SetupProgressState = { status: SetupProgressStatus; message: string; steps: SetupProgressStep[]; logs: Array<{ timestamp: string; phase: string; message: string }> };
 
 const steps = ["Device", "Account", "App Instance", "Package & Add-ons", "Schedule", "Review"];
+
+function progressTime() {
+  return new Date().toLocaleTimeString();
+}
+
+function setupProgressLabel(status: SetupProgressStatus) {
+  if (status === "done") return "Done";
+  if (status === "running") return "Running...";
+  if (status === "failed") return "Failed";
+  if (status === "skipped") return "Skipped";
+  return "Pending";
+}
+
+function copyableSetupLog(state: SetupProgressState) {
+  return state.logs.map((entry) => `${entry.timestamp} · ${entry.phase} · ${entry.message}`).join("\n");
+}
 
 async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
@@ -122,6 +145,7 @@ export default function AddProfileWizard() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [setupProgress, setSetupProgress] = useState<SetupProgressState | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [verification, setVerification] = useState<UsernameVerification | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -141,6 +165,7 @@ export default function AddProfileWizard() {
     commercial_package: defaultAddProfileCommercialPackage(),
     addons: [] as string[],
     runtime_mode: "safe_setup",
+    schedule_mode: "scheduled",
     starts_at: "",
     ends_at: "",
   });
@@ -166,8 +191,12 @@ export default function AddProfileWizard() {
     [form.addons],
   );
   const selectedScheduleSlot = useMemo(
-    () => scheduleSlots?.slots.find((slot) => slot.starts_at === form.starts_at && slot.ends_at === form.ends_at) ?? null,
-    [scheduleSlots, form.starts_at, form.ends_at],
+    () => scheduleSlots?.slots.find((slot) => (
+      form.schedule_mode === "manual_only"
+        ? slot.schedule_mode === "manual_only"
+        : slot.schedule_mode !== "manual_only" && slot.starts_at === form.starts_at && slot.ends_at === form.ends_at
+    )) ?? null,
+    [form.ends_at, form.schedule_mode, form.starts_at, scheduleSlots],
   );
   const scheduleTimezone = scheduleSlots?.timezone || DEFAULT_BUSINESS_TIMEZONE;
 
@@ -202,12 +231,12 @@ export default function AddProfileWizard() {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || step !== 4 || !selectedDevice?.id) return;
+    if (!isOpen || step !== 4 || !selectedDevice?.id || !selectedAppInstance?.app_instance_id) return;
 
     let ignore = false;
     setIsLoadingSlots(true);
     setError("");
-    fetch(`/api/instagram-dashboard/accounts/schedule-slots?device_id=${encodeURIComponent(selectedDevice.id)}&runtime_mode=${encodeURIComponent(form.runtime_mode)}`, {
+    fetch(`/api/instagram-dashboard/accounts/schedule-slots?device_id=${encodeURIComponent(selectedDevice.id)}&app_instance_id=${encodeURIComponent(selectedAppInstance.app_instance_id)}&runtime_mode=${encodeURIComponent(form.runtime_mode)}`, {
       headers: { Accept: "application/json" },
     })
       .then((response) => readApiResponse<ScheduleSlotsResponse>(response, "Could not load schedule slots."))
@@ -215,10 +244,15 @@ export default function AddProfileWizard() {
         if (ignore) return;
         setScheduleSlots(slotResponse);
         setForm((current) => {
-          const currentStillAvailable = slotResponse.slots.some((slot) => slot.available && slot.starts_at === current.starts_at && slot.ends_at === current.ends_at);
+          const currentStillAvailable = slotResponse.slots.some((slot) => slot.available && (
+            current.schedule_mode === "manual_only"
+              ? slot.schedule_mode === "manual_only"
+              : slot.schedule_mode !== "manual_only" && slot.starts_at === current.starts_at && slot.ends_at === current.ends_at
+          ));
           const firstAvailable = slotResponse.slots.find((slot) => slot.available);
           return {
             ...current,
+            schedule_mode: currentStillAvailable ? current.schedule_mode : firstAvailable?.schedule_mode === "manual_only" ? "manual_only" : "scheduled",
             starts_at: currentStillAvailable ? current.starts_at : firstAvailable?.starts_at || "",
             ends_at: currentStillAvailable ? current.ends_at : firstAvailable?.ends_at || "",
           };
@@ -234,13 +268,13 @@ export default function AddProfileWizard() {
     return () => {
       ignore = true;
     };
-  }, [form.runtime_mode, isOpen, selectedDevice?.id, step]);
+  }, [form.runtime_mode, isOpen, selectedAppInstance?.app_instance_id, selectedDevice?.id, step]);
 
   function updateField(key: keyof typeof form, value: string) {
     setForm((current) => ({
       ...current,
       [key]: value,
-      ...(key === "runtime_mode" ? { starts_at: "", ends_at: "" } : {}),
+      ...(key === "runtime_mode" ? { schedule_mode: "scheduled", starts_at: "", ends_at: "" } : {}),
     }));
     if (key === "username") setVerification(null);
     if (key === "runtime_mode") setScheduleSlots(null);
@@ -251,6 +285,7 @@ export default function AddProfileWizard() {
       ...current,
       device_id: device.id,
       app_instance_id: bestDefaultAppInstance(device)?.app_instance_id || "",
+      schedule_mode: "scheduled",
       starts_at: "",
       ends_at: "",
     }));
@@ -288,6 +323,7 @@ export default function AddProfileWizard() {
     setStep(0);
     setError("");
     setSuccess("");
+    setSetupProgress(null);
     setScheduleSlots(null);
   }
 
@@ -307,9 +343,25 @@ export default function AddProfileWizard() {
     setError("");
     setSuccess("");
     setShowConfirm(false);
+    setSetupProgress({
+      status: "running",
+      message: "Creating account through shared backend...",
+      steps: [
+        { id: "verify_username", label: "Verify username", subtitle: `@${verification?.canonical_username || form.username} verified before create.`, status: "done" },
+        { id: "save_credentials", label: "Save credentials", subtitle: form.login_method === "credentials" ? "Vault-backed write-only credentials save." : "Manual login selected; credentials skipped.", status: form.login_method === "credentials" ? "running" : "skipped" },
+        { id: "create_account", label: "Create account", subtitle: "POST /api/instagram-dashboard/accounts/create", status: "running" },
+        { id: "assign_device", label: "Assign device/app instance", subtitle: `${selectedDevice.device_name} · ${selectedAppInstance.label}`, status: "pending" },
+        { id: "save_settings", label: "Save settings", subtitle: "Package, runtime mode, schedule, and metadata.", status: "pending" },
+        { id: "sync_targets", label: "Sync targets/settings", subtitle: "Admin, client, database, and dashboard projections.", status: "pending" },
+      ],
+      logs: [
+        { timestamp: progressTime(), phase: "VERIFY", message: `Verified username @${verification?.canonical_username || form.username}.` },
+        { timestamp: progressTime(), phase: "REQUEST", message: "Starting backend account create." },
+      ],
+    });
 
     try {
-      await readApiResponse(
+      const payload = await readApiResponse<Record<string, unknown>>(
         await fetch("/api/instagram-dashboard/accounts/create", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -322,11 +374,41 @@ export default function AddProfileWizard() {
         }),
         "Could not create profile.",
       );
+      const account = (payload.account ?? {}) as Record<string, unknown>;
+      const credentials = (payload.credentials ?? {}) as Record<string, unknown>;
+      const credentialStatus = projectCredentialBusinessStatus({
+        credentialsConfigured: payload.credentials_configured === true || payload.credential_save_status === "saved",
+        credentialsStatus: String(payload.credential_status || credentials.credentials_status || ""),
+        reauthRequired: credentials.reauth_required === true,
+      });
+      const credentialsConfigured = credentialStatus === "active" || credentialStatus === "saved_pending_verification";
+      setSetupProgress((current) => current ? {
+        status: "done",
+        message: "Profile created with safe setup assignment. No login, provisioning, or run was launched.",
+        steps: current.steps.map((item) => {
+          if (item.id === "save_credentials") return { ...item, status: form.login_method === "credentials" ? credentialsConfigured ? "done" : "failed" : "skipped" };
+          return { ...item, status: "done" };
+        }),
+        logs: [
+          ...current.logs,
+          { timestamp: progressTime(), phase: "PERSIST", message: `Created account ${String(account.id || payload.account_id || "created")}.` },
+          { timestamp: progressTime(), phase: "CREDENTIALS", message: form.login_method === "credentials" ? credentialsConfigured ? "Credentials saved to secure backend." : "Credentials not saved - update required." : "Credentials skipped by manual login mode." },
+          { timestamp: progressTime(), phase: "SYNC", message: "Backend returned account setup confirmation." },
+          { timestamp: progressTime(), phase: "DONE", message: `Add Profile complete for @${String(account.username || verification?.canonical_username || form.username)}.` },
+        ],
+      } : current);
       setSuccess("Profile created with safe setup assignment. No login, provisioning, or run was launched.");
       router.refresh();
-      setTimeout(closeWizard, 650);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : "Could not create profile.");
+      const message = createError instanceof Error ? createError.message : "Could not create profile.";
+      setSetupProgress((current) => current ? {
+        ...current,
+        status: "failed",
+        message,
+        steps: current.steps.map((item) => item.status === "running" || item.id === "create_account" ? { ...item, status: "failed" } : item),
+        logs: [...current.logs, { timestamp: progressTime(), phase: "ERROR", message }],
+      } : current);
+      setError(message);
     } finally {
       setIsSaving(false);
     }
@@ -519,15 +601,20 @@ export default function AddProfileWizard() {
                     <div className="ig-profile-options">
                       {(scheduleSlots?.slots ?? []).map((slot) => (
                         <button
-                          key={`${slot.starts_at}:${slot.ends_at}`}
+                          key={slot.slot_id || `${slot.starts_at}:${slot.ends_at}`}
                           type="button"
-                          className={form.starts_at === slot.starts_at && form.ends_at === slot.ends_at ? "ig-profile-option ig-profile-option-active" : "ig-profile-option"}
-                          onClick={() => setForm((current) => ({ ...current, starts_at: slot.starts_at, ends_at: slot.ends_at }))}
+                          className={selectedScheduleSlot === slot ? "ig-profile-option ig-profile-option-active" : "ig-profile-option"}
+                          onClick={() => setForm((current) => ({
+                            ...current,
+                            schedule_mode: slot.schedule_mode === "manual_only" ? "manual_only" : "scheduled",
+                            starts_at: slot.schedule_mode === "manual_only" ? "" : slot.starts_at,
+                            ends_at: slot.schedule_mode === "manual_only" ? "" : slot.ends_at,
+                          }))}
                           disabled={!slot.available}
                         >
                           <strong>{slot.local_label || `Slot ${slot.slot_index}`}</strong>
-                          <span>{slot.slot_kind_label || slot.slot_kind} · {scheduleTimezone}</span>
-                          <span>{slot.available ? "available" : slot.occupied_by ? `occupied by @${slot.occupied_by}` : slot.reason || "unavailable"}</span>
+                          <span>{slot.schedule_mode === "manual_only" ? "Manual-only · no scheduled window" : `${slot.slot_kind_label || slot.slot_kind} · ${scheduleTimezone}`}</span>
+                          <span>{slot.available ? "available" : slot.occupied_by ? `occupied by @${typeof slot.occupied_by === "string" ? slot.occupied_by : slot.occupied_by.username || "account"}` : slot.reason || "unavailable"}</span>
                         </button>
                       ))}
                     </div>
@@ -551,7 +638,7 @@ export default function AddProfileWizard() {
                     <div><dt>Add-ons</dt><dd>{selectedAddons.length ? selectedAddons.map((addon) => addon.label).join(", ") : "none"} · planned add-ons are not wired to runtime</dd></div>
                     <div><dt>Quotas preview</dt><dd>Package caps apply after assignment; no runtime quota is activated from Add Profile.</dd></div>
                     <div><dt>Entitlements preview</dt><dd>{selectedPackage.commercialCode} · subscription type follows runtime mode · no auto entitlement run</dd></div>
-                    <div><dt>Schedule</dt><dd>{selectedScheduleSlot?.local_label || "—"} · {scheduleTimezone} · visible later in Schedule drawer</dd></div>
+                    <div><dt>Schedule</dt><dd>{form.schedule_mode === "manual_only" ? "Manual-only · no scheduled window" : `${selectedScheduleSlot?.local_label || "—"} · ${scheduleTimezone}`} · visible later in Schedule drawer</dd></div>
                     <div><dt>Safety</dt><dd>No login, provisioning, runner, DM, Welcome, Outreach or Unfollow is launched.</dd></div>
                     <div><dt>No run auto</dt><dd>Provisioning, login, and runner stay off.</dd></div>
                     <div><dt>No login/provisioning auto</dt><dd>Credentials remain write-only when selected; no device login is started.</dd></div>
@@ -592,31 +679,69 @@ export default function AddProfileWizard() {
         </div>
       ) : null}
 
+      {setupProgress ? (
+        <div className="ig-profile-progress-overlay" role="presentation" onMouseDown={() => setupProgress.status !== "running" ? setSetupProgress(null) : undefined}>
+          <section className="ig-profile-progress-modal" role="dialog" aria-modal="true" aria-labelledby="ig-profile-progress-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="ig-profile-progress-header">
+              <div>
+                <span>@{verification?.canonical_username || form.username} · Instagram</span>
+                <h3 id="ig-profile-progress-title">Add Profile</h3>
+                <p>{selectedDevice?.device_name || "Selected phone"} · {selectedAppInstance?.label || "Selected app"}</p>
+              </div>
+              <em className={`status-${setupProgress.status}`}>{setupProgressLabel(setupProgress.status)}</em>
+            </header>
+            <section className="ig-profile-progress-card">
+              <h4>Progress</h4>
+              <div className="ig-profile-progress-steps">
+                {setupProgress.steps.map((item) => (
+                  <div key={item.id} className={`ig-profile-progress-step status-${item.status}`}>
+                    <span aria-hidden="true">{item.status === "done" ? "✓" : item.status === "failed" ? "!" : item.status === "running" ? "…" : "•"}</span>
+                    <div>
+                      <strong>{item.label}</strong>
+                      <small>{item.subtitle}</small>
+                    </div>
+                    <em>{setupProgressLabel(item.status)}</em>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="ig-profile-progress-log">
+              <div>
+                <h4>Process log</h4>
+                <button type="button" onClick={() => void navigator.clipboard?.writeText(copyableSetupLog(setupProgress))}>Copy log</button>
+              </div>
+              <pre>{copyableSetupLog(setupProgress)}</pre>
+            </section>
+            {setupProgress.message ? <p className="ig-profile-progress-message">{setupProgress.message}</p> : null}
+            <div className="ig-profile-actions">
+              {setupProgress.status === "done" ? <button type="button" className="ig-profile-primary" onClick={closeWizard}>Close</button> : null}
+              {setupProgress.status === "failed" ? <button type="button" className="ig-profile-secondary" onClick={() => setSetupProgress(null)}>Back to form</button> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <style>{`
         .ig-add-profile-button,
         .ig-profile-primary,
         .ig-profile-secondary {
-          min-height: 34px;
+          min-height: 38px;
           border-radius: 999px;
-          font-size: 12.5px;
-          font-weight: 700;
+          font-size: 13px;
+          font-weight: 900;
           cursor: pointer;
-          transition: opacity .13s ease, border-color .13s ease, color .13s ease, background .13s ease;
         }
 
-        /* ── Trigger button in the tab toolbar ── */
         .ig-add-profile-button {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          border: 1px solid rgba(101,88,245,0.40);
-          background: #6558f5;
-          color: #fff;
-          padding: 0 13px;
+          border: 1px solid rgba(245,158,11,0.48);
+          background: #F59E0B;
+          color: #160b02;
+          padding: 0 14px;
         }
-        .ig-add-profile-button:hover { opacity: .88; }
 
-        /* ── Overlay ── */
         .ig-profile-overlay {
           position: fixed;
           inset: 0;
@@ -624,21 +749,20 @@ export default function AddProfileWizard() {
           display: grid;
           place-items: center;
           padding: 18px;
-          background: rgba(0,0,0,0.75);
-          backdrop-filter: blur(4px);
+          background: rgba(2,6,23,0.72);
+          backdrop-filter: blur(12px);
         }
 
-        /* ── Modal / Confirm card ── */
         .ig-profile-modal,
         .ig-profile-confirm {
           width: min(100%, 760px);
           max-height: min(90vh, 760px);
           overflow-y: auto;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #161820;
-          color: #f0f0ee;
-          box-shadow: 0 8px 32px -8px rgba(0,0,0,.6);
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 16px;
+          background: #07111f;
+          color: #f0f0ef;
+          box-shadow: 0 24px 90px rgba(0,0,0,0.46);
           padding: 22px;
         }
 
@@ -646,262 +770,294 @@ export default function AddProfileWizard() {
           width: min(100%, 440px);
         }
 
-        /* ── Header ── */
         .ig-profile-header {
           display: flex;
           justify-content: space-between;
           gap: 16px;
           margin-bottom: 18px;
-          padding-bottom: 16px;
-          border-bottom: 1px solid rgba(255,255,255,.07);
         }
 
         .ig-profile-header span,
         .ig-profile-field span,
         .ig-profile-review dt {
           display: block;
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.42);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .1em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
         }
 
         .ig-profile-header h2,
         .ig-profile-confirm h3 {
-          color: #f0f0ee;
-          font-size: 17px;
-          font-weight: 700;
-          letter-spacing: -.01em;
-          margin: 4px 0 0;
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          margin: 6px 0 0;
         }
 
         .ig-profile-header button {
-          width: 28px;
-          height: 28px;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 6px;
-          background: #1e2028;
-          color: #8a8f98;
+          width: 36px;
+          height: 36px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 10px;
+          background: rgba(255,255,255,0.05);
+          color: rgba(255,255,255,0.72);
           cursor: pointer;
-          font-size: 16px;
-          display: grid;
-          place-items: center;
-          transition: border-color .13s ease, color .13s ease, background .13s ease;
-        }
-        .ig-profile-header button:hover {
-          border-color: rgba(248,113,113,0.28);
-          color: #f87171;
-          background: rgba(220,38,38,0.13);
+          font-size: 22px;
         }
 
-        /* ── Step progress bar ── */
         .ig-profile-steps {
           display: grid;
           grid-template-columns: repeat(6, minmax(0, 1fr));
-          gap: 6px;
+          gap: 8px;
           margin-bottom: 18px;
         }
 
         .ig-profile-steps span {
-          min-height: 28px;
-          border: 1px solid rgba(255,255,255,.07);
+          min-height: 30px;
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 999px;
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.48);
           display: grid;
           place-items: center;
           font-size: 11px;
-          font-weight: 600;
+          font-weight: 900;
         }
 
         .ig-profile-steps .ig-profile-step-active {
-          border-color: rgba(101,88,245,0.35);
-          background: rgba(101,88,245,0.18);
-          color: #a594f9;
+          border-color: rgba(245,158,11,0.42);
+          background: rgba(245,158,11,0.14);
+          color: #FBBF24;
         }
 
-        /* ── Package step ── */
         .ig-profile-package-step {
           display: grid;
-          gap: 16px;
+          gap: 18px;
         }
 
         .ig-profile-section h3 {
           margin: 0 0 10px;
-          font-size: 11px;
-          letter-spacing: .1em;
+          font-size: 13px;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
-          color: #4a4f5c;
-          font-family: 'JetBrains Mono', monospace;
-          font-weight: 500;
+          color: rgba(255,255,255,0.58);
         }
 
-        /* ── Grids ── */
         .ig-profile-grid,
         .ig-profile-options,
         .ig-profile-review {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
+          gap: 12px;
         }
 
-        /* ── Option cards + form inputs ── */
         .ig-profile-option,
         .ig-profile-field input,
         .ig-profile-field select,
         .ig-profile-field textarea {
           width: 100%;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #1e2028;
-          color: #f0f0ee;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.045);
+          color: #f0f0ef;
           font: inherit;
           outline: none;
-          padding: 11px 12px;
-          transition: border-color .13s ease;
+          padding: 12px;
         }
-        .ig-profile-field input:focus,
-        .ig-profile-field select:focus,
-        .ig-profile-field textarea:focus { border-color: rgba(101,88,245,.35); }
 
         .ig-profile-option {
-          min-height: 70px;
+          min-height: 74px;
           cursor: pointer;
           text-align: left;
         }
-        .ig-profile-option:hover:not(:disabled) { border-color: rgba(255,255,255,.14); }
 
         .ig-profile-option strong,
         .ig-profile-review dd {
-          color: #f0f0ee;
+          color: #f0f0ef;
           margin: 0;
-          font-weight: 600;
         }
 
         .ig-profile-option span {
           display: block;
-          color: #8a8f98;
-          font-size: 11.5px;
-          margin-top: 4px;
+          color: rgba(255,255,255,0.52);
+          font-size: 12px;
+          margin-top: 5px;
         }
 
         .ig-profile-option-active {
-          border-color: rgba(101,88,245,0.35);
-          background: rgba(101,88,245,0.14);
+          border-color: rgba(245,158,11,0.46);
+          background: rgba(245,158,11,0.13);
         }
 
-        /* ── Field layout ── */
-        .ig-profile-field { display: grid; gap: 8px; }
-        .ig-profile-input-wrap { position: relative; }
-        .ig-profile-field-wide { grid-column: 1 / -1; }
+        .ig-profile-field {
+          display: grid;
+          gap: 8px;
+        }
 
-        /* ── Review step ── */
-        .ig-profile-review { margin: 0; }
+        .ig-profile-input-wrap {
+          position: relative;
+        }
+
+        .ig-profile-field-wide {
+          grid-column: 1 / -1;
+        }
+
+        .ig-profile-review {
+          margin: 0;
+        }
 
         .ig-profile-review div {
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #1e2028;
-          padding: 11px 12px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.035);
+          padding: 12px;
         }
 
         .ig-profile-review dd {
-          margin-top: 5px;
+          margin-top: 6px;
           overflow-wrap: anywhere;
-          color: #f0f0ee;
         }
 
-        /* ── Footer actions ── */
+        .ig-profile-progress-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 205;
+          display: grid;
+          place-items: center;
+          padding: 24px;
+          background: rgba(2, 6, 23, 0.74);
+          backdrop-filter: blur(12px);
+        }
+
+        .ig-profile-progress-modal {
+          width: min(760px, 96vw);
+          max-height: 92vh;
+          overflow: auto;
+          display: grid;
+          gap: 18px;
+          border: 1px solid rgba(71, 85, 105, 0.75);
+          border-radius: 18px;
+          background: #0B1020;
+          color: #E5E7EB;
+          box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+          padding: 22px;
+        }
+
+        .ig-profile-progress-header,
+        .ig-profile-progress-log > div {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .ig-profile-progress-header span { color: #64748B; font-size: 12px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+        .ig-profile-progress-header h3, .ig-profile-progress-card h4, .ig-profile-progress-log h4 { margin: 0; }
+        .ig-profile-progress-header h3 { margin-top: 4px; font-size: 22px; }
+        .ig-profile-progress-header p { margin: 4px 0 0; color: #94A3B8; font-size: 13px; }
+        .ig-profile-progress-header em { border: 1px solid rgba(148, 163, 184, .4); border-radius: 999px; padding: 7px 12px; color: #CBD5E1; font-style: normal; font-weight: 900; white-space: nowrap; }
+        .ig-profile-progress-header em.status-done { border-color: rgba(34,197,94,.45); background: rgba(34,197,94,.12); color: #86EFAC; }
+        .ig-profile-progress-header em.status-running { border-color: rgba(96,165,250,.5); background: rgba(37,99,235,.18); color: #BFDBFE; }
+        .ig-profile-progress-header em.status-failed { border-color: rgba(248,113,113,.45); background: rgba(127,29,29,.28); color: #FCA5A5; }
+        .ig-profile-progress-card { border: 1px solid #2D374A; border-radius: 14px; padding: 18px; }
+        .ig-profile-progress-steps { display: grid; gap: 14px; margin-top: 16px; }
+        .ig-profile-progress-step { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+        .ig-profile-progress-step > span { width: 20px; height: 20px; display: grid; place-items: center; margin-top: 2px; border: 2px solid #64748B; border-radius: 999px; color: #94A3B8; font-size: 12px; }
+        .ig-profile-progress-step.status-done > span { border-color: #22C55E; color: #22C55E; }
+        .ig-profile-progress-step.status-running > span { border-color: #60A5FA; color: #BFDBFE; }
+        .ig-profile-progress-step.status-failed > span { border-color: #F87171; color: #FCA5A5; }
+        .ig-profile-progress-step strong { display: block; font-size: 17px; }
+        .ig-profile-progress-step small { display: block; margin-top: 4px; color: #778299; overflow-wrap: anywhere; }
+        .ig-profile-progress-step em { color: #94A3B8; font-style: normal; white-space: nowrap; }
+        .ig-profile-progress-log { display: grid; gap: 10px; }
+        .ig-profile-progress-log button { border: 1px solid rgba(148, 163, 184, .35); border-radius: 10px; background: rgba(15, 23, 42, .78); color: #E5E7EB; padding: 8px 12px; font-weight: 900; cursor: pointer; }
+        .ig-profile-progress-log pre { min-height: 150px; max-height: 260px; overflow: auto; margin: 0; border: 1px solid #2D374A; border-radius: 12px; background: #080F1D; color: #F8FAFC; padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .ig-profile-progress-message { margin: 0; border: 1px solid rgba(148, 163, 184, .28); border-radius: 12px; background: rgba(15, 23, 42, .6); color: #CBD5E1; padding: 10px 12px; font-size: 13px; }
+
         .ig-profile-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
-          margin-top: 16px;
+          gap: 10px;
+          margin-top: 18px;
         }
 
         .ig-profile-primary {
-          border: 1px solid rgba(101,88,245,0.40);
-          background: #6558f5;
-          color: #fff;
+          border: 1px solid rgba(245,158,11,0.50);
+          background: #F59E0B;
+          color: #160b02;
           padding: 0 16px;
         }
-        .ig-profile-primary:hover:not(:disabled) { opacity: .88; }
 
         .ig-profile-secondary {
-          border: 1px solid rgba(255,255,255,.07);
-          background: #1e2028;
-          color: #8a8f98;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.045);
+          color: rgba(255,255,255,0.76);
           padding: 0 16px;
-        }
-        .ig-profile-secondary:hover:not(:disabled) {
-          border-color: rgba(255,255,255,.18);
-          color: #f0f0ee;
         }
 
         .ig-profile-primary:disabled,
         .ig-profile-secondary:disabled,
         .ig-profile-option:disabled {
           cursor: not-allowed;
-          opacity: 0.45;
+          opacity: 0.58;
         }
 
-        /* ── Warning badge (kept amber — semantic) ── */
         .ig-profile-warning {
           display: block;
-          color: #fbbf24;
+          color: #FBBF24;
           font-size: 11px;
           font-style: normal;
-          font-weight: 700;
+          font-weight: 900;
           margin-top: 6px;
         }
 
-        /* ── Note + verification card ── */
         .ig-profile-note,
         .ig-profile-verification {
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #1e2028;
-          color: #8a8f98;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.035);
+          color: rgba(255,255,255,0.72);
           padding: 12px;
         }
 
-        .ig-profile-note { display: grid; gap: 6px; }
+        .ig-profile-note {
+          display: grid;
+          gap: 6px;
+        }
 
         .ig-profile-field small {
-          color: #8a8f98;
+          color: rgba(255,255,255,0.52);
           font-size: 12px;
           line-height: 1.4;
         }
 
-        /* ── Inline "Verify" action button ── */
         .ig-profile-inline-action {
           position: absolute;
           right: 8px;
           top: 50%;
           transform: translateY(-50%);
-          border: 1px solid rgba(101,88,245,0.35);
+          border: 1px solid rgba(245,158,11,0.42);
           border-radius: 999px;
-          background: rgba(101,88,245,0.14);
-          color: #a594f9;
+          background: rgba(245,158,11,0.14);
+          color: #FBBF24;
           cursor: pointer;
           font-size: 11px;
-          font-weight: 700;
-          padding: 4px 9px;
-          transition: background .13s ease;
+          font-weight: 900;
+          padding: 5px 9px;
         }
-        .ig-profile-inline-action:hover:not(:disabled) { background: rgba(101,88,245,0.24); }
 
-        /* ── Verification preview ── */
-        .ig-profile-verification { display: flex; align-items: center; gap: 10px; }
+        .ig-profile-verification {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
 
         .ig-profile-avatar-preview,
         .ig-profile-avatar-placeholder {
-          width: 40px;
-          height: 40px;
+          width: 42px;
+          height: 42px;
           border-radius: 999px;
           object-fit: cover;
-          flex-shrink: 0;
         }
 
         .ig-profile-avatar-preview {
@@ -913,37 +1069,36 @@ export default function AddProfileWizard() {
         .ig-profile-avatar-placeholder {
           display: grid;
           place-items: center;
-          background: #252832;
-          color: #8a8f98;
+          background: rgba(255,255,255,0.08);
+          color: rgba(255,255,255,0.48);
           font-size: 9px;
           text-align: center;
         }
 
-        /* ── Messages ── */
         .ig-profile-message,
         .ig-profile-loading {
-          border-radius: 8px;
+          border-radius: 12px;
           font-size: 13px;
-          font-weight: 600;
+          font-weight: 800;
           margin: 0 0 14px;
-          padding: 10px 12px;
+          padding: 11px 12px;
         }
 
         .ig-profile-error {
           border: 1px solid rgba(248,113,113,0.28);
           background: rgba(248,113,113,0.08);
-          color: #fca5a5;
+          color: #FCA5A5;
         }
 
         .ig-profile-success {
           border: 1px solid rgba(52,211,153,0.24);
           background: rgba(52,211,153,0.08);
-          color: #86efac;
+          color: #86EFAC;
         }
 
         .ig-profile-loading,
         .ig-profile-confirm p {
-          color: #8a8f98;
+          color: rgba(255,255,255,0.62);
         }
 
         @media (max-width: 720px) {

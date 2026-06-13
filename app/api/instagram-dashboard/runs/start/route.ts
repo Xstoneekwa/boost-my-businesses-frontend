@@ -3,6 +3,7 @@ import {
   evaluateRunStartEligibility,
   getActiveRunRequest,
   insertManualRunAudit,
+  normalizeRunStartTrigger,
   runStartBlockMessage,
   sanitizeRunControlReason,
 } from "@/lib/instagram-dashboard/run-control";
@@ -16,12 +17,25 @@ import {
   requireInstagramAdmin,
   validateAccountId,
 } from "../../_utils";
+import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
+
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
+  if (!relayAuth.ok) {
+    return jsonError("Run start relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+  }
+  return requireInstagramAdmin();
+}
 
 type StartBody = {
   account_id?: unknown;
   requested_run_type?: unknown;
+  trigger?: unknown;
+  manual_start?: unknown;
+  manual_cap_override?: unknown;
   idempotency_key?: unknown;
 };
 
@@ -57,7 +71,7 @@ export function runStartSuccessPayload({
 
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = await readJsonBody<StartBody>(request);
@@ -66,8 +80,12 @@ export async function POST(request: Request) {
     if (accountIdError) return accountIdError;
 
     const requestedRunType = readString(body?.requested_run_type, DEFAULT_ALLOWED_RUN_TYPES[0]).toLowerCase();
+    const trigger = body?.manual_start === true ? "manual" : normalizeRunStartTrigger(body?.trigger);
     const idempotencyKey = readString(body?.idempotency_key, "").slice(0, 200) || null;
-    const eligibility = await evaluateRunStartEligibility(accountId, requestedRunType);
+    const eligibility = await evaluateRunStartEligibility(accountId, requestedRunType, {
+      trigger,
+      manualStart: body?.manual_start === true,
+    });
 
     if (!eligibility.ok) {
       if (eligibility.reason === "already_requested") {
@@ -90,7 +108,7 @@ export async function POST(request: Request) {
         "manual_run_blocked",
         "blocked",
         runStartBlockMessage(eligibility.reason),
-        { reason: eligibility.reason, requested_run_type: requestedRunType },
+        { reason: eligibility.reason, requested_run_type: requestedRunType, trigger },
       ).catch(() => undefined);
 
       const status =
@@ -118,6 +136,8 @@ export async function POST(request: Request) {
       p_metadata_safe: {
         requested_from: "instagram_dashboard",
         requested_run_type: eligibility.normalizedRunType,
+        trigger,
+        manual_start: trigger === "manual",
         follow_filters: "followFiltersSummary" in eligibility ? eligibility.followFiltersSummary : undefined,
       },
     });
@@ -149,6 +169,7 @@ export async function POST(request: Request) {
         request_id: requestId,
         requested_run_type: eligibility.normalizedRunType,
         request_status: requestStatus,
+        trigger,
       },
     ).catch(() => undefined);
 

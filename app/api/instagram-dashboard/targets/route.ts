@@ -38,7 +38,7 @@ import {
   requireInstagramAdmin,
   type SupabaseRecord,
 } from "../_utils";
-import { verifyCompassRelayKey } from "../compass/relay-auth";
+import { relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 const defaultInlineBulkVerificationLimit = 5;
@@ -46,8 +46,8 @@ const defaultInlineBulkVerificationLimit = 5;
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
-  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
-    return jsonError("Targets relay authentication failed.", 403, { reason: relayAuth.reason });
+  if (!relayAuth.ok) {
+    return jsonError("Targets relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
   }
   return requireInstagramAdmin();
 }

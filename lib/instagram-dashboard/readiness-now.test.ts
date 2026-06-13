@@ -106,18 +106,76 @@ test("readiness now returns needs_credentials when credentials are missing", asy
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
-test("readiness now returns needs_credentials when active credentials require reauth", async () => {
+test("readiness now dry-run returns ready_to_connect when active credentials await login verification", async () => {
+  const supabase = makeSupabase(baseRows({
+    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
+    account_assignments: [{
+      ...baseRows().account_assignments[0],
+      starts_at: "2026-06-09T07:00:00.000Z",
+      ends_at: "2026-06-09T07:20:00.000Z",
+      schedule_mode: "manual_only",
+    }],
+    account_dashboard_actions: [{
+      account_id: accountId,
+      status: "pending_verification",
+      blocking_campaign: true,
+      action_type: "submit_instagram_credentials",
+    }],
+  }));
+
+  const result = await runReadinessNow(supabase.client, {
+    accountId,
+    now: new Date("2026-06-09T08:01:00.000Z"),
+    dryRun: true,
+  });
+
+  assert.equal(result.readiness_status, "ready_to_connect");
+  assert.equal(result.client_status, "ready_to_connect");
+  assert.equal(result.reason, "credentials_saved_pending_verification");
+  assert.equal(result.preflight_request_created, false);
+  assert.equal(result.checks?.credentials_pending_verification, true);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("readiness now dry-run is not blocked by missing CT targets during login verification", async () => {
+  const supabase = makeSupabase(baseRows({
+    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
+    ig_targets: [],
+    account_assignments: [{
+      ...baseRows().account_assignments[0],
+      schedule_mode: "manual_only",
+      starts_at: null,
+      ends_at: null,
+    }],
+  }));
+
+  const result = await runReadinessNow(supabase.client, {
+    accountId,
+    now: new Date("2026-06-09T08:01:00.000Z"),
+    dryRun: true,
+  });
+
+  assert.equal(result.readiness_status, "ready_to_connect");
+  assert.equal(result.client_status, "ready_to_connect");
+  assert.equal(result.reason, "credentials_saved_pending_verification");
+});
+
+test("readiness now creates login preflight when credentials await verification and dry-run is false", async () => {
   const supabase = makeSupabase(baseRows({
     account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
   }));
 
-  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+  const result = await runReadinessNow(supabase.client, {
+    accountId,
+    now: new Date("2026-06-09T08:01:00.000Z"),
+    dryRun: false,
+  });
 
-  assert.equal(result.readiness_status, "needs_credentials");
-  assert.equal(result.client_status, "update_password");
-  assert.equal(result.reason, "credentials_reauth_required");
-  assert.equal(result.preflight_request_created, false);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(result.readiness_status, "checking_connection");
+  assert.equal(result.client_status, "checking_connection");
+  assert.equal(result.preflight_request_created, true);
+  assert.equal(supabase.rpcCalls.length, 1);
+  assert.equal(supabase.rpcCalls[0].args.p_requested_run_type, "login_provisioning");
 });
 
 test("readiness now returns action required for 2FA", async () => {

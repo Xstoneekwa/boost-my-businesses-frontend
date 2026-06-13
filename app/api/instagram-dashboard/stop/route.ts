@@ -7,14 +7,24 @@ import {
   sanitizeRunControlReason,
 } from "@/lib/instagram-dashboard/run-control";
 import { getAccountId, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../_utils";
+import { relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
 const ACTIVE_STATUSES = [...ACTIVE_IG_RUN_STATUSES];
 
+async function requireRelayOrAdmin(request: Request) {
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
+  if (!relayAuth.ok) {
+    return jsonError("Run stop relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+  }
+  return requireInstagramAdmin();
+}
+
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = await readJsonBody<{ account_id?: unknown }>(request);

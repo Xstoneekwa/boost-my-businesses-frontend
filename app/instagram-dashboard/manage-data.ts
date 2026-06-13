@@ -3,6 +3,7 @@ import {
   buildAdminReadinessProjection,
   type AdminReadinessProjection,
 } from "@/lib/instagram-dashboard/readiness-projection";
+import { projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
 import { getAccountPackageSummaries } from "./package-summary-data";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -22,6 +23,7 @@ export type ManageAccount = {
   username: string;
   emailDisplay: string;
   adminStatus: string;
+  accountLifecycleStatus: string;
   customerStatus: string;
   subscriptionStatus: string;
   packageLabel: string;
@@ -51,6 +53,7 @@ export type ManageAccount = {
   assignmentStatus?: string | null;
   appInstanceId?: string | null;
   appInstanceLabel?: string | null;
+  appInstanceIndex?: number | null;
   appPackageName?: string | null;
   assignmentStartsAt?: string | null;
   assignmentEndsAt?: string | null;
@@ -362,9 +365,9 @@ function isCredentialIssue(account: ManageAccount) {
 }
 
 function lifecycleStatus(account: ManageAccount) {
-  const status = normalize(account.adminStatus);
-  if (status === "archived" || account.archivedAt) return "archived";
-  if (status === "trashed" || status === "trash" || account.trashedAt) return "trashed";
+  const accountStatus = normalize(account.accountLifecycleStatus || "");
+  if (accountStatus === "archived" || account.archivedAt) return "archived";
+  if (accountStatus === "trashed" || accountStatus === "trash" || account.trashedAt) return "trashed";
   return "active";
 }
 
@@ -432,6 +435,47 @@ async function enrichWithPublicProfileMetadata(overview: ManageOverview): Promis
   }
 }
 
+async function enrichWithIgAccountLifecycle(overview: ManageOverview): Promise<ManageOverview> {
+  const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return overview;
+
+  try {
+    const supabase = createSupabaseClient();
+    const { data, error } = await supabase
+      .from("ig_accounts")
+      .select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at")
+      .in("id", accountIds);
+    if (error) {
+      return { ...overview, errors: ["Instagram account lifecycle projection unavailable.", ...overview.errors] };
+    }
+
+    const byId = new Map<string, SupabaseRecord>();
+    for (const row of (data ?? []) as SupabaseRecord[]) {
+      const id = readString(row, ["id"], "");
+      if (id) byId.set(id, row);
+    }
+
+    const enrich = (account: ManageAccount): ManageAccount => {
+      const row = byId.get(account.accountId);
+      if (!row) return account;
+      const adminLifecycle = readString(row, ["admin_lifecycle_status"], "");
+      return {
+        ...account,
+        adminStatus: adminLifecycle || account.adminStatus,
+        accountLifecycleStatus: readString(row, ["status"], account.accountLifecycleStatus || "active"),
+        archivedAt: readIso(row, ["archived_at"]) ?? account.archivedAt,
+        trashedAt: readIso(row, ["trashed_at"]) ?? account.trashedAt,
+        scheduledTrashAt: readIso(row, ["scheduled_trash_at"]) ?? account.scheduledTrashAt,
+        scheduledDeleteAt: readIso(row, ["scheduled_delete_at"]) ?? account.scheduledDeleteAt,
+      };
+    };
+
+    return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
+  } catch {
+    return { ...overview, errors: ["Instagram account lifecycle projection unavailable.", ...overview.errors] };
+  }
+}
+
 async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview): Promise<ManageOverview> {
   const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
   if (!accountIds.length) return overview;
@@ -441,7 +485,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     const [credentialsResult, assignmentsResult, clientAccountsResult] = await Promise.all([
       supabase
         .from("account_credentials")
-        .select("account_id,status,created_at")
+        .select("account_id,status,reauth_required,secret_ref,created_at")
         .in("account_id", accountIds)
         .order("created_at", { ascending: false })
         .limit(1000),
@@ -508,8 +552,17 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
       const appInstance = appInstanceById.get(readString(assignment, ["app_instance_id"], ""));
       const phoneLabel = readString(device, ["name", "device_name"], account.phoneName);
       const appLabel = readString(appInstance, ["visible_label"], "");
+      const appInstanceIndex = readNullableNumber(appInstance, ["instance_index"]);
       const packageName = readString(appInstance, ["package_name"], "");
-      const credentialsStatus = readString(credential, ["status"], account.credentialsStatus);
+      const rawCredentialsStatus = readString(credential, ["status"], account.credentialsStatus);
+      const reauthRequired = credential ? readNullableBoolean(credential, ["reauth_required"]) ?? account.reauthRequired : account.reauthRequired;
+      const secretRefPresent = credential ? Boolean(readString(credential, ["secret_ref"], "")) : null;
+      const credentialsStatus = projectCredentialBusinessStatus({
+        credentialsConfigured: credential ? rawCredentialsStatus === "active" && secretRefPresent !== false : account.credentialsConfigured,
+        credentialsStatus: rawCredentialsStatus,
+        reauthRequired,
+        secretRefPresent,
+      });
       const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
       const assignedDeviceId = readString(assignment, ["device_id"], "");
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
@@ -529,15 +582,16 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
 
       return {
         ...account,
-        credentialsConfigured: credentialsStatus === "active" ? true : account.credentialsConfigured,
-        credentialsStatus: credentialsStatus === "active" ? "active" : account.credentialsStatus,
-        reauthRequired: credential ? readNullableBoolean(credential, ["reauth_required"]) ?? account.reauthRequired : account.reauthRequired,
-        loginStatus: loginStatus === "unknown" && credentialsStatus === "active" ? "pending_login" : loginStatus,
+        credentialsConfigured: credentialsStatus === "active" || credentialsStatus === "saved_pending_verification" ? true : account.credentialsConfigured,
+        credentialsStatus,
+        reauthRequired,
+        loginStatus: loginStatus === "unknown" && (credentialsStatus === "active" || credentialsStatus === "saved_pending_verification") ? "pending_login" : loginStatus,
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
         phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
         deviceId: assignedDeviceId || account.deviceId || null,
         appInstanceId: assignedAppInstanceId || account.appInstanceId || null,
+        appInstanceIndex: appInstanceIndex ?? account.appInstanceIndex ?? null,
         assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
         assignmentStartsAt,
         assignmentEndsAt,
@@ -569,7 +623,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
     const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult] = await Promise.all([
       supabase
         .from("account_dashboard_actions")
-        .select("account_id,status,blocking_campaign")
+        .select("account_id,action_type,status,blocking_campaign")
         .in("account_id", accountIds)
         .in("status", ["pending", "acknowledged", "pending_verification"])
         .limit(1000),
@@ -596,7 +650,9 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       if (!accountId) continue;
       const current = actionCountsByAccount.get(accountId) ?? { total: 0, blocking: 0 };
       current.total += 1;
-      if (readBoolean(row, ["blocking_campaign"], false)) current.blocking += 1;
+      const actionType = readString(row, ["action_type"], "").toLowerCase();
+      const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
+      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction) current.blocking += 1;
       actionCountsByAccount.set(accountId, current);
     }
 
@@ -725,7 +781,8 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
   const accountSettings = settings.find((setting) => keyForAccount(setting) === accountId);
   const target = targets.find((item) => keyForAccount(item) === accountId);
   const latestRun = latestRunForAccount(runs, accountId);
-  const adminStatus = readString(account, ["admin_lifecycle_status", "status", "state"], "active");
+  const adminStatus = readString(account, ["admin_lifecycle_status"], "active");
+  const accountLifecycleStatus = readString(account, ["status", "state"], "active");
   const loginStatus = readString(account, ["login_status"], readString(accountSettings, ["login_status"], "unknown"));
   const credentialsStatus = readString(account, ["credentials_status", "credential_status"], readString(accountSettings, ["credentials_status", "credential_status"], "unknown"));
   const latestRunStatus = readString(latestRun, ["status", "run_status", "state"], "unknown");
@@ -739,6 +796,7 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
     username: readString(account, ["username", "ig_username", "handle"], "Unknown"),
     emailDisplay: safeEmailDisplay(account),
     adminStatus,
+    accountLifecycleStatus,
     customerStatus: "unknown",
     subscriptionStatus: "unknown",
     packageLabel: packagePending,
@@ -780,8 +838,12 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
 function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
   const passwordDisplay = safeDisplayStatus(readString(row, ["password_display"], ""));
   const twoFactorDisplay = safeDisplayStatus(readString(row, ["two_factor_display"], ""));
-  const credentialsStatus = safeDisplayStatus(readString(row, ["credentials_status"], ""));
   const reauthRequired = readBoolean(row, ["reauth_required"], false);
+  const credentialsStatus = projectCredentialBusinessStatus({
+    credentialsConfigured: readNullableBoolean(row, ["credentials_configured"]),
+    credentialsStatus: safeDisplayStatus(readString(row, ["credentials_status"], "")),
+    reauthRequired,
+  });
 
   return {
     accountId: readString(row, ["account_id", "id"], ""),
@@ -790,6 +852,7 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     username: readString(row, ["username", "ig_username", "handle"], "Unknown"),
     emailDisplay: safeEmailDisplay(row),
     adminStatus: readString(row, ["admin_lifecycle_status", "admin_status"], "unknown"),
+    accountLifecycleStatus: readString(row, ["status", "account_lifecycle_status", "lifecycle_status"], "active"),
     customerStatus: readString(row, ["customer_status"], "unknown"),
     subscriptionStatus: readString(row, ["subscription_status"], "unknown"),
     packageLabel: packagePending,
@@ -815,6 +878,7 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     lastSafeUpdate: readIso(row, ["last_safe_update"]),
     phoneName: readString(row, ["phone_name", "device_name"], unknownPhone),
     macHostName: readString(row, ["mac_host_name", "host_name", "mac_host"], localMac),
+    appInstanceIndex: readNullableNumber(row, ["app_instance_index"]),
     profileImageUrl: safeProfileImageUrlFromRow(row),
     profileImageSource: safeProfileImageUrlFromRow(row) ? "admin-dashboard" : "pending",
     instagramVerificationStatus: readOptionalString(row, ["username_verification_status", "instagram_verification_status", "verification_status"]) ?? "pending",
@@ -1031,7 +1095,7 @@ export async function getManageData() {
   if (!adminDashboardConfig()) {
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview))));
+    return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
   }
 
   try {
@@ -1043,5 +1107,5 @@ export async function getManageData() {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(overview))));
+  return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
 }

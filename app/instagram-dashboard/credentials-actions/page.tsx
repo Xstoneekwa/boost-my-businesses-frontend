@@ -4,6 +4,7 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import EmailVerificationActionBanner from "../EmailVerificationActionBanner";
+import InstagramDashboardViewNav from "../InstagramDashboardViewNav";
 import VerificationCodeActionModal from "../VerificationCodeActionModal";
 import {
   getCredentialsActionsData,
@@ -44,6 +45,7 @@ export default async function InstagramCredentialsActionsPage() {
         eyebrow="Credentials"
         title="Credentials / Dashboard Actions"
         description="Safe credential status and pending account actions."
+        action={<InstagramDashboardViewNav active="credentials" badges={{ radar: radarData.notificationSummary.radarBadgeCount, "server-check": radarData.notificationSummary.serverCheckBadgeCount }} notificationItems={{ radar: radarData.notificationItems.radar, "server-check": radarData.notificationItems.serverCheck }} />}
       />
 
       <EmailVerificationActionBanner initialActions={emailVerificationBannerActions} />
@@ -119,7 +121,7 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-page {
           max-width: 1440px;
           margin: 0 auto;
-          padding: 22px 22px 48px;
+          padding: 28px clamp(16px, 3vw, 36px) 48px;
         }
 
         .ig-credentials-alert {
@@ -130,14 +132,14 @@ export default async function InstagramCredentialsActionsPage() {
           margin-bottom: 18px;
           padding: 12px 14px;
           border: 1px solid rgba(248,113,113,0.28);
-          border-radius: 8px;
+          border-radius: 14px;
           background: rgba(248,113,113,0.08);
-          color: #8a8f98;
+          color: rgba(255,255,255,0.74);
           font-size: 13px;
         }
 
         .ig-credentials-alert strong {
-          color: #fca5a5;
+          color: #FCA5A5;
         }
 
         .ig-credentials-source-strip,
@@ -161,9 +163,9 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-empty,
         .ig-credentials-action,
         .ig-credentials-signal {
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #161820;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(255,255,255,0.028);
         }
 
         .ig-credentials-source-pill,
@@ -185,7 +187,7 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-empty span,
         .ig-credentials-action span,
         .ig-credentials-action-meta span {
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.36);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.08em;
@@ -195,7 +197,7 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-source-pill strong,
         .ig-credentials-empty strong,
         .ig-credentials-action strong {
-          color: #f0f0ee;
+          color: #f0f0ef;
           font-size: 15px;
         }
 
@@ -205,15 +207,15 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-empty p,
         .ig-credentials-action p,
         .ig-credentials-action-meta strong {
-          color: #8a8f98;
+          color: rgba(255,255,255,0.60);
           font-size: 12px;
           line-height: 1.5;
         }
 
         .ig-credentials-kpi strong {
           display: block;
-          color: #f0f0ee;
-          
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
           font-size: 1.65rem;
           line-height: 1;
           margin: 16px 0 10px;
@@ -233,14 +235,14 @@ export default async function InstagramCredentialsActionsPage() {
           align-items: center;
           justify-content: space-between;
           gap: 16px;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: rgba(255,255,255,.025);
+          border: 1px solid rgba(251,191,36,0.24);
+          border-radius: 16px;
+          background: rgba(251,191,36,0.08);
           padding: 14px;
         }
 
         .ig-email-code-action span {
-          color: #a594f9;
+          color: #FBBF24;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           letter-spacing: 0.08em;
@@ -249,7 +251,7 @@ export default async function InstagramCredentialsActionsPage() {
 
         .ig-email-code-action strong {
           display: block;
-          color: #f0f0ee;
+          color: #f0f0ef;
           font-size: 16px;
           margin-top: 4px;
         }
@@ -269,14 +271,14 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-table th,
         .ig-credentials-table td {
           padding: 12px 10px;
-          border-bottom: 1px solid rgba(255,255,255,.04);
+          border-bottom: 1px solid rgba(255,255,255,0.06);
           text-align: left;
           vertical-align: top;
         }
 
         .ig-credentials-account-link,
         .ig-credentials-link {
-          color: #f0f0ee;
+          color: #f0f0ef;
           font-weight: 900;
           text-decoration: none;
         }
@@ -285,7 +287,7 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-account-link:focus-visible,
         .ig-credentials-link:hover,
         .ig-credentials-link:focus-visible {
-          color: #a594f9;
+          color: #FBBF24;
           outline: none;
         }
 
@@ -333,9 +335,9 @@ export default async function InstagramCredentialsActionsPage() {
         }
 
         .ig-credentials-action-badge {
-          border: 1px solid rgba(255,255,255,.07);
-          background: #1e2028;
-          color: #8a8f98;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+          color: rgba(255,255,255,0.72);
         }
 
         .ig-credentials-signal {
@@ -352,14 +354,14 @@ export default async function InstagramCredentialsActionsPage() {
         .ig-credentials-action-field {
           display: grid;
           gap: 4px;
-          border: 1px solid rgba(255,255,255,.04);
-          border-radius: 8px;
-          background: #161820;
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.026);
           padding: 10px;
         }
 
         .ig-credentials-action-field strong {
-          color: #8a8f98;
+          color: rgba(255,255,255,0.72);
           font-size: 12px;
           overflow-wrap: anywhere;
         }
@@ -377,9 +379,9 @@ export default async function InstagramCredentialsActionsPage() {
           align-items: center;
           justify-content: center;
           min-height: 32px;
-          border: 1px solid rgba(255,255,255,.07);
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 999px;
-          background: #1e2028;
+          background: rgba(255,255,255,0.04);
           color: rgba(255,255,255,0.64);
           font-size: 12px;
           font-weight: 900;
@@ -388,7 +390,7 @@ export default async function InstagramCredentialsActionsPage() {
         }
 
         .ig-credentials-action-buttons button {
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.36);
           cursor: not-allowed;
         }
 
@@ -424,7 +426,7 @@ export default async function InstagramCredentialsActionsPage() {
 
         @media (max-width: 760px) {
           .ig-credentials-page {
-            padding: 16px 14px 40px;
+            padding: 22px 14px 40px;
           }
 
           .ig-credentials-source-strip,
@@ -457,9 +459,9 @@ function SourcePill({ label, detail }: { label: string; detail: CredentialsActio
 
 function Kpi({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: "neutral" | "good" | "warning" | "danger" }) {
   const colors = {
-    neutral: "#f0f0ee",
+    neutral: "#f0f0ef",
     good: "#34D399",
-    warning: "#a594f9",
+    warning: "#FBBF24",
     danger: "#F87171",
   };
 

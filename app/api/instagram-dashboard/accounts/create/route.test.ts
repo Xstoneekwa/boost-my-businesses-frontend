@@ -24,21 +24,31 @@ test("accounts create route validates explicit phone app instance target", () =>
 });
 
 test("accounts create route assigns the explicit app_instance_id and does not launch runtime", () => {
-  assert.match(source, /tryAutoAssignOnboardingSchedule\(accountId, \{/);
+  assert.match(source, /tryAssignOnboardingSchedule\(accountId, \{/);
   assert.match(source, /appInstanceId/);
   assert.match(scheduleSource, /p_clone_id: target\.appInstanceId \|\| null/);
   assert.match(scheduleSource, /p_starts_at: startsAt/);
   assert.match(scheduleSource, /p_ends_at: endsAt/);
   assert.match(scheduleSource, /p_device_id: deviceId/);
-  assert.match(source, /Schedule slot is required/);
+  assert.match(source, /scheduled_requires_timeslot/);
   assert.match(source, /provisioning_started: false/);
   assert.match(source, /run_started: false/);
+});
+
+test("accounts create route supports manual_only placement without scheduled window", () => {
+  assert.match(source, /schedule_mode/);
+  assert.match(source, /manual_only_requires_app_instance/);
+  assert.match(source, /invalid_schedule_mode/);
+  assert.match(source, /tryAssignManualOnlyOnboardingSchedule/);
+  assert.match(scheduleSource, /assign_account_manual_only/);
+  assert.match(source, /scheduleMode === "manual_only"/);
+  assert.doesNotMatch(source, /if \(scheduleMode === "manual_only"\)[\s\S]*assertTargetScheduleSlotAvailable/);
 });
 
 test("accounts create route does not write phone_devices.id into legacy ig_accounts.device_id", () => {
   assert.match(source, /device_id: null/);
   assert.doesNotMatch(source, /device_id: isUuid\(deviceId\)/);
-  assert.match(source, /tryAutoAssignOnboardingSchedule\(accountId, \{[\s\S]*deviceId/);
+  assert.match(source, /tryAssignOnboardingSchedule\(accountId, \{[\s\S]*deviceId/);
   assert.match(source, /device_name: deviceName/);
 });
 
@@ -74,4 +84,13 @@ test("accounts create safe response does not expose raw assignment ids", () => {
   assert.doesNotMatch(safeResponseSource, /device_id/);
   assert.doesNotMatch(safeResponseSource, /app_instance_id/);
   assert.doesNotMatch(safeResponseSource, /assignment_id/);
+});
+
+test("accounts create safe response exposes explicit credential save fields", () => {
+  assert.match(source, /credential_save_status/);
+  assert.match(source, /resolveAddProfileCredentialsResponse/);
+  assert.match(source, /isAddProfileCredentialsSaved/);
+  assert.match(source, /loadSafeCredentialsConfirmation/);
+  const safeResponseSource = source.slice(source.indexOf("function safeCreateResponse"), source.indexOf("export async function POST"));
+  assert.doesNotMatch(safeResponseSource, /secret_ref/);
 });

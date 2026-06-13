@@ -22,11 +22,26 @@ type ClientDashboardActionNotification = {
   createdAt: string | null;
   actionHref: string;
 };
+type ClientInstagramAccount = {
+  accountId: string;
+  username: string;
+};
+type ClientProgressSnapshot = {
+  account_id: string;
+  request_id: string | null;
+  run_id: string | null;
+  status: "unknown" | "queued" | "claimed" | "running" | "action_required" | "connected" | "failed" | "stopped";
+  reason: string | null;
+  action_required: null | { title: string; message: string; status: string };
+  steps: Array<{ id: string; label: string; subtitle: string; status: "pending" | "running" | "done" | "failed" | "action_required" | "skipped" }>;
+  process_log: Array<{ id: string; timestamp: string; phase: string; message: string }>;
+};
 
 interface Props {
   userId: string;
   tenantId: string;
   initialNotifications?: ClientDashboardActionNotification[];
+  initialAccounts?: ClientInstagramAccount[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -119,6 +134,12 @@ const T = {
       next:"Prochain prélèvement", nextVal:"3 juillet 2026 — 197€",
       pay:"Moyen de paiement", payVal:"•••• •••• •••• 4242",
       changePlan:"Changer de formule",
+      connectTitle:"Connexion Instagram",
+      connectBody:"Nous connectons votre compte Instagram en toute sécurité. Ne fermez pas cette fenêtre pendant la connexion.",
+      connectProgress:"Voir la progression",
+      connectCheck:"Vérifier à nouveau",
+      connectActionRequired:"Action requise : Instagram demande un code ou une confirmation.",
+      connectActionHelp:"Terminez la confirmation sur le téléphone, puis cliquez sur Vérifier à nouveau.",
     },
     drawer: {
       kicker:"Cibles", title:"@christine_leclerc",
@@ -167,6 +188,12 @@ const T = {
       next:"Next billing", nextVal:"July 3, 2026 — €197",
       pay:"Billing method", payVal:"•••• •••• •••• 4242",
       changePlan:"Change plan",
+      connectTitle:"Instagram connection",
+      connectBody:"We're connecting your Instagram account. Do not close this window while connection is in progress.",
+      connectProgress:"View progress",
+      connectCheck:"Check again",
+      connectActionRequired:"Action required: Instagram is asking for a code or confirmation.",
+      connectActionHelp:"Please complete the confirmation on the phone, then click Check again.",
     },
     drawer: {
       kicker:"Targets", title:"@christine_leclerc",
@@ -538,13 +565,14 @@ function TargetDrawer({ open, onClose, lang, t }: {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, initialNotifications = [] }: Props) {
+export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, initialNotifications = [], initialAccounts = [] }: Props) {
   const [activeView, setActiveView]     = useState<View>("overview");
   const [lang,       setLang]           = useState<Lang>("fr");
   const [theme,      setTheme]          = useState<Theme>("dark");
   const [chartRange, setChartRange]     = useState<ChartRange>(7);
   const [drawerOpen, setDrawerOpen]     = useState(false);
   const [loggingOut, setLoggingOut]     = useState(false);
+  const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
   const router = useRouter();
 
   // Targeting lists
@@ -555,6 +583,49 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
   const [addB, setAddB] = useState("");
 
   const t = T[lang];
+  const primaryAccount = initialAccounts[0] ?? (initialNotifications[0] ? {
+    accountId: initialNotifications[0].accountId,
+    username: initialNotifications[0].username,
+  } : null);
+
+  useEffect(() => {
+    const accountId = connectProgress?.account.accountId;
+    if (!accountId) return undefined;
+    const scopedAccountId = accountId;
+    let cancelled = false;
+
+    async function pollClientProgress() {
+      try {
+        const response = await fetch(`/api/instagram-dashboard/runs/progress?account_id=${encodeURIComponent(scopedAccountId)}&audience=client`, {
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json() as { ok?: boolean; data?: ClientProgressSnapshot; error?: string };
+        if (!response.ok || !payload.ok || !payload.data) {
+          throw new Error(payload.error || "Could not load connection progress.");
+        }
+        if (!cancelled) {
+          setConnectProgress((current) => current ? { ...current, snapshot: payload.data ?? null, message: payload.data?.reason || current.message } : current);
+        }
+      } catch (progressError) {
+        if (!cancelled) {
+          setConnectProgress((current) => current ? {
+            ...current,
+            message: progressError instanceof Error ? progressError.message : "Could not load connection progress.",
+          } : current);
+        }
+      }
+    }
+
+    void pollClientProgress();
+    const interval = window.setInterval(() => {
+      void pollClientProgress();
+    }, 6000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [connectProgress?.account.accountId]);
 
   useEffect(() => {
     const l = localStorage.getItem(LANG_KEY) as Lang|null;
@@ -847,6 +918,24 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         {/* ACCOUNT */}
         {activeView === "account" && (
           <div className="cd-view">
+            {primaryAccount ? (
+              <section className="cd-card cd-connect-card">
+                <div className="cd-s-title">{t.account.connectTitle}</div>
+                <p className="cd-connect-copy">{t.account.connectBody}</p>
+                <div className="cd-connect-actions">
+                  <button
+                    className="cd-btn cd-btn-primary"
+                    onClick={() => setConnectProgress({
+                      account: primaryAccount,
+                      snapshot: null,
+                      message: t.account.connectBody,
+                    })}
+                  >
+                    {t.account.connectProgress}
+                  </button>
+                </div>
+              </section>
+            ) : null}
             <div className="cd-acc-grid">
               <div className="cd-card">
                 <div className="cd-s-title">{t.account.profile}</div>
@@ -855,7 +944,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
                   { lbl:t.account.lname, val:"Leclerc",                ro:false },
                   { lbl:t.account.phone, val:"+33 6 12 34 56 78",      ro:false },
                   { lbl:t.account.email, val:"christine@example.com",  ro:false },
-                  { lbl:t.account.ig,    val:"@christine_leclerc",     ro:true  },
+                  { lbl:t.account.ig,    val:primaryAccount ? `@${primaryAccount.username}` : "@christine_leclerc",     ro:true  },
                 ].map(({ lbl, val, ro }) => (
                   <div key={lbl} className="cd-fg">
                     <label className="cd-fl">{lbl}</label>
@@ -886,6 +975,54 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
 
       {/* ── DRAWER ── */}
       <TargetDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} lang={lang} t={t}/>
+
+      {connectProgress ? (
+        <div className="cd-progress-overlay" role="presentation" onMouseDown={() => setConnectProgress(null)}>
+          <section className="cd-progress-modal" role="dialog" aria-modal="true" aria-labelledby="cd-progress-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="cd-progress-header">
+              <div>
+                <span>@{connectProgress.account.username} · Instagram</span>
+                <h3 id="cd-progress-title">{t.account.connectTitle}</h3>
+                <p>{connectProgress.snapshot?.status === "action_required" ? t.account.connectActionRequired : t.account.connectBody}</p>
+              </div>
+              <em className={`status-${connectProgress.snapshot?.status || "running"}`}>
+                {connectProgress.snapshot?.status === "connected" ? (lang === "fr" ? "Connecté" : "Connected")
+                  : connectProgress.snapshot?.status === "action_required" ? (lang === "fr" ? "Action requise" : "Action required")
+                    : connectProgress.snapshot?.status === "failed" ? (lang === "fr" ? "Échec" : "Failed")
+                      : (lang === "fr" ? "En cours" : "In progress")}
+              </em>
+            </header>
+            <section className="cd-progress-steps">
+              {(connectProgress.snapshot?.steps ?? [
+                { id: "connecting", label: lang === "fr" ? "Connexion en cours" : "Connecting", subtitle: t.account.connectBody, status: "running" as const },
+              ]).slice(0, 4).map((step) => (
+                <div key={step.id} className={`cd-progress-step status-${step.status}`}>
+                  <span aria-hidden="true">{step.status === "done" ? "✓" : step.status === "failed" ? "!" : "…"}</span>
+                  <div>
+                    <strong>{step.label}</strong>
+                    <small>{step.subtitle}</small>
+                  </div>
+                </div>
+              ))}
+            </section>
+            {connectProgress.snapshot?.action_required ? (
+              <p className="cd-progress-action">{connectProgress.snapshot.action_required.message || t.account.connectActionRequired}</p>
+            ) : null}
+            {connectProgress.snapshot?.status === "action_required" ? (
+              <p className="cd-progress-action">{t.account.connectActionHelp}</p>
+            ) : null}
+            <div className="cd-connect-actions">
+              <button className="cd-btn cd-btn-soft" onClick={() => setConnectProgress(null)}>{lang === "fr" ? "Fermer" : "Close"}</button>
+              <button
+                className="cd-btn cd-btn-primary"
+                onClick={() => setConnectProgress((current) => current ? { ...current, snapshot: null, message: t.account.connectBody } : current)}
+              >
+                {t.account.connectCheck}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1088,6 +1225,29 @@ const CSS = `
 
 /* Account */
 .cd-acc-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cd-connect-card{margin-bottom:4px}
+.cd-connect-copy{margin:0 0 14px;color:var(--ink-dim);font-size:.88rem;line-height:1.5}
+.cd-connect-actions{display:flex;gap:10px;flex-wrap:wrap}
+.cd-progress-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px;background:rgba(2,6,23,.74)}
+.cd-progress-modal{width:min(640px,96vw);max-height:90vh;overflow:auto;display:grid;gap:16px;border:1px solid var(--line);border-radius:18px;background:#0B1020;color:#E5E7EB;box-shadow:var(--shadow);padding:22px}
+.cd-progress-header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.cd-progress-header span{color:#64748B;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.cd-progress-header h3{margin:4px 0 0;font-family:var(--font-d);font-size:1.25rem}
+.cd-progress-header p{margin:6px 0 0;color:#94A3B8;font-size:.86rem;line-height:1.45}
+.cd-progress-header em{border:1px solid rgba(148,163,184,.4);border-radius:999px;padding:6px 10px;font-style:normal;font-weight:800;white-space:nowrap}
+.cd-progress-header em.status-connected{border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.12);color:#86EFAC}
+.cd-progress-header em.status-running,.cd-progress-header em.status-queued,.cd-progress-header em.status-claimed{border-color:rgba(96,165,250,.5);background:rgba(37,99,235,.18);color:#BFDBFE}
+.cd-progress-header em.status-action_required{border-color:rgba(245,158,11,.52);background:rgba(120,53,15,.25);color:#FCD34D}
+.cd-progress-header em.status-failed{border-color:rgba(248,113,113,.45);background:rgba(127,29,29,.28);color:#FCA5A5}
+.cd-progress-steps{display:grid;gap:12px}
+.cd-progress-step{display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;align-items:start}
+.cd-progress-step>span{width:18px;height:18px;display:grid;place-items:center;border:2px solid #64748B;border-radius:999px;color:#94A3B8;font-size:.72rem;margin-top:2px}
+.cd-progress-step.status-done>span{border-color:#22C55E;color:#22C55E}
+.cd-progress-step.status-running>span,.cd-progress-step.status-action_required>span{border-color:#60A5FA;color:#BFDBFE}
+.cd-progress-step.status-failed>span{border-color:#F87171;color:#FCA5A5}
+.cd-progress-step strong{display:block;font-size:.95rem}
+.cd-progress-step small{display:block;margin-top:3px;color:#778299;font-size:.8rem;overflow-wrap:anywhere}
+.cd-progress-action{margin:0;border:1px solid rgba(245,158,11,.35);border-radius:12px;background:rgba(120,53,15,.22);color:#FDE68A;padding:10px 12px;font-size:.84rem;line-height:1.45}
 .cd-s-title{font-family:var(--font-d);font-weight:800;font-size:.95rem;margin-bottom:14px;color:var(--ink)}
 .cd-fg{margin-bottom:12px}
 .cd-fl{font-size:.72rem;font-weight:700;color:var(--ink-mute);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;display:block}

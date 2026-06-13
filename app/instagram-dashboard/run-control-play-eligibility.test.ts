@@ -47,7 +47,7 @@ test("run control health projection maps display states for dashboard banner", (
 test("play maintenance, dispatcher config, and unhealthy states have clear messages", () => {
   assert.match(runControlSource, /case "play_disabled":[\s\S]*maintenance mode/);
   assert.match(runControlSource, /case "dispatcher_unconfigured":[\s\S]*no runtime dispatcher worker is configured/);
-  assert.match(runControlSource, /case "dispatcher_unhealthy":[\s\S]*fresh heartbeat/);
+  assert.match(runControlSource, /case "dispatcher_unhealthy":[\s\S]*Dispatcher offline/);
 });
 
 test("account business block messages stay separate from run-control health", () => {
@@ -61,6 +61,22 @@ test("eligibility payload distinguishes config readiness from start eligibility"
   assert.match(eligibilityRouteSource, /reason_description: runStartBlockDescription\(eligibility\.reason\)/);
   assert.match(runControlSource, /Account settings are ready, but this run cannot start because Welcome DM is enabled/);
   assert.match(runControlSource, /Account settings are ready, but this run cannot start outside the assigned schedule window/);
+});
+
+test("technical login runs bypass social credential review and reauth gates", () => {
+  const technicalBlock = runControlSource.indexOf("export async function evaluateLoginChallengeRunEligibility");
+  const socialBlock = runControlSource.indexOf("export async function evaluateRunStartEligibility");
+  const technicalSource = runControlSource.slice(technicalBlock, socialBlock);
+  assert.doesNotMatch(technicalSource, /reauth_required/);
+  assert.doesNotMatch(technicalSource, /CREDENTIAL_REVIEW_ACTIONS/);
+  assert.match(socialBlock > technicalBlock ? runControlSource.slice(socialBlock) : "", /credential\.reauth_required === true/);
+  assert.match(socialBlock > technicalBlock ? runControlSource.slice(socialBlock) : "", /CREDENTIAL_REVIEW_ACTIONS/);
+});
+
+test("dashboard connect action remains separate from social run eligibility blocks", () => {
+  assert.match(buttonsSource, /credentialsSavedPendingVerification/);
+  assert.match(buttonsSource, /credentialStatus === "saved_pending_verification"/);
+  assert.match(buttonsSource, /connectionMissingFromProjection/);
 });
 
 test("eligibility route and dashboard UI do not expose unsafe identifiers", () => {

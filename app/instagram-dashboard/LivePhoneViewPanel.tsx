@@ -28,17 +28,8 @@ export default function LivePhoneViewPanel({
   onRefresh,
 }: LivePhoneViewPanelProps) {
   const dragRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
-  const [position, setPosition] = useState(() => {
-    const w = 520;
-    const h = 680;
-    if (typeof window === "undefined") return { left: 96, top: 96 };
-    const SIDEBAR_WIDTH = 234;
-    return {
-      left: Math.max(0, Math.round((window.innerWidth - SIDEBAR_WIDTH - w) / 2) + SIDEBAR_WIDTH),
-      top: Math.max(0, Math.round((window.innerHeight - h) / 2)),
-    };
-  });
-  const [size, setSize] = useState({ width: 520, height: 680 });
+  const [position, setPosition] = useState({ left: 96, top: 96 });
+  const [size, setSize] = useState({ width: 420, height: 620 });
   const [message, setMessage] = useState(() =>
     liveViewPanelMessage({
       status: session.status,

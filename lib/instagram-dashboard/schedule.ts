@@ -115,6 +115,7 @@ export const SCHEDULE_BLOCK_REASONS = [
   "device_unavailable",
   "assignment_profile_mismatch",
   "manual_only_runtime_disabled",
+  "manual_only_requires_manual_trigger",
 ] as const;
 
 export type ScheduleBlockReason = (typeof SCHEDULE_BLOCK_REASONS)[number];
@@ -158,6 +159,8 @@ export function scheduleBlockMessage(reason: string) {
       return "Manual run is blocked because the assignment profile does not match this run type.";
     case "manual_only_runtime_disabled":
       return "Manual-only runtime is not enabled yet. This account has placement reserved but no Phase 2 manual run path.";
+    case "manual_only_requires_manual_trigger":
+      return "Run manually accounts only start when an admin or client explicitly clicks Start.";
     default:
       return "Manual run is blocked by schedule gates.";
   }

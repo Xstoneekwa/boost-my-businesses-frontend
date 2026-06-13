@@ -29,7 +29,8 @@ test("eligibility overview returns safe account projection fields only", () => {
 });
 
 test("eligibility overview reason comes from run eligibility not readiness placeholder", () => {
-  assert.match(overviewSource, /reason: eligibility\.ok \? "ready" : eligibility\.reason/);
+  assert.match(overviewSource, /readyReason = eligibility\.ok && "reason" in eligibility \? eligibility\.reason : "ready"/);
+  assert.match(overviewSource, /reason: eligibility\.ok \? readyReason : eligibility\.reason/);
   assert.match(overviewSource, /primary_block_reason: eligibility\.ok \? null : eligibility\.reason/);
   assert.match(overviewSource, /reason_description:[\s\S]*runStartBlockDescription\(eligibility\.reason\)/);
   assert.doesNotMatch(overviewSource, /reason:\s*account\.readinessProjection\?\.overall_readiness_reason/);

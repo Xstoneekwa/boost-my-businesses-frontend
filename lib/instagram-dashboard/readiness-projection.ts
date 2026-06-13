@@ -1,3 +1,5 @@
+import { projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
+
 export type AdminReadinessStatus =
   | "ready"
   | "needs_credentials"
@@ -33,6 +35,7 @@ export type AdminReadinessInput = {
   onboardingStatus: string;
   assignmentStatus: string | null;
   assignmentStartsAt: string | null;
+  scheduleMode?: string | null;
   phoneStatus: string | null;
   appInstanceStatus: string | null;
   appPackageName: string | null;
@@ -90,13 +93,17 @@ const loginVerificationStatuses = new Set([
 const waitingLoginStatuses = new Set(["unknown", "verification_pending", "login_pending", "pending_login", "not_started"]);
 const readyProvisioningStatuses = new Set(["ready"]);
 const readyOnboardingStatuses = new Set(["ready"]);
-const activeCredentialStatuses = new Set(["active", "configured"]);
 const openAssignmentStatuses = new Set(["reserved", "active"]);
 const activeAppStatuses = new Set(["available", "occupied"]);
 const activePhoneStatuses = new Set(["available", "active", "online", "occupied"]);
 
 function normalize(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
+}
+
+function credentialsSaved(input: AdminReadinessInput) {
+  const projectedStatus = projectCredentialBusinessStatus(input);
+  return projectedStatus === "active" || projectedStatus === "saved_pending_verification";
 }
 
 function includesAny(value: string, terms: string[]) {
@@ -124,8 +131,9 @@ function unfollowSettingsRequired(input: AdminReadinessInput) {
 }
 
 function credentialNextAction(input: AdminReadinessInput) {
+  if (input.reauthRequired && credentialsSaved(input)) return "check_login_or_auto_login";
   if (input.reauthRequired) return "update_credentials";
-  if (!input.credentialsConfigured || !activeCredentialStatuses.has(normalize(input.credentialsStatus))) {
+  if (!credentialsSaved(input)) {
     return "submit_credentials";
   }
   return "none";
@@ -174,7 +182,11 @@ function runtimeGatesStatus(input: AdminReadinessInput): ComponentReadinessStatu
 
 function assignmentStatus(input: AdminReadinessInput): [ComponentReadinessStatus, string] {
   const status = normalize(input.assignmentStatus);
-  if (status && openAssignmentStatuses.has(status)) return ["ready", "assignment_resolved"];
+  const scheduleMode = normalize(input.scheduleMode);
+  if (status && openAssignmentStatuses.has(status)) {
+    if (scheduleMode === "manual_only") return ["ready", "manual_only_assignment_resolved"];
+    return ["ready", "assignment_resolved"];
+  }
   if (hasPackage(input) && hasRuntimeProfile(input)) {
     return ["waiting", "waiting_scheduled_assignment"];
   }
@@ -182,7 +194,8 @@ function assignmentStatus(input: AdminReadinessInput): [ComponentReadinessStatus
 }
 
 function autoLoginStatus(input: AdminReadinessInput): ComponentReadinessStatus {
-  if (!activeCredentialStatuses.has(normalize(input.credentialsStatus)) || input.reauthRequired) return "missing";
+  if (!credentialsSaved(input)) return "missing";
+  if (input.reauthRequired) return "ready";
   if (connectedLoginStatuses.has(normalize(input.loginStatus)) && readyProvisioningStatuses.has(normalize(input.provisioningStatus))) {
     return "ready";
   }
@@ -248,17 +261,26 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
   let nextAdminAction: string | null = null;
   let nextClientAction: string | null = null;
 
+  const hasCredentialsSaved = credentialsSaved(input);
+  const loginVerificationPending = input.reauthRequired && hasCredentialsSaved;
+  const supportRequiredOnlyForLoginVerification =
+    loginVerificationPending && includesAny(`${normalizedAdmin} ${normalizedProvisioning}`, ["support_required"]);
+
   if (includesAny(`${normalizedAdmin} ${normalizedCustomer} ${normalizedSubscription}`, ["cancelled", "canceled", "trashed"])) {
     overall = "cancelled";
     reason = "account_cancelled";
   } else if (includesAny(normalizedAdmin, ["paused", "archived"])) {
     overall = "paused";
     reason = "account_paused";
-  } else if (input.blockingActionsCount > 0 || includesAny(`${normalizedAdmin} ${normalizedOnboarding} ${normalizedProvisioning}`, ["blocked", "support_required"])) {
+  } else if (
+    input.blockingActionsCount > 0 ||
+    includesAny(`${normalizedOnboarding}`, ["blocked", "support_required"]) ||
+    (!supportRequiredOnlyForLoginVerification && includesAny(`${normalizedAdmin} ${normalizedProvisioning}`, ["blocked", "support_required"]))
+  ) {
     overall = "blocked";
     reason = "blocking_action_or_status";
     nextAdminAction = "review_dashboard_actions";
-  } else if (!input.credentialsConfigured || !activeCredentialStatuses.has(normalizedCredentials) || input.reauthRequired) {
+  } else if (!hasCredentialsSaved || (input.reauthRequired && !hasCredentialsSaved)) {
     overall = "needs_credentials";
     reason = input.reauthRequired ? "credentials_reauth_required" : "credentials_missing_or_inactive";
     nextClientAction = "submit_or_update_credentials";
@@ -278,7 +300,8 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     reason = assignment_reason;
   } else if (auto_login_readiness === "waiting" || !connectedLoginStatuses.has(normalizedLogin) || !readyProvisioningStatuses.has(normalizedProvisioning)) {
     overall = "waiting_auto_login_check";
-    reason = "login_preflight_pending";
+    reason = loginVerificationPending ? "credentials_saved_pending_login_verification" : "login_preflight_pending";
+    nextClientAction = "check_login_or_auto_login";
   } else if (pending.length > 0 || package_readiness !== "ready" || runtime_readiness !== "ready" || dm_readiness !== "ready") {
     overall = "pending_backend_wiring";
     reason = pending[0] || "runtime_projection_incomplete";
@@ -304,7 +327,7 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     client_name: input.clientName,
     package_name: input.packageName,
     package_readiness_status: package_readiness,
-    credential_status: input.reauthRequired ? "reauth_required" : input.credentialsStatus,
+    credential_status: projectCredentialBusinessStatus(input),
     credential_next_action: credentialNextAction(input),
     login_status: input.loginStatus,
     provisioning_status: input.provisioningStatus,

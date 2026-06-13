@@ -17,6 +17,8 @@ type LifecyclePayload = {
 };
 
 const lifecycleActions = new Set<LifecycleAction>(["archive", "trash", "restore"]);
+const activeRequestStatuses = ["queued", "claimed", "starting", "running"];
+const activeRunStatuses = ["queued", "pending", "starting", "running", "in_progress", "active"];
 const forbiddenMetadataKey = new RegExp(["password", "credential", "secret", "token", "authorization", ["service", "role"].join("_"), "raw_xml", "xml", "serial", "udid", "vault"].join("|"), "i");
 
 async function requireRelayOrAdmin(request: Request) {
@@ -61,6 +63,41 @@ function missingLifecycleColumnError(message: string) {
     : message;
 }
 
+function safeLifecycleClientError(action: LifecycleAction, dbMessage: string) {
+  if (/ig_accounts_admin_lifecycle_status_check|check constraint/i.test(dbMessage)) {
+    const message =
+      action === "trash"
+        ? "Move to Bin failed. Lifecycle status mapping is invalid."
+        : action === "archive"
+          ? "Archive failed. Lifecycle status mapping is invalid."
+          : "Restore failed. Lifecycle status mapping is invalid.";
+    return { message, error_code: "lifecycle_status_mapping_invalid", status: 409 };
+  }
+  return {
+    message: missingLifecycleColumnError(dbMessage),
+    error_code: "lifecycle_update_failed",
+    status: 500,
+  };
+}
+
+async function hasActiveRuntime(supabase: ReturnType<typeof createSupabaseClient>, accountId: string) {
+  const [{ data: requests }, { data: runs }] = await Promise.all([
+    supabase
+      .from("account_run_requests")
+      .select("id,status")
+      .eq("account_id", accountId)
+      .in("status", activeRequestStatuses)
+      .limit(1),
+    supabase
+      .from("ig_runs")
+      .select("id,status")
+      .eq("account_id", accountId)
+      .in("status", activeRunStatuses)
+      .limit(1),
+  ]);
+  return Boolean((requests ?? []).length || (runs ?? []).length);
+}
+
 export async function POST(request: Request) {
   try {
     const auth = await requireRelayOrAdmin(request);
@@ -93,7 +130,36 @@ export async function POST(request: Request) {
       .maybeSingle<SupabaseRecord>();
     if (currentError) return jsonError(missingLifecycleColumnError(currentError.message), 500);
     if (!currentRow) return jsonError("Instagram account not found.", 404);
-    const statusBefore = readString(currentRow.status, readString(currentRow.admin_lifecycle_status, "unknown")).toLowerCase();
+    const statusBefore = readString(currentRow.status, "unknown").toLowerCase();
+    const currentAccountStatus = readString(currentRow.status, "active").toLowerCase();
+    if ((action === "archive" || action === "trash") && await hasActiveRuntime(supabase, accountId)) {
+      return jsonError("Cannot change lifecycle while a run or run request is active. Stop the runtime first.", 409);
+    }
+    if (
+      (action === "trash" && currentAccountStatus === "trashed")
+      || (action === "archive" && currentAccountStatus === "archived")
+      || (action === "restore" && currentAccountStatus === "active")
+    ) {
+      const { data: existingRow } = await supabase
+        .from("ig_accounts")
+        .select("*")
+        .eq("id", accountId)
+        .maybeSingle<SupabaseRecord>();
+      if (!existingRow) return jsonError("Instagram account not found.", 404);
+      const statusAfter = readString(existingRow.status, "unknown").toLowerCase();
+      return jsonOk({
+        account_id: accountId,
+        action,
+        status_before: statusBefore,
+        status_after: statusAfter,
+        row: existingRow,
+        audit_event_id: null,
+        idempotent: true,
+        run_started: false,
+        provisioning_started: false,
+        login_started: false,
+      });
+    }
     const patch =
       action === "archive"
         ? {
@@ -130,7 +196,14 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (error) {
-      return jsonError(missingLifecycleColumnError(error.message), 500);
+      const safeError = safeLifecycleClientError(action, error.message);
+      console.error("[lifecycle] account_update_failed", {
+        account_id: accountId,
+        action,
+        error_code: safeError.error_code,
+        reason: error.message,
+      });
+      return jsonError(safeError.message, safeError.status, { error_code: safeError.error_code });
     }
 
     if (!data) {

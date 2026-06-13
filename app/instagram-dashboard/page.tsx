@@ -4,6 +4,7 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import { getRunControlHealthProjection } from "@/lib/instagram-dashboard/run-control";
+import { credentialStatusLabel, projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
 import { readinessLabel, readinessTone } from "@/lib/instagram-dashboard/readiness-projection";
 import AddProfileWizard from "./AddProfileWizard";
 import EmailVerificationActionBanner from "./EmailVerificationActionBanner";
@@ -23,6 +24,14 @@ import {
 } from "./manage-data";
 
 export const dynamic = "force-dynamic";
+
+function displayedCredentialStatus(account: ManageAccount) {
+  return credentialStatusLabel(projectCredentialBusinessStatus({
+    credentialsConfigured: account.credentialsConfigured,
+    credentialsStatus: account.credentialsStatus,
+    reauthRequired: account.reauthRequired,
+  }));
+}
 
 export default async function InstagramAutomationDashboardPage() {
   const userContext = await requireInstagramDashboardAccess();
@@ -755,7 +764,7 @@ function AccountList({
                 <td>
                   <ReadinessSummary account={account} />
                 </td>
-                <td style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</td>
+                <td style={{ color: statusTone(account.credentialsStatus) }}>{displayedCredentialStatus(account)}</td>
                 <td>
                   <span className="ig-dashboard-status" style={{ color: statusTone(account.loginStatus) }}>
                     {account.loginStatus}
@@ -766,7 +775,7 @@ function AccountList({
                   {account.appPackageName ? (
                     <>
                       <br />
-                      <small>{account.assignmentStatus ?? "assigned"} · {account.appPackageName}</small>
+                      <small>{account.assignmentStatus ?? "assigned"} · {account.scheduleMode === "manual_only" ? "Manual" : account.appPackageName}</small>
                     </>
                   ) : null}
                 </td>
@@ -832,7 +841,7 @@ function AccountList({
               </div>
               <div>
                 <dt>Credentials</dt>
-                <dd style={{ color: statusTone(account.credentialsStatus) }}>{account.reauthRequired ? "reauth required" : account.credentialsStatus}</dd>
+                <dd style={{ color: statusTone(account.credentialsStatus) }}>{displayedCredentialStatus(account)}</dd>
               </div>
               <div>
                 <dt>Login</dt>
@@ -840,7 +849,7 @@ function AccountList({
               </div>
               <div>
                 <dt>Phone</dt>
-                <dd>{account.phoneName}{account.appPackageName ? ` · ${account.appPackageName}` : ""}</dd>
+                <dd>{account.phoneName}{account.appPackageName ? ` · ${account.scheduleMode === "manual_only" ? "Manual" : account.appPackageName}` : ""}</dd>
               </div>
               <div>
                 <dt>Mac/host</dt>

@@ -15,6 +15,10 @@ type ClientDashboardActionNotification = {
   createdAt: string | null;
   actionHref: string;
 };
+type ClientInstagramAccount = {
+  accountId: string;
+  username: string;
+};
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -79,6 +83,32 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
   });
 }
 
+async function getClientDashboardAccounts(clientId: string): Promise<ClientInstagramAccount[]> {
+  if (!clientId) return [];
+  const supabase = createSupabaseClient();
+  const { data: links, error: linkError } = await supabase
+    .from("client_instagram_accounts")
+    .select("account_id")
+    .eq("client_id", clientId)
+    .limit(100);
+
+  if (linkError || !Array.isArray(links) || links.length === 0) return [];
+  const accountIds = [...new Set((links as SupabaseRecord[]).map((row) => readString(row.account_id)).filter(Boolean))];
+  if (!accountIds.length) return [];
+
+  const { data: accounts } = await supabase
+    .from("ig_accounts")
+    .select("id,username")
+    .in("id", accountIds);
+
+  return (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
+    .map((row) => ({
+      accountId: readString(row.id),
+      username: readString(row.username, "Instagram account"),
+    }))
+    .filter((row) => Boolean(row.accountId));
+}
+
 export default async function InstagramClientPage() {
   const userContext = await requireInstagramDashboardAccess();
 
@@ -86,13 +116,17 @@ export default async function InstagramClientPage() {
     redirect("/instagram-dashboard");
   }
 
-  const notifications = await getClientDashboardNotifications(userContext.tenantId);
+  const [notifications, accounts] = await Promise.all([
+    getClientDashboardNotifications(userContext.tenantId),
+    getClientDashboardAccounts(userContext.tenantId),
+  ]);
 
   return (
     <ClientDashboard
       userId={userContext.userId}
       tenantId={userContext.tenantId}
       initialNotifications={notifications}
+      initialAccounts={accounts}
     />
   );
 }

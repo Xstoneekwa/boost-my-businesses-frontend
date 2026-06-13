@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
+import {
+  credentialNextActionLabel,
+  credentialStatusLabel,
+  projectCredentialBusinessStatus,
+} from "@/lib/instagram-dashboard/account-status-projection";
 import { createSupabaseClient } from "@/lib/supabase";
 import InstagramDashboardViewNav from "../../InstagramDashboardViewNav";
 import {
@@ -57,6 +62,19 @@ function returnLabel(source: DetailSource) {
 
 function readString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
+}
+
+function displayedCredentialStatus(account: ManageAccount) {
+  const status = projectCredentialBusinessStatus({
+    credentialsConfigured: account.credentialsConfigured,
+    credentialsStatus: account.credentialsStatus,
+    reauthRequired: account.reauthRequired,
+  });
+  return {
+    status,
+    label: credentialStatusLabel(status),
+    nextAction: credentialNextActionLabel(status),
+  };
 }
 
 function readNumberNullable(value: unknown) {
@@ -149,6 +167,7 @@ export default async function InstagramAccountDetailPage({
 
   const warnings = linkedWarnings(account, radarData.warnings);
   const targets = await getAccountTargetsOverview(account.accountId);
+  const credentialDisplay = displayedCredentialStatus(account);
 
   return (
     <main className="dashboard-page ig-account-detail-page">
@@ -242,9 +261,9 @@ export default async function InstagramAccountDetailPage({
         >
           <FieldGrid
             fields={[
-              ["Configured", account.credentialsConfigured === null ? "unknown" : account.credentialsConfigured ? "configured" : "missing"],
-              ["Credentials status", account.credentialsStatus],
-              ["Reauth required", account.reauthRequired ? "yes" : "no"],
+              ["Configured", credentialDisplay.status === "missing" ? "missing" : credentialDisplay.status === "unknown" ? "unknown" : "configured"],
+              ["Credentials status", credentialDisplay.label],
+              ["Next action", credentialDisplay.nextAction],
               ["Password display", account.passwordDisplay],
               ["Two-factor display", account.twoFactorDisplay],
             ]}

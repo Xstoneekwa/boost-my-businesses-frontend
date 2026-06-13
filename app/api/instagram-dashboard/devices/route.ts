@@ -1,6 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
-import { verifyCompassRelayKey } from "../compass/relay-auth";
+import { relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +24,16 @@ type HeartbeatRow = SupabaseRecord & {
   last_seen_at?: unknown;
   current_account_id?: unknown;
   current_clone_id?: unknown;
+};
+
+type AssignmentRow = SupabaseRecord & {
+  id?: unknown;
+  account_id?: unknown;
+  device_id?: unknown;
+  app_instance_id?: unknown;
+  status?: unknown;
+  schedule_mode?: unknown;
+  ig_accounts?: SupabaseRecord | SupabaseRecord[] | null;
 };
 
 const heartbeatStaleMs = 15 * 60 * 1000;
@@ -84,9 +94,39 @@ function heartbeatProjection(row: HeartbeatRow | undefined) {
   };
 }
 
-function safeAppInstance(row: AppInstanceRow) {
+function safeAssignment(row: AssignmentRow | undefined) {
+  if (!row) return null;
+  const accountValue = Array.isArray(row.ig_accounts) ? row.ig_accounts[0] : row.ig_accounts;
+  const account = accountValue && typeof accountValue === "object" ? accountValue : {};
+  return {
+    assignment_id: readString(row.id, "") || null,
+    account_id: readString(row.account_id, "") || null,
+    username: readString(account.username, "") || null,
+    status: readString(row.status, "unknown"),
+    schedule_mode: readString(row.schedule_mode, "scheduled"),
+  };
+}
+
+function safeAppInstance(row: AppInstanceRow, assignment?: AssignmentRow) {
   const instanceType = readString(row.instance_type, "clone");
   const instanceIndex = readNumber(row.instance_index, 0);
+  const occupant = safeAssignment(assignment) ?? (
+    readString(row.current_account_id, "")
+      ? {
+        assignment_id: null,
+        account_id: readString(row.current_account_id, ""),
+        username: null,
+        status: "occupied",
+      }
+      : null
+  );
+  const availability = occupant
+    ? "occupied"
+    : readString(row.status, "unknown") !== "available"
+      ? readString(row.status, "unknown")
+      : readBoolean(row.usable_for_auto_login, false) && readBoolean(row.is_launchable, false)
+        ? "available"
+        : "disabled";
   return {
     app_instance_id: readString(row.id, ""),
     device_id: readString(row.device_id, ""),
@@ -95,20 +135,28 @@ function safeAppInstance(row: AppInstanceRow) {
     label: readString(row.visible_label, instanceType === "primary_app" ? "Primary app" : `Clone ${instanceIndex}`),
     package_name: readString(row.package_name, ""),
     status: readString(row.status, "unknown"),
-    current_account_id: readString(row.current_account_id, "") || null,
+    availability,
+    current_account_id: occupant?.account_id || null,
+    occupant,
     usable_for_auto_login: readBoolean(row.usable_for_auto_login, false),
     is_launchable: readBoolean(row.is_launchable, false),
-    selectable: readString(row.status, "unknown") === "available" &&
+    selectable: availability === "available" &&
+      readString(row.status, "unknown") === "available" &&
       readBoolean(row.usable_for_auto_login, false) &&
       readBoolean(row.is_launchable, false) &&
-      !readString(row.current_account_id, ""),
+      !occupant,
   };
 }
 
-export function safePhoneDevice(row: SupabaseRecord, appInstances: AppInstanceRow[], heartbeat?: HeartbeatRow) {
+export function safePhoneDevice(row: SupabaseRecord, appInstances: AppInstanceRow[], heartbeat?: HeartbeatRow, assignments: AssignmentRow[] = []) {
+  const assignmentByAppInstance = new Map(
+    assignments
+      .filter((assignment) => readString(assignment.device_id, "") === readString(row.id, ""))
+      .map((assignment) => [readString(assignment.app_instance_id, ""), assignment]),
+  );
   const instances = appInstances
     .filter((app) => readString(app.device_id, "") === readString(row.id, ""))
-    .map(safeAppInstance)
+    .map((app) => safeAppInstance(app, assignmentByAppInstance.get(readString(app.id, ""))))
     .sort((a, b) => a.instance_index - b.instance_index);
   const availableCount = instances.filter((app) => app.status === "available" && app.selectable).length;
   const occupiedCount = instances.filter((app) => app.status === "occupied" || app.current_account_id).length;
@@ -139,15 +187,15 @@ export function safePhoneDevice(row: SupabaseRecord, appInstances: AppInstanceRo
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
-  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
-    return jsonError("Devices relay authentication failed.", 403, { reason: relayAuth.reason });
+  if (!relayAuth.ok) {
+    return jsonError("Devices relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
   }
   return requireInstagramAdmin();
 }
 
 export async function getDashboardDevices() {
   const supabase = createSupabaseClient();
-  const [{ data: phones, error: phoneError }, { data: appInstances, error: appError }, { data: heartbeats }] = await Promise.all([
+  const [{ data: phones, error: phoneError }, { data: appInstances, error: appError }, { data: heartbeats }, { data: assignments }] = await Promise.all([
       supabase
         .from("phone_devices")
         .select("id,device_kind,name,device_name,adb_serial,host_machine,pool_type,max_clones,status,timezone,updated_at")
@@ -160,6 +208,10 @@ export async function getDashboardDevices() {
         .from("device_heartbeats")
         .select("device_id,adb_serial,status,last_seen_at,current_account_id,current_clone_id")
         .order("last_seen_at", { ascending: false }),
+      supabase
+        .from("account_assignments")
+        .select("id,account_id,device_id,app_instance_id,status,schedule_mode,ig_accounts(username,status)")
+        .in("status", ["pending", "reserved", "active"]),
   ]);
 
   if (phoneError || appError) {
@@ -170,7 +222,12 @@ export async function getDashboardDevices() {
     ((heartbeats ?? []) as HeartbeatRow[]).map((row) => [readString(row.device_id, ""), row]),
   );
   const devices = ((phones ?? []) as SupabaseRecord[])
-    .map((phone) => safePhoneDevice(phone, (appInstances ?? []) as AppInstanceRow[], heartbeatByDevice.get(readString(phone.id, ""))))
+    .map((phone) => safePhoneDevice(
+      phone,
+      (appInstances ?? []) as AppInstanceRow[],
+      heartbeatByDevice.get(readString(phone.id, "")),
+      (assignments ?? []) as unknown as AssignmentRow[],
+    ))
     .filter((phone) => phone.id);
   return devices.length ? devices : [localDevice];
 }

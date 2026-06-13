@@ -1,7 +1,7 @@
 import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control";
 import {
   FOLLOW_SOURCE_ROTATION_BOUNDS,
-  FOLLOW_SOURCE_ROTATION_DEFAULTS,
+  followSourceRotationDefaultsForPackage,
   followSourceRotationChangedFields,
   redactedFollowSourceRotationSummary,
   validateFollowSourceRotationInteger,
@@ -63,7 +63,7 @@ function readEnvInteger(
   return result.error ? null : result.value;
 }
 
-function envFallbackProjection(accountId: string): FollowSourcesProjection {
+function envFallbackProjection(accountId: string, packageLabel?: string | null): FollowSourcesProjection {
   const envMaxFollows = readEnvInteger(
     "FOLLOW_TARGET_MAX_FOLLOWS_PER_TARGET_PER_RUN",
     "max_follows_per_target_per_run",
@@ -73,11 +73,12 @@ function envFallbackProjection(accountId: string): FollowSourcesProjection {
     "max_targets_per_run",
   );
   const hasEnvFallback = envMaxFollows !== null || envMaxTargets !== null;
+  const packageDefaults = followSourceRotationDefaultsForPackage(packageLabel);
   return {
     account_id: accountId,
     max_follows_per_target_per_run:
-      envMaxFollows ?? FOLLOW_SOURCE_ROTATION_DEFAULTS.max_follows_per_target_per_run,
-    max_targets_per_run: envMaxTargets ?? FOLLOW_SOURCE_ROTATION_DEFAULTS.max_targets_per_run,
+      envMaxFollows ?? packageDefaults.max_follows_per_target_per_run,
+    max_targets_per_run: envMaxTargets ?? packageDefaults.max_targets_per_run,
     source: hasEnvFallback ? "env_fallback" : "default",
     bounds: FOLLOW_SOURCE_ROTATION_BOUNDS,
     save_ready: true,
@@ -86,18 +87,19 @@ function envFallbackProjection(accountId: string): FollowSourcesProjection {
   };
 }
 
-function projectionFromRow(accountId: string, row: SupabaseRecord | null | undefined): FollowSourcesProjection {
-  if (!row) return envFallbackProjection(accountId);
+function projectionFromRow(accountId: string, row: SupabaseRecord | null | undefined, packageLabel?: string | null): FollowSourcesProjection {
+  if (!row) return envFallbackProjection(accountId, packageLabel);
+  const packageDefaults = followSourceRotationDefaultsForPackage(packageLabel);
   return {
     account_id: accountId,
     max_follows_per_target_per_run:
       typeof row.max_follows_per_target_per_run === "number"
         ? row.max_follows_per_target_per_run
-        : FOLLOW_SOURCE_ROTATION_DEFAULTS.max_follows_per_target_per_run,
+        : packageDefaults.max_follows_per_target_per_run,
     max_targets_per_run:
       typeof row.max_targets_per_run === "number"
         ? row.max_targets_per_run
-        : FOLLOW_SOURCE_ROTATION_DEFAULTS.max_targets_per_run,
+        : packageDefaults.max_targets_per_run,
     source: "account_setting",
     bounds: FOLLOW_SOURCE_ROTATION_BOUNDS,
     save_ready: true,
@@ -106,13 +108,27 @@ function projectionFromRow(accountId: string, row: SupabaseRecord | null | undef
   };
 }
 
-function pendingProjection(accountId: string): FollowSourcesProjection {
+function pendingProjection(accountId: string, packageLabel?: string | null): FollowSourcesProjection {
   return {
-    ...envFallbackProjection(accountId),
+    ...envFallbackProjection(accountId, packageLabel),
     save_ready: false,
     runtime_status: "schema_pending",
     note: "Follow source settings schema is pending.",
   };
+}
+
+async function fetchCommercialPackageLabel(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const { data, error } = await supabase
+    .from("account_package_summary")
+    .select("commercial_package_label")
+    .eq("account_id", accountId)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (error) return null;
+  return readString(data?.commercial_package_label, "");
 }
 
 async function fetchFollowSourceSettingsRow(
@@ -169,12 +185,13 @@ export async function GET(request: Request) {
     if (accountIdError) return accountIdError;
 
     const supabase = createSupabaseClient();
+    const packageLabel = await fetchCommercialPackageLabel(supabase, accountId);
     try {
       const row = await fetchFollowSourceSettingsRow(supabase, accountId);
-      return jsonOk(projectionFromRow(accountId, row));
+      return jsonOk(projectionFromRow(accountId, row, packageLabel));
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (isFollowSourcesSchemaPending(message)) return jsonOk(pendingProjection(accountId));
+      if (isFollowSourcesSchemaPending(message)) return jsonOk(pendingProjection(accountId, packageLabel));
       throw error;
     }
   } catch (error) {
@@ -210,9 +227,10 @@ export async function PATCH(request: Request) {
     if (maxTargets.error) return jsonError(maxTargets.error, 400);
 
     const supabase = createSupabaseClient();
+    const packageLabel = await fetchCommercialPackageLabel(supabase, accountId);
     let before: FollowSourcesProjection;
     try {
-      before = projectionFromRow(accountId, await fetchFollowSourceSettingsRow(supabase, accountId));
+      before = projectionFromRow(accountId, await fetchFollowSourceSettingsRow(supabase, accountId), packageLabel);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (isFollowSourcesSchemaPending(message)) {
@@ -254,7 +272,7 @@ export async function PATCH(request: Request) {
       account_id: accountId,
       max_follows_per_target_per_run: maxFollows.value,
       max_targets_per_run: maxTargets.value,
-    });
+    }, packageLabel);
     await recordAudit(supabase, {
       accountId,
       actorId,

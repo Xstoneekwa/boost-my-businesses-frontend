@@ -75,6 +75,19 @@ test("connected account without assignment waits when package and runtime profil
   assert.equal(projection.assignment_status, "waiting");
 });
 
+test("manual_only assignment is ready without scheduled window", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    scheduleMode: "manual_only",
+    assignmentStartsAt: null,
+    assignmentStatus: "reserved",
+  }));
+
+  assert.equal(projection.assignment_status, "ready");
+  assert.equal(projection.assignment_reason, "manual_only_assignment_resolved");
+  assert.equal(projection.next_scheduled_session_at, null);
+  assert.equal(projection.overall_readiness_status, "ready");
+});
+
 test("connected account with assignment and settings is ready", () => {
   const projection = buildAdminReadinessProjection(readyInput());
 
@@ -113,6 +126,43 @@ test("unfollow enabled with settings does not return pending backend wiring", ()
 
   assert.equal(projection.overall_readiness_status, "ready");
   assert.equal(projection.pending_backend_wiring.includes("missing_unfollow_settings"), false);
+});
+
+test("active credentials with reauth_required return saved pending verification not needs_credentials", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    credentialsConfigured: true,
+    credentialsStatus: "active",
+    reauthRequired: true,
+    loginStatus: "unknown",
+    provisioningStatus: "not_started",
+    blockingActionsCount: 0,
+    dashboardActionsCount: 1,
+    adminStatus: "support_required",
+    onboardingStatus: "pending",
+  }));
+
+  assert.equal(projection.overall_readiness_status, "waiting_auto_login_check");
+  assert.equal(projection.credential_status, "saved_pending_verification");
+  assert.equal(projection.overall_readiness_reason, "credentials_saved_pending_login_verification");
+  assert.equal(projection.next_client_action, "check_login_or_auto_login");
+});
+
+test("saved pending verification credential status is treated as saved credentials", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    credentialsConfigured: true,
+    credentialsStatus: "saved_pending_verification",
+    reauthRequired: true,
+    loginStatus: "unknown",
+    provisioningStatus: "not_started",
+    blockingActionsCount: 0,
+    dashboardActionsCount: 1,
+    adminStatus: "support_required",
+    onboardingStatus: "pending",
+  }));
+
+  assert.equal(projection.overall_readiness_status, "waiting_auto_login_check");
+  assert.equal(projection.credential_status, "saved_pending_verification");
+  assert.equal(projection.next_client_action, "check_login_or_auto_login");
 });
 
 test("login needs_2fa returns needs_login_verification", () => {

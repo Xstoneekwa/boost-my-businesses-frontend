@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
+import { getRunControlHealthProjection, type RunControlHealthProjection } from "@/lib/instagram-dashboard/run-control";
 import {
   formatDateTime,
   formatInteger,
@@ -21,7 +22,10 @@ export default async function InstagramServerCheckPage() {
     notFound();
   }
 
-  const data = await getRadarData();
+  const [data, runControlHealth] = await Promise.all([
+    getRadarData(),
+    getRunControlHealthProjection(),
+  ]);
   const { serverCheckItems } = data;
 
   return (
@@ -46,6 +50,8 @@ export default async function InstagramServerCheckPage() {
         <SourcePill label="Warnings" source={data.summary.sourceStatus.warnings} />
         <SourcePill label="Devices" source={data.summary.sourceStatus.devices} />
       </section>
+
+      <RunControlDispatcherCard health={runControlHealth} />
 
       <section className="ig-server-check-summary" aria-label="Server Check summary">
         <article>
@@ -87,6 +93,37 @@ export default async function InstagramServerCheckPage() {
         .ig-server-check-summary {
           display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 12px; margin-bottom: 18px;
+        }
+        .ig-server-check-dispatcher {
+          display: grid; grid-template-columns: 1.15fr 2fr; gap: 14px;
+          margin-bottom: 18px; padding: 16px;
+          border: 1px solid rgba(255,255,255,.07); border-radius: 12px;
+          background: #161820;
+        }
+        .ig-server-check-dispatcher-status {
+          display: grid; gap: 8px; align-content: start;
+        }
+        .ig-server-check-dispatcher-status span,
+        .ig-server-check-dispatcher-grid span {
+          color: #4a4f5c; font-family: 'JetBrains Mono', monospace;
+          font-size: 10px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
+        }
+        .ig-server-check-dispatcher-status strong {
+          color: #f0f0ee; font-size: 20px;
+        }
+        .ig-server-check-dispatcher-status p {
+          margin: 0; color: #8a8f98; font-size: 13px; line-height: 1.55;
+        }
+        .ig-server-check-dispatcher-grid {
+          display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+        }
+        .ig-server-check-dispatcher-grid article {
+          display: grid; gap: 6px; min-width: 0;
+          padding: 12px; border: 1px solid rgba(255,255,255,.06);
+          border-radius: 10px; background: rgba(255,255,255,.025);
+        }
+        .ig-server-check-dispatcher-grid strong {
+          color: #f0f0ee; overflow-wrap: anywhere;
         }
         .ig-server-check-source-strip {
           display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -141,10 +178,41 @@ export default async function InstagramServerCheckPage() {
 
         @media (max-width: 760px) {
           .ig-server-check-page { padding: 16px 14px 40px; }
-          .ig-server-check-summary, .ig-server-check-source-strip { grid-template-columns: 1fr; }
+          .ig-server-check-summary, .ig-server-check-source-strip, .ig-server-check-dispatcher, .ig-server-check-dispatcher-grid { grid-template-columns: 1fr; }
         }
       `}</style>
     </main>
+  );
+}
+
+function formatHeartbeatAge(seconds: number | null) {
+  if (seconds === null) return "unknown";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}
+
+function RunControlDispatcherCard({ health }: { health: RunControlHealthProjection }) {
+  const statusColor = statusTone(health.healthy ? "ok" : "problem");
+  return (
+    <section className="ig-server-check-dispatcher" aria-label="Run Control Dispatcher">
+      <div className="ig-server-check-dispatcher-status">
+        <span>Run Control Dispatcher</span>
+        <strong style={{ color: statusColor }}>{health.label}</strong>
+        <p>{health.message}</p>
+        <p>This dashboard is read-only for the local Mac service. Control start, pause, restart, and logs from BotApp Runtime Health or the local wrapper command.</p>
+      </div>
+      <div className="ig-server-check-dispatcher-grid">
+        <article><span>worker_id</span><strong>{health.dispatcherWorkerId ?? "unconfigured"}</strong></article>
+        <article><span>status</span><strong>{health.dispatcherStatus ?? health.displayState}</strong></article>
+        <article><span>heartbeat age</span><strong>{formatHeartbeatAge(health.heartbeatAgeSeconds)}</strong></article>
+        <article><span>last_seen_at</span><strong>{formatDateTime(health.lastSeenAt)}</strong></article>
+        <article><span>launch_enabled</span><strong>{health.dispatcherLaunchEnabled === null || health.dispatcherLaunchEnabled === undefined ? "unknown" : String(health.dispatcherLaunchEnabled)}</strong></article>
+        <article><span>queue status</span><strong>Supabase gated</strong></article>
+        <article><span>active runs</span><strong>See Radar</strong></article>
+        <article><span>control</span><strong>BotApp / local Mac only</strong></article>
+      </div>
+    </section>
   );
 }
 

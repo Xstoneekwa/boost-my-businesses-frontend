@@ -71,3 +71,30 @@ export async function tryAutoAssignOnboardingSchedule(
     assignment: readRpcObject(assignResult),
   };
 }
+
+export async function tryAssignManualOnlyOnboardingSchedule(
+  accountId: string,
+  target: { deviceId?: string; appInstanceId?: string } = {},
+) {
+  if (!target.deviceId || !target.appInstanceId) {
+    return { assigned: false, reason: "manual_only_requires_app_instance", assignment: {} };
+  }
+
+  const supabase = createSupabaseClient();
+  const { data: assignResult, error: assignError } = await supabase.rpc("assign_account_manual_only", {
+    p_account_id: accountId,
+    p_device_id: target.deviceId,
+    p_app_instance_id: target.appInstanceId,
+    p_assignment_source: "onboarding_auto",
+  });
+
+  if (assignError) {
+    return { assigned: false, reason: readString(assignError.message, "assign_failed"), assignment: {} };
+  }
+
+  return {
+    assigned: true,
+    reason: "manual_only_assigned",
+    assignment: readRpcObject(assignResult),
+  };
+}

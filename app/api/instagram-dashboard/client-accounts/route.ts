@@ -27,6 +27,9 @@ export async function GET(request: Request) {
     return jsonOk({
       generated_at: new Date().toISOString(),
       accounts: manage.allAccounts,
+      activeAccounts: manage.activeAccounts,
+      archivedAccounts: manage.archivedAccounts,
+      trashedAccounts: manage.trashedAccounts,
       summary: manage.summary,
       credentials,
       errors: manage.errors,

@@ -16,8 +16,12 @@ import {
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import { resolveAddProfileAssignmentPolicy } from "@/lib/instagram-dashboard/add-profile-assignment-policy";
 import { applyAddProfileRuntimeDefaults } from "@/lib/instagram-dashboard/add-profile-runtime-defaults";
+import {
+  isAddProfileCredentialsSaved,
+  resolveAddProfileCredentialsResponse,
+} from "@/lib/instagram-dashboard/add-profile-credentials-response";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
-import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
+import { tryAssignManualOnlyOnboardingSchedule, tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
 import {
   getInstagramAdminUserContext,
   jsonError,
@@ -27,7 +31,7 @@ import {
   requireInstagramAdmin,
   type SupabaseRecord,
 } from "../../_utils";
-import { verifyCompassRelayKey } from "../../compass/relay-auth";
+import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -49,8 +53,10 @@ type CreateProfilePayload = {
   runtime_mode?: unknown;
   commercial_package?: unknown;
   addons?: unknown;
+  schedule_mode?: unknown;
   starts_at?: unknown;
   ends_at?: unknown;
+  submit_credentials?: unknown;
   dry_run?: unknown;
   provisioning_enabled?: unknown;
   login_enabled?: unknown;
@@ -65,6 +71,7 @@ type AddProfileCredentialsResponse = {
   credentials_status: string;
   status: string;
   reauth_required: boolean;
+  secret_ref_present?: boolean;
   next_action: string;
   password_status: "write_only";
 };
@@ -90,6 +97,7 @@ const defaultTotalDmDayCap = defaultWelcomeDmDayCap + defaultOutreachDmDayCap;
 const activeDashboardActionStatuses = ["pending", "acknowledged", "pending_verification"];
 const loginMethods = new Set(["manual", "credentials"]);
 const runtimeModes = new Set(["safe_setup", "follow_only_test", "full_cycle", "outreach_only"]);
+const scheduleModes = new Set(["scheduled", "manual_only"]);
 const sensitivePayloadKeys = new Set([
   "password",
   "email",
@@ -115,8 +123,8 @@ function isUuid(value: string) {
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return { mode: "relay_key" as const, userId: null };
-  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
-    const response = jsonError("Add profile relay authentication failed.", 403, { reason: relayAuth.reason });
+  if (!relayAuth.ok) {
+    const response = jsonError("Add profile relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
     return { mode: "unauthorized" as const, response };
   }
   const unauthorizedResponse = await requireInstagramAdmin();
@@ -147,6 +155,37 @@ function truncateSafe(value: string, maxLength = 120) {
 function safeFailureReason(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_:-]/g, "_");
   return normalized.slice(0, 120) || "unknown";
+}
+
+function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
+  const startA = Date.parse(aStart);
+  const endA = Date.parse(aEnd);
+  const startB = Date.parse(bStart);
+  const endB = Date.parse(bEnd);
+  return Number.isFinite(startA) && Number.isFinite(endA) && Number.isFinite(startB) && Number.isFinite(endB) && startA < endB && startB < endA;
+}
+
+function utcMinuteOfDay(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getUTCHours() * 60 + date.getUTCMinutes();
+}
+
+function minuteRanges(start: number, end: number) {
+  if (end > start) return [[start, end]];
+  return [[start, 1440], [0, end]];
+}
+
+function recurringTimeOverlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
+  if (overlaps(aStart, aEnd, bStart, bEnd)) return true;
+  const startA = utcMinuteOfDay(aStart);
+  const endA = utcMinuteOfDay(aEnd);
+  const startB = utcMinuteOfDay(bStart);
+  const endB = utcMinuteOfDay(bEnd);
+  if (startA == null || endA == null || startB == null || endB == null) return false;
+  return minuteRanges(startA, endA).some(([rangeStartA, rangeEndA]) =>
+    minuteRanges(startB, endB).some(([rangeStartB, rangeEndB]) => rangeStartA < rangeEndB && rangeStartB < rangeEndA),
+  );
 }
 
 function redactTemplatePayload(payload: Record<string, string | number | boolean>) {
@@ -193,7 +232,7 @@ function safeCredentialsResponse(value: unknown): AddProfileCredentialsResponse 
 }
 
 function isActiveCredentials(credentials: AddProfileCredentialsResponse) {
-  return credentials.credentials_status === "active" && credentials.status === "active";
+  return isAddProfileCredentialsSaved(credentials);
 }
 
 function isDuplicateAccountError(error: { code?: string; message?: string; details?: string } | null) {
@@ -302,6 +341,37 @@ async function callSubmitAddProfileCredentials(input: AddProfileCredentialsInput
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function loadSafeCredentialsConfirmation(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  fallback: AddProfileCredentialsResponse | null,
+): Promise<AddProfileCredentialsResponse | null> {
+  const { data } = await supabase
+    .from("account_credentials")
+    .select("account_id,provider,credentials_version,status,reauth_required,reauth_reason,next_action,secret_ref,updated_at")
+    .eq("account_id", accountId)
+    .eq("provider", "instagram")
+    .eq("status", "active")
+    .order("credentials_version", { ascending: false })
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+
+  if (!data) return fallback;
+
+  return {
+    request_id: fallback?.request_id ?? "",
+    account_id: safeCredentialString(data.account_id, accountId),
+    provider: safeCredentialString(data.provider, fallback?.provider ?? "instagram"),
+    credentials_version: safeCredentialString(data.credentials_version, fallback?.credentials_version ?? ""),
+    credentials_status: safeCredentialString(data.status, fallback?.credentials_status ?? "unknown"),
+    status: safeCredentialString(data.status, fallback?.status ?? "unknown"),
+    reauth_required: safeCredentialBoolean(data.reauth_required, fallback?.reauth_required ?? false),
+    secret_ref_present: Boolean(safeCredentialString(data.secret_ref, "")),
+    next_action: safeCredentialString(data.next_action, fallback?.next_action ?? "unknown"),
+    password_status: "write_only",
+  };
 }
 
 async function markCredentialFailure(
@@ -600,6 +670,83 @@ async function fetchOnboardingTarget(
   };
 }
 
+async function assertTargetScheduleSlotAvailable(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  target: { deviceId: string; appInstanceId: string; startsAt: string; endsAt: string },
+) {
+  if (!target.startsAt || !target.endsAt) return { ok: false as const, reason: "slot_no_longer_available" };
+  const query = supabase
+    .from("account_assignments")
+    .select("id,account_id,device_id,app_instance_id,starts_at,ends_at,status,schedule_mode")
+    .eq("device_id", target.deviceId)
+    .eq("schedule_mode", "scheduled")
+    .in("status", ["pending", "reserved", "active"]);
+  const { data, error } = await query;
+  if (error) return { ok: false as const, reason: "slot_no_longer_available" };
+  const conflict = ((data ?? []) as SupabaseRecord[]).find((assignment) => recurringTimeOverlaps(
+    target.startsAt,
+    target.endsAt,
+    readString(assignment.starts_at, ""),
+    readString(assignment.ends_at, ""),
+  ));
+  if (!conflict) return { ok: true as const };
+  const status = readString(conflict.status, "");
+  return {
+    ok: false as const,
+    reason: status === "reserved" || status === "pending" ? "reserved_slot" : "occupied_by_account",
+  };
+}
+
+function normalizeTargetError(reason: string, scheduleMode: string) {
+  if (reason === "app_instance_occupied") return "app_instance_already_reserved";
+  if (reason === "manual_target_required" && scheduleMode === "manual_only") return "manual_only_requires_app_instance";
+  return reason;
+}
+
+function normalizeBotAppAssignmentError(reason: string) {
+  const normalized = reason.toLowerCase();
+  if (
+    reason === "app_instance_already_reserved" ||
+    reason === "manual_only_requires_app_instance" ||
+    reason === "reserved_slot" ||
+    reason === "occupied_by_account" ||
+    normalized.includes("manual_only assignments require") ||
+    normalized.includes("full_cycle assignments require slot_kind")
+  ) {
+    return reason === "app_instance_already_reserved" ||
+      reason === "manual_only_requires_app_instance" ||
+      reason === "reserved_slot" ||
+      reason === "occupied_by_account"
+      ? reason
+      : "assignment_validation_failed";
+  }
+  return "slot_no_longer_available";
+}
+
+async function tryAssignOnboardingSchedule(
+  accountId: string,
+  input: {
+    scheduleMode: string;
+    deviceId: string;
+    appInstanceId: string;
+    startsAt: string;
+    endsAt: string;
+  },
+) {
+  if (input.scheduleMode === "manual_only") {
+    return tryAssignManualOnlyOnboardingSchedule(accountId, {
+      deviceId: input.deviceId,
+      appInstanceId: input.appInstanceId,
+    });
+  }
+  return tryAutoAssignOnboardingSchedule(accountId, {
+    deviceId: input.deviceId,
+    appInstanceId: input.appInstanceId,
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+  });
+}
+
 function safeCreateResponse(
   account: SupabaseRecord,
   credentials: AddProfileCredentialsResponse | null,
@@ -607,17 +754,37 @@ function safeCreateResponse(
     onboarding_schedule_assigned?: boolean;
     onboarding_schedule_reason?: string;
     assignment?: SupabaseRecord;
+    schedule_mode?: string;
     package_name?: string;
     runtime_defaults_applied?: boolean;
     runtime_defaults_reason?: string | null;
   },
   source = "admin_dashboard",
 ) {
+  const accountId = readString(account.id, "");
+  const username = readString(account.username, "");
+  const credentialResolution = resolveAddProfileCredentialsResponse({
+    credentials,
+    credentialsSubmitted: Boolean(credentials),
+  });
+  const credentialsConfigured = credentialResolution.credentials_configured;
   return {
     source,
+    ok: true,
+    account_id: accountId,
+    username,
+    account_created: true,
+    assignment_status: scheduleMeta?.onboarding_schedule_assigned ? "reserved" : "not_created",
+    schedule_mode: scheduleMeta?.schedule_mode ?? "scheduled",
+    credential_status: credentialResolution.credential_status,
+    credential_save_status: credentialResolution.credential_save_status,
+    credentials_configured: credentialsConfigured,
+    provisioning_started: false,
+    login_started: false,
+    run_started: false,
     account: {
-      id: readString(account.id, ""),
-      username: readString(account.username, ""),
+      id: accountId,
+      username,
       display_name: readString(account.display_name, ""),
       status: readString(account.status, "active"),
     },
@@ -648,6 +815,7 @@ function safeCreateResponse(
     assignment: {
       status: scheduleMeta?.onboarding_schedule_assigned ? "reserved" : "not_created",
       reason: scheduleMeta?.onboarding_schedule_reason ?? "not_attempted",
+      schedule_mode: scheduleMeta?.schedule_mode ?? "scheduled",
       package_name: scheduleMeta?.package_name ?? null,
     },
     filters: { status: "created" },
@@ -729,7 +897,7 @@ export async function POST(request: Request) {
       repairCredentialsAlreadySaved = Boolean(repairCredentials?.id);
     }
 
-    if (loginMethod === "credentials" && !password && !repairCredentialsAlreadySaved) {
+    if (!dryRun && loginMethod === "credentials" && !password && !repairCredentialsAlreadySaved) {
       return jsonError("Instagram password is required for secure credential setup.", 400);
     }
     if (!dryRun && loginMethod === "credentials" && password && !credentialsConfig()) {
@@ -754,27 +922,43 @@ export async function POST(request: Request) {
       runtimeMode: runtimeMode as AddProfileRuntimeMode,
       addons: selectedAddons,
     });
+    const scheduleMode = readString(body.schedule_mode, "scheduled").trim() || "scheduled";
+    if (!scheduleModes.has(scheduleMode)) return jsonError("invalid_schedule_mode", 400);
     const startsAt = readString(body.starts_at, "").trim();
     const endsAt = readString(body.ends_at, "").trim();
-    const assignmentPolicy = resolveAddProfileAssignmentPolicy({
-      runtimeMode: runtimeMode as AddProfileRuntimeMode,
-      deviceId,
-      appInstanceId,
-      startsAt,
-      endsAt,
-      allowScheduledWait: false,
-    });
-    if (!assignmentPolicy.shouldAssignNow) return jsonError(assignmentPolicy.reason, 409);
-    if (!startsAt || !endsAt) return jsonError("Schedule slot is required.", 400);
+    if (scheduleMode === "manual_only" && (!deviceId || !appInstanceId)) {
+      return jsonError("manual_only_requires_app_instance", 400);
+    }
+    if (scheduleMode === "scheduled") {
+      const assignmentPolicy = resolveAddProfileAssignmentPolicy({
+        runtimeMode: runtimeMode as AddProfileRuntimeMode,
+        deviceId,
+        appInstanceId,
+        startsAt,
+        endsAt,
+        allowScheduledWait: false,
+      });
+      if (!assignmentPolicy.shouldAssignNow) return jsonError(assignmentPolicy.reason, 409);
+      if (!startsAt || !endsAt) return jsonError("scheduled_requires_timeslot", 400);
+    }
     const targetResult = await fetchOnboardingTarget(supabase, deviceId, appInstanceId)
       .then((target) => ({ ok: true as const, target }))
       .catch((error) => ({
         ok: false as const,
-        reason: error instanceof Error ? error.message : "manual_target_invalid",
+        reason: normalizeTargetError(error instanceof Error ? error.message : "manual_target_invalid", scheduleMode),
       }));
     if (!targetResult.ok) return jsonError(targetResult.reason, 409);
     const target = targetResult.target;
     const deviceName = target.deviceName;
+    if (scheduleMode === "scheduled") {
+      const scheduleAvailability = await assertTargetScheduleSlotAvailable(supabase, {
+        deviceId,
+        appInstanceId,
+        startsAt,
+        endsAt,
+      });
+      if (!scheduleAvailability.ok) return jsonError(scheduleAvailability.reason, 409);
+    }
     const template = await fetchTemplate(supabase, templateMode, templateId);
     const deviceUdid = "";
     const settingsPayload = isRecord(template?.settings_payload) ? redactTemplatePayload(template.settings_payload) : {};
@@ -792,10 +976,11 @@ export async function POST(request: Request) {
           assignment_status: "would_assign",
         },
         assignment: {
+          schedule_mode: scheduleMode,
           device_id: deviceId,
           app_instance_id: appInstanceId,
-          starts_at: startsAt,
-          ends_at: endsAt,
+          starts_at: scheduleMode === "scheduled" ? startsAt : null,
+          ends_at: scheduleMode === "scheduled" ? endsAt : null,
           device_name: deviceName,
         },
         settings: {
@@ -1039,6 +1224,7 @@ export async function POST(request: Request) {
           actorType: "admin",
           externalRequestId,
         });
+        credentials = await loadSafeCredentialsConfirmation(supabase, accountId, credentials);
       } catch (credentialsError) {
         const reason = credentialsError instanceof Error && credentialsError.message === "credentials_ingestion_timeout"
           ? "credentials_ingestion_timeout"
@@ -1052,21 +1238,33 @@ export async function POST(request: Request) {
           resultStatus: "failed",
           failureReason: reason,
         });
-        return jsonError(reason, 502);
+        return jsonError(reason, 502, addProfilePartialMeta({
+          accountId,
+          accountCreated: accountCreated || Boolean(accountId),
+          credentialsSaved: false,
+          reason,
+          repairPossible: true,
+        }));
       }
 
-      if (!isActiveCredentials(credentials)) {
+      if (!credentials || !isActiveCredentials(credentials)) {
         await markCredentialFailureWithSupportAction(supabase, accountId, "credentials_not_active", externalRequestId, actorId);
         await tryRecordAddProfileAudit(supabase, {
           accountId,
           username: accountUsername,
           externalRequestId,
-          credentialRequestId: credentials.request_id,
+          credentialRequestId: credentials?.request_id,
           actorId,
           resultStatus: "failed",
           failureReason: "credentials_not_active",
         });
-        return jsonError("credentials_ingestion_failed", 502);
+        return jsonError("credentials_ingestion_failed", 502, addProfilePartialMeta({
+          accountId,
+          accountCreated: accountCreated || Boolean(accountId),
+          credentialsSaved: false,
+          reason: "credentials_not_active",
+          repairPossible: true,
+        }));
       }
     }
 
@@ -1134,6 +1332,44 @@ export async function POST(request: Request) {
     }
 
     if (botAppNoAutomationCreate) {
+      const onboardingSchedule = await tryAssignOnboardingSchedule(accountId, {
+        scheduleMode,
+        deviceId,
+        appInstanceId,
+        startsAt,
+        endsAt,
+      }).catch((error) => ({
+        assigned: false,
+        reason: error instanceof Error ? error.message : "onboarding_schedule_failed",
+        assignment: {},
+      }));
+      if (!onboardingSchedule.assigned) {
+        const reason = normalizeBotAppAssignmentError(onboardingSchedule.reason);
+        await tryRecordAddProfileAudit(supabase, {
+          accountId,
+          username: accountUsername,
+          externalRequestId,
+          credentialRequestId: credentials?.request_id,
+          actorId,
+          resultStatus: "failed",
+          failureReason: reason,
+          metadataSafe: {
+            package_name: target.packageName,
+            runtime_mode: runtimeMode,
+            schedule_mode: scheduleMode,
+            starts_at: scheduleMode === "scheduled" ? startsAt : null,
+            ends_at: scheduleMode === "scheduled" ? endsAt : null,
+          },
+        });
+        return jsonError(reason, 409, addProfilePartialMeta({
+          accountId,
+          accountCreated: accountCreated || Boolean(accountId),
+          credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
+          assignmentFailed: true,
+          reason,
+          repairPossible: true,
+        }));
+      }
       await tryRecordAddProfileAudit(supabase, {
         accountId,
         username: accountUsername,
@@ -1142,8 +1378,9 @@ export async function POST(request: Request) {
         actorId,
         resultStatus: "success",
         metadataSafe: {
-          onboarding_schedule_assigned: false,
-          onboarding_schedule_reason: "botapp_no_automation_create",
+          onboarding_schedule_assigned: true,
+          onboarding_schedule_reason: onboardingSchedule.reason,
+          schedule_mode: scheduleMode,
           package_name: target.packageName,
           runtime_mode: runtimeMode,
           commercial_package: commercialPackage,
@@ -1154,8 +1391,8 @@ export async function POST(request: Request) {
           outreach_enabled: runtimeDefaults.outreach_enabled,
           follow_enabled: runtimeDefaults.follow_enabled,
           unfollow_enabled: runtimeDefaults.unfollow_enabled,
-          starts_at: startsAt,
-          ends_at: endsAt,
+          starts_at: scheduleMode === "scheduled" ? startsAt : null,
+          ends_at: scheduleMode === "scheduled" ? endsAt : null,
           login_method: loginMethod,
           provisioning_started: false,
           login_started: false,
@@ -1167,9 +1404,10 @@ export async function POST(request: Request) {
           { ...account, status: supportRequiredStatus },
           credentials,
           {
-            onboarding_schedule_assigned: false,
-            onboarding_schedule_reason: "botapp_no_automation_create",
-            assignment: {},
+            onboarding_schedule_assigned: true,
+            onboarding_schedule_reason: onboardingSchedule.reason,
+            assignment: onboardingSchedule.assignment,
+            schedule_mode: scheduleMode,
             package_name: target.packageName,
             runtime_defaults_applied: true,
             runtime_defaults_reason: null,
@@ -1180,7 +1418,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const onboardingSchedule = await tryAutoAssignOnboardingSchedule(accountId, {
+    const onboardingSchedule = await tryAssignOnboardingSchedule(accountId, {
+      scheduleMode,
       deviceId,
       appInstanceId,
       startsAt,
@@ -1202,8 +1441,9 @@ export async function POST(request: Request) {
         metadataSafe: {
           package_name: target.packageName,
           runtime_mode: runtimeMode,
-          starts_at: startsAt,
-          ends_at: endsAt,
+          schedule_mode: scheduleMode,
+          starts_at: scheduleMode === "scheduled" ? startsAt : null,
+          ends_at: scheduleMode === "scheduled" ? endsAt : null,
         },
       });
       return jsonError(`assignment_failed:${onboardingSchedule.reason}`, 409, addProfilePartialMeta({
@@ -1249,6 +1489,7 @@ export async function POST(request: Request) {
       metadataSafe: {
         onboarding_schedule_assigned: onboardingSchedule.assigned,
         onboarding_schedule_reason: onboardingSchedule.reason,
+        schedule_mode: scheduleMode,
         package_name: target.packageName,
         runtime_mode: runtimeMode,
         commercial_package: commercialPackage,
@@ -1259,8 +1500,8 @@ export async function POST(request: Request) {
         outreach_enabled: runtimeDefaults.outreach_enabled,
         follow_enabled: runtimeDefaults.follow_enabled,
         unfollow_enabled: runtimeDefaults.unfollow_enabled,
-        starts_at: startsAt,
-        ends_at: endsAt,
+        starts_at: scheduleMode === "scheduled" ? startsAt : null,
+        ends_at: scheduleMode === "scheduled" ? endsAt : null,
         login_method: loginMethod,
         provisioning_started: false,
         run_started: false,
@@ -1274,6 +1515,7 @@ export async function POST(request: Request) {
           onboarding_schedule_assigned: onboardingSchedule.assigned,
           onboarding_schedule_reason: onboardingSchedule.reason,
           assignment: onboardingSchedule.assignment,
+          schedule_mode: scheduleMode,
           package_name: target.packageName,
           runtime_defaults_applied: true,
           runtime_defaults_reason: null,

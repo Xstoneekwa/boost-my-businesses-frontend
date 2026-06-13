@@ -36,13 +36,25 @@ test("devices route projects Samsung phones from phone_devices with app instance
       is_launchable: true,
     }],
     { device_id: "phone-1", status: "online", last_seen_at: new Date().toISOString() },
+    [{
+      id: "assignment-1",
+      account_id: "cinema-account",
+      device_id: "phone-1",
+      app_instance_id: "app-primary",
+      status: "reserved",
+      ig_accounts: { username: "cinema_catchup", status: "active" },
+    }],
   );
 
   assert.equal(phone.device_name, "Samsung A16-01");
   assert.equal(phone.adb_serial, "RFGL145VCKE");
   assert.equal(phone.app_instances_available_count, 1);
   assert.equal(phone.app_instances_occupied_count, 1);
+  assert.equal(phone.app_instances[0].availability, "occupied");
+  assert.equal(phone.app_instances[0].occupant.username, "cinema_catchup");
+  assert.equal(phone.app_instances[0].occupant.assignment_id, "assignment-1");
   assert.equal(phone.app_instances[1].app_instance_id, "app-clone-1");
+  assert.equal(phone.app_instances[1].availability, "available");
   assert.equal(phone.app_instances[1].selectable, true);
 });
 

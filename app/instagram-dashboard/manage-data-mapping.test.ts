@@ -16,8 +16,9 @@ test("Manage enriches legacy accounts with modern assignment phone and clone dat
 
 test("Manage maps active credentials separately from login status", () => {
   assert.match(manageSource, /from\("account_credentials"\)/);
-  assert.match(manageSource, /credentialsStatus === "active" \? "active"/);
-  assert.match(manageSource, /reauthRequired: credentialsStatus === "active" \? false/);
+  assert.match(manageSource, /projectCredentialBusinessStatus/);
+  assert.match(manageSource, /reauthRequired/);
+  assert.match(manageSource, /saved_pending_verification/);
   assert.match(manageSource, /pending_login/);
 });
 
@@ -40,4 +41,20 @@ test("Manage renders account avatar with canonical username fallback", () => {
   assert.match(pageSource, /\/api\/instagram-dashboard\/avatar\?kind=account/);
   assert.match(pageSource, /ig-dashboard-account-avatar-fallback/);
   assert.match(pageSource, /instagramCanonicalUsername/);
+});
+
+test("Manage buckets account lifecycle from ig_accounts status, not admin ops status", () => {
+  assert.match(manageSource, /accountLifecycleStatus/);
+  assert.match(manageSource, /const accountStatus = normalize\(account\.accountLifecycleStatus/);
+  assert.match(manageSource, /activeAccounts: accounts\.filter\(\(account\) => lifecycleStatus\(account\) === "active"\)/);
+  assert.match(manageSource, /archivedAccounts: accounts\.filter\(\(account\) => lifecycleStatus\(account\) === "archived"\)/);
+  assert.match(manageSource, /trashedAccounts: accounts\.filter\(\(account\) => lifecycleStatus\(account\) === "trashed"\)/);
+  assert.doesNotMatch(manageSource, /const status = normalize\(account\.adminStatus\)/);
+});
+
+test("Admin Manage renders separate Active, Archives, and Trash buckets", () => {
+  assert.match(pageSource, /accounts: data\.activeAccounts/);
+  assert.match(pageSource, /accounts: data\.archivedAccounts/);
+  assert.match(pageSource, /accounts: data\.trashedAccounts/);
+  assert.match(pageSource, /mode=\{tab\.id === "archives" \? "archived" : tab\.id === "trash" \? "trashed" : "active"\}/);
 });

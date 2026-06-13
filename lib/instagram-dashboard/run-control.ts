@@ -4,11 +4,28 @@ import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_
 
 export const ACTIVE_IG_RUN_STATUSES = ["running", "queued", "pending", "in_progress", "active", "starting"] as const;
 export const ACTIVE_RUN_REQUEST_STATUSES = ["queued", "claimed", "starting", "running"] as const;
+export const TECHNICAL_ACCOUNT_RUN_TYPES = [
+  "check_login",
+  "login_check",
+  "login_provisioning",
+  "login_email_code_resume",
+  "reconnect_instagram",
+  "credential_verification",
+  "provisioning_only",
+  "account_status_check",
+] as const;
+export const GROWTH_RUN_TYPES = [
+  "account_session",
+  "follow_session",
+  "unfollow_session",
+  "dm_welcome_session_send",
+  "outreach_session",
+  "target_discovery_session",
+] as const;
 export const LOGIN_RUN_TYPES = ["login_provisioning", "login_email_code_resume"] as const;
 export const DEFAULT_ALLOWED_RUN_TYPES = [
-  "account_session",
-  "outreach_session",
-  ...LOGIN_RUN_TYPES,
+  ...GROWTH_RUN_TYPES,
+  ...TECHNICAL_ACCOUNT_RUN_TYPES,
 ] as const;
 const TERMINAL_IG_RUN_STATUSES = new Set(["completed", "failed", "stopped", "canceled", "blocked", "aborted"]);
 
@@ -97,7 +114,12 @@ export type RunStartBlockReason =
   | "outreach_rest_reserved"
   | "no_app_instance_available"
   | "device_unavailable"
+  | "manual_only_runtime_disabled"
+  | "manual_only_requires_manual_trigger"
   | "assignment_profile_mismatch"
+  | "technical_run_allowed_outside_campaign_window"
+  | "technical_run_allowed_manual_only"
+  | "manual_start_allowed_manual_only"
   | "already_running"
   | "already_requested"
   | "invalid_run_type";
@@ -110,6 +132,7 @@ const READY_PROVISIONING_STATUSES = new Set(["ready"]);
 const LOGIN_ACTION_REQUIRED_STATUSES = new Set(["needs_2fa", "2fa_required", "checkpoint", "password_invalid", "bad_password", "login_failed", "failed", "mismatch", "logged_out"]);
 export const DEFAULT_WELCOME_DM_DAY_CAP = 10;
 export const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
+export type RunStartTrigger = "auto" | "scheduler" | "manual" | "technical";
 
 export function runControlPlayFeatureEnabled(env: MiniRunEnv = process.env) {
   const raw = readString(env.INSTAGRAM_RUN_CONTROL_PLAY_ENABLED, "").trim().toLowerCase();
@@ -545,6 +568,46 @@ export function runControlDispatcherAllowedRunTypes(env: MiniRunEnv = process.en
 export function isLoginRunType(runType: string) {
   const normalized = runType.trim().toLowerCase();
   return LOGIN_RUN_TYPES.includes(normalized as (typeof LOGIN_RUN_TYPES)[number]);
+}
+
+export function isTechnicalAccountRun(runType: string) {
+  const normalized = runType.trim().toLowerCase();
+  return TECHNICAL_ACCOUNT_RUN_TYPES.includes(normalized as (typeof TECHNICAL_ACCOUNT_RUN_TYPES)[number]);
+}
+
+export function isGrowthRun(runType: string) {
+  const normalized = runType.trim().toLowerCase();
+  return GROWTH_RUN_TYPES.includes(normalized as (typeof GROWTH_RUN_TYPES)[number]);
+}
+
+export function normalizeRunStartTrigger(value: unknown): RunStartTrigger {
+  const normalized = readString(value, "").trim().toLowerCase();
+  if (normalized === "manual") return "manual";
+  if (normalized === "technical") return "technical";
+  if (normalized === "scheduler") return "scheduler";
+  return "auto";
+}
+
+export function isManualTrigger(trigger: unknown) {
+  return normalizeRunStartTrigger(trigger) === "manual";
+}
+
+export function requiresScheduleWindow(runType: string, trigger: unknown = "auto") {
+  if (!isGrowthRun(runType)) return false;
+  return !isManualTrigger(trigger);
+}
+
+export function requiresTargets(runType: string) {
+  const normalized = runType.trim().toLowerCase();
+  return normalized === "account_session" || normalized === "follow_session" || normalized === "target_discovery_session";
+}
+
+export function countsAgainstSocialQuota(runType: string) {
+  return isGrowthRun(runType);
+}
+
+export function requiresLoginConnected(runType: string) {
+  return isGrowthRun(runType);
 }
 
 export function dispatcherAllowsOnlyAccountSession(env: MiniRunEnv = process.env) {
@@ -1195,9 +1258,10 @@ export async function getActiveRunRequest(accountId: string) {
 export async function evaluateLoginChallengeRunEligibility(
   accountId: string,
   requestedRunType: string,
+  trigger: RunStartTrigger = "technical",
 ) {
   const normalizedRunType = requestedRunType.trim().toLowerCase();
-  if (!isLoginRunType(normalizedRunType)) {
+  if (!isTechnicalAccountRun(normalizedRunType)) {
     return { ok: false as const, reason: "invalid_run_type" as RunStartBlockReason };
   }
 
@@ -1231,12 +1295,88 @@ export async function evaluateLoginChallengeRunEligibility(
     return { ok: false as const, reason: "account_canceled" as RunStartBlockReason, health };
   }
 
+  const { data: credentialRows, error: credentialError } = await supabase
+    .from("account_credentials")
+    .select("status,secret_ref")
+    .eq("account_id", accountId)
+    .order("credentials_version", { ascending: false })
+    .limit(1);
+  if (credentialError) {
+    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+  }
+  const credential = ((credentialRows ?? []) as SupabaseRecord[])[0];
+  if (!credential || readString(credential.status, "").toLowerCase() !== "active" || !readString(credential.secret_ref, "")) {
+    return { ok: false as const, reason: "credentials_review_required" as RunStartBlockReason, health };
+  }
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from("account_assignments")
+    .select("id,device_id,app_instance_id,status,schedule_mode")
+    .eq("account_id", accountId)
+    .in("status", ["pending", "reserved", "active"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (assignmentError) {
+    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+  }
+  const deviceId = readString(assignment?.device_id, "");
+  const appInstanceId = readString(assignment?.app_instance_id, "");
+  if (!assignment || !deviceId || !appInstanceId) {
+    return { ok: false as const, reason: "assignment_missing" as RunStartBlockReason, health };
+  }
+
+  const [{ data: device, error: deviceError }, { data: appInstance, error: appInstanceError }] = await Promise.all([
+    supabase
+      .from("phone_devices")
+      .select("id,status")
+      .eq("id", deviceId)
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
+    supabase
+      .from("phone_app_instances")
+      .select("id,status,current_account_id,is_launchable,usable_for_auto_login")
+      .eq("id", appInstanceId)
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
+  ]);
+  if (deviceError || appInstanceError) {
+    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+  }
+  const deviceStatus = readString(device?.status, "").toLowerCase();
+  if (!device || !["available", "active", "online", "occupied"].includes(deviceStatus)) {
+    return { ok: false as const, reason: "device_unavailable" as RunStartBlockReason, health };
+  }
+  const appStatus = readString(appInstance?.status, "").toLowerCase();
+  const currentAccountId = readString(appInstance?.current_account_id, "");
+  if (
+    !appInstance ||
+    !["available", "active", "occupied", "reserved"].includes(appStatus) ||
+    appInstance.is_launchable === false ||
+    appInstance.usable_for_auto_login === false ||
+    (currentAccountId && currentAccountId !== accountId)
+  ) {
+    return { ok: false as const, reason: "no_app_instance_available" as RunStartBlockReason, health };
+  }
+
+  if (await accountHasActiveIgRun(accountId)) {
+    return { ok: false as const, reason: "already_running" as RunStartBlockReason, health };
+  }
+
   const activeRequest = await getActiveRunRequest(accountId);
   if (activeRequest) {
     return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
   }
 
-  return { ok: true as const, health, normalizedRunType };
+  return {
+    ok: true as const,
+    health,
+    normalizedRunType,
+    trigger,
+    reason: readString(assignment.schedule_mode, "").toLowerCase() === "manual_only"
+      ? "technical_run_allowed_manual_only" as const
+      : "technical_run_allowed_outside_campaign_window" as const,
+  };
 }
 
 export type LoginEmailCodeResumeRunRequestResult = {
@@ -1357,10 +1497,15 @@ export async function evaluateLoginConnectionStartGate(
   return "login_not_connected";
 }
 
-export async function evaluateRunStartEligibility(accountId: string, requestedRunType: string) {
+export async function evaluateRunStartEligibility(
+  accountId: string,
+  requestedRunType: string,
+  options: { trigger?: unknown; manualStart?: unknown } = {},
+) {
   const normalizedRunType = requestedRunType.trim().toLowerCase();
-  if (isLoginRunType(normalizedRunType)) {
-    return evaluateLoginChallengeRunEligibility(accountId, normalizedRunType);
+  const normalizedTrigger = options.manualStart === true ? "manual" : normalizeRunStartTrigger(options.trigger);
+  if (isTechnicalAccountRun(normalizedRunType)) {
+    return evaluateLoginChallengeRunEligibility(accountId, normalizedRunType, normalizedTrigger === "auto" ? "technical" : normalizedTrigger);
   }
   if (!DEFAULT_ALLOWED_RUN_TYPES.includes(normalizedRunType as (typeof DEFAULT_ALLOWED_RUN_TYPES)[number])) {
     return { ok: false as const, reason: "invalid_run_type" as RunStartBlockReason };
@@ -1407,6 +1552,18 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
   }
   if (BLOCKED_ACCOUNT_STATUSES.has(accountStatus)) {
     return { ok: false as const, reason: "account_canceled" as RunStartBlockReason, health };
+  }
+
+  const scheduleBlock = await evaluateScheduleStartGate(accountId, normalizedRunType, normalizedTrigger);
+  if (scheduleBlock) {
+    return { ok: false as const, reason: scheduleBlock, health };
+  }
+
+  if (requiresLoginConnected(normalizedRunType)) {
+    const loginConnectionBlock = await evaluateLoginConnectionStartGate(accountId);
+    if (loginConnectionBlock) {
+      return { ok: false as const, reason: loginConnectionBlock, health };
+    }
   }
 
   if (normalizedRunType === "account_session" || normalizedRunType === "outreach_session") {
@@ -1712,18 +1869,8 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     }
   }
 
-  const loginConnectionBlock = await evaluateLoginConnectionStartGate(accountId);
-  if (loginConnectionBlock) {
-    return { ok: false as const, reason: loginConnectionBlock, health };
-  }
-
   if (await accountHasActiveIgRun(accountId)) {
     return { ok: false as const, reason: "already_running" as RunStartBlockReason, health };
-  }
-
-  const scheduleBlock = await evaluateScheduleStartGate(accountId, normalizedRunType);
-  if (scheduleBlock) {
-    return { ok: false as const, reason: scheduleBlock, health };
   }
 
   const activeRequest = await getActiveRunRequest(accountId);
@@ -1731,17 +1878,19 @@ export async function evaluateRunStartEligibility(accountId: string, requestedRu
     return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
   }
 
-  return { ok: true as const, health, normalizedRunType, followFiltersSummary: safeFollowFiltersSummary };
+  return { ok: true as const, health, normalizedRunType, trigger: normalizedTrigger, followFiltersSummary: safeFollowFiltersSummary };
 }
 
 export async function evaluateScheduleStartGate(
   accountId: string,
   requestedRunType: string,
+  trigger: unknown = "auto",
 ): Promise<ScheduleBlockReason | null> {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase.rpc("evaluate_account_schedule_gate", {
     p_account_id: accountId,
     p_requested_run_type: requestedRunType,
+    p_trigger: normalizeRunStartTrigger(trigger),
   });
   if (error) {
     return "assignment_missing";
@@ -1777,7 +1926,7 @@ export async function insertManualRunAudit(
 export function runStartBlockMessage(reason: RunStartBlockReason) {
   switch (reason) {
     case "dispatcher_unhealthy":
-      return "Manual run requires a healthy runtime dispatcher with a fresh heartbeat.";
+      return "Dispatcher offline. Start dispatcher to run Auto Login.";
     case "dispatcher_unconfigured":
       return "Manual run is unavailable because no runtime dispatcher worker is configured on the dashboard host.";
     case "dispatcher_launch_disabled":
@@ -1874,8 +2023,18 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual run is blocked because no Instagram app instance is available on this phone.";
     case "device_unavailable":
       return "Manual run is blocked because the assigned phone/device is unavailable.";
+    case "manual_only_runtime_disabled":
+      return "Run manually accounts require an explicit manual trigger.";
+    case "manual_only_requires_manual_trigger":
+      return "Run manually accounts only start when an admin or client explicitly clicks Start.";
     case "assignment_profile_mismatch":
       return "Manual run is blocked because the assignment profile does not match this run type.";
+    case "technical_run_allowed_outside_campaign_window":
+      return "Technical account run is allowed outside campaign schedule windows.";
+    case "technical_run_allowed_manual_only":
+      return "Technical account run is allowed immediately in Run manually mode.";
+    case "manual_start_allowed_manual_only":
+      return "Manual growth run is allowed to bypass schedule windows in Run manually mode.";
     case "already_running":
       return "A run is already active for this account.";
     case "already_requested":
@@ -1893,6 +2052,16 @@ export function runStartBlockDescription(reason: RunStartBlockReason) {
       return "Account settings are ready, but this run cannot start because Welcome DM is enabled and real sending is disabled by the ops safety flag.";
     case "assignment_window_closed":
       return "Account settings are ready, but this run cannot start outside the assigned schedule window.";
+    case "manual_only_runtime_disabled":
+      return "Run manually is active, but automatic dispatchers must not start the account without an explicit manual trigger.";
+    case "manual_only_requires_manual_trigger":
+      return "Run manually accounts are ignored by automatic scheduling until an admin or client starts them manually.";
+    case "technical_run_allowed_outside_campaign_window":
+      return "Technical login/check/provisioning runs do not require an active campaign schedule window.";
+    case "technical_run_allowed_manual_only":
+      return "Technical login/check/provisioning runs can start immediately in Run manually mode when credentials, device, and app instance are ready.";
+    case "manual_start_allowed_manual_only":
+      return "Manual growth runs can bypass schedule windows but still require login, targets, quotas, locks, and safety gates.";
     default:
       return "Account settings may be ready, but this run cannot start until the run eligibility block is resolved.";
   }

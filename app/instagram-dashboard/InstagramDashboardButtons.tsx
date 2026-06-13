@@ -29,10 +29,10 @@ import {
   type LiveViewSessionSafe,
 } from "./live-view-client";
 import {
-  buildConnectButtonDisabledState,
   isPlayDisabled,
   isRunEligibilityPending,
   resolveActionButtonDisabled,
+  buildConnectButtonDisabledState,
   shouldShowAssignNow,
   shouldShowConnect,
   shouldShowCredentialsConfirm,
@@ -40,6 +40,7 @@ import {
 
 type ReadinessNowStatus =
   | "ready"
+  | "ready_to_connect"
   | "needs_credentials"
   | "needs_login_verification"
   | "waiting_scheduled_assignment"
@@ -49,6 +50,7 @@ type ReadinessNowStatus =
 
 type ReadinessNowClientStatus =
   | "connected_ready"
+  | "ready_to_connect"
   | "checking_connection"
   | "action_required_2fa"
   | "action_required_checkpoint"
@@ -347,12 +349,6 @@ type TemplateDialog = { kind: "save" | "apply"; source: "settings" | "filters" }
 type ExportMenu = "stats" | "logs" | null;
 type LogExportScope = "all" | "latest-run" | "latest-python-run";
 
-type RunControlHealth = {
-  healthy: boolean;
-  playEnabled: boolean;
-  reason: string;
-};
-
 type RunEligibilityProjection = {
   ok_to_start: boolean;
   reason: string;
@@ -369,8 +365,67 @@ type RunStartResponse = {
   status?: string;
 };
 
+type ProgressStepStatus = "pending" | "running" | "done" | "failed" | "action_required" | "skipped";
+type RunProgressSnapshot = {
+  account_id: string;
+  request_id: string | null;
+  request_status: string | null;
+  requested_run_type: string | null;
+  run_id: string | null;
+  run_status: string | null;
+  status: "unknown" | "queued" | "claimed" | "running" | "action_required" | "connected" | "failed" | "stopped";
+  reason: string | null;
+  action_required: null | {
+    id: string;
+    action_type: string;
+    status: string;
+    title: string;
+    message: string;
+  };
+  steps: Array<{
+    id: string;
+    label: string;
+    subtitle: string;
+    status: ProgressStepStatus;
+  }>;
+  process_log: Array<{
+    id: string;
+    timestamp: string;
+    phase: string;
+    message: string;
+  }>;
+  generated_at: string;
+};
+
+type ProgressModalState = {
+  operation: "connect" | "run";
+  requestId: string | null;
+  snapshot: RunProgressSnapshot | null;
+  message: string;
+};
+
 const DEFAULT_WELCOME_DM_DAY_CAP = 10;
 const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
+const DM_TEMPLATE_VARIABLES = [
+  "{username}",
+  "{{username}}",
+  "{name}",
+  "{{name}}",
+  "{account_username}",
+  "{{account_username}}",
+] as const;
+const DM_TEMPLATE_VARIABLE_HELP = [
+  "{username} / {{username}} = recipient username",
+  "{name} / {{name}} = recipient display name when available, otherwise username",
+  "{account_username} / {{account_username}} = sending Instagram account username",
+];
+const DM_TEMPLATE_SAMPLE_VALUES: Record<string, string> = {
+  username: "justperfect.eu",
+  name: "Marie",
+  account_username: "j_automatise_pour_toi",
+};
+const DM_TEMPLATE_TOKEN_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}|\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g;
+const DM_TEMPLATE_SUPPORTED_VARIABLES = new Set(["username", "name", "account_username"]);
 
 export function runStartSuccessMessage(payload: RunStartResponse) {
   if (!payload.request_id || !payload.status) {
@@ -391,6 +446,7 @@ export function readinessNowSuccessMessage(payload: ReadinessNowResponse) {
     waiting_next_slot: "Waiting next slot",
     try_again_later: "Try again later",
     ready: "Ready",
+    ready_to_connect: "Ready to connect",
     needs_credentials: "Needs credentials",
     needs_login_verification: "Needs login verification",
     waiting_scheduled_assignment: "Waiting next slot",
@@ -398,6 +454,20 @@ export function readinessNowSuccessMessage(payload: ReadinessNowResponse) {
   }[status] ?? "Try again later";
   const requestSuffix = payload.request_id ? ` Request ${payload.request_id.slice(0, 8)} queued.` : "";
   return `${label}.${requestSuffix}`;
+}
+
+export function assignNowSuccessMessage(payload: AssignNowResponse) {
+  return payload.message || (
+    payload.status === "already_assigned"
+      ? "Account already has a valid assignment window."
+      : payload.status === "capacity_unavailable"
+        ? "No phone is available right now."
+        : payload.status === "assignment_repaired"
+          ? "Assignment window repaired for now."
+          : payload.status === "assigned_now"
+            ? "Assignment created for now."
+            : "Assign now could not complete."
+  );
 }
 
 export function connectNowSuccessMessage(payload: ConnectNowResponse) {
@@ -419,20 +489,6 @@ export function confirmValidCredentialsSuccessMessage(payload: ConfirmValidCrede
   if (payload.status === "account_lifecycle_blocked") return "Account cannot be updated.";
   if (payload.status === "update_failed") return "Try again later.";
   return "Credentials confirmed. Recheck readiness or assign now.";
-}
-
-export function assignNowSuccessMessage(payload: AssignNowResponse) {
-  return payload.message || (
-    payload.status === "already_assigned"
-      ? "Account already has a valid assignment window."
-      : payload.status === "capacity_unavailable"
-        ? "No phone is available right now."
-        : payload.status === "assignment_repaired"
-          ? "Assignment window repaired for now."
-          : payload.status === "assigned_now"
-            ? "Assignment created for now."
-            : "Assign now could not complete."
-  );
 }
 
 const baseActiveAccountTools: AccountTool[] = [
@@ -521,9 +577,11 @@ function buildActiveAccountTools(
   const credentialStatus = `${accountConnection.credentialsStatus ?? ""}`.trim().toLowerCase();
   const loginStatus = `${accountConnection.loginStatus ?? ""}`.trim().toLowerCase();
   const provisioningStatus = `${accountConnection.provisioningStatus ?? ""}`.trim().toLowerCase();
+  const credentialsSavedPendingVerification =
+    credentialStatus === "saved_pending_verification" ||
+    ((credentialStatus === "active" || credentialStatus === "configured") && accountConnection.reauthRequired === true);
   const connectionMissingFromProjection =
-    (credentialStatus === "active" || credentialStatus === "configured") &&
-    accountConnection.reauthRequired !== true &&
+    (credentialsSavedPendingVerification || credentialStatus === "active" || credentialStatus === "configured") &&
     (loginStatus !== "connected" || provisioningStatus !== "ready");
   const showConnect = shouldShowConnect(eligibility) || connectionMissingFromProjection;
   const connectButtonState = buildConnectButtonDisabledState({
@@ -1441,11 +1499,11 @@ export default function InstagramDashboardButtons({
   const [targetsOpen, setTargetsOpen] = useState(false);
   const [liveViewOpen, setLiveViewOpen] = useState(false);
   const [liveViewSession, setLiveViewSession] = useState<LiveViewSessionSafe | null>(null);
-  const [runControlHealth, setRunControlHealth] = useState<RunControlHealth | null>(null);
   const [runEligibility, setRunEligibility] = useState<RunEligibilityProjection | null>(null);
   const [runEligibilityLoading, setRunEligibilityLoading] = useState(true);
-  const [hasHydratedActionButtons, setHasHydratedActionButtons] = useState(false);
   const [runEligibilityError, setRunEligibilityError] = useState("");
+  const [progressModal, setProgressModal] = useState<ProgressModalState | null>(null);
+  const [hasHydratedActionButtons, setHasHydratedActionButtons] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
   const [isConfirmingCredentials, setIsConfirmingCredentials] = useState(false);
@@ -1503,6 +1561,44 @@ export default function InstagramDashboardButtons({
     };
   }, [accountId, liveViewOpen]);
 
+  useEffect(() => {
+    if (!progressModal) return undefined;
+    let cancelled = false;
+
+    async function pollRunProgress() {
+      try {
+        const params = new URLSearchParams({ account_id: accountId });
+        if (progressModal?.requestId) params.set("request_id", progressModal.requestId);
+        const snapshot = await readApiResponse<RunProgressSnapshot>(
+          await fetch(`/api/instagram-dashboard/runs/progress?${params.toString()}`, {
+            headers: { Accept: "application/json" },
+          }),
+          "Could not load run progress.",
+        );
+        if (!cancelled) {
+          setProgressModal((current) => current ? { ...current, requestId: snapshot.request_id ?? current.requestId, snapshot } : current);
+        }
+      } catch (progressError) {
+        if (!cancelled) {
+          setProgressModal((current) => current ? {
+            ...current,
+            message: progressError instanceof Error ? progressError.message : "Could not load run progress.",
+          } : current);
+        }
+      }
+    }
+
+    void pollRunProgress();
+    const interval = window.setInterval(() => {
+      void pollRunProgress();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [accountId, progressModal?.operation, progressModal?.requestId]);
+
   async function refreshRunEligibility(options: { cancelled?: () => boolean; loading?: boolean } = {}) {
     if (options.loading !== false) setRunEligibilityLoading(true);
     setRunEligibilityError("");
@@ -1534,35 +1630,6 @@ export default function InstagramDashboardButtons({
       cancelled = true;
     };
   }, [accountId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRunControlHealth() {
-      try {
-        const payload = await readApiResponse<RunControlHealth>(
-          await fetch("/api/instagram-dashboard/runs/health", { headers: { Accept: "application/json" } }),
-          "Could not load run control health."
-        );
-        if (!cancelled) setRunControlHealth(payload);
-      } catch (healthError) {
-        if (!cancelled) {
-          setRunControlHealth({
-            healthy: false,
-            playEnabled: false,
-            reason: healthError instanceof Error && /auth/i.test(healthError.message)
-              ? "admin_session_required"
-              : "dispatcher_unhealthy",
-          });
-        }
-      }
-    }
-
-    void loadRunControlHealth();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   function requestConfirmation(confirmationConfig: Confirmation) {
     setConfirmation(confirmationConfig);
@@ -2193,6 +2260,12 @@ export default function InstagramDashboardButtons({
         "Could not start the run."
       );
       setSuccess(runStartSuccessMessage(payload));
+      setProgressModal({
+        operation: "run",
+        requestId: payload.request_id ?? null,
+        snapshot: null,
+        message: payload.message || "Manual run request queued.",
+      });
       setRunEligibility({
         ok_to_start: false,
         reason: "already_requested",
@@ -2303,6 +2376,14 @@ export default function InstagramDashboardButtons({
         setError(payload.message || "Connexion indisponible. Réessayez plus tard.");
       } else {
         setSuccess(connectNowSuccessMessage(payload));
+        if (payload.request_queued || payload.status === "connecting" || payload.status === "connected") {
+          setProgressModal({
+            operation: "connect",
+            requestId: null,
+            snapshot: null,
+            message: payload.message || "Connect request queued.",
+          });
+        }
       }
       window.dispatchEvent(new CustomEvent(EMAIL_VERIFICATION_REFRESH_EVENT));
       await refreshRunEligibility({ loading: true });
@@ -2612,6 +2693,15 @@ export default function InstagramDashboardButtons({
         />
       ) : null}
 
+      {progressModal ? (
+        <RunProgressModal
+          accountId={accountId}
+          username={username}
+          state={progressModal}
+          onClose={() => setProgressModal(null)}
+        />
+      ) : null}
+
       {styleReady ? <style>{`
         .ig-action-inline {
           width: 100%;
@@ -2634,24 +2724,220 @@ export default function InstagramDashboardButtons({
           color: #FCA5A5;
         }
 
+        .ig-progress-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 130;
+          display: grid;
+          place-items: center;
+          padding: 24px;
+          background: rgba(2, 6, 23, 0.74);
+        }
+
+        .ig-progress-modal {
+          width: min(760px, 96vw);
+          max-height: 92vh;
+          overflow: auto;
+          display: grid;
+          gap: 18px;
+          border: 1px solid rgba(71, 85, 105, 0.75);
+          border-radius: 18px;
+          background: #0B1020;
+          color: #E5E7EB;
+          box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+          padding: 22px;
+        }
+
+        .ig-progress-header,
+        .ig-progress-log-head,
+        .ig-progress-actions {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .ig-progress-header span {
+          color: #64748B;
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: .06em;
+          text-transform: uppercase;
+        }
+
+        .ig-progress-header h3,
+        .ig-progress-card h4,
+        .ig-progress-log h4 {
+          margin: 0;
+        }
+
+        .ig-progress-header h3 {
+          margin-top: 4px;
+          font-size: 22px;
+        }
+
+        .ig-progress-header p {
+          margin: 4px 0 0;
+          color: #94A3B8;
+          font-size: 13px;
+        }
+
+        .ig-progress-global {
+          border: 1px solid rgba(148, 163, 184, .4);
+          border-radius: 999px;
+          padding: 7px 12px;
+          color: #CBD5E1;
+          font-style: normal;
+          font-weight: 900;
+          white-space: nowrap;
+        }
+
+        .ig-progress-global.status-connected,
+        .ig-progress-global.status-done {
+          border-color: rgba(34,197,94,.45);
+          background: rgba(34,197,94,.12);
+          color: #86EFAC;
+        }
+
+        .ig-progress-global.status-running,
+        .ig-progress-global.status-queued,
+        .ig-progress-global.status-claimed,
+        .ig-progress-global.status-loading {
+          border-color: rgba(96,165,250,.5);
+          background: rgba(37,99,235,.18);
+          color: #BFDBFE;
+        }
+
+        .ig-progress-global.status-action_required {
+          border-color: rgba(245,158,11,.52);
+          background: rgba(120,53,15,.25);
+          color: #FCD34D;
+        }
+
+        .ig-progress-global.status-failed {
+          border-color: rgba(248,113,113,.45);
+          background: rgba(127,29,29,.28);
+          color: #FCA5A5;
+        }
+
+        .ig-progress-card {
+          border: 1px solid #2D374A;
+          border-radius: 14px;
+          padding: 18px;
+        }
+
+        .ig-progress-steps {
+          display: grid;
+          gap: 14px;
+          margin-top: 16px;
+        }
+
+        .ig-progress-step {
+          display: grid;
+          grid-template-columns: 26px minmax(0, 1fr) auto;
+          gap: 14px;
+          align-items: start;
+        }
+
+        .ig-progress-step > span {
+          width: 20px;
+          height: 20px;
+          display: grid;
+          place-items: center;
+          margin-top: 2px;
+          border: 2px solid #64748B;
+          border-radius: 999px;
+          color: #94A3B8;
+          font-size: 12px;
+        }
+
+        .ig-progress-step.status-done > span { border-color: #22C55E; color: #22C55E; }
+        .ig-progress-step.status-running > span { border-color: #60A5FA; color: #BFDBFE; }
+        .ig-progress-step.status-failed > span { border-color: #F87171; color: #FCA5A5; }
+        .ig-progress-step.status-action_required > span { border-color: #F59E0B; color: #FCD34D; }
+        .ig-progress-step strong { display: block; font-size: 17px; }
+        .ig-progress-step small { display: block; margin-top: 4px; color: #778299; overflow-wrap: anywhere; }
+        .ig-progress-step em { color: #94A3B8; font-style: normal; white-space: nowrap; }
+        .ig-progress-step.status-running em { color: #BFDBFE; }
+        .ig-progress-step.status-failed em { color: #FCA5A5; }
+        .ig-progress-step.status-action_required em { color: #FCD34D; }
+
+        .ig-progress-action-required {
+          display: grid;
+          gap: 6px;
+          border: 1px solid rgba(245,158,11,.45);
+          border-radius: 12px;
+          background: rgba(120,53,15,.24);
+          color: #FDE68A;
+          padding: 12px 14px;
+        }
+
+        .ig-progress-action-required p,
+        .ig-progress-action-required small,
+        .ig-progress-message {
+          margin: 0;
+        }
+
+        .ig-progress-log {
+          display: grid;
+          gap: 10px;
+        }
+
+        .ig-progress-log-head button,
+        .ig-progress-actions button {
+          border: 1px solid rgba(148, 163, 184, .35);
+          border-radius: 10px;
+          background: rgba(15, 23, 42, .78);
+          color: #E5E7EB;
+          padding: 8px 12px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .ig-progress-log pre {
+          min-height: 150px;
+          max-height: 260px;
+          overflow: auto;
+          margin: 0;
+          border: 1px solid #2D374A;
+          border-radius: 12px;
+          background: #080F1D;
+          color: #F8FAFC;
+          padding: 14px 16px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 14px;
+          line-height: 1.45;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+
+        .ig-progress-message {
+          border: 1px solid rgba(148, 163, 184, .28);
+          border-radius: 12px;
+          background: rgba(15, 23, 42, .6);
+          color: #CBD5E1;
+          padding: 10px 12px;
+          font-size: 13px;
+        }
+
         .ig-settings-overlay {
           position: fixed;
           inset: 0;
           z-index: 120;
           display: flex;
           justify-content: flex-end;
-          background: rgba(0,0,0,0.55);
-          backdrop-filter: blur(3px);
+          background: rgba(2, 6, 23, 0.58);
+          backdrop-filter: blur(10px);
         }
 
         .ig-settings-panel {
           width: min(100%, 760px);
           height: 100vh;
           overflow-y: auto;
-          border-left: 1px solid rgba(255,255,255,0.07);
-          background: #161820;
-          box-shadow: -20px 0 60px rgba(0,0,0,0.50);
-          color: #f0f0ee;
+          border-left: 1px solid rgba(255,255,255,0.10);
+          background: #07111f;
+          box-shadow: -24px 0 80px rgba(0,0,0,0.36);
+          color: #f0f0ef;
           padding: 24px;
         }
 
@@ -2660,69 +2946,50 @@ export default function InstagramDashboardButtons({
           align-items: flex-start;
           justify-content: space-between;
           gap: 16px;
-          margin-bottom: 20px;
-          padding-bottom: 16px;
-          border-bottom: 1px solid rgba(255,255,255,0.07);
+          margin-bottom: 22px;
         }
 
         .ig-settings-header span,
         .ig-settings-field span {
           display: block;
-          color: #6558f5;
+          color: rgba(255,255,255,0.42);
           font-family: 'JetBrains Mono', monospace;
-          font-size: 9.5px;
+          font-size: 10px;
           letter-spacing: 0.1em;
           text-transform: uppercase;
-          font-weight: 500;
         }
 
         .ig-settings-header h2 {
-          color: #f0f0ee;
-          font-size: 17px;
-          font-weight: 700;
-          letter-spacing: -0.02em;
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: clamp(1.35rem, 4vw, 2rem);
           line-height: 1.1;
-          margin: 3px 0 0;
+          margin: 8px 0 0;
         }
 
         .ig-settings-icon-button {
-          width: 28px;
-          height: 28px;
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 6px;
-          background: #1e2028;
-          color: #8a8f98;
+          width: 36px;
+          height: 36px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 10px;
+          background: rgba(255,255,255,0.05);
+          color: rgba(255,255,255,0.72);
           cursor: pointer;
-          font-size: 16px;
+          font-size: 22px;
           line-height: 1;
-          display: grid;
-          place-items: center;
-          transition: border-color .13s ease, color .13s ease, background .13s ease;
-        }
-        .ig-settings-icon-button:hover {
-          border-color: rgba(248,113,113,0.28);
-          color: #f87171;
-          background: rgba(220,38,38,0.13);
         }
 
         .ig-live-view-panel {
           position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 520px;
-          height: 680px;
-          min-width: 380px;
-          min-height: 500px;
           z-index: 150;
           display: grid;
           grid-template-rows: auto 1fr;
           overflow: hidden;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #161820;
-          color: #f0f0ee;
-          box-shadow: 0 20px 60px rgba(0,0,0,.55);
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 18px;
+          background: #07111f;
+          color: #f0f0ef;
+          box-shadow: 0 28px 90px rgba(0,0,0,0.44);
           touch-action: none;
         }
 
@@ -2731,35 +2998,33 @@ export default function InstagramDashboardButtons({
           justify-content: space-between;
           gap: 14px;
           padding: 14px;
-          border-bottom: 1px solid rgba(255,255,255,.07);
-          background: #1e2028;
+          border-bottom: 1px solid rgba(255,255,255,0.09);
+          background: rgba(255,255,255,0.035);
           cursor: grab;
         }
 
         .ig-live-view-panel-header span {
           display: block;
-          color: #6558f5;
+          color: rgba(255,255,255,0.42);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .1em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
         }
 
         .ig-live-view-panel-header h3 {
-          margin: 4px 0 3px;
-          color: #f0f0ee;
-          font-size: .96rem;
-          font-weight: 700;
-          letter-spacing: -.01em;
+          margin: 5px 0 4px;
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 1rem;
           line-height: 1.15;
         }
 
         .ig-live-view-panel-header p {
           margin: 0;
-          color: #8a8f98;
+          color: rgba(255,255,255,0.55);
           font-size: 12px;
-          font-weight: 600;
+          font-weight: 800;
         }
 
         .ig-live-view-panel-actions {
@@ -2769,25 +3034,20 @@ export default function InstagramDashboardButtons({
         }
 
         .ig-live-view-panel-actions button {
-          min-height: 28px;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 5px;
-          background: #252832;
-          color: #8a8f98;
+          min-height: 30px;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 9px;
+          background: rgba(255,255,255,0.055);
+          color: rgba(255,255,255,0.78);
           cursor: pointer;
           font-size: 11px;
-          font-weight: 700;
+          font-weight: 900;
           padding: 0 9px;
-          transition: border-color .13s ease, color .13s ease;
-        }
-        .ig-live-view-panel-actions button:hover:not(:disabled) {
-          border-color: rgba(255,255,255,.18);
-          color: #f0f0ee;
         }
 
         .ig-live-view-panel-actions button:disabled {
           cursor: wait;
-          opacity: 0.45;
+          opacity: 0.58;
         }
 
         .ig-live-view-placeholder {
@@ -2798,30 +3058,30 @@ export default function InstagramDashboardButtons({
           padding: 22px;
           text-align: center;
           background:
-            radial-gradient(circle at top, rgba(52,211,153,.08), transparent 36%),
-            #161820;
+            radial-gradient(circle at top, rgba(34,197,94,0.14), transparent 36%),
+            linear-gradient(180deg, rgba(15,23,42,0.24), rgba(2,6,23,0.42));
         }
 
         .ig-live-view-placeholder strong {
-          color: #86efac;
+          color: #BBF7D0;
           font-size: 1rem;
         }
 
         .ig-live-view-placeholder small {
           max-width: 280px;
-          color: #8a8f98;
+          color: rgba(255,255,255,0.50);
           line-height: 1.45;
         }
 
         .ig-live-view-placeholder em {
-          border: 1px solid rgba(101,88,245,.28);
+          border: 1px solid rgba(245,158,11,0.24);
           border-radius: 999px;
-          background: rgba(101,88,245,.12);
-          color: #a594f9;
+          background: rgba(245,158,11,0.10);
+          color: #FCD34D;
           font-size: 11px;
           font-style: normal;
-          font-weight: 700;
-          padding: 5px 10px;
+          font-weight: 900;
+          padding: 7px 10px;
         }
 
         .ig-live-view-resize {
@@ -2830,8 +3090,8 @@ export default function InstagramDashboardButtons({
           bottom: 6px;
           width: 18px;
           height: 18px;
-          border-right: 2px solid rgba(255,255,255,.14);
-          border-bottom: 2px solid rgba(255,255,255,.14);
+          border-right: 2px solid rgba(255,255,255,0.30);
+          border-bottom: 2px solid rgba(255,255,255,0.30);
           cursor: nwse-resize;
         }
 
@@ -2848,26 +3108,21 @@ export default function InstagramDashboardButtons({
         }
 
         .ig-settings-tab {
-          min-height: 28px;
-          border: 1px solid rgba(255,255,255,0.07);
+          min-height: 32px;
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 999px;
-          background: transparent;
-          color: #8a8f98;
+          background: rgba(255,255,255,0.035);
+          color: rgba(255,255,255,0.58);
           cursor: pointer;
-          font-size: 11.5px;
-          font-weight: 600;
+          font-size: 12px;
+          font-weight: 800;
           padding: 0 11px;
-          transition: all .13s ease;
-        }
-        .ig-settings-tab:hover {
-          background: #1e2028;
-          color: #f0f0ee;
         }
 
         .ig-settings-tab-active {
-          border-color: rgba(101,88,245,0.35);
-          background: rgba(101,88,245,0.18);
-          color: #6558f5;
+          border-color: rgba(245,158,11,0.40);
+          background: rgba(245,158,11,0.14);
+          color: #FBBF24;
         }
 
         .ig-settings-grid {
@@ -3221,6 +3476,63 @@ export default function InstagramDashboardButtons({
           padding: 11px 12px;
         }
 
+        .ig-dm-template-vars {
+          grid-column: 1 / -1;
+          display: grid;
+          gap: 8px;
+          border: 1px solid rgba(251,191,36,0.12);
+          border-radius: 14px;
+          background: rgba(251,191,36,0.045);
+          padding: 10px 12px;
+        }
+
+        .ig-dm-template-vars-head {
+          color: rgba(251,191,36,0.82);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .ig-dm-template-var-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+        }
+
+        .ig-dm-template-var-chip {
+          border: 1px solid rgba(251,191,36,0.22);
+          border-radius: 999px;
+          background: rgba(251,191,36,0.10);
+          color: #FDE68A;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          font-weight: 900;
+          padding: 6px 9px;
+        }
+
+        .ig-dm-template-var-chip:disabled {
+          cursor: not-allowed;
+          opacity: 0.5;
+        }
+
+        .ig-dm-template-var-help {
+          display: grid;
+          gap: 3px;
+          color: rgba(255,255,255,0.52);
+          font-size: 11.5px;
+          line-height: 1.35;
+        }
+
+        .ig-dm-template-var-note {
+          color: rgba(255,255,255,0.42);
+          font-size: 11.5px;
+          line-height: 1.35;
+          margin: 0;
+        }
+
         .ig-dm-preview-head {
           display: flex;
           justify-content: space-between;
@@ -3280,10 +3592,10 @@ export default function InstagramDashboardButtons({
           justify-content: flex-end;
           gap: 10px;
           margin: 6px -24px -24px;
-          padding: 14px 24px 24px;
-          border-top: 1px solid rgba(255,255,255,0.07);
-          background: rgba(22,24,32,0.96);
-          backdrop-filter: blur(12px);
+          padding: 16px 24px 24px;
+          border-top: 1px solid rgba(255,255,255,0.08);
+          background: rgba(7,17,31,0.92);
+          backdrop-filter: blur(14px);
         }
 
         .ig-template-actions {
@@ -3304,24 +3616,15 @@ export default function InstagramDashboardButtons({
         }
 
         .ig-settings-primary {
-          border: 1px solid rgba(101,88,245,0.50);
-          background: #6558f5;
-          color: #fff;
-          transition: opacity .13s ease;
-        }
-        .ig-settings-primary:hover:not(:disabled) {
-          opacity: 0.88;
+          border: 1px solid rgba(245,158,11,0.50);
+          background: #F59E0B;
+          color: #160b02;
         }
 
         .ig-settings-secondary {
-          border: 1px solid rgba(255,255,255,0.07);
-          background: #1e2028;
-          color: #8a8f98;
-          transition: border-color .13s ease, color .13s ease;
-        }
-        .ig-settings-secondary:hover:not(:disabled) {
-          border-color: rgba(255,255,255,0.18);
-          color: #f0f0ee;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.045);
+          color: rgba(255,255,255,0.76);
         }
 
         .ig-settings-primary:disabled,
@@ -3337,31 +3640,30 @@ export default function InstagramDashboardButtons({
           display: grid;
           place-items: center;
           padding: 18px;
-          background: rgba(0,0,0,0.75);
-          backdrop-filter: blur(4px);
+          background: rgba(2,6,23,0.72);
+          backdrop-filter: blur(12px);
         }
 
         .ig-confirm-modal {
           width: min(100%, 440px);
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #161820;
-          box-shadow: 0 8px 32px -8px rgba(0,0,0,.6);
-          color: #f0f0ee;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 16px;
+          background: #07111f;
+          box-shadow: 0 24px 90px rgba(0,0,0,0.46);
+          color: #f0f0ef;
           padding: 20px;
         }
 
         .ig-confirm-modal h3 {
-          color: #f0f0ee;
-          font-size: 15px;
-          font-weight: 700;
-          letter-spacing: -.01em;
+          color: #f0f0ef;
+          font-family: 'Syne', sans-serif;
+          font-size: 1.22rem;
           line-height: 1.25;
           margin: 0 0 10px;
         }
 
         .ig-confirm-modal p {
-          color: #8a8f98;
+          color: rgba(255,255,255,0.62);
           font-size: 13px;
           line-height: 1.6;
           margin: 0;
@@ -3371,14 +3673,14 @@ export default function InstagramDashboardButtons({
         .ig-confirm-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
-          margin-top: 18px;
+          gap: 10px;
+          margin-top: 20px;
         }
 
         .ig-confirm-danger {
-          border-color: rgba(248,113,113,0.35);
-          background: rgba(220,38,38,0.16);
-          color: #f87171;
+          border-color: rgba(248,113,113,0.48);
+          background: #DC2626;
+          color: #fff7f7;
         }
 
         .ig-template-field {
@@ -3388,11 +3690,10 @@ export default function InstagramDashboardButtons({
         }
 
         .ig-template-field span {
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.42);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .1em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
         }
 
@@ -3400,19 +3701,13 @@ export default function InstagramDashboardButtons({
         .ig-template-field textarea,
         .ig-template-field select {
           width: 100%;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #1e2028;
-          color: #f0f0ee;
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 12px;
+          background: rgba(255,255,255,0.045);
+          color: #f0f0ef;
           font: inherit;
           outline: none;
-          padding: 11px 12px;
-          transition: border-color .13s ease;
-        }
-        .ig-template-field input:focus,
-        .ig-template-field textarea:focus,
-        .ig-template-field select:focus {
-          border-color: rgba(101,88,245,.35);
+          padding: 12px;
         }
 
         .ig-export-bar {
@@ -3430,40 +3725,34 @@ export default function InstagramDashboardButtons({
           align-items: center;
           justify-content: center;
           gap: 8px;
-          min-height: 34px;
-          border: 1px solid rgba(255,255,255,.07);
+          min-height: 38px;
+          border: 1px solid rgba(255,255,255,0.12);
           border-radius: 999px;
-          background: #1e2028;
-          color: #8a8f98;
+          background: rgba(255,255,255,0.055);
+          color: rgba(255,255,255,0.82);
           cursor: pointer;
-          font-size: 11.5px;
-          font-weight: 700;
-          padding: 0 13px;
-          transition: border-color .13s ease, color .13s ease, background .13s ease;
-        }
-        .ig-export-button:hover:not(:disabled) {
-          border-color: rgba(101,88,245,.35);
-          color: #6558f5;
-          background: rgba(101,88,245,.12);
+          font-size: 12px;
+          font-weight: 900;
+          padding: 0 14px;
         }
 
         .ig-export-button:disabled {
           cursor: wait;
-          opacity: 0.55;
+          opacity: 0.66;
         }
 
         .ig-export-menu {
           position: absolute;
-          top: calc(100% + 6px);
+          top: calc(100% + 8px);
           right: 0;
           z-index: 5;
           min-width: 180px;
           overflow: hidden;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #1e2028;
-          box-shadow: 0 8px 32px -8px rgba(0,0,0,.6);
-          padding: 4px;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 12px;
+          background: #0b1727;
+          box-shadow: 0 18px 46px rgba(0,0,0,0.35);
+          padding: 6px;
         }
 
         .ig-export-menu button {
@@ -3471,68 +3760,66 @@ export default function InstagramDashboardButtons({
           align-items: center;
           gap: 8px;
           width: 100%;
-          min-height: 32px;
+          min-height: 34px;
           border: 0;
-          border-radius: 5px;
+          border-radius: 8px;
           background: transparent;
-          color: #8a8f98;
+          color: rgba(255,255,255,0.74);
           cursor: pointer;
           font-size: 12px;
-          font-weight: 600;
+          font-weight: 800;
           padding: 0 9px;
           text-align: left;
-          transition: background .13s ease, color .13s ease;
         }
 
         .ig-export-menu button:hover {
-          background: rgba(101,88,245,.14);
-          color: #6558f5;
+          background: rgba(245,158,11,0.12);
+          color: #FBBF24;
         }
 
         .ig-export-menu button:disabled {
           cursor: wait;
-          opacity: 0.55;
+          opacity: 0.58;
         }
 
         .ig-panel-table-wrap {
           overflow-x: auto;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #161820;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(255,255,255,0.025);
         }
 
         .ig-python-live-grid {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 8px;
-          margin: 0 0 14px;
+          margin: 0 0 12px;
         }
 
         .ig-python-live-item {
-          min-height: 68px;
-          border: 1px solid rgba(255,255,255,.07);
+          min-height: 70px;
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 8px;
-          padding: 10px 12px;
-          background: #1e2028;
+          padding: 10px;
+          background: rgba(255,255,255,0.025);
         }
 
         .ig-python-live-item span {
           display: block;
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.42);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          font-weight: 500;
+          font-weight: 800;
           line-height: 1.35;
           text-transform: uppercase;
-          letter-spacing: .08em;
         }
 
         .ig-python-live-item strong {
           display: block;
-          margin-top: 7px;
-          color: #f0f0ee;
-          font-size: 13px;
-          font-weight: 700;
+          margin-top: 8px;
+          color: rgba(255,255,255,0.84);
+          font-size: 14px;
+          font-weight: 900;
           line-height: 1.3;
           overflow-wrap: anywhere;
         }
@@ -3545,61 +3832,52 @@ export default function InstagramDashboardButtons({
 
         .ig-panel-table th,
         .ig-panel-table td {
-          padding: 9px 10px;
-          border-bottom: 1px solid rgba(255,255,255,.04);
+          padding: 12px 10px;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
           text-align: left;
           vertical-align: top;
           font-size: 12px;
         }
 
         .ig-panel-table th {
-          color: #4a4f5c;
+          color: rgba(255,255,255,0.42);
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
-          font-weight: 500;
-          letter-spacing: .08em;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
-          border-bottom: 1px solid rgba(255,255,255,.07);
         }
 
         .ig-panel-table td {
-          color: #8a8f98;
-        }
-
-        .ig-panel-table tbody tr:last-child td {
-          border-bottom: none;
+          color: rgba(255,255,255,0.66);
         }
 
         .ig-source-badge {
           display: inline-flex;
           align-items: center;
-          min-height: 20px;
-          border: 1px solid rgba(255,255,255,.07);
+          min-height: 22px;
+          border: 1px solid rgba(251,191,36,0.24);
           border-radius: 999px;
-          padding: 2px 8px;
-          background: #252832;
-          color: #8a8f98;
+          padding: 3px 8px;
+          background: rgba(251,191,36,0.08);
+          color: #FDE68A;
           font-size: 11px;
-          font-weight: 600;
+          font-weight: 800;
           white-space: nowrap;
         }
 
         .ig-metadata-cell {
           max-width: 320px;
           font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
           line-height: 1.45;
-          color: #4a4f5c;
         }
 
         .ig-panel-empty {
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #161820;
-          color: #4a4f5c;
-          padding: 32px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: rgba(255,255,255,0.025);
+          color: rgba(255,255,255,0.54);
+          padding: 28px;
           text-align: center;
-          font-size: 13px;
         }
 
         @media (max-width: 680px) {
@@ -3685,6 +3963,98 @@ function ConfirmationModal({
           >
             {confirmLabel}
           </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function progressStatusLabel(status: ProgressStepStatus | RunProgressSnapshot["status"] | "loading") {
+  if (status === "done" || status === "connected") return "Done";
+  if (status === "running") return "Running...";
+  if (status === "queued") return "Queued";
+  if (status === "claimed") return "Claimed";
+  if (status === "failed") return "Failed";
+  if (status === "action_required") return "Action required";
+  if (status === "stopped") return "Stopped";
+  if (status === "skipped") return "Skipped";
+  if (status === "loading") return "Loading...";
+  return "Pending";
+}
+
+function copyableRunProgressLog(snapshot: RunProgressSnapshot | null, fallbackMessage: string) {
+  if (!snapshot?.process_log.length) return `${new Date().toLocaleTimeString()} · STATUS · ${fallbackMessage || "Waiting for backend progress."}`;
+  return snapshot.process_log
+    .map((entry) => `${entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "—"} · ${entry.phase || "EVENT"} · ${entry.message || "runtime event"}`)
+    .join("\n");
+}
+
+function RunProgressModal({
+  accountId,
+  username,
+  state,
+  onClose,
+}: {
+  accountId: string;
+  username: string;
+  state: ProgressModalState;
+  onClose: () => void;
+}) {
+  const snapshot = state.snapshot;
+  const globalStatus = snapshot?.status ?? "loading";
+  const steps = snapshot?.steps ?? [
+    { id: "loading", label: "Queue request", subtitle: state.message || "Waiting for backend request.", status: "running" as ProgressStepStatus },
+  ];
+  const logText = copyableRunProgressLog(snapshot, state.message);
+  const title = state.operation === "connect" ? "Connect Instagram" : "Manual run";
+
+  return (
+    <div className="ig-progress-overlay" role="presentation" onMouseDown={onClose}>
+      <section className="ig-progress-modal" role="dialog" aria-modal="true" aria-labelledby={`ig-progress-title-${accountId}`} onMouseDown={(event) => event.stopPropagation()}>
+        <header className="ig-progress-header">
+          <div>
+            <span>@{username} · Instagram</span>
+            <h3 id={`ig-progress-title-${accountId}`}>{title}</h3>
+            <p>{snapshot?.request_id ? `request ${snapshot.request_id.slice(0, 8)}` : "Waiting for request id"}{snapshot?.run_id ? ` · run ${snapshot.run_id.slice(0, 8)}` : ""}</p>
+          </div>
+          <em className={`ig-progress-global status-${globalStatus}`}>{progressStatusLabel(globalStatus)}</em>
+        </header>
+
+        <section className="ig-progress-card" aria-label="Progress">
+          <h4>Progress</h4>
+          <div className="ig-progress-steps">
+            {steps.map((step) => (
+              <div key={step.id} className={`ig-progress-step status-${step.status}`}>
+                <span aria-hidden="true">{step.status === "done" ? "✓" : step.status === "failed" ? "!" : step.status === "running" ? "…" : step.status === "action_required" ? "!" : "•"}</span>
+                <div>
+                  <strong>{step.label}</strong>
+                  <small>{step.subtitle}</small>
+                </div>
+                <em>{progressStatusLabel(step.status)}</em>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {snapshot?.action_required ? (
+          <section className="ig-progress-action-required">
+            <strong>{snapshot.action_required.title || "Action required"}</strong>
+            <p>{snapshot.action_required.message || "Instagram is asking for a code or confirmation."}</p>
+            <small>Dashboard Admin is read-only for local phone control. Use BotApp/Open Phone on the local Mac when manual action is needed.</small>
+          </section>
+        ) : null}
+
+        <section className="ig-progress-log">
+          <div className="ig-progress-log-head">
+            <h4>Process log</h4>
+            <button type="button" onClick={() => void navigator.clipboard?.writeText(logText)}>Copy log</button>
+          </div>
+          <pre>{logText}</pre>
+        </section>
+
+        {state.message || snapshot?.reason ? <p className="ig-progress-message">{snapshot?.reason || state.message}</p> : null}
+        <div className="ig-progress-actions">
+          <button type="button" onClick={onClose}>Close</button>
         </div>
       </section>
     </div>
@@ -4696,6 +5066,11 @@ function DmTargetPanel({
             value={settingString(settings, "welcome_dm_message")}
             onChange={(value) => updateSetting("welcome_dm_message", value)}
           />
+          <DmTemplateVariables
+            value={settingString(settings, "welcome_dm_message")}
+            disabled={!availability.welcomeServiceActive}
+            onInsert={(token) => updateSetting("welcome_dm_message", appendDmTemplateToken(settingString(settings, "welcome_dm_message"), token))}
+          />
           <DmInstagramPreview label="Welcome" value={settingString(settings, "welcome_dm_message")} />
         </div>
       </section>
@@ -4756,6 +5131,11 @@ function DmTargetPanel({
             value={settingString(settings, "cold_dm_message")}
             onChange={(value) => updateSetting("cold_dm_message", value)}
           />
+          <DmTemplateVariables
+            value={settingString(settings, "cold_dm_message")}
+            disabled={!availability.outreachServiceActive}
+            onInsert={(token) => updateSetting("cold_dm_message", appendDmTemplateToken(settingString(settings, "cold_dm_message"), token))}
+          />
           <DmInstagramPreview label="Outreach" value={settingString(settings, "cold_dm_message")} />
         </div>
       </section>
@@ -4763,18 +5143,88 @@ function DmTargetPanel({
   );
 }
 
+function appendDmTemplateToken(value: string, token: string) {
+  const current = normalizeDmTemplateMessage(value);
+  return current ? `${current} ${token}` : token;
+}
+
+function findUnsupportedDmTemplateVariables(value: string) {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const match of value.matchAll(DM_TEMPLATE_TOKEN_RE)) {
+    const name = String(match[1] || match[2] || "").trim();
+    if (!name || DM_TEMPLATE_SUPPORTED_VARIABLES.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    found.push(match[0]);
+  }
+  return found;
+}
+
+function renderDmTemplateSample(value: string) {
+  return value.replace(DM_TEMPLATE_TOKEN_RE, (match, a, b) => {
+    const name = String(a || b || "").trim();
+    return DM_TEMPLATE_SAMPLE_VALUES[name] ?? match;
+  });
+}
+
+function DmTemplateVariables({
+  value,
+  disabled,
+  onInsert,
+}: {
+  value: string;
+  disabled: boolean;
+  onInsert: (token: string) => void;
+}) {
+  const unsupported = findUnsupportedDmTemplateVariables(value);
+  return (
+    <div className="ig-dm-template-vars" aria-label="Available DM template variables">
+      <div className="ig-dm-template-vars-head">Variables disponibles</div>
+      <div className="ig-dm-template-var-chips">
+        {DM_TEMPLATE_VARIABLES.map((token) => (
+          <button
+            key={token}
+            type="button"
+            className="ig-dm-template-var-chip"
+            disabled={disabled}
+            title={`Insert ${token}`}
+            onClick={() => onInsert(token)}
+          >
+            {token}
+          </button>
+        ))}
+      </div>
+      <div className="ig-dm-template-var-help">
+        {DM_TEMPLATE_VARIABLE_HELP.map((line) => (
+          <span key={line}>{line}</span>
+        ))}
+      </div>
+      <p className="ig-dm-template-var-note">
+        Preview uses sample data: username justperfect.eu, name Marie, account j_automatise_pour_toi.
+        Backend falls back from name to username when no display name is available.
+      </p>
+      {unsupported.length ? (
+        <div className="ig-dm-preview-warning">Variable non supportée : {unsupported.join(", ")}</div>
+      ) : null}
+    </div>
+  );
+}
+
 function DmInstagramPreview({ label, value }: { label: "Welcome" | "Outreach"; value: string }) {
   const normalized = normalizeDmTemplateMessage(value);
+  const rendered = renderDmTemplateSample(normalized);
+  const unsupported = findUnsupportedDmTemplateVariables(normalized);
   const lengthError = dmTemplateLengthError(label, normalized);
   return (
     <div className="ig-dm-preview" aria-label={`${label} Instagram preview`}>
       <div className="ig-dm-preview-head">
-        <span>Instagram preview</span>
+        <span>Instagram preview · rendered sample</span>
         <span>{normalized.length}/{DM_TEMPLATE_MESSAGE_MAX_CHARS} chars · {dmTemplateLineCount(normalized)} lines</span>
       </div>
       <div className={normalized ? "ig-dm-preview-body" : "ig-dm-preview-body ig-dm-preview-empty"}>
-        {normalized || "Message preview will appear here."}
+        {rendered || "Message preview will appear here."}
       </div>
+      {unsupported.length ? <div className="ig-dm-preview-warning">Variable non supportée : {unsupported.join(", ")}</div> : null}
       {lengthError ? <div className="ig-dm-preview-warning">{lengthError}</div> : null}
     </div>
   );

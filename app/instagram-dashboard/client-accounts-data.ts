@@ -162,9 +162,9 @@ function sourceStatusFromManage(status: ManageSourceStatus): ClientAccountsSourc
 }
 
 function lifecycleStatus(account: ManageAccount): ClientAccountLifecycleStatus {
-  const status = normalize(account.adminStatus);
-  if (status === "archived" || account.archivedAt) return "archived";
-  if (status === "trashed" || status === "trash" || account.trashedAt) return "trashed";
+  const accountStatus = normalize(account.accountLifecycleStatus || "");
+  if (accountStatus === "archived" || account.archivedAt) return "archived";
+  if (accountStatus === "trashed" || accountStatus === "trash" || account.trashedAt) return "trashed";
   return "active";
 }
 

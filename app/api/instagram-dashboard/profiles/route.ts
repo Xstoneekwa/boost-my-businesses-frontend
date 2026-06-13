@@ -1,7 +1,7 @@
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
-import { verifyCompassRelayKey } from "../compass/relay-auth";
+import { relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -54,16 +54,27 @@ function dayStartIso() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
 }
 
+function socialActionKind(actionType: string) {
+  const action = actionType.toLowerCase();
+  if (action === "follow_completed") return "follows";
+  if (action === "unfollow_completed") return "unfollows";
+  if (action === "like_completed" || action === "post_like_completed") return "likes";
+  if (action === "comment_completed" || action === "post_comment_completed") return "comments";
+  if (action === "send_dm_sent" || action === "dm_sent" || action === "welcome_dm_sent") return "dms";
+  if (action === "story_viewed" || action === "stories_viewed" || action === "story_reaction_sent") return "stories";
+  return null;
+}
+
 function actionCounters(logRows: RecordValue[]) {
-  const counters = { follow: 0, unfollow: 0, like: 0, dm: 0 };
+  const counters = { follows: 0, unfollows: 0, likes: 0, comments: 0, dms: 0, stories: 0 };
   for (const row of logRows) {
-    const action = readString(row.action_type, readString(row.action, readString(row.event_type, ""))).toLowerCase();
-    if (action.includes("unfollow")) counters.unfollow += 1;
-    else if (action.includes("follow")) counters.follow += 1;
-    else if (action.includes("like")) counters.like += 1;
-    else if (action.includes("dm") || action.includes("message")) counters.dm += 1;
+    const kind = socialActionKind(readString(row.action_type, ""));
+    if (kind) counters[kind] += 1;
   }
-  return counters;
+  return {
+    ...counters,
+    interactionsTotal: counters.follows + counters.unfollows + counters.likes + counters.comments + counters.dms + counters.stories,
+  };
 }
 
 function fallbackPackageCaps(packageLabel: string) {
@@ -73,7 +84,13 @@ function fallbackPackageCaps(packageLabel: string) {
   return { followDay: 80, followSession: 80, unfollowDay: 80, unfollowSession: 80, likeDay: 100, dmDay: 0 };
 }
 
-function safeSettingsSummary(account: RecordValue, settings: RecordValue | undefined, packageSummary: RecordValue | undefined, logs: RecordValue[]) {
+function safeSettingsSummary(
+  account: RecordValue,
+  settings: RecordValue | undefined,
+  packageSummary: RecordValue | undefined,
+  logs: RecordValue[],
+  accountRow: RecordValue | undefined,
+) {
   const counters = actionCounters(logs);
   const packageLabel = readString(packageSummary?.commercial_package_label, readString(account.packageLabel, readString(account.package_label, "Growth")));
   const fallback = fallbackPackageCaps(packageLabel);
@@ -95,17 +112,34 @@ function safeSettingsSummary(account: RecordValue, settings: RecordValue | undef
   const effectiveUnfollowCap = Math.max(0, Math.min(packageUnfollowCap, readNumber(settings, ["manual_unfollow_day_cap"], packageUnfollowCap) ?? packageUnfollowCap));
   const likeCap = readNumber(settings, ["total_likes_limit", "like_per_day"], fallback.likeDay);
   const dmCap = readNumber(settings, ["max_dm_per_run", "dm_cap", "welcome_day_cap"], null);
+  const capsToday = {
+    follows: effectiveFollowCap,
+    unfollows: effectiveUnfollowCap,
+    likes: likeCap,
+    comments: 0,
+    dms: dmCap,
+    stories: null,
+  };
   return {
-    timeslotStart: readString(settings?.timeslot_start, ""),
-    timeslotEnd: readString(settings?.timeslot_end, ""),
     timezone: readString(settings?.timezone, ""),
     currentRunStatus: readString(settings?.current_run_status, ""),
+    countersToday: counters,
+    capsToday,
+    followerDelta3d: {
+      value: null,
+      currentFollowers: readNumber(accountRow, ["followers_count"], null),
+      previousFollowers: null,
+      from: null,
+      to: new Date().toISOString(),
+      source: "pending_account_follower_snapshots",
+      freshness: "no_snapshot_table",
+    },
     quotas: {
-      follow: { used: counters.follow, max: effectiveFollowCap },
-      unfollow: { used: counters.unfollow, max: effectiveUnfollowCap },
-      like: { used: counters.like, max: likeCap },
-      comment: { used: 0, max: 0 },
-      dm: { used: counters.dm, max: dmCap },
+      follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs" },
+      unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs" },
+      like: { used: counters.likes, max: likeCap, source: "ig_action_logs" },
+      comment: { used: counters.comments, max: 0, source: "ig_action_logs" },
+      dm: { used: counters.dms, max: dmCap, source: "ig_action_logs" },
     },
     capSummary: {
       packageLabel,
@@ -149,10 +183,11 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, accountResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
-      supabase.from("ig_action_logs").select("account_id,action_type,action,event_type,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
+      supabase.from("ig_action_logs").select("account_id,action_type,status,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
+      supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -166,9 +201,18 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     const packageByAccount = new Map(
       ((packageResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
     );
+    const accountById = new Map(
+      ((accountResult.data ?? []) as RecordValue[]).map((row) => [readString(row.id, ""), row]),
+    );
     return accounts.map((account) => {
       const id = accountId(account);
-      const runtimeSummary = safeSettingsSummary(account, settingsByAccount.get(id), packageByAccount.get(id), logsByAccount.get(id) ?? []);
+      const runtimeSummary = safeSettingsSummary(
+        account,
+        settingsByAccount.get(id),
+        packageByAccount.get(id),
+        logsByAccount.get(id) ?? [],
+        accountById.get(id),
+      );
       return {
         ...account,
         ...runtimeSummary,
@@ -182,8 +226,8 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
-  if (!relayAuth.ok && relayAuth.reason === "relay_auth_invalid") {
-    return jsonError("Profiles relay authentication failed.", 403, { reason: relayAuth.reason });
+  if (!relayAuth.ok) {
+    return jsonError("Profiles relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
   }
   return requireInstagramAdmin();
 }

@@ -1,6 +1,6 @@
 export const FOLLOW_SOURCE_ROTATION_DEFAULTS = {
-  max_follows_per_target_per_run: 2,
-  max_targets_per_run: 3,
+  max_follows_per_target_per_run: 27,
+  max_targets_per_run: 4,
 } as const;
 
 export const FOLLOW_SOURCE_ROTATION_BOUNDS = {
@@ -15,6 +15,18 @@ export type FollowSourceRotationSummary = {
   max_targets_per_run: number;
   source: string;
 };
+
+export function followSourceRotationDefaultsForPackage(packageLabel: string | null | undefined) {
+  const normalized = (packageLabel ?? "").trim().toLowerCase();
+  const maxFollows =
+    normalized.includes("premium") || normalized.includes("pro")
+      ? 30
+      : FOLLOW_SOURCE_ROTATION_DEFAULTS.max_follows_per_target_per_run;
+  return {
+    max_follows_per_target_per_run: maxFollows,
+    max_targets_per_run: FOLLOW_SOURCE_ROTATION_DEFAULTS.max_targets_per_run,
+  };
+}
 
 export function validateFollowSourceRotationInteger(
   value: unknown,
