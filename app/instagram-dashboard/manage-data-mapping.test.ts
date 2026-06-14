@@ -58,3 +58,9 @@ test("Admin Manage renders separate Active, Archives, and Trash buckets", () => 
   assert.match(pageSource, /accounts: data\.trashedAccounts/);
   assert.match(pageSource, /mode=\{tab\.id === "archives" \? "archived" : tab\.id === "trash" \? "trashed" : "active"\}/);
 });
+
+test("Manage does not treat credential verification actions as social blocking", () => {
+  assert.match(manageSource, /isCredentialVerificationAction/);
+  assert.match(manageSource, /blocking_campaign"\], false\) && !isCredentialVerificationAction/);
+  assert.match(manageSource, /blockingCampaign: hasFreshActionCounts \? actionCounts\.blocking > 0 : account\.blockingCampaign/);
+});

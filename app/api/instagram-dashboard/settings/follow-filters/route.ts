@@ -9,7 +9,7 @@ import {
   readJsonBody,
   readInteger,
   readString,
-  requireInstagramAdmin,
+  requireRelayOrAdmin,
   validateAccountId,
   type SupabaseRecord,
 } from "../../_utils";
@@ -144,7 +144,7 @@ async function recordAudit(
 
 export async function GET(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request, "Follow filters settings");
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const accountId = getAccountId(request);
@@ -162,7 +162,7 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request, "Follow filters settings");
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = await readJsonBody<FollowFiltersDomainPatchPayload>(request);

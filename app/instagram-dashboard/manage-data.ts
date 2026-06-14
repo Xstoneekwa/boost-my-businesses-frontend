@@ -676,8 +676,10 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         total: account.pendingActionsCount,
         blocking: account.blockingCampaign ? 1 : 0,
       };
+      const hasFreshActionCounts = actionCountsByAccount.has(account.accountId);
       return {
         ...account,
+        blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
         readinessProjection: buildAdminReadinessProjection({
           accountId: account.accountId,
           username: account.username,

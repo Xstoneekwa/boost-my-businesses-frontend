@@ -23,9 +23,9 @@ function redactRecord(record: SupabaseRecord) {
   );
 }
 
-function safeSettingsRecord(row: SupabaseRecord | null, accountId: string) {
-  if (!row) return { account_id: accountId, status: "not_available" };
-  return redactRecord(row);
+function safeSettingsRecord(row: SupabaseRecord | null, accountId: string, domain: SupabaseRecord = {}) {
+  const base = row ? redactRecord(row) : { account_id: accountId, status: "not_available" };
+  return { ...base, ...domain, account_id: accountId };
 }
 
 function safeTargetRow(row: SupabaseRecord, job: SupabaseRecord | null = null) {
@@ -118,10 +118,14 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [accountResult, settingsResult, filtersResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
+  const [accountResult, settingsResult, filtersResult, dmSettingsResult, dmTemplatesResult, unfollowSettingsResult, sourceSettingsResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
     supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
-    supabase.from("ig_account_filters").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
+    supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
+    supabase.from("ig_account_dm_settings").select("account_id,welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit,total_dm_per_day_limit").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
+    supabase.from("ig_dm_templates").select("id,template_type,body,active,is_default").eq("account_id", accountId).eq("active", true).limit(20),
+    supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_mode,unfollow_per_session_limit,unfollow_per_day_limit,unfollow_after_days,runtime_cap_mode,runtime_safety_cap").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
+    supabase.from("account_follow_source_settings").select("account_id,max_follows_per_target_per_run,max_targets_per_run").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_targets").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
     supabase.from("ct_target_verification_jobs").select("target_id,status,provider_status,attempt_count,next_attempt_at,last_error_code,updated_at").eq("account_id", accountId).limit(500),
     supabase.from("ig_runs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(50),
@@ -147,6 +151,43 @@ export async function getProfileDetailsData(accountId: string) {
 
   const activityItems = activityResult?.items?.filter((item) => item.accountId === accountId || item.username === account.username) ?? [];
   const targetJobs = new Map(((targetJobsResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row.target_id, ""), row]));
+  const templates = (dmTemplatesResult.data ?? []) as SupabaseRecord[];
+  const welcomeTemplate = templates.find((row) => readString(row.id, "") === readString(dmSettingsResult.data?.welcome_template_id, ""))
+    ?? templates.find((row) => readString(row.template_type, "") === "welcome" && row.is_default === true)
+    ?? templates.find((row) => readString(row.template_type, "") === "welcome")
+    ?? null;
+  const outreachTemplate = templates.find((row) => readString(row.id, "") === readString(dmSettingsResult.data?.default_outreach_template_id, ""))
+    ?? templates.find((row) => readString(row.template_type, "") === "outreach" && row.is_default === true)
+    ?? templates.find((row) => readString(row.template_type, "") === "outreach")
+    ?? null;
+  const domainSettings: SupabaseRecord = {
+    dm_settings_status: dmSettingsResult.error ? "backend_pending" : "connected",
+    welcome_enabled: dmSettingsResult.data?.welcome_enabled === true,
+    welcome_dm_enabled: dmSettingsResult.data?.welcome_enabled === true,
+    outreach_enabled: dmSettingsResult.data?.outreach_enabled === true,
+    cold_dm_enabled: dmSettingsResult.data?.outreach_enabled === true,
+    welcome_message: readString(welcomeTemplate?.body, ""),
+    welcome_dm_body: readString(welcomeTemplate?.body, ""),
+    outreach_message: readString(outreachTemplate?.body, ""),
+    cold_dm_body: readString(outreachTemplate?.body, ""),
+    welcome_session_cap: dmSettingsResult.data?.welcome_per_session_limit ?? 0,
+    welcome_day_cap: dmSettingsResult.data?.welcome_per_day_limit ?? 10,
+    outreach_session_cap: dmSettingsResult.data?.outreach_per_session_limit ?? 0,
+    outreach_day_cap: dmSettingsResult.data?.outreach_per_day_limit ?? 30,
+    welcome_template_status: welcomeTemplate ? "Configured" : "Missing",
+    outreach_template_status: outreachTemplate ? "Configured" : "Missing",
+    unfollow_settings_status: unfollowSettingsResult.error ? "backend_pending" : "connected",
+    unfollow_enabled: unfollowSettingsResult.data?.unfollow_enabled === true,
+    unfollow_mode: readString(unfollowSettingsResult.data?.unfollow_mode, "unfollow"),
+    unfollow_per_session_limit: unfollowSettingsResult.data?.unfollow_per_session_limit ?? null,
+    unfollow_per_day_limit: unfollowSettingsResult.data?.unfollow_per_day_limit ?? null,
+    unfollow_after_days: unfollowSettingsResult.data?.unfollow_after_days ?? 3,
+    runtime_cap_mode: readString(unfollowSettingsResult.data?.runtime_cap_mode, "prod_normal"),
+    runtime_safety_cap: unfollowSettingsResult.data?.runtime_safety_cap ?? null,
+    follow_source_settings_status: sourceSettingsResult.error ? "backend_pending" : sourceSettingsResult.data ? "connected" : "default",
+    max_follows_per_target_per_run: sourceSettingsResult.data?.max_follows_per_target_per_run ?? null,
+    max_targets_per_run: sourceSettingsResult.data?.max_targets_per_run ?? null,
+  };
   const lifecycleRow = accountResult.data ?? null;
   const lifecycleAccount = lifecycleRow
     ? {
@@ -194,9 +235,9 @@ export async function getProfileDetailsData(accountId: string) {
       error: targetsResult.error?.message ?? targetJobsResult.error?.message ?? null,
     },
     settings: {
-      data: safeSettingsRecord(settingsResult.data ?? null, accountId),
-      status: settingsResult.error ? "backend_pending" : settingsResult.data ? "connected" : "not_available",
-      error: settingsResult.error?.message ?? null,
+      data: safeSettingsRecord(settingsResult.data ?? null, accountId, domainSettings),
+      status: settingsResult.error || dmSettingsResult.error || unfollowSettingsResult.error || sourceSettingsResult.error ? "backend_pending" : settingsResult.data ? "connected" : "not_available",
+      error: settingsResult.error?.message ?? dmSettingsResult.error?.message ?? unfollowSettingsResult.error?.message ?? sourceSettingsResult.error?.message ?? null,
     },
     packageSummary: {
       data: packageResult.data ? redactRecord(packageResult.data) : { account_id: accountId, status: "not_available" },
@@ -204,7 +245,24 @@ export async function getProfileDetailsData(accountId: string) {
       error: packageResult.error?.message ?? null,
     },
     filters: {
-      data: filtersResult.data ? redactRecord(filtersResult.data) : { account_id: accountId, status: "not_available" },
+      data: filtersResult.data
+        ? {
+            account_id: accountId,
+            skip_private_profiles: filtersResult.data.dont_follow_private_accounts === true,
+            dont_follow_private_accounts: filtersResult.data.dont_follow_private_accounts === true,
+            min_followers: filtersResult.data.min_followers ?? null,
+            max_followers: filtersResult.data.max_followers ?? null,
+            min_posts: filtersResult.data.min_posts ?? null,
+          }
+        : {
+            account_id: accountId,
+            skip_private_profiles: true,
+            dont_follow_private_accounts: true,
+            min_followers: null,
+            max_followers: null,
+            min_posts: null,
+            status: "default",
+          },
       status: filtersResult.error ? "backend_pending" : filtersResult.data ? "connected" : "not_available",
       error: filtersResult.error?.message ?? null,
     },
@@ -226,9 +284,9 @@ export async function getProfileDetailsData(accountId: string) {
       stats: runsResult.error ? "backend_pending" : "ig_runs+ig_action_logs",
       logs: logsResult.error ? "backend_pending" : "ig_action_logs+activity_log",
       targets: targetsResult.error ? "backend_pending" : "ig_targets",
-      settings: settingsResult.error ? "backend_pending" : "ig_account_settings",
+      settings: settingsResult.error ? "backend_pending" : "ig_account_settings+domain_settings",
       packageSummary: packageResult.error ? "backend_pending" : "account_package_summary",
-      filters: filtersResult.error ? "backend_pending" : "ig_account_filters",
+      filters: filtersResult.error ? "backend_pending" : "ig_account_follow_settings",
       readiness: "readiness_now_dry_run",
     },
   };

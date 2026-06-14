@@ -75,11 +75,12 @@ export type RunStartBlockReason =
   | "account_cancelled"
   | "account_paused"
   | "account_needs_assistance"
-  | "support_required"
+  | "eligibility_query_failed"
   | "credentials_review_required"
   | "reauth_required"
   | "login_not_connected"
   | "login_verification_required"
+  | "identity_mismatch_review_required"
   | "welcome_template_missing"
   | "welcome_real_send_disabled"
   | "welcome_cap_unproven"
@@ -126,10 +127,10 @@ export type RunStartBlockReason =
 
 const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
 const CREDENTIAL_REVIEW_ACTIONS = new Set(["review_credentials", "submit_instagram_credentials"]);
-const CHECKPOINT_ACTIONS = new Set(["complete_two_factor", "review_checkpoint", "review_account_mismatch"]);
+const CHECKPOINT_ACTIONS = new Set(["complete_two_factor", "review_checkpoint", "resolve_checkpoint"]);
+const IDENTITY_MISMATCH_ACTIONS = new Set(["review_account_mismatch", "review_logged_in_account_mismatch"]);
 const CONNECTED_LOGIN_STATUSES = new Set(["connected"]);
 const READY_PROVISIONING_STATUSES = new Set(["ready"]);
-const LOGIN_ACTION_REQUIRED_STATUSES = new Set(["needs_2fa", "2fa_required", "checkpoint", "password_invalid", "bad_password", "login_failed", "failed", "mismatch", "logged_out"]);
 export const DEFAULT_WELCOME_DM_DAY_CAP = 10;
 export const DEFAULT_OUTREACH_DM_DAY_CAP = 30;
 export type RunStartTrigger = "auto" | "scheduler" | "manual" | "technical";
@@ -583,6 +584,8 @@ export function isGrowthRun(runType: string) {
 export function normalizeRunStartTrigger(value: unknown): RunStartTrigger {
   const normalized = readString(value, "").trim().toLowerCase();
   if (normalized === "manual") return "manual";
+  if (normalized === "manual_botapp") return "manual";
+  if (normalized === "botapp_manual_play") return "manual";
   if (normalized === "technical") return "technical";
   if (normalized === "scheduler") return "scheduler";
   return "auto";
@@ -1302,7 +1305,7 @@ export async function evaluateLoginChallengeRunEligibility(
     .order("credentials_version", { ascending: false })
     .limit(1);
   if (credentialError) {
-    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
   }
   const credential = ((credentialRows ?? []) as SupabaseRecord[])[0];
   if (!credential || readString(credential.status, "").toLowerCase() !== "active" || !readString(credential.secret_ref, "")) {
@@ -1318,7 +1321,7 @@ export async function evaluateLoginChallengeRunEligibility(
     .limit(1)
     .maybeSingle<SupabaseRecord>();
   if (assignmentError) {
-    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
   }
   const deviceId = readString(assignment?.device_id, "");
   const appInstanceId = readString(assignment?.app_instance_id, "");
@@ -1341,7 +1344,7 @@ export async function evaluateLoginChallengeRunEligibility(
       .maybeSingle<SupabaseRecord>(),
   ]);
   if (deviceError || appInstanceError) {
-    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
   }
   const deviceStatus = readString(device?.status, "").toLowerCase();
   if (!device || !["available", "active", "online", "occupied"].includes(deviceStatus)) {
@@ -1475,7 +1478,7 @@ export async function createLoginEmailCodeResumeRunRequest({
 
 export async function evaluateLoginConnectionStartGate(
   accountId: string,
-): Promise<Extract<RunStartBlockReason, "login_not_connected" | "login_verification_required" | "support_required"> | null> {
+): Promise<Extract<RunStartBlockReason, "login_not_connected" | "login_verification_required" | "identity_mismatch_review_required" | "credentials_review_required" | "eligibility_query_failed"> | null> {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase
     .from("client_instagram_accounts")
@@ -1484,14 +1487,20 @@ export async function evaluateLoginConnectionStartGate(
     .limit(1)
     .maybeSingle<SupabaseRecord>();
 
-  if (error) return "support_required";
+  if (error) return "eligibility_query_failed";
 
   const loginStatus = readString(data?.login_status, "unknown").toLowerCase();
   const provisioningStatus = readString(data?.provisioning_status, "unknown").toLowerCase();
   if (CONNECTED_LOGIN_STATUSES.has(loginStatus) && READY_PROVISIONING_STATUSES.has(provisioningStatus)) {
     return null;
   }
-  if (LOGIN_ACTION_REQUIRED_STATUSES.has(loginStatus)) {
+  if (loginStatus === "mismatch") {
+    return "identity_mismatch_review_required";
+  }
+  if (["failed", "login_failed", "password_invalid", "bad_password"].includes(loginStatus)) {
+    return "credentials_review_required";
+  }
+  if (["needs_2fa", "2fa_required", "checkpoint"].includes(loginStatus)) {
     return "login_verification_required";
   }
   return "login_not_connected";
@@ -1575,7 +1584,7 @@ export async function evaluateRunStartEligibility(
       .maybeSingle();
 
     if (dmSettingsError) {
-      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
     }
 
     const welcomeRealSendEnabled = runControlWelcomeRealSendEnabled();
@@ -1591,7 +1600,7 @@ export async function evaluateRunStartEligibility(
       .maybeSingle();
 
     if (dmCounterError) {
-      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
     }
 
     let welcomeTemplateReady = false;
@@ -1614,7 +1623,7 @@ export async function evaluateRunStartEligibility(
         outreachEntitlementActive = await accountHasOutreachEntitlement(accountId);
       }
     } catch {
-      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
     }
 
     const welcomePreflightCap = resolveWelcomePreflightCap({
@@ -1688,7 +1697,7 @@ export async function evaluateRunStartEligibility(
       try {
         eligibleFollowTargets = await countEligibleFollowTargets(accountId);
       } catch {
-        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
       }
       if (eligibleFollowTargets < 1) {
         if (welcomeEnabled) {
@@ -1705,7 +1714,7 @@ export async function evaluateRunStartEligibility(
         .limit(1)
         .maybeSingle<SupabaseRecord>();
       if (packageSummaryError) {
-        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
       }
       const followCaps = resolveFollowCapPreview(packageSummary);
       let followExecutableByCap = eligibleFollowTargets >= 1;
@@ -1715,7 +1724,7 @@ export async function evaluateRunStartEligibility(
         try {
           followsDoneToday = await countFollowsToday(accountId);
         } catch {
-          return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+          return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
         }
         const remaining = Math.max(0, followCaps.followDay - followsDoneToday);
         const effectiveFollowCap = Math.min(followCaps.followSession, remaining);
@@ -1735,7 +1744,7 @@ export async function evaluateRunStartEligibility(
         .limit(1)
         .maybeSingle<SupabaseRecord>();
       if (followFilterSettingsError) {
-        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
       }
       const followFilterBlock = validateFollowFilterSettingsRow(followFilterSettings);
       if (followFilterBlock) {
@@ -1751,7 +1760,7 @@ export async function evaluateRunStartEligibility(
         .maybeSingle();
 
       if (unfollowSettingsError) {
-        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
       }
 
       const unfollowDayLimit = readPositiveInteger(unfollowSettings?.unfollow_per_day_limit);
@@ -1772,7 +1781,7 @@ export async function evaluateRunStartEligibility(
         unfollowEntitlementActive = await accountHasFeatureEntitlement(accountId, "unfollow");
         unfollowsDoneToday = await countUnfollowsToday(accountId);
       } catch {
-        return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
       }
 
       const unfollowEnabled = unfollowSettings?.unfollow_enabled === true;
@@ -1836,7 +1845,7 @@ export async function evaluateRunStartEligibility(
     .limit(20);
 
   if (actionsError) {
-    return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+    return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
   }
 
   for (const action of (openActions ?? []) as SupabaseRecord[]) {
@@ -1845,7 +1854,10 @@ export async function evaluateRunStartEligibility(
       return { ok: false as const, reason: "credentials_review_required" as RunStartBlockReason, health };
     }
     if (CHECKPOINT_ACTIONS.has(actionType)) {
-      return { ok: false as const, reason: "support_required" as RunStartBlockReason, health };
+      return { ok: false as const, reason: "login_verification_required" as RunStartBlockReason, health };
+    }
+    if (IDENTITY_MISMATCH_ACTIONS.has(actionType)) {
+      return { ok: false as const, reason: "identity_mismatch_review_required" as RunStartBlockReason, health };
     }
   }
 
@@ -1945,8 +1957,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Paused accounts cannot be started until an admin reactivates them.";
     case "account_needs_assistance":
       return "This account needs assistance before it can be started.";
-    case "support_required":
-      return "Account requires support review before manual run.";
+    case "eligibility_query_failed":
+      return "Manual run eligibility could not be verified. Please retry after the dashboard/runtime connection is healthy.";
     case "credentials_review_required":
       return "Credentials review is required before manual run.";
     case "reauth_required":
@@ -1955,6 +1967,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual run is blocked until Instagram is connected on the assigned phone/app.";
     case "login_verification_required":
       return "Manual run is blocked because Instagram login needs verification first.";
+    case "identity_mismatch_review_required":
+      return "Manual run is blocked because the connected Instagram account does not match the expected account.";
     case "welcome_template_missing":
       return "Manual run is blocked because no active Welcome DM template is configured.";
     case "welcome_real_send_disabled":

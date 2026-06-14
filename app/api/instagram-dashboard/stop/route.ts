@@ -13,6 +13,14 @@ export const dynamic = "force-dynamic";
 
 const ACTIVE_STATUSES = [...ACTIVE_IG_RUN_STATUSES];
 
+function normalizeStopSource(value: unknown) {
+  return readString(value, "instagram_dashboard")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.:-]+/g, "_")
+    .slice(0, 80) || "instagram_dashboard";
+}
+
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
@@ -27,10 +35,12 @@ export async function POST(request: Request) {
     const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
-    const body = await readJsonBody<{ account_id?: unknown }>(request);
+    const body = await readJsonBody<{ account_id?: unknown; reason?: unknown; source?: unknown }>(request);
     const accountId = typeof body?.account_id === "string" ? body.account_id.trim() : getAccountId(request);
     const accountIdError = validateAccountId(accountId);
     if (accountIdError) return accountIdError;
+    const stopReason = readString(body?.reason, "manual_stop").slice(0, 160) || "manual_stop";
+    const sourceSurface = normalizeStopSource(body?.source);
 
     const supabase = createSupabaseClient();
     const canceledRequest = await getActiveRunRequest(accountId);
@@ -41,7 +51,7 @@ export async function POST(request: Request) {
     if (canceledRequest) {
       const { data: cancelData, error: cancelError } = await supabase.rpc("cancel_account_run_request", {
         p_account_id: accountId,
-        p_reason: "manual_stop",
+        p_reason: stopReason,
       });
 
       if (cancelError) {
@@ -62,6 +72,8 @@ export async function POST(request: Request) {
         {
           request_id: canceledRequestId,
           request_status: canceledRequestStatus,
+          reason: stopReason,
+          source_surface: sourceSurface,
         },
         linkedRunId,
       ).catch(() => undefined);
@@ -116,7 +128,7 @@ export async function POST(request: Request) {
     if (canceledRequestId && linkedRunId) {
       const { error: cancelRunningError } = await supabase.rpc("cancel_account_run_request", {
         p_request_id: canceledRequestId,
-        p_reason: "manual_stop_running",
+        p_reason: stopReason,
       });
       if (cancelRunningError) {
         return jsonError(sanitizeRunControlReason(cancelRunningError.message, "Could not cancel running request."), 500);
@@ -129,11 +141,15 @@ export async function POST(request: Request) {
       action_type: "run_stopped",
       status: "success",
       message: runId
-        ? "Run stop requested from dashboard."
+        ? "Run stop requested from runtime control."
         : canceledRequestId
-          ? "Queued run request canceled from dashboard."
+          ? "Queued run request canceled from runtime control."
           : "No active run found. Stop log added.",
       created_at: new Date().toISOString(),
+      metadata: {
+        reason: stopReason,
+        source_surface: sourceSurface,
+      },
     });
 
     if (logError) {

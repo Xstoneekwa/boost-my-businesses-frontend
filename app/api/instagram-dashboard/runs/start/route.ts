@@ -34,6 +34,7 @@ type StartBody = {
   account_id?: unknown;
   requested_run_type?: unknown;
   trigger?: unknown;
+  source?: unknown;
   manual_start?: unknown;
   manual_cap_override?: unknown;
   idempotency_key?: unknown;
@@ -41,6 +42,14 @@ type StartBody = {
 
 function shortRequestId(requestId: string) {
   return requestId ? requestId.slice(0, 8) : "";
+}
+
+function normalizeRunStartSource(value: unknown) {
+  return readString(value, "instagram_dashboard")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.:-]+/g, "_")
+    .slice(0, 80) || "instagram_dashboard";
 }
 
 export function runStartSuccessPayload({
@@ -81,6 +90,7 @@ export async function POST(request: Request) {
 
     const requestedRunType = readString(body?.requested_run_type, DEFAULT_ALLOWED_RUN_TYPES[0]).toLowerCase();
     const trigger = body?.manual_start === true ? "manual" : normalizeRunStartTrigger(body?.trigger);
+    const sourceSurface = normalizeRunStartSource(body?.source);
     const idempotencyKey = readString(body?.idempotency_key, "").slice(0, 200) || null;
     const eligibility = await evaluateRunStartEligibility(accountId, requestedRunType, {
       trigger,
@@ -108,7 +118,7 @@ export async function POST(request: Request) {
         "manual_run_blocked",
         "blocked",
         runStartBlockMessage(eligibility.reason),
-        { reason: eligibility.reason, requested_run_type: requestedRunType, trigger },
+        { reason: eligibility.reason, requested_run_type: requestedRunType, trigger, source_surface: sourceSurface },
       ).catch(() => undefined);
 
       const status =
@@ -129,14 +139,16 @@ export async function POST(request: Request) {
       p_account_id: accountId,
       p_requested_by: actorId,
       p_actor_type: "admin",
-      p_source_surface: "instagram_dashboard",
+      p_source_surface: sourceSurface,
       p_requested_run_type: eligibility.normalizedRunType,
       p_idempotency_key: effectiveIdempotencyKey,
       p_priority: 0,
       p_metadata_safe: {
-        requested_from: "instagram_dashboard",
+        requested_from: sourceSurface,
         requested_run_type: eligibility.normalizedRunType,
         trigger,
+        trigger_source: readString(body?.trigger, ""),
+        source_surface: sourceSurface,
         manual_start: trigger === "manual",
         follow_filters: "followFiltersSummary" in eligibility ? eligibility.followFiltersSummary : undefined,
       },
@@ -170,6 +182,7 @@ export async function POST(request: Request) {
         requested_run_type: eligibility.normalizedRunType,
         request_status: requestStatus,
         trigger,
+        source_surface: sourceSurface,
       },
     ).catch(() => undefined);
 

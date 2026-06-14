@@ -50,12 +50,58 @@ function requestIdMatches(row: SupabaseRecord, requestId: string) {
 
 function readLoginProvisionerSummary(logRows: SupabaseRecord[], requestId: string) {
   for (const row of logRows) {
-    if (readString(row.action_type, "") !== "manual_run_completed") continue;
+    const actionType = readString(row.action_type, "");
+    if (actionType !== "manual_run_completed" && actionType !== "manual_run_failed") continue;
     if (!requestIdMatches(row, requestId)) continue;
     const payload = readPayload(row);
     if (isRecord(payload.login_provisioner_summary)) return payload.login_provisioner_summary as SupabaseRecord;
   }
   return null;
+}
+
+function loginFailureClientReason(loginSummary: SupabaseRecord | null, fallback: string) {
+  if (!loginSummary) return fallback;
+  const finalOutcome = readString(loginSummary.final_outcome, "").toLowerCase();
+  const reason = readString(loginSummary.reason, readString(loginSummary.failure_reason, ""));
+  const credentialsError = readString(loginSummary.credentials_error_code, readString(loginSummary.credentials_invalid_reason, ""));
+  const packageMismatch = loginSummary.package_guard_mismatch === true;
+  const submitExecuted = loginSummary.submit_executed === true;
+  const screenType = readString(loginSummary.screen_type, "");
+
+  if (credentialsError) {
+    if (credentialsError.includes("not_found") || credentialsError.includes("missing")) {
+      return "Vault credentials could not be read.";
+    }
+    return "Vault credentials could not be read.";
+  }
+  if (packageMismatch && !submitExecuted) {
+    const actualPackage = readString(loginSummary.actual_foreground_package, "");
+    if (actualPackage.includes("credentialmanager")) {
+      return "Android autofill interrupted login before credentials were submitted.";
+    }
+    return "Login form detected but credentials were not submitted.";
+  }
+  if (!submitExecuted && (screenType === "login_form_empty" || finalOutcome === "wrong_app_package")) {
+    return "Login form detected but credentials were not submitted.";
+  }
+  if (reason.includes("username_field") || reason.includes("password_field") || reason.includes("login_button")) {
+    return "Username/password field not found on the login form.";
+  }
+  if (reason) return redactText(reason).slice(0, 180);
+  if (finalOutcome) return redactText(finalOutcome).slice(0, 180);
+  return fallback;
+}
+
+function dedupeProcessLogs<T extends { id?: string; timestamp?: string; phase?: string; message?: string }>(logs: T[]) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const item of logs) {
+    const key = readString(item.id, "") || `${readString(item.timestamp, "")}:${readString(item.phase, "")}:${readString(item.message, "")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped.sort((left, right) => readString(left.timestamp, "").localeCompare(readString(right.timestamp, "")));
 }
 
 function joinLandingProgressLogs(loginSummary: SupabaseRecord | null) {
@@ -160,6 +206,13 @@ function buildSteps(requestRow: SupabaseRecord | null, runRow: SupabaseRecord | 
   const joinLandingDetected = loginSummary?.join_instagram_landing_detected === true;
   const existingProfilePathUsed = loginSummary?.already_have_profile_tap_sent === true || loginSummary?.join_instagram_existing_profile_path_used === true;
   const loginFormAfterJoinDetected = loginSummary?.login_form_after_join_landing_detected === true;
+  const loginFormEmptyDetected = loginSummary?.login_form_empty_detected === true || readString(loginSummary?.screen_type, "") === "login_form_empty";
+  const credentialsSubmitted = loginSummary?.submit_executed === true;
+  const credentialsReadFailed = Boolean(readString(loginSummary?.credentials_error_code, readString(loginSummary?.credentials_invalid_reason, "")));
+  const packageInterrupted = loginSummary?.package_guard_mismatch === true && !credentialsSubmitted;
+  const fieldMissingFailure = /username_field|password_field|login_button/.test(
+    readString(loginSummary?.reason, readString(loginSummary?.failure_reason, "")),
+  );
   const localConnected = readString(loginSummary?.final_outcome, "").toLowerCase() === "connected";
   const overall = inferOverallStatus(requestRow, runRow, actionRows, logRows, accountRow);
   const hasRequest = Boolean(requestRow);
@@ -169,14 +222,36 @@ function buildSteps(requestRow: SupabaseRecord | null, runRow: SupabaseRecord | 
   const statusSyncMissing = overall === "status_sync_missing";
   const runLinkMissing = overall === "run_link_missing";
   const connected = overall === "connected";
+  const credentialsFailureDetail = credentialsReadFailed
+    ? "Vault credentials could not be read."
+    : packageInterrupted
+      ? "Android autofill interrupted login before credentials were submitted."
+      : fieldMissingFailure
+        ? "Username/password field not found on the login form."
+        : failed && loginFormEmptyDetected && !credentialsSubmitted
+          ? "Login form detected but credentials were not submitted."
+          : loginFormAfterJoinDetected || loginFormEmptyDetected
+            ? "Login form opened; credentials are handled through Vault/runtime boundaries."
+            : "Credentials are handled by the worker through Vault/runtime boundaries.";
+  const identityFailureDetail = actionRequired
+    ? "Manual phone action required before identity can be verified."
+    : statusSyncMissing
+      ? "Identity verified locally; backend status publish is missing."
+      : credentialsReadFailed
+        ? "Vault credentials could not be read."
+        : packageInterrupted || (failed && loginFormEmptyDetected && !credentialsSubmitted)
+          ? "Login form detected but credentials were not submitted."
+          : fieldMissingFailure
+            ? "Username/password field not found on the login form."
+            : "Expected account identity guard.";
 
   return [
     step("queue_request", "Queue request", hasRequest ? `request ${readString(requestRow?.id).slice(0, 8)} · ${requestStatus || "queued"}` : "Waiting for backend request.", hasRequest ? "done" : "pending", requestRow),
     step("dispatcher_claim", "Dispatcher claim", hasRun || ["claimed", "starting", "running", "completed"].includes(requestStatus) ? `dispatcher status ${requestStatus}` : "Waiting for dispatcher claim.", hasRun || ["claimed", "starting", "running", "completed"].includes(requestStatus) ? "done" : hasRequest ? "running" : "pending", requestRow),
     step("open_instagram", "Open Instagram", hasRun ? `run ${readString(runRow?.id).slice(0, 8)} · ${runStatus || "running"}` : appOpened ? "Instagram package opened by login worker." : "Worker has not linked a run yet.", hasRun ? (ACTIVE_RUN_STATUSES.has(runStatus) ? "running" : "done") : appOpened ? "done" : "pending", runRow),
     step("check_session", "Check current session", joinLandingDetected ? "Join Instagram landing detected." : actionRequired ? "Instagram requires manual confirmation." : runLinkMissing ? "Worker finished without run/status evidence." : "Worker checks the current Instagram session.", actionRequired ? "action_required" : connected || statusSyncMissing || localConnected || existingProfilePathUsed ? "done" : failed ? "failed" : hasRun ? "running" : "pending", runRow),
-    step("enter_credentials", "Enter credentials", loginFormAfterJoinDetected ? "Login form opened; credentials are handled through Vault/runtime boundaries." : "Credentials are handled by the worker through Vault/runtime boundaries.", connected || statusSyncMissing || localConnected ? "done" : actionRequired ? "skipped" : failed ? "failed" : loginFormAfterJoinDetected || hasRun ? "running" : "pending", runRow),
-    step("verify_identity", "Verify identity", actionRequired ? "Manual phone action required before identity can be verified." : statusSyncMissing ? "Identity verified locally; backend status publish is missing." : "Expected account identity guard.", actionRequired ? "action_required" : connected || statusSyncMissing || localConnected ? "done" : failed ? "failed" : hasRun ? "running" : "pending", runRow),
+    step("enter_credentials", "Enter credentials", credentialsFailureDetail, connected || statusSyncMissing || localConnected || credentialsSubmitted ? "done" : actionRequired ? "skipped" : failed && (credentialsReadFailed || packageInterrupted || fieldMissingFailure || loginFormEmptyDetected) ? "failed" : loginFormAfterJoinDetected || loginFormEmptyDetected || hasRun ? "running" : "pending", runRow),
+    step("verify_identity", "Verify identity", identityFailureDetail, actionRequired ? "action_required" : connected || statusSyncMissing || localConnected || credentialsSubmitted ? "done" : failed && !credentialsSubmitted ? "failed" : hasRun ? "running" : "pending", runRow),
     step("save_login_status", "Save login status", connected ? "Login status saved." : statusSyncMissing ? "Worker connected locally but did not publish account status." : actionRequired ? "Waiting for manual completion." : failed ? "Run failed before ready status." : "Waiting for terminal login status.", connected ? "done" : statusSyncMissing ? "failed" : actionRequired ? "action_required" : failed ? "failed" : "pending", runRow),
   ];
 }
@@ -271,7 +346,17 @@ export async function GET(request: Request) {
       ? "Worker connected locally but did not publish account status."
       : runLinkMissing
         ? "Worker finished but did not link a run or publish terminal login evidence."
-        : readString(activeAction?.safe_client_message, readString(requestRow?.error_message_safe, readString(runRow?.error_message, readString(requestRow?.status, overallStatus))));
+        : loginFailureClientReason(
+            readLoginProvisionerSummary(logRows, readString(requestRow?.id, "")),
+            readString(activeAction?.safe_client_message, readString(requestRow?.error_message_safe, readString(runRow?.error_message, readString(requestRow?.status, overallStatus)))),
+          );
+
+    const processLog = dedupeProcessLogs([
+      ...joinLandingProgressLogs(readLoginProvisionerSummary(logRows, readString(requestRow?.id, ""))),
+      ...(clientView
+        ? logRows.slice(0, 5).map((row, index) => safeLog(row, index))
+        : logRows.map((row, index) => safeLog(row, index))),
+    ]);
 
     return jsonOk({
       account_id: accountId,

@@ -43,10 +43,16 @@ test("manual-only schedule gate distinguishes auto from manual triggers", () => 
 
 test("start route accepts explicit manual trigger contract safely", () => {
   assert.match(startRouteSource, /trigger\?: unknown/);
+  assert.match(startRouteSource, /source\?: unknown/);
   assert.match(startRouteSource, /manual_start\?: unknown/);
   assert.match(startRouteSource, /normalizeRunStartTrigger\(body\?\.trigger\)/);
+  assert.match(runControlSource, /normalized === "manual_botapp"/);
+  assert.match(runControlSource, /normalized === "botapp_manual_play"/);
+  assert.match(startRouteSource, /normalizeRunStartSource/);
   assert.match(startRouteSource, /evaluateRunStartEligibility\(accountId, requestedRunType,\s*\{[\s\S]*trigger/);
+  assert.match(startRouteSource, /p_source_surface: sourceSurface/);
   assert.match(startRouteSource, /p_metadata_safe:[\s\S]*manual_start: trigger === "manual"/);
+  assert.match(startRouteSource, /source_surface: sourceSurface/);
   assert.doesNotMatch(startRouteSource, /password|secret_ref|service_role/i);
 });
 
