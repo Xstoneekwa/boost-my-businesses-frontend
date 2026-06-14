@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { reconcileSocialCounters, runTotalsCounters, interactionEventCounters } from "@/lib/instagram-dashboard/social-counters";
 import { getAccountId, jsonError, jsonOk, readDate, readNumber, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -102,13 +103,37 @@ function latestProcessedTarget(logs: SupabaseRecord[]) {
   return targetLog ? readString(targetLog.target_username, readString(targetLog.target, "")) : "";
 }
 
-function buildRow(run: SupabaseRecord | null, logs: SupabaseRecord[], index: number) {
-  const follow = countAction(logs, ["follow"], ["unfollow"]);
-  const unfollow = countAction(logs, ["unfollow"]);
-  const like = countAction(logs, ["like"]);
-  const comment = countAction(logs, ["comment"]);
-  const dm = countAction(logs, ["dm", "message"]);
-  const watch = countAction(logs, ["watch", "story"]);
+function buildRow(
+  run: SupabaseRecord | null,
+  logs: SupabaseRecord[],
+  interactionEvents: SupabaseRecord[],
+  index: number,
+) {
+  const followFromLogs = countAction(logs, ["follow"], ["unfollow"]);
+  const unfollowFromLogs = countAction(logs, ["unfollow"]);
+  const likeFromLogs = countAction(logs, ["like"]);
+  const commentFromLogs = countAction(logs, ["comment"]);
+  const dmFromLogs = countAction(logs, ["dm", "message"]);
+  const watchFromLogs = countAction(logs, ["watch", "story"]);
+  const reconciled = reconcileSocialCounters(
+    {
+      follows: followFromLogs,
+      unfollows: unfollowFromLogs,
+      likes: likeFromLogs,
+      comments: commentFromLogs,
+      dms: dmFromLogs,
+      stories: watchFromLogs,
+      interactionsTotal: 0,
+    },
+    run ? runTotalsCounters([run]) : runTotalsCounters([]),
+    interactionEventCounters(interactionEvents),
+  );
+  const follow = reconciled.follows;
+  const unfollow = reconciled.unfollows;
+  const like = reconciled.likes;
+  const comment = reconciled.comments;
+  const dm = reconciled.dms;
+  const watch = reconciled.stories;
   const performance = logs.find(hasPerformanceSummary);
   const runPerformanceSummary = isRecord(run?.performance_summary) ? run.performance_summary : {};
   const performanceSummary = hasPerformanceShape(runPerformanceSummary) || isRecord(run?.performance_summary)
@@ -135,7 +160,7 @@ function buildRow(run: SupabaseRecord | null, logs: SupabaseRecord[], index: num
     comment,
     dm,
     watch,
-    total_interactions: follow + unfollow + like + comment + dm + watch,
+    total_interactions: reconciled.interactionsTotal,
     total_ms: readNumber(performanceSummary.total_ms, 0),
     typing_command_ms: readNumber(performanceSummary.typing_command_ms, 0),
     row_detect_ms: readNumber(performanceSummary.row_detect_ms, 0),
@@ -160,26 +185,29 @@ export async function GET(request: Request) {
     if (accountIdError) return accountIdError;
 
     const supabase = createSupabaseClient();
-    const [runsResult, logsResult] = await Promise.all([
+    const [runsResult, logsResult, interactionEventsResult] = await Promise.all([
       supabase.from("ig_runs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(50),
       supabase.from("ig_action_logs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(2000),
+      supabase.from("ig_interaction_events").select("run_id,event_type,event_status,interaction_type,event_at,payload").eq("account_id", accountId).order("event_at", { ascending: false }).limit(5000),
     ]);
 
-    const firstError = runsResult.error ?? logsResult.error;
+    const firstError = runsResult.error ?? logsResult.error ?? interactionEventsResult.error;
     if (firstError) {
       return jsonError(firstError.message, 500);
     }
 
     const runs = (runsResult.data ?? []) as SupabaseRecord[];
     const logs = (logsResult.data ?? []) as SupabaseRecord[];
+    const interactionEvents = (interactionEventsResult.data ?? []) as SupabaseRecord[];
     const rows = runs.map((run, index) => {
       const runId = keyForRun(run);
       const runLogs = logs.filter((log) => runId && logRunId(log) === runId);
-      return buildRow(run, runLogs, index);
+      const runEvents = interactionEvents.filter((event) => runId && readString(event.run_id, "") === runId);
+      return buildRow(run, runLogs, runEvents, index);
     });
 
     if (!rows.length && logs.length) {
-      rows.push(buildRow(null, logs, 0));
+      rows.push(buildRow(null, logs, interactionEvents, 0));
     }
 
     return jsonOk(rows);

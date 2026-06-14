@@ -1,3 +1,11 @@
+import {
+  interactionEventCountersByDay,
+  reconcileStatsDaySocialCounters,
+  socialActionKindFromLog,
+  toStatsDaySocialCounters,
+  TOTAL_INTERACTIONS_DEFINITION,
+  STATS_TOTAL_INTERACTIONS_DEFINITION,
+} from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../../../_utils";
 import { verifyCompassRelayKey } from "../../../compass/relay-auth";
@@ -16,6 +24,15 @@ type DayCounters = {
   dm_count: number;
   watch_count: number;
   total_interactions: number;
+};
+
+type SocialCounters = {
+  follow_count: number;
+  unfollow_count: number;
+  like_count: number;
+  comment_count: number;
+  dm_count: number;
+  watch_count: number;
 };
 
 function isRecord(value: unknown): value is SupabaseRecord {
@@ -63,14 +80,14 @@ function latestIso(a: string | null, b: string | null) {
 }
 
 function socialActionKind(actionType: string) {
-  const action = actionType.toLowerCase();
-  if (action === "follow_completed") return "follow_count";
-  if (action === "unfollow_completed") return "unfollow_count";
-  if (action === "like_completed" || action === "post_like_completed") return "like_count";
-  if (action === "comment_completed" || action === "post_comment_completed") return "comment_count";
-  if (action === "send_dm_sent" || action === "dm_sent" || action === "welcome_dm_sent" || action === "outreach_dm_sent") return "dm_count";
-  if (action === "story_viewed" || action === "stories_viewed" || action === "story_reaction_sent" || action === "watch_completed") return "watch_count";
-  return null;
+  const kind = socialActionKindFromLog(actionType);
+  if (!kind) return null;
+  if (kind === "follows") return "follow_count";
+  if (kind === "unfollows") return "unfollow_count";
+  if (kind === "likes") return "like_count";
+  if (kind === "comments") return "comment_count";
+  if (kind === "dms") return "dm_count";
+  return "watch_count";
 }
 
 function shouldCountSocialLog(row: SupabaseRecord) {
@@ -92,6 +109,47 @@ function blankDay(date: string): DayCounters {
     dm_count: 0,
     watch_count: 0,
     total_interactions: 0,
+  };
+}
+
+function blankSocialCounters(): SocialCounters {
+  return {
+    follow_count: 0,
+    unfollow_count: 0,
+    like_count: 0,
+    comment_count: 0,
+    dm_count: 0,
+    watch_count: 0,
+  };
+}
+
+function mergeRunTotals(target: SocialCounters, row: SupabaseRecord) {
+  target.follow_count += readNumber(row.total_follow, 0);
+  target.like_count += readNumber(row.total_like, 0);
+  target.dm_count += readNumber(row.total_dm, 0);
+  target.watch_count += readNumber(row.total_story, 0);
+}
+
+function reconcileDayWithSources(
+  day: DayCounters,
+  runTotals: SocialCounters | undefined,
+  eventTotals: SocialCounters | undefined,
+) {
+  const reconciled = reconcileStatsDaySocialCounters(
+    {
+      follow_count: day.follow_count,
+      unfollow_count: day.unfollow_count,
+      like_count: day.like_count,
+      comment_count: day.comment_count,
+      dm_count: day.dm_count,
+      watch_count: day.watch_count,
+    },
+    runTotals ?? blankSocialCounters(),
+    eventTotals ?? blankSocialCounters(),
+  );
+  return {
+    ...day,
+    ...reconciled,
   };
 }
 
@@ -155,7 +213,7 @@ export async function GET(
     since.setUTCHours(0, 0, 0, 0);
 
     const supabase = createSupabaseClient();
-    const [logsResult, runsResult, settingsResult, packageResult] = await Promise.all([
+    const [logsResult, runsResult, interactionEventsResult, settingsResult, packageResult] = await Promise.all([
       supabase
         .from("ig_action_logs")
         .select("id,action_type,status,created_at")
@@ -171,6 +229,13 @@ export async function GET(
         .order("created_at", { ascending: false })
         .limit(500),
       supabase
+        .from("ig_interaction_events")
+        .select("event_type,event_status,interaction_type,event_at,payload")
+        .eq("account_id", normalizedAccountId)
+        .gte("event_at", since.toISOString())
+        .order("event_at", { ascending: false })
+        .limit(5000),
+      supabase
         .from("ig_account_settings")
         .select("total_likes_limit,max_dm_per_run")
         .eq("account_id", normalizedAccountId)
@@ -184,7 +249,7 @@ export async function GET(
         .maybeSingle<SupabaseRecord>(),
     ]);
 
-    const firstError = logsResult.error ?? runsResult.error ?? settingsResult.error ?? packageResult.error;
+    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? settingsResult.error ?? packageResult.error;
     if (firstError) return jsonError(firstError.message, 500);
 
     const byDay = new Map<string, DayCounters>();
@@ -206,22 +271,42 @@ export async function GET(
       if (kind) day[kind] += 1;
     }
 
+    const runTotalsByDay = new Map<string, SocialCounters>();
     for (const row of (runsResult.data ?? []) as SupabaseRecord[]) {
       const sessionAt = readString(row.started_at, readString(row.created_at, ""));
       const date = dayKey(sessionAt);
       if (!date) continue;
       const day = ensureDay(date);
       day.session_time = latestIso(day.session_time, sessionAt);
+      const totals = runTotalsByDay.get(date) ?? blankSocialCounters();
+      mergeRunTotals(totals, row);
+      runTotalsByDay.set(date, totals);
+    }
+
+    const interactionEventsByDay = interactionEventCountersByDay((interactionEventsResult.data ?? []) as SupabaseRecord[]);
+    const eventTotalsByDay = new Map<string, SocialCounters>();
+    for (const [date, counters] of interactionEventsByDay.entries()) {
+      eventTotalsByDay.set(date, toStatsDaySocialCounters(counters));
+    }
+    for (const date of new Set([...runTotalsByDay.keys(), ...eventTotalsByDay.keys()])) {
+      ensureDay(date);
     }
 
     const caps = effectiveCaps(settingsResult.data ?? null, packageResult.data ?? null);
     const rows = Array.from(byDay.values())
-      .map((day) => ({
-        ...day,
-        ...caps,
-        session_time: formatSessionTime(day.session_time),
-        total_interactions: day.follow_count + day.unfollow_count + day.like_count + day.comment_count + day.dm_count + day.watch_count,
-      }))
+      .map((day) => {
+        const reconciled = reconcileDayWithSources(
+          day,
+          runTotalsByDay.get(day.date),
+          eventTotalsByDay.get(day.date),
+        );
+        return {
+          ...reconciled,
+          ...caps,
+          session_time: formatSessionTime(day.session_time),
+          total_interactions: reconciled.follow_count + reconciled.unfollow_count + reconciled.like_count + reconciled.comment_count + reconciled.dm_count + reconciled.watch_count,
+        };
+      })
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, days);
 
@@ -230,13 +315,14 @@ export async function GET(
       days: rows,
       source: {
         actions: "ig_action_logs",
-        runs: "ig_runs",
+        runs: "ig_runs.total_* reconciliation for post-follow likes",
+        interaction_events: "ig_interaction_events post_like_success for live post-follow likes",
         caps: "account_package_summary+ig_account_settings",
         followers: "pending_account_follower_snapshots",
         followings: "pending_account_following_snapshots",
       },
       missing_sources: ["account_follower_snapshots", "account_following_snapshots"],
-      total_interactions_definition: "follow_count + unfollow_count + like_count + comment_count + dm_count + watch_count",
+      total_interactions_definition: STATS_TOTAL_INTERACTIONS_DEFINITION,
       thresholds: {
         low: "< 40",
         medium: "40-99",

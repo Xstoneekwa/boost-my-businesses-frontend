@@ -57,3 +57,11 @@ test("BotApp live data endpoints use existing dashboard loaders", () => {
     assert.match(source, pattern);
   }
 });
+
+test("BotApp profiles endpoint reconciles counters from ig_runs totals", () => {
+  const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
+  assert.match(source, /total_like/);
+  assert.match(source, /reconcileSocialCounters/);
+  assert.match(source, /ig_interaction_events/);
+  assert.match(source, /ig_action_logs\+ig_runs\+ig_interaction_events/);
+});

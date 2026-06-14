@@ -1,4 +1,11 @@
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
+import {
+  actionCountersFromLogs,
+  interactionEventCounters,
+  reconcileSocialCounters,
+  runTotalsCounters,
+  TOTAL_INTERACTIONS_DEFINITION,
+} from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
@@ -54,34 +61,37 @@ function dayStartIso() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
 }
 
-function socialActionKind(actionType: string) {
-  const action = actionType.toLowerCase();
-  if (action === "follow_completed") return "follows";
-  if (action === "unfollow_completed") return "unfollows";
-  if (action === "like_completed" || action === "post_like_completed") return "likes";
-  if (action === "comment_completed" || action === "post_comment_completed") return "comments";
-  if (action === "send_dm_sent" || action === "dm_sent" || action === "welcome_dm_sent") return "dms";
-  if (action === "story_viewed" || action === "stories_viewed" || action === "story_reaction_sent") return "stories";
-  return null;
-}
-
-function actionCounters(logRows: RecordValue[]) {
-  const counters = { follows: 0, unfollows: 0, likes: 0, comments: 0, dms: 0, stories: 0 };
-  for (const row of logRows) {
-    const kind = socialActionKind(readString(row.action_type, ""));
-    if (kind) counters[kind] += 1;
-  }
-  return {
-    ...counters,
-    interactionsTotal: counters.follows + counters.unfollows + counters.likes + counters.comments + counters.dms + counters.stories,
-  };
-}
-
 function fallbackPackageCaps(packageLabel: string) {
   const normalized = packageLabel.toLowerCase();
   if (normalized.includes("premium")) return { followDay: 180, followSession: 180, unfollowDay: 240, unfollowSession: 240, likeDay: 500, dmDay: 100 };
   if (normalized.includes("pro")) return { followDay: 120, followSession: 120, unfollowDay: 120, unfollowSession: 120, likeDay: 500, dmDay: 10 };
   return { followDay: 80, followSession: 80, unfollowDay: 80, unfollowSession: 80, likeDay: 100, dmDay: 0 };
+}
+
+function activeRunControlProjection(
+  activeRequest: RecordValue | undefined,
+  activeRun: RecordValue | undefined,
+) {
+  if (!activeRequest && !activeRun) return {};
+  const reason = activeRun ? "already_running" : "already_requested";
+  return {
+    runStatus: "running",
+    currentRunStatus: "running",
+    eligibility: "blocked_now",
+    eligibility_status: "blocked_now",
+    eligibilityReason: reason,
+    eligibility_reason: reason,
+    primary_block_reason: reason,
+    primaryBlockReason: reason,
+    activeRunRequestId: activeRequest ? readString(activeRequest.id, "") : null,
+    activeRunRequestStatus: activeRequest ? readString(activeRequest.status, "") : null,
+    activeRunId: activeRun
+      ? readString(activeRun.id, "")
+      : activeRequest
+        ? readString(activeRequest.run_id, "")
+        : null,
+    activeRunStatus: activeRun ? readString(activeRun.status, "") : null,
+  };
 }
 
 function safeSettingsSummary(
@@ -90,8 +100,14 @@ function safeSettingsSummary(
   packageSummary: RecordValue | undefined,
   logs: RecordValue[],
   accountRow: RecordValue | undefined,
+  runs: RecordValue[] = [],
+  interactionEvents: RecordValue[] = [],
 ) {
-  const counters = actionCounters(logs);
+  const counters = reconcileSocialCounters(
+    actionCountersFromLogs(logs),
+    runTotalsCounters(runs),
+    interactionEventCounters(interactionEvents),
+  );
   const packageLabel = readString(packageSummary?.commercial_package_label, readString(account.packageLabel, readString(account.package_label, "Growth")));
   const fallback = fallbackPackageCaps(packageLabel);
   const packageCaps = readRecord(packageSummary?.package_caps);
@@ -135,11 +151,11 @@ function safeSettingsSummary(
       freshness: "no_snapshot_table",
     },
     quotas: {
-      follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs" },
-      unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs" },
-      like: { used: counters.likes, max: likeCap, source: "ig_action_logs" },
-      comment: { used: counters.comments, max: 0, source: "ig_action_logs" },
-      dm: { used: counters.dms, max: dmCap, source: "ig_action_logs" },
+      follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
+      unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
+      like: { used: counters.likes, max: likeCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
+      comment: { used: counters.comments, max: 0, source: "ig_action_logs+ig_runs+ig_interaction_events" },
+      dm: { used: counters.dms, max: dmCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
     },
     capSummary: {
       packageLabel,
@@ -173,7 +189,12 @@ function safeSettingsSummary(
         source: manualFollowDayCap !== null ? "admin_override" : warmupApplied ? "warmup" : "package_default",
       },
     },
-    capsSource: packageSummary ? "account_package_summary+ig_account_settings+ig_action_logs" : settings ? "ig_account_settings+ig_action_logs" : "ig_action_logs",
+    capsSource: packageSummary
+      ? "account_package_summary+ig_account_settings+ig_action_logs+ig_runs+ig_interaction_events"
+      : settings
+        ? "ig_account_settings+ig_action_logs+ig_runs+ig_interaction_events"
+        : "ig_action_logs+ig_runs+ig_interaction_events",
+    totalInteractionsDefinition: TOTAL_INTERACTIONS_DEFINITION,
   };
 }
 
@@ -183,11 +204,15 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
       supabase.from("ig_action_logs").select("account_id,action_type,status,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
+      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "claimed", "running"]),
+      supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
+      supabase.from("ig_runs").select("account_id,total_follow,total_like,total_dm,total_story,created_at,started_at").in("account_id", ids).gte("created_at", since).limit(10000),
+      supabase.from("ig_interaction_events").select("account_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -204,6 +229,30 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     const accountById = new Map(
       ((accountResult.data ?? []) as RecordValue[]).map((row) => [readString(row.id, ""), row]),
     );
+    const activeRequestByAccount = new Map<string, RecordValue>();
+    for (const row of (requestsResult.data ?? []) as RecordValue[]) {
+      const id = readString(row.account_id, "");
+      if (!id || activeRequestByAccount.has(id)) continue;
+      activeRequestByAccount.set(id, row);
+    }
+    const activeRunByAccount = new Map<string, RecordValue>();
+    for (const row of (runsResult.data ?? []) as RecordValue[]) {
+      const id = readString(row.account_id, "");
+      if (!id || activeRunByAccount.has(id)) continue;
+      activeRunByAccount.set(id, row);
+    }
+    const sessionRunsByAccount = new Map<string, RecordValue[]>();
+    for (const row of (sessionRunsResult.data ?? []) as RecordValue[]) {
+      const id = readString(row.account_id, "");
+      if (!id) continue;
+      sessionRunsByAccount.set(id, [...(sessionRunsByAccount.get(id) ?? []), row]);
+    }
+    const interactionEventsByAccount = new Map<string, RecordValue[]>();
+    for (const row of (interactionEventsResult.data ?? []) as RecordValue[]) {
+      const id = readString(row.account_id, "");
+      if (!id) continue;
+      interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
+    }
     return accounts.map((account) => {
       const id = accountId(account);
       const runtimeSummary = safeSettingsSummary(
@@ -212,10 +261,13 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
         packageByAccount.get(id),
         logsByAccount.get(id) ?? [],
         accountById.get(id),
+        sessionRunsByAccount.get(id) ?? [],
+        interactionEventsByAccount.get(id) ?? [],
       );
       return {
         ...account,
         ...runtimeSummary,
+        ...activeRunControlProjection(activeRequestByAccount.get(id), activeRunByAccount.get(id)),
       };
     });
   } catch {

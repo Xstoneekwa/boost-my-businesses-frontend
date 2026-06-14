@@ -6,13 +6,8 @@ const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/[ac
 
 test("stats history uses real social action logs and excludes operational logs", () => {
   assert.match(source, /ig_action_logs/);
-  assert.match(source, /follow_completed/);
-  assert.match(source, /unfollow_completed/);
-  assert.match(source, /like_completed/);
-  assert.match(source, /comment_completed/);
-  assert.match(source, /welcome_dm_sent/);
-  assert.match(source, /outreach_dm_sent/);
-  assert.match(source, /story_viewed/);
+  assert.match(source, /socialActionKindFromLog/);
+  assert.match(source, /ig_interaction_events/);
   assert.doesNotMatch(source, /login_completed/);
   assert.doesNotMatch(source, /preflight_completed/);
 });
@@ -26,7 +21,15 @@ test("stats history exposes 30-day rows with pending snapshot sources", () => {
 });
 
 test("stats history keeps total interactions aligned with profile row definition", () => {
-  assert.match(source, /follow_count \+ unfollow_count \+ like_count \+ comment_count \+ dm_count \+ watch_count/);
+  assert.match(source, /STATS_TOTAL_INTERACTIONS_DEFINITION/);
   assert.match(source, /total_interactions/);
   assert.match(source, /account_package_summary\+ig_account_settings/);
+});
+
+test("stats history reconciles post-follow likes from ig_runs totals", () => {
+  assert.match(source, /total_like/);
+  assert.match(source, /reconcileDayWithSources/);
+  assert.match(source, /ig_runs\.total_\* reconciliation for post-follow likes/);
+  assert.match(source, /ig_interaction_events/);
+  assert.match(source, /post_like_success/);
 });
