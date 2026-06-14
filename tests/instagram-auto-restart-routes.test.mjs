@@ -79,6 +79,7 @@ test("BotApp profiles endpoint exposes current run counters and runtime indicato
   assert.match(source, /runScopedCounters/);
   assert.match(source, /runtimeIndicator/);
   assert.match(source, /partial_safe_stopped/);
+  assert.doesNotMatch(source, /ig_run_id/);
 });
 
 test("settings saves update ig_account_settings updated_at", () => {

@@ -121,7 +121,7 @@ function runScopedCounters(
       runId: null,
     };
   }
-  const scopedLogs = logs.filter((row) => readString(row.run_id, readString(row.ig_run_id, "")) === runId);
+  const scopedLogs = logs.filter((row) => readString(row.run_id, "") === runId);
   const scopedRuns = runs.filter((row) => readString(row.id, readString(row.run_id, "")) === runId);
   const scopedEvents = interactionEvents.filter((row) => readString(row.run_id, "") === runId);
   return {
@@ -155,7 +155,7 @@ function runtimeIndicatorProjection(
   const terminationClass = readString(performance?.session_termination_class, "");
   const followPhaseStatus = readString(performance?.follow_phase_status, "");
   const latestRunId = readString(latestRun.id, "");
-  const latestRunLogs = logs.filter((row) => readString(row.run_id, readString(row.ig_run_id, "")) === latestRunId);
+  const latestRunLogs = logs.filter((row) => readString(row.run_id, "") === latestRunId);
   const logReasons = latestRunLogs.map((row) => {
     const payload = readRecord(row.payload);
     return [
@@ -310,7 +310,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     const since = dayStartIso();
     const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
-      supabase.from("ig_action_logs").select("account_id,run_id,ig_run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
+      supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
