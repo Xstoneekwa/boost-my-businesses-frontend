@@ -94,6 +94,110 @@ function activeRunControlProjection(
   };
 }
 
+function activeRunId(activeRequest: RecordValue | undefined, activeRun: RecordValue | undefined) {
+  return activeRun
+    ? readString(activeRun.id, "")
+    : activeRequest
+      ? readString(activeRequest.run_id, "")
+      : "";
+}
+
+function runScopedCounters(
+  runId: string,
+  logs: RecordValue[],
+  runs: RecordValue[],
+  interactionEvents: RecordValue[],
+) {
+  if (!runId) {
+    return {
+      follows: 0,
+      unfollows: 0,
+      likes: 0,
+      comments: 0,
+      dms: 0,
+      stories: 0,
+      interactionsTotal: 0,
+      source: "pending_run_id",
+      runId: null,
+    };
+  }
+  const scopedLogs = logs.filter((row) => readString(row.run_id, readString(row.ig_run_id, "")) === runId);
+  const scopedRuns = runs.filter((row) => readString(row.id, readString(row.run_id, "")) === runId);
+  const scopedEvents = interactionEvents.filter((row) => readString(row.run_id, "") === runId);
+  return {
+    ...reconcileSocialCounters(
+      actionCountersFromLogs(scopedLogs),
+      runTotalsCounters(scopedRuns),
+      interactionEventCounters(scopedEvents),
+    ),
+    source: "ig_action_logs+ig_runs+ig_interaction_events",
+    runId,
+  };
+}
+
+function runtimeIndicatorProjection(
+  activeRequest: RecordValue | undefined,
+  activeRun: RecordValue | undefined,
+  latestRun: RecordValue | undefined,
+  logs: RecordValue[],
+) {
+  if (activeRequest || activeRun) {
+    return {
+      state: "active",
+      reason: activeRun ? "active_run" : "active_request",
+      lastRunId: latestRun ? readString(latestRun.id, "") : null,
+    };
+  }
+  if (!latestRun) return { state: "idle", reason: "no_run", lastRunId: null };
+  const status = readString(latestRun.status, "").toLowerCase();
+  const performance = readRecord(latestRun.performance_summary);
+  const exitCode = readJsonNumber(performance, "exit_code", null);
+  const terminationClass = readString(performance?.session_termination_class, "");
+  const followPhaseStatus = readString(performance?.follow_phase_status, "");
+  const latestRunId = readString(latestRun.id, "");
+  const latestRunLogs = logs.filter((row) => readString(row.run_id, readString(row.ig_run_id, "")) === latestRunId);
+  const logReasons = latestRunLogs.map((row) => {
+    const payload = readRecord(row.payload);
+    return [
+      readString(row.action_type, ""),
+      readString(row.status, ""),
+      readString(row.message, ""),
+      readString(payload?.post_follow_failure_reason, ""),
+      readString(payload?.failure_reason, ""),
+      readString(payload?.session_outcome, ""),
+    ].join(" ");
+  }).join(" ");
+  const combined = `${status} ${terminationClass} ${followPhaseStatus} ${logReasons}`.toLowerCase();
+  const abnormal = (
+    ["failed", "error", "aborted"].includes(status)
+    || (exitCode !== null && exitCode !== 0)
+    || combined.includes("partial_safe_stopped")
+    || combined.includes("unsafe")
+    || combined.includes("timeout")
+    || combined.includes("drift")
+    || combined.includes("exception")
+    || combined.includes("unknown")
+  );
+  if (abnormal) {
+    return {
+      state: "error",
+      reason: terminationClass || followPhaseStatus || logReasons || status || "abnormal_run",
+      lastRunId: readString(latestRun.id, ""),
+      lastRunStatus: status,
+      lastRunExitCode: exitCode,
+      lastRunFinishedAt: readString(latestRun.finished_at, ""),
+    };
+  }
+  return {
+    state: "idle",
+    reason: status === "completed" ? "last_run_normal" : "no_active_run",
+    lastRunId: readString(latestRun.id, ""),
+    lastRunStatus: status,
+    lastRunExitCode: exitCode,
+    lastRunFinishedAt: readString(latestRun.finished_at, ""),
+  };
+}
+
 function safeSettingsSummary(
   account: RecordValue,
   settings: RecordValue | undefined,
@@ -206,13 +310,13 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     const since = dayStartIso();
     const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
-      supabase.from("ig_action_logs").select("account_id,action_type,status,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
+      supabase.from("ig_action_logs").select("account_id,run_id,ig_run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
-      supabase.from("ig_runs").select("account_id,total_follow,total_like,total_dm,total_story,created_at,started_at").in("account_id", ids).gte("created_at", since).limit(10000),
-      supabase.from("ig_interaction_events").select("account_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
+      supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
+      supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -247,6 +351,12 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       if (!id) continue;
       sessionRunsByAccount.set(id, [...(sessionRunsByAccount.get(id) ?? []), row]);
     }
+    const latestRunByAccount = new Map<string, RecordValue>();
+    for (const row of (sessionRunsResult.data ?? []) as RecordValue[]) {
+      const id = readString(row.account_id, "");
+      if (!id || latestRunByAccount.has(id)) continue;
+      latestRunByAccount.set(id, row);
+    }
     const interactionEventsByAccount = new Map<string, RecordValue[]>();
     for (const row of (interactionEventsResult.data ?? []) as RecordValue[]) {
       const id = readString(row.account_id, "");
@@ -264,10 +374,20 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
         sessionRunsByAccount.get(id) ?? [],
         interactionEventsByAccount.get(id) ?? [],
       );
+      const activeRequest = activeRequestByAccount.get(id);
+      const activeRun = activeRunByAccount.get(id);
+      const runId = activeRunId(activeRequest, activeRun);
       return {
         ...account,
         ...runtimeSummary,
-        ...activeRunControlProjection(activeRequestByAccount.get(id), activeRunByAccount.get(id)),
+        currentRunCounters: runScopedCounters(
+          runId,
+          logsByAccount.get(id) ?? [],
+          sessionRunsByAccount.get(id) ?? [],
+          interactionEventsByAccount.get(id) ?? [],
+        ),
+        runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
+        ...activeRunControlProjection(activeRequest, activeRun),
       };
     });
   } catch {
