@@ -120,22 +120,6 @@ export function interactionEventCounters(eventRows: RecordValue[]): ProfileSocia
     const interactionType = readString(row.interaction_type, "").toLowerCase();
     if (eventType === "post_like_success" || interactionType === "like" || eventType.includes("post_like")) {
       counters.likes += likedCountFromInteractionEvent(row);
-      continue;
-    }
-    if (eventType === "follow_sent" || interactionType === "follow") {
-      counters.follows += 1;
-      continue;
-    }
-    if (interactionType === "unfollow" || eventType.includes("unfollow")) {
-      counters.unfollows += 1;
-      continue;
-    }
-    if (interactionType === "dm" || eventType.includes("dm")) {
-      counters.dms += 1;
-      continue;
-    }
-    if (interactionType === "story_view" || eventType.includes("story")) {
-      counters.stories += 1;
     }
   }
   return withInteractionsTotal(counters);
