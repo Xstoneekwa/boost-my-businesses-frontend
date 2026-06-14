@@ -209,7 +209,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_action_logs").select("account_id,action_type,status,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
-      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "claimed", "running"]),
+      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("account_id,total_follow,total_like,total_dm,total_story,created_at,started_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("ig_interaction_events").select("account_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),

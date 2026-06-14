@@ -65,3 +65,15 @@ test("BotApp profiles endpoint reconciles counters from ig_runs totals", () => {
   assert.match(source, /ig_interaction_events/);
   assert.match(source, /ig_action_logs\+ig_runs\+ig_interaction_events/);
 });
+
+test("BotApp profiles endpoint projects queued and starting run requests", () => {
+  const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
+  assert.match(source, /"queued"/);
+  assert.match(source, /"starting"/);
+  assert.match(source, /activeRunRequestStatus/);
+});
+
+test("settings saves update ig_account_settings updated_at", () => {
+  const source = readFileSync(new URL("../app/api/instagram-dashboard/settings/route.ts", import.meta.url), "utf8");
+  assert.match(source, /updated_at:\s*new Date\(\)\.toISOString\(\)/);
+});

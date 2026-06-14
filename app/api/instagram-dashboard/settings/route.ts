@@ -1040,7 +1040,10 @@ async function saveSettings(request: Request) {
     const warmupError = await saveWarmupSettings(supabase, settings);
     if (warmupError) return jsonError(warmupError, 400);
 
-    const persistable = persistableSettings(settings);
+    const persistable = {
+      ...persistableSettings(settings),
+      updated_at: new Date().toISOString(),
+    } as SettingsPayload & { updated_at: string };
     const { data, error } = await supabase
       .from("ig_account_settings")
       .update(persistable)
