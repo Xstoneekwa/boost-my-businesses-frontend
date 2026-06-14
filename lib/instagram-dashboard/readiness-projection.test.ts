@@ -137,7 +137,7 @@ test("active credentials with reauth_required return saved pending verification 
     provisioningStatus: "not_started",
     blockingActionsCount: 0,
     dashboardActionsCount: 1,
-    adminStatus: "support_required",
+    adminStatus: "active",
     onboardingStatus: "pending",
   }));
 
@@ -156,7 +156,7 @@ test("saved pending verification credential status is treated as saved credentia
     provisioningStatus: "not_started",
     blockingActionsCount: 0,
     dashboardActionsCount: 1,
-    adminStatus: "support_required",
+    adminStatus: "active",
     onboardingStatus: "pending",
   }));
 

@@ -18,7 +18,7 @@ import {
   readProductDefaultDayCap,
 } from "./dm/route";
 import { dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
-import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../_utils";
+import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireRelayOrAdmin, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -249,6 +249,11 @@ const runtimeProjectionKeys = [
   "effective_warmup_cap_today",
   "follow_day_remaining",
   "follow_limiting_reason",
+  "admin_lifecycle_status",
+  "login_status",
+  "provisioning_status",
+  "onboarding_status",
+  "current_runtime_mode",
   "warmup_enabled",
   "warmup_status",
   "warmup_day",
@@ -532,7 +537,7 @@ async function withUnfollowRuntimeStatus(
     return {
       ...settings,
       unfollow_any_runtime_state: "Configured but blocked by runtime gate",
-      unfollow_any_runtime_block_reason: "support_required",
+      unfollow_any_runtime_block_reason: "eligibility_query_failed",
     };
   }
 
@@ -955,7 +960,7 @@ function validateSettingsAccountId(accountId: string) {
 
 export async function GET(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request, "Settings");
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const accountId = getAccountId(request);
@@ -1000,7 +1005,7 @@ export async function GET(request: Request) {
 
 async function saveSettings(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request, "Settings");
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = await readJsonBody<Partial<SettingsPayload>>(request);
@@ -1023,7 +1028,15 @@ async function saveSettings(request: Request) {
 
     if (existingError) return migrationError(existingError.message);
 
-    const settings = withFollowManualAliases(preserveProtectedSettings(normalizeSettings(body, accountId), existing));
+    const baseSettings = existing
+      ? normalizeSettings(existing, accountId)
+      : normalizeSettings({ account_id: accountId } as SettingsRecord, accountId);
+    const settings = withFollowManualAliases(
+      preserveProtectedSettings(
+        normalizeSettings({ ...baseSettings, ...body, account_id: accountId } as SettingsRecord, accountId),
+        existing,
+      ),
+    );
     const warmupError = await saveWarmupSettings(supabase, settings);
     if (warmupError) return jsonError(warmupError, 400);
 

@@ -86,7 +86,7 @@ type AddProfileCredentialsInput = {
 
 const credentialsTimeoutMs = 9000;
 const activeAccountStatus = "active";
-const supportRequiredStatus = "support_required";
+const needsAssistanceStatus = "needs_assistance";
 const addProfileOperation = "add_profile";
 const addProfileSourceSurface = "admin_dashboard";
 const defaultWelcomeDmDayCap = 10;
@@ -381,11 +381,11 @@ async function markCredentialFailure(
   await Promise.all([
     supabase
       .from("ig_accounts")
-      .update({ status: supportRequiredStatus })
+      .update({ status: activeAccountStatus, admin_lifecycle_status: needsAssistanceStatus })
       .eq("id", accountId),
     supabase
       .from("ig_account_settings")
-      .update({ account_status: supportRequiredStatus, password: "" })
+      .update({ account_status: activeAccountStatus, password: "" })
       .eq("account_id", accountId),
   ]);
 }
@@ -436,7 +436,7 @@ async function markCredentialFailureWithSupportAction(
   try {
     await createCredentialSupportAction(supabase, accountId, reason, externalRequestId, actorId);
   } catch {
-    // Status is the safety boundary; support action creation is best-effort.
+    // The explicit admin lifecycle state is the safety boundary; dashboard action creation is best-effort.
   }
 }
 
@@ -483,7 +483,9 @@ async function loadRepairableAddProfileAccount(
     .maybeSingle<SupabaseRecord>();
 
   if (error || !account) return { kind: "new" as const };
-  if (readString(account.status, "") === activeAccountStatus) {
+  const adminLifecycleStatus = readString(account.admin_lifecycle_status, "").toLowerCase();
+  const accountStatus = readString(account.status, "").toLowerCase();
+  if (accountStatus === activeAccountStatus && adminLifecycleStatus !== needsAssistanceStatus) {
     return { kind: "duplicate_active" as const, account };
   }
 
@@ -497,7 +499,7 @@ async function loadRepairableAddProfileAccount(
     return { kind: "duplicate_assigned" as const, account };
   }
 
-  if (readString(account.status, "") !== supportRequiredStatus) {
+  if (adminLifecycleStatus !== needsAssistanceStatus) {
     return { kind: "duplicate_active" as const, account };
   }
 
@@ -522,7 +524,7 @@ async function finalizeActiveProfile(
   const [accountResult, settingsResult] = await Promise.all([
     supabase
       .from("ig_accounts")
-      .update({ status: activeAccountStatus })
+      .update({ status: activeAccountStatus, admin_lifecycle_status: activeAccountStatus })
       .eq("id", accountId),
     supabase
       .from("ig_account_settings")
@@ -967,11 +969,11 @@ export async function POST(request: Request) {
     if (dryRun) {
       return jsonOk({
         dry_run: true,
-        would_create: earlyRepairState.kind === "repair" ? "repair_existing_support_required_account" : "new_account",
+        would_create: earlyRepairState.kind === "repair" ? "repair_existing_needs_assistance_account" : "new_account",
         account: {
           account_id: earlyRepairState.kind === "repair" ? readString(earlyRepairState.account.id, "") : null,
           username: accountUsername,
-          status: supportRequiredStatus,
+          status: activeAccountStatus,
           credential_status: loginMethod === "credentials" ? "would_submit_write_only" : "not_submitted",
           assignment_status: "would_assign",
         },
@@ -1001,7 +1003,7 @@ export async function POST(request: Request) {
     const accountPayload = {
       username: accountUsername,
       display_name: displayName,
-      status: supportRequiredStatus,
+      status: activeAccountStatus,
       // ig_accounts.device_id FK still points at legacy ig_devices; phone placement uses assign_account_slot.
       device_id: null,
       device_name: deviceName,
@@ -1077,7 +1079,7 @@ export async function POST(request: Request) {
       device_udid: deviceUdid,
       email: readString(body.email, "").trim(),
       password: "",
-      account_status: supportRequiredStatus,
+      account_status: activeAccountStatus,
       cloned_app_mode: cloneMode !== "off",
       dry_run_enabled: true,
     };
@@ -1401,7 +1403,7 @@ export async function POST(request: Request) {
       });
       return jsonOk(
         safeCreateResponse(
-          { ...account, status: supportRequiredStatus },
+          { ...account, status: activeAccountStatus },
           credentials,
           {
             onboarding_schedule_assigned: true,

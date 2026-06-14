@@ -15,7 +15,7 @@ test("credential projection maps active reauth credentials to saved pending veri
   });
 
   assert.equal(status, "saved_pending_verification");
-  assert.equal(credentialStatusLabel(status), "credentials saved - login pending");
+  assert.equal(credentialStatusLabel(status), "credentials saved · login pending");
 });
 
 test("credential projection does not show missing when credentials are active", () => {

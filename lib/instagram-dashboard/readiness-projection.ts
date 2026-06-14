@@ -263,8 +263,6 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
 
   const hasCredentialsSaved = credentialsSaved(input);
   const loginVerificationPending = input.reauthRequired && hasCredentialsSaved;
-  const supportRequiredOnlyForLoginVerification =
-    loginVerificationPending && includesAny(`${normalizedAdmin} ${normalizedProvisioning}`, ["support_required"]);
 
   if (includesAny(`${normalizedAdmin} ${normalizedCustomer} ${normalizedSubscription}`, ["cancelled", "canceled", "trashed"])) {
     overall = "cancelled";
@@ -274,8 +272,9 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     reason = "account_paused";
   } else if (
     input.blockingActionsCount > 0 ||
-    includesAny(`${normalizedOnboarding}`, ["blocked", "support_required"]) ||
-    (!supportRequiredOnlyForLoginVerification && includesAny(`${normalizedAdmin} ${normalizedProvisioning}`, ["blocked", "support_required"]))
+    includesAny(`${normalizedOnboarding}`, ["blocked"]) ||
+    includesAny(`${normalizedAdmin}`, ["needs_assistance", "needs assistance"]) ||
+    includesAny(`${normalizedAdmin} ${normalizedProvisioning}`, ["blocked"])
   ) {
     overall = "blocked";
     reason = "blocking_action_or_status";

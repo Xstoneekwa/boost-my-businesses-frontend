@@ -675,7 +675,9 @@ Mutations:
 - Insert `ig_accounts`.
 - Insert `ig_account_settings`.
 - Insert `ig_account_filters`.
-- Update `ig_accounts.status = "support_required"` si credential ingestion echoue apres creation.
+- Si credential ingestion echoue apres creation : conserver `ig_accounts.status = "active"`,
+  poser `admin_lifecycle_status = "needs_assistance"` et creer une action
+  `review_credentials` bloquante.
 
 D donnees sensibles interdites:
 

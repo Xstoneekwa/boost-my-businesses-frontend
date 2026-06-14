@@ -73,6 +73,13 @@ test("admin lifecycle block messages are explicit", () => {
   assert.match(runStartBlockMessage("account_needs_assistance"), /needs assistance/);
 });
 
+test("support and query block messages use precise reasons", () => {
+  assert.match(runStartBlockMessage("eligibility_query_failed"), /could not be verified/);
+  assert.match(runStartBlockMessage("login_verification_required"), /login needs verification/);
+  assert.match(runStartBlockMessage("identity_mismatch_review_required"), /does not match/);
+  assert.match(runStartBlockMessage("credentials_review_required"), /Credentials review/);
+});
+
 test("API start success payload includes request id and account id", () => {
   const payload = runStartSuccessPayload({
     accountId: "00000000-0000-4000-8000-000000000001",

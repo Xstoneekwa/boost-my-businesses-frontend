@@ -392,7 +392,7 @@ export default function AddProfileWizard() {
         logs: [
           ...current.logs,
           { timestamp: progressTime(), phase: "PERSIST", message: `Created account ${String(account.id || payload.account_id || "created")}.` },
-          { timestamp: progressTime(), phase: "CREDENTIALS", message: form.login_method === "credentials" ? credentialsConfigured ? "Credentials saved to secure backend." : "Credentials not saved - update required." : "Credentials skipped by manual login mode." },
+          { timestamp: progressTime(), phase: "CREDENTIALS", message: form.login_method === "credentials" ? credentialsConfigured ? "Credentials saved to secure backend." : "Credentials not saved — update required." : "Credentials skipped by manual login mode." },
           { timestamp: progressTime(), phase: "SYNC", message: "Backend returned account setup confirmation." },
           { timestamp: progressTime(), phase: "DONE", message: `Add Profile complete for @${String(account.username || verification?.canonical_username || form.username)}.` },
         ],

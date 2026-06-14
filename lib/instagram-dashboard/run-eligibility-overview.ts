@@ -49,7 +49,8 @@ const assignmentReasons = new Set([
 const credentialsOrLoginReasons = new Set([
   "credentials_review_required",
   "reauth_required",
-  "support_required",
+  "login_verification_required",
+  "identity_mismatch_review_required",
   "account_needs_assistance",
 ]);
 
