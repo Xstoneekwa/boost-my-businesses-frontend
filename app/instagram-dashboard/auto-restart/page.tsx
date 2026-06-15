@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
+import AutoRestartRulesEditor from "@/components/instagram-dashboard/AutoRestartRulesEditor";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import {
   getAutoRestartData,
@@ -47,13 +48,16 @@ export default async function InstagramAutoRestartPage() {
 
   const data = await getAutoRestartData();
   const { status, rules } = data;
+  const settingsBackendPending = data.sourceStatus.some(
+    (row) => row.label === "Auto Restart settings" && row.status === "pending",
+  );
 
   return (
     <main className="dashboard-page ig-auto-restart-page">
       <DashboardPageHeader
         eyebrow="Admin scheduler"
         title="Auto Restart"
-        description="Dry-run preview for quota resume, restart eligibility, phone-farm gates, and no-overrun planning."
+        description="Persisted restart settings, quota resume preview, reliability snapshot, and safety gates. Scheduler enqueue remains disabled."
       />
 
       {data.errors.length > 0 ? (
@@ -64,11 +68,11 @@ export default async function InstagramAutoRestartPage() {
       ) : null}
 
       <section className="ig-ar-status-grid" aria-label="Auto Restart status">
-        <StatusCard label="Auto Restart" value={status.enabled ? "On" : "Off"} detail="Active scheduler is not enabled from this UI." tone={status.enabled ? "ready" : "muted"} />
-        <StatusCard label="Runtime mode" value={status.mode === "dry_run" ? "Dry-run only" : status.mode} detail={status.statusLabel} tone="watch" />
-        <StatusCard label="Last scheduler check" value={formatDateTime(status.lastSchedulerCheck)} detail="No active scheduler heartbeat wired yet." tone="muted" />
-        <StatusCard label="Next check" value={formatDateTime(status.nextSchedulerCheck)} detail={`Preview interval: ${rules.checkEveryMinutes} minutes`} tone="muted" />
-        <StatusCard label="Eligible candidates" value={formatInteger(status.activeRestartCandidates)} detail="Dry-run eligible only; no request is created." tone={status.activeRestartCandidates ? "ready" : "muted"} />
+        <StatusCard label="Auto Restart" value={status.enabled ? "On" : "Off"} detail={status.statusLabel} tone={status.enabled ? "ready" : "muted"} />
+        <StatusCard label="Runtime mode" value={status.mode === "dry_run" ? "Dry-run planning" : status.mode} detail="No automatic enqueue from BotApp." tone="watch" />
+        <StatusCard label="Restart delay" value={`${rules.restartDelayMinutes} min`} detail="Used for next-restart preview and worker resume plan." tone="muted" />
+        <StatusCard label="Next preview check" value={formatDateTime(status.nextSchedulerCheck)} detail="Preview-only cadence; scheduler heartbeat not wired." tone="muted" />
+        <StatusCard label="Eligible candidates" value={formatInteger(status.activeRestartCandidates)} detail="Preview eligible only; no request is created." tone={status.activeRestartCandidates ? "ready" : "muted"} />
         <StatusCard label="Blocked candidates" value={formatInteger(status.blockedCandidates)} detail="Blocked by quotas, account gates, active requests, or missing sources." tone={status.blockedCandidates ? "watch" : "ready"} />
       </section>
 
@@ -76,19 +80,9 @@ export default async function InstagramAutoRestartPage() {
         <AnalyticsSectionCard
           eyebrow="Rules"
           title="Restart Rules"
-          description="Configuration API pending. These controls show the intended contract and remain read-only until backed by Supabase and scheduler gates."
+          description="Persisted in auto_restart_settings. Save updates Supabase; scheduler enqueue remains disabled."
         >
-          <div className="ig-ar-rule-grid">
-            <ReadOnlySwitch label="Auto Restart" checked={rules.enabled} helper="Disabled until scheduler and settings persistence are wired." />
-            <ReadOnlySwitch label="Restart yellow accounts" checked={rules.restartYellowAccounts} helper="Partially done account_session summaries." />
-            <ReadOnlySwitch label="Restart red accounts" checked={rules.restartRedAccounts} helper="Not done, but only when safe gates pass." />
-            <ReadOnlySwitch label="Respect fixed blackouts" checked={rules.respectPhoneRest} helper="Blocks only explicit maintenance/ops blackout windows, not natural post-session buffer." />
-            <ReadOnlySwitch label="Respect 6h session window" checked={rules.respectSixHourWindow} helper="Pending session-window source." />
-            <ReadOnlyNumber label="Check every" value={rules.checkEveryMinutes} suffix="minutes" />
-            <ReadOnlyNumber label="Max restarts/day" value={rules.maxRestartsPerAccountPerDay} suffix="per account" />
-            <ReadOnlyNumber label="Max restarts/window" value={rules.maxRestartsPerAccountPerWindow} suffix="per session window" />
-          </div>
-          <p className="ig-ar-pending-note">Save is intentionally unavailable: `auto_restart_settings` and active scheduler wiring are pending.</p>
+          <AutoRestartRulesEditor initialRules={rules} backendPending={settingsBackendPending} />
         </AnalyticsSectionCard>
 
         <AnalyticsSectionCard
@@ -107,6 +101,7 @@ export default async function InstagramAutoRestartPage() {
             <li>Do not restart if a run or request is already active.</li>
             <li>Do not restart on credential, checkpoint, 2FA, assignment, or device blockers.</li>
             <li>Planned next run quota is always `min(session cap, remaining day quota)`.</li>
+            <li>Max attempts per session: {formatInteger(rules.maxAttemptsPerSession)}.</li>
           </ul>
         </AnalyticsSectionCard>
       </section>
@@ -114,7 +109,7 @@ export default async function InstagramAutoRestartPage() {
       <AnalyticsSectionCard
         eyebrow="Quota Resume Preview"
         title="Candidate Accounts"
-        description="Read-only preview. It does not enqueue account_run_requests and does not launch any worker."
+        description="Read-only preview with reliability snapshot. It does not enqueue account_run_requests."
       >
         <div className="ig-ar-table-wrap">
           <table className="ig-ar-table">
@@ -127,13 +122,18 @@ export default async function InstagramAutoRestartPage() {
                 <th>Welcome</th>
                 <th>Outreach</th>
                 <th>Next run</th>
-                <th>Decision</th>
+                <th>Gate</th>
+                <th>Reliability</th>
               </tr>
             </thead>
             <tbody>
-              {data.candidates.map((candidate) => (
+              {data.candidates.length ? data.candidates.map((candidate) => (
                 <CandidateRow key={candidate.accountId} candidate={candidate} />
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={9} className="ig-ar-empty">No active accounts available for preview.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -172,7 +172,7 @@ export default async function InstagramAutoRestartPage() {
       <AnalyticsSectionCard
         eyebrow="Sources"
         title="Readiness / Backend Contract"
-        description="Frontend = Supabase = scheduler gates = worker runtime. Editable fields stay disabled until every layer is wired."
+        description="Frontend = Supabase settings = worker resume plan. Scheduler enqueue remains disabled."
       >
         <div className="ig-ar-source-grid">
           {data.sourceStatus.map((source) => (
@@ -299,7 +299,7 @@ export default async function InstagramAutoRestartPage() {
           border: 1px solid rgba(255,255,255,.07);
           border-radius: 8px;
           background: #1e2028;
-          color: #8a8f98;
+          color: #e2e8f0;
           padding: 10px;
         }
 
@@ -307,6 +307,37 @@ export default async function InstagramAutoRestartPage() {
           display: flex;
           gap: 10px;
           align-items: flex-start;
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .ig-ar-editor-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          align-items: center;
+          margin-top: 14px;
+        }
+
+        .ig-ar-save-btn {
+          border: 1px solid rgba(34,197,94,0.35);
+          background: rgba(34,197,94,0.18);
+          color: #86efac;
+          border-radius: 8px;
+          padding: 10px 14px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+
+        .ig-ar-save-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
+        .ig-ar-editor-meta {
+          color: #8a8f98;
+          font-size: 12px;
         }
 
         .ig-ar-switch-dot {
@@ -459,29 +490,6 @@ function StatusCard({ label, value, detail, tone }: { label: string; value: stri
   );
 }
 
-function ReadOnlySwitch({ label, checked, helper }: { label: string; checked: boolean; helper: string }) {
-  return (
-    <div className={checked ? "ig-ar-field ig-ar-switch ig-ar-switch-on" : "ig-ar-field ig-ar-switch"}>
-      <span className="ig-ar-switch-dot" aria-hidden="true" />
-      <div>
-        <span>{label}</span>
-        <strong>{checked ? "On" : "Off"}</strong>
-        <small>{helper}</small>
-      </div>
-    </div>
-  );
-}
-
-function ReadOnlyNumber({ label, value, suffix }: { label: string; value: number; suffix: string }) {
-  return (
-    <label className="ig-ar-field">
-      <span>{label}</span>
-      <input type="number" value={value} readOnly disabled />
-      <small>{suffix}</small>
-    </label>
-  );
-}
-
 function Threshold({ label, value }: { label: string; value: number }) {
   return (
     <article className="ig-ar-threshold">
@@ -522,8 +530,21 @@ function CandidateRow({ candidate }: { candidate: AutoRestartCandidate }) {
         )}</small>
       </td>
       <td className="ig-ar-decision-cell">
-        <strong>{candidate.restartEligible ? "Eligible (dry-run)" : "Blocked"}</strong>
+        <strong>{candidate.restartEligible ? "Eligible (preview)" : "Blocked"}</strong>
         <small>{candidate.blockReason}</small>
+      </td>
+      <td className="ig-ar-decision-cell">
+        <strong>{candidate.reliability.restartAllowed === null ? "Unknown" : candidate.reliability.restartAllowed ? "Allowed" : "Blocked"}</strong>
+        <small>Termination: {candidate.reliability.sessionTerminationClass || "—"}</small>
+        <small>Attempt {candidate.reliability.currentAttempt} → {candidate.reliability.nextAttempt}</small>
+        <small>Next restart: {formatDateTime(candidate.reliability.nextRestartAt)}</small>
+        {candidate.reliability.unsafeMarkers.length ? (
+          <small>Unsafe: {candidate.reliability.unsafeMarkers.join(", ")}</small>
+        ) : null}
+        {candidate.reliability.lastRestartError ? (
+          <small>Error: {candidate.reliability.lastRestartError}</small>
+        ) : null}
+        <small>{candidate.reliability.sourceLabel}</small>
       </td>
     </tr>
   );

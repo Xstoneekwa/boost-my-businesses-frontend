@@ -12,12 +12,17 @@ export type AutoRestartRulePreview = {
   enabled: boolean;
   mode: AutoRestartMode;
   checkEveryMinutes: number;
-  restartYellowAccounts: boolean;
-  restartRedAccounts: boolean;
-  maxRestartsPerAccountPerDay: number;
-  maxRestartsPerAccountPerWindow: number;
+  restartDelayMinutes: number;
+  maxAttemptsPerSession: number;
+  resumeFollowIfQuotaRemaining: boolean;
+  resumeUnfollowIfQuotaRemaining: boolean;
   respectPhoneRest: boolean;
   respectSixHourWindow: boolean;
+  blockOnChallenge: boolean;
+  blockOnRestriction: boolean;
+  blockOnAccountMismatch: boolean;
+  blockOnDeviceOffline: boolean;
+  notifyOnBlockedRestart: boolean;
   thresholds: {
     followRemainingMin: number;
     unfollowRemainingMin: number;
@@ -53,6 +58,19 @@ export type AutoRestartCandidate = {
   restartEligible: boolean;
   blockReason: string;
   plannedRunType: "account_session" | "outreach_session" | "none";
+  reliability: {
+    restartAllowed: boolean | null;
+    restartBlockReason: string;
+    unsafeMarkers: string[];
+    currentAttempt: string;
+    nextAttempt: string;
+    nextRestartAt: string | null;
+    lastRestartError: string;
+    sessionTerminationClass: string;
+    lastRunId: string;
+    lastRunStatus: string;
+    sourceLabel: string;
+  };
   quotas: {
     follow: AutoRestartQuotaPreview;
     unfollow: AutoRestartQuotaPreview;
@@ -145,23 +163,57 @@ function groupByAccount(rows: SupabaseRecord[], key = "account_id") {
 }
 
 function defaultRules(): AutoRestartRulePreview {
+  return defaultAutoRestartRules();
+}
+
+export function defaultAutoRestartRules(): AutoRestartRulePreview {
   return {
     enabled: false,
     mode: "dry_run",
     checkEveryMinutes: 15,
-    restartYellowAccounts: true,
-    restartRedAccounts: true,
-    maxRestartsPerAccountPerDay: 2,
-    maxRestartsPerAccountPerWindow: 1,
+    restartDelayMinutes: 20,
+    maxAttemptsPerSession: 2,
+    resumeFollowIfQuotaRemaining: true,
+    resumeUnfollowIfQuotaRemaining: true,
     respectPhoneRest: true,
     respectSixHourWindow: true,
+    blockOnChallenge: true,
+    blockOnRestriction: true,
+    blockOnAccountMismatch: true,
+    blockOnDeviceOffline: true,
+    notifyOnBlockedRestart: true,
     thresholds: {
       followRemainingMin: 1,
       unfollowRemainingMin: 1,
       welcomeRemainingMin: 1,
       outreachRemainingMin: 1,
     },
-    sourceLabel: "configuration API pending; preview defaults only",
+    sourceLabel: "auto_restart_settings fallback defaults",
+  };
+}
+
+function rulesFromSettings(row: SupabaseRecord | null | undefined): AutoRestartRulePreview {
+  return rulesFromSettingsRow(row);
+}
+
+export function rulesFromSettingsRow(row: SupabaseRecord | null | undefined): AutoRestartRulePreview {
+  const fallback = defaultAutoRestartRules();
+  if (!row) return fallback;
+  const mode = readString(row.mode, "dry_run") as AutoRestartMode;
+  return {
+    ...fallback,
+    enabled: readBoolean(row.auto_restart_enabled, fallback.enabled),
+    mode: mode === "active" || mode === "disabled" || mode === "dry_run" ? mode : "dry_run",
+    restartDelayMinutes: Math.max(1, readNumber(row.restart_delay_minutes, fallback.restartDelayMinutes)),
+    maxAttemptsPerSession: Math.max(0, readNumber(row.max_attempts_per_session, fallback.maxAttemptsPerSession)),
+    resumeFollowIfQuotaRemaining: readBoolean(row.resume_follow_if_quota_remaining, fallback.resumeFollowIfQuotaRemaining),
+    resumeUnfollowIfQuotaRemaining: readBoolean(row.resume_unfollow_if_quota_remaining, fallback.resumeUnfollowIfQuotaRemaining),
+    blockOnChallenge: readBoolean(row.block_on_challenge, fallback.blockOnChallenge),
+    blockOnRestriction: readBoolean(row.block_on_restriction, fallback.blockOnRestriction),
+    blockOnAccountMismatch: readBoolean(row.block_on_account_mismatch, fallback.blockOnAccountMismatch),
+    blockOnDeviceOffline: readBoolean(row.block_on_device_offline, fallback.blockOnDeviceOffline),
+    notifyOnBlockedRestart: readBoolean(row.notify_on_blocked_restart, fallback.notifyOnBlockedRestart),
+    sourceLabel: "auto_restart_settings",
   };
 }
 
@@ -219,9 +271,124 @@ function rowDateToday(row: SupabaseRecord, key: string, since: string) {
   return Boolean(raw && raw >= since);
 }
 
+function readRecord(value: unknown): SupabaseRecord | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as SupabaseRecord;
+  }
+  return undefined;
+}
+
+function latestSessionRunByAccount(rows: SupabaseRecord[]) {
+  const map = new Map<string, SupabaseRecord>();
+  for (const row of rows) {
+    const accountId = readString(row.account_id);
+    if (!accountId || map.has(accountId)) continue;
+    map.set(accountId, row);
+  }
+  return map;
+}
+
+function reliabilityFromLatestRun(
+  latestRun: SupabaseRecord | undefined,
+  rules: AutoRestartRulePreview,
+): AutoRestartCandidate["reliability"] {
+  if (!latestRun) {
+    return {
+      restartAllowed: null,
+      restartBlockReason: "no_recent_run",
+      unsafeMarkers: [],
+      currentAttempt: "—",
+      nextAttempt: "—",
+      nextRestartAt: null,
+      lastRestartError: "",
+      sessionTerminationClass: "",
+      lastRunId: "",
+      lastRunStatus: "",
+      sourceLabel: "no_recent_run",
+    };
+  }
+
+  const performance = readRecord(latestRun.performance_summary);
+  const resumePlan = readRecord(performance?.auto_restart_resume_plan)
+    ?? readRecord(performance?.admin_reliability_snapshot);
+  const unsafeRaw = resumePlan?.unsafe_markers ?? performance?.unsafe_markers;
+  const unsafeMarkers = Array.isArray(unsafeRaw)
+    ? unsafeRaw.map((marker) => readString(marker)).filter(Boolean)
+    : readString(unsafeRaw).split(",").map((marker) => marker.trim()).filter(Boolean);
+
+  const restartAllowedRaw = resumePlan?.restart_allowed ?? performance?.auto_restart_restart_allowed;
+  const restartAllowed = typeof restartAllowedRaw === "boolean" ? restartAllowedRaw : null;
+  const finishedAt = readString(latestRun.finished_at) || readString(latestRun.updated_at);
+  const nextRestartAt = finishedAt && rules.restartDelayMinutes > 0
+    ? new Date(new Date(finishedAt).getTime() + rules.restartDelayMinutes * 60_000).toISOString()
+    : null;
+
+  return {
+    restartAllowed,
+    restartBlockReason: readString(
+      resumePlan?.restart_block_reason,
+      readString(performance?.auto_restart_restart_block_reason, "unknown"),
+    ),
+    unsafeMarkers,
+    currentAttempt: readString(resumePlan?.current_attempt_id, "—") || "—",
+    nextAttempt: readString(resumePlan?.next_attempt_id, "—") || "—",
+    nextRestartAt,
+    lastRestartError: readString(performance?.auto_restart_resume_plan_error, ""),
+    sessionTerminationClass: readString(
+      resumePlan?.session_termination_class,
+      readString(performance?.session_termination_class, ""),
+    ),
+    lastRunId: readString(latestRun.id),
+    lastRunStatus: readString(latestRun.status),
+    sourceLabel: resumePlan ? "ig_runs.performance_summary.resume_plan" : "ig_runs.performance_summary",
+  };
+}
+
+function accountHasUnsafeMarker(account: ManageAccount, marker: string) {
+  const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`.toLowerCase();
+  const patterns: Record<string, string[]> = {
+    challenge: ["checkpoint", "challenge", "2fa"],
+    restriction: ["restricted", "restriction", "action block", "action_block"],
+    account_mismatch: ["mismatch", "wrong account"],
+    device_offline: ["offline", "device_offline"],
+  };
+  return (patterns[marker] ?? [marker]).some((term) => combined.includes(term));
+}
+
 function isBlockingAccount(account: ManageAccount) {
   const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`.toLowerCase();
   return ["checkpoint", "challenge", "reauth", "missing", "blocked", "problem", "failed"].some((term) => combined.includes(term)) || account.pendingActionsCount > 0 || account.blockingCampaign;
+}
+
+function applySafetyBlocks({
+  account,
+  rules,
+  blockingReasons,
+  reliability,
+}: {
+  account: ManageAccount;
+  rules: AutoRestartRulePreview;
+  blockingReasons: string[];
+  reliability: AutoRestartCandidate["reliability"];
+}) {
+  if (rules.blockOnChallenge && accountHasUnsafeMarker(account, "challenge")) {
+    blockingReasons.push("challenge_blocked");
+  }
+  if (rules.blockOnRestriction && accountHasUnsafeMarker(account, "restriction")) {
+    blockingReasons.push("restriction_blocked");
+  }
+  if (rules.blockOnAccountMismatch && accountHasUnsafeMarker(account, "account_mismatch")) {
+    blockingReasons.push("account_mismatch_blocked");
+  }
+  if (rules.blockOnDeviceOffline && accountHasUnsafeMarker(account, "device_offline")) {
+    blockingReasons.push("device_offline_blocked");
+  }
+  if (reliability.unsafeMarkers.length) {
+    blockingReasons.push(`unsafe_markers:${reliability.unsafeMarkers.join(",")}`);
+  }
+  if (reliability.restartAllowed === false && reliability.restartBlockReason) {
+    blockingReasons.push(`worker_plan:${reliability.restartBlockReason}`);
+  }
 }
 
 function followFiltersLabel(settings: SupabaseRecord | undefined) {
@@ -272,6 +439,7 @@ function planCandidate({
   restWindows,
   eligibleFollowTargetCount,
   rules,
+  reliability,
 }: {
   account: ManageAccount;
   settings: SupabaseRecord | undefined;
@@ -286,6 +454,7 @@ function planCandidate({
   restWindows: ScheduleRestWindowProjection[];
   eligibleFollowTargetCount: number;
   rules: AutoRestartRulePreview;
+  reliability: AutoRestartCandidate["reliability"];
 }): AutoRestartCandidate {
   const packageDefaults = inferPackageDefaults(account);
   const followEnabled = readBoolean(settings?.follow_enabled, false);
@@ -351,7 +520,7 @@ function planCandidate({
   const phoneRestStatus = phoneRestActive ? "active" : restWindows.length ? "clear" : "no_rest_configured";
 
   if (!rules.enabled) blockingReasons.push("scheduler_disabled");
-  if (rules.mode !== "dry_run") blockingReasons.push("active_mode_not_wired");
+  if (rules.mode === "disabled") blockingReasons.push("mode_disabled");
   if (activeRun) blockingReasons.push("active_run_exists");
   if (activeRequest) blockingReasons.push("active_run_request_exists");
   if (isBlockingAccount(account)) blockingReasons.push("account_blocking_action_or_credentials");
@@ -360,6 +529,7 @@ function planCandidate({
   if (rules.respectPhoneRest && phoneRestActive) blockingReasons.push("phone_rest_active");
   if (!account.phoneName || account.phoneName === "Unknown phone") blockingReasons.push("assignment_or_device_pending");
   if (follow.enabled && follow.remaining > 0 && eligibleFollowTargetCount < 1) blockingReasons.push("no_eligible_targets");
+  applySafetyBlocks({ account, rules, blockingReasons, reliability });
 
   const accountSessionRemaining = follow.remaining + unfollow.remaining + welcome.remaining;
   const outreachRemaining = outreach.remaining;
@@ -391,10 +561,11 @@ function planCandidate({
     phoneRestStatus,
     sessionWindowStatus,
     assignmentStatus: assignment ? readString(assignment.status, "assigned") : "pending",
-    gateStatus: restartEligible ? "dry-run eligible" : "blocked",
+    gateStatus: restartEligible ? "eligible_preview" : "blocked",
     restartEligible,
-    blockReason: blockingReasons.join(",") || "eligible_dry_run",
+    blockReason: blockingReasons.join(",") || "eligible_preview",
     plannedRunType,
+    reliability,
     quotas: { follow, unfollow, welcome, outreach },
   };
 }
@@ -416,17 +587,18 @@ function mapDecision(row: SupabaseRecord): AutoRestartDecision {
 
 export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const supabase = createSupabaseClient();
-  const rules = defaultRules();
   const [manageData, radarData] = await Promise.all([getManageData(), getRadarData()]);
   const accountIds = manageData.activeAccounts.map((account) => account.accountId).filter(Boolean);
   const since = todayStartIso();
 
   const [
+    autoRestartSettingsResult,
     settingsResult,
     unfollowResult,
     dmResult,
     interactionsResult,
     runsResult,
+    sessionRunsResult,
     requestsResult,
     runtimeEventsResult,
     workerHeartbeatsResult,
@@ -437,11 +609,13 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     assignmentsResult,
     restWindowsResult,
   ] = await Promise.all([
+    supabase.from("auto_restart_settings").select("*").eq("id", "global").limit(1).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_dm_settings").select("account_id,welcome_enabled,outreach_enabled,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit").in("account_id", accountIds).limit(500),
     supabase.from("ig_interacted_users").select("account_id,followed_at,unfollowed_at,unfollow_result,was_successful,welcome_dm_sent,dm_sent,updated_at").in("account_id", accountIds).or(`followed_at.gte.${since},unfollowed_at.gte.${since},updated_at.gte.${since}`).limit(5000),
     supabase.from("ig_runs").select("id,account_id,status,created_at,updated_at").in("account_id", accountIds).in("status", [...ACTIVE_RUN_STATUSES]).limit(500),
+    supabase.from("ig_runs").select("id,account_id,status,finished_at,updated_at,performance_summary").in("account_id", accountIds).order("created_at", { ascending: false }).limit(500),
     supabase.from("account_run_requests").select("id,account_id,status,requested_run_type,created_at,metadata_safe").in("account_id", accountIds).in("status", [...ACTIVE_REQUEST_STATUSES]).limit(500),
     supabase.from("runtime_events").select("id,created_at,event_type,reason,source,job_id,metadata").ilike("event_type", "%restart%").order("created_at", { ascending: false }).limit(10),
     supabase.from("worker_heartbeats").select("worker_id,status,last_seen_at").order("last_seen_at", { ascending: false }).limit(20),
@@ -461,13 +635,16 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .eq("status", "active")
       .limit(1000),
   ]);
+  const rules = rulesFromSettings(autoRestartSettingsResult.data as SupabaseRecord | null | undefined);
 
   const errors = [
+    autoRestartSettingsResult.error,
     settingsResult.error,
     unfollowResult.error,
     dmResult.error,
     interactionsResult.error,
     runsResult.error,
+    sessionRunsResult.error,
     requestsResult.error,
     runtimeEventsResult.error,
     workerHeartbeatsResult.error,
@@ -486,6 +663,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const dmByAccount = mapByAccount((dmResult.data ?? []) as SupabaseRecord[]);
   const interactionsByAccount = groupByAccount((interactionsResult.data ?? []) as SupabaseRecord[]);
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
+  const latestSessionRunsByAccount = latestSessionRunByAccount((sessionRunsResult.data ?? []) as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
@@ -520,6 +698,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         restWindows,
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         rules,
+        reliability: reliabilityFromLatestRun(latestSessionRunsByAccount.get(account.accountId), rules),
       });
     })
     .sort((a, b) => Number(b.restartEligible) - Number(a.restartEligible) || b.quotas.follow.remaining + b.quotas.unfollow.remaining - (a.quotas.follow.remaining + a.quotas.unfollow.remaining))
@@ -534,12 +713,14 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     status: {
       enabled: rules.enabled,
       mode: rules.mode,
-      statusLabel: "Dry-run only; active scheduler not wired",
+      statusLabel: rules.enabled
+        ? "Settings active; scheduler enqueue remains disabled from BotApp"
+        : "Settings persisted; auto restart disabled",
       lastSchedulerCheck: null,
-      nextSchedulerCheck: null,
+      nextSchedulerCheck: rules.enabled ? new Date(Date.now() + rules.restartDelayMinutes * 60_000).toISOString() : null,
       activeRestartCandidates,
       blockedCandidates,
-      schedulerSourceStatus: "pending",
+      schedulerSourceStatus: autoRestartSettingsResult.error ? "pending" : "connected",
     },
     rules,
     candidates,
@@ -554,7 +735,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       { label: "Package cap alignment", status: "partial", detail: "Uses account_package_summary when available plus domain caps; runtime profiles are displayed separately." },
     ],
     sourceStatus: [
-      { label: "Auto Restart settings", status: "pending", detail: "No auto_restart_settings table or PATCH API yet; preview defaults are read-only." },
+      { label: "Auto Restart settings", status: autoRestartSettingsResult.error ? "pending" : "connected", detail: autoRestartSettingsResult.error ? "auto_restart_settings unavailable; apply migration before real save/load." : `Loaded from ${rules.sourceLabel}.` },
       { label: "Quota counts", status: interactionsResult.error ? "unknown" : "connected", detail: "Derived from ig_interacted_users daily markers." },
       { label: "Run protection", status: runsResult.error || requestsResult.error ? "unknown" : "connected", detail: "Reads ig_runs and account_run_requests without creating requests." },
       { label: "Decisions/audit", status: runtimeEventsResult.error ? "unknown" : "pending", detail: "Reads runtime_events restart decisions if present; no dedicated decision table yet." },
