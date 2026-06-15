@@ -11,6 +11,8 @@ const statusRouteSource = readFileSync(new URL("../api/instagram-dashboard/accou
 test("client accounts normalize needs assistance as its own non-active status", () => {
   assert.match(dataSource, /"needs_assistance"/);
   assert.match(dataSource, /if \(needsAssistance\) return \{ status: "needs_assistance"/);
+  assert.match(dataSource, /"needs_credentials", "needs_login_verification", "needs_phone_assignment"/);
+  assert.match(dataSource, /readiness\?\.overall_readiness_reason \?\? `readiness_\$\{readinessStatus\}`/);
   assert.match(pageSource, /item\.operationsStatus === "needs_assistance"/);
   assert.doesNotMatch(pageSource, /item\.needsAssistance \? "needs assistance" : item\.operationsStatus/);
 });

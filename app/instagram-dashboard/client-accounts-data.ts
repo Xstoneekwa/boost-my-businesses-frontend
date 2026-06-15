@@ -250,11 +250,16 @@ function buildTransitions(from: ClientAccountOperationsStatus): ClientAccountSta
 }
 
 function assistanceReason(account: ManageAccount, hasDashboardAction: boolean) {
+  const readiness = account.readinessProjection;
+  const readinessStatus = readiness?.overall_readiness_status ?? "unknown";
   const credentialText = `${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`;
   if (includesAny(account.adminStatus, ["needs_assistance", "needs assistance"])) return "admin_lifecycle_needs_assistance";
   if (hasDashboardAction || account.blockingCampaign || account.pendingActionsCount > 0) return "dashboard_action_open";
   if (account.reauthRequired) return "reauth_required";
   if (includesAny(credentialText, ["problem", "error", "failed", "blocked", "checkpoint", "challenge", "reauth"])) return "credential_or_login_blocker";
+  if (["blocked", "needs_credentials", "needs_login_verification", "needs_phone_assignment"].includes(readinessStatus)) {
+    return readiness?.overall_readiness_reason ?? `readiness_${readinessStatus}`;
+  }
   return null;
 }
 
