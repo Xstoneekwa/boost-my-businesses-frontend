@@ -5,6 +5,7 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import { canAccessTenantPages, requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import AccountStatusActionMenu from "./AccountStatusActionMenu";
+import EmailCopyButton from "./EmailCopyButton";
 import RequestPasswordUpdateButton from "./RequestPasswordUpdateButton";
 import {
   getClientAccountsOperationsData,
@@ -12,7 +13,6 @@ import {
   type ClientAccountOperationsStatus,
 } from "../client-accounts-data";
 import { formatDateTime, formatInteger, statusTone } from "../manage-data";
-import { getRadarData } from "../radar-data";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,7 @@ function filterHref(filter: FilterKey) {
 
 function filteredItems(items: ClientAccountOperationsItem[], filter: FilterKey) {
   if (filter === "all") return items;
-  if (filter === "needs-assistance") return items.filter((item) => item.needsAssistance);
+  if (filter === "needs-assistance") return items.filter((item) => item.operationsStatus === "needs_assistance");
   return items.filter((item) => item.operationsStatus === filter);
 }
 
@@ -61,7 +61,7 @@ export default async function InstagramClientAccountsPage({
 
   const query = await searchParams;
   const activeFilter = parseFilter(query?.status);
-  const [data, radarData] = await Promise.all([getClientAccountsOperationsData(), getRadarData()]);
+  const data = await getClientAccountsOperationsData();
   const visibleItems = filteredItems(data.items, activeFilter);
 
   return (
@@ -81,7 +81,7 @@ export default async function InstagramClientAccountsPage({
 
       <section className="ig-client-accounts-kpis" aria-label="Client Accounts summary">
         <Kpi label="Total" value={formatInteger(data.summary.total)} detail="Safe account rows" />
-        <Kpi label="Active" value={formatInteger(data.summary.active)} detail="Lifecycle active + admin active" tone="good" />
+        <Kpi label="Active" value={formatInteger(data.summary.active)} detail="Normalized active rows" tone="good" />
         <Kpi label="Pending" value={formatInteger(data.summary.pending)} detail="Pending customer, subscription, or provisioning" tone={data.summary.pending ? "warning" : "neutral"} />
         <Kpi label="Onboarding" value={formatInteger(data.summary.onboarding)} detail="Onboarding status projection" tone={data.summary.onboarding ? "warning" : "neutral"} />
         <Kpi label="Paused" value={formatInteger(data.summary.paused)} detail="Paused business status" tone={data.summary.paused ? "warning" : "neutral"} />
@@ -93,6 +93,12 @@ export default async function InstagramClientAccountsPage({
         eyebrow="Client accounts"
         title="Account operations worklist"
       >
+        <div className="ig-client-accounts-sync-row">
+          <span>Synced from DB</span>
+          <Link href="/instagram-dashboard/client-accounts" className="ig-client-accounts-refresh-link">
+            Refresh
+          </Link>
+        </div>
         <FilterBar items={data.items} activeFilter={activeFilter} />
         <ClientAccountsTable items={visibleItems} />
       </AnalyticsSectionCard>
@@ -198,6 +204,26 @@ export default async function InstagramClientAccountsPage({
           border: 1px solid rgba(255,255,255,.07);
           border-radius: 18px;
           background: #161820;
+        }
+
+        .ig-client-accounts-sync-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin: -2px 0 12px;
+          color: rgba(255,255,255,0.48);
+          font-size: 11px;
+        }
+
+        .ig-client-accounts-refresh-link {
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 999px;
+          color: #a594f9;
+          font-size: 11px;
+          font-weight: 900;
+          padding: 7px 10px;
+          text-decoration: none;
         }
 
         .ig-client-accounts-filter {
@@ -326,7 +352,8 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-account-cell,
-        .ig-client-accounts-status-cell {
+        .ig-client-accounts-status-cell,
+        .ig-client-accounts-email {
           display: grid;
           gap: 6px;
           min-width: 0;
@@ -348,10 +375,56 @@ export default async function InstagramClientAccountsPage({
         }
 
         .ig-client-accounts-account-cell small,
-        .ig-client-accounts-status-cell small {
+        .ig-client-accounts-status-cell small,
+        .ig-client-accounts-email small {
           color: rgba(255,255,255,0.46);
           font-size: 11px;
           overflow-wrap: anywhere;
+        }
+
+        .ig-client-accounts-email {
+          position: relative;
+        }
+
+        .ig-client-accounts-email-button {
+          width: fit-content;
+          max-width: 100%;
+          border: 0;
+          background: transparent;
+          color: #f0f0ee;
+          cursor: pointer;
+          font: inherit;
+          font-weight: 800;
+          overflow-wrap: anywhere;
+          padding: 0;
+          text-align: left;
+        }
+
+        .ig-client-accounts-email-button:hover,
+        .ig-client-accounts-email-button:focus-visible {
+          color: #a594f9;
+          outline: none;
+        }
+
+        .ig-client-accounts-email-button-disabled {
+          color: #8a8f98;
+          cursor: not-allowed;
+          font-weight: 600;
+        }
+
+        .ig-client-accounts-email-toast {
+          position: absolute;
+          z-index: 20;
+          left: 0;
+          top: calc(100% + 6px);
+          width: max-content;
+          max-width: 210px;
+          border: 1px solid rgba(52,211,153,0.24);
+          border-radius: 999px;
+          background: rgba(9,14,28,0.98);
+          color: #86efac !important;
+          padding: 6px 9px;
+          box-shadow: 0 12px 28px rgba(0,0,0,0.24);
         }
 
         .ig-client-accounts-badge {
@@ -653,14 +726,16 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
                     <Link className="ig-client-accounts-account-link" href={`/instagram-dashboard/accounts/${encodeURIComponent(item.accountId || item.username)}`}>
                       {item.username}
                     </Link>
-                    <small>{item.clientName ?? "Client pending"} · {item.lifecycleStatus}</small>
+                    <small>{item.clientName ?? "Client pending"} · {item.packageLabel}</small>
                     <small style={{ color: statusTone(item.instagramVerificationStatus ?? "pending") }}>
                       username {item.instagramVerificationStatus ?? "pending"}
                     </small>
                   </div>
                 </div>
               </td>
-              <td>{item.emailDisplay}</td>
+              <td>
+                <EmailCopyButton email={item.emailDisplay} emailSource={item.emailSource} />
+              </td>
               <td>
                 <StatusBadge value={passwordLabel(item.passwordStatus)} tone={passwordTone(item.passwordStatus)} />
               </td>
@@ -671,8 +746,9 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
               <td>
                 <div className="ig-client-accounts-status-cell">
                   <span className="ig-client-accounts-status-select-label">Status</span>
-                  <StatusBadge value={item.needsAssistance ? "needs assistance" : item.operationsStatus} tone={item.needsAssistance ? "danger" : statusBadgeTone(item.operationsStatus)} />
+                  <StatusBadge value={item.operationsStatus === "needs_assistance" ? "needs assistance" : item.operationsStatus} tone={statusBadgeTone(item.operationsStatus)} />
                   <small style={{ color: statusTone(item.operationsStatus) }}>{item.adminStatus} · {item.customerStatus} · {item.subscriptionStatus}</small>
+                  <small>{item.statusReason} · {item.readinessStatus}</small>
                 </div>
               </td>
               <td>
@@ -724,7 +800,8 @@ function ActionList({ item }: { item: ClientAccountOperationsItem }) {
       <AccountStatusActionMenu
         accountId={item.accountId}
         username={item.username}
-        operationsStatus={item.needsAssistance ? "needs-assistance" : item.operationsStatus}
+        operationsStatus={item.operationsStatus}
+        actions={item.lifecycleActions}
       />
     </div>
   );
@@ -787,7 +864,7 @@ function twoFactorTone(value: string): "neutral" | "good" | "warning" | "danger"
 
 function statusBadgeTone(value: ClientAccountOperationsStatus): "neutral" | "good" | "warning" | "danger" {
   if (value === "active") return "good";
-  if (value === "cancelled") return "danger";
+  if (value === "cancelled" || value === "needs_assistance") return "danger";
   if (value === "pending" || value === "onboarding" || value === "paused") return "warning";
   return "neutral";
 }

@@ -3,13 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LifeBuoy, PauseCircle, RotateCcw, SlidersHorizontal, XCircle } from "lucide-react";
+import type { ClientAccountLifecycleActionAvailability, ClientAccountLifecycleActionKey } from "../client-accounts-data";
 
-type AccountStatusAction = "pause" | "cancel" | "mark_needs_assistance" | "reactivate";
+type AccountStatusAction = ClientAccountLifecycleActionKey;
 
 type AccountStatusActionMenuProps = {
   accountId: string;
   username: string;
   operationsStatus: string;
+  actions: ClientAccountLifecycleActionAvailability[];
 };
 
 const actions: Array<{
@@ -50,6 +52,7 @@ export default function AccountStatusActionMenu({
   accountId,
   username,
   operationsStatus,
+  actions: actionAvailability,
 }: AccountStatusActionMenuProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -75,6 +78,7 @@ export default function AccountStatusActionMenu({
         throw new Error(payload.error || "Could not update account status.");
       }
       setIsOpen(false);
+      setMessage(`${actions.find((item) => item.action === action)?.label ?? "Status"} updated.`);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not update account status.");
@@ -98,12 +102,9 @@ export default function AccountStatusActionMenu({
       {isOpen ? (
         <span className="ig-client-accounts-status-popover" role="menu">
           {actions.map(({ action, label, description, tone, Icon }) => {
-            const disabled =
-              isSaving ||
-              (action === "pause" && operationsStatus === "paused") ||
-              (action === "cancel" && operationsStatus === "cancelled") ||
-              (action === "mark_needs_assistance" && operationsStatus === "needs-assistance") ||
-              (action === "reactivate" && operationsStatus === "active");
+            const availability = actionAvailability.find((item) => item.action === action);
+            const disabled = isSaving || availability?.disabled === true;
+            const title = availability?.disabledReason ?? description;
             return (
               <button
                 key={action}
@@ -111,12 +112,14 @@ export default function AccountStatusActionMenu({
                 role="menuitem"
                 className={tone === "danger" ? "ig-client-accounts-status-menu-item ig-client-accounts-status-menu-item-danger" : "ig-client-accounts-status-menu-item"}
                 disabled={disabled}
+                title={title}
+                aria-label={`${label}: ${title}`}
                 onClick={() => void applyAction(action)}
               >
                 <Icon aria-hidden />
                 <span>
                   <strong>{label}</strong>
-                  <small>{description}</small>
+                  <small>{title}</small>
                 </span>
               </button>
             );
@@ -124,6 +127,7 @@ export default function AccountStatusActionMenu({
           {message ? <small className="ig-client-accounts-status-menu-error">{message}</small> : null}
         </span>
       ) : null}
+      {!isOpen && message ? <small className="ig-client-accounts-action-message">{message}</small> : null}
     </span>
   );
 }

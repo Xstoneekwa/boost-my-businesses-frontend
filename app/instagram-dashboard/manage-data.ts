@@ -22,6 +22,7 @@ export type ManageAccount = {
   clientName: string | null;
   username: string;
   emailDisplay: string;
+  emailSource?: string | null;
   adminStatus: string;
   accountLifecycleStatus: string;
   customerStatus: string;
@@ -322,15 +323,25 @@ function keyForAccount(row: SupabaseRecord | undefined) {
   return readString(row, ["account_id", "ig_account_id", "instagram_account_id", "id"], "");
 }
 
+function safeEmailValue(row: SupabaseRecord | undefined, keys = ["email", "account_email"]) {
+  const email = readString(row, keys, "");
+  if (!email) return "unknown";
+  const normalized = email.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return "configured";
+  if (["password", "secret", "token", "authorization", "service_role"].some((term) => normalized.toLowerCase().includes(term))) return "unknown";
+  return normalized;
+}
+
 function safeEmailDisplay(row: SupabaseRecord | undefined) {
   const explicitDisplay = readString(row, ["email_display"], "");
-  if (explicitDisplay) return explicitDisplay;
+  if (explicitDisplay && explicitDisplay !== "unknown") return explicitDisplay;
+  return safeEmailValue(row);
+}
 
-  const email = readString(row, ["email", "account_email"], "");
-  if (!email) return "unknown";
-  const [name, domain] = email.split("@");
-  if (!name || !domain) return "configured";
-  return `${name.slice(0, 2)}***@${domain}`;
+function emailSourceFromRow(row: SupabaseRecord | undefined) {
+  const explicitDisplay = readString(row, ["email_display"], "");
+  if (explicitDisplay && explicitDisplay !== "unknown") return "admin_dashboard";
+  return safeEmailValue(row) !== "unknown" ? "ig_accounts" : null;
 }
 
 function safeDisplayStatus(value: string, fallback = "unknown") {
@@ -482,10 +493,10 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
 
   try {
     const supabase = createSupabaseClient();
-    const [credentialsResult, assignmentsResult, clientAccountsResult] = await Promise.all([
+    const [credentialsResult, assignmentsResult, clientAccountsResult, settingsResult] = await Promise.all([
       supabase
         .from("account_credentials")
-        .select("account_id,status,reauth_required,secret_ref,created_at")
+        .select("account_id,status,reauth_required,secret_ref,created_at,metadata_safe")
         .in("account_id", accountIds)
         .order("created_at", { ascending: false })
         .limit(1000),
@@ -501,9 +512,14 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .select("account_id,login_status,provisioning_status,onboarding_status")
         .in("account_id", accountIds)
         .limit(1000),
+      supabase
+        .from("ig_account_settings")
+        .select("account_id,email")
+        .in("account_id", accountIds)
+        .limit(1000),
     ]);
 
-    if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error) {
+    if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error || settingsResult.error) {
       return { ...overview, errors: ["Assignment or credential projection unavailable.", ...overview.errors] };
     }
 
@@ -517,6 +533,12 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     for (const row of (clientAccountsResult.data ?? []) as SupabaseRecord[]) {
       const accountId = readString(row, ["account_id"], "");
       if (accountId && !clientAccountByAccount.has(accountId)) clientAccountByAccount.set(accountId, row);
+    }
+
+    const settingsByAccount = new Map<string, SupabaseRecord>();
+    for (const row of (settingsResult.data ?? []) as SupabaseRecord[]) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId && !settingsByAccount.has(accountId)) settingsByAccount.set(accountId, row);
     }
 
     const assignments = ((assignmentsResult.data ?? []) as SupabaseRecord[]);
@@ -547,6 +569,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     const enrich = (account: ManageAccount): ManageAccount => {
       const credential = credentialsByAccount.get(account.accountId);
       const clientAccount = clientAccountByAccount.get(account.accountId);
+      const settings = settingsByAccount.get(account.accountId);
       const assignment = assignmentByAccount.get(account.accountId);
       const device = deviceById.get(readString(assignment, ["device_id"], ""));
       const appInstance = appInstanceById.get(readString(assignment, ["app_instance_id"], ""));
@@ -563,6 +586,25 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         reauthRequired,
         secretRefPresent,
       });
+      const settingsEmail = safeEmailValue(settings, ["email"]);
+      const credentialMetadata = credential?.metadata_safe && typeof credential.metadata_safe === "object" && !Array.isArray(credential.metadata_safe)
+        ? credential.metadata_safe as SupabaseRecord
+        : undefined;
+      const credentialEmail = safeEmailValue(credentialMetadata, ["email", "account_email", "login_email"]);
+      const emailDisplay = account.emailDisplay !== "unknown"
+        ? account.emailDisplay
+        : settingsEmail !== "unknown"
+          ? settingsEmail
+          : credentialEmail !== "unknown"
+            ? credentialEmail
+            : account.emailDisplay;
+      const emailSource = account.emailDisplay !== "unknown"
+        ? account.emailSource ?? "ig_accounts"
+        : settingsEmail !== "unknown"
+          ? "ig_account_settings"
+          : credentialEmail !== "unknown"
+            ? "account_credentials_metadata_safe"
+            : account.emailSource ?? null;
       const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
       const assignedDeviceId = readString(assignment, ["device_id"], "");
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
@@ -585,6 +627,8 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         credentialsConfigured: credentialsStatus === "active" || credentialsStatus === "saved_pending_verification" ? true : account.credentialsConfigured,
         credentialsStatus,
         reauthRequired,
+        emailDisplay,
+        emailSource,
         loginStatus: loginStatus === "unknown" && (credentialsStatus === "active" || credentialsStatus === "saved_pending_verification") ? "pending_login" : loginStatus,
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
@@ -797,6 +841,7 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
     clientName: readString(account, ["display_name", "name", "full_name"], "") || null,
     username: readString(account, ["username", "ig_username", "handle"], "Unknown"),
     emailDisplay: safeEmailDisplay(account),
+    emailSource: emailSourceFromRow(account),
     adminStatus,
     accountLifecycleStatus,
     customerStatus: "unknown",
@@ -853,6 +898,7 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     clientName: readString(row, ["client_name"], "") || null,
     username: readString(row, ["username", "ig_username", "handle"], "Unknown"),
     emailDisplay: safeEmailDisplay(row),
+    emailSource: emailSourceFromRow(row),
     adminStatus: readString(row, ["admin_lifecycle_status", "admin_status"], "unknown"),
     accountLifecycleStatus: readString(row, ["status", "account_lifecycle_status", "lifecycle_status"], "active"),
     customerStatus: readString(row, ["customer_status"], "unknown"),

@@ -94,6 +94,37 @@ async function hasActiveRuntime(supabase: ReturnType<typeof createSupabaseClient
   return Boolean((requests ?? []).length || (runs ?? []).length);
 }
 
+async function reactivateBlockReason(supabase: ReturnType<typeof createSupabaseClient>, accountId: string, lifecycleStatus: string) {
+  if (["archived", "trashed", "trash", "deleted"].includes(lifecycleStatus)) {
+    return "Restore the archived account lifecycle before reactivation.";
+  }
+
+  const [{ data: credentials }, { data: actions }] = await Promise.all([
+    supabase
+      .from("account_credentials")
+      .select("status,reauth_required,secret_ref")
+      .eq("account_id", accountId)
+      .order("created_at", { ascending: false })
+      .limit(1),
+    supabase
+      .from("account_dashboard_actions")
+      .select("id,action_type,blocking_campaign,status")
+      .eq("account_id", accountId)
+      .in("status", ["pending", "acknowledged", "pending_verification"])
+      .limit(10),
+  ]);
+
+  const credential = ((credentials ?? []) as SupabaseRecord[])[0];
+  const credentialStatus = readString(credential?.status, "").toLowerCase();
+  const hasSecretRef = Boolean(readString(credential?.secret_ref, ""));
+  if (readBoolean(credential?.reauth_required, false)) return "Resolve credential reauth before reactivation.";
+  if (!credential || credentialStatus !== "active" || !hasSecretRef) return "Active configured credentials are required before reactivation.";
+
+  const blockingActions = ((actions ?? []) as SupabaseRecord[]).filter((action) => readBoolean(action.blocking_campaign, false));
+  if (blockingActions.length > 0) return "Resolve blocking dashboard actions before reactivation.";
+  return null;
+}
+
 async function auditStatusChange(
   supabase: ReturnType<typeof createSupabaseClient>,
   input: {
@@ -167,6 +198,11 @@ export async function PATCH(request: Request) {
     }
 
     const oldStatus = readString(currentRow.admin_lifecycle_status, readString(currentRow.status, "active")).toLowerCase();
+    const accountLifecycleStatus = readString(currentRow.status, "active").toLowerCase();
+    if (action === "reactivate") {
+      const blockReason = await reactivateBlockReason(supabase, accountId, accountLifecycleStatus);
+      if (blockReason) return jsonError(blockReason, 409);
+    }
     const newStatus = statusForAction(action);
 
     const { data: updatedRow, error: updateError } = await supabase

@@ -67,8 +67,8 @@ test("client projection buckets lifecycle from accountLifecycleStatus", () => {
   assert.match(clientSource, /account\.accountLifecycleStatus/);
 });
 
-test("client accounts API exposes the same lifecycle buckets as BotApp/Admin", () => {
-  assert.match(clientAccountsRouteSource, /activeAccounts: manage\.activeAccounts/);
-  assert.match(clientAccountsRouteSource, /archivedAccounts: manage\.archivedAccounts/);
-  assert.match(clientAccountsRouteSource, /trashedAccounts: manage\.trashedAccounts/);
+test("client accounts API exposes normalized operations projection for BotApp/Admin", () => {
+  assert.match(clientAccountsRouteSource, /getClientAccountsOperationsData/);
+  assert.match(clientAccountsRouteSource, /accounts: clientAccounts\.items/);
+  assert.match(clientAccountsRouteSource, /summary: clientAccounts\.summary/);
 });

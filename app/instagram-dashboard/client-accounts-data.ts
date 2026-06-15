@@ -2,7 +2,7 @@ import { getCredentialsActionsData } from "./credentials-actions-data";
 import { getManageData, type ManageAccount, type ManageSourceStatus } from "./manage-data";
 
 export type ClientAccountPasswordStatus = "configured" | "missing" | "reauth_required" | "update_needed" | "unknown";
-export type ClientAccountOperationsStatus = "active" | "pending" | "cancelled" | "onboarding" | "paused" | "unknown";
+export type ClientAccountOperationsStatus = "active" | "pending" | "cancelled" | "onboarding" | "paused" | "needs_assistance" | "archived" | "unknown";
 export type ClientAccountLifecycleStatus = "active" | "archived" | "trashed";
 export type ClientAccountBackendStatus = "pending_backend" | "connected" | "disabled";
 export type ClientAccountsSourceStatusCode = "connected" | "pending" | "unknown" | "disabled";
@@ -28,11 +28,21 @@ export type ClientAccountOperationAction = {
   backendStatus: ClientAccountBackendStatus;
 };
 
+export type ClientAccountLifecycleActionKey = "pause" | "cancel" | "mark_needs_assistance" | "reactivate";
+
+export type ClientAccountLifecycleActionAvailability = {
+  action: ClientAccountLifecycleActionKey;
+  disabled: boolean;
+  disabledReason: string | null;
+};
+
 export type ClientAccountOperationsItem = {
   accountId: string;
   username: string;
   clientName: string | null;
   emailDisplay: string;
+  emailSource: string | null;
+  packageLabel: string;
   profileImageUrl?: string | null;
   profileImageSource?: ClientAccountProfileImageSource;
   instagramVerificationStatus?: InstagramVerificationStatus;
@@ -44,9 +54,22 @@ export type ClientAccountOperationsItem = {
   customerStatus: string;
   subscriptionStatus: string;
   operationsStatus: ClientAccountOperationsStatus;
+  normalizedStatus: ClientAccountOperationsStatus;
+  statusReason: string;
+  readinessStatus: string;
+  readinessReason: string;
+  needsAssistanceReason: string | null;
+  businessStatus: string;
+  provisioningStatus: string;
+  onboardingStatus: string;
+  assignmentLabel: string | null;
+  deviceLabel: string | null;
+  appInstanceLabel: string | null;
+  appPackageName: string | null;
   lifecycleStatus: ClientAccountLifecycleStatus;
   availableStatusTransitions: ClientAccountStatusTransition[];
   actions: ClientAccountOperationAction[];
+  lifecycleActions: ClientAccountLifecycleActionAvailability[];
   sourceLabel: string;
   lastSafeUpdate: string | null;
   needsAssistance: boolean;
@@ -85,7 +108,7 @@ export type ClientAccountsOperationsOverview = {
   errors: string[];
 };
 
-const transitionStatuses: Array<Exclude<ClientAccountOperationsStatus, "unknown">> = ["active", "pending", "onboarding", "paused", "cancelled"];
+const transitionStatuses: Array<Exclude<ClientAccountOperationsStatus, "unknown" | "needs_assistance" | "archived">> = ["active", "pending", "onboarding", "paused", "cancelled"];
 const profileImageKeys = ["profileImageUrl", "profile_image_url", "profile_picture_url", "avatar_url", "instagram_profile_picture_url", "picture_url", "image_url"] as const;
 const verificationStatusKeys = ["instagramVerificationStatus", "username_verification_status", "instagram_verification_status", "verification_status"] as const;
 const canonicalUsernameKeys = ["instagramCanonicalUsername", "instagram_canonical_username", "canonical_username"] as const;
@@ -188,7 +211,7 @@ function twoFactorStatus(account: ManageAccount) {
   return "unknown";
 }
 
-function operationsStatus(account: ManageAccount): ClientAccountOperationsStatus {
+function operationsStatus(account: ManageAccount, needsAssistance: boolean): { status: ClientAccountOperationsStatus; reason: string } {
   const lifecycle = lifecycleStatus(account);
   const admin = normalize(account.adminStatus);
   const customer = normalize(account.customerStatus);
@@ -197,13 +220,14 @@ function operationsStatus(account: ManageAccount): ClientAccountOperationsStatus
   const provisioning = normalize(account.provisioningStatus);
   const combined = `${admin} ${customer} ${subscription} ${onboarding} ${provisioning}`;
 
-  if (includesAny(combined, ["cancelled", "canceled"])) return "cancelled";
-  if (includesAny(admin, ["paused"])) return "paused";
-  if (includesAny(admin, ["needs_assistance", "needs assistance"])) return "pending";
-  if (includesAny(onboarding, ["onboarding"])) return "onboarding";
-  if (includesAny(combined, ["pending"])) return "pending";
-  if (lifecycle === "active" && admin === "active") return "active";
-  return "unknown";
+  if (includesAny(combined, ["cancelled", "canceled"])) return { status: "cancelled", reason: "cancelled_raw_status" };
+  if (needsAssistance) return { status: "needs_assistance", reason: "assistance_required" };
+  if (includesAny(admin, ["paused"])) return { status: "paused", reason: "admin_paused" };
+  if (lifecycle === "archived" || lifecycle === "trashed") return { status: "archived", reason: `lifecycle_${lifecycle}` };
+  if (includesAny(onboarding, ["onboarding"])) return { status: "onboarding", reason: "onboarding_status" };
+  if (includesAny(combined, ["pending"])) return { status: "pending", reason: "pending_raw_status" };
+  if (lifecycle === "active" && admin === "active") return { status: "active", reason: "active_all_required_statuses" };
+  return { status: "unknown", reason: "status_unknown" };
 }
 
 function transitionLabel(status: Exclude<ClientAccountOperationsStatus, "unknown">) {
@@ -223,6 +247,15 @@ function buildTransitions(from: ClientAccountOperationsStatus): ClientAccountSta
     disabledReason: "Status changes require audited backend sync.",
     backendStatus: "pending_backend",
   }));
+}
+
+function assistanceReason(account: ManageAccount, hasDashboardAction: boolean) {
+  const credentialText = `${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`;
+  if (includesAny(account.adminStatus, ["needs_assistance", "needs assistance"])) return "admin_lifecycle_needs_assistance";
+  if (hasDashboardAction || account.blockingCampaign || account.pendingActionsCount > 0) return "dashboard_action_open";
+  if (account.reauthRequired) return "reauth_required";
+  if (includesAny(credentialText, ["problem", "error", "failed", "blocked", "checkpoint", "challenge", "reauth"])) return "credential_or_login_blocker";
+  return null;
 }
 
 function buildActions(account: ManageAccount, passwordUpdateAlreadyRequested: boolean): ClientAccountOperationAction[] {
@@ -264,27 +297,72 @@ function buildActions(account: ManageAccount, passwordUpdateAlreadyRequested: bo
   ];
 }
 
-function isAssistanceNeeded(account: ManageAccount, hasDashboardAction: boolean) {
-  return (
-    hasDashboardAction ||
-    account.reauthRequired ||
-    account.pendingActionsCount > 0 ||
-    account.blockingCampaign ||
-    includesAny(account.adminStatus, ["needs_assistance", "needs assistance"]) ||
-    passwordStatus(account) === "missing" ||
-    includesAny(`${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`, ["problem", "error", "failed", "blocked", "checkpoint", "challenge"])
-  );
+function lifecycleActionAvailability(account: ManageAccount, status: ClientAccountOperationsStatus, needsAssistanceReason: string | null): ClientAccountLifecycleActionAvailability[] {
+  const lifecycle = lifecycleStatus(account);
+  const readiness = account.readinessProjection;
+  const hasAssignment = Boolean(account.assignmentStatus);
+  const reactivateBlockedByAssistance = Boolean(needsAssistanceReason && needsAssistanceReason !== "admin_lifecycle_needs_assistance");
+  const reactivateBlockedByLifecycle = lifecycle !== "active";
+
+  return [
+    {
+      action: "pause",
+      disabled: status === "paused" || status === "cancelled" || status === "archived",
+      disabledReason: status === "paused"
+        ? "Account is already paused."
+        : status === "cancelled" || status === "archived"
+          ? "Inactive accounts cannot be paused."
+          : null,
+    },
+    {
+      action: "cancel",
+      disabled: status === "cancelled" || status === "archived",
+      disabledReason: status === "cancelled" || status === "archived"
+        ? "Account is already inactive."
+        : null,
+    },
+    {
+      action: "mark_needs_assistance",
+      disabled: status === "needs_assistance" || status === "cancelled" || status === "archived",
+      disabledReason: status === "needs_assistance"
+        ? "Account already needs assistance."
+        : status === "cancelled" || status === "archived"
+          ? "Inactive accounts cannot be marked for support."
+          : null,
+    },
+    {
+      action: "reactivate",
+      disabled: status === "active" || reactivateBlockedByLifecycle || reactivateBlockedByAssistance || !hasAssignment,
+      disabledReason: status === "active"
+        ? "Account is already active."
+        : reactivateBlockedByLifecycle
+          ? "Restore the archived account lifecycle first."
+          : reactivateBlockedByAssistance
+            ? `Resolve blocker first: ${needsAssistanceReason}.`
+            : !hasAssignment
+              ? "Assignment is missing."
+              : readiness?.overall_readiness_status === "cancelled"
+                ? "Cancelled account cannot be reactivated from this state."
+                : null,
+    },
+  ];
 }
 
 function mapAccount(account: ManageAccount, hasDashboardAction: boolean, passwordUpdateAlreadyRequested: boolean): ClientAccountOperationsItem {
-  const status = operationsStatus(account);
+  const needsAssistanceReason = assistanceReason(account, hasDashboardAction);
+  const needsAssistance = needsAssistanceReason !== null;
+  const { status, reason: statusReason } = operationsStatus(account, needsAssistance);
   const profileImageUrl = safeProfileImageUrl(account);
+  const readiness = account.readinessProjection;
+  const assignmentParts = [account.assignmentStatus, account.scheduleLabel].filter(Boolean);
 
   return {
     accountId: account.accountId,
     username: account.username,
     clientName: account.clientName,
     emailDisplay: account.emailDisplay,
+    emailSource: account.emailSource ?? null,
+    packageLabel: account.packageLabel,
     profileImageUrl,
     profileImageSource: profileImageSource(account, profileImageUrl),
     instagramVerificationStatus: instagramVerificationStatus(account),
@@ -296,12 +374,25 @@ function mapAccount(account: ManageAccount, hasDashboardAction: boolean, passwor
     customerStatus: account.customerStatus,
     subscriptionStatus: account.subscriptionStatus,
     operationsStatus: status,
+    normalizedStatus: status,
+    statusReason,
+    readinessStatus: readiness?.overall_readiness_status ?? "unknown",
+    readinessReason: readiness?.overall_readiness_reason ?? "readiness_unknown",
+    needsAssistanceReason,
+    businessStatus: account.adminStatus,
+    provisioningStatus: account.provisioningStatus,
+    onboardingStatus: account.onboardingStatus,
+    assignmentLabel: assignmentParts.length ? assignmentParts.join(" · ") : null,
+    deviceLabel: account.phoneName || null,
+    appInstanceLabel: account.appInstanceLabel ?? null,
+    appPackageName: account.appPackageName ?? null,
     lifecycleStatus: lifecycleStatus(account),
     availableStatusTransitions: buildTransitions(status),
     actions: buildActions(account, passwordUpdateAlreadyRequested),
+    lifecycleActions: lifecycleActionAvailability(account, status, needsAssistanceReason),
     sourceLabel: account.sourceLabel,
     lastSafeUpdate: account.lastSafeUpdate,
-    needsAssistance: isAssistanceNeeded(account, hasDashboardAction),
+    needsAssistance,
     reauthRequired: account.reauthRequired,
   };
 }
@@ -314,7 +405,7 @@ function buildSummary(items: ClientAccountOperationsItem[]): ClientAccountsOpera
     onboarding: items.filter((item) => item.operationsStatus === "onboarding").length,
     paused: items.filter((item) => item.operationsStatus === "paused").length,
     cancelled: items.filter((item) => item.operationsStatus === "cancelled").length,
-    needsAssistance: items.filter((item) => item.needsAssistance).length,
+    needsAssistance: items.filter((item) => item.operationsStatus === "needs_assistance").length,
     reauthRequired: items.filter((item) => item.reauthRequired).length,
   };
 }
@@ -337,9 +428,9 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
     sourceStatus: {
       manageOverview: sourceStatusFromManage(manageData.summary.sourceStatus.backendApi),
       credentialsActions: credentialsData.sourceStatus.dashboardActions === "disabled" ? "disabled" : credentialsData.sourceStatus.dashboardActions === "pending" ? "pending" : "connected",
-      statusMutations: "pending",
-      botAppSync: "pending",
-      clientDashboardSync: "pending",
+      statusMutations: "connected",
+      botAppSync: "connected",
+      clientDashboardSync: "connected",
     },
     sourceDetails: {
       manageOverview: {
@@ -351,16 +442,16 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
         description: "Assistance signals are derived from the read-only Credentials Actions contract.",
       },
       statusMutations: {
-        label: "Status changes unavailable",
-        description: "Business status changes are not exposed from this read-only support view.",
+        label: "Status mutations connected",
+        description: "Lifecycle actions call the audited accounts/status backend route.",
       },
       botAppSync: {
-        label: "BotApp sync not shown",
-        description: "BotApp sync status is not displayed in this support view.",
+        label: "BotApp sync connected",
+        description: "BotApp relay uses the same normalized Client Accounts projection.",
       },
       clientDashboardSync: {
-        label: "Client sync not shown",
-        description: "Client dashboard sync status is not displayed in this support view.",
+        label: "Client sync connected",
+        description: "Client-facing assistance actions are read from account_dashboard_actions.",
       },
     },
     errors: [...manageData.errors, ...credentialsData.errors],

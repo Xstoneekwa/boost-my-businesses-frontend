@@ -1,5 +1,4 @@
-import { getCredentialsActionsData } from "@/app/instagram-dashboard/credentials-actions-data";
-import { getManageData } from "@/app/instagram-dashboard/manage-data";
+import { getClientAccountsOperationsData } from "@/app/instagram-dashboard/client-accounts-data";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -19,21 +18,16 @@ export async function GET(request: Request) {
     const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
-    const [manage, credentials] = await Promise.all([
-      getManageData(),
-      getCredentialsActionsData().catch((error) => ({ error: error instanceof Error ? error.message : "Credentials unavailable." })),
-    ]);
+    const clientAccounts = await getClientAccountsOperationsData();
 
     return jsonOk({
       generated_at: new Date().toISOString(),
-      accounts: manage.allAccounts,
-      activeAccounts: manage.activeAccounts,
-      archivedAccounts: manage.archivedAccounts,
-      trashedAccounts: manage.trashedAccounts,
-      summary: manage.summary,
-      credentials,
-      errors: manage.errors,
-      source: "manage_overview",
+      accounts: clientAccounts.items,
+      summary: clientAccounts.summary,
+      sourceStatus: clientAccounts.sourceStatus,
+      sourceDetails: clientAccounts.sourceDetails,
+      errors: clientAccounts.errors,
+      source: "client_accounts_operations_projection",
     });
   } catch {
     return jsonError("Could not load BotApp client accounts.", 500);
