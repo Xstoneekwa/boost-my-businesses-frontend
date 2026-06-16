@@ -14,6 +14,8 @@ test("client accounts normalize needs assistance as its own non-active status", 
   assert.match(dataSource, /"needs_credentials", "needs_login_verification", "needs_phone_assignment"/);
   assert.match(dataSource, /readiness\?\.overall_readiness_reason \?\? `readiness_\$\{readinessStatus\}`/);
   assert.match(pageSource, /item\.operationsStatus === "needs_assistance"/);
+  assert.match(pageSource, /function statusSubtext\(item: ClientAccountOperationsItem\)/);
+  assert.match(pageSource, /needs assistance · \$\{reason\}/);
   assert.doesNotMatch(pageSource, /item\.needsAssistance \? "needs assistance" : item\.operationsStatus/);
 });
 
@@ -29,6 +31,7 @@ test("client accounts relay returns normalized projection", () => {
   assert.match(routeSource, /getClientAccountsOperationsData/);
   assert.match(routeSource, /accounts: clientAccounts\.items/);
   assert.match(routeSource, /source: "client_accounts_operations_projection"/);
+  assert.match(routeSource, /\[client-accounts\] botapp_projection/);
 });
 
 test("client accounts lifecycle actions are real and expose disabled reasons", () => {

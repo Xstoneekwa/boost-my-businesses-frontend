@@ -44,6 +44,17 @@ function filteredItems(items: ClientAccountOperationsItem[], filter: FilterKey) 
   return items.filter((item) => item.operationsStatus === filter);
 }
 
+function statusSubtext(item: ClientAccountOperationsItem) {
+  if (item.operationsStatus === "needs_assistance") {
+    const reason = item.needsAssistanceReason || item.statusReason || item.readinessStatus;
+    return `needs assistance · ${reason} · ${item.readinessStatus}`;
+  }
+  if (item.operationsStatus === "cancelled") {
+    return `cancelled · ${item.adminStatus} · ${item.readinessStatus}`;
+  }
+  return `${item.adminStatus} · ${item.customerStatus} · ${item.subscriptionStatus}`;
+}
+
 function countForFilter(items: ClientAccountOperationsItem[], filter: FilterKey) {
   return filteredItems(items, filter).length;
 }
@@ -747,7 +758,7 @@ function ClientAccountsTable({ items }: { items: ClientAccountOperationsItem[] }
                 <div className="ig-client-accounts-status-cell">
                   <span className="ig-client-accounts-status-select-label">Status</span>
                   <StatusBadge value={item.operationsStatus === "needs_assistance" ? "needs assistance" : item.operationsStatus} tone={statusBadgeTone(item.operationsStatus)} />
-                  <small style={{ color: statusTone(item.operationsStatus) }}>{item.adminStatus} · {item.customerStatus} · {item.subscriptionStatus}</small>
+                  <small style={{ color: statusTone(item.operationsStatus) }}>{statusSubtext(item)}</small>
                   <small>{item.statusReason} · {item.readinessStatus}</small>
                 </div>
               </td>

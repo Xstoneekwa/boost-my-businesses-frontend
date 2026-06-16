@@ -19,6 +19,20 @@ export async function GET(request: Request) {
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const clientAccounts = await getClientAccountsOperationsData();
+    const botapp = clientAccounts.items.find((item) => item.username === "botapp");
+    if (botapp) {
+      console.info("[client-accounts] botapp_projection", {
+        username: botapp.username,
+        operationsStatus: botapp.operationsStatus,
+        normalizedStatus: botapp.normalizedStatus,
+        adminStatus: botapp.adminStatus,
+        lifecycleStatus: botapp.lifecycleStatus,
+        readinessStatus: botapp.readinessStatus,
+        needsAssistance: botapp.needsAssistance,
+        needsAssistanceReason: botapp.needsAssistanceReason,
+        statusReason: botapp.statusReason,
+      });
+    }
 
     return jsonOk({
       generated_at: new Date().toISOString(),
