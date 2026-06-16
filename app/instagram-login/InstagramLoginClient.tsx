@@ -5,6 +5,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { instagramPostLoginPath } from "@/lib/instagram-auth/post-login-path";
+import type { UserRole } from "@/lib/userContext";
 
 const ACCENT_FROM = "#fbbf24";
 const ACCENT_MID  = "#e9a23b";
@@ -92,13 +94,17 @@ export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }
         }),
       });
 
-      const payload = (await res.json()) as { error?: string; details?: string };
+      const payload = (await res.json()) as {
+        user?: { role?: UserRole };
+        error?: string;
+        details?: string;
+      };
 
       if (!res.ok) {
         throw new Error(payload.details || payload.error || "Accès refusé.");
       }
 
-      const dashboardPath = "/instagram-dashboard";
+      const dashboardPath = instagramPostLoginPath(payload.user?.role);
       const topWindow = typeof window !== "undefined" ? window.top ?? window : null;
       if (topWindow && topWindow !== window) {
         topWindow.location.assign(dashboardPath);

@@ -583,6 +583,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
   const [addB, setAddB] = useState("");
 
   const t = T[lang];
+  const hasLinkedInstagramAccount = initialAccounts.length > 0 || initialNotifications.length > 0;
   const primaryAccount = initialAccounts[0] ?? (initialNotifications[0] ? {
     accountId: initialNotifications[0].accountId,
     username: initialNotifications[0].username,
@@ -755,8 +756,27 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
           </section>
         )}
 
+        {!hasLinkedInstagramAccount ? (
+          <div className="cd-view">
+            <section className="cd-card cd-setup-required">
+              <div className="cd-s-title">{lang === "fr" ? "Configuration requise" : "Setup required"}</div>
+              <h2>{lang === "fr" ? "Aucun compte Instagram lié pour le moment" : "No Instagram account linked yet"}</h2>
+              <p>
+                {lang === "fr"
+                  ? "Votre espace client est actif, mais aucun compte Instagram n'est encore rattaché à votre abonnement. Notre équipe finalise la liaison ou l'activation de votre compte."
+                  : "Your client workspace is active, but no Instagram account is linked to your subscription yet. Our team is finishing the account link or activation."}
+              </p>
+              <p className="cd-setup-note">
+                {lang === "fr"
+                  ? "Si vous venez de souscrire, revenez dans quelques minutes ou contactez le support."
+                  : "If you just subscribed, check back in a few minutes or contact support."}
+              </p>
+            </section>
+          </div>
+        ) : null}
+
         {/* OVERVIEW */}
-        {activeView === "overview" && (
+        {hasLinkedInstagramAccount && activeView === "overview" && (
           <div className="cd-view">
             {/* Stats */}
             <div className="cd-stats-row">
@@ -823,7 +843,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         )}
 
         {/* ACTIVITY */}
-        {activeView === "activity" && (
+        {hasLinkedInstagramAccount && activeView === "activity" && (
           <div className="cd-view">
             <div className="cd-card">
               <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
@@ -833,7 +853,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         )}
 
         {/* TARGETING */}
-        {activeView === "targeting" && (
+        {hasLinkedInstagramAccount && activeView === "targeting" && (
           <div className="cd-view">
             <div className="cd-tg2-topbar">
               <p className="cd-tg2-intro">{t.targeting.intro}</p>
@@ -916,7 +936,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         )}
 
         {/* ACCOUNT */}
-        {activeView === "account" && (
+        {hasLinkedInstagramAccount && activeView === "account" && (
           <div className="cd-view">
             {primaryAccount ? (
               <section className="cd-card cd-connect-card">
@@ -1145,6 +1165,10 @@ const CSS = `
 
 /* Card */
 .cd-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.cd-setup-required{display:grid;gap:10px;max-width:720px}
+.cd-setup-required h2{margin:0;font-family:var(--font-d);font-size:1.35rem;color:var(--ink)}
+.cd-setup-required p{margin:0;color:var(--ink-dim);line-height:1.6;font-size:.92rem}
+.cd-setup-note{color:var(--ink-mute)!important;font-size:.84rem!important}
 .cd-card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .cd-card-hd h3{font-family:var(--font-d);font-weight:800;font-size:.95rem;color:var(--ink)}
 .cd-card-hd a{font-size:.78rem;font-weight:700;color:var(--accent);opacity:.85;transition:opacity var(--tr)}
