@@ -17,9 +17,9 @@ import {
   type TargetSafeRow,
   type TargetsOverview,
 } from "@/app/instagram-dashboard/targets-data";
+import ClientAiTargetSearchWizard from "./ClientAiTargetSearchWizard";
 import {
   clientAiTargetingButtonLabel,
-  clientAiTargetingComingSoonMessage,
   clientAiTargetingUpgradeLabel,
   isClientAiTargetingEnabled,
 } from "@/lib/instagram-client/ai-targeting-gate";
@@ -169,6 +169,7 @@ export default function ClientAccountTargetsDrawer({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [aiMessage, setAiMessage] = useState("");
+  const [aiWizardOpen, setAiWizardOpen] = useState(false);
 
   const filterKeys = ["all", "eligible", "pending", "rejected", "archived"];
   const aiEnabled = isClientAiTargetingEnabled(packageCode);
@@ -389,7 +390,8 @@ export default function ClientAccountTargetsDrawer({
 
   function handleAiClick() {
     if (!aiEnabled) return;
-    setAiMessage(clientAiTargetingComingSoonMessage(lang));
+    setAiMessage("");
+    setAiWizardOpen(true);
   }
 
   return (
@@ -551,6 +553,17 @@ export default function ClientAccountTargetsDrawer({
         </div>
         ) : null}
       </aside>
+      <ClientAiTargetSearchWizard
+        open={aiWizardOpen}
+        onClose={() => setAiWizardOpen(false)}
+        lang={lang}
+        accountId={accountId}
+        onValidated={async (message) => {
+          setSuccess(message);
+          await loadTargets();
+          await onReload();
+        }}
+      />
     </>
   );
 }

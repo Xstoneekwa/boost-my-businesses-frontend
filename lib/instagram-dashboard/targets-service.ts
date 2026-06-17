@@ -35,7 +35,7 @@ type SupabaseRecord = Record<string, unknown>;
 
 export type TargetsServiceContext = {
   actorType: TargetActorType;
-  sourceSurface: "admin_dashboard" | "client_dashboard";
+  sourceSurface: "admin_dashboard" | "client_dashboard" | "client_dashboard_ai";
 };
 
 export type TargetsServiceResult<T> =
@@ -189,6 +189,7 @@ function activeExistingUsername(row: SupabaseRecord) {
 }
 
 function targetSourceForAdd(mode: "single" | "bulk", ctx: TargetsServiceContext): TargetSource {
+  if (ctx.sourceSurface === "client_dashboard_ai") return "future_discovery";
   if (ctx.actorType === "client") return "client";
   return mode === "bulk" ? "manual_bulk" : "manual_single";
 }

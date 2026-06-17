@@ -16,6 +16,11 @@ const clientTargetsContext = {
   sourceSurface: "client_dashboard" as const,
 };
 
+const clientAiTargetsContext = {
+  actorType: "client" as const,
+  sourceSurface: "client_dashboard_ai" as const,
+};
+
 async function authorizeAccountRoute(accountId: string) {
   const session = await requireClientInstagramSession();
   if (!session.ok) {
@@ -48,6 +53,7 @@ export async function GET(
 type PostBody = {
   target_username?: string;
   usernames?: string[];
+  import_source?: string;
 };
 
 export async function POST(
@@ -67,8 +73,11 @@ export async function POST(
   const technicalError = rejectTechnicalClientFields(body ?? {});
   if (technicalError) return NextResponse.json({ ok: false, error: technicalError }, { status: 400 });
 
+  const importSource = readString(body?.import_source, "").trim().toLowerCase();
+  const addContext = importSource === "ai_discovery" ? clientAiTargetsContext : clientTargetsContext;
+
   if (Array.isArray(body?.usernames)) {
-    const result = await addAccountTargetsBulk(auth.accountId, body.usernames, clientTargetsContext);
+    const result = await addAccountTargetsBulk(auth.accountId, body.usernames, addContext);
     if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
     return NextResponse.json({ ok: true, data: result.data });
   }
