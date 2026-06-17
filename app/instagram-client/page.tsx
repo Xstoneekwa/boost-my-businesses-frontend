@@ -148,15 +148,8 @@ async function getClientDashboardAccounts(clientId: string): Promise<ClientInsta
     .filter((row) => Boolean(row.accountId));
 }
 
-function prioritizeInstagramAccount(accounts: ClientInstagramAccount[], preferredUsername = "i_m_your_traker") {
-  const normalizedPreferred = preferredUsername.replace(/^@+/, "").toLowerCase();
-  return [...accounts].sort((left, right) => {
-    const leftMatch = left.username.toLowerCase() === normalizedPreferred;
-    const rightMatch = right.username.toLowerCase() === normalizedPreferred;
-    if (leftMatch && !rightMatch) return -1;
-    if (!leftMatch && rightMatch) return 1;
-    return left.username.localeCompare(right.username);
-  });
+function sortClientInstagramAccounts(accounts: ClientInstagramAccount[]) {
+  return [...accounts].sort((left, right) => left.username.localeCompare(right.username));
 }
 
 export default async function InstagramClientPage() {
@@ -181,7 +174,7 @@ export default async function InstagramClientPage() {
     getClientDashboardAccounts(userContext.tenantId),
     getClientWorkspaceView(userContext.tenantId, loginEmail),
   ]);
-  const orderedAccounts = prioritizeInstagramAccount(accounts);
+  const orderedAccounts = sortClientInstagramAccounts(accounts);
 
   const primaryAccountId = orderedAccounts[0]?.accountId ?? "";
   const accountInsights: ClientAccountInsights | null = primaryAccountId

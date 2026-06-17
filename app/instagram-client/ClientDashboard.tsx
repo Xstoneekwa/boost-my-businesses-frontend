@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
+import ClientAccountTargetsDrawer, { mainTargetingUsernames } from "./ClientAccountTargetsDrawer";
+import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
+import { normalizeTargetUsername } from "@/lib/instagram-targets";
 import type { ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
 import type { ClientLinkedInstagramAccount, ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 
@@ -76,29 +79,8 @@ const FD: FeedItem[] = [
 ];
 
 const INIT_TARGETS = ["mode_paris_fr","luxeboutique_fr","styliste_officiel","fashionweek_fr","createur_mode","parisienne_style","atelier_couture_fr","galerie_lafayette"];
-const INIT_WHITE   = ["christine_leclerc","mon_compte_perso","client_vip_fr","partenaire_officiel"];
+const INIT_WHITE   = ["demo_protected","demo_vip","demo_partner"];
 const INIT_BLACK   = ["spam_follow4follow","giveaway_daily","dropship_eushop","bot_network_99"];
-
-type DwrRow = {
-  h: string; ver: string; elig: "eligible"|"verified"|"pending"|"rejected"|"archived";
-  f: number|null; perf: string|null; fbr: number|null; sent: number;
-  last: string|null; lastEn: string|null; lastTag: string;
-  added: string; addedEn: string; src: string; srcEn: string;
-};
-const DTL: DwrRow[] = [
-  { h:"mode_paris_fr",        ver:"found",     elig:"eligible",  f:4900,   perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
-  { h:"transcendanse_style",  ver:"found",     elig:"eligible",  f:519,    perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
-  { h:"atelier_couture_fr",   ver:"found",     elig:"eligible",  f:871,    perf:"pending",  fbr:null, sent:0,   last:"2 juin", lastEn:"Jun 02",  lastTag:"metrics",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
-  { h:"galerie_lafayette",    ver:"found",     elig:"verified",  f:46200,  perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
-  { h:"fashionweek_fr",       ver:"found",     elig:"eligible",  f:1300,   perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"2 juin",  addedEn:"Jun 02", src:"Manuel", srcEn:"Manual" },
-  { h:"luxeboutique_fr",      ver:"found",     elig:"verified",  f:12300,  perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"pending",  added:"1 juin",  addedEn:"Jun 01", src:"IA",     srcEn:"AI" },
-  { h:"styliste_officiel",    ver:"found",     elig:"eligible",  f:8700,   perf:"running",  fbr:9.2,  sent:142, last:"1 juin", lastEn:"Jun 01",  lastTag:"sent",     added:"1 juin",  addedEn:"Jun 01", src:"IA",     srcEn:"AI" },
-  { h:"parisienne_style",     ver:"found",     elig:"eligible",  f:1300,   perf:"running",  fbr:4.1,  sent:86,  last:"31 mai", lastEn:"May 31",  lastTag:"sent",     added:"31 mai",  addedEn:"May 31", src:"Manuel", srcEn:"Manual" },
-  { h:"createur_mode",        ver:"found",     elig:"pending",   f:3400,   perf:"pending",  fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"review",   added:"30 mai",  addedEn:"May 30", src:"IA",     srcEn:"AI" },
-  { h:"shop_dropship_eu",     ver:"found",     elig:"rejected",  f:120000, perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"—",        added:"29 mai",  addedEn:"May 29", src:"IA",     srcEn:"AI" },
-  { h:"compte_introuvable",   ver:"not_found", elig:"rejected",  f:null,   perf:null,       fbr:null, sent:0,   last:null,     lastEn:null,      lastTag:"—",        added:"28 mai",  addedEn:"May 28", src:"Manuel", srcEn:"Manual" },
-  { h:"fastfashion_promo",    ver:"found",     elig:"archived",  f:88000,  perf:null,       fbr:0.4,  sent:30,  last:"20 mai", lastEn:"May 20",  lastTag:"archived", added:"18 mai",  addedEn:"May 18", src:"Manuel", srcEn:"Manual" },
-];
 
 const AVPAL = [
   ["#f58529","#dd2a7b"],["#8a3ab9","#cd486b"],["#5a6cf5","#e8a030"],["#fbbf24","#dd2a7b"],
@@ -118,7 +100,7 @@ const T = {
       { lbl:"Aujourd'hui",    val:"94",    sub:"follows + likes + stories" },
       { lbl:"Moy. / jour",    val:"14,3",  sub:"abonnés qualifiés réels" },
     ],
-    chart: { title:"Abonnés · @christine_leclerc", all:"Tout", d30:"30 jours", daily:"Quotidien" },
+    chart: { title:"Abonnés", all:"Tout", d30:"30 jours", daily:"Quotidien" },
     feed: { title:"Activité récente", seeAll:"Tout voir →" },
     plan: { name:"Pro", price:"197€", period:"/mois", growth:"Croissance estimée", growthVal:"300–500 / mois", nextBill:"Prochain prélèvement", nextBillVal:"3 juil. 2026", support:"Support", supportVal:"7j / 7", manage:"Gérer mon abonnement" },
     mgr: { name:"Mythyl E.", sub:"Votre account manager", text:"Votre manager dédié surveille votre campagne chaque jour, ajuste le paramétrage chaque semaine et est disponible pour répondre à vos questions 7j/7.", email:"Envoyer un email", call:"Prendre RDV" },
@@ -133,7 +115,7 @@ const T = {
       detailBtn:"Ajouter les comptes cibles",
       targets:"Comptes cibles", white:"Liste blanche", black:"Liste noire",
       placeholderW:"compte_protege", placeholderB:"compte_exclu",
-      emptyT:"Aucun compte cible pour l'instant.", emptyW:"Aucun compte protégé.", emptyB:"Aucun compte exclu.",
+      emptyT:"Aucun compte cible configuré pour le moment.", emptyW:"Aucun compte protégé.", emptyB:"Aucun compte exclu.",
       emptyTitle:"Ciblage",
       emptyBody:"Ajoutez ou connectez un compte Instagram pour configurer le ciblage",
       emptyNote:"Rendez-vous dans Vue d'ensemble pour lier votre compte, puis revenez ici pour organiser vos listes.",
@@ -163,14 +145,14 @@ const T = {
       changePlanHelp:"Contactez le support pour modifier votre formule",
     },
     drawer: {
-      kicker:"Cibles", title:"@christine_leclerc",
+      kicker:"Cibles", title:"Comptes cibles",
       total:"Total", valid:"Valides / éligibles", archived:"Archivés",
       searchPh:"Filtrer par nom, santé, statut…",
       chips:["Tout","Actifs / valides","En attente","Rejetés","Archivés"],
       refresh:"Actualiser", export:"Exporter", del:"Supprimer la sélection",
       addLbl:"Ajouter une cible", addPh:"Nom d'utilisateur Instagram", addBtn:"Ajouter",
       bulkLbl:"Ajout groupé (un par ligne)", importBtn:"Importer",
-      aiLbl:"Trouver mes comptes cibles avec l'IA", aiBtn:"Lancer la recherche",
+      aiLbl:"Trouver mes comptes cibles avec l'IA", aiBtn:"Lancer la recherche avec l'IA",
       cols:["","Compte","Vérification","Éligibilité","Abonnés","Perf","FBR","Envoyés","Dern. usage","Ajouté"],
       elig:{ eligible:"Éligible", verified:"Vérifié", pending:"En attente", rejected:"Rejeté", archived:"Archivé" },
       perf:{ running:"En cours", pending:"En attente" },
@@ -189,7 +171,7 @@ const T = {
       { lbl:"Today",        val:"94",    sub:"follows + likes + stories" },
       { lbl:"Daily avg.",   val:"14.3",  sub:"real qualified followers" },
     ],
-    chart: { title:"Followers · @christine_leclerc", all:"All time", d30:"30 days", daily:"Daily" },
+    chart: { title:"Followers", all:"All time", d30:"30 days", daily:"Daily" },
     feed: { title:"Recent activity", seeAll:"View all →" },
     plan: { name:"Pro", price:"€197", period:"/mo", growth:"Estimated growth", growthVal:"300–500 / mo", nextBill:"Next billing", nextBillVal:"Jul 3, 2026", support:"Support", supportVal:"7 days / week", manage:"Manage plan" },
     mgr: { name:"Mythyl E.", sub:"Your account manager", text:"Your dedicated manager monitors your campaign daily, fine-tunes settings weekly, and is available to answer your questions 7 days a week.", email:"Send email", call:"Book a call" },
@@ -234,14 +216,14 @@ const T = {
       changePlanHelp:"Contact support to change your plan",
     },
     drawer: {
-      kicker:"Targets", title:"@christine_leclerc",
+      kicker:"Targets", title:"Target accounts",
       total:"Total", valid:"Valid / eligible", archived:"Archived",
       searchPh:"Filter by username, health, status…",
       chips:["All","Active / valid","Pending","Rejected","Archived / deleted"],
       refresh:"Refresh", export:"Export", del:"Delete selected",
       addLbl:"Add target", addPh:"Instagram username", addBtn:"Add",
       bulkLbl:"Bulk add (one per line)", importBtn:"Import",
-      aiLbl:"Find my target accounts with AI", aiBtn:"Start search",
+      aiLbl:"Find my target accounts with AI", aiBtn:"Launch AI search",
       cols:["","Username","Verification","Eligibility","Followers","Perf","FBR","Sent","Last used","Added"],
       elig:{ eligible:"Eligible", verified:"Verified", pending:"Pending", rejected:"Rejected", archived:"Archived" },
       perf:{ running:"Running", pending:"Pending" },
@@ -521,168 +503,6 @@ function FollowerChart({ range, lang, onRangeChange, t, series }: {
   );
 }
 
-function TargetDrawer({ open, onClose, lang, t }: {
-  open: boolean; onClose: () => void; lang: Lang; t: typeof T["fr"];
-}) {
-  const [filter, setFilter] = useState("all");
-  const [query, setQuery] = useState("");
-  const [sel, setSel] = useState<Record<string, boolean>>({});
-  const [singleInput, setSingleInput] = useState("");
-  const [bulkText, setBulkText] = useState("");
-
-  const td = t.drawer;
-  const filterKeys = ["all","eligible","pending","rejected","archived"];
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape" && open) onClose(); };
-    document.addEventListener("keydown", h);
-    return () => document.removeEventListener("keydown", h);
-  }, [open, onClose]);
-
-  const eligMap: Record<string, { cls: string; label: string }> = {
-    eligible: { cls:"cd-elig", label: td.elig.eligible },
-    verified: { cls:"cd-ver",  label: td.elig.verified },
-    pending:  { cls:"cd-pend", label: td.elig.pending },
-    rejected: { cls:"cd-rej",  label: td.elig.rejected },
-    archived: { cls:"cd-arch", label: td.elig.archived },
-  };
-
-  const rows = DTL.filter(r => {
-    if (filter === "eligible" && r.elig !== "eligible" && r.elig !== "verified") return false;
-    if (filter === "pending"  && r.elig !== "pending")  return false;
-    if (filter === "rejected" && r.elig !== "rejected") return false;
-    if (filter === "archived" && r.elig !== "archived") return false;
-    if (query) { const q = query.toLowerCase(); if (!r.h.toLowerCase().includes(q) && !r.elig.includes(q)) return false; }
-    return true;
-  });
-
-  const totalValid   = DTL.filter(r => r.elig === "eligible" || r.elig === "verified").length;
-  const totalArch    = DTL.filter(r => r.elig === "archived").length;
-  const nSelected    = Object.values(sel).filter(Boolean).length;
-
-  function fmtK(n: number|null) {
-    if (n == null) return "—";
-    if (n >= 1000) { const v = n/1000; return (v >= 10 ? Math.round(v) : v.toFixed(1)).toString().replace(".",",") + (lang === "en" ? "K" : " k"); }
-    return n.toLocaleString("fr-FR");
-  }
-
-  return (
-    <>
-      <div className={`cd-dwr-scrim${open ? " open" : ""}`} onClick={onClose}/>
-      <aside className={`cd-dwr${open ? " open" : ""}`} aria-hidden={!open}>
-        <header className="cd-dwr-hd">
-          <div className="cd-dwr-hd-l">
-            <span className="cd-dwr-hd-ic">
-              <svg viewBox="0 0 24 24" width={20} height={20} stroke="var(--accent)" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            </span>
-            <div>
-              <div className="cd-dwr-kicker">{td.kicker}</div>
-              <div className="cd-dwr-title" style={{ color:"var(--accent)" }}>{td.title}</div>
-            </div>
-          </div>
-          <button className="cd-dwr-x" onClick={onClose}>
-            <svg viewBox="0 0 24 24" width={17} height={17} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </header>
-
-        <div className="cd-dwr-body">
-          {/* Stats */}
-          <div className="cd-dwr-stats">
-            <div className="cd-dwr-stat"><div className="cd-dwr-stat-l">{td.total}</div><div className="cd-dwr-stat-v">{DTL.length}</div></div>
-            <div className="cd-dwr-stat"><div className="cd-dwr-stat-l">{td.valid}</div><div className="cd-dwr-stat-v" style={{color:"var(--good)"}}>{totalValid}</div></div>
-            <div className="cd-dwr-stat"><div className="cd-dwr-stat-l">{td.archived}</div><div className="cd-dwr-stat-v" style={{color:"var(--ink-dim)"}}>{totalArch}</div></div>
-          </div>
-
-          {/* Search + chips */}
-          <div className="cd-dwr-controls">
-            <div className="cd-dwr-search">
-              <svg viewBox="0 0 24 24" width={15} height={15} stroke="var(--ink-mute)" fill="none" strokeWidth={2} strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" placeholder={td.searchPh} value={query} onChange={e => setQuery(e.target.value)}/>
-            </div>
-            <div className="cd-dwr-chips">
-              {filterKeys.map((k, i) => (
-                <button key={k} className={`cd-dwr-chip${filter === k ? " on" : ""}`} onClick={() => setFilter(k)}>{td.chips[i]}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="cd-dwr-actions">
-            <button className="cd-dwr-act"><svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>{td.refresh}</button>
-            <button className="cd-dwr-act"><svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>{td.export}</button>
-            <button className="cd-dwr-act" style={{color:"var(--bad)"}} disabled={nSelected === 0}><svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{td.del}</button>
-          </div>
-
-          {/* Add panels */}
-          <div className="cd-dwr-add">
-            <div className="cd-dwr-add-card">
-              <div className="cd-dwr-add-lbl">{td.addLbl}</div>
-              <div className="cd-dwr-add-row">
-                <input type="text" className="cd-dwr-in" placeholder={td.addPh} value={singleInput} onChange={e => setSingleInput(e.target.value)}/>
-                <button className="cd-dwr-add-btn" onClick={() => setSingleInput("")}>
-                  <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={2.2} strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                  {td.addBtn}
-                </button>
-              </div>
-            </div>
-            <div className="cd-dwr-add-card">
-              <div className="cd-dwr-add-lbl">{td.bulkLbl}</div>
-              <textarea className="cd-dwr-ta" placeholder={"user_one\n@user_two\nuser_three"} value={bulkText} onChange={e => setBulkText(e.target.value)}/>
-              <button className="cd-dwr-import" onClick={() => setBulkText("")}>{td.importBtn}</button>
-            </div>
-          </div>
-
-          {/* AI panel */}
-          <div className="cd-dwr-add-card" style={{textAlign:"center"}}>
-            <div className="cd-dwr-add-lbl" style={{marginBottom:12}}>{td.aiLbl}</div>
-            <button className="cd-dwr-import">{td.aiBtn}</button>
-          </div>
-
-          {/* Table */}
-          <div className="cd-dwr-table">
-            <div className="cd-dwr-trow cd-dwr-thead">
-              {td.cols.map((c, i) => <span key={i} className={i >= 4 && i <= 7 ? "cd-dwr-num" : ""}>{c}</span>)}
-            </div>
-            <div>
-              {rows.length === 0 ? (
-                <div className="cd-dwr-empty">{lang === "en" ? "No targets match your filter." : "Aucune cible ne correspond à votre filtre."}</div>
-              ) : rows.map((r) => {
-                const pal = avPal(r.h);
-                const e = eligMap[r.elig] || { cls:"cd-arch", label: r.elig };
-                const foll = r.f == null ? "—" : fmtK(r.f);
-                const verTxt = r.ver === "found" ? td.found : td.notFound;
-                const last = r.last ? (lang === "en" ? (r.lastEn || r.last) : r.last) : "—";
-                const fbr = r.fbr == null ? "—" : r.fbr.toFixed(1).replace(".",",")+"%";
-                const perfTxt = r.perf === "running" ? td.perf.running : r.perf === "pending" ? td.perf.pending : null;
-                const addedDisplay = lang === "en" ? r.addedEn : r.added;
-                const srcDisplay = lang === "en" ? r.srcEn : r.src;
-                const isSelected = !!sel[r.h];
-                return (
-                  <div key={r.h} className="cd-dwr-trow cd-dwr-rrow">
-                    <span className={`cd-dwr-cb${isSelected ? " on" : ""}`} onClick={() => setSel(s => ({...s, [r.h]: !s[r.h]}))}/>
-                    <div className="cd-dwr-u">
-                      <span className="cd-dwr-u-av" style={{background:`linear-gradient(135deg,${pal[0]},${pal[1]})`}}/>
-                      <span className="cd-dwr-u-h">@{r.h}</span>
-                    </div>
-                    <span className={`cd-dwr-ver${r.ver === "not_found" ? " cd-nf" : ""}`}>{verTxt}</span>
-                    <span><span className={`cd-dwr-pill ${e.cls}`}>{e.label}</span></span>
-                    <span className="cd-dwr-num">{foll}</span>
-                    <span>{perfTxt ? <span className="cd-dwr-tag">{perfTxt}</span> : <span className="cd-dwr-dash">—</span>}</span>
-                    <span className="cd-dwr-num">{fbr}</span>
-                    <span className="cd-dwr-num">{r.sent}</span>
-                    <span><span className="cd-dwr-last">{last}</span></span>
-                    <span><span className="cd-dwr-added">{addedDisplay}</span><span className="cd-dwr-added-s">{srcDisplay}</span></span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-}
-
 // ─── Main export ──────────────────────────────────────────────────────────────
 export default function ClientDashboard({
   userId: _userId,
@@ -723,9 +543,12 @@ export default function ClientDashboard({
   const useLiveData = hasLinkedInstagramAccount && Boolean(accountInsights);
   const demoMode = !useLiveData;
 
-  const [targets,   setTargets]   = useState(useLiveData ? accountInsights!.targets.map((row) => row.username) : INIT_TARGETS);
+  const [targetingOverview, setTargetingOverview] = useState<TargetsOverview | null>(null);
+  const [demoTargetList, setDemoTargetList] = useState(INIT_TARGETS);
   const [whitelist, setWhitelist] = useState(useLiveData ? accountInsights!.whitelist : INIT_WHITE);
   const [blacklist, setBlacklist] = useState(useLiveData ? accountInsights!.blacklist : INIT_BLACK);
+  const [targetingLoading, setTargetingLoading] = useState(false);
+  const [targetingMessage, setTargetingMessage] = useState<string | null>(null);
 
   const t = T[lang];
   const linkedAccountsForAccountTab: ClientLinkedInstagramAccount[] = workspace?.linkedInstagramAccounts?.length
@@ -754,6 +577,83 @@ export default function ClientDashboard({
       accountId: initialNotifications[0].accountId,
       username: initialNotifications[0].username,
     } as ClientInstagramAccount : null);
+
+  const targetingAccountId = primaryAccount?.accountId || accountInsights?.accountId || "";
+  const targetingUsername = primaryAccount?.username || accountInsights?.username || "";
+  const targetingPackageCode = accountInsights?.packageCode || primaryAccount?.packageLabel?.toLowerCase() || "growth";
+  const demoTargets = demoTargetList;
+  const targets = useLiveData ? mainTargetingUsernames(targetingOverview) : demoTargets;
+
+  const reloadTargeting = useCallback(async () => {
+    if (!targetingAccountId || !useLiveData) return;
+    setTargetingLoading(true);
+    setTargetingMessage(null);
+    try {
+      const [targetsResponse, filtersResponse] = await Promise.all([
+        fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/targets`, {
+          headers: { Accept: "application/json" },
+        }),
+        fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/filters`, {
+          headers: { Accept: "application/json" },
+        }),
+      ]);
+      const targetsPayload = await targetsResponse.json() as { ok?: boolean; data?: TargetSafeRow[]; error?: string };
+      const filtersPayload = await filtersResponse.json() as { ok?: boolean; data?: { whitelist?: string[]; blacklist?: string[] }; error?: string };
+      if (!targetsResponse.ok || !targetsPayload.ok || !Array.isArray(targetsPayload.data)) {
+        throw new Error(targetsPayload.error || "Could not load targets.");
+      }
+      if (!filtersResponse.ok || !filtersPayload.ok || !filtersPayload.data) {
+        throw new Error(filtersPayload.error || "Could not load filters.");
+      }
+      setTargetingOverview(buildTargetsOverview(targetsPayload.data));
+      setWhitelist(filtersPayload.data.whitelist ?? []);
+      setBlacklist(filtersPayload.data.blacklist ?? []);
+    } catch (error) {
+      setTargetingMessage(error instanceof Error ? error.message : "Could not load targeting data.");
+    } finally {
+      setTargetingLoading(false);
+    }
+  }, [targetingAccountId, useLiveData]);
+
+  useEffect(() => {
+    if (useLiveData && targetingAccountId) {
+      void reloadTargeting();
+    }
+  }, [useLiveData, targetingAccountId, reloadTargeting]);
+
+  async function persistFilterLists(nextWhitelist: string[], nextBlacklist: string[]) {
+    if (!targetingAccountId || !useLiveData) return;
+    const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/filters`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ whitelist: nextWhitelist, blacklist: nextBlacklist }),
+    });
+    const payload = await response.json() as { ok?: boolean; data?: { whitelist?: string[]; blacklist?: string[] }; error?: string };
+    if (!response.ok || !payload.ok || !payload.data) {
+      throw new Error(payload.error || "Could not save filters.");
+    }
+    setWhitelist(payload.data.whitelist ?? nextWhitelist);
+    setBlacklist(payload.data.blacklist ?? nextBlacklist);
+  }
+
+  async function archiveTargetByUsername(username: string) {
+    if (!targetingAccountId || !useLiveData || !targetingOverview) return;
+    const normalized = normalizeTargetUsername(username);
+    const item = targetingOverview.items.find(
+      (row) => row.targetUsername === normalized && !isArchivedOrDeletedTarget(row),
+    );
+    if (!item) return;
+    const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/targets`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ ids: [item.id] }),
+    });
+    const payload = await response.json() as { ok?: boolean; error?: string };
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Could not archive target.");
+    }
+    await reloadTargeting();
+  }
 
   useEffect(() => {
     const accountId = connectProgress?.account.accountId;
@@ -912,8 +812,50 @@ export default function ClientDashboard({
   function addToList(list: "white"|"black", value: string) {
     const h = tgClean(value);
     if (!h) return;
-    if (list === "white") { if (!whitelist.includes(h)) setWhitelist(p => [h,...p]); setAddW(""); }
-    else { if (!blacklist.includes(h)) setBlacklist(p => [h,...p]); setAddB(""); }
+    void (async () => {
+      try {
+        if (list === "white") {
+          if (whitelist.includes(h)) return;
+          const next = [h, ...whitelist];
+          if (useLiveData) await persistFilterLists(next, blacklist);
+          else setWhitelist(next);
+          setAddW("");
+        } else {
+          if (blacklist.includes(h)) return;
+          const next = [h, ...blacklist];
+          if (useLiveData) await persistFilterLists(whitelist, next);
+          else setBlacklist(next);
+          setAddB("");
+        }
+      } catch (error) {
+        setTargetingMessage(error instanceof Error ? error.message : "Could not update filters.");
+      }
+    })();
+  }
+
+  async function removeFromFilterList(list: "white"|"black", username: string) {
+    try {
+      if (list === "white") {
+        const next = whitelist.filter((row) => row !== username);
+        if (useLiveData) await persistFilterLists(next, blacklist);
+        else setWhitelist(next);
+      } else {
+        const next = blacklist.filter((row) => row !== username);
+        if (useLiveData) await persistFilterLists(whitelist, next);
+        else setBlacklist(next);
+      }
+    } catch (error) {
+      setTargetingMessage(error instanceof Error ? error.message : "Could not update filters.");
+    }
+  }
+
+  async function removeTargetFromList(username: string) {
+    try {
+      if (useLiveData) await archiveTargetByUsername(username);
+      else setDemoTargetList((current) => current.filter((row) => row !== username));
+    } catch (error) {
+      setTargetingMessage(error instanceof Error ? error.message : "Could not archive target.");
+    }
   }
 
   const navItems: { view: View; label: string; icon: React.ReactNode; badge?: number; section?: string }[] = [
@@ -1103,12 +1045,20 @@ export default function ClientDashboard({
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
             <div className="cd-tg2-topbar">
-              <p className="cd-tg2-intro">{t.targeting.intro}</p>
-              <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)}>
+              <p className="cd-tg2-intro">
+                {useLiveData && targetingUsername
+                  ? `${t.targeting.intro} · @${targetingUsername.replace(/^@+/, "")}`
+                  : t.targeting.intro}
+              </p>
+              <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)} disabled={!useLiveData || !targetingAccountId}>
                 <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
                 {t.targeting.detailBtn}
               </button>
             </div>
+            {targetingMessage ? <p className="cd-setup-note" role="status">{targetingMessage}</p> : null}
+            {targetingLoading && useLiveData ? (
+              <p className="cd-setup-note">{lang === "fr" ? "Chargement du ciblage…" : "Loading targeting…"}</p>
+            ) : null}
 
             <div className="cd-tg2-cols">
               {/* Cibles */}
@@ -1123,7 +1073,7 @@ export default function ClientDashboard({
                     <div key={h} className="cd-tg2-li">
                       <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
                       <span className="cd-tg2-handle">@{h}</span>
-                      <button className="cd-tg2-li-x" onClick={() => setTargets(p => p.filter(x => x !== h))} title="Retirer">
+                      <button className="cd-tg2-li-x" onClick={() => void removeTargetFromList(h)} title="Retirer" disabled={targetingLoading}>
                         <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                       </button>
                     </div>
@@ -1147,7 +1097,7 @@ export default function ClientDashboard({
                     <div key={h} className="cd-tg2-li">
                       <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
                       <span className="cd-tg2-handle">@{h}</span>
-                      <button className="cd-tg2-li-x" onClick={() => setWhitelist(p => p.filter(x => x !== h))} title="Retirer">
+                      <button className="cd-tg2-li-x" onClick={() => void removeFromFilterList("white", h)} title="Retirer">
                         <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                       </button>
                     </div>
@@ -1171,7 +1121,7 @@ export default function ClientDashboard({
                     <div key={h} className="cd-tg2-li">
                       <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
                       <span className="cd-tg2-handle">@{h}</span>
-                      <button className="cd-tg2-li-x" onClick={() => setBlacklist(p => p.filter(x => x !== h))} title="Retirer">
+                      <button className="cd-tg2-li-x" onClick={() => void removeFromFilterList("black", h)} title="Retirer">
                         <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                       </button>
                     </div>
@@ -1265,7 +1215,20 @@ export default function ClientDashboard({
       </main>
 
       {/* ── DRAWER ── */}
-      <TargetDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} lang={lang} t={t}/>
+      {useLiveData && targetingAccountId ? (
+        <ClientAccountTargetsDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          lang={lang}
+          copy={t.drawer}
+          accountId={targetingAccountId}
+          accountUsername={targetingUsername}
+          packageCode={targetingPackageCode}
+          overview={targetingOverview}
+          onOverviewChange={setTargetingOverview}
+          onReload={reloadTargeting}
+        />
+      ) : null}
       <PaymentBillingDrawer open={billingDrawerOpen} onClose={() => setBillingDrawerOpen(false)} lang={lang} t={t} billing={workspace?.billing ?? null} />
 
       {connectProgress ? (

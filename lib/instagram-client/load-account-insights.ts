@@ -41,6 +41,7 @@ export type ClientAccountInsights = {
   accountId: string;
   username: string;
   packageLabel: string;
+  packageCode: string;
   campaignActive: boolean;
   statsDays: ClientStatsDay[];
   overview: {
@@ -256,12 +257,15 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     .filter((row) => Boolean(row.id && row.username));
 
   const filters = filtersResult.data as SupabaseRecord | null;
-  const packageLabel = packageSummaries.get(accountId)?.commercialPackageLabel || "Growth";
+  const packageSummary = packageSummaries.get(accountId);
+  const packageLabel = packageSummary?.commercialPackageLabel || "Growth";
+  const packageCode = packageSummary?.commercialPackageCode || "growth";
 
   return {
     accountId,
     username: readString(accountResult.data.username, "Instagram account"),
     packageLabel,
+    packageCode,
     campaignActive: readString(accountResult.data.admin_lifecycle_status, readString(accountResult.data.status, "active")) === "active",
     statsDays,
     overview: {
