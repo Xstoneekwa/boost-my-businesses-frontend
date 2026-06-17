@@ -46,7 +46,6 @@ export function targetAiCopy(lang: TargetAiLang) {
     validateSuccess: (count: number) => fr
       ? `${count} compte(s) ajouté(s) à votre ciblage.`
       : `${count} account(s) added to your targeting.`,
-    helpLink: fr ? "Comment choisir mes comptes cibles →" : "How to choose target accounts →",
     close: fr ? "Fermer" : "Close",
   };
 }

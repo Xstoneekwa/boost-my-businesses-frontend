@@ -1595,6 +1595,8 @@ const CSS = `
 .cd-dwr-ta::placeholder{color:var(--ink-mute)}
 .cd-dwr-import{width:100%;margin-top:11px;font-family:var(--font-d);font-weight:800;font-size:.85rem;color:#fff;background:linear-gradient(110deg,var(--accent-2),var(--accent));padding:12px;border-radius:var(--r-sm);box-shadow:0 8px 22px -10px var(--a-ring);transition:transform var(--tr);cursor:pointer;border:none;display:block}
 .cd-dwr-import:hover{transform:translateY(-1px)}
+.cd-dwr-import:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
+.cd-dwr-import-upgrade{background:var(--good)!important;color:#0b1a12!important;box-shadow:none!important}
 .cd-dwr-table{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto}
 .cd-dwr-trow{display:grid;grid-template-columns:34px minmax(180px,1.5fr) 100px 110px 92px 92px 64px 64px 96px 86px;align-items:center;gap:10px;padding:13px 18px;min-width:1000px}
 .cd-dwr-thead{border-bottom:1px solid var(--line)}

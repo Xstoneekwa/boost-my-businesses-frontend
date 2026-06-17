@@ -481,7 +481,7 @@ export default function ClientAccountTargetsDrawer({
                 {aiMessage ? <p style={{ marginTop: 10, fontSize: 12, color: "var(--ink-mute)" }}>{aiMessage}</p> : null}
               </>
             ) : (
-              <button type="button" className="cd-dwr-import" style={{ background: "var(--good)", color: "#0b1a12" }} disabled>
+              <button type="button" className="cd-dwr-import cd-dwr-import-upgrade" disabled aria-disabled="true">
                 {clientAiTargetingUpgradeLabel(lang)}
               </button>
             )}

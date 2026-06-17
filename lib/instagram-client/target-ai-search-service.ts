@@ -50,7 +50,7 @@ async function callOpenAiUsernames(input: {
 }) {
   const apiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
   if (!targetAiEnabled() || !apiKey) {
-    return { ok: false as const, usernames: readTargetAiMockUsernames(), provider: "mock" as const, error_code: "ai_unavailable" };
+    return { ok: false as const, usernames: readTargetAiMockUsernames(), provider: "mock" as const, error_code: "target_ai_disabled" as const };
   }
 
   const model = targetAiModel();
@@ -80,7 +80,7 @@ async function callOpenAiUsernames(input: {
 
   if (!response.ok) {
     safeLog("openai_error", { status: response.status });
-    return { ok: false as const, usernames: readTargetAiMockUsernames(), provider: "mock" as const, error_code: "provider_error" };
+    return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "target_ai_provider_error" as const };
   }
 
   const payload = await response.json() as {
@@ -91,11 +91,11 @@ async function callOpenAiUsernames(input: {
     const parsed = JSON.parse(content) as unknown;
     const usernames = sanitizeTargetAiSuggestedUsernames(parsed, input.maxCandidates);
     if (usernames.length === 0) {
-      return { ok: false as const, usernames: readTargetAiMockUsernames(), provider: "openai" as const, error_code: "invalid_ai_output" };
+      return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "no_candidates_found" as const };
     }
     return { ok: true as const, usernames, provider: "openai" as const, error_code: null };
   } catch {
-    return { ok: false as const, usernames: readTargetAiMockUsernames(), provider: "openai" as const, error_code: "invalid_ai_output" };
+    return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "target_ai_provider_error" as const };
   }
 }
 
@@ -151,7 +151,7 @@ export async function searchTargetAccountsWithAi(input: {
       suggested_count: 0,
       verified_count: 0,
       avatar_resolved: 0,
-      error_code: suggestionResult.error_code,
+      error_code: suggestionResult.error_code || "no_candidates_found",
     };
   }
 

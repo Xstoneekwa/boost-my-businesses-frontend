@@ -7,6 +7,8 @@ import {
   type AiTargetEligibilityReasonCode,
 } from "@/lib/instagram-client/target-ai-eligibility";
 import { targetAiCopy, targetAiEligibilityLabel, type TargetAiLang } from "@/lib/instagram-client/target-ai-copy";
+import type { TargetAiErrorCode } from "@/lib/instagram-client/target-ai-config";
+import { TargetAiRequestError, targetAiErrorMessage } from "@/lib/instagram-client/target-ai-errors";
 import type { TargetAiSearchCandidate } from "@/lib/instagram-client/target-ai-search-service";
 
 type GeocodedPlace = {
@@ -24,23 +26,28 @@ type ClientAiTargetSearchWizardProps = {
   onValidated: (message: string) => Promise<void>;
 };
 
-type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
+type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string; error_code?: TargetAiErrorCode };
 
-async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
+async function readApiResponse<T>(
+  response: Response,
+  lang: TargetAiLang,
+  fallbackCode: TargetAiErrorCode = "target_ai_provider_error",
+): Promise<T> {
   const text = await response.text();
   let payload: ApiEnvelope<T> | null = null;
   if (text.trim()) {
     try {
       payload = JSON.parse(text) as ApiEnvelope<T>;
     } catch {
-      throw new Error(response.ok ? fallback : `Request failed (${response.status}).`);
+      throw new TargetAiRequestError(fallbackCode, targetAiErrorMessage(lang, fallbackCode));
     }
   }
   if (!payload || typeof payload !== "object" || !("ok" in payload)) {
-    throw new Error(response.ok ? fallback : `Request failed (${response.status}).`);
+    throw new TargetAiRequestError(fallbackCode, targetAiErrorMessage(lang, fallbackCode));
   }
   if (payload.ok) return payload.data;
-  throw new Error(payload.error || fallback);
+  const code = payload.error_code || fallbackCode;
+  throw new TargetAiRequestError(code, targetAiErrorMessage(lang, code));
 }
 
 function formatFollowers(value: number | null, lang: TargetAiLang) {
@@ -78,6 +85,7 @@ export default function ClientAiTargetSearchWizard({
   const [searching, setSearching] = useState(false);
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
   const [candidates, setCandidates] = useState<TargetAiSearchCandidate[]>([]);
 
   useEffect(() => {
@@ -90,6 +98,7 @@ export default function ClientAiTargetSearchWizard({
     setSearching(false);
     setValidating(false);
     setError("");
+    setStatusMessage("");
     setCandidates([]);
   }, [open]);
 
@@ -107,7 +116,8 @@ export default function ClientAiTargetSearchWizard({
           await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/location?q=${encodeURIComponent(query)}`, {
             headers: { Accept: "application/json" },
           }),
-          copy.searchError,
+          lang,
+          "location_unavailable",
         );
         setLocationSuggestions(Array.isArray(data.places) ? data.places : []);
       } catch {
@@ -117,7 +127,7 @@ export default function ClientAiTargetSearchWizard({
       }
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [accountId, copy.searchError, locationQuery, open, step]);
+  }, [accountId, lang, locationQuery, open, step]);
 
   const selectedCandidates = candidates;
   const ineligiblePresent = hasIneligibleAiTargetSelection(selectedCandidates);
@@ -132,6 +142,7 @@ export default function ClientAiTargetSearchWizard({
   async function launchSearch() {
     setSearching(true);
     setError("");
+    setStatusMessage("");
     setStep(3);
     try {
       const data = await readApiResponse<{
@@ -147,12 +158,26 @@ export default function ClientAiTargetSearchWizard({
               : null,
           }),
         }),
-        copy.searchError,
+        lang,
+        "target_ai_provider_error",
       );
       setCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      if (!data.candidates?.length) {
+        setStatusMessage(targetAiErrorMessage(lang, "no_candidates_found"));
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : copy.searchError);
       setCandidates([]);
+      if (e instanceof TargetAiRequestError) {
+        if (e.code === "no_candidates_found") {
+          setStatusMessage(e.message);
+          setError("");
+        } else {
+          setError(e.message);
+          setStatusMessage("");
+        }
+      } else {
+        setError(targetAiErrorMessage(lang, "target_ai_provider_error"));
+      }
     } finally {
       setSearching(false);
     }
@@ -172,12 +197,13 @@ export default function ClientAiTargetSearchWizard({
             import_source: "ai_discovery",
           }),
         }),
-        copy.validateError,
+        lang,
+        "target_ai_provider_error",
       );
       await onValidated(copy.validateSuccess(eligibleUsernames.length));
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : copy.validateError);
+      setError(e instanceof TargetAiRequestError ? e.message : copy.validateError);
     } finally {
       setValidating(false);
     }
@@ -289,8 +315,9 @@ export default function ClientAiTargetSearchWizard({
             ) : (
               <>
                 {ineligiblePresent ? <p className="cd-ai-warning">{copy.blockedValidation}</p> : null}
+                {statusMessage ? <p className="cd-ai-hint">{statusMessage}</p> : null}
                 <div className="cd-ai-results">
-                  {selectedCandidates.length === 0 ? (
+                  {selectedCandidates.length === 0 && !statusMessage ? (
                     <p className="cd-ai-hint">{copy.emptySelection}</p>
                   ) : selectedCandidates.map((row) => (
                     <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}`}>
@@ -326,17 +353,13 @@ export default function ClientAiTargetSearchWizard({
                     {copy.validate}
                   </button>
                 </div>
-                <button type="button" className="cd-ai-secondary" onClick={() => { setStep(1); setCandidates([]); }}>
+                <button type="button" className="cd-ai-secondary" onClick={() => { setStep(1); setCandidates([]); setStatusMessage(""); setError(""); }}>
                   {copy.newSearch}
                 </button>
               </>
             )}
           </div>
         ) : null}
-
-        <a className="cd-ai-help" href="https://boostmybusinesses.com/instagram-growth/" target="_blank" rel="noopener noreferrer">
-          {copy.helpLink}
-        </a>
       </section>
     </>
   );
