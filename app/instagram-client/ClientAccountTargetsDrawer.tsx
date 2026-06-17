@@ -23,6 +23,7 @@ import {
   clientAiTargetingUpgradeLabel,
   isClientAiTargetingEnabled,
 } from "@/lib/instagram-client/ai-targeting-gate";
+import TargetAvatar from "./TargetAvatar";
 
 type Lang = "fr" | "en";
 
@@ -50,15 +51,6 @@ type DrawerCopy = {
 };
 
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
-
-const AVPAL = [
-  ["#f58529", "#dd2a7b"], ["#8a3ab9", "#cd486b"], ["#5a6cf5", "#e8a030"], ["#fbbf24", "#dd2a7b"],
-  ["#34d399", "#5a6cf5"], ["#dd2a7b", "#fbbf24"], ["#e8a030", "#8a3ab9"], ["#5851db", "#e1306c"],
-];
-
-function avPal(h: string) {
-  return AVPAL[h.charCodeAt(0) % AVPAL.length];
-}
 
 async function readApiResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
@@ -499,7 +491,6 @@ export default function ClientAccountTargetsDrawer({
                 <div className="cd-dwr-empty">{lang === "en" ? "No targets match your filter." : "Aucune cible ne correspond à votre filtre."}</div>
               ) : filteredRows.map((r) => {
                 const elig = drawerEligKey(r);
-                const pal = avPal(r.targetUsername);
                 const e = eligMap[elig];
                 const foll = fmtK(r.followersCount, lang);
                 const verTxt = r.verificationStatus === "found" ? td.found : td.notFound;
@@ -521,7 +512,13 @@ export default function ClientAccountTargetsDrawer({
                       aria-checked={isSelected}
                     />
                     <div className="cd-dwr-u">
-                      <span className="cd-dwr-u-av" style={{ background: `linear-gradient(135deg,${pal[0]},${pal[1]})` }} />
+                      <TargetAvatar
+                        accountId={accountId}
+                        targetId={r.id}
+                        username={r.targetUsername}
+                        avatarAvailable={Boolean(r.avatarUrl)}
+                        size={28}
+                      />
                       <span className="cd-dwr-u-h">@{r.targetUsername}</span>
                     </div>
                     <span className={`cd-dwr-ver${r.verificationStatus === "not_found" ? " cd-nf" : ""}`}>{verTxt}</span>
@@ -555,9 +552,17 @@ export function buildInitialTargetsOverview(rows: TargetSafeRow[]) {
   return buildTargetsOverview(rows);
 }
 
-export function mainTargetingUsernames(overview: TargetsOverview | null) {
+export function mainTargetingItems(overview: TargetsOverview | null) {
   if (!overview) return [];
   return overview.items
     .filter((item) => !isArchivedOrDeletedTarget(item))
-    .map((item) => item.targetUsername);
+    .map((item) => ({
+      id: item.id,
+      targetUsername: item.targetUsername,
+      avatarUrl: item.avatarUrl,
+    }));
+}
+
+export function mainTargetingUsernames(overview: TargetsOverview | null) {
+  return mainTargetingItems(overview).map((item) => item.targetUsername);
 }

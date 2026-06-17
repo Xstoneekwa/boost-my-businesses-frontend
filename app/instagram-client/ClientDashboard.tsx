@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
-import ClientAccountTargetsDrawer, { mainTargetingUsernames } from "./ClientAccountTargetsDrawer";
+import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
+import TargetAvatar from "./TargetAvatar";
 import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
 import { normalizeTargetUsername } from "@/lib/instagram-targets";
 import type { ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
@@ -582,7 +583,12 @@ export default function ClientDashboard({
   const targetingUsername = primaryAccount?.username || accountInsights?.username || "";
   const targetingPackageCode = accountInsights?.packageCode || primaryAccount?.packageLabel?.toLowerCase() || "growth";
   const demoTargets = demoTargetList;
-  const targets = useLiveData ? mainTargetingUsernames(targetingOverview) : demoTargets;
+  const targetingItems = useLiveData ? mainTargetingItems(targetingOverview) : demoTargets.map((username) => ({
+    id: username,
+    targetUsername: username,
+    avatarUrl: null,
+  }));
+  const targets = targetingItems.map((item) => item.targetUsername);
 
   const reloadTargeting = useCallback(async () => {
     if (!targetingAccountId || !useLiveData) return;
@@ -1069,11 +1075,16 @@ export default function ClientDashboard({
                   <span className="cd-tg2-col-ct">{targets.length}</span>
                 </div>
                 <div className="cd-tg2-col-rows">
-                  {targets.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyT}</div> : targets.map(h => (
-                    <div key={h} className="cd-tg2-li">
-                      <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
-                      <span className="cd-tg2-handle">@{h}</span>
-                      <button className="cd-tg2-li-x" onClick={() => void removeTargetFromList(h)} title="Retirer" disabled={targetingLoading}>
+                  {targetingItems.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyT}</div> : targetingItems.map((item) => (
+                    <div key={item.id} className="cd-tg2-li">
+                      <TargetAvatar
+                        accountId={targetingAccountId}
+                        targetId={item.id}
+                        username={item.targetUsername}
+                        avatarAvailable={Boolean(item.avatarUrl)}
+                      />
+                      <span className="cd-tg2-handle">@{item.targetUsername}</span>
+                      <button className="cd-tg2-li-x" onClick={() => void removeTargetFromList(item.targetUsername)} title="Retirer" disabled={targetingLoading}>
                         <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2.3} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                       </button>
                     </div>
@@ -1492,7 +1503,9 @@ const CSS = `
 .cd-tg2-li{display:flex;align-items:center;gap:11px;padding:10px 16px;border-bottom:1px solid var(--line-2);transition:background var(--tr)}
 .cd-tg2-li:last-child{border-bottom:none}
 .cd-tg2-li:hover{background:var(--a-tint)}
-.cd-tg2-av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none}
+.cd-tg2-av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none;overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+.cd-tg2-av img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
+.cd-tg2-av-img{background:var(--surface)}
 .cd-tg2-av i{width:100%;height:100%;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-family:var(--font-d);font-weight:800;font-size:.82rem;color:var(--ink);font-style:normal}
 .cd-tg2-handle{flex:1;font-size:.85rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
 .cd-tg2-li-x{flex:none;width:26px;height:26px;border-radius:7px;border:1px solid transparent;background:none;color:var(--ink-mute);display:grid;place-items:center;cursor:pointer;opacity:0;transition:all var(--tr)}

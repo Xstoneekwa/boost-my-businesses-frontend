@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { projectTargetSafeRowsAvatar } from "@/lib/instagram-dashboard/target-avatar-projection";
 import {
   addAccountTargetSingle,
   addAccountTargetsBulk,
@@ -41,7 +42,7 @@ export async function GET(
 
   const result = await listAccountTargets(auth.accountId);
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
-  return NextResponse.json({ ok: true, data: result.data });
+  return NextResponse.json({ ok: true, data: projectTargetSafeRowsAvatar(result.data) });
 }
 
 type PostBody = {

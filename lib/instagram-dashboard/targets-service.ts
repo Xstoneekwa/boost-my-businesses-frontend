@@ -1,5 +1,6 @@
+import { projectPersistedTargetAvatar } from "@/lib/instagram-dashboard/target-avatar-projection";
+import { enrichBulkTargetLinesWithProvider } from "@/lib/instagram-dashboard/target-provider-enrichment";
 import { createSupabaseClient } from "@/lib/supabase";
-import { safeInstagramPublicAvatarUrl } from "@/lib/instagram-public-profile-lookup";
 import {
   buildTargetVerificationJobDecision,
   buildTargetVerificationJobPayloads,
@@ -106,6 +107,7 @@ export function safeTargetRow(row: SupabaseRecord): TargetSafeRow {
   const exhaustionReason = readString(row.exhaustion_reason, "") || null;
   const cooldownUntil = readDateString(row, "cooldown_until");
   const metricsUpdatedAt = readDateString(row, "metrics_updated_at");
+  const avatarProjection = projectPersistedTargetAvatar(readString(row.avatar_url, ""));
 
   return {
     target_id: id,
@@ -119,7 +121,9 @@ export function safeTargetRow(row: SupabaseRecord): TargetSafeRow {
     verification_status: readString(row.verification_status, "pending"),
     verification_reason: readString(row.verification_reason, "") || null,
     quality_status: qualityStatus,
-    avatar_url: safeInstagramPublicAvatarUrl(readString(row.avatar_url, "")),
+    avatar_url: avatarProjection.avatarUrl,
+    avatarAvailable: avatarProjection.avatarAvailable,
+    avatarSource: avatarProjection.avatarSource,
     source: readString(row.source, "unknown"),
     actor_type: readString(row.actor_type, "") || null,
     rejected_reason: readString(row.rejected_reason, "") || null,
@@ -382,6 +386,7 @@ export async function addAccountTargetSingle(
   validation_pending: boolean;
   verification_status: string;
   quality_status: string;
+  avatar_status: "resolved" | "unavailable";
 }>> {
   const supabase = createSupabaseClient();
   const now = new Date().toISOString();
@@ -467,6 +472,7 @@ export async function addAccountTargetSingle(
       validation_pending: decision.verification_status === "pending",
       verification_status: decision.verification_status,
       quality_status: decision.quality_status,
+      avatar_status: safeRow.avatarAvailable ? "resolved" : "unavailable",
     },
     status: 201,
   };
@@ -498,9 +504,14 @@ export async function addAccountTargetsBulk(
   const accepted = classified.filter((line) => line.status === "pending_verification");
   const batchId = accepted.length > 0 ? crypto.randomUUID() : null;
   const source = targetSourceForAdd("bulk", ctx);
+  const enriched = await enrichBulkTargetLinesWithProvider(accepted, 3);
+  let avatarResolved = 0;
+  let avatarUnavailable = 0;
 
-  const rows = accepted.map((line) =>
-    targetInsertPayload({
+  const rows = enriched.map(({ line, decision, avatarStatus }) => {
+    if (avatarStatus === "resolved") avatarResolved += 1;
+    else avatarUnavailable += 1;
+    return targetInsertPayload({
       accountId,
       inputUsername: line.input_username,
       normalizedUsername: line.normalized_username,
@@ -508,9 +519,9 @@ export async function addAccountTargetsBulk(
       actorType: ctx.actorType,
       now,
       batchId,
-      decision: pendingTargetVerificationDecision("queued_for_future_verification"),
-    }),
-  );
+      decision,
+    });
+  });
 
   const insertResult = rows.length > 0
     ? await supabase.from("ig_targets").insert(rows).select("*")
@@ -578,6 +589,8 @@ export async function addAccountTargetsBulk(
       summary,
       lines: classified,
       rows: ((insertResult.data ?? []) as SupabaseRecord[]).map(safeTargetRow),
+      avatar_resolved: avatarResolved,
+      avatar_unavailable: avatarUnavailable,
     },
   };
 }

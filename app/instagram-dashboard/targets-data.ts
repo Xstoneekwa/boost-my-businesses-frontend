@@ -25,6 +25,8 @@ export type TargetSafeRow = {
   verification_reason?: string | null;
   quality_status?: string | null;
   avatar_url?: string | null;
+  avatarAvailable?: boolean;
+  avatarSource?: string | null;
   source: string;
   actor_type?: string | null;
   rejected_reason?: string | null;
