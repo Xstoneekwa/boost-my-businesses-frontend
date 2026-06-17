@@ -4,6 +4,11 @@ import {
   type AdminReadinessProjection,
 } from "@/lib/instagram-dashboard/readiness-projection";
 import { projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
+import {
+  mergeResolvedAccountEmail,
+  resolveAccountEmail,
+  resolvedEmailFromRow,
+} from "@/lib/instagram-dashboard/resolve-account-email";
 import { getAccountPackageSummaries } from "./package-summary-data";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -23,6 +28,7 @@ export type ManageAccount = {
   username: string;
   emailDisplay: string;
   emailSource?: string | null;
+  emailAvailable?: boolean;
   adminStatus: string;
   accountLifecycleStatus: string;
   customerStatus: string;
@@ -586,25 +592,20 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         reauthRequired,
         secretRefPresent,
       });
-      const settingsEmail = safeEmailValue(settings, ["email"]);
       const credentialMetadata = credential?.metadata_safe && typeof credential.metadata_safe === "object" && !Array.isArray(credential.metadata_safe)
         ? credential.metadata_safe as SupabaseRecord
         : undefined;
-      const credentialEmail = safeEmailValue(credentialMetadata, ["email", "account_email", "login_email"]);
-      const emailDisplay = account.emailDisplay !== "unknown"
-        ? account.emailDisplay
-        : settingsEmail !== "unknown"
-          ? settingsEmail
-          : credentialEmail !== "unknown"
-            ? credentialEmail
-            : account.emailDisplay;
-      const emailSource = account.emailDisplay !== "unknown"
-        ? account.emailSource ?? "ig_accounts"
-        : settingsEmail !== "unknown"
-          ? "ig_account_settings"
-          : credentialEmail !== "unknown"
-            ? "account_credentials_metadata_safe"
-            : account.emailSource ?? null;
+      const resolvedEmail = mergeResolvedAccountEmail(
+        {
+          emailDisplay: account.emailDisplay,
+          emailSource: account.emailSource,
+          emailAvailable: account.emailAvailable ?? account.emailDisplay !== "unknown",
+        },
+        resolveAccountEmail({
+          accountSettings: settings,
+          credentialMetadataSafe: credentialMetadata,
+        }),
+      );
       const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
       const assignedDeviceId = readString(assignment, ["device_id"], "");
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
@@ -627,8 +628,9 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         credentialsConfigured: credentialsStatus === "active" || credentialsStatus === "saved_pending_verification" ? true : account.credentialsConfigured,
         credentialsStatus,
         reauthRequired,
-        emailDisplay,
-        emailSource,
+        emailDisplay: resolvedEmail.emailDisplay,
+        emailSource: resolvedEmail.emailAvailable ? resolvedEmail.emailSource : null,
+        emailAvailable: resolvedEmail.emailAvailable,
         loginStatus: loginStatus === "unknown" && (credentialsStatus === "active" || credentialsStatus === "saved_pending_verification") ? "pending_login" : loginStatus,
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
@@ -835,13 +837,16 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
   const pendingActionsCount = isAttentionStatus(`${adminStatus} ${latestRunStatus} ${loginStatus} ${credentialsStatus}`) ? 1 : 0;
   void target;
 
+  const resolvedEmail = resolveAccountEmail({ igAccount: account, accountSettings });
+
   return {
     accountId,
     clientId: null,
     clientName: readString(account, ["display_name", "name", "full_name"], "") || null,
     username: readString(account, ["username", "ig_username", "handle"], "Unknown"),
-    emailDisplay: safeEmailDisplay(account),
-    emailSource: emailSourceFromRow(account),
+    emailDisplay: resolvedEmail.emailDisplay,
+    emailSource: resolvedEmail.emailAvailable ? resolvedEmail.emailSource : null,
+    emailAvailable: resolvedEmail.emailAvailable,
     adminStatus,
     accountLifecycleStatus,
     customerStatus: "unknown",
@@ -892,13 +897,16 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     reauthRequired,
   });
 
+  const resolvedEmail = resolvedEmailFromRow(row, "admin_dashboard");
+
   return {
     accountId: readString(row, ["account_id", "id"], ""),
     clientId: readString(row, ["client_id"], "") || null,
     clientName: readString(row, ["client_name"], "") || null,
     username: readString(row, ["username", "ig_username", "handle"], "Unknown"),
-    emailDisplay: safeEmailDisplay(row),
-    emailSource: emailSourceFromRow(row),
+    emailDisplay: resolvedEmail.emailDisplay,
+    emailSource: resolvedEmail.emailAvailable ? resolvedEmail.emailSource : null,
+    emailAvailable: resolvedEmail.emailAvailable,
     adminStatus: readString(row, ["admin_lifecycle_status", "admin_status"], "unknown"),
     accountLifecycleStatus: readString(row, ["status", "account_lifecycle_status", "lifecycle_status"], "active"),
     customerStatus: readString(row, ["customer_status"], "unknown"),

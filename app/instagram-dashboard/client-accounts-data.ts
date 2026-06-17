@@ -42,6 +42,7 @@ export type ClientAccountOperationsItem = {
   clientName: string | null;
   emailDisplay: string;
   emailSource: string | null;
+  emailAvailable: boolean;
   packageLabel: string;
   profileImageUrl?: string | null;
   profileImageSource?: ClientAccountProfileImageSource;
@@ -367,6 +368,7 @@ function mapAccount(account: ManageAccount, hasDashboardAction: boolean, passwor
     clientName: account.clientName,
     emailDisplay: account.emailDisplay,
     emailSource: account.emailSource ?? null,
+    emailAvailable: account.emailAvailable ?? account.emailDisplay !== "unknown",
     packageLabel: account.packageLabel,
     profileImageUrl,
     profileImageSource: profileImageSource(account, profileImageUrl),

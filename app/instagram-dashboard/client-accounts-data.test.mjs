@@ -22,7 +22,9 @@ test("client accounts normalize needs assistance as its own non-active status", 
 test("client accounts email projection uses safe DB sources and copy UI", () => {
   assert.match(manageSource, /from\("ig_account_settings"\)/);
   assert.match(manageSource, /account_id,email/);
+  assert.match(manageSource, /resolveAccountEmail/);
   assert.match(dataSource, /emailSource/);
+  assert.match(dataSource, /emailAvailable/);
   assert.match(pageSource, /EmailCopyButton/);
   assert.doesNotMatch(pageSource, /<td>\{item\.emailDisplay\}<\/td>/);
 });
