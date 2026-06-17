@@ -1,13 +1,17 @@
 import { mapWithConcurrency } from "../instagram-dashboard/target-provider-enrichment.ts";
 import { normalizeTargetUsername, verifySingleTargetUsername } from "../instagram-targets.ts";
-import { evaluateAiTargetEligibility } from "./target-ai-eligibility.ts";
 import {
   buildTargetAiDiscoveryPrompt,
+  buildTargetAiSystemPrompt,
   readTargetAiMockUsernames,
-  sanitizeTargetAiSuggestedUsernames,
+  sanitizeTargetAiDiscoveryResponse,
+  targetingAiPromptVersion,
   targetAiEnabled,
   targetAiModel,
+  type TargetAiDiscoveryPass,
 } from "./target-ai-contract.ts";
+import { evaluateAiTargetEligibility } from "./target-ai-eligibility.ts";
+import { readTargetingAiSettings } from "./targeting-ai-settings.ts";
 
 export type TargetAiSearchLocation = {
   label: string;
@@ -29,6 +33,25 @@ export type TargetAiSearchCandidate = {
   qualityStatus: string;
 };
 
+export type TargetAiSearchDebugSummary = {
+  prompt_version: string;
+  model: string;
+  provider: "openai" | "mock";
+  niche_present: boolean;
+  location_present: boolean;
+  gpt_candidates_count: number;
+  searchapi_checked_count: number;
+  found_count: number;
+  eligible_count: number;
+  ineligible_count: number;
+  not_found_count: number;
+  displayed_count: number;
+  second_pass_used: boolean;
+  rejection_reasons_top: Array<{ reason: string; count: number }>;
+  latency_ms: number;
+  error_code: string | null;
+};
+
 export type TargetAiSearchResult = {
   status: "ok" | "ai_unavailable" | "no_candidates";
   provider: "openai" | "mock";
@@ -37,20 +60,44 @@ export type TargetAiSearchResult = {
   verified_count: number;
   avatar_resolved: number;
   error_code: string | null;
+  debug: TargetAiSearchDebugSummary;
 };
 
 function safeLog(event: string, fields: Record<string, unknown>) {
   console.info("[Target AI search]", { event, ...fields });
 }
 
-async function callOpenAiUsernames(input: {
+function countReasons(candidates: TargetAiSearchCandidate[]) {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    if (candidate.eligible) continue;
+    const reason = candidate.ineligibleReasonCode || "rejected";
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 6);
+}
+
+async function callOpenAiDiscovery(input: {
   niche: string;
   locationLabel?: string | null;
   maxCandidates: number;
+  minFollowers: number;
+  maxFollowers: number;
+  allowVerified: boolean;
+  temperature: number;
+  pass: TargetAiDiscoveryPass;
 }) {
   const apiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
   if (!targetAiEnabled() || !apiKey) {
-    return { ok: false as const, usernames: readTargetAiMockUsernames(), provider: "mock" as const, error_code: "target_ai_disabled" as const };
+    return {
+      ok: false as const,
+      usernames: readTargetAiMockUsernames(input.maxCandidates),
+      provider: "mock" as const,
+      error_code: "target_ai_disabled" as const,
+    };
   }
 
   const model = targetAiModel();
@@ -64,22 +111,27 @@ async function callOpenAiUsernames(input: {
       model,
       response_format: { type: "json_object" },
       messages: [
-        {
-          role: "system",
-          content: "You return strict JSON only.",
-        },
+        { role: "system", content: buildTargetAiSystemPrompt() },
         {
           role: "user",
-          content: buildTargetAiDiscoveryPrompt(input),
+          content: buildTargetAiDiscoveryPrompt({
+            niche: input.niche,
+            locationLabel: input.locationLabel,
+            maxCandidates: input.maxCandidates,
+            minFollowers: input.minFollowers,
+            maxFollowers: input.maxFollowers,
+            allowVerified: input.allowVerified,
+            pass: input.pass,
+          }),
         },
       ],
-      temperature: 0.4,
+      temperature: input.temperature,
     }),
     cache: "no-store",
   });
 
   if (!response.ok) {
-    safeLog("openai_error", { status: response.status });
+    safeLog("openai_error", { status: response.status, pass: input.pass });
     return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "target_ai_provider_error" as const };
   }
 
@@ -89,7 +141,7 @@ async function callOpenAiUsernames(input: {
   const content = payload.choices?.[0]?.message?.content ?? "";
   try {
     const parsed = JSON.parse(content) as unknown;
-    const usernames = sanitizeTargetAiSuggestedUsernames(parsed, input.maxCandidates);
+    const usernames = sanitizeTargetAiDiscoveryResponse(parsed, input.maxCandidates);
     if (usernames.length === 0) {
       return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "no_candidates_found" as const };
     }
@@ -124,60 +176,166 @@ function mapVerifiedCandidate(username: string, decision: Awaited<ReturnType<typ
   };
 }
 
+function rankCandidates(candidates: TargetAiSearchCandidate[]) {
+  return [...candidates].sort((left, right) => {
+    if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
+    const leftFollowers = left.followersCount ?? -1;
+    const rightFollowers = right.followersCount ?? -1;
+    return rightFollowers - leftFollowers;
+  });
+}
+
+function selectDisplayCandidates(candidates: TargetAiSearchCandidate[], maxDisplayedResults: number) {
+  const found = rankCandidates(candidates.filter((row) => row.verificationStatus === "found"));
+  return found.slice(0, maxDisplayedResults);
+}
+
+async function verifyUsernames(
+  usernames: string[],
+  concurrency: number,
+  maxChecks: number,
+  checked: Set<string>,
+) {
+  const queue = usernames
+    .map((username) => normalizeTargetUsername(username))
+    .filter((username): username is string => Boolean(username))
+    .filter((username) => {
+      if (checked.has(username)) return false;
+      checked.add(username);
+      return true;
+    })
+    .slice(0, maxChecks);
+
+  return mapWithConcurrency(queue, concurrency, async (username) => {
+    const decision = await verifySingleTargetUsername(username);
+    return mapVerifiedCandidate(username, decision);
+  });
+}
+
 export async function searchTargetAccountsWithAi(input: {
   niche: string;
   location?: TargetAiSearchLocation | null;
   maxCandidates?: number;
 }): Promise<TargetAiSearchResult> {
-  const niche = input.niche.trim();
-  const maxCandidates = Math.min(Math.max(input.maxCandidates ?? 10, 4), 15);
-  const suggestionResult = await callOpenAiUsernames({
-    niche,
-    locationLabel: input.location?.label ?? null,
-    maxCandidates,
+  const startedAt = Date.now();
+  const settings = readTargetingAiSettings({
+    maxGptCandidates: typeof input.maxCandidates === "number"
+      ? Math.min(Math.max(input.maxCandidates, 12), 80)
+      : undefined,
   });
+  const niche = input.niche.trim();
+  const locationLabel = input.location?.label ?? null;
+  const checked = new Set<string>();
+  let gptCandidatesCount = 0;
+  let secondPassUsed = false;
+  let provider: "openai" | "mock" = "openai";
+  let errorCode: string | null = null;
 
-  const usernames = [...new Set(
-    suggestionResult.usernames
-      .map((username) => normalizeTargetUsername(username))
-      .filter(Boolean),
-  )].slice(0, maxCandidates);
+  const primary = await callOpenAiDiscovery({
+    niche,
+    locationLabel,
+    maxCandidates: settings.maxGptCandidates,
+    minFollowers: settings.minFollowers,
+    maxFollowers: settings.maxFollowers,
+    allowVerified: settings.allowVerified,
+    temperature: settings.temperature,
+    pass: "primary",
+  });
+  provider = primary.provider;
+  errorCode = primary.error_code;
+  gptCandidatesCount += primary.usernames.length;
 
-  if (usernames.length === 0) {
+  let verified: TargetAiSearchCandidate[] = [];
+  if (primary.usernames.length > 0) {
+    verified = await verifyUsernames(
+      primary.usernames,
+      settings.searchApiConcurrency,
+      settings.maxSearchApiChecks,
+      checked,
+    );
+  }
+
+  let eligibleCount = verified.filter((row) => row.eligible).length;
+  const remainingChecks = settings.maxSearchApiChecks - checked.size;
+
+  if (
+    settings.secondPassEnabled
+    && remainingChecks > 8
+    && eligibleCount < settings.minEligibleTarget
+    && primary.ok
+  ) {
+    secondPassUsed = true;
+    const broadened = await callOpenAiDiscovery({
+      niche,
+      locationLabel,
+      maxCandidates: Math.min(settings.maxGptCandidates, remainingChecks + 8),
+      minFollowers: settings.minFollowers,
+      maxFollowers: settings.maxFollowers,
+      allowVerified: settings.allowVerified,
+      temperature: settings.temperature,
+      pass: "broadened",
+    });
+    if (broadened.usernames.length > 0) {
+      gptCandidatesCount += broadened.usernames.length;
+      const passVerified = await verifyUsernames(
+        broadened.usernames,
+        settings.searchApiConcurrency,
+        remainingChecks,
+        checked,
+      );
+      const merged = new Map<string, TargetAiSearchCandidate>();
+      for (const row of [...verified, ...passVerified]) merged.set(row.username, row);
+      verified = [...merged.values()];
+      eligibleCount = verified.filter((row) => row.eligible).length;
+      if (!broadened.ok && !errorCode) errorCode = broadened.error_code;
+    }
+  }
+
+  const displayCandidates = selectDisplayCandidates(verified, settings.maxDisplayedResults);
+  const foundCount = verified.filter((row) => row.verificationStatus === "found").length;
+  const avatarResolved = displayCandidates.filter((row) => row.avatarAvailable).length;
+  const debug: TargetAiSearchDebugSummary = {
+    prompt_version: targetingAiPromptVersion(),
+    model: settings.model,
+    provider,
+    niche_present: Boolean(niche),
+    location_present: Boolean(locationLabel),
+    gpt_candidates_count: gptCandidatesCount,
+    searchapi_checked_count: checked.size,
+    found_count: foundCount,
+    eligible_count: displayCandidates.filter((row) => row.eligible).length,
+    ineligible_count: displayCandidates.filter((row) => !row.eligible).length,
+    not_found_count: verified.filter((row) => row.ineligibleReasonCode === "not_found").length,
+    displayed_count: displayCandidates.length,
+    second_pass_used: secondPassUsed,
+    rejection_reasons_top: countReasons(displayCandidates),
+    latency_ms: Date.now() - startedAt,
+    error_code: errorCode,
+  };
+
+  safeLog("search_completed", debug);
+
+  if (displayCandidates.length === 0) {
     return {
       status: "no_candidates",
-      provider: suggestionResult.provider,
+      provider,
       candidates: [],
-      suggested_count: 0,
-      verified_count: 0,
+      suggested_count: gptCandidatesCount,
+      verified_count: checked.size,
       avatar_resolved: 0,
-      error_code: suggestionResult.error_code || "no_candidates_found",
+      error_code: errorCode || "no_candidates_found",
+      debug,
     };
   }
 
-  const verified = await mapWithConcurrency(usernames, 3, async (username) => {
-    const decision = await verifySingleTargetUsername(username);
-    return mapVerifiedCandidate(username, decision);
-  });
-
-  const avatarResolved = verified.filter((row) => row.avatarAvailable).length;
-  safeLog("search_completed", {
-    niche_present: Boolean(niche),
-    location_present: Boolean(input.location?.label),
-    suggested_count: usernames.length,
-    verified_count: verified.length,
-    avatar_present_count: avatarResolved,
-    provider: suggestionResult.provider,
-    found_count: verified.filter((row) => row.verificationStatus === "found").length,
-  });
-
   return {
-    status: verified.length > 0 ? "ok" : "no_candidates",
-    provider: suggestionResult.provider,
-    candidates: verified,
-    suggested_count: usernames.length,
-    verified_count: verified.length,
+    status: "ok",
+    provider,
+    candidates: displayCandidates,
+    suggested_count: gptCandidatesCount,
+    verified_count: checked.size,
     avatar_resolved: avatarResolved,
-    error_code: suggestionResult.ok ? null : suggestionResult.error_code,
+    error_code: primary.ok ? null : errorCode,
+    debug,
   };
 }

@@ -66,6 +66,10 @@ export async function POST(
           verified_count: result.verified_count,
           avatar_resolved: result.avatar_resolved,
           error_code: result.error_code,
+          prompt_version: result.debug.prompt_version,
+          found_count: result.debug.found_count,
+          eligible_count: result.debug.eligible_count,
+          displayed_count: result.debug.displayed_count,
         },
       },
     }, { status: 422 });
@@ -86,6 +90,10 @@ export async function POST(
         verified_count: result.verified_count,
         avatar_resolved: result.avatar_resolved,
         error_code: result.error_code,
+        prompt_version: result.debug.prompt_version,
+        found_count: result.debug.found_count,
+        eligible_count: result.debug.eligible_count,
+        displayed_count: result.debug.displayed_count,
       },
     },
   });
