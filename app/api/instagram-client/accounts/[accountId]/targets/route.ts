@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { projectTargetSafeRowsAvatar } from "@/lib/instagram-dashboard/target-avatar-projection";
+import { projectTargetSafeRowAvatar, projectTargetSafeRowsAvatar } from "@/lib/instagram-dashboard/target-avatar-projection";
 import {
   addAccountTargetSingle,
   addAccountTargetsBulk,
@@ -79,7 +79,13 @@ export async function POST(
     clientTargetsContext,
   );
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
-  return NextResponse.json({ ok: true, data: result.data }, { status: result.status ?? 201 });
+  return NextResponse.json({
+    ok: true,
+    data: {
+      ...result.data,
+      row: projectTargetSafeRowAvatar(result.data.row),
+    },
+  }, { status: result.status ?? 201 });
 }
 
 type DeleteBody = { ids?: string[] };

@@ -16,6 +16,7 @@ type TargetAvatarProps = {
   accountId: string;
   targetId?: string | null;
   username: string;
+  avatarUrl?: string | null;
   avatarAvailable?: boolean;
   size?: number;
   className?: string;
@@ -25,7 +26,8 @@ export default function TargetAvatar({
   accountId,
   targetId,
   username,
-  avatarAvailable = false,
+  avatarUrl = null,
+  avatarAvailable,
   size = 32,
   className = "",
 }: TargetAvatarProps) {
@@ -33,9 +35,7 @@ export default function TargetAvatar({
   const normalizedUsername = username.replace(/^@+/, "");
   const [from, to] = avatarPalette(normalizedUsername || "?");
   const initial = (normalizedUsername || "?").charAt(0).toUpperCase();
-  const proxySrc = avatarAvailable && targetId
-    ? clientTargetAvatarProxyPath(accountId, targetId)
-    : null;
+  const proxySrc = targetId ? clientTargetAvatarProxyPath(accountId, targetId) : null;
 
   if (proxySrc && !failed) {
     return (

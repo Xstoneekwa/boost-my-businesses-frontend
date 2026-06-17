@@ -230,6 +230,10 @@ export default function ClientAccountTargetsDrawer({
   }, [rows, query, listFilter]);
 
   const nSelected = Object.entries(selected).filter(([, on]) => on).length;
+  const canExport = open && rows.length > 0;
+  const canRefresh = open && !loading && !saving;
+  const canArchiveSelection = open && nSelected > 0 && !saving;
+  const canSubmitAdd = open && !saving;
 
   const eligMap: Record<DrawerElig, { cls: string; label: string }> = {
     eligible: { cls: "cd-elig", label: td.elig.eligible },
@@ -407,6 +411,7 @@ export default function ClientAccountTargetsDrawer({
           </button>
         </header>
 
+        {open ? (
         <div className="cd-dwr-body">
           {(error || success) ? (
             <div style={{ marginBottom: 12, fontSize: 13 }}>
@@ -434,15 +439,15 @@ export default function ClientAccountTargetsDrawer({
           </div>
 
           <div className="cd-dwr-actions">
-            <button type="button" className="cd-dwr-act" onClick={() => void refreshAll()} disabled={loading || saving}>
+            <button type="button" className="cd-dwr-act" onClick={() => void refreshAll()} disabled={!canRefresh}>
               <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
               {td.refresh}
             </button>
-            <button type="button" className="cd-dwr-act" onClick={exportCsv} disabled={rows.length === 0}>
+            <button type="button" className="cd-dwr-act" onClick={exportCsv} disabled={!canExport}>
               <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               {td.export}
             </button>
-            <button type="button" className="cd-dwr-act" style={{ color: "var(--bad)" }} disabled={nSelected === 0 || saving} onClick={() => void archiveSelected()}>
+            <button type="button" className="cd-dwr-act" style={{ color: "var(--bad)" }} disabled={!canArchiveSelection} onClick={() => void archiveSelected()}>
               <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
               {td.del}
             </button>
@@ -453,7 +458,7 @@ export default function ClientAccountTargetsDrawer({
               <div className="cd-dwr-add-lbl">{td.addLbl}</div>
               <div className="cd-dwr-add-row">
                 <input type="text" className="cd-dwr-in" placeholder={td.addPh} value={singleInput} onChange={(e) => setSingleInput(e.target.value)} />
-                <button type="submit" className="cd-dwr-add-btn" disabled={saving}>
+                <button type="submit" className="cd-dwr-add-btn" disabled={!canSubmitAdd}>
                   <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={2.2} strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                   {td.addBtn}
                 </button>
@@ -462,7 +467,7 @@ export default function ClientAccountTargetsDrawer({
             <form className="cd-dwr-add-card" onSubmit={addBulk}>
               <div className="cd-dwr-add-lbl">{td.bulkLbl}</div>
               <textarea className="cd-dwr-ta" placeholder={"user_one\n@user_two\nuser_three"} value={bulkText} onChange={(e) => setBulkText(e.target.value)} />
-              <button type="submit" className="cd-dwr-import" disabled={saving}>{td.importBtn}</button>
+              <button type="submit" className="cd-dwr-import" disabled={!canSubmitAdd}>{td.importBtn}</button>
             </form>
           </div>
 
@@ -516,7 +521,8 @@ export default function ClientAccountTargetsDrawer({
                         accountId={accountId}
                         targetId={r.id}
                         username={r.targetUsername}
-                        avatarAvailable={Boolean(r.avatarUrl)}
+                        avatarUrl={r.avatarUrl}
+                        avatarAvailable={r.avatarAvailable}
                         size={28}
                       />
                       <span className="cd-dwr-u-h">@{r.targetUsername}</span>
@@ -543,6 +549,7 @@ export default function ClientAccountTargetsDrawer({
             </div>
           </div>
         </div>
+        ) : null}
       </aside>
     </>
   );
@@ -560,6 +567,7 @@ export function mainTargetingItems(overview: TargetsOverview | null) {
       id: item.id,
       targetUsername: item.targetUsername,
       avatarUrl: item.avatarUrl,
+      avatarAvailable: item.avatarAvailable,
     }));
 }
 

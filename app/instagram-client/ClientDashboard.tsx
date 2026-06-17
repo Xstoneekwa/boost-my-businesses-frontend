@@ -587,6 +587,7 @@ export default function ClientDashboard({
     id: username,
     targetUsername: username,
     avatarUrl: null,
+    avatarAvailable: false,
   }));
   const targets = targetingItems.map((item) => item.targetUsername);
 
@@ -1081,7 +1082,8 @@ export default function ClientDashboard({
                         accountId={targetingAccountId}
                         targetId={item.id}
                         username={item.targetUsername}
-                        avatarAvailable={Boolean(item.avatarUrl)}
+                        avatarUrl={item.avatarUrl}
+                        avatarAvailable={item.avatarAvailable}
                       />
                       <span className="cd-tg2-handle">@{item.targetUsername}</span>
                       <button className="cd-tg2-li-x" onClick={() => void removeTargetFromList(item.targetUsername)} title="Retirer" disabled={targetingLoading}>

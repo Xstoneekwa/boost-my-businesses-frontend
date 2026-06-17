@@ -25,6 +25,7 @@ export type TargetSafeRow = {
   verification_reason?: string | null;
   quality_status?: string | null;
   avatar_url?: string | null;
+  avatarUrl?: string | null;
   avatarAvailable?: boolean;
   avatarSource?: string | null;
   source: string;
@@ -77,6 +78,7 @@ export type TargetAccountItem = {
   healthStatus: TargetHealthStatus;
   source: string;
   avatarUrl: string | null;
+  avatarAvailable: boolean;
   createdAt: string;
   updatedAt: string;
   sourceLabel: string;
@@ -348,7 +350,8 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
     verificationReason: row.verification_reason ?? null,
     healthStatus,
     source: row.source || "unknown",
-    avatarUrl: row.avatar_url ?? null,
+    avatarUrl: row.avatarUrl ?? row.avatar_url ?? null,
+    avatarAvailable: row.avatarAvailable ?? Boolean(row.avatarUrl ?? row.avatar_url),
     createdAt: addedAt,
     updatedAt: row.updated_at,
     sourceLabel: targetSourceLabel(row.source || "unknown"),
