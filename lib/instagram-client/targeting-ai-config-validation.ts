@@ -14,11 +14,23 @@ const forbiddenPromptPatterns = [
 
 const forbiddenFactClaims = [
   /you know which accounts exist/i,
-  /invent follower counts/i,
   /provide exact follower counts/i,
-  /guarantee.*exist/i,
+  /guarantee.{0,40}exist/i,
   /all accounts exist/i,
 ];
+
+function stripPromptGuardrailNegations(text: string) {
+  return text
+    .replace(/never invent follower counts/gi, "")
+    .replace(/do not invent follower counts/gi, "")
+    .replace(/must not invent follower counts/gi, "");
+}
+
+function hasForbiddenFactClaim(text: string) {
+  const sanitized = stripPromptGuardrailNegations(text);
+  return forbiddenFactClaims.some((pattern) => pattern.test(sanitized))
+    || /(?:^|[^\w])invent follower counts/i.test(sanitized);
+}
 
 const requiredTemplateTokens = ["{{niche}}", "{{max_candidates}}", "{{min_followers}}"];
 
@@ -58,14 +70,12 @@ export function validateTargetingAiPromptText(input: {
       return { ok: false as const, reason: "Prompt must not contain API key material.", field: "user_prompt_template" };
     }
   }
-  for (const pattern of forbiddenFactClaims) {
-    if (pattern.test(combined)) {
-      return {
-        ok: false as const,
-        reason: "Prompt must not ask GPT to invent final Instagram account facts.",
-        field: "user_prompt_template",
-      };
-    }
+  if (hasForbiddenFactClaim(combined)) {
+    return {
+      ok: false as const,
+      reason: "Prompt must not ask GPT to invent final Instagram account facts.",
+      field: "user_prompt_template",
+    };
   }
 
   return { ok: true as const };
