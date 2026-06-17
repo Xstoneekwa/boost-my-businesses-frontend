@@ -12,6 +12,10 @@ import {
 import { applyAddProfileRuntimeDefaults } from "@/lib/instagram-dashboard/add-profile-runtime-defaults";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
+import {
+  parseLoginEmailInput,
+  persistAccountLoginEmail,
+} from "@/lib/instagram-dashboard/persist-account-login-email";
 import { clientMaxAccountsLimit, projectClientAccountRow, readBoolean, readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -141,11 +145,15 @@ async function usernameLinkedToClient(
 export async function createClientInstagramAccount(input: ClientCreateAccountInput): Promise<ClientCreateAccountResult> {
   const username = normalizeInstagramPublicUsername(readString(input.username));
   const password = readString(input.password);
-  const email = readString(input.email);
+  const emailParsed = parseLoginEmailInput(input.email);
+  const email = emailParsed.email ?? "";
   const notes = readString(input.notes);
   const dryRun = input.dryRun === true;
 
   if (!username) return { ok: false, status: 400, error: "Instagram username is required.", code: "username_required" };
+  if (emailParsed.present && emailParsed.invalid) {
+    return { ok: false, status: 400, error: "Instagram login email is invalid.", code: "email_invalid" };
+  }
   if (!isPlausibleInstagramPublicUsername(username)) {
     return { ok: false, status: 400, error: "Instagram username is invalid.", code: "username_invalid" };
   }
@@ -240,7 +248,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     display_name: "",
     device_name: "",
     device_udid: "",
-    email,
+    email: "",
     password: "",
     account_status: "active",
     cloned_app_mode: false,
@@ -266,6 +274,14 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
   if (settingsError || filtersError || dmError) {
     await supabase.from("ig_accounts").delete().eq("id", accountId);
     return { ok: false, status: 500, error: "Could not finish account setup.", code: "profile_setup_failed" };
+  }
+
+  if (email) {
+    const emailPersisted = await persistAccountLoginEmail(supabase, accountId, email, "client_add_account");
+    if (!emailPersisted.ok) {
+      await supabase.from("ig_accounts").delete().eq("id", accountId);
+      return { ok: false, status: 500, error: "Could not save Instagram login email.", code: "email_persist_failed" };
+    }
   }
 
   try {

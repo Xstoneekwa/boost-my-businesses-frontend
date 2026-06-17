@@ -1,6 +1,10 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { canAccessTenantPages } from "@/lib/restaurant-analytics/session";
 import {
+  parseLoginEmailInput,
+  persistAccountLoginEmail,
+} from "@/lib/instagram-dashboard/persist-account-login-email";
+import {
   getInstagramAdminUserContext,
   jsonError,
   jsonOk,
@@ -213,6 +217,28 @@ async function insertSafeAudit(input: {
   return readString(data?.id, "");
 }
 
+function resolveEmailSubmitStatus(emailInput: unknown, dryRun: boolean) {
+  const parsed = parseLoginEmailInput(emailInput);
+  if (!parsed.present) return { status: "not_submitted" as const, parsed };
+  if (parsed.invalid) return { status: dryRun ? "invalid" as const : "invalid" as const, parsed };
+  return { status: dryRun ? "would_persist" as const : "pending_persist" as const, parsed };
+}
+
+async function persistSubmittedLoginEmail(accountId: string, emailInput: unknown) {
+  const parsed = parseLoginEmailInput(emailInput);
+  if (!parsed.present) return "not_submitted" as const;
+  if (!parsed.email) return "invalid" as const;
+
+  const result = await persistAccountLoginEmail(
+    createSupabaseClient(),
+    accountId,
+    parsed.email,
+    "credentials_submit",
+  );
+  if (!result.ok) return "persist_failed" as const;
+  return result.emailPresent ? "persisted" as const : "not_submitted" as const;
+}
+
 export async function POST(request: Request) {
   try {
     const auth = await requireRelayOrAdmin(request);
@@ -224,10 +250,12 @@ export async function POST(request: Request) {
     const password = readString(payload.password, "");
     const reason = safeReason(payload.reason);
     const dryRun = readBoolean(payload.dry_run, false);
+    const emailSubmit = resolveEmailSubmitStatus(payload.email, dryRun);
 
     if (!uuidPattern.test(accountId)) return jsonError("account_id_invalid", 400);
     if (!usernamePattern.test(username) || username.includes("..")) return jsonError("username_invalid", 400);
     if (!dryRun && (password.length < 6 || password.trim().length < 6)) return jsonError("password_invalid", 400);
+    if (emailSubmit.status === "invalid") return jsonError("email_invalid", 400);
     if (readBoolean(payload.login_after_save, false) || readBoolean(payload.provisioning_enabled, false) || readBoolean(payload.start_run, false)) {
       return jsonError("automation_flags_must_be_false", 400);
     }
@@ -249,7 +277,7 @@ export async function POST(request: Request) {
         username,
         credential_status: readString(state.credentials?.status, "not_submitted"),
         password_status: state.credentials ? "would_update" : "would_submit",
-        email_status: readString(payload.email, "").trim() ? "skipped_not_supported" : "not_submitted",
+        email_status: emailSubmit.status,
         two_factor_status: readString(payload.two_factor_secret, "").trim() ? "skipped_not_supported" : "not_submitted",
         vault_write: "skipped",
         login_started: false,
@@ -279,6 +307,7 @@ export async function POST(request: Request) {
       actorMode: auth.mode,
       actorId: auth.userId,
     });
+    const emailStatus = await persistSubmittedLoginEmail(accountId, payload.email);
 
     return jsonOk({
       account_id: credentials.account_id || accountId,
@@ -286,7 +315,7 @@ export async function POST(request: Request) {
       credential_status: credentials.credentials_status,
       credentials_version: credentials.credentials_version,
       password_status: action === "update_password" ? "updated" : "submitted",
-      email_status: readString(payload.email, "").trim() ? "skipped_not_supported" : "not_submitted",
+      email_status: emailStatus,
       two_factor_status: readString(payload.two_factor_secret, "").trim() ? "skipped_not_supported" : "not_submitted",
       vault_write: "success",
       login_started: false,

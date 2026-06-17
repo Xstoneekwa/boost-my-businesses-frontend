@@ -23,6 +23,10 @@ import {
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAssignManualOnlyOnboardingSchedule, tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
 import {
+  parseLoginEmailInput,
+  persistAccountLoginEmail,
+} from "@/lib/instagram-dashboard/persist-account-login-email";
+import {
   getInstagramAdminUserContext,
   jsonError,
   jsonOk,
@@ -851,6 +855,8 @@ export async function POST(request: Request) {
     const username = normalizeInstagramPublicUsername(readString(body.username, ""));
     if (!username) return jsonError("Instagram username is required.", 400);
     if (!isPlausibleInstagramPublicUsername(username)) return jsonError("username_verification_failed", 400);
+    const loginEmailParsed = parseLoginEmailInput(body.email);
+    if (loginEmailParsed.present && loginEmailParsed.invalid) return jsonError("email_invalid", 400);
     const loginMethod = readString(body.login_method, "manual").trim();
     if (!loginMethods.has(loginMethod)) return jsonError("Invalid login method.", 400);
     const password = readString(body.password, "");
@@ -1077,7 +1083,7 @@ export async function POST(request: Request) {
       display_name: displayName,
       device_name: deviceName,
       device_udid: deviceUdid,
-      email: readString(body.email, "").trim(),
+      email: loginEmailParsed.email ?? "",
       password: "",
       account_status: activeAccountStatus,
       cloned_app_mode: cloneMode !== "off",
@@ -1117,6 +1123,27 @@ export async function POST(request: Request) {
         await markCredentialFailureWithSupportAction(supabase, accountId, "profile_settings_compensation_failed", externalRequestId, actorId);
       }
       return jsonError("profile_setup_failed", 500);
+    }
+
+    if (loginEmailParsed.email) {
+      const emailPersisted = await persistAccountLoginEmail(
+        supabase,
+        accountId,
+        loginEmailParsed.email,
+        "admin_add_profile",
+      );
+      if (!emailPersisted.ok) {
+        const compensated = accountCreated ? await compensateNewProfile(supabase, accountId) : false;
+        await tryRecordAddProfileAudit(supabase, {
+          accountId,
+          username: accountUsername,
+          externalRequestId,
+          actorId,
+          resultStatus: compensated ? "compensated" : "failed",
+          failureReason: "email_persist_failed",
+        });
+        return jsonError("email_persist_failed", 500);
+      }
     }
 
     const { data: existingFilters } = await supabase

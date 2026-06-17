@@ -1,5 +1,6 @@
 import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_utils";
 import { createClientInstagramAccount } from "@/lib/instagram-client/create-account";
+import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
 import {
   readBoolean,
   readString,
@@ -13,6 +14,7 @@ type CreateBody = {
   username?: unknown;
   password?: unknown;
   email?: unknown;
+  loginEmail?: unknown;
   notes?: unknown;
   dry_run?: unknown;
 };
@@ -25,12 +27,18 @@ export async function POST(request: Request) {
   const technicalError = rejectTechnicalClientFields(body as Record<string, unknown>);
   if (technicalError) return jsonError(technicalError, 400, { code: "technical_fields_forbidden" });
 
+  const emailInput = readString(body?.email) || readString(body?.loginEmail);
+  const emailParsed = parseLoginEmailInput(emailInput);
+  if (emailParsed.present && emailParsed.invalid) {
+    return jsonError("Instagram login email is invalid.", 400, { code: "email_invalid" });
+  }
+
   const result = await createClientInstagramAccount({
     clientId: session.clientId,
     userId: session.userId,
     username: readString(body?.username),
     password: readString(body?.password),
-    email: readString(body?.email),
+    email: emailParsed.email ?? "",
     notes: readString(body?.notes),
     dryRun: readBoolean(body?.dry_run, false),
   });
