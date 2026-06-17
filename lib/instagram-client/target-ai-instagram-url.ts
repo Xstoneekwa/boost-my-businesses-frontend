@@ -16,6 +16,12 @@ const blockedInstagramPathSegments = new Set([
   "api",
   "direct",
   "nametag",
+  "business",
+  "help",
+  "privacy",
+  "terms",
+  "press",
+  "jobs",
 ]);
 
 const instagramUrlPattern = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-z0-9._]{1,30})(?:[/?#]|$)/gi;

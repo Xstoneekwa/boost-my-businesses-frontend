@@ -180,7 +180,7 @@ function checkSearchApiThrottle(inputUsername: string, options: InstagramPublicP
   return null;
 }
 
-async function runSearchApiSerialized<T>(operation: () => Promise<T>) {
+export async function runSearchApiSerialized<T>(operation: () => Promise<T>) {
   const previous = searchApiQueue.catch(() => undefined);
   let release = () => {};
   searchApiQueue = new Promise<void>((resolve) => {
@@ -192,6 +192,43 @@ async function runSearchApiSerialized<T>(operation: () => Promise<T>) {
   } finally {
     release();
   }
+}
+
+export async function runSearchApiThrottledFetch(
+  scopeKey: string,
+  url: string,
+  options: InstagramPublicProfileLookupOptions & { timeoutMs?: number } = {},
+) {
+  const fetcher = options.fetcher ?? fetch;
+  return runSearchApiSerialized(async () => {
+    const throttled = checkSearchApiThrottle(scopeKey, options);
+    if (throttled) {
+      return { ok: false as const, status: 429, payload: null, reason: "provider_throttled" };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 8000);
+    try {
+      const response = await fetcher(url, {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (response.status === 429) {
+        return { ok: false as const, status: 429, payload: null, reason: "rate_limited" };
+      }
+      if (!response.ok) {
+        return { ok: false as const, status: response.status, payload: null, reason: `provider_http_${response.status}` };
+      }
+      const payload = await response.json();
+      return { ok: true as const, status: response.status, payload, reason: "ok" };
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_error";
+      return { ok: false as const, status: 0, payload: null, reason };
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
 }
 
 export function resetInstagramPublicProfileLookupGuardsForTests() {
@@ -415,6 +452,8 @@ function fromSearchApiPayload(
       provider_mode: "searchapi",
       provider_status: "found",
       provider_engine: "instagram_profile",
+      profile_name: readString(profile, ["full_name", "name", "fullName"]).slice(0, 120) || null,
+      biography: readString(profile, ["biography", "bio", "description"]).slice(0, 160) || null,
     },
   });
 }

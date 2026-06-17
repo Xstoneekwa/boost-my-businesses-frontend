@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readString, rejectTechnicalClientFields } from "@/lib/instagram-client/_utils";
 import { authorizeClientTargetAiRoute, jsonTargetAiError } from "@/lib/instagram-client/target-ai-route-auth";
+import { serializeTargetAiCandidateForClient } from "@/lib/instagram-client/target-ai-candidate-avatar";
 import { searchTargetAccountsWithAi } from "@/lib/instagram-client/target-ai-search-service";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,9 @@ export async function POST(
     maxCandidates: typeof body?.max_candidates === "number" ? body.max_candidates : undefined,
   });
 
+  const normalizedAccountId = accountId?.trim() ?? "";
+  const clientCandidates = result.candidates.map((candidate) => serializeTargetAiCandidateForClient(normalizedAccountId, candidate));
+
   if (result.status === "no_candidates") {
     return NextResponse.json({
       ok: false,
@@ -85,7 +89,7 @@ export async function POST(
     data: {
       status: result.status,
       provider: result.provider,
-      candidates: result.candidates,
+      candidates: clientCandidates,
       summary: {
         suggested_count: result.suggested_count,
         verified_count: result.verified_count,

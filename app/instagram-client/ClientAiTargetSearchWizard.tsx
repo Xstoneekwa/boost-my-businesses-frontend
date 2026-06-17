@@ -55,13 +55,24 @@ function formatFollowers(value: number | null, lang: TargetAiLang) {
   return value.toLocaleString(lang === "fr" ? "fr-FR" : "en-US");
 }
 
-function AiResultAvatar({ username, avatarUrl }: { username: string; avatarUrl: string | null }) {
+function AiResultAvatar({
+  username,
+  avatarUrl,
+  avatarAvailable,
+  accountId,
+}: {
+  username: string;
+  avatarUrl: string | null;
+  avatarAvailable?: boolean;
+  accountId: string;
+}) {
   const [failed, setFailed] = useState(false);
   const initial = username.replace(/^@+/, "").charAt(0).toUpperCase() || "?";
-  if (avatarUrl && !failed) {
+  const proxySrc = avatarAvailable && avatarUrl ? avatarUrl : null;
+  if (proxySrc && !failed) {
     return (
       <span className="cd-ai-av cd-ai-av-img">
-        <img src={avatarUrl} alt="" width={40} height={40} loading="lazy" decoding="async" onError={() => setFailed(true)} />
+        <img src={proxySrc} alt="" width={40} height={40} loading="lazy" decoding="async" onError={() => setFailed(true)} />
       </span>
     );
   }
@@ -321,7 +332,12 @@ export default function ClientAiTargetSearchWizard({
                     <p className="cd-ai-hint">{copy.emptySelection}</p>
                   ) : selectedCandidates.map((row) => (
                     <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}`}>
-                      <AiResultAvatar username={row.username} avatarUrl={row.avatarUrl} />
+                      <AiResultAvatar
+                        username={row.username}
+                        avatarUrl={row.avatarUrl}
+                        avatarAvailable={row.avatarAvailable}
+                        accountId={accountId}
+                      />
                       <div className="cd-ai-row-main">
                         <div className="cd-ai-row-top">
                           <a href={row.profileUrl} target="_blank" rel="noopener noreferrer" className="cd-ai-handle">@{row.username}</a>

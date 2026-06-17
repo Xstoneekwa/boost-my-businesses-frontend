@@ -1,5 +1,5 @@
 import { mapWithConcurrency } from "../instagram-dashboard/target-provider-enrichment.ts";
-import { normalizeTargetUsername, verifySingleTargetUsername } from "../instagram-targets.ts";
+import { normalizeTargetUsername } from "../instagram-targets.ts";
 import { buildTargetAiDiscoveryQueries } from "./target-ai-discovery-queries.ts";
 import { readTargetAiMockUsernames } from "./target-ai-contract.ts";
 import { evaluateAiTargetEligibility } from "./target-ai-eligibility.ts";
@@ -12,6 +12,15 @@ import {
   readTargetAiDiscoveryLimits,
 } from "./target-ai-searchapi-discovery.ts";
 import { mergeDiscoveredUsernames } from "./target-ai-instagram-url.ts";
+import {
+  applyTargetAiProfileVerifyStats,
+  createTargetAiProfileVerifyStats,
+  readTargetAiProfileLookupConcurrency,
+  topTargetAiProviderErrorReasons,
+  verifyTargetAiProfileUsername,
+  type TargetAiProfileVerifyStats,
+} from "./target-ai-profile-verify.ts";
+import { scoreTargetAiCandidateRelevance } from "./target-ai-relevance-score.ts";
 
 export type TargetAiSearchLocation = {
   label: string;
@@ -31,6 +40,7 @@ export type TargetAiSearchCandidate = {
   isPrivate: boolean | null;
   verificationStatus: string;
   qualityStatus: string;
+  relevanceScore: number;
 };
 
 export type TargetAiSearchDebugSummary = {
@@ -40,6 +50,9 @@ export type TargetAiSearchDebugSummary = {
   provider: "openai" | "mock";
   niche_present: boolean;
   location_present: boolean;
+  max_displayed_results: number;
+  max_searchapi_checks: number;
+  profile_lookup_concurrency: number;
   gpt_search_queries_count: number;
   gpt_seed_usernames_count: number;
   searchapi_discovery_queries_count: number;
@@ -48,13 +61,24 @@ export type TargetAiSearchDebugSummary = {
   profile_found_count: number;
   profile_not_found_count: number;
   profile_provider_error_count: number;
+  profile_rate_limited_count: number;
+  profile_retried_count: number;
   profile_skipped_count: number;
   duplicate_skipped_count: number;
+  avatar_available_count: number;
+  avatar_missing_count: number;
   eligible_count: number;
   ineligible_count: number;
+  eligible_displayed_count: number;
+  ineligible_displayed_count: number;
   displayed_count: number;
+  final_results_count: number;
+  third_pass_used: boolean;
   second_pass_used: boolean;
+  provider_error_reasons_top: Array<{ reason: string; count: number }>;
   rejection_reasons_top: Array<{ reason: string; count: number }>;
+  relevance_score_top: number | null;
+  relevance_score_bottom: number | null;
   latency_ms: number;
   error_code: string | null;
   /** @deprecated use gpt_seed_usernames_count */
@@ -78,15 +102,6 @@ export type TargetAiSearchResult = {
   debug: TargetAiSearchDebugSummary;
 };
 
-type ProfileVerifyStats = {
-  checked: number;
-  found: number;
-  notFound: number;
-  providerError: number;
-  skipped: number;
-  duplicateSkipped: number;
-};
-
 function safeLog(event: string, fields: Record<string, unknown>) {
   console.info("[Target AI search]", { event, ...fields });
 }
@@ -104,7 +119,18 @@ function countReasons(candidates: TargetAiSearchCandidate[]) {
     .slice(0, 6);
 }
 
-function mapVerifiedCandidate(username: string, decision: Awaited<ReturnType<typeof verifySingleTargetUsername>>): TargetAiSearchCandidate {
+function readProfileText(metadata: Record<string, string | number | boolean | null>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function mapVerifiedCandidate(
+  username: string,
+  decision: Awaited<ReturnType<typeof verifyTargetAiProfileUsername>>["decision"],
+  lookup: Awaited<ReturnType<typeof verifyTargetAiProfileUsername>>["lookup"],
+  niche: string,
+  locationLabel: string | null,
+): TargetAiSearchCandidate {
   const eligibility = evaluateAiTargetEligibility({
     quality_status: decision.quality_status,
     status: decision.status,
@@ -114,6 +140,13 @@ function mapVerifiedCandidate(username: string, decision: Awaited<ReturnType<typ
     verification_status: decision.verification_status,
   });
   const avatarUrl = decision.avatar_url ?? null;
+  const relevanceScore = scoreTargetAiCandidateRelevance({
+    username,
+    niche,
+    locationLabel,
+    profileName: readProfileText(lookup.metadata, "profile_name"),
+    biography: readProfileText(lookup.metadata, "biography"),
+  });
   return {
     username,
     followersCount: decision.followers_count,
@@ -126,12 +159,14 @@ function mapVerifiedCandidate(username: string, decision: Awaited<ReturnType<typ
     isPrivate: decision.is_private,
     verificationStatus: decision.verification_status,
     qualityStatus: decision.quality_status,
+    relevanceScore,
   };
 }
 
 function rankCandidates(candidates: TargetAiSearchCandidate[]) {
   return [...candidates].sort((left, right) => {
     if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
+    if (left.relevanceScore !== right.relevanceScore) return right.relevanceScore - left.relevanceScore;
     const leftFollowers = left.followersCount ?? -1;
     const rightFollowers = right.followersCount ?? -1;
     return rightFollowers - leftFollowers;
@@ -143,22 +178,26 @@ function selectDisplayCandidates(candidates: TargetAiSearchCandidate[], maxDispl
   return found.slice(0, maxDisplayedResults);
 }
 
-function classifyVerificationStatus(status: string) {
-  if (status === "found") return "found" as const;
-  if (status === "not_found") return "not_found" as const;
-  return "provider_error" as const;
-}
-
 function shouldStopProfileVerification(input: {
   verified: TargetAiSearchCandidate[];
   maxDisplayedResults: number;
-  minEligibleTarget: number;
 }) {
   const found = input.verified.filter((row) => row.verificationStatus === "found");
-  const eligible = found.filter((row) => row.eligible);
-  if (found.length >= input.maxDisplayedResults) return true;
-  if (eligible.length >= input.minEligibleTarget) return true;
-  return false;
+  return found.length >= input.maxDisplayedResults;
+}
+
+function mergeProfileStats(target: TargetAiProfileVerifyStats, source: TargetAiProfileVerifyStats) {
+  target.checked += source.checked;
+  target.found += source.found;
+  target.notFound += source.notFound;
+  target.providerError += source.providerError;
+  target.rateLimited += source.rateLimited;
+  target.skipped += source.skipped;
+  target.duplicateSkipped += source.duplicateSkipped;
+  target.retried += source.retried;
+  for (const [reason, count] of source.errorReasons.entries()) {
+    target.errorReasons.set(reason, (target.errorReasons.get(reason) ?? 0) + count);
+  }
 }
 
 async function verifyUsernames(
@@ -168,18 +207,12 @@ async function verifyUsernames(
   checked: Set<string>,
   stopWhen: {
     maxDisplayedResults: number;
-    minEligibleTarget: number;
     currentVerified: TargetAiSearchCandidate[];
+    niche: string;
+    locationLabel: string | null;
   },
 ) {
-  const stats: ProfileVerifyStats = {
-    checked: 0,
-    found: 0,
-    notFound: 0,
-    providerError: 0,
-    skipped: 0,
-    duplicateSkipped: 0,
-  };
+  const stats = createTargetAiProfileVerifyStats();
 
   const queue = usernames
     .map((username) => normalizeTargetUsername(username))
@@ -201,20 +234,34 @@ async function verifyUsernames(
 
   await mapWithConcurrency(boundedQueue, concurrency, async (username) => {
     if (stopEarly) return null;
-    const decision = await verifySingleTargetUsername(username);
-    const candidate = mapVerifiedCandidate(username, decision);
+    const result = await verifyTargetAiProfileUsername(username);
+    const candidate = mapVerifiedCandidate(
+      username,
+      result.decision,
+      result.lookup,
+      stopWhen.niche,
+      stopWhen.locationLabel,
+    );
     verified.push(candidate);
-    stats.checked += 1;
+    applyTargetAiProfileVerifyStats(stats, {
+      errorReason: result.errorReason,
+      verificationStatus: candidate.verificationStatus,
+      retried: result.retried,
+    });
 
-    const bucket = classifyVerificationStatus(candidate.verificationStatus);
-    if (bucket === "found") stats.found += 1;
-    else if (bucket === "not_found") stats.notFound += 1;
-    else stats.providerError += 1;
+    if (result.errorReason !== "not_found" && result.errorReason !== "username_invalid") {
+      safeLog("profile_lookup_issue", {
+        username,
+        reason: result.errorReason,
+        verification_status: candidate.verificationStatus,
+        retried: Boolean(result.retried),
+        endpoint: "instagram_profile",
+      });
+    }
 
     if (shouldStopProfileVerification({
       verified,
       maxDisplayedResults: stopWhen.maxDisplayedResults,
-      minEligibleTarget: stopWhen.minEligibleTarget,
     })) {
       stopEarly = true;
     }
@@ -227,7 +274,7 @@ async function verifyUsernames(
 
 function logGptDiscovery(input: {
   discovery: Awaited<ReturnType<typeof callTargetAiOpenAiDiscovery>>["discovery"];
-  pass: "primary" | "broadened";
+  pass: "primary" | "broadened" | "complementary";
 }) {
   const { discovery } = input;
   safeLog("gpt_discovery", {
@@ -244,7 +291,7 @@ function logGptDiscovery(input: {
 async function runDiscoveryPass(input: {
   niche: string;
   locationLabel?: string | null;
-  pass: "primary" | "broadened";
+  pass: "primary" | "broadened" | "complementary";
   config: Awaited<ReturnType<typeof resolveActiveTargetingAiConfig>>;
 }) {
   const limits = readTargetAiDiscoveryLimits();
@@ -252,7 +299,7 @@ async function runDiscoveryPass(input: {
     config: input.config,
     niche: input.niche,
     locationLabel: input.locationLabel,
-    pass: input.pass,
+    pass: input.pass === "complementary" ? "broadened" : input.pass,
   });
 
   logGptDiscovery({ discovery: gpt.discovery, pass: input.pass });
@@ -261,7 +308,7 @@ async function runDiscoveryPass(input: {
     niche: input.niche,
     locationLabel: input.locationLabel,
     discovery: gpt.discovery,
-    pass: input.pass,
+    pass: input.pass === "complementary" ? "broadened" : input.pass,
     maxQueries: limits.maxDiscoveryQueries,
   });
 
@@ -276,7 +323,6 @@ async function runDiscoveryPass(input: {
     const searchResult = await discoverInstagramUsernamesViaSearchApi({
       queries,
       maxUsernames: limits.maxDiscoveredUsernames,
-      concurrency: input.config.searchapi_concurrency,
     });
     discovery = {
       usernames: searchResult.usernames,
@@ -314,6 +360,19 @@ async function runDiscoveryPass(input: {
   };
 }
 
+function shouldRunThirdPass(input: {
+  displayedCount: number;
+  maxDisplayedResults: number;
+  profileStats: TargetAiProfileVerifyStats;
+  maxSearchApiChecks: number;
+}) {
+  const targetFloor = Math.min(20, Math.max(12, Math.floor(input.maxDisplayedResults * 0.66)));
+  if (input.displayedCount >= targetFloor) return false;
+  if (input.profileStats.found >= input.maxDisplayedResults) return false;
+  if (input.profileStats.checked >= input.maxSearchApiChecks - 8) return false;
+  return true;
+}
+
 export async function searchTargetAccountsWithAi(input: {
   niche: string;
   location?: TargetAiSearchLocation | null;
@@ -326,13 +385,15 @@ export async function searchTargetAccountsWithAi(input: {
     max_gpt_candidates: typeof input.maxCandidates === "number"
       ? Math.min(Math.max(input.maxCandidates, 12), 80)
       : activeConfig.max_gpt_candidates,
-    max_searchapi_checks: Math.min(Math.max(activeConfig.max_searchapi_checks, 50), 70),
+    max_searchapi_checks: Math.min(Math.max(activeConfig.max_searchapi_checks, 60), 100),
   };
+  const profileLookupConcurrency = readTargetAiProfileLookupConcurrency(config.searchapi_concurrency);
 
   const niche = input.niche.trim();
   const locationLabel = input.location?.label ?? null;
   const checked = new Set<string>();
   let secondPassUsed = false;
+  let thirdPassUsed = false;
   let provider: "openai" | "mock" = "openai";
   let errorCode: string | null = null;
   let gptSearchQueriesCount = 0;
@@ -341,33 +402,62 @@ export async function searchTargetAccountsWithAi(input: {
   let extractedUsernamesCount = 0;
   let duplicateSkippedCount = 0;
 
-  const profileStats: ProfileVerifyStats = {
-    checked: 0,
-    found: 0,
-    notFound: 0,
-    providerError: 0,
-    skipped: 0,
-    duplicateSkipped: 0,
-  };
+  const profileStats = createTargetAiProfileVerifyStats();
 
-  const primary = await runDiscoveryPass({
-    niche,
-    locationLabel,
-    pass: "primary",
-    config,
-  });
-  provider = primary.gpt.provider;
-  errorCode = primary.gpt.error_code;
-  gptSearchQueriesCount += primary.queries.length;
-  gptSeedUsernamesCount += primary.gpt.usernames.length;
-  searchapiDiscoveryQueriesCount += primary.discoveryQueriesExecuted;
-  extractedUsernamesCount += primary.extractedUsernamesCount;
-  duplicateSkippedCount += primary.duplicateSkippedCount;
+  async function runPass(
+    pass: "primary" | "broadened" | "complementary",
+    currentVerified: TargetAiSearchCandidate[],
+    maxChecks: number,
+  ) {
+    const discoveryPass = await runDiscoveryPass({
+      niche,
+      locationLabel,
+      pass,
+      config,
+    });
+    gptSearchQueriesCount += discoveryPass.queries.length;
+    gptSeedUsernamesCount += discoveryPass.gpt.usernames.length;
+    searchapiDiscoveryQueriesCount += discoveryPass.discoveryQueriesExecuted;
+    extractedUsernamesCount += discoveryPass.extractedUsernamesCount;
+    duplicateSkippedCount += discoveryPass.duplicateSkippedCount;
+    if (!errorCode && discoveryPass.gpt.error_code) errorCode = discoveryPass.gpt.error_code;
+    provider = discoveryPass.gpt.provider;
+
+    if (discoveryPass.candidateUsernames.length === 0) {
+      return currentVerified;
+    }
+
+    const passVerified = await verifyUsernames(
+      discoveryPass.candidateUsernames,
+      profileLookupConcurrency,
+      maxChecks,
+      checked,
+      {
+        maxDisplayedResults: config.max_displayed_results,
+        currentVerified,
+        niche,
+        locationLabel,
+      },
+    );
+    mergeProfileStats(profileStats, passVerified.stats);
+    const merged = new Map<string, TargetAiSearchCandidate>();
+    for (const row of passVerified.verified) merged.set(row.username, row);
+    return [...merged.values()];
+  }
 
   let verified: TargetAiSearchCandidate[] = [];
-  let candidateUsernames = primary.candidateUsernames;
 
-  if (candidateUsernames.length === 0 && !primary.gpt.ok && primary.gpt.provider === "mock") {
+  const primaryDiscovery = await runDiscoveryPass({ niche, locationLabel, pass: "primary", config });
+  provider = primaryDiscovery.gpt.provider;
+  errorCode = primaryDiscovery.gpt.error_code;
+  gptSearchQueriesCount += primaryDiscovery.queries.length;
+  gptSeedUsernamesCount += primaryDiscovery.gpt.usernames.length;
+  searchapiDiscoveryQueriesCount += primaryDiscovery.discoveryQueriesExecuted;
+  extractedUsernamesCount += primaryDiscovery.extractedUsernamesCount;
+  duplicateSkippedCount += primaryDiscovery.duplicateSkippedCount;
+
+  let candidateUsernames = primaryDiscovery.candidateUsernames;
+  if (candidateUsernames.length === 0) {
     const mockUsernames = readTargetAiMockUsernames(config.max_gpt_candidates);
     candidateUsernames = mockUsernames;
     gptSeedUsernamesCount += mockUsernames.length;
@@ -376,77 +466,51 @@ export async function searchTargetAccountsWithAi(input: {
   if (candidateUsernames.length > 0) {
     const passVerified = await verifyUsernames(
       candidateUsernames,
-      config.searchapi_concurrency,
+      profileLookupConcurrency,
       config.max_searchapi_checks,
       checked,
       {
         maxDisplayedResults: config.max_displayed_results,
-        minEligibleTarget: config.min_eligible_target,
         currentVerified: [],
+        niche,
+        locationLabel,
       },
     );
+    mergeProfileStats(profileStats, passVerified.stats);
     verified = passVerified.verified;
-    profileStats.checked += passVerified.stats.checked;
-    profileStats.found += passVerified.stats.found;
-    profileStats.notFound += passVerified.stats.notFound;
-    profileStats.providerError += passVerified.stats.providerError;
-    profileStats.skipped += passVerified.stats.skipped;
-    profileStats.duplicateSkipped += passVerified.stats.duplicateSkipped;
   }
 
-  let eligibleCount = verified.filter((row) => row.eligible).length;
-  const remainingChecks = config.max_searchapi_checks - profileStats.checked;
+  let displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
+  let remainingChecks = config.max_searchapi_checks - profileStats.checked;
 
   if (
     config.second_pass_enabled
     && remainingChecks > 8
-    && eligibleCount < config.min_eligible_target
-    && selectDisplayCandidates(verified, config.max_displayed_results).length < config.max_displayed_results
-    && (primary.gpt.ok || primary.gpt.provider === "openai")
+    && displayCandidates.length < config.max_displayed_results
+    && profileStats.found < config.max_displayed_results
   ) {
     secondPassUsed = true;
-    const broadened = await runDiscoveryPass({
-      niche,
-      locationLabel,
-      pass: "broadened",
-      config: {
-        ...config,
-        max_gpt_candidates: Math.min(config.max_gpt_candidates, remainingChecks + 8),
-      },
-    });
-    gptSearchQueriesCount += broadened.queries.length;
-    gptSeedUsernamesCount += broadened.gpt.usernames.length;
-    searchapiDiscoveryQueriesCount += broadened.discoveryQueriesExecuted;
-    extractedUsernamesCount += broadened.extractedUsernamesCount;
-    duplicateSkippedCount += broadened.duplicateSkippedCount;
-
-    if (broadened.candidateUsernames.length > 0) {
-      const passVerified = await verifyUsernames(
-        broadened.candidateUsernames,
-        config.searchapi_concurrency,
-        remainingChecks,
-        checked,
-        {
-          maxDisplayedResults: config.max_displayed_results,
-          minEligibleTarget: config.min_eligible_target,
-          currentVerified: verified,
-        },
-      );
-      const merged = new Map<string, TargetAiSearchCandidate>();
-      for (const row of passVerified.verified) merged.set(row.username, row);
-      verified = [...merged.values()];
-      profileStats.checked += passVerified.stats.checked;
-      profileStats.found += passVerified.stats.found;
-      profileStats.notFound += passVerified.stats.notFound;
-      profileStats.providerError += passVerified.stats.providerError;
-      profileStats.skipped += passVerified.stats.skipped;
-      profileStats.duplicateSkipped += passVerified.stats.duplicateSkipped;
-      eligibleCount = verified.filter((row) => row.eligible).length;
-      if (!broadened.gpt.ok && !errorCode) errorCode = broadened.gpt.error_code;
-    }
+    verified = await runPass("broadened", verified, remainingChecks);
+    displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
+    remainingChecks = config.max_searchapi_checks - profileStats.checked;
   }
 
-  const displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
+  if (
+    shouldRunThirdPass({
+      displayedCount: displayCandidates.length,
+      maxDisplayedResults: config.max_displayed_results,
+      profileStats,
+      maxSearchApiChecks: config.max_searchapi_checks,
+    })
+    && remainingChecks > 8
+  ) {
+    thirdPassUsed = true;
+    verified = await runPass("complementary", verified, remainingChecks);
+    displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
+  }
+
+  const avatarAvailableCount = displayCandidates.filter((row) => row.avatarAvailable).length;
+  const relevanceScores = displayCandidates.map((row) => row.relevanceScore);
   const debug: TargetAiSearchDebugSummary = {
     prompt_version: config.prompt_version,
     prompt_source: config.prompt_source,
@@ -454,6 +518,9 @@ export async function searchTargetAccountsWithAi(input: {
     provider,
     niche_present: Boolean(niche),
     location_present: Boolean(locationLabel),
+    max_displayed_results: config.max_displayed_results,
+    max_searchapi_checks: config.max_searchapi_checks,
+    profile_lookup_concurrency: profileLookupConcurrency,
     gpt_search_queries_count: gptSearchQueriesCount,
     gpt_seed_usernames_count: gptSeedUsernamesCount,
     searchapi_discovery_queries_count: searchapiDiscoveryQueriesCount,
@@ -462,13 +529,24 @@ export async function searchTargetAccountsWithAi(input: {
     profile_found_count: profileStats.found,
     profile_not_found_count: profileStats.notFound,
     profile_provider_error_count: profileStats.providerError,
+    profile_rate_limited_count: profileStats.rateLimited,
+    profile_retried_count: profileStats.retried,
     profile_skipped_count: profileStats.skipped,
     duplicate_skipped_count: duplicateSkippedCount + profileStats.duplicateSkipped,
+    avatar_available_count: avatarAvailableCount,
+    avatar_missing_count: displayCandidates.length - avatarAvailableCount,
     eligible_count: displayCandidates.filter((row) => row.eligible).length,
     ineligible_count: displayCandidates.filter((row) => !row.eligible).length,
+    eligible_displayed_count: displayCandidates.filter((row) => row.eligible).length,
+    ineligible_displayed_count: displayCandidates.filter((row) => !row.eligible).length,
     displayed_count: displayCandidates.length,
+    final_results_count: displayCandidates.length,
     second_pass_used: secondPassUsed,
+    third_pass_used: thirdPassUsed,
+    provider_error_reasons_top: topTargetAiProviderErrorReasons(profileStats),
     rejection_reasons_top: countReasons(displayCandidates),
+    relevance_score_top: relevanceScores.length > 0 ? Math.max(...relevanceScores) : null,
+    relevance_score_bottom: relevanceScores.length > 0 ? Math.min(...relevanceScores) : null,
     latency_ms: Date.now() - startedAt,
     error_code: errorCode,
     gpt_candidates_count: gptSeedUsernamesCount,
@@ -498,8 +576,8 @@ export async function searchTargetAccountsWithAi(input: {
     candidates: displayCandidates,
     suggested_count: gptSeedUsernamesCount + extractedUsernamesCount,
     verified_count: profileStats.checked,
-    avatar_resolved: displayCandidates.filter((row) => row.avatarAvailable).length,
-    error_code: primary.gpt.ok ? null : errorCode,
+    avatar_resolved: avatarAvailableCount,
+    error_code: errorCode,
     debug,
   };
 }
