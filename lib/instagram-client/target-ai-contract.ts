@@ -5,6 +5,7 @@ export type TargetAiDiscoveryPass = "primary" | "broadened";
 
 export type TargetAiDiscoveryResponse = {
   search_strategy_summary?: string;
+  search_queries?: string[];
   search_angles?: Array<{
     label?: string;
     keywords?: string[];
@@ -14,6 +15,20 @@ export type TargetAiDiscoveryResponse = {
   seed_usernames?: string[];
   niche_variants?: string[];
   usernames?: string[];
+};
+
+export type ParsedTargetAiDiscoveryPayload = {
+  searchStrategySummary: string | null;
+  searchQueries: string[];
+  searchAngles: Array<{
+    label: string | null;
+    keywords: string[];
+    hashtagHints: string[];
+    seedUsernames: string[];
+  }>;
+  seedUsernames: string[];
+  nicheVariants: string[];
+  usernames: string[];
 };
 
 export type TargetingAiStoredConfig = {
@@ -69,6 +84,9 @@ export function buildDefaultUserPromptTemplate() {
     "Return JSON with this shape:",
     "{",
     '  "search_strategy_summary": "short strategy",',
+    '  "search_queries": [',
+    '    "site:instagram.com \\"niche keyword\\" \\"city\\""',
+    "  ],",
     '  "search_angles": [',
     "    {",
     '      "label": "angle name",',
@@ -81,8 +99,10 @@ export function buildDefaultUserPromptTemplate() {
     '  "niche_variants": ["adjacent niche phrase"]',
     "}",
     "Rules:",
+    "- Produce between 10 and 20 unique search_queries using site:instagram.com patterns.",
+    "- search_queries are the primary discovery input; combine niche, location, FR/EN variants, hashtags, and local business angles.",
     "- Produce between {{min_seed_count}} and {{max_candidates}} unique seed usernames across all fields.",
-    "- seed usernames are hypotheses to verify later; many may not exist.",
+    "- seed usernames are optional hints only; many may not exist and must never be treated as verified accounts.",
     "- Usernames must be lowercase, without @, valid Instagram handle format.",
     "- Prefer niche-relevant local businesses, creators, coaches, studios, community pages, and specialized media.",
     "- Prioritize accounts with clear local business or practitioner relevance when a location is provided.",
@@ -208,28 +228,90 @@ export function sanitizeTargetAiSuggestedUsernames(value: unknown, maxCandidates
   return sanitizeTargetAiDiscoveryResponse(value, maxCandidates);
 }
 
-export function sanitizeTargetAiDiscoveryResponse(value: unknown, maxCandidates: number) {
-  const seen = new Set<string>();
-  const output: string[] = [];
+function normalizeDiscoveryQuery(entry: unknown) {
+  if (typeof entry !== "string") return null;
+  const normalized = entry.trim().replace(/\s+/g, " ");
+  if (normalized.length < 8 || normalized.length > 220) return null;
+  return normalized;
+}
+
+function readStringList(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean);
+}
+
+export function parseTargetAiDiscoveryPayload(value: unknown, maxCandidates: number): ParsedTargetAiDiscoveryPayload {
+  const usernameSeen = new Set<string>();
+  const usernames: string[] = [];
+  const searchQuerySeen = new Set<string>();
+  const searchQueries: string[] = [];
 
   function pushUsername(entry: unknown) {
     const normalized = normalizeUsername(entry);
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    output.push(normalized);
+    if (!normalized || usernameSeen.has(normalized)) return;
+    usernameSeen.add(normalized);
+    usernames.push(normalized);
   }
 
-  if (!value || typeof value !== "object" || Array.isArray(value)) return output;
+  function pushSearchQuery(entry: unknown) {
+    const normalized = normalizeDiscoveryQuery(entry);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (searchQuerySeen.has(key)) return;
+    searchQuerySeen.add(key);
+    searchQueries.push(normalized);
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      searchStrategySummary: null,
+      searchQueries: [],
+      searchAngles: [],
+      seedUsernames: [],
+      nicheVariants: [],
+      usernames: [],
+    };
+  }
+
   const payload = value as TargetAiDiscoveryResponse;
+  const searchAngles = (payload.search_angles ?? [])
+    .filter((angle) => angle && typeof angle === "object")
+    .map((angle) => ({
+      label: typeof angle.label === "string" ? angle.label.trim() || null : null,
+      keywords: readStringList(angle.keywords),
+      hashtagHints: readStringList(angle.hashtag_hints),
+      seedUsernames: readStringList(angle.seed_usernames)
+        .map((entry) => normalizeUsername(entry))
+        .filter((entry): entry is string => Boolean(entry)),
+    }));
+
+  for (const entry of payload.search_queries ?? []) pushSearchQuery(entry);
+  for (const entry of payload.niche_variants ?? []) {
+    if (typeof entry !== "string") continue;
+    const variant = entry.trim();
+    if (variant) pushSearchQuery(`site:instagram.com ${variant}`);
+  }
+  for (const angle of searchAngles) {
+    for (const entry of angle.seedUsernames) pushUsername(entry);
+  }
 
   for (const entry of payload.usernames ?? []) pushUsername(entry);
   for (const entry of payload.seed_usernames ?? []) pushUsername(entry);
-  for (const angle of payload.search_angles ?? []) {
-    if (!angle || typeof angle !== "object") continue;
-    for (const entry of angle.seed_usernames ?? []) pushUsername(entry);
-  }
 
-  return output.slice(0, maxCandidates);
+  return {
+    searchStrategySummary: typeof payload.search_strategy_summary === "string"
+      ? payload.search_strategy_summary.trim() || null
+      : null,
+    searchQueries: searchQueries.slice(0, 20),
+    searchAngles,
+    seedUsernames: usernames.slice(0, maxCandidates),
+    nicheVariants: readStringList(payload.niche_variants),
+    usernames: usernames.slice(0, maxCandidates),
+  };
+}
+
+export function sanitizeTargetAiDiscoveryResponse(value: unknown, maxCandidates: number) {
+  return parseTargetAiDiscoveryPayload(value, maxCandidates).usernames;
 }
 
 export function readTargetAiMockUsernames(maxCandidates = 50) {

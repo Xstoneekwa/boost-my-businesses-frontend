@@ -32,8 +32,8 @@ export function targetAiErrorMessage(lang: TargetAiLang, code: TargetAiErrorCode
       return fr ? "Indiquez une niche ou un mot-clé valide." : "Enter a valid niche or keyword.";
     case "no_candidates_found":
       return fr
-        ? "Aucun compte pertinent trouvé pour cette recherche. Essayez une niche plus précise ou une autre zone."
-        : "No relevant accounts were found. Try a more specific niche or another area.";
+        ? "Aucun compte vérifié trouvé pour cette recherche. Essayez une niche plus précise ou une localisation différente."
+        : "No verified accounts were found for this search. Try a more specific niche or a different location.";
     case "location_unavailable":
       return fr
         ? "La recherche de localisation est temporairement indisponible."

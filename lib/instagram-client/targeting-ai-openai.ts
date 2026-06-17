@@ -1,7 +1,8 @@
 import {
   buildTargetAiDiscoveryPrompt,
+  parseTargetAiDiscoveryPayload,
   readTargetAiMockUsernames,
-  sanitizeTargetAiDiscoveryResponse,
+  type ParsedTargetAiDiscoveryPayload,
   type TargetAiDiscoveryPass,
 } from "./target-ai-contract.ts";
 import type { ResolvedTargetingAiConfig } from "./targeting-ai-config-store.ts";
@@ -9,6 +10,7 @@ import type { ResolvedTargetingAiConfig } from "./targeting-ai-config-store.ts";
 export type TargetAiOpenAiDiscoveryResult = {
   ok: boolean;
   usernames: string[];
+  discovery: ParsedTargetAiDiscoveryPayload;
   provider: "openai" | "mock";
   error_code: string | null;
   model: string;
@@ -26,9 +28,11 @@ export async function callTargetAiOpenAiDiscovery(input: {
   const maxCandidates = input.config.max_gpt_candidates;
 
   if (!input.config.enabled || !apiKey) {
+    const mockUsernames = readTargetAiMockUsernames(maxCandidates);
     return {
       ok: false as const,
-      usernames: readTargetAiMockUsernames(maxCandidates),
+      usernames: mockUsernames,
+      discovery: parseTargetAiDiscoveryPayload({ usernames: mockUsernames }, maxCandidates),
       provider: "mock" as const,
       error_code: "target_ai_disabled" as const,
       model: input.config.model,
@@ -70,6 +74,7 @@ export async function callTargetAiOpenAiDiscovery(input: {
     return {
       ok: false as const,
       usernames: [],
+      discovery: parseTargetAiDiscoveryPayload(null, maxCandidates),
       provider: "openai" as const,
       error_code: "target_ai_provider_error" as const,
       model: input.config.model,
@@ -85,11 +90,13 @@ export async function callTargetAiOpenAiDiscovery(input: {
 
   try {
     const parsed = JSON.parse(content) as unknown;
-    const usernames = sanitizeTargetAiDiscoveryResponse(parsed, maxCandidates);
-    if (usernames.length === 0) {
+    const discovery = parseTargetAiDiscoveryPayload(parsed, maxCandidates);
+    const usernames = discovery.usernames;
+    if (usernames.length === 0 && discovery.searchQueries.length === 0) {
       return {
         ok: false as const,
         usernames: [],
+        discovery,
         provider: "openai" as const,
         error_code: "no_candidates_found" as const,
         model: input.config.model,
@@ -100,6 +107,7 @@ export async function callTargetAiOpenAiDiscovery(input: {
     return {
       ok: true as const,
       usernames,
+      discovery,
       provider: "openai" as const,
       error_code: null,
       model: input.config.model,
@@ -110,6 +118,7 @@ export async function callTargetAiOpenAiDiscovery(input: {
     return {
       ok: false as const,
       usernames: [],
+      discovery: parseTargetAiDiscoveryPayload(null, maxCandidates),
       provider: "openai" as const,
       error_code: "target_ai_provider_error" as const,
       model: input.config.model,
