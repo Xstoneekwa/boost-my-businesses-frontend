@@ -754,7 +754,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
           </section>
         )}
 
-        {!hasLinkedInstagramAccount ? (
+        {!hasLinkedInstagramAccount && activeView === "overview" ? (
           <div className="cd-view">
             <ClientAccountsSection lang={lang} accounts={[]} />
           </div>
