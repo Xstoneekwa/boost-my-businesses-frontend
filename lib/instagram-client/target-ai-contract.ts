@@ -1,3 +1,4 @@
+import { CT_MANUAL_FOLLOWERS_MAX_GUARD, CT_QUALITY_MIN_FOLLOWERS } from "../instagram-target-quality.ts";
 import { TARGETING_AI_PROMPT_VERSION } from "./targeting-ai-settings.ts";
 
 export type TargetAiDiscoveryPass = "primary" | "broadened";
@@ -15,6 +16,27 @@ export type TargetAiDiscoveryResponse = {
   usernames?: string[];
 };
 
+export type TargetingAiStoredConfig = {
+  enabled: boolean;
+  provider: "openai";
+  model: string;
+  prompt_version: string;
+  system_prompt: string;
+  user_prompt_template: string;
+  max_gpt_candidates: number;
+  max_displayed_results: number;
+  min_followers: number;
+  max_followers: number;
+  allow_verified: boolean;
+  min_eligible_target: number;
+  searchapi_concurrency: number;
+  max_searchapi_checks: number;
+  second_pass_enabled: boolean;
+  temperature: number;
+  updated_at: string | null;
+  updated_by: string | null;
+};
+
 const usernamePattern = /^[a-z0-9._]{1,30}$/;
 
 export function targetAiEnabled() {
@@ -29,41 +51,21 @@ export function targetingAiPromptVersion() {
   return TARGETING_AI_PROMPT_VERSION;
 }
 
-export function buildTargetAiSystemPrompt() {
+export function buildTargetAiSystemPrompt(version = TARGETING_AI_PROMPT_VERSION) {
   return [
     "You are a search strategist for an Instagram growth agency.",
     "Your job is to propose candidate discovery hints for public Instagram accounts in a niche.",
     "You do NOT know which accounts exist, their follower counts, avatars, verification, or privacy status.",
     "Never invent follower counts, avatars, verification, or eligibility.",
     "Return strict JSON only. No markdown.",
-    `Prompt version: ${TARGETING_AI_PROMPT_VERSION}.`,
+    `Prompt version: ${version}.`,
   ].join(" ");
 }
 
-export function buildTargetAiDiscoveryPrompt(input: {
-  niche: string;
-  locationLabel?: string | null;
-  maxCandidates: number;
-  minFollowers: number;
-  maxFollowers: number;
-  allowVerified: boolean;
-  pass: TargetAiDiscoveryPass;
-}) {
-  const locationLine = input.locationLabel
-    ? `Location focus: ${input.locationLabel}. Prioritize local/community/business accounts tied to this area when plausible.`
-    : "No specific location was provided. Focus on niche-relevant accounts broadly.";
-
-  const passLine = input.pass === "broadened"
-    ? "This is a broadened second pass: widen angles, relax location strictness, include adjacent niches and bilingual FR/EN variants."
-    : "This is the primary pass: stay focused on the niche and location.";
-
-  const verifiedLine = input.allowVerified
-    ? "Verified accounts may appear but still avoid mega brands and official institutions."
-    : "Avoid verified/certified accounts and official brand pages.";
-
+export function buildDefaultUserPromptTemplate() {
   return [
     "Generate a broad Instagram target discovery strategy for follower-source accounts.",
-    passLine,
+    "{{pass_instruction}}",
     "Return JSON with this shape:",
     "{",
     '  "search_strategy_summary": "short strategy",',
@@ -79,36 +81,116 @@ export function buildTargetAiDiscoveryPrompt(input: {
     '  "niche_variants": ["adjacent niche phrase"]',
     "}",
     "Rules:",
-    `- Produce between ${Math.max(24, Math.floor(input.maxCandidates * 0.6))} and ${input.maxCandidates} unique seed usernames across all fields.`,
+    "- Produce between {{min_seed_count}} and {{max_candidates}} unique seed usernames across all fields.",
     "- seed usernames are hypotheses to verify later; many may not exist.",
     "- Usernames must be lowercase, without @, valid Instagram handle format.",
     "- Prefer niche-relevant local businesses, creators, coaches, studios, community pages, and specialized media.",
     "- Include multiple angles: local accounts, niche practitioners, community hubs, business pages, micro/mid creators.",
     "- Use FR and EN naming patterns when relevant to the niche/location.",
     "- Include keywords and hashtag hints that operators could use manually; do not claim they were searched.",
-    `- Prefer accounts likely between ${input.minFollowers} and ${input.maxFollowers} followers; avoid celebrities and mega accounts.`,
-    verifiedLine,
+    "- Prefer accounts likely between {{min_followers}} and {{max_followers}} followers; avoid celebrities and mega accounts.",
+    "{{verified_rule}}",
     "- Avoid obviously private-looking handles and generic national news/media giants.",
     "- Do not include duplicates.",
     "- Do not include explanations outside JSON.",
-    `Business niche / keyword: ${input.niche}.`,
-    locationLine,
+    "Business niche / keyword: {{niche}}.",
+    "{{location_line}}",
   ].join("\n");
+}
+
+function buildPassInstruction(pass: TargetAiDiscoveryPass) {
+  return pass === "broadened"
+    ? "This is a broadened second pass: widen angles, relax location strictness, include adjacent niches and bilingual FR/EN variants."
+    : "This is the primary pass: stay focused on the niche and location.";
+}
+
+function buildLocationLine(locationLabel?: string | null) {
+  return locationLabel
+    ? `Location focus: ${locationLabel}. Prioritize local/community/business accounts tied to this area when plausible.`
+    : "No specific location was provided. Focus on niche-relevant accounts broadly.";
+}
+
+function buildVerifiedRule(allowVerified: boolean) {
+  return allowVerified
+    ? "Verified accounts may appear but still avoid mega brands and official institutions."
+    : "Avoid verified/certified accounts and official brand pages.";
+}
+
+export function renderTargetAiUserPrompt(
+  template: string,
+  input: {
+    niche: string;
+    locationLabel?: string | null;
+    maxCandidates: number;
+    minFollowers: number;
+    maxFollowers: number;
+    allowVerified: boolean;
+    pass: TargetAiDiscoveryPass;
+    language?: string | null;
+  },
+) {
+  const replacements: Record<string, string> = {
+    "{{pass_instruction}}": buildPassInstruction(input.pass),
+    "{{niche}}": input.niche,
+    "{{location_label}}": input.locationLabel ?? "",
+    "{{location_line}}": buildLocationLine(input.locationLabel),
+    "{{language}}": input.language?.trim() || "auto",
+    "{{max_candidates}}": String(input.maxCandidates),
+    "{{min_seed_count}}": String(Math.max(24, Math.floor(input.maxCandidates * 0.6))),
+    "{{min_followers}}": String(input.minFollowers),
+    "{{max_followers}}": String(input.maxFollowers),
+    "{{verified_rule}}": buildVerifiedRule(input.allowVerified),
+  };
+
+  let rendered = template;
+  for (const [token, value] of Object.entries(replacements)) {
+    rendered = rendered.split(token).join(value);
+  }
+  return rendered;
+}
+
+export function buildDefaultTargetingAiCodeConfig(): TargetingAiStoredConfig {
+  return {
+    enabled: targetAiEnabled(),
+    provider: "openai",
+    model: targetAiModel(),
+    prompt_version: TARGETING_AI_PROMPT_VERSION,
+    system_prompt: buildTargetAiSystemPrompt(),
+    user_prompt_template: buildDefaultUserPromptTemplate(),
+    max_gpt_candidates: 50,
+    max_displayed_results: 20,
+    min_followers: CT_QUALITY_MIN_FOLLOWERS,
+    max_followers: CT_MANUAL_FOLLOWERS_MAX_GUARD,
+    allow_verified: false,
+    min_eligible_target: 8,
+    searchapi_concurrency: 4,
+    max_searchapi_checks: 55,
+    second_pass_enabled: true,
+    temperature: 0.5,
+    updated_at: null,
+    updated_by: null,
+  };
+}
+
+export function buildTargetAiDiscoveryPrompt(input: {
+  niche: string;
+  locationLabel?: string | null;
+  maxCandidates: number;
+  minFollowers: number;
+  maxFollowers: number;
+  allowVerified: boolean;
+  pass: TargetAiDiscoveryPass;
+  userPromptTemplate?: string;
+}) {
+  const template = input.userPromptTemplate?.trim() || buildDefaultUserPromptTemplate();
+  return renderTargetAiUserPrompt(template, input);
 }
 
 export function buildTargetAiPromptPreview() {
   return {
     version: TARGETING_AI_PROMPT_VERSION,
     system: buildTargetAiSystemPrompt(),
-    user_template: buildTargetAiDiscoveryPrompt({
-      niche: "{{niche}}",
-      locationLabel: "{{location_label}}",
-      maxCandidates: 50,
-      minFollowers: 500,
-      maxFollowers: 50_000,
-      allowVerified: false,
-      pass: "primary",
-    }),
+    user_template: buildDefaultUserPromptTemplate(),
   };
 }
 

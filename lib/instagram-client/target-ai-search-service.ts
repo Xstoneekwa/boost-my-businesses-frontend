@@ -1,17 +1,10 @@
 import { mapWithConcurrency } from "../instagram-dashboard/target-provider-enrichment.ts";
 import { normalizeTargetUsername, verifySingleTargetUsername } from "../instagram-targets.ts";
-import {
-  buildTargetAiDiscoveryPrompt,
-  buildTargetAiSystemPrompt,
-  readTargetAiMockUsernames,
-  sanitizeTargetAiDiscoveryResponse,
-  targetingAiPromptVersion,
-  targetAiEnabled,
-  targetAiModel,
-  type TargetAiDiscoveryPass,
-} from "./target-ai-contract.ts";
+import { readTargetAiMockUsernames } from "./target-ai-contract.ts";
 import { evaluateAiTargetEligibility } from "./target-ai-eligibility.ts";
-import { readTargetingAiSettings } from "./targeting-ai-settings.ts";
+import { callTargetAiOpenAiDiscovery } from "./targeting-ai-openai.ts";
+import { resolveActiveTargetingAiConfig } from "./targeting-ai-config-store.ts";
+import type { TargetingAiPromptSource } from "./targeting-ai-config-store.ts";
 
 export type TargetAiSearchLocation = {
   label: string;
@@ -35,6 +28,7 @@ export type TargetAiSearchCandidate = {
 
 export type TargetAiSearchDebugSummary = {
   prompt_version: string;
+  prompt_source: TargetingAiPromptSource;
   model: string;
   provider: "openai" | "mock";
   niche_present: boolean;
@@ -78,77 +72,6 @@ function countReasons(candidates: TargetAiSearchCandidate[]) {
     .map(([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count)
     .slice(0, 6);
-}
-
-async function callOpenAiDiscovery(input: {
-  niche: string;
-  locationLabel?: string | null;
-  maxCandidates: number;
-  minFollowers: number;
-  maxFollowers: number;
-  allowVerified: boolean;
-  temperature: number;
-  pass: TargetAiDiscoveryPass;
-}) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
-  if (!targetAiEnabled() || !apiKey) {
-    return {
-      ok: false as const,
-      usernames: readTargetAiMockUsernames(input.maxCandidates),
-      provider: "mock" as const,
-      error_code: "target_ai_disabled" as const,
-    };
-  }
-
-  const model = targetAiModel();
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: buildTargetAiSystemPrompt() },
-        {
-          role: "user",
-          content: buildTargetAiDiscoveryPrompt({
-            niche: input.niche,
-            locationLabel: input.locationLabel,
-            maxCandidates: input.maxCandidates,
-            minFollowers: input.minFollowers,
-            maxFollowers: input.maxFollowers,
-            allowVerified: input.allowVerified,
-            pass: input.pass,
-          }),
-        },
-      ],
-      temperature: input.temperature,
-    }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    safeLog("openai_error", { status: response.status, pass: input.pass });
-    return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "target_ai_provider_error" as const };
-  }
-
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string | null } }>;
-  };
-  const content = payload.choices?.[0]?.message?.content ?? "";
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    const usernames = sanitizeTargetAiDiscoveryResponse(parsed, input.maxCandidates);
-    if (usernames.length === 0) {
-      return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "no_candidates_found" as const };
-    }
-    return { ok: true as const, usernames, provider: "openai" as const, error_code: null };
-  } catch {
-    return { ok: false as const, usernames: [], provider: "openai" as const, error_code: "target_ai_provider_error" as const };
-  }
 }
 
 function mapVerifiedCandidate(username: string, decision: Awaited<ReturnType<typeof verifySingleTargetUsername>>): TargetAiSearchCandidate {
@@ -218,11 +141,14 @@ export async function searchTargetAccountsWithAi(input: {
   maxCandidates?: number;
 }): Promise<TargetAiSearchResult> {
   const startedAt = Date.now();
-  const settings = readTargetingAiSettings({
-    maxGptCandidates: typeof input.maxCandidates === "number"
+  const activeConfig = await resolveActiveTargetingAiConfig();
+  const config = {
+    ...activeConfig,
+    max_gpt_candidates: typeof input.maxCandidates === "number"
       ? Math.min(Math.max(input.maxCandidates, 12), 80)
-      : undefined,
-  });
+      : activeConfig.max_gpt_candidates,
+  };
+
   const niche = input.niche.trim();
   const locationLabel = input.location?.label ?? null;
   const checked = new Set<string>();
@@ -231,14 +157,10 @@ export async function searchTargetAccountsWithAi(input: {
   let provider: "openai" | "mock" = "openai";
   let errorCode: string | null = null;
 
-  const primary = await callOpenAiDiscovery({
+  const primary = await callTargetAiOpenAiDiscovery({
+    config,
     niche,
     locationLabel,
-    maxCandidates: settings.maxGptCandidates,
-    minFollowers: settings.minFollowers,
-    maxFollowers: settings.maxFollowers,
-    allowVerified: settings.allowVerified,
-    temperature: settings.temperature,
     pass: "primary",
   });
   provider = primary.provider;
@@ -249,37 +171,47 @@ export async function searchTargetAccountsWithAi(input: {
   if (primary.usernames.length > 0) {
     verified = await verifyUsernames(
       primary.usernames,
-      settings.searchApiConcurrency,
-      settings.maxSearchApiChecks,
+      config.searchapi_concurrency,
+      config.max_searchapi_checks,
       checked,
     );
+  } else if (!primary.ok && primary.provider === "mock") {
+    const mockUsernames = readTargetAiMockUsernames(config.max_gpt_candidates);
+    gptCandidatesCount += mockUsernames.length;
+    if (mockUsernames.length > 0) {
+      verified = await verifyUsernames(
+        mockUsernames,
+        config.searchapi_concurrency,
+        config.max_searchapi_checks,
+        checked,
+      );
+    }
   }
 
   let eligibleCount = verified.filter((row) => row.eligible).length;
-  const remainingChecks = settings.maxSearchApiChecks - checked.size;
+  const remainingChecks = config.max_searchapi_checks - checked.size;
 
   if (
-    settings.secondPassEnabled
+    config.second_pass_enabled
     && remainingChecks > 8
-    && eligibleCount < settings.minEligibleTarget
-    && primary.ok
+    && eligibleCount < config.min_eligible_target
+    && (primary.ok || primary.provider === "openai")
   ) {
     secondPassUsed = true;
-    const broadened = await callOpenAiDiscovery({
+    const broadened = await callTargetAiOpenAiDiscovery({
+      config: {
+        ...config,
+        max_gpt_candidates: Math.min(config.max_gpt_candidates, remainingChecks + 8),
+      },
       niche,
       locationLabel,
-      maxCandidates: Math.min(settings.maxGptCandidates, remainingChecks + 8),
-      minFollowers: settings.minFollowers,
-      maxFollowers: settings.maxFollowers,
-      allowVerified: settings.allowVerified,
-      temperature: settings.temperature,
       pass: "broadened",
     });
     if (broadened.usernames.length > 0) {
       gptCandidatesCount += broadened.usernames.length;
       const passVerified = await verifyUsernames(
         broadened.usernames,
-        settings.searchApiConcurrency,
+        config.searchapi_concurrency,
         remainingChecks,
         checked,
       );
@@ -291,18 +223,17 @@ export async function searchTargetAccountsWithAi(input: {
     }
   }
 
-  const displayCandidates = selectDisplayCandidates(verified, settings.maxDisplayedResults);
-  const foundCount = verified.filter((row) => row.verificationStatus === "found").length;
-  const avatarResolved = displayCandidates.filter((row) => row.avatarAvailable).length;
+  const displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
   const debug: TargetAiSearchDebugSummary = {
-    prompt_version: targetingAiPromptVersion(),
-    model: settings.model,
+    prompt_version: config.prompt_version,
+    prompt_source: config.prompt_source,
+    model: config.model,
     provider,
     niche_present: Boolean(niche),
     location_present: Boolean(locationLabel),
     gpt_candidates_count: gptCandidatesCount,
     searchapi_checked_count: checked.size,
-    found_count: foundCount,
+    found_count: verified.filter((row) => row.verificationStatus === "found").length,
     eligible_count: displayCandidates.filter((row) => row.eligible).length,
     ineligible_count: displayCandidates.filter((row) => !row.eligible).length,
     not_found_count: verified.filter((row) => row.ineligibleReasonCode === "not_found").length,
@@ -334,7 +265,7 @@ export async function searchTargetAccountsWithAi(input: {
     candidates: displayCandidates,
     suggested_count: gptCandidatesCount,
     verified_count: checked.size,
-    avatar_resolved: avatarResolved,
+    avatar_resolved: displayCandidates.filter((row) => row.avatarAvailable).length,
     error_code: primary.ok ? null : errorCode,
     debug,
   };

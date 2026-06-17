@@ -1,13 +1,17 @@
 import { CT_MANUAL_FOLLOWERS_MAX_GUARD, CT_QUALITY_MIN_FOLLOWERS } from "../instagram-target-quality.ts";
 import { targetAiEnabled, targetAiModel } from "./target-ai-contract.ts";
+import type { ResolvedTargetingAiConfig } from "./targeting-ai-config-store.ts";
 
 export const TARGETING_AI_PROMPT_VERSION = "targeting_ai_v1";
 
 export type TargetingAiSettings = {
   promptVersion: string;
+  promptSource: "code_default" | "db_custom";
   enabled: boolean;
   provider: "openai";
   model: string;
+  systemPrompt: string;
+  userPromptTemplate: string;
   maxGptCandidates: number;
   maxDisplayedResults: number;
   minEligibleTarget: number;
@@ -37,12 +41,39 @@ function readFloatEnv(name: string, fallback: number, min: number, max: number) 
   return Math.min(Math.max(parsed, min), max);
 }
 
+export function resolvedConfigToSettings(config: ResolvedTargetingAiConfig): TargetingAiSettings {
+  return {
+    promptVersion: config.prompt_version,
+    promptSource: config.prompt_source,
+    enabled: config.enabled,
+    provider: config.provider,
+    model: config.model,
+    systemPrompt: config.system_prompt,
+    userPromptTemplate: config.user_prompt_template,
+    maxGptCandidates: config.max_gpt_candidates,
+    maxDisplayedResults: config.max_displayed_results,
+    minEligibleTarget: config.min_eligible_target,
+    minFollowers: config.min_followers,
+    maxFollowers: config.max_followers,
+    allowVerified: config.allow_verified,
+    searchApiConcurrency: config.searchapi_concurrency,
+    maxSearchApiChecks: config.max_searchapi_checks,
+    temperature: config.temperature,
+    secondPassEnabled: config.second_pass_enabled,
+    geocodingUserAgent: config.geocoding_user_agent,
+  };
+}
+
+/** Env-only fallback for legacy synchronous callers/tests. */
 export function readTargetingAiSettings(overrides?: Partial<Pick<TargetingAiSettings, "maxGptCandidates">>): TargetingAiSettings {
   return {
     promptVersion: TARGETING_AI_PROMPT_VERSION,
+    promptSource: "code_default",
     enabled: targetAiEnabled(),
     provider: "openai",
     model: targetAiModel(),
+    systemPrompt: "",
+    userPromptTemplate: "",
     maxGptCandidates: overrides?.maxGptCandidates
       ?? readIntEnv("TARGET_AI_MAX_GPT_CANDIDATES", 50, 12, 80),
     maxDisplayedResults: readIntEnv("TARGET_AI_MAX_DISPLAYED_RESULTS", 20, 8, 40),
@@ -60,32 +91,4 @@ export function readTargetingAiSettings(overrides?: Partial<Pick<TargetingAiSett
 
 export function isSearchApiConfigured() {
   return Boolean(process.env.INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY?.trim());
-}
-
-export function buildTargetingAiPublicConfig() {
-  const settings = readTargetingAiSettings();
-  return {
-    service: "targeting_ai",
-    schema_version: "v1",
-    prompt_version: settings.promptVersion,
-    enabled: settings.enabled,
-    provider: settings.provider,
-    model: settings.model,
-    max_gpt_candidates: settings.maxGptCandidates,
-    max_displayed_results: settings.maxDisplayedResults,
-    min_eligible_target: settings.minEligibleTarget,
-    min_followers: settings.minFollowers,
-    max_followers: settings.maxFollowers,
-    allow_verified: settings.allowVerified,
-    searchapi_concurrency: settings.searchApiConcurrency,
-    max_searchapi_checks: settings.maxSearchApiChecks,
-    temperature: settings.temperature,
-    second_pass_enabled: settings.secondPassEnabled,
-    geocoding_user_agent: settings.geocodingUserAgent,
-    openai_key_configured: Boolean(process.env.OPENAI_API_KEY?.trim()),
-    searchapi_key_configured: isSearchApiConfigured(),
-    prompt_editable: false,
-    prompt_storage: "code_versioned",
-    last_updated: "2026-06-15",
-  };
 }

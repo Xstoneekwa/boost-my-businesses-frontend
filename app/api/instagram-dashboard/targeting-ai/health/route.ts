@@ -1,32 +1,19 @@
 import { NextResponse } from "next/server";
-import { requireInstagramAdmin } from "../../_utils";
-import { verifyCompassRelayKey } from "../../compass/relay-auth";
-import { buildTargetingAiPublicConfig } from "@/lib/instagram-client/targeting-ai-settings";
+import { requireRelayOrAdmin } from "../../_utils";
+import {
+  loadTargetingAiConfigSnapshot,
+  serializeTargetingAiPublicConfig,
+} from "@/lib/instagram-client/targeting-ai-config-store";
 
 export const dynamic = "force-dynamic";
 
-async function requireRelayOrAdmin(request: Request) {
-  const relayAuth = verifyCompassRelayKey(request.headers);
-  if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
-  if (!relayAuth.ok) {
-    return NextResponse.json(
-      {
-        ok: false,
-        reason: relayAuth.reason,
-        openai_key_configured: false,
-        searchapi_key_configured: false,
-      },
-      { status: relayAuth.reason === "relay_auth_required" ? 401 : 403 },
-    );
-  }
-  return requireInstagramAdmin();
-}
-
 export async function GET(request: Request) {
-  const unauthorizedResponse = await requireRelayOrAdmin(request);
+  const unauthorizedResponse = await requireRelayOrAdmin(request, "Targeting AI health");
   if (unauthorizedResponse) return unauthorizedResponse;
 
-  const config = buildTargetingAiPublicConfig();
+  const snapshot = await loadTargetingAiConfigSnapshot();
+  const config = serializeTargetingAiPublicConfig(snapshot);
+
   if (!config.enabled) {
     return NextResponse.json({
       ...config,
