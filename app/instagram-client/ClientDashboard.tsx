@@ -115,13 +115,21 @@ const T = {
     feed: { title:"Activité récente", seeAll:"Tout voir →" },
     plan: { name:"Pro", price:"197€", period:"/mois", growth:"Croissance estimée", growthVal:"300–500 / mois", nextBill:"Prochain prélèvement", nextBillVal:"3 juil. 2026", support:"Support", supportVal:"7j / 7", manage:"Gérer mon abonnement" },
     mgr: { name:"Mythyl E.", sub:"Votre account manager", text:"Votre manager dédié surveille votre campagne chaque jour, ajuste le paramétrage chaque semaine et est disponible pour répondre à vos questions 7j/7.", email:"Envoyer un email", call:"Prendre RDV" },
-    activity: { title:"Journal complet · 30 derniers jours" },
+    activity: {
+      title:"Journal complet · 30 derniers jours",
+      emptyTitle:"Activité",
+      emptyBody:"Aucune activité disponible pour le moment",
+      emptyNote:"Connectez un compte Instagram pour afficher l'activité de votre campagne.",
+    },
     targeting: {
       intro:"Organisez votre campagne : les comptes que nous ciblons, votre liste blanche protégée et la liste noire que nous excluons.",
       detailBtn:"Ajouter les comptes cibles",
       targets:"Comptes cibles", white:"Liste blanche", black:"Liste noire",
       placeholderW:"compte_protege", placeholderB:"compte_exclu",
       emptyT:"Aucun compte cible pour l'instant.", emptyW:"Aucun compte protégé.", emptyB:"Aucun compte exclu.",
+      emptyTitle:"Ciblage",
+      emptyBody:"Ajoutez ou connectez un compte Instagram pour configurer le ciblage",
+      emptyNote:"Rendez-vous dans Vue d'ensemble pour lier votre compte, puis revenez ici pour organiser vos listes.",
     },
     account: {
       profile:"Mon profil", subscription:"Abonnement",
@@ -169,13 +177,21 @@ const T = {
     feed: { title:"Recent activity", seeAll:"View all →" },
     plan: { name:"Pro", price:"€197", period:"/mo", growth:"Estimated growth", growthVal:"300–500 / mo", nextBill:"Next billing", nextBillVal:"Jul 3, 2026", support:"Support", supportVal:"7 days / week", manage:"Manage plan" },
     mgr: { name:"Mythyl E.", sub:"Your account manager", text:"Your dedicated manager monitors your campaign daily, fine-tunes settings weekly, and is available to answer your questions 7 days a week.", email:"Send email", call:"Book a call" },
-    activity: { title:"Full activity log · last 30 days" },
+    activity: {
+      title:"Full activity log · last 30 days",
+      emptyTitle:"Activity",
+      emptyBody:"No activity available yet",
+      emptyNote:"Connect an Instagram account to display your campaign activity.",
+    },
     targeting: {
       intro:"Organise your campaign: the accounts we target, your protected whitelist, and the blacklist we exclude.",
       detailBtn:"Add target accounts",
       targets:"Target accounts", white:"Whitelist", black:"Blacklist",
       placeholderW:"protected_account", placeholderB:"excluded_account",
       emptyT:"No target accounts yet.", emptyW:"No protected accounts.", emptyB:"No excluded accounts.",
+      emptyTitle:"Targeting",
+      emptyBody:"Add or connect an Instagram account to configure targeting",
+      emptyNote:"Go to Overview to link your account, then return here to manage your lists.",
     },
     account: {
       profile:"My profile", subscription:"Subscription",
@@ -829,18 +845,34 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         )}
 
         {/* ACTIVITY */}
-        {hasLinkedInstagramAccount && activeView === "activity" && (
+        {activeView === "activity" && (
           <div className="cd-view">
-            <div className="cd-card">
-              <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
-              <FeedList items={FD} lang={lang}/>
-            </div>
+            {!hasLinkedInstagramAccount ? (
+              <section className="cd-card cd-setup-required">
+                <div className="cd-s-title">{t.activity.emptyTitle}</div>
+                <h2>{t.activity.emptyBody}</h2>
+                <p className="cd-setup-note">{t.activity.emptyNote}</p>
+              </section>
+            ) : (
+              <div className="cd-card">
+                <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
+                <FeedList items={FD} lang={lang}/>
+              </div>
+            )}
           </div>
         )}
 
         {/* TARGETING */}
-        {hasLinkedInstagramAccount && activeView === "targeting" && (
+        {activeView === "targeting" && (
           <div className="cd-view">
+            {!hasLinkedInstagramAccount ? (
+              <section className="cd-card cd-setup-required">
+                <div className="cd-s-title">{t.targeting.emptyTitle}</div>
+                <h2>{t.targeting.emptyBody}</h2>
+                <p className="cd-setup-note">{t.targeting.emptyNote}</p>
+              </section>
+            ) : (
+            <>
             <div className="cd-tg2-topbar">
               <p className="cd-tg2-intro">{t.targeting.intro}</p>
               <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)}>
@@ -918,11 +950,13 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
                 </div>
               </div>
             </div>
+            </>
+            )}
           </div>
         )}
 
         {/* ACCOUNT */}
-        {hasLinkedInstagramAccount && activeView === "account" && (
+        {activeView === "account" && (
           <div className="cd-view">
             {primaryAccount ? (
               <section className="cd-card cd-connect-card">
