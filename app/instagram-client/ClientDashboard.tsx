@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
+import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -22,10 +23,7 @@ type ClientDashboardActionNotification = {
   createdAt: string | null;
   actionHref: string;
 };
-type ClientInstagramAccount = {
-  accountId: string;
-  username: string;
-};
+type ClientInstagramAccount = ClientInstagramAccountView;
 type ClientProgressSnapshot = {
   account_id: string;
   request_id: string | null;
@@ -758,26 +756,14 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
 
         {!hasLinkedInstagramAccount ? (
           <div className="cd-view">
-            <section className="cd-card cd-setup-required">
-              <div className="cd-s-title">{lang === "fr" ? "Configuration requise" : "Setup required"}</div>
-              <h2>{lang === "fr" ? "Aucun compte Instagram lié pour le moment" : "No Instagram account linked yet"}</h2>
-              <p>
-                {lang === "fr"
-                  ? "Votre espace client est actif, mais aucun compte Instagram n'est encore rattaché à votre abonnement. Notre équipe finalise la liaison ou l'activation de votre compte."
-                  : "Your client workspace is active, but no Instagram account is linked to your subscription yet. Our team is finishing the account link or activation."}
-              </p>
-              <p className="cd-setup-note">
-                {lang === "fr"
-                  ? "Si vous venez de souscrire, revenez dans quelques minutes ou contactez le support."
-                  : "If you just subscribed, check back in a few minutes or contact support."}
-              </p>
-            </section>
+            <ClientAccountsSection lang={lang} accounts={[]} showEmptySetup />
           </div>
         ) : null}
 
         {/* OVERVIEW */}
         {hasLinkedInstagramAccount && activeView === "overview" && (
           <div className="cd-view">
+            <ClientAccountsSection lang={lang} accounts={initialAccounts} />
             {/* Stats */}
             <div className="cd-stats-row">
               {t.stats.map((s, i) => (
@@ -1169,6 +1155,24 @@ const CSS = `
 .cd-setup-required h2{margin:0;font-family:var(--font-d);font-size:1.35rem;color:var(--ink)}
 .cd-setup-required p{margin:0;color:var(--ink-dim);line-height:1.6;font-size:.92rem}
 .cd-setup-note{color:var(--ink-mute)!important;font-size:.84rem!important}
+.cd-accounts-panel{display:grid;gap:14px;margin-bottom:14px}
+.cd-accounts-panel .cd-card-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+.cd-btn-compact{font-size:.78rem;padding:8px 12px}
+.cd-accounts-list{display:grid;gap:10px}
+.cd-account-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface-2)}
+.cd-account-main{display:grid;gap:4px;min-width:0}
+.cd-account-main strong{font-family:var(--font-d);font-size:.95rem;color:var(--ink)}
+.cd-account-main small{color:var(--ink-mute);font-size:.78rem;text-transform:capitalize}
+.cd-account-pill{display:inline-flex;width:fit-content;padding:4px 8px;border-radius:999px;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn);font-size:.72rem;font-weight:700}
+.cd-account-pill.connected{background:var(--good-bg);border-color:var(--good-line);color:var(--good)}
+.cd-account-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.cd-accounts-empty{display:grid;gap:12px;padding:8px 0;color:var(--ink-dim);font-size:.9rem}
+.cd-accounts-message{margin:0;font-size:.82rem;font-weight:700}
+.cd-accounts-message.success{color:var(--good)}
+.cd-accounts-message.error{color:var(--bad)}
+.cd-add-account-modal{max-width:520px;width:min(520px,calc(100vw - 32px))}
+.cd-add-account-form{display:grid;gap:12px;margin-top:8px}
+.cd-add-account-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 .cd-card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .cd-card-hd h3{font-family:var(--font-d);font-weight:800;font-size:.95rem;color:var(--ink)}
 .cd-card-hd a{font-size:.78rem;font-weight:700;color:var(--accent);opacity:.85;transition:opacity var(--tr)}

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
+import { projectClientAccountRow } from "@/lib/instagram-client/account-projection";
 import ClientDashboard from "./ClientDashboard";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,14 @@ type ClientDashboardActionNotification = {
 type ClientInstagramAccount = {
   accountId: string;
   username: string;
+  packageLabel: string;
+  accountStatus: string;
+  onboardingStatus: string;
+  provisioningStatus: string;
+  loginStatus: string;
+  assignmentStatus: string;
+  readinessLabel: string;
+  connected: boolean;
 };
 
 type SupabaseRecord = Record<string, unknown>;
@@ -88,7 +97,7 @@ async function getClientDashboardAccounts(clientId: string): Promise<ClientInsta
   const supabase = createSupabaseClient();
   const { data: links, error: linkError } = await supabase
     .from("client_instagram_accounts")
-    .select("account_id")
+    .select("account_id,onboarding_status,provisioning_status,login_status")
     .eq("client_id", clientId)
     .limit(100);
 
@@ -96,16 +105,44 @@ async function getClientDashboardAccounts(clientId: string): Promise<ClientInsta
   const accountIds = [...new Set((links as SupabaseRecord[]).map((row) => readString(row.account_id)).filter(Boolean))];
   if (!accountIds.length) return [];
 
-  const { data: accounts } = await supabase
-    .from("ig_accounts")
-    .select("id,username")
-    .in("id", accountIds);
+  const [{ data: accounts }, { data: packages }] = await Promise.all([
+    supabase
+      .from("ig_accounts")
+      .select("id,username,status,admin_lifecycle_status")
+      .in("id", accountIds),
+    supabase
+      .from("account_commercial_packages")
+      .select("account_id,package_code,status")
+      .in("account_id", accountIds)
+      .eq("status", "active"),
+  ]);
+
+  const packageByAccount = new Map((Array.isArray(packages) ? packages as SupabaseRecord[] : [])
+    .map((row): [string, string] => [readString(row.account_id), readString(row.package_code, "growth")])
+    .filter(([id]) => Boolean(id)));
+  const linkByAccount = new Map((links as SupabaseRecord[])
+    .map((row): [string, SupabaseRecord] => [readString(row.account_id), row])
+    .filter(([id]) => Boolean(id)));
 
   return (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
-    .map((row) => ({
-      accountId: readString(row.id),
-      username: readString(row.username, "Instagram account"),
-    }))
+    .map((row) => {
+      const accountId = readString(row.id);
+      const link = linkByAccount.get(accountId);
+      const loginStatus = readString(link?.login_status, "unknown");
+      const onboardingStatus = readString(link?.onboarding_status, "pending");
+      const provisioningStatus = readString(link?.provisioning_status, "not_started");
+      const assignmentStatus = onboardingStatus === "ready" ? "assigned" : "pending_assignment";
+      return projectClientAccountRow({
+        accountId,
+        username: readString(row.username, "Instagram account"),
+        packageLabel: packageByAccount.get(accountId) || "Growth",
+        accountStatus: readString(row.admin_lifecycle_status, readString(row.status, "active")),
+        onboardingStatus,
+        provisioningStatus,
+        loginStatus,
+        assignmentStatus,
+      });
+    })
     .filter((row) => Boolean(row.accountId));
 }
 
