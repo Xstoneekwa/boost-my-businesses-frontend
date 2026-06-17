@@ -162,6 +162,7 @@ const T = {
       found:"trouvé", notFound:"introuvable",
     },
     servicePage:"Page du service",
+    preview:"Aperçu démo — liez votre compte Instagram pour activer les données réelles de votre campagne.",
   },
   en: {
     views: { overview:"Overview", activity:"Activity", targeting:"Targeting", account:"My account" },
@@ -224,6 +225,7 @@ const T = {
       found:"found", notFound:"not found",
     },
     servicePage:"Service page",
+    preview:"Demo preview — link your Instagram account to activate your real campaign data.",
   },
 };
 
@@ -770,16 +772,12 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
           </section>
         )}
 
-        {!hasLinkedInstagramAccount && activeView === "overview" ? (
+        {activeView === "overview" && (
           <div className="cd-view">
-            <ClientAccountsSection lang={lang} accounts={[]} />
-          </div>
-        ) : null}
-
-        {/* OVERVIEW */}
-        {hasLinkedInstagramAccount && activeView === "overview" && (
-          <div className="cd-view">
-            <ClientAccountsSection lang={lang} accounts={initialAccounts} />
+            <ClientAccountsSection lang={lang} accounts={hasLinkedInstagramAccount ? initialAccounts : []} />
+            {!hasLinkedInstagramAccount ? (
+              <p className="cd-preview-banner" role="note">{t.preview}</p>
+            ) : null}
             {/* Stats */}
             <div className="cd-stats-row">
               {t.stats.map((s, i) => (
@@ -848,17 +846,12 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         {activeView === "activity" && (
           <div className="cd-view">
             {!hasLinkedInstagramAccount ? (
-              <section className="cd-card cd-setup-required">
-                <div className="cd-s-title">{t.activity.emptyTitle}</div>
-                <h2>{t.activity.emptyBody}</h2>
-                <p className="cd-setup-note">{t.activity.emptyNote}</p>
-              </section>
-            ) : (
-              <div className="cd-card">
-                <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
-                <FeedList items={FD} lang={lang}/>
-              </div>
-            )}
+              <p className="cd-preview-banner" role="note">{t.preview}</p>
+            ) : null}
+            <div className="cd-card">
+              <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
+              <FeedList items={FD} lang={lang}/>
+            </div>
           </div>
         )}
 
@@ -866,13 +859,8 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         {activeView === "targeting" && (
           <div className="cd-view">
             {!hasLinkedInstagramAccount ? (
-              <section className="cd-card cd-setup-required">
-                <div className="cd-s-title">{t.targeting.emptyTitle}</div>
-                <h2>{t.targeting.emptyBody}</h2>
-                <p className="cd-setup-note">{t.targeting.emptyNote}</p>
-              </section>
-            ) : (
-            <>
+              <p className="cd-preview-banner" role="note">{t.preview}</p>
+            ) : null}
             <div className="cd-tg2-topbar">
               <p className="cd-tg2-intro">{t.targeting.intro}</p>
               <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)}>
@@ -950,8 +938,6 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
                 </div>
               </div>
             </div>
-            </>
-            )}
           </div>
         )}
 
@@ -1186,7 +1172,7 @@ const CSS = `
 /* Card */
 .cd-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
 .cd-setup-required{display:grid;gap:10px;max-width:720px}
-.cd-setup-required h2{margin:0;font-family:var(--font-d);font-size:1.35rem;color:var(--ink)}
+.cd-preview-banner{margin:0 0 14px;padding:10px 14px;border:1px solid var(--warn-line);border-radius:var(--r-sm);background:var(--warn-bg);color:var(--warn);font-size:.8rem;font-weight:700;line-height:1.5}
 .cd-setup-required p{margin:0;color:var(--ink-dim);line-height:1.6;font-size:.92rem}
 .cd-setup-note{color:var(--ink-mute)!important;font-size:.84rem!important}
 .cd-accounts-panel{display:grid;gap:14px;margin-bottom:14px}
