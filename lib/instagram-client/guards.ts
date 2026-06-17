@@ -35,6 +35,16 @@ const TECHNICAL_FIELD_KEYS = [
   "provisioning_enabled",
   "login_enabled",
   "start_run",
+  "package",
+  "plan",
+  "subscription_id",
+  "role",
+  "tenant_id",
+  "client_id",
+  "account_id",
+  "assignment",
+  "payment_method",
+  "invoice",
 ] as const;
 
 export function rejectTechnicalClientFields(body: Record<string, unknown> | null | undefined) {

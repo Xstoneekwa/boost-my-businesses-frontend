@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import type { ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
-import type { ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
+import type { ClientLinkedInstagramAccount, ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -153,6 +153,14 @@ const T = {
       connectCheck:"Vérifier à nouveau",
       connectActionRequired:"Action requise : Instagram demande un code ou une confirmation.",
       connectActionHelp:"Terminez la confirmation sur le téléphone, puis cliquez sur Vérifier à nouveau.",
+      emailHint:"Email de connexion — non modifiable ici",
+      nextPending:"À configurer",
+      managePayment:"Gérer le paiement",
+      billingTitle:"Moyen de paiement",
+      billingSoon:"Gestion du paiement bientôt disponible",
+      billingNoMethod:"Aucun moyen de paiement lié pour le moment",
+      billingInvoicesSoon:"Les factures seront disponibles ici après activation du paiement.",
+      changePlanHelp:"Contactez le support pour modifier votre formule",
     },
     drawer: {
       kicker:"Cibles", title:"@christine_leclerc",
@@ -216,6 +224,14 @@ const T = {
       connectCheck:"Check again",
       connectActionRequired:"Action required: Instagram is asking for a code or confirmation.",
       connectActionHelp:"Please complete the confirmation on the phone, then click Check again.",
+      emailHint:"Login email — cannot be changed here",
+      nextPending:"To be configured",
+      managePayment:"Manage payment",
+      billingTitle:"Payment method",
+      billingSoon:"Payment management coming soon",
+      billingNoMethod:"No payment method linked yet",
+      billingInvoicesSoon:"Invoices will appear here after payment activation.",
+      changePlanHelp:"Contact support to change your plan",
     },
     drawer: {
       kicker:"Targets", title:"@christine_leclerc",
@@ -291,6 +307,59 @@ function mapInsightsActivity(items: ClientAccountInsights["activity"], lang: Lan
     time: formatActivityTimestamp(item.timestamp, "fr"),
     timeEn: formatActivityTimestamp(item.timestamp, "en"),
   }));
+}
+
+function formatLinkedAccountLine(account: ClientLinkedInstagramAccount, lang: Lang) {
+  const status = account.connected
+    ? (lang === "fr" ? "Connecté" : "Connected")
+    : account.statusLabel === "Ready"
+      ? (lang === "fr" ? "Prêt" : "Ready")
+      : account.statusLabel === "Verification required"
+        ? (lang === "fr" ? "Vérification requise" : "Verification required")
+        : (lang === "fr" ? "Configuration en cours" : "Setup pending");
+  return `@${account.username} · ${account.packageLabel} · ${status}`;
+}
+
+function PaymentBillingDrawer({ open, onClose, lang, t, billing }: {
+  open: boolean;
+  onClose: () => void;
+  lang: Lang;
+  t: typeof T["fr"];
+  billing: ClientWorkspaceView["billing"] | null;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && open) onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  return (
+    <>
+      <div className={`cd-dwr-scrim${open ? " open" : ""}`} onClick={onClose}/>
+      <aside className={`cd-dwr cd-billing-dwr${open ? " open" : ""}`} aria-hidden={!open}>
+        <header className="cd-dwr-hd">
+          <div className="cd-dwr-hd-l">
+            <div>
+              <div className="cd-dwr-kicker">{t.account.subscription}</div>
+              <div className="cd-dwr-title">{t.account.billingTitle}</div>
+            </div>
+          </div>
+          <button className="cd-dwr-x" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" width={17} height={17} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+        <div className="cd-dwr-body">
+          <section className="cd-card cd-setup-required">
+            <div className="cd-s-title">{billing?.status === "configured" ? t.account.managePayment : t.account.billingSoon}</div>
+            <h2>{billing?.paymentMethodLabel || t.account.billingNoMethod}</h2>
+            <p className="cd-setup-note">{t.account.billingInvoicesSoon}</p>
+          </section>
+        </div>
+      </aside>
+    </>
+  );
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -629,6 +698,8 @@ export default function ClientDashboard({
   const [theme,      setTheme]          = useState<Theme>("dark");
   const [chartRange, setChartRange]     = useState<ChartRange>(7);
   const [drawerOpen, setDrawerOpen]     = useState(false);
+  const [billingDrawerOpen, setBillingDrawerOpen] = useState(false);
+  const [planHelpOpen, setPlanHelpOpen] = useState(false);
   const [loggingOut, setLoggingOut]     = useState(false);
   const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
   const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
@@ -639,13 +710,16 @@ export default function ClientDashboard({
     firstName: initialWorkspace?.firstName || "",
     lastName: initialWorkspace?.lastName || "",
     phone: initialWorkspace?.phone || "",
-    email: initialWorkspace?.contactEmail || loginEmail,
+    email: initialWorkspace?.authEmail || initialWorkspace?.contactEmail || loginEmail,
   });
   const [addW, setAddW] = useState("");
   const [addB, setAddB] = useState("");
   const router = useRouter();
 
-  const hasLinkedInstagramAccount = initialAccounts.length > 0 || initialNotifications.length > 0;
+  const hasLinkedInstagramAccount = initialAccounts.length > 0
+    || initialNotifications.length > 0
+    || (initialWorkspace?.linkedInstagramAccounts?.length ?? 0) > 0
+    || (workspace?.linkedInstagramAccounts?.length ?? 0) > 0;
   const useLiveData = hasLinkedInstagramAccount && Boolean(accountInsights);
   const demoMode = !useLiveData;
 
@@ -654,10 +728,32 @@ export default function ClientDashboard({
   const [blacklist, setBlacklist] = useState(useLiveData ? accountInsights!.blacklist : INIT_BLACK);
 
   const t = T[lang];
-  const primaryAccount = initialAccounts[0] ?? (initialNotifications[0] ? {
-    accountId: initialNotifications[0].accountId,
-    username: initialNotifications[0].username,
-  } : null);
+  const linkedAccountsForAccountTab: ClientLinkedInstagramAccount[] = workspace?.linkedInstagramAccounts?.length
+    ? workspace.linkedInstagramAccounts
+    : initialAccounts.map((account) => ({
+        accountId: account.accountId,
+        username: account.username,
+        packageLabel: account.packageLabel,
+        statusLabel: account.connected ? "Connected" : account.readinessLabel,
+        connected: account.connected,
+      }));
+  const primaryAccount = linkedAccountsForAccountTab[0]
+    ? {
+        accountId: linkedAccountsForAccountTab[0].accountId,
+        username: linkedAccountsForAccountTab[0].username,
+        packageLabel: linkedAccountsForAccountTab[0].packageLabel,
+        accountStatus: "",
+        onboardingStatus: "",
+        provisioningStatus: "",
+        loginStatus: linkedAccountsForAccountTab[0].connected ? "connected" : "unknown",
+        assignmentStatus: "",
+        readinessLabel: linkedAccountsForAccountTab[0].statusLabel,
+        connected: linkedAccountsForAccountTab[0].connected,
+      }
+    : (initialNotifications[0] ? {
+      accountId: initialNotifications[0].accountId,
+      username: initialNotifications[0].username,
+    } as ClientInstagramAccount : null);
 
   useEffect(() => {
     const accountId = connectProgress?.account.accountId;
@@ -708,6 +804,31 @@ export default function ClientDashboard({
   useEffect(() => { localStorage.setItem(LANG_KEY, lang); }, [lang]);
   useEffect(() => { localStorage.setItem(THEME_KEY, theme); }, [theme]);
 
+  useEffect(() => {
+    if (activeView !== "account") return undefined;
+    let cancelled = false;
+    async function refreshWorkspace() {
+      try {
+        const response = await fetch("/api/instagram-client/workspace", { headers: { Accept: "application/json" } });
+        const payload = await response.json() as { ok?: boolean; data?: ClientWorkspaceView; error?: string };
+        if (cancelled || !response.ok || !payload.ok || !payload.data) return;
+        setWorkspace(payload.data);
+        setProfileForm({
+          firstName: payload.data.firstName,
+          lastName: payload.data.lastName,
+          phone: payload.data.phone,
+          email: payload.data.authEmail || payload.data.contactEmail,
+        });
+      } catch {
+        // Keep server-rendered workspace if refresh fails.
+      }
+    }
+    void refreshWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView]);
+
   const handleNavigate = useCallback((view: View) => setActiveView(view), []);
 
   const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
@@ -728,10 +849,19 @@ export default function ClientDashboard({
   const chartTitle = useLiveData && primaryAccount
     ? `${lang === "fr" ? "Activité" : "Activity"} · @${primaryAccount.username}`
     : t.chart.title;
-  const subscriptionPlanValue = workspace?.subscriptionLabel || accountInsights?.packageLabel || t.account.planVal;
-  const subscriptionSinceValue = workspace?.subscriptionSince
-    ? new Date(workspace.subscriptionSince).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
-    : t.account.sinceVal;
+  const subscriptionPlanValue = workspace?.subscriptionLabel || accountInsights?.packageLabel || "";
+  const memberSinceValue = workspace?.memberSince
+    ? new Date(workspace.memberSince).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
+    : "";
+  const nextBillingValue = workspace?.billing?.status === "configured" && workspace.billing.nextBillingLabel
+    ? new Date(workspace.billing.nextBillingLabel).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
+    : t.account.nextPending;
+  const paymentMethodValue = workspace?.billing?.status === "configured" && workspace.billing.paymentMethodLabel
+    ? workspace.billing.paymentMethodLabel
+    : t.account.billingNoMethod;
+  const instagramSummary = linkedAccountsForAccountTab.length
+    ? linkedAccountsForAccountTab.map((account) => formatLinkedAccountLine(account, lang)).join("\n")
+    : (lang === "fr" ? "Aucun compte lié" : "No linked account");
 
   async function handleSaveProfile() {
     if (accountSaving) return;
@@ -744,7 +874,6 @@ export default function ClientDashboard({
         body: JSON.stringify({
           first_name: profileForm.firstName,
           last_name: profileForm.lastName,
-          contact_email: profileForm.email,
           phone: profileForm.phone,
           preferred_language: lang,
         }),
@@ -758,7 +887,7 @@ export default function ClientDashboard({
         firstName: payload.data.firstName,
         lastName: payload.data.lastName,
         phone: payload.data.phone,
-        email: payload.data.contactEmail,
+        email: payload.data.authEmail || payload.data.contactEmail,
       });
       setAccountMessage(lang === "fr" ? "Profil enregistré." : "Profile saved.");
     } catch (error) {
@@ -1056,7 +1185,7 @@ export default function ClientDashboard({
         {/* ACCOUNT */}
         {activeView === "account" && (
           <div className="cd-view">
-            {primaryAccount ? (
+            {primaryAccount && !primaryAccount.connected ? (
               <section className="cd-card cd-connect-card">
                 <div className="cd-s-title">{t.account.connectTitle}</div>
                 <p className="cd-connect-copy">{t.account.connectBody}</p>
@@ -1081,7 +1210,6 @@ export default function ClientDashboard({
                   { lbl:t.account.fname, key:"firstName" as const, ro:false },
                   { lbl:t.account.lname, key:"lastName" as const, ro:false },
                   { lbl:t.account.phone, key:"phone" as const, ro:false },
-                  { lbl:t.account.email, key:"email" as const, ro:false },
                 ].map(({ lbl, key, ro }) => (
                   <div key={lbl} className="cd-fg">
                     <label className="cd-fl">{lbl}</label>
@@ -1094,12 +1222,13 @@ export default function ClientDashboard({
                   </div>
                 ))}
                 <div className="cd-fg">
+                  <label className="cd-fl">{t.account.email}</label>
+                  <input className="cd-fi-in" value={profileForm.email} readOnly />
+                  <p className="cd-setup-note">{t.account.emailHint}</p>
+                </div>
+                <div className="cd-fg">
                   <label className="cd-fl">{t.account.ig}</label>
-                  <input
-                    className="cd-fi-in"
-                    value={primaryAccount ? `@${primaryAccount.username}` : (lang === "fr" ? "Aucun compte lié" : "No linked account")}
-                    readOnly
-                  />
+                  <textarea className="cd-fi-in cd-fi-textarea" value={instagramSummary} readOnly rows={Math.max(2, linkedAccountsForAccountTab.length)} />
                 </div>
                 {accountMessage ? <p className={`cd-accounts-message${accountMessage.includes("enregistr") || accountMessage.includes("saved") ? " success" : " error"}`}>{accountMessage}</p> : null}
                 <button className="cd-btn cd-btn-primary" onClick={handleSaveProfile} disabled={accountSaving}>
@@ -1109,17 +1238,26 @@ export default function ClientDashboard({
               <div className="cd-card">
                 <div className="cd-s-title">{t.account.subscription}</div>
                 {[
-                  { lbl:t.account.planLabel, val:subscriptionPlanValue },
-                  { lbl:t.account.since,     val:subscriptionSinceValue },
-                  { lbl:t.account.next,      val:lang === "fr" ? "Géré par votre abonnement" : "Managed by your subscription" },
-                  { lbl:t.account.pay,       val:lang === "fr" ? "Contactez le support pour modifier" : "Contact support to update" },
+                  { lbl:t.account.planLabel, val:subscriptionPlanValue || (lang === "fr" ? "Non renseigné" : "Not available") },
+                  { lbl:t.account.since,     val:memberSinceValue || (lang === "fr" ? "Non renseigné" : "Not available") },
+                  { lbl:t.account.next,      val:nextBillingValue },
                 ].map(({ lbl, val }) => (
                   <div key={lbl} className="cd-fg">
                     <label className="cd-fl">{lbl}</label>
-                    <input className="cd-fi-in" defaultValue={val} readOnly/>
+                    <input className="cd-fi-in" value={val} readOnly/>
                   </div>
                 ))}
-                <button className="cd-btn cd-btn-soft">{t.account.changePlan}</button>
+                <div className="cd-fg">
+                  <label className="cd-fl">{t.account.pay}</label>
+                  <input className="cd-fi-in" value={paymentMethodValue} readOnly/>
+                  <button className="cd-btn cd-btn-soft cd-btn-full" type="button" onClick={() => setBillingDrawerOpen(true)}>
+                    {t.account.managePayment}
+                  </button>
+                </div>
+                <button className="cd-btn cd-btn-soft" type="button" onClick={() => setPlanHelpOpen(true)}>{t.account.changePlan}</button>
+                {planHelpOpen ? (
+                  <p className="cd-setup-note">{t.account.changePlanHelp}</p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1128,6 +1266,7 @@ export default function ClientDashboard({
 
       {/* ── DRAWER ── */}
       <TargetDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} lang={lang} t={t}/>
+      <PaymentBillingDrawer open={billingDrawerOpen} onClose={() => setBillingDrawerOpen(false)} lang={lang} t={t} billing={workspace?.billing ?? null} />
 
       {connectProgress ? (
         <div className="cd-progress-overlay" role="presentation" onMouseDown={() => setConnectProgress(null)}>
@@ -1429,6 +1568,8 @@ const CSS = `
 .cd-fi-in{width:100%;padding:9px 13px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);font-family:var(--font-b);font-size:.88rem;color:var(--ink);outline:none;transition:border-color var(--tr)}
 .cd-fi-in:focus{border-color:var(--a-ring)}
 .cd-fi-in[readonly]{color:var(--ink-mute);cursor:default}
+.cd-fi-textarea{min-height:72px;resize:vertical;line-height:1.5}
+.cd-billing-dwr{max-width:520px}
 
 /* Drawer scrim */
 .cd-dwr-scrim{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity var(--tr),visibility var(--tr);z-index:90}
