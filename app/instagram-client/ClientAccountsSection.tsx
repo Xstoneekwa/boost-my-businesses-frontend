@@ -19,7 +19,6 @@ export type ClientInstagramAccountView = {
 type Props = {
   lang: "fr" | "en";
   accounts: ClientInstagramAccountView[];
-  showEmptySetup?: boolean;
 };
 
 type ActionState = {
@@ -31,7 +30,7 @@ function labelFor(lang: "fr" | "en", fr: string, en: string) {
   return lang === "fr" ? fr : en;
 }
 
-export default function ClientAccountsSection({ lang, accounts, showEmptySetup = false }: Props) {
+export default function ClientAccountsSection({ lang, accounts }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
   const [modalOpen, setModalOpen] = useState(false);
@@ -44,6 +43,7 @@ export default function ClientAccountsSection({ lang, accounts, showEmptySetup =
   const [actionState, setActionState] = useState<ActionState>(null);
 
   const canAddAccount = useMemo(() => items.length < 5, [items.length]);
+  const isEmpty = items.length === 0;
 
   function pushMessage(text: string, tone: "success" | "error" = "success") {
     setMessage(text);
@@ -159,14 +159,14 @@ export default function ClientAccountsSection({ lang, accounts, showEmptySetup =
       <section className="cd-card cd-accounts-panel">
         <div className="cd-card-hd">
           <h3>{labelFor(lang, "Mes comptes Instagram", "My Instagram accounts")}</h3>
-          {canAddAccount ? (
+          {canAddAccount && !isEmpty ? (
             <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" onClick={() => setModalOpen(true)}>
               {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
             </button>
           ) : null}
         </div>
 
-        {showEmptySetup ? (
+        {isEmpty ? (
           <div className="cd-accounts-empty">
             <p>{labelFor(lang, "Aucun compte Instagram lié pour le moment.", "No Instagram account linked yet.")}</p>
             <button type="button" className="cd-btn cd-btn-primary" onClick={() => setModalOpen(true)}>
