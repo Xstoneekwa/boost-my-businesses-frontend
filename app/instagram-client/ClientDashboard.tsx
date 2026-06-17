@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
+import type { ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
+import type { ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -35,11 +37,16 @@ type ClientProgressSnapshot = {
   process_log: Array<{ id: string; timestamp: string; phase: string; message: string }>;
 };
 
+type FeedItem = { t: FeedType; fr: string; en: string; n: number; time: string; timeEn: string };
+
 interface Props {
   userId: string;
   tenantId: string;
+  loginEmail?: string;
   initialNotifications?: ClientDashboardActionNotification[];
   initialAccounts?: ClientInstagramAccount[];
+  initialWorkspace?: ClientWorkspaceView | null;
+  initialAccountInsights?: ClientAccountInsights | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -53,7 +60,7 @@ const DS: Record<ChartRange, number[]> = {
   90: Array.from({ length: 90 }, (_, i) => 3200 + Math.floor(i * 4.8) + Math.floor(Math.sin(i) * 6)),
 };
 
-const FD: { t: FeedType; fr: string; en: string; n: number; time: string; timeEn: string }[] = [
+const FD: FeedItem[] = [
   { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:47, time:"Aujourd'hui · 14:32", timeEn:"Today · 2:32 PM" },
   { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:62, time:"Aujourd'hui · 12:15", timeEn:"Today · 12:15 PM" },
   { t:"st", fr:"Vues de stories",      en:"Story views",     n:31, time:"Aujourd'hui · 09:40", timeEn:"Today · 9:40 AM" },
@@ -263,9 +270,35 @@ const FeedIcon = ({ type }: { type: FeedType }) => {
   return <svg viewBox="0 0 24 24" {...props}><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>;
 };
 
+function formatActivityTimestamp(value: string | null, lang: Lang) {
+  if (!value) return lang === "fr" ? "Récemment" : "Recently";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return lang === "fr" ? "Récemment" : "Recently";
+  return date.toLocaleString(lang === "fr" ? "fr-FR" : "en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function mapInsightsActivity(items: ClientAccountInsights["activity"], lang: Lang): FeedItem[] {
+  return items.map((item) => ({
+    t: item.actionType as FeedType,
+    fr: item.labelFr,
+    en: item.labelEn,
+    n: item.count,
+    time: formatActivityTimestamp(item.timestamp, "fr"),
+    timeEn: formatActivityTimestamp(item.timestamp, "en"),
+  }));
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function FeedList({ items, lang }: { items: typeof FD; lang: Lang }) {
+function FeedList({ items, lang, emptyLabel }: { items: FeedItem[]; lang: Lang; emptyLabel?: string }) {
+  if (items.length === 0) {
+    return <div className="cd-tg2-col-empty">{emptyLabel || (lang === "fr" ? "Aucune activité disponible pour le moment" : "No activity available yet")}</div>;
+  }
   return (
     <div className="cd-feed">
       {items.map((d, i) => (
@@ -282,10 +315,11 @@ function FeedList({ items, lang }: { items: typeof FD; lang: Lang }) {
   );
 }
 
-function FollowerChart({ range, lang, onRangeChange, t }: {
+function FollowerChart({ range, lang, onRangeChange, t, series }: {
   range: ChartRange; lang: Lang;
   onRangeChange: (r: ChartRange) => void;
   t: typeof T["fr"];
+  series?: Record<ChartRange, number[]>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(800);
@@ -298,7 +332,7 @@ function FollowerChart({ range, lang, onRangeChange, t }: {
     return () => ro.disconnect();
   }, []);
 
-  const data = DS[range];
+  const data = series?.[range] ?? DS[range];
   const H = 240, padL = 44, padR = 18, padT = 14, padB = 34;
   const cw = W - padL - padR, ch = H - padT - padB;
   const rawMin = Math.min(...data), rawMax = Math.max(...data);
@@ -581,7 +615,15 @@ function TargetDrawer({ open, onClose, lang, t }: {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, initialNotifications = [], initialAccounts = [] }: Props) {
+export default function ClientDashboard({
+  userId: _userId,
+  tenantId: _tenantId,
+  loginEmail = "",
+  initialNotifications = [],
+  initialAccounts = [],
+  initialWorkspace = null,
+  initialAccountInsights = null,
+}: Props) {
   const [activeView, setActiveView]     = useState<View>("overview");
   const [lang,       setLang]           = useState<Lang>("fr");
   const [theme,      setTheme]          = useState<Theme>("dark");
@@ -589,17 +631,29 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
   const [drawerOpen, setDrawerOpen]     = useState(false);
   const [loggingOut, setLoggingOut]     = useState(false);
   const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
-  const router = useRouter();
-
-  // Targeting lists
-  const [targets,   setTargets]   = useState(INIT_TARGETS);
-  const [whitelist, setWhitelist] = useState(INIT_WHITE);
-  const [blacklist, setBlacklist] = useState(INIT_BLACK);
+  const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
+  const [accountInsights] = useState<ClientAccountInsights | null>(initialAccountInsights);
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountMessage, setAccountMessage] = useState<string | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    firstName: initialWorkspace?.firstName || "",
+    lastName: initialWorkspace?.lastName || "",
+    phone: initialWorkspace?.phone || "",
+    email: initialWorkspace?.contactEmail || loginEmail,
+  });
   const [addW, setAddW] = useState("");
   const [addB, setAddB] = useState("");
+  const router = useRouter();
+
+  const hasLinkedInstagramAccount = initialAccounts.length > 0 || initialNotifications.length > 0;
+  const useLiveData = hasLinkedInstagramAccount && Boolean(accountInsights);
+  const demoMode = !useLiveData;
+
+  const [targets,   setTargets]   = useState(useLiveData ? accountInsights!.targets.map((row) => row.username) : INIT_TARGETS);
+  const [whitelist, setWhitelist] = useState(useLiveData ? accountInsights!.whitelist : INIT_WHITE);
+  const [blacklist, setBlacklist] = useState(useLiveData ? accountInsights!.blacklist : INIT_BLACK);
 
   const t = T[lang];
-  const hasLinkedInstagramAccount = initialAccounts.length > 0 || initialNotifications.length > 0;
   const primaryAccount = initialAccounts[0] ?? (initialNotifications[0] ? {
     accountId: initialNotifications[0].accountId,
     username: initialNotifications[0].username,
@@ -656,6 +710,64 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
 
   const handleNavigate = useCallback((view: View) => setActiveView(view), []);
 
+  const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
+  const sidebarPlan = workspace?.subscriptionLabel || accountInsights?.packageLabel || t.plan.name;
+  const activityBadge = useLiveData ? (accountInsights?.activity.length || undefined) : 12;
+  const liveFeedItems = useLiveData ? mapInsightsActivity(accountInsights!.activity, lang) : FD;
+  const overviewStats = useLiveData ? [
+    { lbl: lang === "fr" ? "Ce mois-ci" : "This month", val: `+${accountInsights!.overview.monthGain}`, sub: lang === "fr" ? "Interactions campagne" : "Campaign interactions" },
+    { lbl: lang === "fr" ? "Total gagné" : "Total gained", val: `+${accountInsights!.overview.totalGain}`, sub: lang === "fr" ? "Sur la période chargée" : "On loaded period" },
+    { lbl: lang === "fr" ? "Aujourd'hui" : "Today", val: String(accountInsights!.overview.todayCount), sub: lang === "fr" ? "Interactions du jour" : "Today's interactions" },
+    { lbl: lang === "fr" ? "Moy. / jour" : "Daily avg.", val: String(accountInsights!.overview.dailyAverage), sub: lang === "fr" ? "30 derniers jours" : "Last 30 days" },
+  ] : t.stats;
+  const chartSeries = useLiveData ? {
+    7: accountInsights!.chartSeries.d7,
+    30: accountInsights!.chartSeries.d30,
+    90: accountInsights!.chartSeries.d90,
+  } as Record<ChartRange, number[]> : undefined;
+  const chartTitle = useLiveData && primaryAccount
+    ? `${lang === "fr" ? "Activité" : "Activity"} · @${primaryAccount.username}`
+    : t.chart.title;
+  const subscriptionPlanValue = workspace?.subscriptionLabel || accountInsights?.packageLabel || t.account.planVal;
+  const subscriptionSinceValue = workspace?.subscriptionSince
+    ? new Date(workspace.subscriptionSince).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
+    : t.account.sinceVal;
+
+  async function handleSaveProfile() {
+    if (accountSaving) return;
+    setAccountSaving(true);
+    setAccountMessage(null);
+    try {
+      const response = await fetch("/api/instagram-client/workspace", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          first_name: profileForm.firstName,
+          last_name: profileForm.lastName,
+          contact_email: profileForm.email,
+          phone: profileForm.phone,
+          preferred_language: lang,
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean; data?: ClientWorkspaceView; error?: string };
+      if (!response.ok || !payload.ok || !payload.data) {
+        throw new Error(payload.error || "Could not save profile.");
+      }
+      setWorkspace(payload.data);
+      setProfileForm({
+        firstName: payload.data.firstName,
+        lastName: payload.data.lastName,
+        phone: payload.data.phone,
+        email: payload.data.contactEmail,
+      });
+      setAccountMessage(lang === "fr" ? "Profil enregistré." : "Profile saved.");
+    } catch (error) {
+      setAccountMessage(error instanceof Error ? error.message : "Could not save profile.");
+    } finally {
+      setAccountSaving(false);
+    }
+  }
+
   async function handleLogout() {
     if (loggingOut) return;
     setLoggingOut(true);
@@ -677,7 +789,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
 
   const navItems: { view: View; label: string; icon: React.ReactNode; badge?: number; section?: string }[] = [
     { view:"overview",  label:t.views.overview,  section:t.nav.dashboard, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
-    { view:"activity",  label:t.views.activity,  icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>, badge:12 },
+    { view:"activity",  label:t.views.activity,  icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>, badge:activityBadge },
     { view:"targeting", label:t.views.targeting, section:t.nav.campaign, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg> },
     { view:"account",   label:t.views.account,   section:t.nav.myaccount, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
   ];
@@ -719,10 +831,10 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         </div>
         <div className="cd-sb-foot">
           <div className="cd-sb-acct">
-            <div className="cd-sb-av">C</div>
+            <div className="cd-sb-av">{sidebarName.charAt(0).toUpperCase()}</div>
             <div>
-              <div className="cd-sb-aname">Christine Leclerc</div>
-              <div className="cd-sb-aplan">Plan Pro</div>
+              <div className="cd-sb-aname">{sidebarName}</div>
+              <div className="cd-sb-aplan">{sidebarPlan}</div>
             </div>
             <div className="cd-sb-live"><div className="cd-sb-dot"/></div>
           </div>
@@ -733,7 +845,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
       <header className="cd-topbar">
         <h1 className="cd-tb-title">{t.views[activeView]}</h1>
         <div className="cd-tb-right">
-          <div className="cd-stat-pill"><span className="cd-dot"/><span>{t.topbar.active}</span></div>
+          <div className="cd-stat-pill"><span className="cd-dot"/><span>{workspace?.campaignActive || accountInsights?.campaignActive ? t.topbar.active : (lang === "fr" ? "Espace client" : "Client workspace")}</span></div>
           <button className="cd-ic-btn" onClick={() => setTheme(th => th === "dark" ? "light" : "dark")} title="Toggle theme">
             <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
@@ -775,12 +887,12 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         {activeView === "overview" && (
           <div className="cd-view">
             <ClientAccountsSection lang={lang} accounts={hasLinkedInstagramAccount ? initialAccounts : []} />
-            {!hasLinkedInstagramAccount ? (
+            {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
             {/* Stats */}
             <div className="cd-stats-row">
-              {t.stats.map((s, i) => (
+              {overviewStats.map((s, i) => (
                 <div key={i} className="cd-sc">
                   <div className="cd-sc-lbl">{s.lbl}</div>
                   <div className={`cd-sc-val${i === 0 ? " cd-grad" : ""}`}>{s.val}</div>
@@ -790,7 +902,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
             </div>
 
             {/* Chart */}
-            <FollowerChart range={chartRange} lang={lang} onRangeChange={setChartRange} t={t}/>
+            <FollowerChart range={chartRange} lang={lang} onRangeChange={setChartRange} t={{ ...t, chart: { ...t.chart, title: chartTitle } }} series={chartSeries}/>
 
             {/* Two-col */}
             <div className="cd-two-col">
@@ -799,13 +911,13 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
                   <h3>{t.feed.title}</h3>
                   <a href="#" onClick={e => { e.preventDefault(); handleNavigate("activity"); }}>{t.feed.seeAll}</a>
                 </div>
-                <FeedList items={FD.slice(0,5)} lang={lang}/>
+                <FeedList items={liveFeedItems.slice(0, 5)} lang={lang}/>
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                 {/* Plan card */}
                 <div className="cd-card cd-plan-wrap">
                   <div className="cd-plan-top">
-                    <div className="cd-plan-name">{t.plan.name}</div>
+                    <div className="cd-plan-name">{subscriptionPlanValue}</div>
                     <span className="cd-plan-tag">{lang === "fr" ? "Actif" : "Active"}</span>
                   </div>
                   <div className="cd-plan-price">{t.plan.price}<small>{t.plan.period}</small></div>
@@ -845,12 +957,12 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         {/* ACTIVITY */}
         {activeView === "activity" && (
           <div className="cd-view">
-            {!hasLinkedInstagramAccount ? (
+            {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
             <div className="cd-card">
               <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
-              <FeedList items={FD} lang={lang}/>
+              <FeedList items={liveFeedItems} lang={lang}/>
             </div>
           </div>
         )}
@@ -858,7 +970,7 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
         {/* TARGETING */}
         {activeView === "targeting" && (
           <div className="cd-view">
-            {!hasLinkedInstagramAccount ? (
+            {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
             <div className="cd-tg2-topbar">
@@ -966,26 +1078,41 @@ export default function ClientDashboard({ userId: _userId, tenantId: _tenantId, 
               <div className="cd-card">
                 <div className="cd-s-title">{t.account.profile}</div>
                 {[
-                  { lbl:t.account.fname, val:"Christine",              ro:false },
-                  { lbl:t.account.lname, val:"Leclerc",                ro:false },
-                  { lbl:t.account.phone, val:"+33 6 12 34 56 78",      ro:false },
-                  { lbl:t.account.email, val:"christine@example.com",  ro:false },
-                  { lbl:t.account.ig,    val:primaryAccount ? `@${primaryAccount.username}` : "@christine_leclerc",     ro:true  },
-                ].map(({ lbl, val, ro }) => (
+                  { lbl:t.account.fname, key:"firstName" as const, ro:false },
+                  { lbl:t.account.lname, key:"lastName" as const, ro:false },
+                  { lbl:t.account.phone, key:"phone" as const, ro:false },
+                  { lbl:t.account.email, key:"email" as const, ro:false },
+                ].map(({ lbl, key, ro }) => (
                   <div key={lbl} className="cd-fg">
                     <label className="cd-fl">{lbl}</label>
-                    <input className="cd-fi-in" defaultValue={val} readOnly={ro}/>
+                    <input
+                      className="cd-fi-in"
+                      value={profileForm[key]}
+                      readOnly={ro}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, [key]: event.target.value }))}
+                    />
                   </div>
                 ))}
-                <button className="cd-btn cd-btn-primary">{t.account.save}</button>
+                <div className="cd-fg">
+                  <label className="cd-fl">{t.account.ig}</label>
+                  <input
+                    className="cd-fi-in"
+                    value={primaryAccount ? `@${primaryAccount.username}` : (lang === "fr" ? "Aucun compte lié" : "No linked account")}
+                    readOnly
+                  />
+                </div>
+                {accountMessage ? <p className={`cd-accounts-message${accountMessage.includes("enregistr") || accountMessage.includes("saved") ? " success" : " error"}`}>{accountMessage}</p> : null}
+                <button className="cd-btn cd-btn-primary" onClick={handleSaveProfile} disabled={accountSaving}>
+                  {accountSaving ? (lang === "fr" ? "Enregistrement…" : "Saving…") : t.account.save}
+                </button>
               </div>
               <div className="cd-card">
                 <div className="cd-s-title">{t.account.subscription}</div>
                 {[
-                  { lbl:t.account.planLabel, val:t.account.planVal  },
-                  { lbl:t.account.since,     val:t.account.sinceVal },
-                  { lbl:t.account.next,      val:t.account.nextVal  },
-                  { lbl:t.account.pay,       val:t.account.payVal   },
+                  { lbl:t.account.planLabel, val:subscriptionPlanValue },
+                  { lbl:t.account.since,     val:subscriptionSinceValue },
+                  { lbl:t.account.next,      val:lang === "fr" ? "Géré par votre abonnement" : "Managed by your subscription" },
+                  { lbl:t.account.pay,       val:lang === "fr" ? "Contactez le support pour modifier" : "Contact support to update" },
                 ].map(({ lbl, val }) => (
                   <div key={lbl} className="cd-fg">
                     <label className="cd-fl">{lbl}</label>

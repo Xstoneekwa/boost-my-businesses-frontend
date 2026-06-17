@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
 import { projectClientAccountRow } from "@/lib/instagram-client/account-projection";
+import { loadClientAccountInsights, type ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
+import { getClientWorkspaceView, type ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 import ClientDashboard from "./ClientDashboard";
 
 export const dynamic = "force-dynamic";
@@ -146,6 +148,17 @@ async function getClientDashboardAccounts(clientId: string): Promise<ClientInsta
     .filter((row) => Boolean(row.accountId));
 }
 
+function prioritizeInstagramAccount(accounts: ClientInstagramAccount[], preferredUsername = "i_m_your_traker") {
+  const normalizedPreferred = preferredUsername.replace(/^@+/, "").toLowerCase();
+  return [...accounts].sort((left, right) => {
+    const leftMatch = left.username.toLowerCase() === normalizedPreferred;
+    const rightMatch = right.username.toLowerCase() === normalizedPreferred;
+    if (leftMatch && !rightMatch) return -1;
+    if (!leftMatch && rightMatch) return 1;
+    return left.username.localeCompare(right.username);
+  });
+}
+
 export default async function InstagramClientPage() {
   const userContext = await requireInstagramDashboardAccess();
 
@@ -153,17 +166,37 @@ export default async function InstagramClientPage() {
     redirect("/instagram-dashboard");
   }
 
-  const [notifications, accounts] = await Promise.all([
+  const loginEmail = await (async () => {
+    try {
+      const supabase = createSupabaseClient();
+      const { data } = await supabase.auth.admin.getUserById(userContext.userId);
+      return readString(data.user?.email, "");
+    } catch {
+      return "";
+    }
+  })();
+
+  const [notifications, accounts, workspace] = await Promise.all([
     getClientDashboardNotifications(userContext.tenantId),
     getClientDashboardAccounts(userContext.tenantId),
+    getClientWorkspaceView(userContext.tenantId, loginEmail),
   ]);
+  const orderedAccounts = prioritizeInstagramAccount(accounts);
+
+  const primaryAccountId = orderedAccounts[0]?.accountId ?? "";
+  const accountInsights: ClientAccountInsights | null = primaryAccountId
+    ? await loadClientAccountInsights(primaryAccountId)
+    : null;
 
   return (
     <ClientDashboard
       userId={userContext.userId}
       tenantId={userContext.tenantId}
+      loginEmail={loginEmail}
       initialNotifications={notifications}
-      initialAccounts={accounts}
+      initialAccounts={orderedAccounts}
+      initialWorkspace={workspace}
+      initialAccountInsights={accountInsights}
     />
   );
 }
