@@ -1,5 +1,13 @@
 import { runSearchApiThrottledFetch } from "../instagram-public-profile-lookup.ts";
 import { extractInstagramUsernamesFromSearchResult, mergeDiscoveredUsernames } from "./target-ai-instagram-url.ts";
+import type { TargetAiSearchRuntime } from "./target-ai-search-runtime.ts";
+
+export type DiscoveredInstagramCandidate = {
+  username: string;
+  sourceQuery: string;
+  title: string | null;
+  snippet: string | null;
+};
 
 export type TargetAiSearchApiDiscoveryStats = {
   queriesExecuted: number;
@@ -12,6 +20,7 @@ export type TargetAiSearchApiDiscoveryStats = {
 
 export type TargetAiSearchApiDiscoveryResult = TargetAiSearchApiDiscoveryStats & {
   usernames: string[];
+  candidates: DiscoveredInstagramCandidate[];
 };
 
 type SearchApiOrganicResult = {
@@ -33,22 +42,6 @@ function readDiscoveryApiKey() {
     || "";
 }
 
-function readIntEnv(name: string, fallback: number, min: number, max: number) {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(Math.max(parsed, min), max);
-}
-
-export function readTargetAiDiscoveryLimits() {
-  return {
-    maxDiscoveryQueries: readIntEnv("TARGET_AI_MAX_DISCOVERY_QUERIES", 18, 8, 24),
-    maxDiscoveredUsernames: readIntEnv("TARGET_AI_MAX_DISCOVERED_USERNAMES", 100, 20, 120),
-    discoveryConcurrency: readIntEnv("TARGET_AI_DISCOVERY_CONCURRENCY", 2, 1, 3),
-  };
-}
-
 export function isTargetAiSearchApiDiscoveryConfigured() {
   return Boolean(readDiscoveryApiKey());
 }
@@ -56,12 +49,7 @@ export function isTargetAiSearchApiDiscoveryConfigured() {
 function readOrganicResults(payload: unknown): SearchApiOrganicResult[] {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
   const record = payload as Record<string, unknown>;
-  const candidates = [
-    record.organic_results,
-    record.results,
-    record.items,
-  ];
-  for (const entry of candidates) {
+  for (const entry of [record.organic_results, record.results, record.items]) {
     if (!Array.isArray(entry)) continue;
     return entry.filter((row) => row && typeof row === "object") as SearchApiOrganicResult[];
   }
@@ -75,7 +63,13 @@ async function fetchDiscoveryQuery(input: {
   endpoint: string;
   fetcher?: typeof fetch;
   timeoutMs?: number;
+  runtime?: TargetAiSearchRuntime;
 }) {
+  if (input.runtime) {
+    await input.runtime.waitForCooldown();
+    if (input.runtime.isTimeExceeded()) return { ok: false as const, status: 0, payload: null, reason: "time_budget" };
+  }
+
   const url = new URL(input.endpoint);
   url.searchParams.set("engine", "google");
   url.searchParams.set("q", input.query);
@@ -83,27 +77,35 @@ async function fetchDiscoveryQuery(input: {
   if (input.page > 1) url.searchParams.set("page", String(input.page));
 
   const scopeKey = `discovery:${input.query.slice(0, 40)}:${input.page}`;
-  return runSearchApiThrottledFetch(scopeKey, url.toString(), {
+  const response = await runSearchApiThrottledFetch(scopeKey, url.toString(), {
     fetcher: input.fetcher,
-    timeoutMs: input.timeoutMs ?? 8000,
+    timeoutMs: input.timeoutMs ?? 7000,
   });
+
+  if (!response.ok && (response.reason === "rate_limited" || response.reason === "provider_throttled")) {
+    input.runtime?.recordRateLimit();
+  }
+
+  return response;
 }
 
 export async function discoverInstagramUsernamesViaSearchApi(input: {
   queries: string[];
   maxUsernames: number;
-  concurrency?: number;
+  maxPagesPerQuery?: number;
   fetcher?: typeof fetch;
   timeoutMs?: number;
+  runtime?: TargetAiSearchRuntime;
 }): Promise<TargetAiSearchApiDiscoveryResult> {
   const apiKey = readDiscoveryApiKey();
   const endpoint = readDiscoveryEndpoint();
-  const limits = readTargetAiDiscoveryLimits();
-  const queries = input.queries.filter(Boolean).slice(0, limits.maxDiscoveryQueries);
+  const queries = input.queries.filter(Boolean);
+  const maxPagesPerQuery = input.maxPagesPerQuery ?? 1;
 
   if (!apiKey || queries.length === 0) {
     return {
       usernames: [],
+      candidates: [],
       queriesExecuted: 0,
       queriesSucceeded: 0,
       queriesFailed: 0,
@@ -117,11 +119,16 @@ export async function discoverInstagramUsernamesViaSearchApi(input: {
   let queriesFailed = 0;
   let organicResultsScanned = 0;
   let queriesExecuted = 0;
-  const usernameBatches: string[][] = [];
+  const discovered: DiscoveredInstagramCandidate[] = [];
+  const seenUsernames = new Set<string>();
 
   for (const query of queries) {
-    for (const page of [1, 2]) {
-      if (usernameBatches.flat().length >= input.maxUsernames) break;
+    if (input.runtime?.isTimeExceeded()) break;
+    if (input.runtime?.shouldThrottleDiscovery()) break;
+    if (seenUsernames.size >= input.maxUsernames) break;
+
+    for (let page = 1; page <= maxPagesPerQuery; page += 1) {
+      if (seenUsernames.size >= input.maxUsernames) break;
       queriesExecuted += 1;
       const response = await fetchDiscoveryQuery({
         query,
@@ -130,6 +137,7 @@ export async function discoverInstagramUsernamesViaSearchApi(input: {
         endpoint,
         fetcher: input.fetcher,
         timeoutMs: input.timeoutMs,
+        runtime: input.runtime,
       });
       if (!response.ok) {
         queriesFailed += 1;
@@ -137,22 +145,34 @@ export async function discoverInstagramUsernamesViaSearchApi(input: {
         continue;
       }
       const organicResults = readOrganicResults(response.payload);
-      if (organicResults.length === 0 && page === 2) continue;
       organicResultsScanned += organicResults.length;
-      const extracted: string[] = [];
       for (const row of organicResults) {
-        extracted.push(...extractInstagramUsernamesFromSearchResult(row));
+        const usernames = extractInstagramUsernamesFromSearchResult(row);
+        for (const username of usernames) {
+          if (seenUsernames.has(username)) continue;
+          seenUsernames.add(username);
+          discovered.push({
+            username,
+            sourceQuery: query,
+            title: row.title ?? null,
+            snippet: row.snippet ?? null,
+          });
+          if (discovered.length >= input.maxUsernames) break;
+        }
       }
-      if (extracted.length > 0) usernameBatches.push(extracted);
       if (page === 1) queriesSucceeded += 1;
       if (organicResults.length < 4) break;
     }
   }
 
-  const merged = mergeDiscoveredUsernames(usernameBatches, input.maxUsernames);
+  const merged = mergeDiscoveredUsernames([discovered.map((row) => row.username)], input.maxUsernames);
+  const candidateByUsername = new Map(discovered.map((row) => [row.username, row]));
 
   return {
     usernames: merged.usernames,
+    candidates: merged.usernames
+      .map((username) => candidateByUsername.get(username))
+      .filter((row): row is DiscoveredInstagramCandidate => Boolean(row)),
     queriesExecuted,
     queriesSucceeded,
     queriesFailed,

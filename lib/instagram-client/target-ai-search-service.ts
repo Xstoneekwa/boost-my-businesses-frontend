@@ -9,7 +9,7 @@ import type { TargetingAiPromptSource } from "./targeting-ai-config-store.ts";
 import {
   discoverInstagramUsernamesViaSearchApi,
   isTargetAiSearchApiDiscoveryConfigured,
-  readTargetAiDiscoveryLimits,
+  type DiscoveredInstagramCandidate,
 } from "./target-ai-searchapi-discovery.ts";
 import { mergeDiscoveredUsernames } from "./target-ai-instagram-url.ts";
 import {
@@ -20,7 +20,10 @@ import {
   verifyTargetAiProfileUsername,
   type TargetAiProfileVerifyStats,
 } from "./target-ai-profile-verify.ts";
+import { scoreDiscoveryCandidate, rankDiscoveryCandidates } from "./target-ai-discovery-candidate-score.ts";
 import { scoreTargetAiCandidateRelevance } from "./target-ai-relevance-score.ts";
+import { TargetAiSearchRuntime, readTargetAiSearchRuntimeLimits } from "./target-ai-search-runtime.ts";
+import { cacheResolvedAvatarUrl } from "./target-avatar-proxy-server.ts";
 
 export type TargetAiSearchLocation = {
   label: string;
@@ -52,6 +55,7 @@ export type TargetAiSearchDebugSummary = {
   location_present: boolean;
   max_displayed_results: number;
   max_searchapi_checks: number;
+  max_latency_ms: number;
   profile_lookup_concurrency: number;
   gpt_search_queries_count: number;
   gpt_seed_usernames_count: number;
@@ -59,9 +63,13 @@ export type TargetAiSearchDebugSummary = {
   extracted_usernames_count: number;
   profile_checked_count: number;
   profile_found_count: number;
+  profile_found_partial_count: number;
   profile_not_found_count: number;
   profile_provider_error_count: number;
   profile_rate_limited_count: number;
+  profile_timeout_count: number;
+  profile_invalid_response_count: number;
+  profile_skipped_low_score_count: number;
   profile_retried_count: number;
   profile_skipped_count: number;
   duplicate_skipped_count: number;
@@ -75,19 +83,16 @@ export type TargetAiSearchDebugSummary = {
   final_results_count: number;
   third_pass_used: boolean;
   second_pass_used: boolean;
+  stopped_reason: string | null;
   provider_error_reasons_top: Array<{ reason: string; count: number }>;
   rejection_reasons_top: Array<{ reason: string; count: number }>;
   relevance_score_top: number | null;
   relevance_score_bottom: number | null;
   latency_ms: number;
   error_code: string | null;
-  /** @deprecated use gpt_seed_usernames_count */
   gpt_candidates_count: number;
-  /** @deprecated use profile_checked_count */
   searchapi_checked_count: number;
-  /** @deprecated use profile_found_count */
   found_count: number;
-  /** @deprecated use profile_not_found_count */
   not_found_count: number;
 };
 
@@ -101,6 +106,8 @@ export type TargetAiSearchResult = {
   error_code: string | null;
   debug: TargetAiSearchDebugSummary;
 };
+
+type ScoredDiscoveryCandidate = DiscoveredInstagramCandidate & { discoveryScore: number };
 
 function safeLog(event: string, fields: Record<string, unknown>) {
   console.info("[Target AI search]", { event, ...fields });
@@ -130,6 +137,7 @@ function mapVerifiedCandidate(
   lookup: Awaited<ReturnType<typeof verifyTargetAiProfileUsername>>["lookup"],
   niche: string,
   locationLabel: string | null,
+  discoveryScore = 0,
 ): TargetAiSearchCandidate {
   const eligibility = evaluateAiTargetEligibility({
     quality_status: decision.quality_status,
@@ -140,13 +148,17 @@ function mapVerifiedCandidate(
     verification_status: decision.verification_status,
   });
   const avatarUrl = decision.avatar_url ?? null;
-  const relevanceScore = scoreTargetAiCandidateRelevance({
-    username,
-    niche,
-    locationLabel,
-    profileName: readProfileText(lookup.metadata, "profile_name"),
-    biography: readProfileText(lookup.metadata, "biography"),
-  });
+  if (avatarUrl) cacheResolvedAvatarUrl(username, avatarUrl);
+  const relevanceScore = Math.max(
+    discoveryScore,
+    scoreTargetAiCandidateRelevance({
+      username,
+      niche,
+      locationLabel,
+      profileName: readProfileText(lookup.metadata, "profile_name"),
+      biography: readProfileText(lookup.metadata, "biography"),
+    }),
+  );
   return {
     username,
     followersCount: decision.followers_count,
@@ -174,25 +186,47 @@ function rankCandidates(candidates: TargetAiSearchCandidate[]) {
 }
 
 function selectDisplayCandidates(candidates: TargetAiSearchCandidate[], maxDisplayedResults: number) {
-  const found = rankCandidates(candidates.filter((row) => row.verificationStatus === "found"));
-  return found.slice(0, maxDisplayedResults);
+  return rankCandidates(candidates.filter((row) => row.verificationStatus === "found")).slice(0, maxDisplayedResults);
+}
+
+function countFound(candidates: TargetAiSearchCandidate[]) {
+  return candidates.filter((row) => row.verificationStatus === "found").length;
+}
+
+function countEligible(candidates: TargetAiSearchCandidate[]) {
+  return candidates.filter((row) => row.eligible).length;
 }
 
 function shouldStopProfileVerification(input: {
   verified: TargetAiSearchCandidate[];
   maxDisplayedResults: number;
+  targetEligibleCount: number;
+  runtime: TargetAiSearchRuntime;
 }) {
-  const found = input.verified.filter((row) => row.verificationStatus === "found");
-  return found.length >= input.maxDisplayedResults;
+  if (input.runtime.isTimeExceeded()) {
+    input.runtime.markStopped("time_budget");
+    return true;
+  }
+  if (input.runtime.isRateLimitSevere()) {
+    input.runtime.markStopped("rate_limit");
+    return true;
+  }
+  if (countFound(input.verified) >= input.maxDisplayedResults) return true;
+  if (countEligible(input.verified) >= input.targetEligibleCount) return true;
+  return false;
 }
 
 function mergeProfileStats(target: TargetAiProfileVerifyStats, source: TargetAiProfileVerifyStats) {
   target.checked += source.checked;
   target.found += source.found;
+  target.foundPartial += source.foundPartial;
   target.notFound += source.notFound;
   target.providerError += source.providerError;
   target.rateLimited += source.rateLimited;
+  target.timeout += source.timeout;
+  target.invalidResponse += source.invalidResponse;
   target.skipped += source.skipped;
+  target.skippedLowScore += source.skippedLowScore;
   target.duplicateSkipped += source.duplicateSkipped;
   target.retried += source.retried;
   for (const [reason, count] of source.errorReasons.entries()) {
@@ -200,21 +234,53 @@ function mergeProfileStats(target: TargetAiProfileVerifyStats, source: TargetAiP
   }
 }
 
+function scoreAndSortDiscoveryCandidates(
+  candidates: DiscoveredInstagramCandidate[],
+  niche: string,
+  locationLabel: string | null,
+  minScore: number,
+) {
+  const scored = candidates.map((candidate) => ({
+    ...candidate,
+    discoveryScore: scoreDiscoveryCandidate({
+      username: candidate.username,
+      niche,
+      locationLabel,
+      sourceQuery: candidate.sourceQuery,
+      title: candidate.title,
+      snippet: candidate.snippet,
+    }),
+  }));
+  const ranked = rankDiscoveryCandidates(scored);
+  const accepted = ranked.filter((row) => row.discoveryScore >= minScore);
+  return {
+    ranked,
+    accepted,
+    skippedLowScore: Math.max(ranked.length - accepted.length, 0),
+  };
+}
+
 async function verifyUsernames(
-  usernames: string[],
+  scoredCandidates: ScoredDiscoveryCandidate[],
+  seedUsernames: string[],
   concurrency: number,
   maxChecks: number,
   checked: Set<string>,
+  runtime: TargetAiSearchRuntime,
   stopWhen: {
     maxDisplayedResults: number;
+    targetEligibleCount: number;
     currentVerified: TargetAiSearchCandidate[];
     niche: string;
     locationLabel: string | null;
   },
 ) {
   const stats = createTargetAiProfileVerifyStats();
-
-  const queue = usernames
+  const discoveryByUsername = new Map(scoredCandidates.map((row) => [row.username, row.discoveryScore]));
+  const queue = [
+    ...scoredCandidates.map((row) => row.username),
+    ...seedUsernames,
+  ]
     .map((username) => normalizeTargetUsername(username))
     .filter((username): username is string => Boolean(username))
     .filter((username) => {
@@ -233,35 +299,47 @@ async function verifyUsernames(
   let stopEarly = false;
 
   await mapWithConcurrency(boundedQueue, concurrency, async (username) => {
-    if (stopEarly) return null;
-    const result = await verifyTargetAiProfileUsername(username);
+    if (stopEarly || runtime.isTimeExceeded()) {
+      stopEarly = true;
+      return null;
+    }
+
+    const result = await verifyTargetAiProfileUsername(username, runtime);
     const candidate = mapVerifiedCandidate(
       username,
       result.decision,
       result.lookup,
       stopWhen.niche,
       stopWhen.locationLabel,
+      discoveryByUsername.get(username) ?? 0,
     );
     verified.push(candidate);
     applyTargetAiProfileVerifyStats(stats, {
       errorReason: result.errorReason,
       verificationStatus: candidate.verificationStatus,
       retried: result.retried,
+      partialFound: candidate.verificationStatus === "found"
+        && (!candidate.followersCount || !candidate.avatarAvailable),
     });
 
-    if (result.errorReason !== "not_found" && result.errorReason !== "username_invalid") {
+    if (
+      result.errorReason !== "not_found"
+      && result.errorReason !== "username_invalid"
+      && candidate.verificationStatus !== "found"
+    ) {
       safeLog("profile_lookup_issue", {
         username,
         reason: result.errorReason,
         verification_status: candidate.verificationStatus,
         retried: Boolean(result.retried),
-        endpoint: "instagram_profile",
       });
     }
 
     if (shouldStopProfileVerification({
       verified,
       maxDisplayedResults: stopWhen.maxDisplayedResults,
+      targetEligibleCount: stopWhen.targetEligibleCount,
+      runtime,
     })) {
       stopEarly = true;
     }
@@ -275,16 +353,14 @@ async function verifyUsernames(
 function logGptDiscovery(input: {
   discovery: Awaited<ReturnType<typeof callTargetAiOpenAiDiscovery>>["discovery"];
   pass: "primary" | "broadened" | "complementary";
+  queries: string[];
 }) {
-  const { discovery } = input;
   safeLog("gpt_discovery", {
     pass: input.pass,
-    search_queries_count: discovery.searchQueries.length,
-    search_queries_sample: discovery.searchQueries.slice(0, 4).map((query) => query.slice(0, 120)),
-    keywords_count: discovery.searchAngles.reduce((sum, angle) => sum + angle.keywords.length, 0),
-    hashtag_hints_count: discovery.searchAngles.reduce((sum, angle) => sum + angle.hashtagHints.length, 0),
-    seed_usernames_count: discovery.usernames.length,
-    niche_variants_count: discovery.nicheVariants.length,
+    search_queries_count: input.discovery.searchQueries.length,
+    built_queries_count: input.queries.length,
+    built_queries_sample: input.queries.slice(0, 5).map((query) => query.slice(0, 120)),
+    seed_usernames_count: input.discovery.usernames.length,
   });
 }
 
@@ -293,8 +369,10 @@ async function runDiscoveryPass(input: {
   locationLabel?: string | null;
   pass: "primary" | "broadened" | "complementary";
   config: Awaited<ReturnType<typeof resolveActiveTargetingAiConfig>>;
+  runtime: TargetAiSearchRuntime;
+  queryLimit: number;
 }) {
-  const limits = readTargetAiDiscoveryLimits();
+  const limits = input.runtime.limits;
   const gpt = await callTargetAiOpenAiDiscovery({
     config: input.config,
     niche: input.niche,
@@ -302,34 +380,28 @@ async function runDiscoveryPass(input: {
     pass: input.pass === "complementary" ? "broadened" : input.pass,
   });
 
-  logGptDiscovery({ discovery: gpt.discovery, pass: input.pass });
-
   const queries = buildTargetAiDiscoveryQueries({
     niche: input.niche,
     locationLabel: input.locationLabel,
     discovery: gpt.discovery,
-    pass: input.pass === "complementary" ? "broadened" : input.pass,
-    maxQueries: limits.maxDiscoveryQueries,
+    pass: input.pass,
+    maxQueries: input.queryLimit,
   });
 
-  let discovery = {
-    usernames: [] as string[],
-    queriesExecuted: 0,
-    duplicateSkippedCount: 0,
-    extractedUsernamesCount: 0,
-  };
+  logGptDiscovery({ discovery: gpt.discovery, pass: input.pass, queries });
 
-  if (isTargetAiSearchApiDiscoveryConfigured() && queries.length > 0) {
+  let discoveryCandidates: DiscoveredInstagramCandidate[] = [];
+  let discoveryQueriesExecuted = 0;
+
+  if (isTargetAiSearchApiDiscoveryConfigured() && queries.length > 0 && !input.runtime.isTimeExceeded()) {
     const searchResult = await discoverInstagramUsernamesViaSearchApi({
       queries,
       maxUsernames: limits.maxDiscoveredUsernames,
+      maxPagesPerQuery: input.pass === "primary" ? 1 : 1,
+      runtime: input.runtime,
     });
-    discovery = {
-      usernames: searchResult.usernames,
-      queriesExecuted: searchResult.queriesExecuted,
-      duplicateSkippedCount: searchResult.duplicateSkippedCount,
-      extractedUsernamesCount: searchResult.extractedUsernamesCount,
-    };
+    discoveryCandidates = searchResult.candidates;
+    discoveryQueriesExecuted = searchResult.queriesExecuted;
     safeLog("searchapi_discovery", {
       pass: input.pass,
       queries_executed: searchResult.queriesExecuted,
@@ -338,39 +410,58 @@ async function runDiscoveryPass(input: {
       organic_results_scanned: searchResult.organicResultsScanned,
       extracted_usernames_count: searchResult.extractedUsernamesCount,
     });
-  } else if (!isTargetAiSearchApiDiscoveryConfigured()) {
-    safeLog("searchapi_discovery_skipped", {
-      pass: input.pass,
-      reason: "searchapi_not_configured",
-    });
   }
 
-  const merged = mergeDiscoveredUsernames(
-    [discovery.usernames, gpt.usernames],
-    limits.maxDiscoveredUsernames,
+  const scored = scoreAndSortDiscoveryCandidates(
+    discoveryCandidates,
+    input.niche,
+    input.locationLabel ?? null,
+    limits.minCandidateScore,
   );
+
+  const mergedSeeds = mergeDiscoveredUsernames([gpt.usernames], limits.maxDiscoveredUsernames);
 
   return {
     gpt,
     queries,
-    candidateUsernames: merged.usernames,
-    duplicateSkippedCount: merged.duplicateSkipped + discovery.duplicateSkippedCount,
-    discoveryQueriesExecuted: discovery.queriesExecuted,
-    extractedUsernamesCount: discovery.extractedUsernamesCount,
+    discoveryCandidates: scored.accepted,
+    skippedLowScore: scored.skippedLowScore,
+    seedUsernames: mergedSeeds.usernames,
+    discoveryQueriesExecuted,
+    extractedUsernamesCount: discoveryCandidates.length,
+    duplicateSkippedCount: mergedSeeds.duplicateSkipped,
   };
 }
 
-function shouldRunThirdPass(input: {
-  displayedCount: number;
-  maxDisplayedResults: number;
+function shouldRunBroadenedPass(input: {
+  displayCount: number;
+  maxDisplayed: number;
   profileStats: TargetAiProfileVerifyStats;
-  maxSearchApiChecks: number;
+  runtime: TargetAiSearchRuntime;
+  maxChecks: number;
+  secondPassEnabled: boolean;
 }) {
-  const targetFloor = Math.min(20, Math.max(12, Math.floor(input.maxDisplayedResults * 0.66)));
-  if (input.displayedCount >= targetFloor) return false;
-  if (input.profileStats.found >= input.maxDisplayedResults) return false;
-  if (input.profileStats.checked >= input.maxSearchApiChecks - 8) return false;
-  return true;
+  if (!input.secondPassEnabled) return false;
+  if (input.runtime.isTimeExceeded() || input.runtime.isRateLimitSevere()) return false;
+  if (input.displayCount >= input.maxDisplayed) return false;
+  if (input.profileStats.found >= input.maxDisplayed) return false;
+  return input.profileStats.checked < input.maxChecks - 6;
+}
+
+function shouldRunThirdPass(input: {
+  displayCount: number;
+  maxDisplayed: number;
+  profileStats: TargetAiProfileVerifyStats;
+  runtime: TargetAiSearchRuntime;
+  maxChecks: number;
+  thirdPassEnabled: boolean;
+}) {
+  if (!input.thirdPassEnabled) return false;
+  if (input.runtime.isTimeExceeded() || input.runtime.isRateLimitSevere()) return false;
+  const targetFloor = Math.min(20, Math.max(12, Math.floor(input.maxDisplayed * 0.66)));
+  if (input.displayCount >= targetFloor) return false;
+  if (input.profileStats.found >= input.maxDisplayed) return false;
+  return input.profileStats.checked < input.maxChecks - 4;
 }
 
 export async function searchTargetAccountsWithAi(input: {
@@ -385,9 +476,9 @@ export async function searchTargetAccountsWithAi(input: {
     max_gpt_candidates: typeof input.maxCandidates === "number"
       ? Math.min(Math.max(input.maxCandidates, 12), 80)
       : activeConfig.max_gpt_candidates,
-    max_searchapi_checks: Math.min(Math.max(activeConfig.max_searchapi_checks, 60), 100),
   };
-  const profileLookupConcurrency = readTargetAiProfileLookupConcurrency(config.searchapi_concurrency);
+  const runtimeLimits = readTargetAiSearchRuntimeLimits(config);
+  const runtime = new TargetAiSearchRuntime(runtimeLimits, startedAt);
 
   const niche = input.niche.trim();
   const locationLabel = input.location?.label ?? null;
@@ -401,39 +492,55 @@ export async function searchTargetAccountsWithAi(input: {
   let searchapiDiscoveryQueriesCount = 0;
   let extractedUsernamesCount = 0;
   let duplicateSkippedCount = 0;
+  let skippedLowScoreCount = 0;
 
   const profileStats = createTargetAiProfileVerifyStats();
+  let verified: TargetAiSearchCandidate[] = [];
 
-  async function runPass(
+  async function executePass(
     pass: "primary" | "broadened" | "complementary",
+    queryLimit: number,
     currentVerified: TargetAiSearchCandidate[],
-    maxChecks: number,
   ) {
+    if (runtime.isTimeExceeded() || runtime.isRateLimitSevere()) return currentVerified;
+
     const discoveryPass = await runDiscoveryPass({
       niche,
       locationLabel,
       pass,
       config,
+      runtime,
+      queryLimit,
     });
+    provider = discoveryPass.gpt.provider;
+    if (!errorCode && discoveryPass.gpt.error_code) errorCode = discoveryPass.gpt.error_code;
     gptSearchQueriesCount += discoveryPass.queries.length;
-    gptSeedUsernamesCount += discoveryPass.gpt.usernames.length;
+    gptSeedUsernamesCount += discoveryPass.seedUsernames.length;
     searchapiDiscoveryQueriesCount += discoveryPass.discoveryQueriesExecuted;
     extractedUsernamesCount += discoveryPass.extractedUsernamesCount;
     duplicateSkippedCount += discoveryPass.duplicateSkippedCount;
-    if (!errorCode && discoveryPass.gpt.error_code) errorCode = discoveryPass.gpt.error_code;
-    provider = discoveryPass.gpt.provider;
+    skippedLowScoreCount += discoveryPass.skippedLowScore;
 
-    if (discoveryPass.candidateUsernames.length === 0) {
+    const remainingChecks = runtimeLimits.maxProfileChecks - profileStats.checked;
+    if (remainingChecks <= 0) return currentVerified;
+    if (discoveryPass.discoveryCandidates.length === 0 && discoveryPass.seedUsernames.length === 0) {
       return currentVerified;
     }
 
+    const concurrency = readTargetAiProfileLookupConcurrency(
+      config.searchapi_concurrency,
+      runtime.rateLimitHits,
+    );
     const passVerified = await verifyUsernames(
-      discoveryPass.candidateUsernames,
-      profileLookupConcurrency,
-      maxChecks,
+      discoveryPass.discoveryCandidates,
+      discoveryPass.seedUsernames,
+      concurrency,
+      remainingChecks,
       checked,
+      runtime,
       {
         maxDisplayedResults: config.max_displayed_results,
+        targetEligibleCount: runtimeLimits.targetEligibleCount,
         currentVerified,
         niche,
         locationLabel,
@@ -445,72 +552,67 @@ export async function searchTargetAccountsWithAi(input: {
     return [...merged.values()];
   }
 
-  let verified: TargetAiSearchCandidate[] = [];
+  verified = await executePass("primary", runtimeLimits.primaryQueryLimit, []);
 
-  const primaryDiscovery = await runDiscoveryPass({ niche, locationLabel, pass: "primary", config });
-  provider = primaryDiscovery.gpt.provider;
-  errorCode = primaryDiscovery.gpt.error_code;
-  gptSearchQueriesCount += primaryDiscovery.queries.length;
-  gptSeedUsernamesCount += primaryDiscovery.gpt.usernames.length;
-  searchapiDiscoveryQueriesCount += primaryDiscovery.discoveryQueriesExecuted;
-  extractedUsernamesCount += primaryDiscovery.extractedUsernamesCount;
-  duplicateSkippedCount += primaryDiscovery.duplicateSkippedCount;
-
-  let candidateUsernames = primaryDiscovery.candidateUsernames;
-  if (candidateUsernames.length === 0) {
+  if (verified.length === 0) {
     const mockUsernames = readTargetAiMockUsernames(config.max_gpt_candidates);
-    candidateUsernames = mockUsernames;
-    gptSeedUsernamesCount += mockUsernames.length;
-  }
-
-  if (candidateUsernames.length > 0) {
-    const passVerified = await verifyUsernames(
-      candidateUsernames,
-      profileLookupConcurrency,
-      config.max_searchapi_checks,
-      checked,
-      {
-        maxDisplayedResults: config.max_displayed_results,
-        currentVerified: [],
-        niche,
-        locationLabel,
-      },
-    );
-    mergeProfileStats(profileStats, passVerified.stats);
-    verified = passVerified.verified;
+    if (mockUsernames.length > 0) {
+      gptSeedUsernamesCount += mockUsernames.length;
+      const mockVerified = await verifyUsernames(
+        [],
+        mockUsernames,
+        1,
+        runtimeLimits.maxProfileChecks,
+        checked,
+        runtime,
+        {
+          maxDisplayedResults: config.max_displayed_results,
+          targetEligibleCount: runtimeLimits.targetEligibleCount,
+          currentVerified: [],
+          niche,
+          locationLabel,
+        },
+      );
+      mergeProfileStats(profileStats, mockVerified.stats);
+      verified = mockVerified.verified;
+    }
   }
 
   let displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
-  let remainingChecks = config.max_searchapi_checks - profileStats.checked;
 
-  if (
-    config.second_pass_enabled
-    && remainingChecks > 8
-    && displayCandidates.length < config.max_displayed_results
-    && profileStats.found < config.max_displayed_results
-  ) {
+  if (shouldRunBroadenedPass({
+    displayCount: displayCandidates.length,
+    maxDisplayed: config.max_displayed_results,
+    profileStats,
+    runtime,
+    maxChecks: runtimeLimits.maxProfileChecks,
+    secondPassEnabled: config.second_pass_enabled,
+  })) {
     secondPassUsed = true;
-    verified = await runPass("broadened", verified, remainingChecks);
+    verified = await executePass("broadened", runtimeLimits.broadenedQueryLimit, verified);
     displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
-    remainingChecks = config.max_searchapi_checks - profileStats.checked;
   }
 
-  if (
-    shouldRunThirdPass({
-      displayedCount: displayCandidates.length,
-      maxDisplayedResults: config.max_displayed_results,
-      profileStats,
-      maxSearchApiChecks: config.max_searchapi_checks,
-    })
-    && remainingChecks > 8
-  ) {
+  if (shouldRunThirdPass({
+    displayCount: displayCandidates.length,
+    maxDisplayed: config.max_displayed_results,
+    profileStats,
+    runtime,
+    maxChecks: runtimeLimits.maxProfileChecks,
+    thirdPassEnabled: runtimeLimits.thirdPassEnabled,
+  })) {
     thirdPassUsed = true;
-    verified = await runPass("complementary", verified, remainingChecks);
+    verified = await executePass("complementary", runtimeLimits.complementaryQueryLimit, verified);
     displayCandidates = selectDisplayCandidates(verified, config.max_displayed_results);
   }
 
   const avatarAvailableCount = displayCandidates.filter((row) => row.avatarAvailable).length;
   const relevanceScores = displayCandidates.map((row) => row.relevanceScore);
+  const profileLookupConcurrency = readTargetAiProfileLookupConcurrency(
+    config.searchapi_concurrency,
+    runtime.rateLimitHits,
+  );
+
   const debug: TargetAiSearchDebugSummary = {
     prompt_version: config.prompt_version,
     prompt_source: config.prompt_source,
@@ -519,7 +621,8 @@ export async function searchTargetAccountsWithAi(input: {
     niche_present: Boolean(niche),
     location_present: Boolean(locationLabel),
     max_displayed_results: config.max_displayed_results,
-    max_searchapi_checks: config.max_searchapi_checks,
+    max_searchapi_checks: runtimeLimits.maxProfileChecks,
+    max_latency_ms: runtimeLimits.maxLatencyMs,
     profile_lookup_concurrency: profileLookupConcurrency,
     gpt_search_queries_count: gptSearchQueriesCount,
     gpt_seed_usernames_count: gptSeedUsernamesCount,
@@ -527,9 +630,13 @@ export async function searchTargetAccountsWithAi(input: {
     extracted_usernames_count: extractedUsernamesCount,
     profile_checked_count: profileStats.checked,
     profile_found_count: profileStats.found,
+    profile_found_partial_count: profileStats.foundPartial,
     profile_not_found_count: profileStats.notFound,
     profile_provider_error_count: profileStats.providerError,
     profile_rate_limited_count: profileStats.rateLimited,
+    profile_timeout_count: profileStats.timeout,
+    profile_invalid_response_count: profileStats.invalidResponse,
+    profile_skipped_low_score_count: skippedLowScoreCount,
     profile_retried_count: profileStats.retried,
     profile_skipped_count: profileStats.skipped,
     duplicate_skipped_count: duplicateSkippedCount + profileStats.duplicateSkipped,
@@ -543,6 +650,10 @@ export async function searchTargetAccountsWithAi(input: {
     final_results_count: displayCandidates.length,
     second_pass_used: secondPassUsed,
     third_pass_used: thirdPassUsed,
+    stopped_reason: runtime.stoppedReason
+      ?? (displayCandidates.length < config.max_displayed_results
+        ? `found_count=${profileStats.found + profileStats.foundPartial}`
+        : null),
     provider_error_reasons_top: topTargetAiProviderErrorReasons(profileStats),
     rejection_reasons_top: countReasons(displayCandidates),
     relevance_score_top: relevanceScores.length > 0 ? Math.max(...relevanceScores) : null,
@@ -551,7 +662,7 @@ export async function searchTargetAccountsWithAi(input: {
     error_code: errorCode,
     gpt_candidates_count: gptSeedUsernamesCount,
     searchapi_checked_count: profileStats.checked,
-    found_count: profileStats.found,
+    found_count: profileStats.found + profileStats.foundPartial,
     not_found_count: profileStats.notFound,
   };
 

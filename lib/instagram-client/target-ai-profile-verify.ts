@@ -5,6 +5,7 @@ import {
   type InstagramPublicProfileLookupResult,
 } from "../instagram-public-profile-lookup.ts";
 import { targetDecisionFromLookup } from "../instagram-targets.ts";
+import type { TargetAiSearchRuntime } from "./target-ai-search-runtime.ts";
 
 export type TargetAiProfileVerifyErrorReason =
   | "not_found"
@@ -20,10 +21,14 @@ export type TargetAiProfileVerifyErrorReason =
 export type TargetAiProfileVerifyStats = {
   checked: number;
   found: number;
+  foundPartial: number;
   notFound: number;
   providerError: number;
   rateLimited: number;
+  timeout: number;
+  invalidResponse: number;
   skipped: number;
+  skippedLowScore: number;
   duplicateSkipped: number;
   retried: number;
   errorReasons: Map<string, number>;
@@ -44,43 +49,51 @@ function readVerifyErrorReason(lookup: InstagramPublicProfileLookupResult): Targ
 }
 
 function shouldRetryLookup(reason: TargetAiProfileVerifyErrorReason) {
-  return reason === "rate_limited"
-    || reason === "provider_throttled"
-    || reason === "provider_timeout"
-    || reason === "provider_unavailable"
-    || reason === "provider_http_error";
+  return reason === "rate_limited" || reason === "provider_throttled" || reason === "provider_timeout";
 }
 
 function recordErrorReason(stats: TargetAiProfileVerifyStats, reason: string) {
   stats.errorReasons.set(reason, (stats.errorReasons.get(reason) ?? 0) + 1);
 }
 
-function classifyLookupBucket(reason: TargetAiProfileVerifyErrorReason) {
-  if (reason === "not_found") return "not_found" as const;
-  if (reason === "rate_limited" || reason === "provider_throttled") return "rate_limited" as const;
-  return "provider_error" as const;
-}
-
 export function createTargetAiProfileVerifyStats(): TargetAiProfileVerifyStats {
   return {
     checked: 0,
     found: 0,
+    foundPartial: 0,
     notFound: 0,
     providerError: 0,
     rateLimited: 0,
+    timeout: 0,
+    invalidResponse: 0,
     skipped: 0,
+    skippedLowScore: 0,
     duplicateSkipped: 0,
     retried: 0,
     errorReasons: new Map<string, number>(),
   };
 }
 
-export function readTargetAiProfileLookupConcurrency(configured: number) {
+export function readTargetAiProfileLookupConcurrency(configured: number, rateLimitHits = 0) {
+  if (rateLimitHits >= 4) return 1;
   const parsed = Number.isFinite(configured) ? configured : 4;
   return Math.min(Math.max(parsed, 1), 2);
 }
 
-export async function verifyTargetAiProfileUsername(username: string) {
+function isPartialFound(decision: ReturnType<typeof targetDecisionFromLookup>) {
+  return decision.verification_status === "found"
+    && (!decision.followers_count || !decision.avatar_url);
+}
+
+export async function verifyTargetAiProfileUsername(
+  username: string,
+  runtime?: TargetAiSearchRuntime,
+) {
+  if (runtime) {
+    await runtime.waitForCooldown();
+    if (runtime.isTimeExceeded()) runtime.markStopped("time_budget");
+  }
+
   const lookup = await lookupInstagramPublicProfile(username);
   if (lookup.status === "username_invalid") {
     const decision = evaluateTargetQuality({
@@ -102,8 +115,14 @@ export async function verifyTargetAiProfileUsername(username: string) {
   }
 
   let errorReason = readVerifyErrorReason(lookup);
-  if (shouldRetryLookup(errorReason)) {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+  if (
+    shouldRetryLookup(errorReason)
+    && runtime?.canRetryProfileLookup()
+    && !runtime.isTimeExceeded()
+  ) {
+    runtime.recordRateLimit();
+    runtime.recordRetry();
+    await new Promise((resolve) => setTimeout(resolve, runtime.limits.rateLimitCooldownMs));
     const retryLookup = await lookupInstagramPublicProfile(username, { disableCache: true });
     if (retryLookup.status === "found" || retryLookup.status === "not_found") {
       return {
@@ -122,6 +141,10 @@ export async function verifyTargetAiProfileUsername(username: string) {
     };
   }
 
+  if (errorReason === "rate_limited" || errorReason === "provider_throttled") {
+    runtime?.recordRateLimit();
+  }
+
   return {
     decision: targetDecisionFromLookup(lookup),
     lookup,
@@ -132,21 +155,42 @@ export async function verifyTargetAiProfileUsername(username: string) {
 
 export function applyTargetAiProfileVerifyStats(
   stats: TargetAiProfileVerifyStats,
-  input: { errorReason: TargetAiProfileVerifyErrorReason; verificationStatus: string; retried?: boolean },
+  input: {
+    errorReason: TargetAiProfileVerifyErrorReason;
+    verificationStatus: string;
+    retried?: boolean;
+    partialFound?: boolean;
+  },
 ) {
   stats.checked += 1;
   if (input.retried) stats.retried += 1;
   recordErrorReason(stats, input.errorReason);
 
   if (input.verificationStatus === "found") {
-    stats.found += 1;
+    if (input.partialFound) stats.foundPartial += 1;
+    else stats.found += 1;
     return;
   }
 
-  const bucket = classifyLookupBucket(input.errorReason);
-  if (bucket === "not_found") stats.notFound += 1;
-  else if (bucket === "rate_limited") stats.rateLimited += 1;
-  else stats.providerError += 1;
+  if (input.errorReason === "not_found") {
+    stats.notFound += 1;
+    return;
+  }
+  if (input.errorReason === "rate_limited" || input.errorReason === "provider_throttled") {
+    stats.rateLimited += 1;
+    return;
+  }
+  if (input.errorReason === "provider_timeout") {
+    stats.timeout += 1;
+    stats.providerError += 1;
+    return;
+  }
+  if (input.errorReason === "provider_invalid_response") {
+    stats.invalidResponse += 1;
+    stats.providerError += 1;
+    return;
+  }
+  stats.providerError += 1;
 }
 
 export function topTargetAiProviderErrorReasons(stats: TargetAiProfileVerifyStats, limit = 6) {

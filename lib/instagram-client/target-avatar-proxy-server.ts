@@ -2,6 +2,8 @@ import { safeExternalImageUrl } from "@/lib/instagram-dashboard/safe-external-ur
 import { lookupInstagramPublicProfile, normalizeInstagramPublicUsername } from "@/lib/instagram-public-profile-lookup";
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const avatarUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
+const AVATAR_URL_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const upstreamHeaders = {
   Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
@@ -15,6 +17,28 @@ export type TargetAvatarUpstreamResult = {
   resolvedAvatarUrl: string;
   refreshedFromProvider: boolean;
 };
+
+function readCachedAvatarUrl(username: string) {
+  const cached = avatarUrlCache.get(username);
+  if (!cached || cached.expiresAtMs <= Date.now()) {
+    if (cached) avatarUrlCache.delete(username);
+    return null;
+  }
+  return cached.url;
+}
+
+export function cacheResolvedAvatarUrl(username: string, avatarUrl: string) {
+  const safe = safeExternalImageUrl(avatarUrl);
+  if (!safe) return;
+  avatarUrlCache.set(username, {
+    url: safe,
+    expiresAtMs: Date.now() + AVATAR_URL_CACHE_TTL_MS,
+  });
+}
+
+export function resetTargetAvatarProxyCacheForTests() {
+  avatarUrlCache.clear();
+}
 
 async function fetchAvatarBytes(avatarUrl: string) {
   const upstream = await fetch(avatarUrl, {
@@ -36,25 +60,54 @@ async function fetchAvatarBytes(avatarUrl: string) {
 export async function resolveTargetAvatarUpstream(input: {
   username: string;
   storedAvatarUrl?: string | null;
+  allowProviderRefresh?: boolean;
 }): Promise<TargetAvatarUpstreamResult | null> {
   const username = normalizeInstagramPublicUsername(input.username);
   const candidates: string[] = [];
-  const stored = safeExternalImageUrl(input.storedAvatarUrl ?? "");
-  if (stored) candidates.push(stored);
+  const cached = readCachedAvatarUrl(username);
+  if (cached) candidates.push(cached);
 
-  const lookup = await lookupInstagramPublicProfile(username);
-  const fresh = lookup.status === "found" ? safeExternalImageUrl(lookup.avatar_url ?? "") : null;
-  if (fresh && !candidates.includes(fresh)) {
-    candidates.unshift(fresh);
+  const stored = safeExternalImageUrl(input.storedAvatarUrl ?? "");
+  if (stored && !candidates.includes(stored)) candidates.push(stored);
+
+  let fresh: string | null = null;
+  const shouldRefresh = input.allowProviderRefresh !== false
+    && !cached
+    && candidates.every((url) => !url.includes("scontent-"));
+
+  if (shouldRefresh || candidates.length === 0) {
+    const lookup = await lookupInstagramPublicProfile(username);
+    fresh = lookup.status === "found" ? safeExternalImageUrl(lookup.avatar_url ?? "") : null;
+    if (fresh) {
+      cacheResolvedAvatarUrl(username, fresh);
+      if (!candidates.includes(fresh)) candidates.unshift(fresh);
+    }
   }
 
   for (const avatarUrl of candidates) {
     const fetched = await fetchAvatarBytes(avatarUrl);
     if (!fetched) continue;
+    cacheResolvedAvatarUrl(username, avatarUrl);
     return {
       ...fetched,
       refreshedFromProvider: Boolean(fresh && avatarUrl === fresh && avatarUrl !== stored),
     };
+  }
+
+  if (fresh) return null;
+  if (!shouldRefresh && candidates.length > 0) {
+    const lookup = await lookupInstagramPublicProfile(username);
+    const retryFresh = lookup.status === "found" ? safeExternalImageUrl(lookup.avatar_url ?? "") : null;
+    if (retryFresh && !candidates.includes(retryFresh)) {
+      const fetched = await fetchAvatarBytes(retryFresh);
+      if (fetched) {
+        cacheResolvedAvatarUrl(username, retryFresh);
+        return {
+          ...fetched,
+          refreshedFromProvider: true,
+        };
+      }
+    }
   }
 
   return null;
