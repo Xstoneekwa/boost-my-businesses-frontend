@@ -26,14 +26,13 @@ export function serializeTargetAiCandidateForClient(
     serpPosition?: number | null;
   },
 ) {
-  const avatarProxyUrl = candidate.avatarAvailable
-    ? clientAiCandidateAvatarProxyPath(accountId, candidate.username)
-    : null;
+  const avatarProxyUrl = clientAiCandidateAvatarProxyPath(accountId, candidate.username);
+  const isVerifiedProfile = candidate.verificationStatus === "found";
   return {
     username: candidate.username,
     followersCount: candidate.followersCount,
     avatarUrl: avatarProxyUrl,
-    avatarAvailable: candidate.avatarAvailable,
+    avatarAvailable: isVerifiedProfile ? candidate.avatarAvailable : true,
     avatarProxyUrl,
     eligible: candidate.eligible,
     ineligibleReasonCode: candidate.ineligibleReasonCode,
@@ -43,9 +42,6 @@ export function serializeTargetAiCandidateForClient(
     verificationStatus: candidate.verificationStatus,
     qualityStatus: candidate.qualityStatus,
     relevanceScore: candidate.relevanceScore ?? null,
-    serpTitle: candidate.serpTitle ?? null,
-    serpSnippet: candidate.serpSnippet ?? null,
-    serpSourceQuery: candidate.serpSourceQuery ?? null,
-    serpPosition: candidate.serpPosition ?? null,
+    displayTitle: candidate.serpTitle ?? null,
   };
 }

@@ -24,29 +24,28 @@ export function targetAiCopy(lang: TargetAiLang) {
     launchSearch: fr ? "Lancer la recherche" : "Launch search",
     step3Title: fr ? "Confirmez vos comptes cibles" : "Confirm your target accounts",
     step3Body: fr
-      ? "Consultez les comptes trouvés via Google. Les comptes non vérifiés restent visibles ; vérifiez votre sélection avant validation."
-      : "Review accounts found via Google. Unverified accounts stay visible; verify your selection before adding.",
+      ? "Consultez les profils suggérés pour votre campagne. Retirez ceux que vous ne souhaitez pas utiliser avant de valider."
+      : "Review suggested profiles for your campaign. Remove any accounts you do not want before validating.",
     loadingTitle: fr ? "Recherche en cours…" : "Searching…",
     loadingBody: fr
-      ? "Nous recherchons des profils Instagram pertinents via Google. L’affichage arrive en quelques secondes."
-      : "We are searching relevant Instagram profiles via Google. Results appear in a few seconds.",
-    validate: fr ? "Valider les comptes éligibles" : "Add eligible accounts",
-    pendingVerification: fr ? "À vérifier" : "Pending verification",
-    verifySelection: fr ? "Vérifier la sélection" : "Verify selection",
-    verifySelectionHint: fr
-      ? "Vérifiez les comptes sélectionnés avant de les ajouter à votre ciblage."
-      : "Verify selected accounts before adding them to your targeting.",
-    serpFoundLabel: fr ? "Trouvé via Google" : "Found via Google",
+      ? "Nous analysons des profils Instagram pertinents pour votre campagne. Les premiers résultats arrivent dans quelques secondes."
+      : "We are analyzing relevant Instagram profiles for your campaign. First results arrive in a few seconds.",
+    validate: fr ? "Valider la sélection" : "Validate selection",
+    enriching: fr ? "Analyse des profils…" : "Analyzing profiles…",
+    partialValidation: fr
+      ? "Certains profils ne respectent pas nos critères et n’ont pas été ajoutés."
+      : "Some profiles did not meet our criteria and were not added.",
     newSearch: fr ? "Nouvelle recherche" : "Start a new search",
     remove: fr ? "Retirer" : "Remove",
     openInstagram: fr ? "Ouvrir sur Instagram" : "Open on Instagram",
     eligible: fr ? "Éligible" : "Eligible",
     ineligible: fr ? "Non éligible" : "Not eligible",
+    suggestedProfile: fr ? "Profil suggéré" : "Suggested profile",
     followers: fr ? "abonnés" : "followers",
     blockedValidation: fr
       ? "Retirez les comptes non éligibles avant de valider votre sélection."
       : "Remove ineligible accounts before validating your selection.",
-    emptySelection: fr ? "Ajoutez au moins un compte éligible à votre sélection." : "Add at least one eligible account to your selection.",
+    emptySelection: fr ? "Ajoutez au moins un compte à votre sélection." : "Add at least one account to your selection.",
     searchError: fr ? "La recherche IA n’a pas pu aboutir. Réessayez dans un instant." : "AI search could not complete. Please try again shortly.",
     validateError: fr ? "Impossible d’ajouter la sélection pour le moment." : "Could not add the selected accounts right now.",
     validateSuccess: (count: number) => fr
@@ -61,18 +60,18 @@ export function targetAiEligibilityLabel(lang: TargetAiLang, reasonCode: AiTarge
   const fr = lang === "fr";
   switch (reasonCode) {
     case "low_followers":
-      return fr ? "Moins de 500 abonnés" : "Fewer than 500 followers";
+      return fr ? "Trop peu d’abonnés" : "Too few followers";
     case "verified":
       return fr ? "Compte certifié" : "Verified account";
     case "private":
       return fr ? "Compte privé" : "Private account";
     case "not_found":
-      return fr ? "Compte introuvable" : "Account not found";
+      return fr ? "Profil non disponible" : "Profile unavailable";
     case "too_many_followers":
       return fr ? "Plus de 50 000 abonnés" : "More than 50,000 followers";
     case "pending_verification":
-      return fr ? "Vérification en cours" : "Verification pending";
+      return fr ? "Analyse en cours" : "Analysis in progress";
     default:
-      return fr ? "Non conforme à nos critères" : "Does not meet our criteria";
+      return fr ? "Hors critères" : "Outside criteria";
   }
 }

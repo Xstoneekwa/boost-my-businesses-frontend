@@ -207,7 +207,10 @@ export async function verifyTargetAiUsernamesBatch(input: {
   const concurrency = input.concurrency ?? 1;
   const verifiedByUsername = new Map<string, TargetAiSearchCandidate>();
 
-  await mapWithConcurrency(input.usernames, concurrency, async (username) => {
+  await mapWithConcurrency(input.usernames, concurrency, async (username, index) => {
+    if (index > 0) {
+      await new Promise((resolve) => setTimeout(resolve, readIntEnv("TARGET_AI_V2_VERIFY_DELAY_MS", 350, 150, 800)));
+    }
     const serp = input.serpByUsername.get(username);
     if (!serp) return null;
     const result = await verifyTargetAiProfileUsername(username);
@@ -419,6 +422,9 @@ export async function searchTargetAccountsWithAiV2(input: {
     serp_candidates: rankedSerp.length,
     displayed_count: merged.candidates.length,
     auto_verified_count: verificationSummary.verified_count,
+    auto_verify_attempted: autoVerifyUsernames.length,
+    profile_found_count: verifyStats.found,
+    profile_rate_limited_count: verifyStats.rateLimited,
     latency_ms: Date.now() - startedAt,
     stopped_reason: stoppedReason,
   });

@@ -43,10 +43,13 @@ export function extractSerpProfileFromOrganicRow(input: {
   const usernameFromDisplayed = acceptProfileUsername(extractInstagramUsernameFromUrl(displayedLink));
   const username = usernameFromLink || usernameFromDisplayed;
   if (!username) return null;
+  if (!usernameFromLink && !usernameFromDisplayed) return null;
 
-  const profileUrl = link && extractInstagramUsernameFromUrl(link) === username
+  const profileUrl = usernameFromLink && link
     ? link
-    : `https://www.instagram.com/${encodeURIComponent(username)}/`;
+    : usernameFromDisplayed && displayedLink
+      ? displayedLink
+      : `https://www.instagram.com/${encodeURIComponent(username)}/`;
 
   return {
     username,

@@ -1,23 +1,28 @@
 import { parseTargetAiLocationParts } from "./target-ai-discovery-queries.ts";
 
-export const TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS = [
+export const TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS_SHORT = [
   "-inurl:/p/",
-  "-inurl:/reel/",
   "-inurl:/explore",
+] as const;
+
+export const TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS = [
+  ...TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS_SHORT,
+  "-inurl:/reel/",
   "-inurl:/stories",
   "-inurl:/tv/",
   "-inurl:/direct/",
   "-inurl:/accounts/",
-  "-inurl:/about/",
-  "-inurl:/developer/",
-  "-inurl:/business/",
-  "-inurl:/legal/",
 ] as const;
 
 const CITY_DISTRICTS: Record<string, string[]> = {
-  johannesburg: ["Sandton", "Rosebank", "Midrand", "Fourways", "Soweto"],
+  johannesburg: ["Sandton", "Rosebank", "Randburg", "Braamfontein", "Melville", "Midrand", "Fourways"],
   bordeaux: ["Mérignac", "Pessac", "Talence", "Bègles"],
   pretoria: ["Centurion", "Menlyn", "Brooklyn"],
+};
+
+const COUNTRY_MAJOR_CITIES: Record<string, string[]> = {
+  belgique: ["Bruxelles", "Brussels", "Antwerpen", "Antwerp", "Gent", "Ghent", "Liège"],
+  belgium: ["Bruxelles", "Brussels", "Antwerpen", "Antwerp", "Gent", "Ghent", "Liège"],
 };
 
 function normalizeKey(value: string) {
@@ -31,6 +36,7 @@ function readNicheVariants(niche: string) {
   if (normalized.includes("restaurant") && normalized.includes("chinois")) {
     variants.add("restaurant chinois");
     variants.add("chinese restaurant");
+    variants.add("chinese food");
     variants.add("chinese takeaway");
     variants.add("asian restaurant");
   } else if (normalized.includes("restaurant") && normalized.includes("asiatique")) {
@@ -44,10 +50,11 @@ function readNicheVariants(niche: string) {
   } else if (normalized.includes("psycholog")) {
     variants.add("psychologue");
     variants.add("psychologist");
+    variants.add("clinical psychologist");
     variants.add("therapy");
     variants.add("therapist");
-    variants.add("mental health");
     variants.add("counselling");
+    variants.add("mental health");
   } else if (normalized.includes("social media") || normalized.includes("agence")) {
     variants.add("agence social media");
     variants.add("social media agency");
@@ -61,18 +68,51 @@ function readNicheVariants(niche: string) {
   return [...variants].filter(Boolean);
 }
 
+function readLocationPhrases(locationLabel?: string | null) {
+  const location = parseTargetAiLocationParts(locationLabel);
+  const phrases = new Set<string>();
+  if (location.city) phrases.add(location.city);
+  if (location.region && location.region !== location.city) phrases.add(location.region);
+  if (location.country) phrases.add(location.country);
+  if (location.label) phrases.add(location.label);
+
+  const countryKey = normalizeKey(location.country || location.city || location.label);
+  for (const city of COUNTRY_MAJOR_CITIES[countryKey] ?? []) {
+    phrases.add(city);
+  }
+
+  if (location.city) {
+    for (const district of CITY_DISTRICTS[normalizeKey(location.city)] ?? []) {
+      phrases.add(district);
+    }
+  }
+
+  return [...phrases].filter(Boolean);
+}
+
 function buildGoogleInstagramQuery(input: {
   locationPhrase: string;
-  nichePhrase: string;
+  nicheParts: string[];
   includeSiteInternet?: boolean;
+  shortExclusions?: boolean;
 }) {
-  const parts = [
-    `"${input.locationPhrase}"`,
-    `"${input.nichePhrase}"`,
-  ];
+  const parts = [`"${input.locationPhrase}"`];
+  for (const part of input.nicheParts) {
+    parts.push(`"${part}"`);
+  }
   if (input.includeSiteInternet) parts.push('"site internet"');
-  parts.push("site:instagram.com", ...TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS);
+  parts.push("site:instagram.com");
+  parts.push(...(input.shortExclusions ? TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS_SHORT : TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS));
   return parts.join(" ");
+}
+
+function readNicheQueryForms(niche: string) {
+  const normalized = niche.trim().toLowerCase();
+  const forms: string[][] = [[niche.trim()]];
+  if (normalized.includes("restaurant") && (normalized.includes("chinois") || normalized.includes("asiatique"))) {
+    forms.push(["restaurant", normalized.includes("chinois") ? "chinois" : "asiatique"]);
+  }
+  return forms;
 }
 
 export function buildTargetAiGoogleQueries(input: {
@@ -80,10 +120,11 @@ export function buildTargetAiGoogleQueries(input: {
   locationLabel?: string | null;
   maxQueries?: number;
 }) {
-  const maxQueries = input.maxQueries ?? 18;
+  const maxQueries = input.maxQueries ?? 22;
   const niche = input.niche.trim();
-  const location = parseTargetAiLocationParts(input.locationLabel);
   const nicheVariants = readNicheVariants(niche);
+  const nicheForms = readNicheQueryForms(niche);
+  const locationPhrases = readLocationPhrases(input.locationLabel);
   const seen = new Set<string>();
   const output: string[] = [];
 
@@ -96,35 +137,73 @@ export function buildTargetAiGoogleQueries(input: {
     output.push(normalized);
   }
 
-  const locationPhrases: string[] = [];
-  if (location.city) locationPhrases.push(location.city);
-  if (location.region && location.region !== location.city) locationPhrases.push(location.region);
-  if (location.country && !locationPhrases.includes(location.country)) locationPhrases.push(location.country);
-  if (locationPhrases.length === 0 && location.label) locationPhrases.push(location.label);
-
   for (const locationPhrase of locationPhrases) {
-    for (const nichePhrase of nicheVariants.slice(0, 6)) {
-      push(buildGoogleInstagramQuery({ locationPhrase, nichePhrase, includeSiteInternet: true }));
-      push(buildGoogleInstagramQuery({ locationPhrase, nichePhrase, includeSiteInternet: false }));
+    for (const nicheParts of nicheForms) {
+      push(buildGoogleInstagramQuery({ locationPhrase, nicheParts, includeSiteInternet: true, shortExclusions: true }));
+      push(buildGoogleInstagramQuery({ locationPhrase, nicheParts, includeSiteInternet: false, shortExclusions: true }));
     }
-  }
-
-  if (location.city) {
-    const districts = CITY_DISTRICTS[normalizeKey(location.city)] ?? [];
-    for (const district of districts.slice(0, 4)) {
-      for (const nichePhrase of nicheVariants.slice(0, 3)) {
-        push(buildGoogleInstagramQuery({ locationPhrase: district, nichePhrase, includeSiteInternet: false }));
-      }
+    for (const nichePhrase of nicheVariants) {
+      push(buildGoogleInstagramQuery({ locationPhrase, nicheParts: [nichePhrase], includeSiteInternet: true, shortExclusions: true }));
+      push(buildGoogleInstagramQuery({ locationPhrase, nicheParts: [nichePhrase], includeSiteInternet: false, shortExclusions: true }));
+      push(buildGoogleInstagramQuery({ locationPhrase, nicheParts: [nichePhrase], includeSiteInternet: false, shortExclusions: false }));
     }
   }
 
   if (locationPhrases.length === 0) {
     for (const nichePhrase of nicheVariants) {
-      push(`"${nichePhrase}" "site internet" site:instagram.com ${TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS.join(" ")}`);
+      push(`"${nichePhrase}" site:instagram.com ${TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS_SHORT.join(" ")}`);
     }
   }
 
   return output.slice(0, maxQueries);
+}
+
+export function buildTargetAiManualBenchmarkQueries(input: {
+  niche: string;
+  locationLabel?: string | null;
+}) {
+  const niche = input.niche.trim().toLowerCase();
+  const location = parseTargetAiLocationParts(input.locationLabel);
+  const city = (location.city || location.label || "").trim();
+  const cityLower = city.toLowerCase();
+
+  if (cityLower.includes("johannesburg") && niche.includes("restaurant") && niche.includes("chinois")) {
+    return [
+      `"${city}" "restaurant" "chinois" "site internet" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "restaurant chinois" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "chinese restaurant" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "chinese food" site:instagram.com -inurl:/p/ -inurl:/explore`,
+    ];
+  }
+
+  if (cityLower.includes("bordeaux") && niche.includes("restaurant") && niche.includes("asiatique")) {
+    return [
+      `"${city}" "restaurant" "asiatique" "site internet" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "restaurant asiatique" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "restaurant chinois" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "ramen" site:instagram.com -inurl:/p/ -inurl:/explore`,
+    ];
+  }
+
+  if (cityLower.includes("johannesburg") && niche.includes("psycholog")) {
+    return [
+      `"${city}" "psychologist" "site internet" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "clinical psychologist" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "therapy" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"${city}" "counselling" site:instagram.com -inurl:/p/ -inurl:/explore`,
+    ];
+  }
+
+  if ((cityLower.includes("belg") || location.country?.toLowerCase().includes("belg")) && niche.includes("social media")) {
+    return [
+      `"belgique" "agence social media" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"belgium" "social media agency" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"bruxelles" "agence social media" site:instagram.com -inurl:/p/ -inurl:/explore`,
+      `"brussels" "social media agency" site:instagram.com -inurl:/p/ -inurl:/explore`,
+    ];
+  }
+
+  return buildTargetAiGoogleQueries({ niche: input.niche, locationLabel: input.locationLabel, maxQueries: 8 });
 }
 
 export function formatTargetAiGoogleQueryExample(input: {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildOpenStreetMapEmbedUrl } from "@/lib/geocoding/osm-embed";
 import {
   type AiTargetEligibilityReasonCode,
@@ -16,6 +16,10 @@ type GeocodedPlace = {
   label: string;
   lat: number;
   lon: number;
+};
+
+type ClientTargetAiCandidate = TargetAiSearchCandidate & {
+  displayTitle?: string | null;
 };
 
 type ClientAiTargetSearchWizardProps = {
@@ -55,17 +59,17 @@ function formatFollowers(value: number | null, lang: TargetAiLang) {
   return value.toLocaleString(lang === "fr" ? "fr-FR" : "en-US");
 }
 
-function isPendingCandidate(row: TargetAiSearchCandidate) {
+function isPendingCandidate(row: ClientTargetAiCandidate) {
   return row.verificationStatus === "pending" || row.qualityStatus === "pending_verification";
 }
 
-function hasVerifiedIneligibleSelection(items: TargetAiSearchCandidate[]) {
+function hasVerifiedIneligibleSelection(items: ClientTargetAiCandidate[]) {
   return items.some((item) => item.verificationStatus === "found" && !item.eligible);
 }
 
 function mergeVerifiedCandidates(
-  current: TargetAiSearchCandidate[],
-  verified: TargetAiSearchCandidate[],
+  current: ClientTargetAiCandidate[],
+  verified: ClientTargetAiCandidate[],
 ) {
   const byUsername = new Map(verified.map((row) => [row.username, row]));
   return current.map((row) => byUsername.get(row.username) ?? row);
@@ -87,11 +91,12 @@ export default function ClientAiTargetSearchWizard({
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [searching, setSearching] = useState(false);
   const [validating, setValidating] = useState(false);
-  const [verifying, setVerifying] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [sessionId, setSessionId] = useState("");
-  const [candidates, setCandidates] = useState<TargetAiSearchCandidate[]>([]);
+  const [candidates, setCandidates] = useState<ClientTargetAiCandidate[]>([]);
+  const enrichStartedRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -102,11 +107,12 @@ export default function ClientAiTargetSearchWizard({
     setSelectedLocation(null);
     setSearching(false);
     setValidating(false);
-    setVerifying(false);
+    setEnriching(false);
     setError("");
     setStatusMessage("");
     setSessionId("");
     setCandidates([]);
+    enrichStartedRef.current = false;
   }, [open]);
 
   useEffect(() => {
@@ -136,16 +142,45 @@ export default function ClientAiTargetSearchWizard({
     return () => window.clearTimeout(timer);
   }, [accountId, lang, locationQuery, open, step]);
 
+  async function enrichCandidates(usernames: string[]) {
+    if (!sessionId || usernames.length === 0) return;
+    setEnriching(true);
+    try {
+      const data = await readApiResponse<{ candidates: ClientTargetAiCandidate[] }>(
+        await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/ai-search/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            usernames,
+            niche: niche.trim(),
+            location: selectedLocation ? { label: selectedLocation.label } : null,
+          }),
+        }),
+        lang,
+        "target_ai_provider_error",
+      );
+      setCandidates((rows) => mergeVerifiedCandidates(rows, Array.isArray(data.candidates) ? data.candidates : []));
+    } catch {
+      // Keep suggestions visible even if background enrichment fails quietly.
+    } finally {
+      setEnriching(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open || searching || !sessionId || candidates.length === 0 || enrichStartedRef.current) return;
+    enrichStartedRef.current = true;
+    const topPending = candidates.filter(isPendingCandidate).slice(0, 12).map((row) => row.username);
+    if (topPending.length > 0) void enrichCandidates(topPending);
+  }, [open, searching, sessionId, candidates]);
+
   const selectedCandidates = candidates;
-  const pendingPresent = selectedCandidates.some(isPendingCandidate);
   const ineligiblePresent = hasVerifiedIneligibleSelection(selectedCandidates);
-  const eligibleUsernames = selectedCandidates.filter((row) => row.verificationStatus === "found" && row.eligible).map((row) => row.username);
-  const pendingUsernames = selectedCandidates.filter(isPendingCandidate).map((row) => row.username);
-  const canVerify = sessionId && pendingUsernames.length > 0 && !verifying && !validating;
-  const canValidate = selectedCandidates.length > 0 && !pendingPresent && !ineligiblePresent && eligibleUsernames.length > 0 && !validating && !verifying;
+  const canValidate = selectedCandidates.length > 0 && !validating && !searching;
 
   function closeWizard() {
-    if (searching || validating || verifying) return;
+    if (searching || validating || enriching) return;
     onClose();
   }
 
@@ -154,9 +189,10 @@ export default function ClientAiTargetSearchWizard({
     setError("");
     setStatusMessage("");
     setStep(3);
+    enrichStartedRef.current = false;
     try {
       const data = await readApiResponse<{
-        candidates: TargetAiSearchCandidate[];
+        candidates: ClientTargetAiCandidate[];
         session_id?: string | null;
       }>(
         await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/ai-search`, {
@@ -196,38 +232,47 @@ export default function ClientAiTargetSearchWizard({
     }
   }
 
-  async function verifySelection() {
-    if (!canVerify) return;
-    setVerifying(true);
-    setError("");
-    try {
-      const data = await readApiResponse<{ candidates: TargetAiSearchCandidate[] }>(
-        await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/ai-search/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            session_id: sessionId,
-            usernames: pendingUsernames,
-            niche: niche.trim(),
-            location: selectedLocation ? { label: selectedLocation.label } : null,
-          }),
-        }),
-        lang,
-        "target_ai_provider_error",
-      );
-      setCandidates((rows) => mergeVerifiedCandidates(rows, Array.isArray(data.candidates) ? data.candidates : []));
-    } catch (e) {
-      setError(e instanceof TargetAiRequestError ? e.message : copy.searchError);
-    } finally {
-      setVerifying(false);
-    }
-  }
-
   async function validateSelection() {
     if (!canValidate) return;
     setValidating(true);
     setError("");
+    setStatusMessage("");
     try {
+      const selectedUsernames = selectedCandidates.map((row) => row.username);
+      const pendingUsernames = selectedCandidates.filter(isPendingCandidate).map((row) => row.username);
+      let workingCandidates = selectedCandidates;
+
+      if (pendingUsernames.length > 0 && sessionId) {
+        const data = await readApiResponse<{ candidates: ClientTargetAiCandidate[] }>(
+          await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/ai-search/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              usernames: pendingUsernames,
+              niche: niche.trim(),
+              location: selectedLocation ? { label: selectedLocation.label } : null,
+            }),
+          }),
+          lang,
+          "target_ai_provider_error",
+        );
+        workingCandidates = mergeVerifiedCandidates(workingCandidates, Array.isArray(data.candidates) ? data.candidates : []);
+        setCandidates(workingCandidates);
+      }
+
+      const eligibleUsernames = workingCandidates
+        .filter((row) => selectedUsernames.includes(row.username) && row.verificationStatus === "found" && row.eligible)
+        .map((row) => row.username);
+      const rejectedCount = workingCandidates
+        .filter((row) => selectedUsernames.includes(row.username) && row.verificationStatus === "found" && !row.eligible)
+        .length;
+
+      if (eligibleUsernames.length === 0) {
+        setError(copy.blockedValidation);
+        return;
+      }
+
       await readApiResponse(
         await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets`, {
           method: "POST",
@@ -240,7 +285,11 @@ export default function ClientAiTargetSearchWizard({
         lang,
         "target_ai_provider_error",
       );
-      await onValidated(copy.validateSuccess(eligibleUsernames.length));
+
+      const message = rejectedCount > 0
+        ? `${copy.validateSuccess(eligibleUsernames.length)} ${copy.partialValidation}`
+        : copy.validateSuccess(eligibleUsernames.length);
+      await onValidated(message);
       onClose();
     } catch (e) {
       setError(e instanceof TargetAiRequestError ? e.message : copy.validateError);
@@ -253,8 +302,8 @@ export default function ClientAiTargetSearchWizard({
     setCandidates((rows) => rows.filter((row) => row.username !== username));
   }
 
-  function statusLabel(row: TargetAiSearchCandidate) {
-    if (isPendingCandidate(row)) return copy.pendingVerification;
+  function statusLabel(row: ClientTargetAiCandidate) {
+    if (isPendingCandidate(row)) return copy.suggestedProfile;
     if (row.eligible) return copy.eligible;
     return copy.ineligible;
   }
@@ -360,7 +409,7 @@ export default function ClientAiTargetSearchWizard({
               </div>
             ) : (
               <>
-                {pendingPresent ? <p className="cd-ai-hint">{copy.verifySelectionHint}</p> : null}
+                {enriching ? <p className="cd-ai-hint">{copy.enriching}</p> : null}
                 {ineligiblePresent ? <p className="cd-ai-warning">{copy.blockedValidation}</p> : null}
                 {statusMessage ? <p className="cd-ai-hint">{statusMessage}</p> : null}
                 <div className="cd-ai-results">
@@ -384,11 +433,9 @@ export default function ClientAiTargetSearchWizard({
                         <div className="cd-ai-row-meta">
                           {row.verificationStatus === "found" ? (
                             <span>{formatFollowers(row.followersCount, lang)} {copy.followers}</span>
-                          ) : (
-                            <span>{copy.serpFoundLabel}</span>
-                          )}
-                          {row.serpSnippet ? <span>{row.serpSnippet.slice(0, 120)}</span> : null}
-                          {!row.eligible && !isPendingCandidate(row) && row.ineligibleReasonCode ? (
+                          ) : null}
+                          {row.displayTitle ? <span>{row.displayTitle.slice(0, 120)}</span> : null}
+                          {!row.eligible && row.verificationStatus === "found" && row.ineligibleReasonCode ? (
                             <span>{targetAiEligibilityLabel(lang, row.ineligibleReasonCode as AiTargetEligibilityReasonCode)}</span>
                           ) : null}
                         </div>
@@ -405,17 +452,12 @@ export default function ClientAiTargetSearchWizard({
                   ))}
                 </div>
                 <div className="cd-ai-actions">
-                  <button type="button" className="cd-ai-back" onClick={() => setStep(2)} disabled={validating || verifying}>{copy.back}</button>
-                  {canVerify ? (
-                    <button type="button" className="cd-dwr-import secondary" disabled={!canVerify} onClick={() => void verifySelection()}>
-                      {verifying ? copy.loadingTitle : copy.verifySelection}
-                    </button>
-                  ) : null}
+                  <button type="button" className="cd-ai-back" onClick={() => setStep(2)} disabled={validating}>{copy.back}</button>
                   <button type="button" className="cd-dwr-import" disabled={!canValidate} onClick={() => void validateSelection()}>
-                    {copy.validate}
+                    {validating ? copy.enriching : copy.validate}
                   </button>
                 </div>
-                <button type="button" className="cd-ai-secondary" onClick={() => { setStep(1); setCandidates([]); setSessionId(""); setStatusMessage(""); setError(""); }}>
+                <button type="button" className="cd-ai-secondary" onClick={() => { setStep(1); setCandidates([]); setSessionId(""); setStatusMessage(""); setError(""); enrichStartedRef.current = false; }}>
                   {copy.newSearch}
                 </button>
               </>
