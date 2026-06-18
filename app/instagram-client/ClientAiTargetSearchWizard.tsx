@@ -10,6 +10,7 @@ import { targetAiCopy, targetAiEligibilityLabel, type TargetAiLang } from "@/lib
 import type { TargetAiErrorCode } from "@/lib/instagram-client/target-ai-config";
 import { TargetAiRequestError, targetAiErrorMessage } from "@/lib/instagram-client/target-ai-errors";
 import type { TargetAiSearchCandidate } from "@/lib/instagram-client/target-ai-search-service";
+import { AiCandidateAvatar } from "./TargetAvatar";
 
 type GeocodedPlace = {
   id: string;
@@ -53,30 +54,6 @@ async function readApiResponse<T>(
 function formatFollowers(value: number | null, lang: TargetAiLang) {
   if (value == null) return "—";
   return value.toLocaleString(lang === "fr" ? "fr-FR" : "en-US");
-}
-
-function AiResultAvatar({
-  username,
-  avatarUrl,
-  avatarAvailable,
-  accountId,
-}: {
-  username: string;
-  avatarUrl: string | null;
-  avatarAvailable?: boolean;
-  accountId: string;
-}) {
-  const [failed, setFailed] = useState(false);
-  const initial = username.replace(/^@+/, "").charAt(0).toUpperCase() || "?";
-  const proxySrc = avatarAvailable && avatarUrl ? avatarUrl : null;
-  if (proxySrc && !failed) {
-    return (
-      <span className="cd-ai-av cd-ai-av-img">
-        <img src={proxySrc} alt="" width={40} height={40} loading="lazy" decoding="async" onError={() => setFailed(true)} />
-      </span>
-    );
-  }
-  return <span className="cd-ai-av"><i>{initial}</i></span>;
 }
 
 export default function ClientAiTargetSearchWizard({
@@ -332,11 +309,11 @@ export default function ClientAiTargetSearchWizard({
                     <p className="cd-ai-hint">{copy.emptySelection}</p>
                   ) : selectedCandidates.map((row) => (
                     <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}`}>
-                      <AiResultAvatar
+                      <AiCandidateAvatar
+                        accountId={accountId}
                         username={row.username}
                         avatarUrl={row.avatarUrl}
                         avatarAvailable={row.avatarAvailable}
-                        accountId={accountId}
                       />
                       <div className="cd-ai-row-main">
                         <div className="cd-ai-row-top">

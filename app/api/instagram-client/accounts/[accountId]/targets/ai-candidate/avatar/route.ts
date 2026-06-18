@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { safeExternalImageUrl } from "@/lib/instagram-dashboard/safe-external-url";
 import { authorizeClientInstagramAccount, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
-import { lookupInstagramPublicProfile, normalizeInstagramPublicUsername } from "@/lib/instagram-public-profile-lookup";
+import { resolveTargetAvatarUpstream } from "@/lib/instagram-client/target-avatar-proxy-server";
+import { normalizeInstagramPublicUsername } from "@/lib/instagram-public-profile-lookup";
 
 export const dynamic = "force-dynamic";
-
-const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 export async function GET(
   request: Request,
@@ -28,35 +26,16 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "Missing username." }, { status: 400 });
   }
 
-  const lookup = await lookupInstagramPublicProfile(username);
-  const avatarUrl = safeExternalImageUrl(lookup.avatar_url ?? "");
-  if (lookup.status !== "found" || !avatarUrl) {
-    return NextResponse.json({ ok: false, error: "avatar_not_found" }, { status: 404 });
-  }
-
-  try {
-    const upstream = await fetch(avatarUrl, {
-      headers: {
-        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        "User-Agent": "Mozilla/5.0",
-      },
-      cache: "no-store",
-    });
-    if (!upstream.ok) return NextResponse.json({ ok: false, error: "avatar_unavailable" }, { status: 502 });
-
-    const contentType = upstream.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
-    if (!allowedImageTypes.has(contentType)) {
-      return NextResponse.json({ ok: false, error: "avatar_unavailable" }, { status: 502 });
-    }
-
-    return new NextResponse(upstream.body, {
-      status: 200,
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "private, max-age=900",
-      },
-    });
-  } catch {
+  const upstream = await resolveTargetAvatarUpstream({ username });
+  if (!upstream?.body) {
     return NextResponse.json({ ok: false, error: "avatar_unavailable" }, { status: 502 });
   }
+
+  return new NextResponse(upstream.body, {
+    status: 200,
+    headers: {
+      "Content-Type": upstream.contentType,
+      "Cache-Control": "private, max-age=300",
+    },
+  });
 }
