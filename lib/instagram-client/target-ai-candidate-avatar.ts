@@ -20,6 +20,10 @@ export function serializeTargetAiCandidateForClient(
     verificationStatus: string;
     qualityStatus: string;
     relevanceScore?: number;
+    serpTitle?: string | null;
+    serpSnippet?: string | null;
+    serpSourceQuery?: string | null;
+    serpPosition?: number | null;
   },
 ) {
   const avatarProxyUrl = candidate.avatarAvailable
@@ -39,5 +43,9 @@ export function serializeTargetAiCandidateForClient(
     verificationStatus: candidate.verificationStatus,
     qualityStatus: candidate.qualityStatus,
     relevanceScore: candidate.relevanceScore ?? null,
+    serpTitle: candidate.serpTitle ?? null,
+    serpSnippet: candidate.serpSnippet ?? null,
+    serpSourceQuery: candidate.serpSourceQuery ?? null,
+    serpPosition: candidate.serpPosition ?? null,
   };
 }

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildOpenStreetMapEmbedUrl } from "@/lib/geocoding/osm-embed";
 import {
-  hasIneligibleAiTargetSelection,
   type AiTargetEligibilityReasonCode,
 } from "@/lib/instagram-client/target-ai-eligibility";
 import { targetAiCopy, targetAiEligibilityLabel, type TargetAiLang } from "@/lib/instagram-client/target-ai-copy";
@@ -56,6 +55,22 @@ function formatFollowers(value: number | null, lang: TargetAiLang) {
   return value.toLocaleString(lang === "fr" ? "fr-FR" : "en-US");
 }
 
+function isPendingCandidate(row: TargetAiSearchCandidate) {
+  return row.verificationStatus === "pending" || row.qualityStatus === "pending_verification";
+}
+
+function hasVerifiedIneligibleSelection(items: TargetAiSearchCandidate[]) {
+  return items.some((item) => item.verificationStatus === "found" && !item.eligible);
+}
+
+function mergeVerifiedCandidates(
+  current: TargetAiSearchCandidate[],
+  verified: TargetAiSearchCandidate[],
+) {
+  const byUsername = new Map(verified.map((row) => [row.username, row]));
+  return current.map((row) => byUsername.get(row.username) ?? row);
+}
+
 export default function ClientAiTargetSearchWizard({
   open,
   onClose,
@@ -72,8 +87,10 @@ export default function ClientAiTargetSearchWizard({
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [searching, setSearching] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [candidates, setCandidates] = useState<TargetAiSearchCandidate[]>([]);
 
   useEffect(() => {
@@ -85,8 +102,10 @@ export default function ClientAiTargetSearchWizard({
     setSelectedLocation(null);
     setSearching(false);
     setValidating(false);
+    setVerifying(false);
     setError("");
     setStatusMessage("");
+    setSessionId("");
     setCandidates([]);
   }, [open]);
 
@@ -118,12 +137,15 @@ export default function ClientAiTargetSearchWizard({
   }, [accountId, lang, locationQuery, open, step]);
 
   const selectedCandidates = candidates;
-  const ineligiblePresent = hasIneligibleAiTargetSelection(selectedCandidates);
-  const eligibleUsernames = selectedCandidates.filter((row) => row.eligible).map((row) => row.username);
-  const canValidate = selectedCandidates.length > 0 && !ineligiblePresent && eligibleUsernames.length > 0 && !validating;
+  const pendingPresent = selectedCandidates.some(isPendingCandidate);
+  const ineligiblePresent = hasVerifiedIneligibleSelection(selectedCandidates);
+  const eligibleUsernames = selectedCandidates.filter((row) => row.verificationStatus === "found" && row.eligible).map((row) => row.username);
+  const pendingUsernames = selectedCandidates.filter(isPendingCandidate).map((row) => row.username);
+  const canVerify = sessionId && pendingUsernames.length > 0 && !verifying && !validating;
+  const canValidate = selectedCandidates.length > 0 && !pendingPresent && !ineligiblePresent && eligibleUsernames.length > 0 && !validating && !verifying;
 
   function closeWizard() {
-    if (searching || validating) return;
+    if (searching || validating || verifying) return;
     onClose();
   }
 
@@ -135,6 +157,7 @@ export default function ClientAiTargetSearchWizard({
     try {
       const data = await readApiResponse<{
         candidates: TargetAiSearchCandidate[];
+        session_id?: string | null;
       }>(
         await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/ai-search`, {
           method: "POST",
@@ -150,11 +173,13 @@ export default function ClientAiTargetSearchWizard({
         "target_ai_provider_error",
       );
       setCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setSessionId(typeof data.session_id === "string" ? data.session_id : "");
       if (!data.candidates?.length) {
         setStatusMessage(targetAiErrorMessage(lang, "no_candidates_found"));
       }
     } catch (e) {
       setCandidates([]);
+      setSessionId("");
       if (e instanceof TargetAiRequestError) {
         if (e.code === "no_candidates_found") {
           setStatusMessage(e.message);
@@ -168,6 +193,33 @@ export default function ClientAiTargetSearchWizard({
       }
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function verifySelection() {
+    if (!canVerify) return;
+    setVerifying(true);
+    setError("");
+    try {
+      const data = await readApiResponse<{ candidates: TargetAiSearchCandidate[] }>(
+        await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets/ai-search/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            usernames: pendingUsernames,
+            niche: niche.trim(),
+            location: selectedLocation ? { label: selectedLocation.label } : null,
+          }),
+        }),
+        lang,
+        "target_ai_provider_error",
+      );
+      setCandidates((rows) => mergeVerifiedCandidates(rows, Array.isArray(data.candidates) ? data.candidates : []));
+    } catch (e) {
+      setError(e instanceof TargetAiRequestError ? e.message : copy.searchError);
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -199,6 +251,12 @@ export default function ClientAiTargetSearchWizard({
 
   function removeCandidate(username: string) {
     setCandidates((rows) => rows.filter((row) => row.username !== username));
+  }
+
+  function statusLabel(row: TargetAiSearchCandidate) {
+    if (isPendingCandidate(row)) return copy.pendingVerification;
+    if (row.eligible) return copy.eligible;
+    return copy.ineligible;
   }
 
   if (!open) return null;
@@ -302,13 +360,14 @@ export default function ClientAiTargetSearchWizard({
               </div>
             ) : (
               <>
+                {pendingPresent ? <p className="cd-ai-hint">{copy.verifySelectionHint}</p> : null}
                 {ineligiblePresent ? <p className="cd-ai-warning">{copy.blockedValidation}</p> : null}
                 {statusMessage ? <p className="cd-ai-hint">{statusMessage}</p> : null}
                 <div className="cd-ai-results">
                   {selectedCandidates.length === 0 && !statusMessage ? (
                     <p className="cd-ai-hint">{copy.emptySelection}</p>
                   ) : selectedCandidates.map((row) => (
-                    <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}`}>
+                    <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}${isPendingCandidate(row) ? " pending" : ""}`}>
                       <AiCandidateAvatar
                         accountId={accountId}
                         username={row.username}
@@ -318,13 +377,18 @@ export default function ClientAiTargetSearchWizard({
                       <div className="cd-ai-row-main">
                         <div className="cd-ai-row-top">
                           <a href={row.profileUrl} target="_blank" rel="noopener noreferrer" className="cd-ai-handle">@{row.username}</a>
-                          <span className={`cd-ai-pill${row.eligible ? " ok" : " bad"}`}>
-                            {row.eligible ? copy.eligible : copy.ineligible}
+                          <span className={`cd-ai-pill${row.eligible ? " ok" : isPendingCandidate(row) ? " pending" : " bad"}`}>
+                            {statusLabel(row)}
                           </span>
                         </div>
                         <div className="cd-ai-row-meta">
-                          <span>{formatFollowers(row.followersCount, lang)} {copy.followers}</span>
-                          {!row.eligible && row.ineligibleReasonCode ? (
+                          {row.verificationStatus === "found" ? (
+                            <span>{formatFollowers(row.followersCount, lang)} {copy.followers}</span>
+                          ) : (
+                            <span>{copy.serpFoundLabel}</span>
+                          )}
+                          {row.serpSnippet ? <span>{row.serpSnippet.slice(0, 120)}</span> : null}
+                          {!row.eligible && !isPendingCandidate(row) && row.ineligibleReasonCode ? (
                             <span>{targetAiEligibilityLabel(lang, row.ineligibleReasonCode as AiTargetEligibilityReasonCode)}</span>
                           ) : null}
                         </div>
@@ -341,12 +405,17 @@ export default function ClientAiTargetSearchWizard({
                   ))}
                 </div>
                 <div className="cd-ai-actions">
-                  <button type="button" className="cd-ai-back" onClick={() => setStep(2)} disabled={validating}>{copy.back}</button>
+                  <button type="button" className="cd-ai-back" onClick={() => setStep(2)} disabled={validating || verifying}>{copy.back}</button>
+                  {canVerify ? (
+                    <button type="button" className="cd-dwr-import secondary" disabled={!canVerify} onClick={() => void verifySelection()}>
+                      {verifying ? copy.loadingTitle : copy.verifySelection}
+                    </button>
+                  ) : null}
                   <button type="button" className="cd-dwr-import" disabled={!canValidate} onClick={() => void validateSelection()}>
                     {copy.validate}
                   </button>
                 </div>
-                <button type="button" className="cd-ai-secondary" onClick={() => { setStep(1); setCandidates([]); setStatusMessage(""); setError(""); }}>
+                <button type="button" className="cd-ai-secondary" onClick={() => { setStep(1); setCandidates([]); setSessionId(""); setStatusMessage(""); setError(""); }}>
                   {copy.newSearch}
                 </button>
               </>

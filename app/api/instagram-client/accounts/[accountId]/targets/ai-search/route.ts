@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { readString, rejectTechnicalClientFields } from "@/lib/instagram-client/_utils";
 import { authorizeClientTargetAiRoute, jsonTargetAiError } from "@/lib/instagram-client/target-ai-route-auth";
 import { serializeTargetAiCandidateForClient } from "@/lib/instagram-client/target-ai-candidate-avatar";
-import { searchTargetAccountsWithAi } from "@/lib/instagram-client/target-ai-search-service";
+import { searchTargetAccountsWithAi, type TargetAiSearchResult } from "@/lib/instagram-client/target-ai-search-service";
+import type { TargetAiSearchV2Result } from "@/lib/instagram-client/target-ai-search-v2-service";
 
 export const dynamic = "force-dynamic";
+
+function isV2SearchResult(result: TargetAiSearchResult | TargetAiSearchV2Result): result is TargetAiSearchV2Result {
+  return "mode" in result && result.mode === "google_first_v2";
+}
 
 type SearchBody = {
   niche?: string;
@@ -47,13 +52,14 @@ export async function POST(
     return jsonTargetAiError("invalid_niche", 400);
   }
 
+  const normalizedAccountId = accountId?.trim() ?? "";
   const result = await searchTargetAccountsWithAi({
+    accountId: normalizedAccountId,
     niche,
     location: readLocation(body?.location),
     maxCandidates: typeof body?.max_candidates === "number" ? body.max_candidates : undefined,
   });
 
-  const normalizedAccountId = accountId?.trim() ?? "";
   const clientCandidates = result.candidates.map((candidate) => serializeTargetAiCandidateForClient(normalizedAccountId, candidate));
 
   if (result.status === "no_candidates") {
@@ -89,7 +95,16 @@ export async function POST(
     data: {
       status: result.status,
       provider: result.provider,
+      mode: isV2SearchResult(result) ? result.mode : "profile_first_v1",
+      session_id: isV2SearchResult(result) ? result.session_id : null,
       candidates: clientCandidates,
+      unverified_candidates: isV2SearchResult(result)
+        ? result.unverifiedCandidates.map((candidate) => serializeTargetAiCandidateForClient(normalizedAccountId, candidate))
+        : [],
+      verified_candidates: isV2SearchResult(result)
+        ? result.verifiedCandidates.map((candidate) => serializeTargetAiCandidateForClient(normalizedAccountId, candidate))
+        : clientCandidates,
+      verification_summary: isV2SearchResult(result) ? result.verificationSummary : null,
       summary: {
         suggested_count: result.suggested_count,
         verified_count: result.verified_count,
@@ -100,6 +115,8 @@ export async function POST(
         found_count: result.debug.found_count,
         eligible_count: result.debug.eligible_count,
         displayed_count: result.debug.displayed_count,
+        serp_candidates_count: result.debug.extracted_usernames_count,
+        stopped_reason: result.debug.stopped_reason,
       },
     },
   });

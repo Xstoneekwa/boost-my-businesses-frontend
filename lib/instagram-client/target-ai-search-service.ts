@@ -44,6 +44,10 @@ export type TargetAiSearchCandidate = {
   verificationStatus: string;
   qualityStatus: string;
   relevanceScore: number;
+  serpTitle?: string | null;
+  serpSnippet?: string | null;
+  serpSourceQuery?: string | null;
+  serpPosition?: number | null;
 };
 
 export type TargetAiSearchDebugSummary = {
@@ -497,7 +501,7 @@ function resolveStoppedReason(input: {
   return `found_count=${input.profileStats.found + input.profileStats.foundPartial}`;
 }
 
-export async function searchTargetAccountsWithAi(input: {
+export async function searchTargetAccountsWithAiV1(input: {
   niche: string;
   location?: TargetAiSearchLocation | null;
   maxCandidates?: number;
@@ -730,4 +734,26 @@ export async function searchTargetAccountsWithAi(input: {
     error_code: errorCode,
     debug,
   };
+}
+
+export async function searchTargetAccountsWithAi(input: {
+  accountId: string;
+  niche: string;
+  location?: TargetAiSearchLocation | null;
+  maxCandidates?: number;
+}): Promise<TargetAiSearchResult | import("./target-ai-search-v2-service.ts").TargetAiSearchV2Result> {
+  const { isTargetAiV2Enabled, searchTargetAccountsWithAiV2 } = await import("./target-ai-search-v2-service.ts");
+  if (isTargetAiV2Enabled()) {
+    return searchTargetAccountsWithAiV2({
+      accountId: input.accountId,
+      niche: input.niche,
+      location: input.location,
+      maxCandidates: input.maxCandidates,
+    });
+  }
+  return searchTargetAccountsWithAiV1({
+    niche: input.niche,
+    location: input.location,
+    maxCandidates: input.maxCandidates,
+  });
 }

@@ -24,13 +24,19 @@ export function targetAiCopy(lang: TargetAiLang) {
     launchSearch: fr ? "Lancer la recherche" : "Launch search",
     step3Title: fr ? "Confirmez vos comptes cibles" : "Confirm your target accounts",
     step3Body: fr
-      ? "Retirez les comptes que vous ne souhaitez pas utiliser. Seuls les comptes éligibles pourront être validés."
-      : "Remove accounts you do not want to use. Only eligible accounts can be validated.",
+      ? "Consultez les comptes trouvés via Google. Les comptes non vérifiés restent visibles ; vérifiez votre sélection avant validation."
+      : "Review accounts found via Google. Unverified accounts stay visible; verify your selection before adding.",
     loadingTitle: fr ? "Recherche en cours…" : "Searching…",
     loadingBody: fr
-      ? "Nous analysons votre niche et vérifions les comptes proposés. Cela peut prendre jusqu’à deux minutes."
-      : "We are analyzing your niche and verifying suggested accounts. This may take up to two minutes.",
-    validate: fr ? "Valider la sélection" : "Validate selection",
+      ? "Nous recherchons des profils Instagram pertinents via Google. L’affichage arrive en quelques secondes."
+      : "We are searching relevant Instagram profiles via Google. Results appear in a few seconds.",
+    validate: fr ? "Valider les comptes éligibles" : "Add eligible accounts",
+    pendingVerification: fr ? "À vérifier" : "Pending verification",
+    verifySelection: fr ? "Vérifier la sélection" : "Verify selection",
+    verifySelectionHint: fr
+      ? "Vérifiez les comptes sélectionnés avant de les ajouter à votre ciblage."
+      : "Verify selected accounts before adding them to your targeting.",
+    serpFoundLabel: fr ? "Trouvé via Google" : "Found via Google",
     newSearch: fr ? "Nouvelle recherche" : "Start a new search",
     remove: fr ? "Retirer" : "Remove",
     openInstagram: fr ? "Ouvrir sur Instagram" : "Open on Instagram",
