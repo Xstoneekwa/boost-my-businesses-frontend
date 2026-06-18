@@ -49,7 +49,11 @@ function readVerifyErrorReason(lookup: InstagramPublicProfileLookupResult): Targ
 }
 
 function shouldRetryLookup(reason: TargetAiProfileVerifyErrorReason) {
-  return reason === "rate_limited" || reason === "provider_throttled" || reason === "provider_timeout";
+  return reason === "rate_limited"
+    || reason === "provider_throttled"
+    || reason === "provider_timeout"
+    || reason === "provider_unavailable"
+    || reason === "provider_http_error";
 }
 
 function recordErrorReason(stats: TargetAiProfileVerifyStats, reason: string) {
@@ -75,7 +79,7 @@ export function createTargetAiProfileVerifyStats(): TargetAiProfileVerifyStats {
 }
 
 export function readTargetAiProfileLookupConcurrency(configured: number, rateLimitHits = 0) {
-  if (rateLimitHits >= 4) return 1;
+  if (rateLimitHits >= 12) return 1;
   const parsed = Number.isFinite(configured) ? configured : 4;
   return Math.min(Math.max(parsed, 1), 2);
 }
@@ -91,7 +95,7 @@ export async function verifyTargetAiProfileUsername(
 ) {
   if (runtime) {
     await runtime.waitForCooldown();
-    if (runtime.isTimeExceeded()) runtime.markStopped("time_budget");
+    if (runtime.isTimeExceeded()) runtime.markStopped("time_budget_reached");
   }
 
   const lookup = await lookupInstagramPublicProfile(username);
@@ -120,7 +124,6 @@ export async function verifyTargetAiProfileUsername(
     && runtime?.canRetryProfileLookup()
     && !runtime.isTimeExceeded()
   ) {
-    runtime.recordRateLimit();
     runtime.recordRetry();
     await new Promise((resolve) => setTimeout(resolve, runtime.limits.rateLimitCooldownMs));
     const retryLookup = await lookupInstagramPublicProfile(username, { disableCache: true });
@@ -193,8 +196,16 @@ export function applyTargetAiProfileVerifyStats(
   stats.providerError += 1;
 }
 
+const NON_PROVIDER_ERROR_REASONS = new Set([
+  "not_found",
+  "rate_limited",
+  "provider_throttled",
+  "username_invalid",
+]);
+
 export function topTargetAiProviderErrorReasons(stats: TargetAiProfileVerifyStats, limit = 6) {
   return [...stats.errorReasons.entries()]
+    .filter(([reason]) => !NON_PROVIDER_ERROR_REASONS.has(reason))
     .map(([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count)
     .slice(0, limit);

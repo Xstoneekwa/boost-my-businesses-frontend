@@ -16,6 +16,9 @@ export type TargetAiSearchRuntimeLimits = {
   rateLimitCooldownMs: number;
   minCandidateScore: number;
   targetEligibleCount: number;
+  minDisplayedBeforeStop: number;
+  thirdPassDisplayThreshold: number;
+  broadenedDisplayThreshold: number;
   thirdPassEnabled: boolean;
   maxDiscoveredUsernames: number;
   maxProfileChecks: number;
@@ -23,16 +26,19 @@ export type TargetAiSearchRuntimeLimits = {
 
 export function readTargetAiSearchRuntimeLimits(config: ResolvedTargetingAiConfig): TargetAiSearchRuntimeLimits {
   return {
-    maxLatencyMs: readIntEnv("TARGET_AI_MAX_LATENCY_MS", 120_000, 45_000, 180_000),
-    primaryQueryLimit: readIntEnv("TARGET_AI_PRIMARY_DISCOVERY_QUERY_LIMIT", 10, 6, 14),
-    broadenedQueryLimit: readIntEnv("TARGET_AI_BROADENED_DISCOVERY_QUERY_LIMIT", 8, 4, 12),
-    complementaryQueryLimit: readIntEnv("TARGET_AI_COMPLEMENTARY_DISCOVERY_QUERY_LIMIT", 6, 3, 10),
-    rateLimitCooldownMs: readIntEnv("TARGET_AI_RATE_LIMIT_COOLDOWN_MS", 2_200, 1_000, 6_000),
-    minCandidateScore: readIntEnv("TARGET_AI_MIN_CANDIDATE_SCORE_BEFORE_LOOKUP", 0, -5, 10),
+    maxLatencyMs: readIntEnv("TARGET_AI_MAX_LATENCY_MS", 120_000, 60_000, 180_000),
+    primaryQueryLimit: readIntEnv("TARGET_AI_PRIMARY_DISCOVERY_QUERY_LIMIT", 14, 10, 18),
+    broadenedQueryLimit: readIntEnv("TARGET_AI_BROADENED_DISCOVERY_QUERY_LIMIT", 12, 8, 16),
+    complementaryQueryLimit: readIntEnv("TARGET_AI_COMPLEMENTARY_DISCOVERY_QUERY_LIMIT", 8, 4, 12),
+    rateLimitCooldownMs: readIntEnv("TARGET_AI_RATE_LIMIT_COOLDOWN_MS", 1_800, 800, 5_000),
+    minCandidateScore: readIntEnv("TARGET_AI_MIN_CANDIDATE_SCORE_BEFORE_LOOKUP", -20, -30, 10),
     targetEligibleCount: config.min_eligible_target,
+    minDisplayedBeforeStop: readIntEnv("TARGET_AI_MIN_DISPLAYED_BEFORE_STOP", 15, 10, 30),
+    thirdPassDisplayThreshold: readIntEnv("TARGET_AI_THIRD_PASS_DISPLAY_THRESHOLD", 10, 6, 20),
+    broadenedDisplayThreshold: readIntEnv("TARGET_AI_BROADENED_DISPLAY_THRESHOLD", 15, 10, 25),
     thirdPassEnabled: process.env.TARGET_AI_THIRD_PASS_ENABLED !== "false",
-    maxDiscoveredUsernames: readIntEnv("TARGET_AI_MAX_DISCOVERED_USERNAMES", 70, 30, 100),
-    maxProfileChecks: Math.min(Math.max(config.max_searchapi_checks, 50), 80),
+    maxDiscoveredUsernames: readIntEnv("TARGET_AI_MAX_DISCOVERED_USERNAMES", 100, 40, 120),
+    maxProfileChecks: Math.min(Math.max(config.max_searchapi_checks, 60), 100),
   };
 }
 
@@ -57,17 +63,27 @@ export class TargetAiSearchRuntime {
     return this.elapsedMs(now) >= this.limits.maxLatencyMs;
   }
 
-  isRateLimitSevere() {
-    return this.rateLimitHits >= 8;
+  /** Soft throttle: slow down but keep checking extracted candidates. */
+  shouldSlowDownProfileLookups() {
+    return this.rateLimitHits >= 10;
   }
 
-  shouldThrottleDiscovery() {
-    return this.rateLimitHits >= 6;
+  /** Hard stop: only when throttling is extreme and we already tried enough. */
+  isRateLimitHardStop() {
+    return this.rateLimitHits >= 24;
+  }
+
+  /** Discovery can pause new queries under pressure, but profile queue should continue. */
+  shouldPauseDiscovery() {
+    return this.rateLimitHits >= 18;
   }
 
   recordRateLimit(now = Date.now()) {
     this.rateLimitHits += 1;
-    this.cooldownUntilMs = Math.max(this.cooldownUntilMs, now + this.limits.rateLimitCooldownMs);
+    const backoff = this.shouldSlowDownProfileLookups()
+      ? this.limits.rateLimitCooldownMs * 1.5
+      : this.limits.rateLimitCooldownMs;
+    this.cooldownUntilMs = Math.max(this.cooldownUntilMs, now + backoff);
   }
 
   async waitForCooldown(now = Date.now()) {
@@ -78,7 +94,7 @@ export class TargetAiSearchRuntime {
   }
 
   canRetryProfileLookup() {
-    return this.rateLimitHits < 5 && this.retriesUsed < 8;
+    return !this.isRateLimitHardStop() && this.retriesUsed < 16;
   }
 
   recordRetry() {
@@ -86,8 +102,8 @@ export class TargetAiSearchRuntime {
   }
 
   profileConcurrency(configured: number) {
-    if (this.isRateLimitSevere()) return 1;
-    if (this.rateLimitHits >= 4) return 1;
+    if (this.isRateLimitHardStop()) return 1;
+    if (this.shouldSlowDownProfileLookups()) return 1;
     return Math.min(Math.max(configured, 1), 2);
   }
 

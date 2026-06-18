@@ -204,15 +204,24 @@ function shouldStopProfileVerification(input: {
   runtime: TargetAiSearchRuntime;
 }) {
   if (input.runtime.isTimeExceeded()) {
-    input.runtime.markStopped("time_budget");
+    input.runtime.markStopped("time_budget_reached");
     return true;
   }
-  if (input.runtime.isRateLimitSevere()) {
-    input.runtime.markStopped("rate_limit");
+  if (countFound(input.verified) >= input.maxDisplayedResults) {
+    input.runtime.markStopped("max_displayed_reached");
     return true;
   }
-  if (countFound(input.verified) >= input.maxDisplayedResults) return true;
-  if (countEligible(input.verified) >= input.targetEligibleCount) return true;
+  if (countEligible(input.verified) >= input.targetEligibleCount) {
+    input.runtime.markStopped("eligible_target_reached");
+    return true;
+  }
+  if (
+    input.runtime.isRateLimitHardStop()
+    && countFound(input.verified) >= input.runtime.limits.minDisplayedBeforeStop
+  ) {
+    input.runtime.markStopped("rate_limit_hard_stop");
+    return true;
+  }
   return false;
 }
 
@@ -252,7 +261,9 @@ function scoreAndSortDiscoveryCandidates(
     }),
   }));
   const ranked = rankDiscoveryCandidates(scored);
-  const accepted = ranked.filter((row) => row.discoveryScore >= minScore);
+  const accepted = minScore <= -10
+    ? ranked
+    : ranked.filter((row) => row.discoveryScore >= minScore);
   return {
     ranked,
     accepted,
@@ -299,7 +310,10 @@ async function verifyUsernames(
   let stopEarly = false;
 
   await mapWithConcurrency(boundedQueue, concurrency, async (username) => {
-    if (stopEarly || runtime.isTimeExceeded()) {
+    if (stopEarly) return null;
+
+    if (runtime.isTimeExceeded()) {
+      runtime.markStopped("time_budget_reached");
       stopEarly = true;
       return null;
     }
@@ -435,33 +449,52 @@ async function runDiscoveryPass(input: {
 
 function shouldRunBroadenedPass(input: {
   displayCount: number;
-  maxDisplayed: number;
   profileStats: TargetAiProfileVerifyStats;
   runtime: TargetAiSearchRuntime;
   maxChecks: number;
   secondPassEnabled: boolean;
+  displayThreshold: number;
 }) {
   if (!input.secondPassEnabled) return false;
-  if (input.runtime.isTimeExceeded() || input.runtime.isRateLimitSevere()) return false;
-  if (input.displayCount >= input.maxDisplayed) return false;
-  if (input.profileStats.found >= input.maxDisplayed) return false;
-  return input.profileStats.checked < input.maxChecks - 6;
+  if (input.runtime.isTimeExceeded()) return false;
+  if (input.displayCount >= input.displayThreshold) return false;
+  if (input.profileStats.found + input.profileStats.foundPartial >= input.displayThreshold) return false;
+  return input.profileStats.checked < input.maxChecks - 4;
 }
 
 function shouldRunThirdPass(input: {
   displayCount: number;
-  maxDisplayed: number;
   profileStats: TargetAiProfileVerifyStats;
   runtime: TargetAiSearchRuntime;
   maxChecks: number;
   thirdPassEnabled: boolean;
+  displayThreshold: number;
 }) {
   if (!input.thirdPassEnabled) return false;
-  if (input.runtime.isTimeExceeded() || input.runtime.isRateLimitSevere()) return false;
-  const targetFloor = Math.min(20, Math.max(12, Math.floor(input.maxDisplayed * 0.66)));
-  if (input.displayCount >= targetFloor) return false;
-  if (input.profileStats.found >= input.maxDisplayed) return false;
-  return input.profileStats.checked < input.maxChecks - 4;
+  if (input.runtime.isTimeExceeded()) return false;
+  if (input.runtime.isRateLimitHardStop()) return false;
+  if (input.displayCount >= input.displayThreshold) return false;
+  if (input.profileStats.found + input.profileStats.foundPartial >= input.displayThreshold) return false;
+  return input.profileStats.checked < input.maxChecks - 2;
+}
+
+function resolveStoppedReason(input: {
+  runtime: TargetAiSearchRuntime;
+  displayCount: number;
+  maxDisplayed: number;
+  eligibleCount: number;
+  targetEligibleCount: number;
+  profileStats: TargetAiProfileVerifyStats;
+  extractedUsernamesCount: number;
+}) {
+  if (input.runtime.stoppedReason) return input.runtime.stoppedReason;
+  if (input.displayCount >= input.maxDisplayed) return "max_displayed_reached";
+  if (input.eligibleCount >= input.targetEligibleCount) return "eligible_target_reached";
+  if (input.runtime.isTimeExceeded()) return "time_budget_reached";
+  if (input.runtime.isRateLimitHardStop()) return "rate_limit_hard_stop";
+  if (input.extractedUsernamesCount === 0) return "insufficient_candidates";
+  if (input.profileStats.checked >= input.runtime.limits.maxProfileChecks) return "insufficient_candidates";
+  return `found_count=${input.profileStats.found + input.profileStats.foundPartial}`;
 }
 
 export async function searchTargetAccountsWithAi(input: {
@@ -476,6 +509,7 @@ export async function searchTargetAccountsWithAi(input: {
     max_gpt_candidates: typeof input.maxCandidates === "number"
       ? Math.min(Math.max(input.maxCandidates, 12), 80)
       : activeConfig.max_gpt_candidates,
+    max_searchapi_checks: Math.min(Math.max(activeConfig.max_searchapi_checks, 60), 100),
   };
   const runtimeLimits = readTargetAiSearchRuntimeLimits(config);
   const runtime = new TargetAiSearchRuntime(runtimeLimits, startedAt);
@@ -502,7 +536,7 @@ export async function searchTargetAccountsWithAi(input: {
     queryLimit: number,
     currentVerified: TargetAiSearchCandidate[],
   ) {
-    if (runtime.isTimeExceeded() || runtime.isRateLimitSevere()) return currentVerified;
+    if (runtime.isTimeExceeded()) return currentVerified;
 
     const discoveryPass = await runDiscoveryPass({
       niche,
@@ -582,11 +616,11 @@ export async function searchTargetAccountsWithAi(input: {
 
   if (shouldRunBroadenedPass({
     displayCount: displayCandidates.length,
-    maxDisplayed: config.max_displayed_results,
     profileStats,
     runtime,
     maxChecks: runtimeLimits.maxProfileChecks,
     secondPassEnabled: config.second_pass_enabled,
+    displayThreshold: runtimeLimits.broadenedDisplayThreshold,
   })) {
     secondPassUsed = true;
     verified = await executePass("broadened", runtimeLimits.broadenedQueryLimit, verified);
@@ -595,11 +629,11 @@ export async function searchTargetAccountsWithAi(input: {
 
   if (shouldRunThirdPass({
     displayCount: displayCandidates.length,
-    maxDisplayed: config.max_displayed_results,
     profileStats,
     runtime,
     maxChecks: runtimeLimits.maxProfileChecks,
     thirdPassEnabled: runtimeLimits.thirdPassEnabled,
+    displayThreshold: runtimeLimits.thirdPassDisplayThreshold,
   })) {
     thirdPassUsed = true;
     verified = await executePass("complementary", runtimeLimits.complementaryQueryLimit, verified);
@@ -650,10 +684,15 @@ export async function searchTargetAccountsWithAi(input: {
     final_results_count: displayCandidates.length,
     second_pass_used: secondPassUsed,
     third_pass_used: thirdPassUsed,
-    stopped_reason: runtime.stoppedReason
-      ?? (displayCandidates.length < config.max_displayed_results
-        ? `found_count=${profileStats.found + profileStats.foundPartial}`
-        : null),
+    stopped_reason: resolveStoppedReason({
+      runtime,
+      displayCount: displayCandidates.length,
+      maxDisplayed: config.max_displayed_results,
+      eligibleCount: displayCandidates.filter((row) => row.eligible).length,
+      targetEligibleCount: runtimeLimits.targetEligibleCount,
+      profileStats,
+      extractedUsernamesCount,
+    }),
     provider_error_reasons_top: topTargetAiProviderErrorReasons(profileStats),
     rejection_reasons_top: countReasons(displayCandidates),
     relevance_score_top: relevanceScores.length > 0 ? Math.max(...relevanceScores) : null,

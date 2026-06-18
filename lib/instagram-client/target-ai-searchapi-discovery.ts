@@ -124,7 +124,7 @@ export async function discoverInstagramUsernamesViaSearchApi(input: {
 
   for (const query of queries) {
     if (input.runtime?.isTimeExceeded()) break;
-    if (input.runtime?.shouldThrottleDiscovery()) break;
+    if (input.runtime?.shouldPauseDiscovery()) break;
     if (seenUsernames.size >= input.maxUsernames) break;
 
     for (let page = 1; page <= maxPagesPerQuery; page += 1) {
