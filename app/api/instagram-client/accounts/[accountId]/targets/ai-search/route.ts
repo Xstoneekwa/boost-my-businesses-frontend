@@ -8,7 +8,7 @@ import type { TargetAiSearchV2Result } from "@/lib/instagram-client/target-ai-se
 export const dynamic = "force-dynamic";
 
 function isV2SearchResult(result: TargetAiSearchResult | TargetAiSearchV2Result): result is TargetAiSearchV2Result {
-  return "mode" in result && result.mode === "google_first_v2";
+  return "mode" in result && (result.mode === "searchapi_loose_v21" || result.mode === "google_first_v2");
 }
 
 type SearchBody = {

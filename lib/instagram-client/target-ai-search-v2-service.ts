@@ -36,7 +36,7 @@ export type TargetAiVerificationSummary = {
 
 export type TargetAiSearchV2Result = TargetAiSearchResult & {
   session_id: string;
-  mode: "google_first_v2";
+  mode: "searchapi_loose_v21";
   candidates: TargetAiSearchCandidate[];
   unverifiedCandidates: TargetAiSearchCandidate[];
   verifiedCandidates: TargetAiSearchCandidate[];
@@ -311,7 +311,7 @@ export async function searchTargetAccountsWithAiV2(input: {
     return {
       status: cached.candidates.length > 0 ? "ok" : "no_candidates",
       provider: "openai",
-      mode: "google_first_v2",
+      mode: "searchapi_loose_v21",
       session_id: sessionId,
       candidates: cached.candidates,
       unverifiedCandidates: cached.candidates.filter((row) => row.verificationStatus === "pending"),
@@ -331,8 +331,10 @@ export async function searchTargetAccountsWithAiV2(input: {
           queriesExecuted: 0,
           queriesSucceeded: 0,
           queriesFailed: 0,
+          pagesFetched: 0,
           organicResultsScanned: 0,
           extractedCandidatesCount: cached.serpCandidates.length,
+          stoppedReason: "session_cache_hit",
         },
         verifyStats: createTargetAiProfileVerifyStats(),
         candidates: cached.candidates,
@@ -343,15 +345,24 @@ export async function searchTargetAccountsWithAiV2(input: {
   }
 
   const maxSerpCandidates = readIntEnv("TARGET_AI_V2_MAX_SERP_CANDIDATES", 60, 30, 80);
-  const maxQueries = readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 16, 10, 22);
-  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 12, 8, 20);
+  const maxQueries = readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 24, 12, 30);
+  const pagesPerQuery = readIntEnv("TARGET_AI_V2_SERP_PAGES", 3, 2, 4);
+  const discoveryMaxMs = readIntEnv("TARGET_AI_V2_DISCOVERY_MAX_MS", 75_000, 30_000, 90_000);
+  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 0, 0, 20);
 
   const queries = buildTargetAiGoogleQueries({ niche, locationLabel, maxQueries });
-  safeLog("google_queries_built", { count: queries.length, sample: queries.slice(0, 4) });
+  safeLog("google_queries_built", {
+    count: queries.length,
+    pages_per_query: pagesPerQuery,
+    sample: queries.slice(0, 4),
+    query_mode: "loose_first",
+  });
 
   const serpStats = await runTargetAiGoogleSerpDiscovery({
     queries,
     maxCandidates: maxSerpCandidates,
+    pagesPerQuery,
+    maxDurationMs: discoveryMaxMs,
   });
 
   const rankedSerp = rankSerpProfileCandidates(serpStats.candidates, niche, locationLabel)
@@ -361,7 +372,7 @@ export async function searchTargetAccountsWithAiV2(input: {
     return {
       status: "no_candidates",
       provider: "openai",
-      mode: "google_first_v2",
+      mode: "searchapi_loose_v21",
       session_id: sessionId,
       candidates: [],
       unverifiedCandidates: [],
@@ -386,14 +397,18 @@ export async function searchTargetAccountsWithAiV2(input: {
   }
 
   const serpByUsername = new Map(rankedSerp.map((row) => [row.username, row]));
-  const autoVerifyUsernames = rankedSerp.slice(0, autoVerifyCount).map((row) => row.username);
-  const { verifiedByUsername, stats: verifyStats } = await verifyTargetAiUsernamesBatch({
-    usernames: autoVerifyUsernames,
-    niche,
-    locationLabel,
-    serpByUsername,
-    concurrency: 1,
-  });
+  const autoVerifyUsernames = autoVerifyCount > 0
+    ? rankedSerp.slice(0, autoVerifyCount).map((row) => row.username)
+    : [];
+  const { verifiedByUsername, stats: verifyStats } = autoVerifyUsernames.length > 0
+    ? await verifyTargetAiUsernamesBatch({
+      usernames: autoVerifyUsernames,
+      niche,
+      locationLabel,
+      serpByUsername,
+      concurrency: 1,
+    })
+    : { verifiedByUsername: new Map<string, TargetAiSearchCandidate>(), stats: createTargetAiProfileVerifyStats() };
 
   const merged = mergeSerpAndVerifiedCandidates({
     rankedSerp,
@@ -413,9 +428,8 @@ export async function searchTargetAccountsWithAiV2(input: {
   });
 
   const verificationSummary = summarizeVerification(merged.candidates);
-  const stoppedReason = merged.candidates.length >= 30
-    ? "serp_candidates_ready"
-    : "insufficient_candidates";
+  const stoppedReason = serpStats.stoppedReason
+    ?? (merged.candidates.length >= 30 ? "serp_candidates_ready" : "insufficient_candidates");
 
   safeLog("search_completed", {
     session_id: sessionId,
@@ -432,7 +446,7 @@ export async function searchTargetAccountsWithAiV2(input: {
   return {
     status: "ok",
     provider: "openai",
-    mode: "google_first_v2",
+    mode: "searchapi_loose_v21",
     session_id: sessionId,
     candidates: merged.candidates,
     unverifiedCandidates: merged.unverifiedCandidates,
