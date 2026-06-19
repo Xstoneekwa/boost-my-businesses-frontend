@@ -3,6 +3,7 @@ import { requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/sess
 import { createSupabaseClient } from "@/lib/supabase";
 import { projectClientAccountRow } from "@/lib/instagram-client/account-projection";
 import { loadClientAccountInsights, type ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
+import { loadClientFollowerGrowthSeries } from "@/lib/instagram-client/load-client-follower-growth";
 import { getClientWorkspaceView, type ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 import ClientDashboard from "./ClientDashboard";
 
@@ -177,9 +178,12 @@ export default async function InstagramClientPage() {
   const orderedAccounts = sortClientInstagramAccounts(accounts);
 
   const primaryAccountId = orderedAccounts[0]?.accountId ?? "";
-  const accountInsights: ClientAccountInsights | null = primaryAccountId
-    ? await loadClientAccountInsights(primaryAccountId)
-    : null;
+  const [accountInsights, followerGrowth] = primaryAccountId
+    ? await Promise.all([
+      loadClientAccountInsights(primaryAccountId),
+      loadClientFollowerGrowthSeries(primaryAccountId),
+    ])
+    : [null, null];
 
   return (
     <ClientDashboard
@@ -190,6 +194,7 @@ export default async function InstagramClientPage() {
       initialAccounts={orderedAccounts}
       initialWorkspace={workspace}
       initialAccountInsights={accountInsights}
+      initialFollowerGrowth={followerGrowth}
     />
   );
 }

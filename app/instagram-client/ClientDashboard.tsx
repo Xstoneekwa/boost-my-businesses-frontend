@@ -11,22 +11,24 @@ import TargetAvatar from "./TargetAvatar";
 import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
 import { normalizeTargetUsername } from "@/lib/instagram-targets";
 import type { ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
+import type { LoadClientFollowerGrowthResult } from "@/lib/instagram-client/load-client-follower-growth";
 import type { ClientLinkedInstagramAccount, ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 import {
   buildAccountManagerOverview,
-  buildOverviewChartFallbackSeries,
-  buildOverviewChartSeries,
-  buildOverviewChartTitle,
   buildOverviewStats,
   buildSubscriptionOverviewCard,
-  overviewChartDeltaLabel,
 } from "@/lib/instagram-client/client-overview-projection";
+import {
+  buildFollowerChartTitle,
+  buildFollowerChartViews,
+  type FollowerChartPeriod,
+  type FollowerChartView,
+} from "@/lib/instagram-client/client-follower-chart-projection";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
 type Theme = "dark" | "light";
 type View = "overview" | "activity" | "targeting" | "account";
-type ChartRange = 7 | 30 | 90;
 type FeedType = "fo" | "li" | "dm" | "st";
 
 type ClientDashboardActionNotification = {
@@ -61,19 +63,14 @@ interface Props {
   initialAccounts?: ClientInstagramAccount[];
   initialWorkspace?: ClientWorkspaceView | null;
   initialAccountInsights?: ClientAccountInsights | null;
+  initialFollowerGrowth?: LoadClientFollowerGrowthResult | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LANG_KEY = "bmb_dash_lang";
 const THEME_KEY = "bmb_th";
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-const DS: Record<ChartRange, number[]> = {
-  7:  [3508,3522,3536,3548,3561,3578,3594],
-  30: [3500,3502,3508,3514,3519,3522,3530,3536,3540,3544,3548,3553,3557,3561,3565,3569,3573,3578,3582,3585,3589,3592,3596,3600,3604,3609,3614,3618,3624,3630],
-  90: Array.from({ length: 90 }, (_, i) => 3200 + Math.floor(i * 4.8) + Math.floor(Math.sin(i) * 6)),
-};
-
+// ─── Mock data (activity feed demo only — never used for follower chart) ───────
 const FD: FeedItem[] = [
   { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:47, time:"Aujourd'hui · 14:32", timeEn:"Today · 2:32 PM" },
   { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:62, time:"Aujourd'hui · 12:15", timeEn:"Today · 12:15 PM" },
@@ -376,10 +373,9 @@ function FeedList({ items, lang, emptyLabel }: { items: FeedItem[]; lang: Lang; 
   );
 }
 
-function fmtChartDate(daysBack: number, lang: Lang, live: boolean) {
-  const today = live ? new Date() : new Date(2026, 5, 2);
-  const d = new Date(today);
-  d.setDate(d.getDate() - daysBack);
+function fmtPointLabel(capturedAt: string, lang: Lang) {
+  const d = new Date(capturedAt);
+  if (Number.isNaN(d.getTime())) return "";
   const MFR = ["jan","fév","mar","avr","mai","jun","jui","aoû","sep","oct","nov","déc"];
   const MEN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return lang === "en"
@@ -387,16 +383,31 @@ function fmtChartDate(daysBack: number, lang: Lang, live: boolean) {
     : `${d.getDate()} ${MFR[d.getMonth()]}`;
 }
 
-function FollowerChart({ range, lang, onRangeChange, t, series, live = false }: {
-  range: ChartRange; lang: Lang;
-  onRangeChange: (r: ChartRange) => void;
-  t: typeof T["fr"];
-  series?: Record<ChartRange, number[]>;
-  live?: boolean;
+function followerDeltaStyles(tone: FollowerChartView["deltaTone"]) {
+  if (tone === "positive") {
+    return { color: "var(--good)", background: "var(--good-bg)", borderColor: "var(--good-line)" };
+  }
+  if (tone === "negative") {
+    return { color: "var(--bad)", background: "var(--bad-bg)", borderColor: "var(--bad-line)" };
+  }
+  if (tone === "neutral") {
+    return { color: "var(--ink-mute)", background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)" };
+  }
+  return { color: "var(--ink-mute)", background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)" };
+}
+
+function FollowerChart({ period, lang, onPeriodChange, title, views }: {
+  period: FollowerChartPeriod;
+  lang: Lang;
+  onPeriodChange: (period: FollowerChartPeriod) => void;
+  title: string;
+  views: Record<FollowerChartPeriod, FollowerChartView>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(800);
-  const [hoverIdx, setHoverIdx] = useState<number|null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const view = views[period];
+  const data = view.points.map((point) => point.followersCount);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -405,50 +416,70 @@ function FollowerChart({ range, lang, onRangeChange, t, series, live = false }: 
     return () => ro.disconnect();
   }, []);
 
-  const data = series?.[range] ?? DS[range];
-  const pendingLabel = lang === "fr" ? "Données en cours" : "Data pending";
-  const displayValue = live ? data[data.length - 1].toLocaleString(lang === "fr" ? "fr-FR" : "en-US") : pendingLabel;
-  const H = 240, padL = 44, padR = 18, padT = 14, padB = 34;
-  const cw = W - padL - padR, ch = H - padT - padB;
-  const rawMin = Math.min(...data), rawMax = Math.max(...data);
-  const pad = Math.max(1, Math.round((rawMax - rawMin) * 0.12));
-  const minV = rawMin - pad, maxV = rawMax + pad;
+  useEffect(() => {
+    setHoverIdx(null);
+  }, [period, view.points.length]);
+
+  const H = 240;
+  const padL = 44;
+  const padR = 18;
+  const padT = 14;
+  const padB = 34;
+  const cw = W - padL - padR;
+  const ch = H - padT - padB;
+  const showChart = view.showChart && data.length >= 2;
+  const rawMin = showChart ? Math.min(...data) : 0;
+  const rawMax = showChart ? Math.max(...data) : 0;
+  const pad = showChart ? Math.max(1, Math.round((rawMax - rawMin) * 0.12)) : 1;
+  const minV = rawMin - pad;
+  const maxV = rawMax + pad;
   const rng = maxV - minV || 1;
-  const xp = (i: number) => padL + i * cw / (data.length - 1);
+  const xp = (i: number) => padL + (data.length <= 1 ? 0 : i * cw / (data.length - 1));
   const yp = (v: number) => padT + (1 - (v - minV) / rng) * ch;
 
-  const pts = data.map((v, i) => [xp(i), yp(v)] as [number,number]);
-  const linePath = smoothPath(pts);
-  const areaPath = `${linePath} L${xp(data.length-1)},${padT+ch} L${xp(0)},${padT+ch} Z`;
-  const net = data[data.length-1] - data[0];
-  const activeIdx = hoverIdx ?? data.length - 1;
-  const diff = data[activeIdx] - (activeIdx > 0 ? data[activeIdx-1] : data[activeIdx]);
+  const pts = showChart ? data.map((v, i) => [xp(i), yp(v)] as [number, number]) : [];
+  const linePath = showChart ? smoothPath(pts) : "";
+  const areaPath = showChart
+    ? `${linePath} L${xp(data.length - 1)},${padT + ch} L${xp(0)},${padT + ch} Z`
+    : "";
+  const activeIdx = hoverIdx ?? Math.max(0, data.length - 1);
+  const diff = showChart && activeIdx > 0
+    ? data[activeIdx] - data[activeIdx - 1]
+    : 0;
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!showChart) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / rect.width;
-    setHoverIdx(Math.max(0, Math.min(Math.round(relX * (data.length-1)), data.length-1)));
+    setHoverIdx(Math.max(0, Math.min(Math.round(relX * (data.length - 1)), data.length - 1)));
   };
 
-  // Y gridlines
   const gridSteps = 4;
-  const gridLines = Array.from({ length: gridSteps+1 }, (_, i) => {
-    const v = minV + i * (rng / gridSteps);
-    const y = yp(v);
-    return { v, y };
-  });
+  const gridLines = showChart
+    ? Array.from({ length: gridSteps + 1 }, (_, i) => {
+      const v = minV + i * (rng / gridSteps);
+      return { v, y: yp(v) };
+    })
+    : [];
 
-  // X labels
-  const xTicks = Math.min(7, data.length);
-  const xLabels = Array.from({ length: xTicks }, (_, xi) => {
-    const idx = Math.round(xi * (data.length-1) / (xTicks-1));
-    const anchor = xi === 0 ? "start" : xi === xTicks-1 ? "end" : "middle";
-    return { idx, anchor, label: fmtChartDate(data.length-1-idx, lang, live) };
-  });
+  const xTicks = showChart ? Math.min(7, data.length) : 0;
+  const xLabels = showChart
+    ? Array.from({ length: xTicks }, (_, xi) => {
+      const idx = Math.round(xi * (data.length - 1) / Math.max(xTicks - 1, 1));
+      const anchor = xi === 0 ? "start" : xi === xTicks - 1 ? "end" : "middle";
+      return {
+        idx,
+        anchor,
+        label: fmtPointLabel(view.points[idx]?.capturedAt ?? "", lang),
+      };
+    })
+    : [];
 
-  // Tooltip position
-  const tipLeftPct = (xp(activeIdx) / W * 100);
+  const tipLeftPct = showChart ? (xp(activeIdx) / W * 100) : 0;
   const tipLeft = tipLeftPct > 75 ? `${tipLeftPct - 22}%` : `${tipLeftPct}%`;
+  const deltaStyles = followerDeltaStyles(view.deltaTone);
+  const showDeltaBadge = view.deltaDisplay !== null;
+  const deltaPrefix = view.deltaTone === "negative" ? "" : view.deltaTone === "positive" ? "" : "";
 
   return (
     <div className="cd-chart-card">
@@ -458,70 +489,85 @@ function FollowerChart({ range, lang, onRangeChange, t, series, live = false }: 
             <span className="cd-c-badge">
               <svg viewBox="0 0 24 24" fill="none" width={18} height={18}><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/><circle cx="9.5" cy="7" r="4" stroke="#fff" strokeWidth={2}/><path d="M19 8v6M22 11h-6" stroke="#fff" strokeWidth={2} strokeLinecap="round"/></svg>
             </span>
-            <h3 className="cd-c-title">{t.chart.title}</h3>
+            <h3 className="cd-c-title">{title}</h3>
           </div>
           <div className="cd-c-bignum">
-            <span className="cd-c-foll-n">{displayValue}</span>
-            {live ? (
-              <span className="cd-c-delta" style={{ color: net < 0 ? "var(--bad)" : "var(--good)", background: net < 0 ? "var(--bad-bg)" : "var(--good-bg)", borderColor: net < 0 ? "var(--bad-line)" : "var(--good-line)" }}>
-                <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" style={{ transform: net < 0 ? "scaleY(-1)" : "none" }}><polyline points="6 14 12 8 18 14"/></svg>
-                {(net >= 0 ? "+" : "") + net.toLocaleString(lang === "fr" ? "fr-FR" : "en-US")}
+            <span className="cd-c-foll-n">{view.mainValue}</span>
+            {showDeltaBadge ? (
+              <span className="cd-c-delta" style={deltaStyles}>
+                {view.deltaTone === "unknown" ? null : (
+                  <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" style={{ transform: view.deltaTone === "negative" ? "scaleY(-1)" : "none" }}><polyline points="6 14 12 8 18 14"/></svg>
+                )}
+                {deltaPrefix}{view.deltaDisplay}
               </span>
             ) : null}
           </div>
+          {view.subtitle ? <div className="cd-c-sub">{view.subtitle}</div> : null}
         </div>
         <div className="cd-range-tabs">
-          {([90, 30, 7] as ChartRange[]).map((r) => {
-            const label = r === 90 ? t.chart.all : r === 30 ? t.chart.d30 : t.chart.daily;
+          {(["all", "30d", "daily"] as FollowerChartPeriod[]).map((key) => {
+            const label = key === "all"
+              ? (lang === "fr" ? "Tout" : "All")
+              : key === "30d"
+                ? (lang === "fr" ? "30 jours" : "30 days")
+                : (lang === "fr" ? "Quotidien" : "Daily");
             return (
-              <button key={r} className={range === r ? "on" : ""} onClick={() => onRangeChange(r)}>{label}</button>
+              <button key={key} className={period === key ? "on" : ""} onClick={() => onPeriodChange(key)}>{label}</button>
             );
           })}
         </div>
       </div>
       <div ref={containerRef} style={{ position: "relative", marginTop: 8 }}>
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ display: "block", width: "100%", overflow: "visible" }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => setHoverIdx(null)}
-        >
-          <defs>
-            <linearGradient id="cd-lg" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#f7a52b"/>
-              <stop offset="34%" stopColor="#f4506b"/>
-              <stop offset="62%" stopColor="#d23db0"/>
-              <stop offset="100%" stopColor="#8b3df5"/>
-            </linearGradient>
-            <linearGradient id="cd-ag" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#f4506b" stopOpacity={0.16}/>
-              <stop offset="100%" stopColor="#8b3df5" stopOpacity={0}/>
-            </linearGradient>
-          </defs>
-          {gridLines.map(({ v, y }) => (
-            <g key={v}>
-              <line x1={padL} y1={y} x2={W-padR} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
-              <text x={padL-10} y={y+4} textAnchor="end" fontSize={11} fill="var(--ink-mute)" fontFamily="var(--font-d)" fontWeight={600}>
-                {Math.round(v).toLocaleString("fr-FR")}
+        {showChart ? (
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            style={{ display: "block", width: "100%", overflow: "visible" }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={() => setHoverIdx(null)}
+          >
+            <defs>
+              <linearGradient id="cd-lg" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#f7a52b"/>
+                <stop offset="34%" stopColor="#f4506b"/>
+                <stop offset="62%" stopColor="#d23db0"/>
+                <stop offset="100%" stopColor="#8b3df5"/>
+              </linearGradient>
+              <linearGradient id="cd-ag" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#f4506b" stopOpacity={0.16}/>
+                <stop offset="100%" stopColor="#8b3df5" stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            {gridLines.map(({ v, y }) => (
+              <g key={v}>
+                <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
+                <text x={padL - 10} y={y + 4} textAnchor="end" fontSize={11} fill="var(--ink-mute)" fontFamily="var(--font-d)" fontWeight={600}>
+                  {Math.round(v).toLocaleString(lang === "fr" ? "fr-FR" : "en-US")}
+                </text>
+              </g>
+            ))}
+            <path d={areaPath} fill="url(#cd-ag)"/>
+            <path d={linePath} fill="none" stroke="url(#cd-lg)" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"/>
+            {pts.map(([x, y], i) => (
+              <circle key={i} cx={x} cy={y} r={4} fill="#fff" stroke="url(#cd-lg)" strokeWidth={2.4}/>
+            ))}
+            <circle cx={xp(activeIdx)} cy={yp(data[activeIdx])} r={6} fill="#fff" stroke="url(#cd-lg)" strokeWidth={3}/>
+            {xLabels.map(({ idx, anchor, label }) => (
+              <text key={idx} x={xp(idx)} y={H - 8} textAnchor={anchor as "start" | "middle" | "end"} fontSize={11} fill="var(--ink-mute)" fontFamily="var(--font-d)" fontWeight={600}>
+                {label}
               </text>
-            </g>
-          ))}
-          <path d={areaPath} fill="url(#cd-ag)"/>
-          <path d={linePath} fill="none" stroke="url(#cd-lg)" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"/>
-          {pts.map(([x, y], i) => (
-            <circle key={i} cx={x} cy={y} r={4} fill="#fff" stroke="url(#cd-lg)" strokeWidth={2.4}/>
-          ))}
-          <circle cx={xp(activeIdx)} cy={yp(data[activeIdx])} r={6} fill="#fff" stroke="url(#cd-lg)" strokeWidth={3}/>
-          {xLabels.map(({ idx, anchor, label }) => (
-            <text key={idx} x={xp(idx)} y={H-8} textAnchor={anchor as "start"|"middle"|"end"} fontSize={11} fill="var(--ink-mute)" fontFamily="var(--font-d)" fontWeight={600}>
-              {label}
-            </text>
-          ))}
-        </svg>
-        {hoverIdx !== null && (
+            ))}
+          </svg>
+        ) : (
+          <div className="cd-chart-empty" style={{ minHeight: H, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: "var(--ink-mute)", fontSize: 13 }}>
+              {lang === "fr" ? "Courbe disponible après collecte d'historique" : "Chart available once history is collected"}
+            </span>
+          </div>
+        )}
+        {showChart && hoverIdx !== null && (
           <div className="cd-chart-tip" style={{ opacity: 1, left: tipLeft, top: 8 }}>
-            <span className="cd-tv">{overviewChartDeltaLabel(diff, lang, live)}</span>
-            <span>{fmtChartDate(data.length-1-activeIdx, lang, live)}</span>
+            <span className="cd-tv">{(diff >= 0 ? "+" : "") + diff.toLocaleString(lang === "fr" ? "fr-FR" : "en-US")}</span>
+            <span>{fmtPointLabel(view.points[activeIdx]?.capturedAt ?? "", lang)}</span>
           </div>
         )}
       </div>
@@ -538,11 +584,12 @@ export default function ClientDashboard({
   initialAccounts = [],
   initialWorkspace = null,
   initialAccountInsights = null,
+  initialFollowerGrowth = null,
 }: Props) {
   const [activeView, setActiveView]     = useState<View>("overview");
   const [lang,       setLang]           = useState<Lang>("fr");
   const [theme,      setTheme]          = useState<Theme>("dark");
-  const [chartRange, setChartRange]     = useState<ChartRange>(7);
+  const [chartPeriod, setChartPeriod]   = useState<FollowerChartPeriod>("all");
   const [drawerOpen, setDrawerOpen]     = useState(false);
   const [billingDrawerOpen, setBillingDrawerOpen] = useState(false);
   const [planHelpOpen, setPlanHelpOpen] = useState(false);
@@ -777,15 +824,29 @@ export default function ClientDashboard({
     ? mapInsightsActivity(accountInsights!.activity, lang)
     : [];
   const overviewStats = buildOverviewStats(accountInsights, lang);
-  const chartSeries = hasOverviewInsights
-    ? buildOverviewChartSeries(accountInsights)
-    : buildOverviewChartFallbackSeries();
-  const chartTitle = buildOverviewChartTitle(
-    accountInsights,
-    primaryAccount?.username || accountInsights?.username || null,
-    lang,
-    lang === "fr" ? "Activité campagne" : "Campaign activity",
-  );
+  const followerChartUsername = primaryAccount?.username || accountInsights?.username || initialFollowerGrowth?.username || null;
+  const followerChartTitle = buildFollowerChartTitle(followerChartUsername, lang);
+  const followerChartViews = useMemo(() => {
+    if (!initialFollowerGrowth?.bundle) {
+      const emptySeries = {
+        period: "all" as const,
+        businessTimezone: "Africa/Johannesburg",
+        clientLinkedAt: null,
+        currentFollowers: null,
+        currentCapturedAt: null,
+        periodStartFollowers: null,
+        periodStartCapturedAt: null,
+        delta: null,
+        deltaStatus: "unknown" as const,
+        historyStartDate: null,
+        points: [],
+        coverageStatus: "none" as const,
+      };
+      const emptyBundle = { all: emptySeries, d30: { ...emptySeries, period: "30d" as const }, daily: { ...emptySeries, period: "daily" as const } };
+      return buildFollowerChartViews(emptyBundle, lang);
+    }
+    return buildFollowerChartViews(initialFollowerGrowth.bundle, lang);
+  }, [initialFollowerGrowth, lang]);
   const subscriptionPlanValue = workspace?.subscriptionLabel || accountInsights?.packageLabel || "";
   const subscriptionCard = buildSubscriptionOverviewCard(workspace, subscriptionPlanValue, lang);
   const accountManagerCard = buildAccountManagerOverview(workspace, lang, {
@@ -1018,12 +1079,11 @@ export default function ClientDashboard({
 
             {/* Chart */}
             <FollowerChart
-              range={chartRange}
+              period={chartPeriod}
               lang={lang}
-              onRangeChange={setChartRange}
-              t={{ ...t, chart: { ...t.chart, title: chartTitle } }}
-              series={chartSeries}
-              live={hasOverviewInsights}
+              onPeriodChange={setChartPeriod}
+              title={followerChartTitle}
+              views={followerChartViews}
             />
 
             {/* Two-col */}

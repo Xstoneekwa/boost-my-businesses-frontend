@@ -29,14 +29,6 @@ export type OverviewAccountManagerCard = {
   bookingHref: string | null;
 };
 
-export type ChartRange = 7 | 30 | 90;
-
-const EMPTY_CHART: Record<ChartRange, number[]> = {
-  7: [0, 0, 0, 0, 0, 0, 0],
-  30: Array.from({ length: 30 }, () => 0),
-  90: Array.from({ length: 90 }, () => 0),
-};
-
 function pendingLabel(lang: "fr" | "en") {
   return lang === "fr" ? "Données en cours" : "Data pending";
 }
@@ -125,31 +117,6 @@ export function buildOverviewStats(
   ];
 }
 
-export function buildOverviewChartSeries(insights: ClientAccountInsights | null) {
-  if (!insights) return undefined;
-  return {
-    7: insights.chartSeries.d7,
-    30: insights.chartSeries.d30,
-    90: insights.chartSeries.d90,
-  } as Record<ChartRange, number[]>;
-}
-
-export function buildOverviewChartFallbackSeries(): Record<ChartRange, number[]> {
-  return EMPTY_CHART;
-}
-
-export function buildOverviewChartTitle(
-  insights: ClientAccountInsights | null,
-  username: string | null,
-  lang: "fr" | "en",
-  fallbackTitle: string,
-) {
-  if (insights && username) {
-    return `${lang === "fr" ? "Activité" : "Activity"} · @${username.replace(/^@+/, "")}`;
-  }
-  return fallbackTitle;
-}
-
 export function buildSubscriptionOverviewCard(
   workspace: ClientWorkspaceView | null,
   packageLabel: string,
@@ -200,13 +167,3 @@ export function buildAccountManagerOverview(
   };
 }
 
-export function overviewChartMetricLabel(lang: "fr" | "en", live: boolean) {
-  if (!live) return pendingLabel(lang);
-  return lang === "fr" ? "interactions" : "interactions";
-}
-
-export function overviewChartDeltaLabel(delta: number, lang: "fr" | "en", live: boolean) {
-  const prefix = delta >= 0 ? "+" : "";
-  const suffix = overviewChartMetricLabel(lang, live);
-  return `${prefix}${delta} ${suffix}`;
-}

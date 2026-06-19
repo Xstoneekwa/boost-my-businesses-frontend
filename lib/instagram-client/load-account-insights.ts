@@ -113,6 +113,7 @@ function mergeRunTotals(target: ReturnType<typeof blankRunTotals>, row: Supabase
 }
 
 function buildChartSeries(days: ClientStatsDay[], length: number) {
+  // Campaign interaction series — not used by the follower growth chart.
   const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
   const values = sorted.slice(-length).map((day) => day.totalInteractions);
   while (values.length < length) values.unshift(0);
