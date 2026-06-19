@@ -2,8 +2,8 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { getActivityLogData } from "@/app/instagram-dashboard/activity-log-data";
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import type { SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
-import { safeInstagramPublicAvatarUrl } from "@/lib/instagram-public-profile-lookup";
 import { runReadinessNow } from "@/lib/instagram-dashboard/readiness-now";
+import { projectProfileDetailsTargetRow } from "@/lib/instagram-dashboard/profile-details-target-projection";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value;
@@ -29,53 +29,7 @@ function safeSettingsRecord(row: SupabaseRecord | null, accountId: string, domai
 }
 
 function safeTargetRow(row: SupabaseRecord, job: SupabaseRecord | null = null) {
-  const id = readString(row.id, "");
-  const rawAvatarUrl = readString(row.avatar_url, readString(row.profile_picture_url, readString(row.profile_image_url, "")));
-  const avatarUrl = id && safeInstagramPublicAvatarUrl(rawAvatarUrl)
-    ? `/api/instagram-dashboard/avatar?kind=target&id=${encodeURIComponent(id)}`
-    : null;
-  return {
-    id,
-    account_id: readString(row.account_id, ""),
-    target_username: readString(row.target_username, readString(row.normalized_username, "")),
-    normalized_username: readString(row.normalized_username, ""),
-    display_name: readString(row.display_name, ""),
-    avatar_url: avatarUrl || null,
-    avatar_source: avatarUrl ? "dashboard_avatar_proxy" : "not_available",
-    avatar_last_checked_at: readString(row.provider_checked_at, readString(row.avatar_last_checked_at, "")) || null,
-    status: readString(row.status, "unknown"),
-    quality_status: readString(row.quality_status, "unknown"),
-    verification_status: readString(row.verification_status, "pending"),
-    verification_reason: readString(row.verification_reason, "") || null,
-    source: readString(row.source, "unknown"),
-    followers_count: row.followers_count ?? null,
-    is_private: typeof row.is_private === "boolean" ? row.is_private : null,
-    is_verified: typeof row.is_verified === "boolean" ? row.is_verified : null,
-    followbacks_count: row.followbacks_count ?? null,
-    follows_sent_count: row.follows_sent_count ?? null,
-    followback_ratio: row.followback_ratio ?? null,
-    performance_status: readString(row.performance_status, "") || null,
-    archived_at: readString(row.archived_at, "") || null,
-    deleted_at: readString(row.deleted_at, "") || null,
-    last_used_at: readString(row.last_used_at, "") || null,
-    last_selected_at: readString(row.last_selected_at, "") || null,
-    last_successful_candidate_at: readString(row.last_successful_candidate_at, "") || null,
-    last_exhausted_at: readString(row.last_exhausted_at, "") || null,
-    exhaustion_reason: readString(row.exhaustion_reason, "") || null,
-    cooldown_until: readString(row.cooldown_until, "") || null,
-    metrics_updated_at: readString(row.metrics_updated_at, "") || null,
-    rejected_reason: readString(row.rejected_reason, "") || null,
-    rejection_reason: readString(row.rejected_reason, "") || null,
-    batch_id: readString(row.batch_id, "") || null,
-    provider_checked_at: readString(row.provider_checked_at, "") || null,
-    last_verified_at: readString(row.provider_checked_at, "") || null,
-    job_status: readString(job?.status, "") || null,
-    job_provider_status: readString(job?.provider_status, "") || null,
-    job_attempt_count: job?.attempt_count ?? null,
-    job_next_attempt_at: readString(job?.next_attempt_at, "") || null,
-    job_last_error_code: readString(job?.last_error_code, "") || null,
-    updated_at: readString(row.updated_at, "") || null,
-  };
+  return projectProfileDetailsTargetRow(row, job);
 }
 
 function safeLogRow(row: SupabaseRecord) {
