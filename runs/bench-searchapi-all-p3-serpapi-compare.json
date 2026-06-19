@@ -1,0 +1,4201 @@
+{
+  "generated_at": "2026-06-19T09:13:09.295Z",
+  "provider": "searchapi",
+  "provider_label": "SearchAPI Google",
+  "pages": 3,
+  "duration_ms": 372047,
+  "api_key_env": "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY",
+  "missing_providers": {
+    "serper": "missing (SERPER_API_KEY | TARGET_AI_SERPER_API_KEY)",
+    "serpapi": "missing (SERPAPI_API_KEY | TARGET_AI_SERPAPI_KEY)",
+    "bing": "missing (BING_SEARCH_API_KEY | AZURE_BING_SEARCH_KEY | TARGET_AI_BING_API_KEY)"
+  },
+  "reports": [
+    {
+      "id": "A",
+      "key": "johannesburg_chinese",
+      "niche": "restaurant chinois",
+      "locationLabel": "Johannesburg, Gauteng, South Africa",
+      "strict": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 33124,
+        "organic_results_count": 104,
+        "instagram_urls_count": 104,
+        "profile_urls_count": 12,
+        "rejected_non_profile_count": 92,
+        "extracted_usernames_unique": 12,
+        "relevant_usernames_unique": 12,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 92
+        },
+        "top20": [
+          {
+            "username": "notredameozanam",
+            "profileUrl": "https://www.instagram.com/notredameozanam/",
+            "title": "Centre scolaire Notre-Dame Ozanam Mâcon ...",
+            "snippet": "... restaurant chinois où nous avons goûté une fondue chinoise ainsi qu'un ... De Johannesburg à Sydney, en passant par Cape Town et bien d'autres ...",
+            "score": 25,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "hatoumata.m",
+            "profileUrl": "https://www.instagram.com/hatoumata.m/",
+            "title": "Hatoumata Magassa | Stratège Afrique 🌍 (@hatoumata.m)",
+            "snippet": "Johannesburg 2025 — let's build Africa's next opportunities together.",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "klumnet",
+            "profileUrl": "https://www.instagram.com/klumnet/",
+            "title": "Klumnet (@klumnet) • Instagram photos and videos",
+            "snippet": "... restaurant pour manger une pizza. Car cet individu aime les pizzas en ... site internet de Gala, monument de l'investigation indépendante. Aucune des ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "annie.daigle.voyage_",
+            "profileUrl": "https://www.instagram.com/annie.daigle.voyage_/",
+            "title": "Annie Daigle (@annie.daigle.voyage_)",
+            "snippet": "... Restaurant(s) 5 Bar(s) • Hôtel contemporain situé sur la vaste plage de ... Johannesburg et admirez son mélange d'architecture à la fois historique et ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "iamchris.ka",
+            "profileUrl": "https://www.instagram.com/iamchris.ka/",
+            "title": "Chris Hyconiq Ka (@iamchris.ka)",
+            "snippet": "Throwback to Spring '25 Au restaurant du frérot @alphawaraba @wukong ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "lunalitesoftware",
+            "profileUrl": "https://www.instagram.com/lunalitesoftware/",
+            "title": "LUNALITE Software (@lunalitesoftware)",
+            "snippet": "Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) est prêt à conquérir ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "julieannebastard",
+            "profileUrl": "https://www.instagram.com/julieannebastard/",
+            "title": "Julie-anne Bastard (@julieannebastard)",
+            "snippet": "... Bonjour les amis @tout le monde Voici donc le portrait chinois réalisé avec Julie-anne Bastard Merci @leslecturesdecerise_74 ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "fondationcarmignac",
+            "profileUrl": "https://www.instagram.com/fondationcarmignac/",
+            "title": "Fondation Carmignac (@fondationcarmignac) · Porquerolles",
+            "snippet": "... restaurant Le Poisson Ivre - un tote-bag contenant le catalogue de l ... Johannesburg ...",
+            "score": 15,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "a2zartgalleryparis",
+            "profileUrl": "https://www.instagram.com/a2zartgalleryparis/",
+            "title": "A2Z Art Gallery Paris (@a2zartgalleryparis)",
+            "snippet": "1978, Johannesburg, South Africa) is based in Johannesburg. Her practice ... chinois à avoir libéré l'Art chinois de la propagande maoïste. Il dédie sa ...",
+            "score": 12,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "fondation_af",
+            "profileUrl": "https://www.instagram.com/fondation_af/",
+            "title": "Fondation des Alliances Françaises (@fondation_af) · Paris",
+            "snippet": "... Johannesburg ! @afjohannesburg L'Alliance Française a eu l'honneur d ... chinois. Elles sont issues de la sélection des 200 meilleures ...",
+            "score": 11,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "amismondediplo",
+            "profileUrl": "https://www.instagram.com/amismondediplo/",
+            "title": "Les Amis du Monde diplo ⏚ (@amismondediplo) · Paris",
+            "snippet": "... chinois, par Arsène Ruhlmann Au Salvador, la surenchère de M. Bukele, par ... restaurant #macron #cuisine #allemagne ...",
+            "score": 11,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "polkamagazine",
+            "profileUrl": "https://www.instagram.com/polkamagazine/",
+            "title": "Polka Magazine (@polkamagazine)",
+            "snippet": "Un alien qui commande au restaurant chinois face à une vendeuse pas ... Johannesburg, 2006. © Raymond Depardon / @magnumphotos. 2. Poilley, 1973 ...",
+            "score": 10,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 30,
+            "instagram_urls_count": 30,
+            "profile_urls_count": 10,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 10,
+            "relevant_usernames_count": 10,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [
+              {
+                "username": "hatoumata.m",
+                "profileUrl": "https://www.instagram.com/hatoumata.m/",
+                "title": "Hatoumata Magassa | Stratège Afrique 🌍 (@hatoumata.m)",
+                "snippet": "Johannesburg 2025 — let's build Africa's next opportunities together.",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "klumnet",
+                "profileUrl": "https://www.instagram.com/klumnet/",
+                "title": "Klumnet (@klumnet) • Instagram photos and videos",
+                "snippet": "... restaurant pour manger une pizza. Car cet individu aime les pizzas en ... site internet de Gala, monument de l'investigation indépendante. Aucune des ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "annie.daigle.voyage_",
+                "profileUrl": "https://www.instagram.com/annie.daigle.voyage_/",
+                "title": "Annie Daigle (@annie.daigle.voyage_)",
+                "snippet": "... Restaurant(s) 5 Bar(s) • Hôtel contemporain situé sur la vaste plage de ... Johannesburg et admirez son mélange d'architecture à la fois historique et ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "iamchris.ka",
+                "profileUrl": "https://www.instagram.com/iamchris.ka/",
+                "title": "Chris Hyconiq Ka (@iamchris.ka)",
+                "snippet": "Throwback to Spring '25 Au restaurant du frérot @alphawaraba @wukong ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "lunalitesoftware",
+                "profileUrl": "https://www.instagram.com/lunalitesoftware/",
+                "title": "LUNALITE Software (@lunalitesoftware)",
+                "snippet": "Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) est prêt à conquérir ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "julieannebastard",
+                "profileUrl": "https://www.instagram.com/julieannebastard/",
+                "title": "Julie-anne Bastard (@julieannebastard)",
+                "snippet": "... Bonjour les amis @tout le monde Voici donc le portrait chinois réalisé avec Julie-anne Bastard Merci @leslecturesdecerise_74 ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "fondationcarmignac",
+                "profileUrl": "https://www.instagram.com/fondationcarmignac/",
+                "title": "Fondation Carmignac (@fondationcarmignac) · Porquerolles",
+                "snippet": "... restaurant Le Poisson Ivre - un tote-bag contenant le catalogue de l ... Johannesburg ...",
+                "score": 15,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "a2zartgalleryparis",
+                "profileUrl": "https://www.instagram.com/a2zartgalleryparis/",
+                "title": "A2Z Art Gallery Paris (@a2zartgalleryparis)",
+                "snippet": "1978, Johannesburg, South Africa) is based in Johannesburg. Her practice ... chinois à avoir libéré l'Art chinois de la propagande maoïste. Il dédie sa ...",
+                "score": 12,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "fondation_af",
+                "profileUrl": "https://www.instagram.com/fondation_af/",
+                "title": "Fondation des Alliances Françaises (@fondation_af) · Paris",
+                "snippet": "... Johannesburg ! @afjohannesburg L'Alliance Française a eu l'honneur d ... chinois. Elles sont issues de la sélection des 200 meilleures ...",
+                "score": 11,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "amismondediplo",
+                "profileUrl": "https://www.instagram.com/amismondediplo/",
+                "title": "Les Amis du Monde diplo ⏚ (@amismondediplo) · Paris",
+                "snippet": "... chinois, par Arsène Ruhlmann Au Salvador, la surenchère de M. Bukele, par ... restaurant #macron #cuisine #allemagne ...",
+                "score": 11,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6999,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 23,
+            "instagram_urls_count": 23,
+            "profile_urls_count": 2,
+            "rejected_non_profile_count": 21,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 2,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 21
+            },
+            "top20": [
+              {
+                "username": "notredameozanam",
+                "profileUrl": "https://www.instagram.com/notredameozanam/",
+                "title": "Centre scolaire Notre-Dame Ozanam Mâcon ...",
+                "snippet": "... restaurant chinois où nous avons goûté une fondue chinoise ainsi qu'un ... De Johannesburg à Sydney, en passant par Cape Town et bien d'autres ...",
+                "score": 25,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "polkamagazine",
+                "profileUrl": "https://www.instagram.com/polkamagazine/",
+                "title": "Polka Magazine (@polkamagazine)",
+                "snippet": "Un alien qui commande au restaurant chinois face à une vendeuse pas ... Johannesburg, 2006. © Raymond Depardon / @magnumphotos. 2. Poilley, 1973 ...",
+                "score": 10,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8931,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 3
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese restaurant\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 24,
+            "instagram_urls_count": 24,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 24,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 24
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10526,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese food\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 27,
+            "instagram_urls_count": 27,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 27,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 27
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6668,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      },
+      "loose": {
+        "query_count": 15,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 129061,
+        "organic_results_count": 390,
+        "instagram_urls_count": 255,
+        "profile_urls_count": 27,
+        "rejected_non_profile_count": 224,
+        "extracted_usernames_unique": 24,
+        "relevant_usernames_unique": 19,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 224
+        },
+        "top20": [
+          {
+            "username": "tang_sandton",
+            "profileUrl": "https://www.instagram.com/tang_sandton/",
+            "title": "TANG ™️ (@tang_sandton) · Sandton",
+            "snippet": "... Truly honoured and deeply grateful for this ... Johannesburg. We're celebrating the grand reopening of your Asian-inspired ...",
+            "score": 33,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "lovemesojhb",
+            "profileUrl": "https://www.instagram.com/lovemesojhb/?hl=en",
+            "title": "Love Me So (@lovemesojhb) · Johannesburg",
+            "snippet": "... asian #restaurant #johannesburg #instagood #instadaily #instadaily #lovemeso ... #foodie #yummy #food #asian #restaurant #instafood #instadaily #instafollow #vibe ...",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "asian_herbivore",
+            "profileUrl": "https://www.instagram.com/asian_herbivore/reels/",
+            "title": "Asian Herbivore (@asian_herbivore)",
+            "snippet": "Redefining Asian Fusion. 100% Meat-Free. Melrose Crossing, Johannesburg Mojo Market, Cape Town (Express) Ramen • Rice • Bao • Sushi • Tacos.",
+            "score": 31,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "merakicoffeehouse_",
+            "profileUrl": "https://www.instagram.com/merakicoffeehouse_/",
+            "title": "Nice Halaal Restaurant in Cape Town",
+            "snippet": "... Johannesburg, Halaal Restaurants in Waterfront ... Instagram: [@merakicoffeehouse_](https://www.instagram.com/merakicoffeehouse_/) ... Halaal Chinese Restaurant ...",
+            "score": 30,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "loose"
+          },
+          {
+            "username": "noodz",
+            "profileUrl": "https://www.instagram.com/noodz/?hl=en",
+            "title": "NOODLES (@noodz) • Instagram photos and videos",
+            "snippet": "... JOHANNESBURG. WHO AM I?! Literal girls saying they had been following me on tumblr since i was 16. I FELT SO SEEN IN ANOTHER COUNTRY. THANK YOU SOUTH AFRICA ...",
+            "score": 29,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "pron.restaurant",
+            "profileUrl": "https://www.instagram.com/pron.restaurant/?hl=en",
+            "title": "People's Republic Of Noodles (@pron.restaurant)",
+            "snippet": "People's Republic Of Noodles (@pron.restaurant) · Johannesburg. Instagram. Log in · Open app · pron.restaurant's profile picture ...",
+            "score": 29,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "tea_and_antique",
+            "profileUrl": "https://www.instagram.com/tea_and_antique/?hl=en",
+            "title": "Tea & Antique | Chinese Food Joburg (@tea_and_antique)",
+            "snippet": "... Johannesburg Bookings & menu ↓ ... Tea & Antique | Chinese Food Joburg. 15.2K followers. 142 following. Authentic Chinese home cooking ...",
+            "score": 28,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"chinese food\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "joburg_noms",
+            "profileUrl": "https://www.instagram.com/joburg_noms/",
+            "title": "Joburg Noms | Best Restaurants in Johannesburg (@ ...",
+            "snippet": "Authentic Northern Chinese food, fresh hand-pulled noodles, and proper comforting flavours. Not the kind of place you go for the aesthetic… but absolutely ...",
+            "score": 28,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"chinese food\" instagram",
+            "mode": "loose"
+          },
+          {
+            "username": "chunky_chau_restaurant",
+            "profileUrl": "https://www.instagram.com/chunky_chau_restaurant/?hl=en",
+            "title": "Chunky Chau (@chunky_chau_restaurant) · Johannesburg",
+            "snippet": "10K followers · 1.8K+ following · 428 posts · @chunky_chau_restaurant: “Pan Asian Fusion & Bar Located in Rosebank ... Best Asian Restaurant in Johannesburg, ...",
+            "score": 27,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"rosebank\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "obentoyum",
+            "profileUrl": "https://www.instagram.com/obentoyum/?hl=en",
+            "title": "OBENTO RAMEN BAR ™️ (@obentoyum)",
+            "snippet": "Four bowls. One decision. We went deep trying to crown a favorite… rich broths, perfect noodles, layers on layers of flavor. Each one made a strong case. But ...",
+            "score": 26,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "munaf1.0",
+            "profileUrl": "https://www.instagram.com/munaf1.0/",
+            "title": "Munaf Sheikh (@munaf1.0)",
+            "snippet": "... Allan Gray year end 2022, with Cape Town, Bloemfontein, Durban, Johannesburg, Pretoria, Port Elizabeth, Namibia and Botswana. Beautiful, super ...",
+            "score": 26,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "bluegingermw",
+            "profileUrl": "https://www.instagram.com/bluegingermw/",
+            "title": "Blue Ginger (@bluegingermw) · Lilongwe",
+            "snippet": "... Johannesburg #HalaalGoodsMarket is the first Artisanal Halaal Food and ... Eid ...",
+            "score": 25,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "nickhammangram",
+            "profileUrl": "https://www.instagram.com/nickhammangram/reels/",
+            "title": "Nick Hamman ✌ (@nickhammangram)",
+            "snippet": "... Noodles” or “Xinjiang Hand-Pulled Noodles.” I decided to go for the Cumin ... I'm Nick ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "dumplingdza",
+            "profileUrl": "https://www.instagram.com/dumplingdza/",
+            "title": "DumplingD (@dumplingdza) · Johannesburg",
+            "snippet": "Dim sum dumplings folded by hand & served frozen to you. Cook from frozen & have a dim sum feast at home. Deliveries in Johannesburg & surrounds only.",
+            "score": 22,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "basicallybedfordview",
+            "profileUrl": "https://www.instagram.com/basicallybedfordview/",
+            "title": "Basically Bedfordview (@basicallybedfordview)",
+            "snippet": "... Johannesburg ...",
+            "score": 22,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "master_chef_noodles",
+            "profileUrl": "https://www.instagram.com/master_chef_noodles/",
+            "title": "MASTER CHEF NOODLES (@master_chef_noodles)",
+            "snippet": "145 followers · 34 posts · #manufacturer of #premium #quality #instant #noodles #master_chef_noodles #noodle #niht #halal #johannesburg #southafrica #instagram",
+            "score": 21,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "hsinfortuna",
+            "profileUrl": "https://www.instagram.com/hsinfortuna/?hl=en",
+            "title": "Hsin Fortuna Restaurant (@hsinfortuna) · Adelaide, SA",
+            "snippet": "Our iconic Fortuna Court Chinese Restaurant in Norwood's the Parade was where it all began. In 2002, we started serving our authentic Chinese food fresh from ...",
+            "score": 20,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"norwood\" \"chinese restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "beijingoperajhb",
+            "profileUrl": "https://www.instagram.com/beijingoperajhb/?hl=en",
+            "title": "Beijing Opera (@beijingoperajhb) · Blairgowrie, Gauteng",
+            "snippet": "98 Conrad Drive, Blairgowrie Johannesburg Open Weekly Thursday - Sunday hello@beijingopera.co.za or WhatsApp 0822564602. Follow. Message ...",
+            "score": 18,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dim sum\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "eatingwithmarbz",
+            "profileUrl": "https://www.instagram.com/eatingwithmarbz/",
+            "title": "Mmabalane.S (@eatingwithmarbz) · Johannesburg, Gauteng",
+            "snippet": "... johannesburg. The most important meal of the day ft Honey and ...",
+            "score": 18,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "popular",
+            "profileUrl": "https://www.instagram.com/popular/",
+            "title": "Best Noodles In South Africa",
+            "snippet": "I'm Nick Hamman and I'm looking for the best noodles in South Africa and today my search has taken me to Rivonia Johannesburg inside Rivonia Central to ...",
+            "score": 16,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "loose"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"johannesburg\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 15,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 15,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 15
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 13075,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese food\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 24,
+            "instagram_urls_count": 16,
+            "profile_urls_count": 3,
+            "rejected_non_profile_count": 12,
+            "extracted_usernames_count": 3,
+            "relevant_usernames_count": 3,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 12
+            },
+            "top20": [
+              {
+                "username": "tea_and_antique",
+                "profileUrl": "https://www.instagram.com/tea_and_antique/?hl=en",
+                "title": "Tea & Antique | Chinese Food Joburg (@tea_and_antique)",
+                "snippet": "... Johannesburg Bookings & menu ↓ ... Tea & Antique | Chinese Food Joburg. 15.2K followers. 142 following. Authentic Chinese home cooking ...",
+                "score": 28,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"chinese food\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "joburg_noms",
+                "profileUrl": "https://www.instagram.com/joburg_noms/",
+                "title": "Joburg Noms | Best Restaurants in Johannesburg (@ ...",
+                "snippet": "Authentic Northern Chinese food, fresh hand-pulled noodles, and proper comforting flavours. Not the kind of place you go for the aesthetic… but absolutely ...",
+                "score": 28,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"chinese food\" instagram",
+                "mode": "loose"
+              },
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/?hl=en",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "... South Africa's oldest Chinese supermarket has been serving Johannesburg since 1943 Founded by Ng Sui Chee ...",
+                "score": 18,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"chinese food\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 15942,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese takeaway\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 25,
+            "instagram_urls_count": 23,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 23,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 23
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10016,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"dim sum\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 16,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 16
+            },
+            "top20": [
+              {
+                "username": "beijingoperajhb",
+                "profileUrl": "https://www.instagram.com/beijingoperajhb/?hl=en",
+                "title": "Beijing Opera (@beijingoperajhb) · Blairgowrie, Gauteng",
+                "snippet": "98 Conrad Drive, Blairgowrie Johannesburg Open Weekly Thursday - Sunday hello@beijingopera.co.za or WhatsApp 0822564602. Follow. Message ...",
+                "score": 18,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dim sum\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 9019,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"dumplings\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 25,
+            "instagram_urls_count": 12,
+            "profile_urls_count": 3,
+            "rejected_non_profile_count": 9,
+            "extracted_usernames_count": 3,
+            "relevant_usernames_count": 3,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 9
+            },
+            "top20": [
+              {
+                "username": "dumplingdza",
+                "profileUrl": "https://www.instagram.com/dumplingdza/",
+                "title": "DumplingD (@dumplingdza) · Johannesburg",
+                "snippet": "Dim sum dumplings folded by hand & served frozen to you. Cook from frozen & have a dim sum feast at home. Deliveries in Johannesburg & surrounds only.",
+                "score": 22,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/?hl=en",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "I'm Nick Hamman and I want to show you my Johannesburg. If you follow me you'll know that I ...",
+                "score": 20,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "eatingwithmarbz",
+                "profileUrl": "https://www.instagram.com/eatingwithmarbz/",
+                "title": "Mmabalane.S (@eatingwithmarbz) · Johannesburg, Gauteng",
+                "snippet": "... johannesburg. The most important meal of the day ft Honey and ...",
+                "score": 18,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6293,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"noodles\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 25,
+            "instagram_urls_count": 12,
+            "profile_urls_count": 6,
+            "rejected_non_profile_count": 6,
+            "extracted_usernames_count": 6,
+            "relevant_usernames_count": 6,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 6
+            },
+            "top20": [
+              {
+                "username": "noodz",
+                "profileUrl": "https://www.instagram.com/noodz/?hl=en",
+                "title": "NOODLES (@noodz) • Instagram photos and videos",
+                "snippet": "... JOHANNESBURG. WHO AM I?! Literal girls saying they had been following me on tumblr since i was 16. I FELT SO SEEN IN ANOTHER COUNTRY. THANK YOU SOUTH AFRICA ...",
+                "score": 29,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "pron.restaurant",
+                "profileUrl": "https://www.instagram.com/pron.restaurant/?hl=en",
+                "title": "People's Republic Of Noodles (@pron.restaurant)",
+                "snippet": "People's Republic Of Noodles (@pron.restaurant) · Johannesburg. Instagram. Log in · Open app · pron.restaurant's profile picture ...",
+                "score": 29,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "obentoyum",
+                "profileUrl": "https://www.instagram.com/obentoyum/?hl=en",
+                "title": "OBENTO RAMEN BAR ™️ (@obentoyum)",
+                "snippet": "Four bowls. One decision. We went deep trying to crown a favorite… rich broths, perfect noodles, layers on layers of flavor. Each one made a strong case. But ...",
+                "score": 26,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/reels/",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "... Noodles” or “Xinjiang Hand-Pulled Noodles.” I decided to go for the Cumin ... I'm Nick ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "master_chef_noodles",
+                "profileUrl": "https://www.instagram.com/master_chef_noodles/",
+                "title": "MASTER CHEF NOODLES (@master_chef_noodles)",
+                "snippet": "145 followers · 34 posts · #manufacturer of #premium #quality #instant #noodles #master_chef_noodles #noodle #niht #halal #johannesburg #southafrica #instagram",
+                "score": 21,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Best Noodles In South Africa",
+                "snippet": "I'm Nick Hamman and I'm looking for the best noodles in South Africa and today my search has taken me to Rivonia Johannesburg inside Rivonia Central to ...",
+                "score": 16,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4772,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 8
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"asian restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 20,
+            "profile_urls_count": 4,
+            "rejected_non_profile_count": 16,
+            "extracted_usernames_count": 4,
+            "relevant_usernames_count": 4,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 16
+            },
+            "top20": [
+              {
+                "username": "tang_sandton",
+                "profileUrl": "https://www.instagram.com/tang_sandton/",
+                "title": "TANG ™️ (@tang_sandton) · Sandton",
+                "snippet": "... Truly honoured and deeply grateful for this ... Johannesburg. We're celebrating the grand reopening of your Asian-inspired ...",
+                "score": 33,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "lovemesojhb",
+                "profileUrl": "https://www.instagram.com/lovemesojhb/?hl=en",
+                "title": "Love Me So (@lovemesojhb) · Johannesburg",
+                "snippet": "... asian #restaurant #johannesburg #instagood #instadaily #instadaily #lovemeso ... #foodie #yummy #food #asian #restaurant #instafood #instadaily #instafollow #vibe ...",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "asian_herbivore",
+                "profileUrl": "https://www.instagram.com/asian_herbivore/reels/",
+                "title": "Asian Herbivore (@asian_herbivore)",
+                "snippet": "Redefining Asian Fusion. 100% Meat-Free. Melrose Crossing, Johannesburg Mojo Market, Cape Town (Express) Ramen • Rice • Bao • Sushi • Tacos.",
+                "score": 31,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/reels/",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "I'm Nick ... Asian Restaurant that I find the most incredible meals. The first tip I can ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4754,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"halaal chinese\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 19,
+            "instagram_urls_count": 7,
+            "profile_urls_count": 3,
+            "rejected_non_profile_count": 2,
+            "extracted_usernames_count": 4,
+            "relevant_usernames_count": 4,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 2
+            },
+            "top20": [
+              {
+                "username": "merakicoffeehouse_",
+                "profileUrl": "https://www.instagram.com/merakicoffeehouse_/",
+                "title": "Nice Halaal Restaurant in Cape Town",
+                "snippet": "... Johannesburg, Halaal Restaurants in Waterfront ... Instagram: [@merakicoffeehouse_](https://www.instagram.com/merakicoffeehouse_/) ... Halaal Chinese Restaurant ...",
+                "score": 30,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "loose"
+              },
+              {
+                "username": "munaf1.0",
+                "profileUrl": "https://www.instagram.com/munaf1.0/",
+                "title": "Munaf Sheikh (@munaf1.0)",
+                "snippet": "... Allan Gray year end 2022, with Cape Town, Bloemfontein, Durban, Johannesburg, Pretoria, Port Elizabeth, Namibia and Botswana. Beautiful, super ...",
+                "score": 26,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "bluegingermw",
+                "profileUrl": "https://www.instagram.com/bluegingermw/",
+                "title": "Blue Ginger (@bluegingermw) · Lilongwe",
+                "snippet": "... Johannesburg #HalaalGoodsMarket is the first Artisanal Halaal Food and ... Eid ...",
+                "score": 25,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "basicallybedfordview",
+                "profileUrl": "https://www.instagram.com/basicallybedfordview/",
+                "title": "Basically Bedfordview (@basicallybedfordview)",
+                "snippet": "... Johannesburg ...",
+                "score": 22,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7375,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 0
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"sandton\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 16,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 16
+            },
+            "top20": [
+              {
+                "username": "tasteofchinarivonia",
+                "profileUrl": "https://www.instagram.com/tasteofchinarivonia/",
+                "title": "Taste of China东方小吃 (@tasteofchinarivonia) · Sandton",
+                "snippet": "... followers · 10 posts · OFFICIAL Account New Chinese restaurant ... Taste of China东方小吃 (@tasteofchinarivonia) · Sandton. Instagram. Log in.",
+                "score": 14,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"chinese restaurant\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8076,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"sandton\" \"dim sum\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 24,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 22,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 22
+            },
+            "top20": [
+              {
+                "username": "dhinebitesweet",
+                "profileUrl": "https://www.instagram.com/dhinebitesweet/",
+                "title": "Authentic Chinese Restaurant in Sandton | Enjoy Delicious ...",
+                "snippet": "Authentic Chinese Restaurant in Sandton | Enjoy Delicious Dim Sum ... Instagram: https://www.instagram.com/dhinebitesweet/ Tiktok: https ...",
+                "score": 14,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"dim sum\" instagram",
+                "mode": "loose"
+              },
+              {
+                "username": "tang_sandton",
+                "profileUrl": "https://www.instagram.com/tang_sandton/reels/",
+                "title": "TANG ™️ (@tang_sandton) · Sandton",
+                "snippet": "... dim sum and a Lunar drink to guests who have made reservations for either of the two days. To the Year of the Dragon! 龍⁠ ⁠ Chinese New Year at TANG 龍 ...",
+                "score": 4,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"dim sum\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7841,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"rosebank\" \"asian restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 21,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [
+              {
+                "username": "chunky_chau_restaurant",
+                "profileUrl": "https://www.instagram.com/chunky_chau_restaurant/?hl=en",
+                "title": "Chunky Chau (@chunky_chau_restaurant) · Johannesburg",
+                "snippet": "10K followers · 1.8K+ following · 428 posts · @chunky_chau_restaurant: “Pan Asian Fusion & Bar Located in Rosebank ... Best Asian Restaurant in Johannesburg, ...",
+                "score": 27,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"rosebank\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8472,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"randburg\" \"chinese takeaway\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 21,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [
+              {
+                "username": "marike.victor",
+                "profileUrl": "https://www.instagram.com/marike.victor/",
+                "title": "Marike Victor",
+                "snippet": "Sorta like Chinese takeaway, but keto compliant. I love chowmein. I ...",
+                "score": 6,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"chinese takeaway\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10689,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"fourways\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 18,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 18,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 18
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7115,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"melrose\" \"asian restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 15,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 14,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 14
+            },
+            "top20": [
+              {
+                "username": "melrose_restaurant",
+                "profileUrl": "https://www.instagram.com/melrose_restaurant/?hl=en",
+                "title": "Melrose Restaurant & Rooftop Bar (@melrose_restaurant)",
+                "snippet": "We're honoured to share that Melrose Restaurant has been awarded by the Australian Good Food Guide for 2026. This recognition reflects the care, consistency and ...",
+                "score": 15,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"melrose\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7617,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"norwood\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 28,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 2,
+            "rejected_non_profile_count": 15,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 15
+            },
+            "top20": [
+              {
+                "username": "hsinfortuna",
+                "profileUrl": "https://www.instagram.com/hsinfortuna/?hl=en",
+                "title": "Hsin Fortuna Restaurant (@hsinfortuna) · Adelaide, SA",
+                "snippet": "Our iconic Fortuna Court Chinese Restaurant in Norwood's the Parade was where it all began. In 2002, we started serving our authentic Chinese food fresh from ...",
+                "score": 20,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"norwood\" \"chinese restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Pf Changs Norwood",
+                "snippet": "P.F. Chang's in Norwood is a Chinese restaurant located at 2633 Edmondson Rd, Cincinnati, OH 45209, offering dine-in, delivery, takeout, and catering ...",
+                "score": 2,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"norwood\" \"chinese restaurant\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8005,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B",
+      "key": "bordeaux_asian",
+      "niche": "restaurant asiatique",
+      "locationLabel": "Bordeaux, Gironde, France",
+      "strict": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 24201,
+        "organic_results_count": 94,
+        "instagram_urls_count": 94,
+        "profile_urls_count": 2,
+        "rejected_non_profile_count": 92,
+        "extracted_usernames_unique": 2,
+        "relevant_usernames_unique": 2,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 92
+        },
+        "top20": [
+          {
+            "username": "shaiko.bordeaux",
+            "profileUrl": "https://www.instagram.com/shaiko.bordeaux/",
+            "title": "shaiko.bordeaux",
+            "snippet": "Bonjour à tous ! Voici enfin notre menu de la Saint valentin. N'hésitez pas à nous contacter pour réserver votre table sur notre site internet \"shaiko-bordeaux.",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"bordeaux\" \"restaurant\" \"asiatique\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "isshin_ramen_officiel",
+            "profileUrl": "https://www.instagram.com/isshin_ramen_officiel/",
+            "title": "iSSHIN RAMEN (@isshin_ramen_officiel)",
+            "snippet": "Isshin Ramen c'est deux adresses à Paris, une adresse à Bordeaux et une autre en ...",
+            "score": 14,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"bordeaux\" \"ramen\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"bordeaux\" \"restaurant\" \"asiatique\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 21,
+            "instagram_urls_count": 21,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [
+              {
+                "username": "shaiko.bordeaux",
+                "profileUrl": "https://www.instagram.com/shaiko.bordeaux/",
+                "title": "shaiko.bordeaux",
+                "snippet": "Bonjour à tous ! Voici enfin notre menu de la Saint valentin. N'hésitez pas à nous contacter pour réserver votre table sur notre site internet \"shaiko-bordeaux.",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"bordeaux\" \"restaurant\" \"asiatique\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4733,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 1
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"bordeaux\" \"restaurant asiatique\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 27,
+            "instagram_urls_count": 27,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 27,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 27
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6098,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"bordeaux\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 20,
+            "instagram_urls_count": 20,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7557,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 0
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"bordeaux\" \"ramen\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 26,
+            "instagram_urls_count": 26,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 25,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 25
+            },
+            "top20": [
+              {
+                "username": "isshin_ramen_officiel",
+                "profileUrl": "https://www.instagram.com/isshin_ramen_officiel/",
+                "title": "iSSHIN RAMEN (@isshin_ramen_officiel)",
+                "snippet": "Isshin Ramen c'est deux adresses à Paris, une adresse à Bordeaux et une autre en ...",
+                "score": 14,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"bordeaux\" \"ramen\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5813,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      },
+      "loose": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 31702,
+        "organic_results_count": 106,
+        "instagram_urls_count": 70,
+        "profile_urls_count": 10,
+        "rejected_non_profile_count": 60,
+        "extracted_usernames_unique": 8,
+        "relevant_usernames_unique": 4,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 60
+        },
+        "top20": [
+          {
+            "username": "pavillonyuasa",
+            "profileUrl": "https://www.instagram.com/pavillonyuasa/?hl=en",
+            "title": "Pavillon Yuasa Bordeaux (@pavillonyuasa)",
+            "snippet": "Intégrez un restaurant japonais authentique situé dans le quartier des Chartrons, Bordeaux. • Expérience en restauration exigée • Notions de japonais ...",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "izakaya_bar_66",
+            "profileUrl": "https://www.instagram.com/izakaya_bar_66/",
+            "title": "izakaya bar 66 (@izakaya_bar_66) · Pessac",
+            "snippet": "Nouveau restaurant asiatique à Pessac centre. A découvrir votre nouveau restaurant asiatique au Pessac centre !!!",
+            "score": 26,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"pessac\" \"restaurant asiatique\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "ginza.merignac",
+            "profileUrl": "https://www.instagram.com/ginza.merignac/",
+            "title": "Restaurant Ginza (@ginza.merignac)",
+            "snippet": "1K+ followers · 33 following · 30 posts · @ginza.merignac: “ Restaurant Asiatique spécialisé dans la Cuisine Japonaise Formule à volonté Ouvert 7j/7 ...",
+            "score": 25,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"merignac\" \"restaurant asiatique\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "gwenmds",
+            "profileUrl": "https://www.instagram.com/gwenmds/",
+            "title": "Gwen MDS (@gwenmds) • Instagram photos and videos",
+            "snippet": "C'est LE restaurant Japonais de Bordeaux qu'il ne faut pas louper ! #japanfood ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "maki.time_bordeaux",
+            "profileUrl": "https://www.instagram.com/maki.time_bordeaux/",
+            "title": "MAKI TIME Bordeaux (@maki.time_bordeaux)",
+            "snippet": "... followers · 4 following · 1 posts · @maki.time_bordeaux: “Super Restaurant Japonais ... MAKI TIME Bordeaux. 9 followers. 3 following. Super Restaurant ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "restaurantishikawa",
+            "profileUrl": "https://www.instagram.com/restaurantishikawa/",
+            "title": "Restaurant Ishikawa (@restaurantishikawa) · Bordeaux-en- ...",
+            "snippet": "Plats à emporter pour Noël et la fin d'année .⁡ ⁡⁡ #oishi#exception#bordeaux#bordeauxmaville#restaurantishikawa#authentique#traditionnel#cuisinejaponaise# ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "othai.pessac",
+            "profileUrl": "https://www.instagram.com/othai.pessac/",
+            "title": "O'thaï 🍛 (@othai.pessac)",
+            "snippet": "67 followers · 2 posts · Restaurant asiatique 114 Avenue de Canéjan Pessac 33600 06.62.78.58.23.",
+            "score": 23,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"pessac\" \"restaurant asiatique\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "popular",
+            "profileUrl": "https://www.instagram.com/popular/",
+            "title": "Restaurant Asiatique Pessac",
+            "snippet": "Watch short videos about restaurant asiatique pessac from people around the world. Pessac, Asiatique Pessac, Pessac Restaurant And More...",
+            "score": 13,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"pessac\" \"restaurant asiatique\" instagram",
+            "mode": "loose"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"bordeaux\" \"restaurant asiatique\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 24,
+            "instagram_urls_count": 15,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 15,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 15
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8998,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"bordeaux\" \"restaurant japonais\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 4,
+            "rejected_non_profile_count": 13,
+            "extracted_usernames_count": 4,
+            "relevant_usernames_count": 4,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 13
+            },
+            "top20": [
+              {
+                "username": "pavillonyuasa",
+                "profileUrl": "https://www.instagram.com/pavillonyuasa/?hl=en",
+                "title": "Pavillon Yuasa Bordeaux (@pavillonyuasa)",
+                "snippet": "Intégrez un restaurant japonais authentique situé dans le quartier des Chartrons, Bordeaux. • Expérience en restauration exigée • Notions de japonais ...",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "gwenmds",
+                "profileUrl": "https://www.instagram.com/gwenmds/",
+                "title": "Gwen MDS (@gwenmds) • Instagram photos and videos",
+                "snippet": "C'est LE restaurant Japonais de Bordeaux qu'il ne faut pas louper ! #japanfood ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "maki.time_bordeaux",
+                "profileUrl": "https://www.instagram.com/maki.time_bordeaux/",
+                "title": "MAKI TIME Bordeaux (@maki.time_bordeaux)",
+                "snippet": "... followers · 4 following · 1 posts · @maki.time_bordeaux: “Super Restaurant Japonais ... MAKI TIME Bordeaux. 9 followers. 3 following. Super Restaurant ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "restaurantishikawa",
+                "profileUrl": "https://www.instagram.com/restaurantishikawa/",
+                "title": "Restaurant Ishikawa (@restaurantishikawa) · Bordeaux-en- ...",
+                "snippet": "Plats à emporter pour Noël et la fin d'année .⁡ ⁡⁡ #oishi#exception#bordeaux#bordeauxmaville#restaurantishikawa#authentique#traditionnel#cuisinejaponaise# ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"bordeaux\" \"restaurant japonais\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4840,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"merignac\" \"restaurant asiatique\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 19,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 18,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 18
+            },
+            "top20": [
+              {
+                "username": "ginza.merignac",
+                "profileUrl": "https://www.instagram.com/ginza.merignac/",
+                "title": "Restaurant Ginza (@ginza.merignac)",
+                "snippet": "1K+ followers · 33 following · 30 posts · @ginza.merignac: “ Restaurant Asiatique spécialisé dans la Cuisine Japonaise Formule à volonté Ouvert 7j/7 ...",
+                "score": 25,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"merignac\" \"restaurant asiatique\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7608,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"pessac\" \"restaurant asiatique\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 19,
+            "profile_urls_count": 5,
+            "rejected_non_profile_count": 14,
+            "extracted_usernames_count": 3,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 14
+            },
+            "top20": [
+              {
+                "username": "izakaya_bar_66",
+                "profileUrl": "https://www.instagram.com/izakaya_bar_66/",
+                "title": "izakaya bar 66 (@izakaya_bar_66) · Pessac",
+                "snippet": "Nouveau restaurant asiatique à Pessac centre. A découvrir votre nouveau restaurant asiatique au Pessac centre !!!",
+                "score": 26,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"pessac\" \"restaurant asiatique\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "othai.pessac",
+                "profileUrl": "https://www.instagram.com/othai.pessac/",
+                "title": "O'thaï 🍛 (@othai.pessac)",
+                "snippet": "67 followers · 2 posts · Restaurant asiatique 114 Avenue de Canéjan Pessac 33600 06.62.78.58.23.",
+                "score": 23,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"pessac\" \"restaurant asiatique\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Restaurant Asiatique Pessac",
+                "snippet": "Watch short videos about restaurant asiatique pessac from people around the world. Pessac, Asiatique Pessac, Pessac Restaurant And More...",
+                "score": 13,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"pessac\" \"restaurant asiatique\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10256,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "C",
+      "key": "johannesburg_psy",
+      "niche": "psychologue",
+      "locationLabel": "Johannesburg, Gauteng, South Africa",
+      "strict": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 29450,
+        "organic_results_count": 101,
+        "instagram_urls_count": 101,
+        "profile_urls_count": 1,
+        "rejected_non_profile_count": 100,
+        "extracted_usernames_unique": 1,
+        "relevant_usernames_unique": 1,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 100
+        },
+        "top20": [
+          {
+            "username": "kiaraoccupationaltherapy",
+            "profileUrl": "https://www.instagram.com/kiaraoccupationaltherapy/",
+            "title": "Kiara Occupational Therapy (@kiaraoccupationaltherapy)",
+            "snippet": "Kiara Occupational Therapy. 289 followers. 38 following. OT Practice based in Johannesburg. We help people of various ages reach their potential to thrive ...",
+            "score": 13,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"therapy\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"johannesburg\" \"psychologist\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 18,
+            "instagram_urls_count": 18,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 18,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 18
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5856,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 8
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 0
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"clinical psychologist\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 26,
+            "instagram_urls_count": 26,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 26,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 26
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7947,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"therapy\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 29,
+            "instagram_urls_count": 29,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 28,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 28
+            },
+            "top20": [
+              {
+                "username": "kiaraoccupationaltherapy",
+                "profileUrl": "https://www.instagram.com/kiaraoccupationaltherapy/",
+                "title": "Kiara Occupational Therapy (@kiaraoccupationaltherapy)",
+                "snippet": "Kiara Occupational Therapy. 289 followers. 38 following. OT Practice based in Johannesburg. We help people of various ages reach their potential to thrive ...",
+                "score": 13,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"therapy\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10424,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"counselling\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 28,
+            "instagram_urls_count": 28,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 28,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 28
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5223,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      },
+      "loose": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 38189,
+        "organic_results_count": 107,
+        "instagram_urls_count": 67,
+        "profile_urls_count": 32,
+        "rejected_non_profile_count": 34,
+        "extracted_usernames_unique": 29,
+        "relevant_usernames_unique": 15,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 34
+        },
+        "top20": [
+          {
+            "username": "raeesah.khotu_psychologist",
+            "profileUrl": "https://www.instagram.com/raeesah.khotu_psychologist/",
+            "title": "Clinical Psychologist (@raeesah.khotu_psychologist)",
+            "snippet": "Clinical Psychologist. 1,645 followers. 131 following. ◾Psychotherapy services for adults and adolescents ◾Please note: This page is not intended to replace ...",
+            "score": 35,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "the_wmnologist",
+            "profileUrl": "https://www.instagram.com/the_wmnologist/",
+            "title": "WMNOLOGY by Sandi Conradie (@the_wmnologist)",
+            "snippet": "* Psychotherapy for women * A community for women and mothers * Advocating women's mental health * Psychoeducation All with women in mind. Based in Johannesburg ...",
+            "score": 34,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "anele_siswana",
+            "profileUrl": "https://www.instagram.com/anele_siswana/?hl=en",
+            "title": "Anele Siswana (@anele_siswana) - Instagram",
+            "snippet": "Award Winning Clinical Psychologist EAP Expert Igqirha Kwa Xhosa Spiritual Healer Public Speaker Influencer bookings@anelesiswana.co.za 27720486361.",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "soulful_psychology_mo",
+            "profileUrl": "https://www.instagram.com/soulful_psychology_mo/?hl=en",
+            "title": "Mohammed Uzair Bhamjee 🇿🇦 (@soulful_psychology_mo)",
+            "snippet": "... psychologist #brownmentalhealth #Johannesburg #soulfulpsychology #peopleofcolour ...",
+            "score": 30,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "greening_psychology",
+            "profileUrl": "https://www.instagram.com/greening_psychology/",
+            "title": "Kayleigh Green (@greening_psychology) · Johannesburg",
+            "snippet": "Reach out Meet your psychologist ~ Kayleigh Mbali Green #psychology ... psychologist #psychologysouthafrica #greeningpsychologygroup ...",
+            "score": 29,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "drhananbushkin",
+            "profileUrl": "https://www.instagram.com/drhananbushkin/?hl=en",
+            "title": "Dr Hanan Bushkin (@drhananbushkin)",
+            "snippet": "Psychologist, PhD, Head of the Anxiety and Trauma Clinic, Pioneer of ABA (Anchor Based Approach)",
+            "score": 29,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "lesegondhlovu_psychologist",
+            "profileUrl": "https://www.instagram.com/lesegondhlovu_psychologist/",
+            "title": "lesegondhlovu_psychologist",
+            "snippet": "... #liberation. #annafreud ...",
+            "score": 28,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "drthuraishamoodley",
+            "profileUrl": "https://www.instagram.com/drthuraishamoodley/",
+            "title": "Thuraisha Moodley., PhD. (@drthuraishamoodley)",
+            "snippet": "14K followers · 206 posts · Clinical Psychologist | Speaker | Facilitator ... When: Apr 18, 2021 06:30 PM Johannesburg Register in advance for this ...",
+            "score": 26,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "coupleshealingsa",
+            "profileUrl": "https://www.instagram.com/coupleshealingsa/",
+            "title": "Sandra Brownrigg Clinical Psychologist ...",
+            "snippet": "Guiding couples & individuals on journeys of growth & connection Clinical Psychologist | SA sandra@couplescounselling.co.za | 060 834 2995. Follow.",
+            "score": 25,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "mindfulmoments_psy",
+            "profileUrl": "https://www.instagram.com/mindfulmoments_psy/",
+            "title": "Franck Origins Psychologists (@mindfulmoments_psy)",
+            "snippet": "Flow: Where joy meets purpose. According to psychologist Mihaly Csikszentmihalyi, when we're in ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "findyourflourishsa",
+            "profileUrl": "https://www.instagram.com/findyourflourishsa/",
+            "title": "Rachel Molongoana (@findyourflourishsa) · Johannesburg",
+            "snippet": "Rachel Molongoana: HPCSA & BHF registered Counselling Psychologist. Private practice based Johannesburg, South Africa. ☎️ : 011 682 3598/076 150 3200",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "hlengiwezwanee",
+            "profileUrl": "https://www.instagram.com/hlengiwezwanee/",
+            "title": "Hlengiweeah (@hlengiwezwanee)",
+            "snippet": "482 followers · 645 following · 183 posts · @hlengiwezwanee: “JDD Psych Consulting Clinical Psychologist in Rosebank@The Zone; Resident Psychologist for Seng'",
+            "score": 23,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "clinicalpsychologisthd",
+            "profileUrl": "https://www.instagram.com/clinicalpsychologisthd/",
+            "title": "Heather Delaney (@clinicalpsychologisthd)",
+            "snippet": "MA (Clin. Psych.) A clinical psychologist in Sandton. #southafrica This page is for educational purposes only. DM for an appointment or more info.",
+            "score": 22,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "calvinpienaarpsych",
+            "profileUrl": "https://www.instagram.com/calvinpienaarpsych/",
+            "title": "Calvin Pienaar Clinical Psychologist (@calvinpienaarpsych)",
+            "snippet": "Clinical Psychologist | Sandton Therapy for growth, insight & healing. In-person & online | 40 East Road, Sandton calvin@calvinpienaar.co.za.",
+            "score": 22,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "lurixpsychologist",
+            "profileUrl": "https://www.instagram.com/lurixpsychologist/",
+            "title": "Luricka Fick Psychologist (@lurixpsychologist)",
+            "snippet": "#psychology #befree #befree #believe #psychologist #psychological #feelit #feelfreefeed #feelfree ...",
+            "score": 21,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "mbclinpsych",
+            "profileUrl": "https://www.instagram.com/mbclinpsych/",
+            "title": "Mental Health with Mariné (@mbclinpsych) · Sandton",
+            "snippet": "“In all chaos there is a cosmos.” - C.G. Jung Clinical Psychologist in Private Practice Sandown, Sandton. · www.mbclinpsych.co.za #psychology #mentalhealth # ...",
+            "score": 21,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "ritowellness_",
+            "profileUrl": "https://www.instagram.com/ritowellness_/",
+            "title": "RitoWellness-Mental health services. (@ritowellness_)",
+            "snippet": "Counseling in randburg Marriage counsellor in randburg Grief counselling in randburg Couples therapists in randburg #counsellinginrandburg #therapy # ...",
+            "score": 21,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"randburg\" \"therapy\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "dranthonytownsend",
+            "profileUrl": "https://www.instagram.com/dranthonytownsend/",
+            "title": "Anthony Townsend (@dranthonytownsend)",
+            "snippet": "... psychologist ... Johannesburg, Woodmead Lincoln St, Woodmead, Sandton, 2128 Investment: R3950 per person To book, DM “ABA” or contact ...",
+            "score": 20,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "brendaleemanschildtherapy",
+            "profileUrl": "https://www.instagram.com/brendaleemanschildtherapy/",
+            "title": "Brenda Leemans 💚 Child Therapist ...",
+            "snippet": "Different Spaces, Different Stories One of the lovely things about working in a setting with access to different spaces is that therapy does not always have ...",
+            "score": 20,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"randburg\" \"therapy\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "farhana.goga",
+            "profileUrl": "https://www.instagram.com/farhana.goga/?hl=en",
+            "title": "Farhana Goga",
+            "snippet": "Hi, I am Farhana Goga. I am a ... Johannesburg (Rosebank) — 2 August Online — 23 August 9am–1pm SAST ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"johannesburg\" \"psychologist\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 14,
+            "profile_urls_count": 12,
+            "rejected_non_profile_count": 1,
+            "extracted_usernames_count": 12,
+            "relevant_usernames_count": 12,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 1
+            },
+            "top20": [
+              {
+                "username": "raeesah.khotu_psychologist",
+                "profileUrl": "https://www.instagram.com/raeesah.khotu_psychologist/",
+                "title": "Clinical Psychologist (@raeesah.khotu_psychologist)",
+                "snippet": "Clinical Psychologist. 1,645 followers. 131 following. ◾Psychotherapy services for adults and adolescents ◾Please note: This page is not intended to replace ...",
+                "score": 35,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "the_wmnologist",
+                "profileUrl": "https://www.instagram.com/the_wmnologist/",
+                "title": "WMNOLOGY by Sandi Conradie (@the_wmnologist)",
+                "snippet": "* Psychotherapy for women * A community for women and mothers * Advocating women's mental health * Psychoeducation All with women in mind. Based in Johannesburg ...",
+                "score": 34,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "anele_siswana",
+                "profileUrl": "https://www.instagram.com/anele_siswana/?hl=en",
+                "title": "Anele Siswana (@anele_siswana) - Instagram",
+                "snippet": "Award Winning Clinical Psychologist EAP Expert Igqirha Kwa Xhosa Spiritual Healer Public Speaker Influencer bookings@anelesiswana.co.za 27720486361.",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "soulful_psychology_mo",
+                "profileUrl": "https://www.instagram.com/soulful_psychology_mo/?hl=en",
+                "title": "Mohammed Uzair Bhamjee 🇿🇦 (@soulful_psychology_mo)",
+                "snippet": "... psychologist #brownmentalhealth #Johannesburg #soulfulpsychology #peopleofcolour ...",
+                "score": 30,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "greening_psychology",
+                "profileUrl": "https://www.instagram.com/greening_psychology/",
+                "title": "Kayleigh Green (@greening_psychology) · Johannesburg",
+                "snippet": "Reach out Meet your psychologist ~ Kayleigh Mbali Green #psychology ... psychologist #psychologysouthafrica #greeningpsychologygroup ...",
+                "score": 29,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "drhananbushkin",
+                "profileUrl": "https://www.instagram.com/drhananbushkin/?hl=en",
+                "title": "Dr Hanan Bushkin (@drhananbushkin)",
+                "snippet": "Psychologist, PhD, Head of the Anxiety and Trauma Clinic, Pioneer of ABA (Anchor Based Approach)",
+                "score": 29,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "lesegondhlovu_psychologist",
+                "profileUrl": "https://www.instagram.com/lesegondhlovu_psychologist/",
+                "title": "lesegondhlovu_psychologist",
+                "snippet": "... #liberation. #annafreud ...",
+                "score": 28,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "drthuraishamoodley",
+                "profileUrl": "https://www.instagram.com/drthuraishamoodley/",
+                "title": "Thuraisha Moodley., PhD. (@drthuraishamoodley)",
+                "snippet": "14K followers · 206 posts · Clinical Psychologist | Speaker | Facilitator ... When: Apr 18, 2021 06:30 PM Johannesburg Register in advance for this ...",
+                "score": 26,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "mindfulmoments_psy",
+                "profileUrl": "https://www.instagram.com/mindfulmoments_psy/",
+                "title": "Franck Origins Psychologists (@mindfulmoments_psy)",
+                "snippet": "Flow: Where joy meets purpose. According to psychologist Mihaly Csikszentmihalyi, when we're in ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "findyourflourishsa",
+                "profileUrl": "https://www.instagram.com/findyourflourishsa/",
+                "title": "Rachel Molongoana (@findyourflourishsa) · Johannesburg",
+                "snippet": "Rachel Molongoana: HPCSA & BHF registered Counselling Psychologist. Private practice based Johannesburg, South Africa. ☎️ : 011 682 3598/076 150 3200",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "lurixpsychologist",
+                "profileUrl": "https://www.instagram.com/lurixpsychologist/",
+                "title": "Luricka Fick Psychologist (@lurixpsychologist)",
+                "snippet": "#psychology #befree #befree #believe #psychologist #psychological #feelit #feelfreefeed #feelfree ...",
+                "score": 21,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "dranthonytownsend",
+                "profileUrl": "https://www.instagram.com/dranthonytownsend/",
+                "title": "Anthony Townsend (@dranthonytownsend)",
+                "snippet": "... psychologist ... Johannesburg, Woodmead Lincoln St, Woodmead, Sandton, 2128 Investment: R3950 per person To book, DM “ABA” or contact ...",
+                "score": 20,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"psychologist\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 18473,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 8
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"sandton\" \"psychologist\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 9,
+            "rejected_non_profile_count": 8,
+            "extracted_usernames_count": 8,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 8
+            },
+            "top20": [
+              {
+                "username": "coupleshealingsa",
+                "profileUrl": "https://www.instagram.com/coupleshealingsa/",
+                "title": "Sandra Brownrigg Clinical Psychologist ...",
+                "snippet": "Guiding couples & individuals on journeys of growth & connection Clinical Psychologist | SA sandra@couplescounselling.co.za | 060 834 2995. Follow.",
+                "score": 25,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "clinicalpsychologisthd",
+                "profileUrl": "https://www.instagram.com/clinicalpsychologisthd/",
+                "title": "Heather Delaney (@clinicalpsychologisthd)",
+                "snippet": "MA (Clin. Psych.) A clinical psychologist in Sandton. #southafrica This page is for educational purposes only. DM for an appointment or more info.",
+                "score": 22,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "calvinpienaarpsych",
+                "profileUrl": "https://www.instagram.com/calvinpienaarpsych/",
+                "title": "Calvin Pienaar Clinical Psychologist (@calvinpienaarpsych)",
+                "snippet": "Clinical Psychologist | Sandton Therapy for growth, insight & healing. In-person & online | 40 East Road, Sandton calvin@calvinpienaar.co.za.",
+                "score": 22,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "mbclinpsych",
+                "profileUrl": "https://www.instagram.com/mbclinpsych/",
+                "title": "Mental Health with Mariné (@mbclinpsych) · Sandton",
+                "snippet": "“In all chaos there is a cosmos.” - C.G. Jung Clinical Psychologist in Private Practice Sandown, Sandton. · www.mbclinpsych.co.za #psychology #mentalhealth # ...",
+                "score": 21,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "the.conscious.psychologist",
+                "profileUrl": "https://www.instagram.com/the.conscious.psychologist/?hl=en",
+                "title": "The.Conscious.Psychologist - Sanam Naran",
+                "snippet": "199K followers · 179 following · 1067 posts · @the.conscious.psychologist: “ | Psychologist ... The Words That Heal campaign by Sandton City & the Riky Rick ...",
+                "score": 17,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "stacey_cohen_psychologist",
+                "profileUrl": "https://www.instagram.com/stacey_cohen_psychologist/",
+                "title": "Stacey Cohen (@stacey_cohen_psychologist) · Sandton",
+                "snippet": "Educational Psychologist.Rivonia, Sandton, South Africa. stacey@buddingminds.org (063)0986482 https://buddingminds.org/ for more info",
+                "score": 17,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "lungile_lechesa_psychologist",
+                "profileUrl": "https://www.instagram.com/lungile_lechesa_psychologist/",
+                "title": "Lungile Lechesa (@lungile_lechesa_psychologist) · Sandton",
+                "snippet": "Clinical Psychologist | Isaiah 50:4 | · Which one do you need to work on? · Seeking help is a sign of strength, not weakness. · Therapy isn't just about ...",
+                "score": 16,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "dranthonytownsend",
+                "profileUrl": "https://www.instagram.com/dranthonytownsend/",
+                "title": "Anthony Townsend (@dranthonytownsend)",
+                "snippet": "... Psychologist #Sandton. An exploration of the mind of the surrealist ...",
+                "score": 6,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"psychologist\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5640,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"rosebank\" \"psychologist\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 18,
+            "profile_urls_count": 5,
+            "rejected_non_profile_count": 13,
+            "extracted_usernames_count": 5,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 13
+            },
+            "top20": [
+              {
+                "username": "hlengiwezwanee",
+                "profileUrl": "https://www.instagram.com/hlengiwezwanee/",
+                "title": "Hlengiweeah (@hlengiwezwanee)",
+                "snippet": "482 followers · 645 following · 183 posts · @hlengiwezwanee: “JDD Psych Consulting Clinical Psychologist in Rosebank@The Zone; Resident Psychologist for Seng'",
+                "score": 23,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "farhana.goga",
+                "profileUrl": "https://www.instagram.com/farhana.goga/?hl=en",
+                "title": "Farhana Goga",
+                "snippet": "Hi, I am Farhana Goga. I am a ... Johannesburg (Rosebank) — 2 August Online — 23 August 9am–1pm SAST ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "rosebanksteam",
+                "profileUrl": "https://www.instagram.com/rosebanksteam/?hl=en",
+                "title": "Rosebank Elementary- Nashville (@rosebanksteam)",
+                "snippet": "Price (School Psychologist) and Clay Capp (Metro Council, District 6). - New Traffic Safety Campaign - Spiritwear Sale - New RSBK hats!",
+                "score": 16,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "rosebank.college",
+                "profileUrl": "https://www.instagram.com/rosebank.college/?hl=en",
+                "title": "Rosebank College",
+                "snippet": "Parenting in the Digital Age: Brad Marshall at Rosebank College Last night, Rosebank College was privileged to host psychologist and author Brad Marshall ...",
+                "score": 13,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "soulful_psychology_mo",
+                "profileUrl": "https://www.instagram.com/soulful_psychology_mo/?hl=en",
+                "title": "Mohammed Uzair Bhamjee 🇿🇦 (@soulful_psychology_mo)",
+                "snippet": "Hafidh Psychologist with special interest in Adults, Pro Athletes and Trauma using #BWRT BWRT Advanced Practitioner Rosebank jhb | online.",
+                "score": 8,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"rosebank\" \"psychologist\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7786,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"randburg\" \"therapy\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 18,
+            "profile_urls_count": 6,
+            "rejected_non_profile_count": 12,
+            "extracted_usernames_count": 6,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 12
+            },
+            "top20": [
+              {
+                "username": "ritowellness_",
+                "profileUrl": "https://www.instagram.com/ritowellness_/",
+                "title": "RitoWellness-Mental health services. (@ritowellness_)",
+                "snippet": "Counseling in randburg Marriage counsellor in randburg Grief counselling in randburg Couples therapists in randburg #counsellinginrandburg #therapy # ...",
+                "score": 21,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"therapy\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "brendaleemanschildtherapy",
+                "profileUrl": "https://www.instagram.com/brendaleemanschildtherapy/",
+                "title": "Brenda Leemans 💚 Child Therapist ...",
+                "snippet": "Different Spaces, Different Stories One of the lovely things about working in a setting with access to different spaces is that therapy does not always have ...",
+                "score": 20,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"therapy\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "kirstenbeukesot",
+                "profileUrl": "https://www.instagram.com/kirstenbeukesot/",
+                "title": "Kirsten Beukes Occupational Therapists (@kirstenbeukesot)",
+                "snippet": "... Who are we: Beukes and Reynders is an occupational therapy practice based in Randburg, Johannesburg. With a special ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"randburg\" \"therapy\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "olive_branch_therapy",
+                "profileUrl": "https://www.instagram.com/olive_branch_therapy/",
+                "title": "Olive Branch therapy (@olive_branch_therapy) · Randburg",
+                "snippet": "... therapy - Speech therapy - Sport massage. ... Olive Branch therapy (@olive_branch_therapy) · Randburg. Instagram. Log in.",
+                "score": 10,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"therapy\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "randburgpowertohealth",
+                "profileUrl": "https://www.instagram.com/randburgpowertohealth/",
+                "title": "Power To Health Randburg (@randburgpowertohealth)",
+                "snippet": "222 followers · 65 posts · Recovery|Rehab|Wellness|Health Oxygen Therapy - MHBOT ‍♀️Ozone Therapy Floating Therapy Randburg - Parkside Centre (072) 911",
+                "score": 6,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"therapy\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "rumble_inrandburg",
+                "profileUrl": "https://www.instagram.com/rumble_inrandburg/reels/",
+                "title": "RUMBLE (@rumble_inrandburg)",
+                "snippet": "Because when it gets tough… you don't quit. Not when someone's counting on you. Rumble Remix | 9 May | ATG Randburg Teams of 2. Mixed pairs. RX & Not So RX.",
+                "score": 4,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"therapy\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6290,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "D",
+      "key": "belgium_smma",
+      "niche": "agence social media",
+      "locationLabel": "Belgique",
+      "strict": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 25075,
+        "organic_results_count": 103,
+        "instagram_urls_count": 103,
+        "profile_urls_count": 2,
+        "rejected_non_profile_count": 101,
+        "extracted_usernames_unique": 2,
+        "relevant_usernames_unique": 0,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 101
+        },
+        "top20": [
+          {
+            "username": "arkayzeroproof",
+            "profileUrl": "https://www.instagram.com/arkayzeroproof/p/DWcQj_3DDFu/?hl=da",
+            "title": "We don't need a social media agency. ...",
+            "snippet": "... likes, 0 comments - arkayzeroproof på March 28, 2026: \"We don't need a social media agency ... Brussels Reserve single barrel, rare breed, bourbon ...",
+            "score": 9,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"brussels\" \"social media agency\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "weswwim",
+            "profileUrl": "https://www.instagram.com/weswwim/",
+            "title": "Swwim - Content Marketing (@weswwim)",
+            "snippet": "POV: Your brand finally gets the social media agency it deserves. ‍↕️ When you ...",
+            "score": 9,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"brussels\" \"social media agency\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"belgique\" \"agence social media\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 14,
+            "instagram_urls_count": 14,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 14,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 14
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6298,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 4
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 0
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"belgium\" \"social media agency\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 30,
+            "instagram_urls_count": 30,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 30,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 30
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6637,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"bruxelles\" \"agence social media\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 30,
+            "instagram_urls_count": 30,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 30,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 30
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4525,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"brussels\" \"social media agency\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 29,
+            "instagram_urls_count": 29,
+            "profile_urls_count": 2,
+            "rejected_non_profile_count": 27,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 27
+            },
+            "top20": [
+              {
+                "username": "arkayzeroproof",
+                "profileUrl": "https://www.instagram.com/arkayzeroproof/p/DWcQj_3DDFu/?hl=da",
+                "title": "We don't need a social media agency. ...",
+                "snippet": "... likes, 0 comments - arkayzeroproof på March 28, 2026: \"We don't need a social media agency ... Brussels Reserve single barrel, rare breed, bourbon ...",
+                "score": 9,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"brussels\" \"social media agency\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "weswwim",
+                "profileUrl": "https://www.instagram.com/weswwim/",
+                "title": "Swwim - Content Marketing (@weswwim)",
+                "snippet": "POV: Your brand finally gets the social media agency it deserves. ‍↕️ When you ...",
+                "score": 9,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"brussels\" \"social media agency\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7615,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      },
+      "loose": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 41703,
+        "organic_results_count": 104,
+        "instagram_urls_count": 54,
+        "profile_urls_count": 22,
+        "rejected_non_profile_count": 32,
+        "extracted_usernames_unique": 20,
+        "relevant_usernames_unique": 5,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 32
+        },
+        "top20": [
+          {
+            "username": "moondustagency",
+            "profileUrl": "https://www.instagram.com/moondustagency/",
+            "title": "Agence Moondust (@moondustagency) · Watermael-Boitsfort",
+            "snippet": "... agence social media et contenu à Bruxelles, qui travaille avec des ... #moondustagency #glambusiness #socialmediagency #agencesocialmedia ...",
+            "score": 42,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "clarkinfluence",
+            "profileUrl": "https://www.instagram.com/clarkinfluence/?hl=en",
+            "title": "Clark Influence (@clarkinfluence)",
+            "snippet": "Agence social media & influence. Paris, Montréal, Toronto, Austin ... Belgique pour un petit voyage haut en couleur ! ☂️ Deux jours à se régaler ...",
+            "score": 41,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "socialfirst.agency",
+            "profileUrl": "https://www.instagram.com/socialfirst.agency/",
+            "title": "Social First | Agence social media (@socialfirst.agency)",
+            "snippet": "Belgique, Suède, Norvège, Pays-Bas, Angleterre, Irlande… Tous réunis à Bruxelles pour ...",
+            "score": 33,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "someagency.belgium",
+            "profileUrl": "https://www.instagram.com/someagency.belgium/",
+            "title": "So Me Agency (@someagency.belgium)",
+            "snippet": "Agence Social Media Confiez vos réseaux sociaux à nos Community managers ... Belgique ? En tout cas, profiter de votre week-end ! À lundi pour ...",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "target4biz_agency",
+            "profileUrl": "https://www.instagram.com/target4biz_agency/",
+            "title": "Target4Biz Web Agency Brussels (@target4biz_agency)",
+            "snippet": "En tant qu'agence social media marketing en Belgique, nous avons constaté ...",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "maem.studio",
+            "profileUrl": "https://www.instagram.com/maem.studio/",
+            "title": "Creative Marketing Agency (@maem.studio)",
+            "snippet": "... Antwerp, BE Working worldwide ... You get a social media agency that blends big-picture growth with eye-catching content.",
+            "score": 28,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "socialsky_agency",
+            "profileUrl": "https://www.instagram.com/socialsky_agency/?hl=en",
+            "title": "socialsky (@socialsky_agency) • Instagram photos and ...",
+            "snippet": "... Bruxelles Nous sommes fiers de nos membres qui ont parcouru cette course ... social media agency. And a good excuse to enjoy this delicious cake ...",
+            "score": 25,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "yourcommunicationsucks",
+            "profileUrl": "https://www.instagram.com/yourcommunicationsucks/",
+            "title": "Social Media Agency (@yourcommunicationsucks) · Brussels",
+            "snippet": "Social Media Agency (@yourcommunicationsucks) · Brussels. Instagram. Log in ... Thank us later.",
+            "score": 24,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "tackl.agency",
+            "profileUrl": "https://www.instagram.com/tackl.agency/",
+            "title": "TACKL. (@tackl.agency) · Antwerp",
+            "snippet": "3.4K+ followers · 1.9K+ posts · WE CULTURE. WE CONNECT. Social Media Agency based in Antwerp.",
+            "score": 24,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "terrage_antwerp",
+            "profileUrl": "https://www.instagram.com/terrage_antwerp/",
+            "title": "Antwerp (@terrage_antwerp)",
+            "snippet": "terrage_antwerp. Branding & Social Media Agency | Antwerp. 1,603 followers. 176 following. Terragé Helping businesses communicate who they are. Follow. Message ...",
+            "score": 23,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "duckmotion_",
+            "profileUrl": "https://www.instagram.com/duckmotion_/",
+            "title": "Duckmotion - Video content strategy agency (@duckmotion_)",
+            "snippet": "... Instagram, coach Instagram, social media agency ]. Dernière ligne droite jusqu'au ...",
+            "score": 21,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "chasetheagency",
+            "profileUrl": "https://www.instagram.com/chasetheagency/",
+            "title": "Chase Social Agency (@chasetheagency) - Instagram",
+            "snippet": "Welkom op ons kantoor in Gent! ☀️ #chasetheagency #officetour ...",
+            "score": 21,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "deal_eu",
+            "profileUrl": "https://www.instagram.com/deal_eu/",
+            "title": "D-E-A-L (@deal_eu) • Instagram photos and videos",
+            "snippet": "Series of posters for the Radio Campus Bruxelles party, print by the riso master and color shaman @harry_riso.",
+            "score": 18,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "superkraft.be",
+            "profileUrl": "https://www.instagram.com/superkraft.be/?hl=en",
+            "title": "Superkraft (@superkraft.be) · Ghent",
+            "snippet": "NEW WORK ⚡️Shared mobility should be for ... Marketing #Agency #Agencylife #Superkraft #WeAreSuperkraft ...",
+            "score": 16,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "beekeepersagency",
+            "profileUrl": "https://www.instagram.com/beekeepersagency/",
+            "title": "BeeKeepers (@beekeepersagency)",
+            "snippet": "... gent. Another busy day at my internship #agency #gent #9000 #beekeepers #dayinthelifevlog ...",
+            "score": 15,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "weswwim",
+            "profileUrl": "https://www.instagram.com/weswwim/",
+            "title": "Swwim - Content Marketing (@weswwim)",
+            "snippet": "POV: Your brand finally gets the social media agency it deserves. ‍↕️ When you ...",
+            "score": 14,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "for.youagency",
+            "profileUrl": "https://www.instagram.com/for.youagency/?hl=en",
+            "title": "For You Agency (@for.youagency)",
+            "snippet": "a full-service social media agency that helps brands stand out, to stay in ... but in our aesthetic office 3.⁠ ⁠@kesvandenbroek was enjoying Antwerp ...",
+            "score": 14,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "bydavydenduyver",
+            "profileUrl": "https://www.instagram.com/bydavydenduyver/",
+            "title": "Davy Denduyver Offices (@bydavydenduyver)",
+            "snippet": "Initial launch posters for @snkm.be first Antwerp edition. It's been fun to grow ...",
+            "score": 14,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "nextchapter.agency",
+            "profileUrl": "https://www.instagram.com/nextchapter.agency/?hl=en",
+            "title": "Next Chapter Agency (@nextchapter.agency)",
+            "snippet": "Full-service social, digital and influencer marketing agency. >>> Shaping ... gent #rotterdam ...",
+            "score": 8,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "visualcontentagency",
+            "profileUrl": "https://www.instagram.com/visualcontentagency/?hl=en",
+            "title": "Visual Content Agency (@visualcontentagency)",
+            "snippet": "One of the biggest challenges of starting a marketing agency? Coming up ...",
+            "score": 6,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"belgique\" \"agence social media\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 11,
+            "profile_urls_count": 5,
+            "rejected_non_profile_count": 6,
+            "extracted_usernames_count": 5,
+            "relevant_usernames_count": 5,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 6
+            },
+            "top20": [
+              {
+                "username": "moondustagency",
+                "profileUrl": "https://www.instagram.com/moondustagency/",
+                "title": "Agence Moondust (@moondustagency) · Watermael-Boitsfort",
+                "snippet": "... agence social media et contenu à Bruxelles, qui travaille avec des ... #moondustagency #glambusiness #socialmediagency #agencesocialmedia ...",
+                "score": 42,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "clarkinfluence",
+                "profileUrl": "https://www.instagram.com/clarkinfluence/?hl=en",
+                "title": "Clark Influence (@clarkinfluence)",
+                "snippet": "Agence social media & influence. Paris, Montréal, Toronto, Austin ... Belgique pour un petit voyage haut en couleur ! ☂️ Deux jours à se régaler ...",
+                "score": 41,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "socialfirst.agency",
+                "profileUrl": "https://www.instagram.com/socialfirst.agency/",
+                "title": "Social First | Agence social media (@socialfirst.agency)",
+                "snippet": "Belgique, Suède, Norvège, Pays-Bas, Angleterre, Irlande… Tous réunis à Bruxelles pour ...",
+                "score": 33,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "someagency.belgium",
+                "profileUrl": "https://www.instagram.com/someagency.belgium/",
+                "title": "So Me Agency (@someagency.belgium)",
+                "snippet": "Agence Social Media Confiez vos réseaux sociaux à nos Community managers ... Belgique ? En tout cas, profiter de votre week-end ! À lundi pour ...",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "target4biz_agency",
+                "profileUrl": "https://www.instagram.com/target4biz_agency/",
+                "title": "Target4Biz Web Agency Brussels (@target4biz_agency)",
+                "snippet": "En tant qu'agence social media marketing en Belgique, nous avons constaté ...",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"belgique\" \"agence social media\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8832,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"bruxelles\" \"social media agency\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 24,
+            "instagram_urls_count": 12,
+            "profile_urls_count": 5,
+            "rejected_non_profile_count": 7,
+            "extracted_usernames_count": 5,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 7
+            },
+            "top20": [
+              {
+                "username": "moondustagency",
+                "profileUrl": "https://www.instagram.com/moondustagency/",
+                "title": "Agence Moondust (@moondustagency) · Watermael-Boitsfort",
+                "snippet": "... Bruxelles. ... Social media changes and evolves all the time. As a social media agency, we have strategies ...",
+                "score": 27,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "socialsky_agency",
+                "profileUrl": "https://www.instagram.com/socialsky_agency/?hl=en",
+                "title": "socialsky (@socialsky_agency) • Instagram photos and ...",
+                "snippet": "... Bruxelles Nous sommes fiers de nos membres qui ont parcouru cette course ... social media agency. And a good excuse to enjoy this delicious cake ...",
+                "score": 25,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "yourcommunicationsucks",
+                "profileUrl": "https://www.instagram.com/yourcommunicationsucks/",
+                "title": "Social Media Agency (@yourcommunicationsucks) · Brussels",
+                "snippet": "Social Media Agency (@yourcommunicationsucks) · Brussels. Instagram. Log in ... Thank us later.",
+                "score": 24,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "duckmotion_",
+                "profileUrl": "https://www.instagram.com/duckmotion_/",
+                "title": "Duckmotion - Video content strategy agency (@duckmotion_)",
+                "snippet": "... Instagram, coach Instagram, social media agency ]. Dernière ligne droite jusqu'au ...",
+                "score": 21,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "deal_eu",
+                "profileUrl": "https://www.instagram.com/deal_eu/",
+                "title": "D-E-A-L (@deal_eu) • Instagram photos and videos",
+                "snippet": "Series of posters for the Radio Campus Bruxelles party, print by the riso master and color shaman @harry_riso.",
+                "score": 18,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"bruxelles\" \"social media agency\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8472,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"antwerp\" \"social media agency\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 19,
+            "profile_urls_count": 7,
+            "rejected_non_profile_count": 12,
+            "extracted_usernames_count": 7,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 12
+            },
+            "top20": [
+              {
+                "username": "maem.studio",
+                "profileUrl": "https://www.instagram.com/maem.studio/",
+                "title": "Creative Marketing Agency (@maem.studio)",
+                "snippet": "... Antwerp, BE Working worldwide ... You get a social media agency that blends big-picture growth with eye-catching content.",
+                "score": 28,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "tackl.agency",
+                "profileUrl": "https://www.instagram.com/tackl.agency/",
+                "title": "TACKL. (@tackl.agency) · Antwerp",
+                "snippet": "3.4K+ followers · 1.9K+ posts · WE CULTURE. WE CONNECT. Social Media Agency based in Antwerp.",
+                "score": 24,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "terrage_antwerp",
+                "profileUrl": "https://www.instagram.com/terrage_antwerp/",
+                "title": "Antwerp (@terrage_antwerp)",
+                "snippet": "terrage_antwerp. Branding & Social Media Agency | Antwerp. 1,603 followers. 176 following. Terragé Helping businesses communicate who they are. Follow. Message ...",
+                "score": 23,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "socialsky_agency",
+                "profileUrl": "https://www.instagram.com/socialsky_agency/?hl=en",
+                "title": "socialsky (@socialsky_agency) • Instagram photos and ...",
+                "snippet": "4.8K+ followers · 59 following · 203 posts · @socialsky_agency: “ social first agency Brussels | Antwerp I Mauritius ⚡️ stop posting, start existing ...",
+                "score": 17,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "weswwim",
+                "profileUrl": "https://www.instagram.com/weswwim/",
+                "title": "Swwim - Content Marketing (@weswwim)",
+                "snippet": "POV: Your brand finally gets the social media agency it deserves. ‍↕️ When you ...",
+                "score": 14,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "for.youagency",
+                "profileUrl": "https://www.instagram.com/for.youagency/?hl=en",
+                "title": "For You Agency (@for.youagency)",
+                "snippet": "a full-service social media agency that helps brands stand out, to stay in ... but in our aesthetic office 3.⁠ ⁠@kesvandenbroek was enjoying Antwerp ...",
+                "score": 14,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "bydavydenduyver",
+                "profileUrl": "https://www.instagram.com/bydavydenduyver/",
+                "title": "Davy Denduyver Offices (@bydavydenduyver)",
+                "snippet": "Initial launch posters for @snkm.be first Antwerp edition. It's been fun to grow ...",
+                "score": 14,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"antwerp\" \"social media agency\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10793,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"gent\" \"marketing agency\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 12,
+            "profile_urls_count": 5,
+            "rejected_non_profile_count": 7,
+            "extracted_usernames_count": 5,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 7
+            },
+            "top20": [
+              {
+                "username": "chasetheagency",
+                "profileUrl": "https://www.instagram.com/chasetheagency/",
+                "title": "Chase Social Agency (@chasetheagency) - Instagram",
+                "snippet": "Welkom op ons kantoor in Gent! ☀️ #chasetheagency #officetour ...",
+                "score": 21,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "superkraft.be",
+                "profileUrl": "https://www.instagram.com/superkraft.be/?hl=en",
+                "title": "Superkraft (@superkraft.be) · Ghent",
+                "snippet": "NEW WORK ⚡️Shared mobility should be for ... Marketing #Agency #Agencylife #Superkraft #WeAreSuperkraft ...",
+                "score": 16,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "beekeepersagency",
+                "profileUrl": "https://www.instagram.com/beekeepersagency/",
+                "title": "BeeKeepers (@beekeepersagency)",
+                "snippet": "... gent. Another busy day at my internship #agency #gent #9000 #beekeepers #dayinthelifevlog ...",
+                "score": 15,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nextchapter.agency",
+                "profileUrl": "https://www.instagram.com/nextchapter.agency/?hl=en",
+                "title": "Next Chapter Agency (@nextchapter.agency)",
+                "snippet": "Full-service social, digital and influencer marketing agency. >>> Shaping ... gent #rotterdam ...",
+                "score": 8,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "visualcontentagency",
+                "profileUrl": "https://www.instagram.com/visualcontentagency/?hl=en",
+                "title": "Visual Content Agency (@visualcontentagency)",
+                "snippet": "One of the biggest challenges of starting a marketing agency? Coming up ...",
+                "score": 6,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"gent\" \"marketing agency\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 13606,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      }
+    }
+  ]
+}
