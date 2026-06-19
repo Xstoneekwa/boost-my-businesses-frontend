@@ -28,6 +28,12 @@ import {
   type TargetVerificationDecision,
 } from "@/lib/instagram-targets";
 import type { TargetSafeRow } from "@/app/instagram-dashboard/targets-data";
+import {
+  evaluateTargetReaddBlock,
+  shouldAllowAutoArchiveRestoreOverride,
+  TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON,
+  TARGET_AUTO_ARCHIVE_READD_BLOCKED_AUDIT_REASON,
+} from "@/lib/instagram-dashboard/target-auto-archive-low-fbr-policy";
 
 export type { TargetSafeRow };
 
@@ -186,6 +192,30 @@ function validateKnownFollowersCount(followersCount: number | null) {
 function activeExistingUsername(row: SupabaseRecord) {
   if (isDeletedTarget(row) || isArchivedTarget(row)) return "";
   return normalizeTargetUsername(readString(row.normalized_username, readString(row.target_username, "")));
+}
+
+async function rejectBlockedTargetReadd(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+  rows: SupabaseRecord[],
+  targetUsername: string,
+  ctx: TargetsServiceContext,
+  operation: "target_add_single" | "target_add_bulk",
+) {
+  const block = evaluateTargetReaddBlock(rows, targetUsername);
+  if (!block.blocked) return null;
+  await tryRecordTargetAudit(supabase, {
+    accountId,
+    operation,
+    result: "rejected",
+    reason: TARGET_AUTO_ARCHIVE_READD_BLOCKED_AUDIT_REASON,
+    actorType: ctx.actorType,
+    sourceSurface: ctx.sourceSurface,
+  });
+  const message = ctx.actorType === "client"
+    ? (block.clientMessageFr ?? "Ce compte cible a été mis de côté pour cette campagne.")
+    : (block.clientMessageEn ?? "This target account has been set aside for this campaign.");
+  return { ok: false as const, error: message, status: 409 as const };
 }
 
 function targetSourceForAdd(mode: "single" | "bulk", ctx: TargetsServiceContext): TargetSource {
@@ -410,7 +440,10 @@ export async function addAccountTargetSingle(
     .eq("account_id", accountId);
 
   if (dupError) return { ok: false, error: dupError.message, status: 500 };
-  const dup = ((dupRows ?? []) as SupabaseRecord[]).find((row) => activeExistingUsername(row) === single);
+  const existingRows = (dupRows ?? []) as SupabaseRecord[];
+  const readdBlock = await rejectBlockedTargetReadd(supabase, accountId, existingRows, single, ctx, "target_add_single");
+  if (readdBlock) return readdBlock;
+  const dup = existingRows.find((row) => activeExistingUsername(row) === single);
   if (dup) {
     await tryRecordTargetAudit(supabase, {
       accountId,
@@ -501,6 +534,18 @@ export async function addAccountTargetsBulk(
     usernames.map((u) => readString(u, "")),
     existingUsernames,
   );
+  for (const line of classified) {
+    if (line.status === "invalid_syntax" || line.status === "duplicate_in_batch" || line.status === "duplicate_existing") continue;
+    const readdBlock = await rejectBlockedTargetReadd(
+      supabase,
+      accountId,
+      (existingRows ?? []) as SupabaseRecord[],
+      line.normalized_username,
+      ctx,
+      "target_add_bulk",
+    );
+    if (readdBlock) return readdBlock;
+  }
   const summary = summarizeBulkTargetLines(classified);
   const accepted = classified.filter((line) => line.status === "pending_verification");
   const batchId = accepted.length > 0 ? crypto.randomUUID() : null;
@@ -666,6 +711,21 @@ export async function restoreAccountTarget(
   if (!row) return { ok: false, error: "Target does not belong to this account.", status: 400 };
   if (isDeletedTargetLifecycle(row)) return { ok: false, error: "Deleted targets cannot be restored from this action.", status: 409 };
   if (!isArchivedTargetLifecycle(row)) return { ok: false, error: "Only archived targets can be restored.", status: 409 };
+  if (
+    readString(row.archive_reason, "") === TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON
+    && !shouldAllowAutoArchiveRestoreOverride(ctx.actorType)
+  ) {
+    const block = evaluateTargetReaddBlock(rows, readString(row.normalized_username, readString(row.target_username, "")));
+    if (block.blocked) {
+      return {
+        ok: false,
+        error: ctx.actorType === "client"
+          ? (block.clientMessageFr ?? "Ce compte cible a été mis de côté pour cette campagne.")
+          : "Restore is blocked until the performance re-add window expires or an admin override is enabled.",
+        status: 409,
+      };
+    }
+  }
   if (hasActiveDuplicateForRestore(row, rows)) return { ok: false, error: "duplicate_existing_active", status: 409 };
 
   const previousStatus = readString(row.status, "unknown");
