@@ -24,9 +24,9 @@ type SearchBody = {
 function readLocation(body: SearchBody["location"]) {
   if (!body || typeof body !== "object") return null;
   const label = readString(body.label, "").trim();
-  const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
-  const lon = typeof body.lon === "number" && Number.isFinite(body.lon) ? body.lon : null;
-  if (!label || lat === null || lon === null) return null;
+  if (!label) return null;
+  const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : 0;
+  const lon = typeof body.lon === "number" && Number.isFinite(body.lon) ? body.lon : 0;
   return { label, lat, lon };
 }
 
@@ -63,9 +63,10 @@ export async function POST(
   const clientCandidates = result.candidates.map((candidate) => serializeTargetAiCandidateForClient(normalizedAccountId, candidate));
 
   if (result.status === "no_candidates") {
+    const errorCode = result.error_code === "invalid_location" ? "invalid_location" : "no_candidates_found";
     return NextResponse.json({
       ok: false,
-      error_code: "no_candidates_found",
+      error_code: errorCode,
       error: "No relevant accounts were found.",
       data: {
         status: result.status,

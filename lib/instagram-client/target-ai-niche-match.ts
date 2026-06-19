@@ -14,6 +14,10 @@ export function readTargetAiNicheSynonyms(niche: string) {
       "chinese takeaway",
       "chinese cuisine",
       "dim sum",
+      "dumplings",
+      "noodles",
+      "asian restaurant",
+      "halaal chinese",
     ]) {
       phrases.add(term);
     }

@@ -6,6 +6,7 @@ export type TargetAiErrorCode =
   | "ownership_denied"
   | "invalid_niche"
   | "no_candidates_found"
+  | "invalid_location"
   | "location_unavailable";
 
 export function isTargetAiConfigured() {

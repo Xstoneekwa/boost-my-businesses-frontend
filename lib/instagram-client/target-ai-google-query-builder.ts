@@ -1,4 +1,4 @@
-import { parseTargetAiLocationParts } from "./target-ai-discovery-queries.ts";
+import { readTargetAiLocationPhrases } from "./target-ai-location-normalize.ts";
 import { readTargetAiNicheSynonyms } from "./target-ai-niche-match.ts";
 
 export const TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS_SHORT = [
@@ -15,55 +15,8 @@ export const TARGET_AI_GOOGLE_INSTAGRAM_EXCLUSIONS = [
   "-inurl:/accounts/",
 ] as const;
 
-const CITY_DISTRICTS: Record<string, string[]> = {
-  johannesburg: ["Sandton", "Rosebank", "Randburg", "Braamfontein", "Melville"],
-  bordeaux: ["Mérignac", "Pessac", "Talence", "Bègles"],
-  pretoria: ["Centurion", "Menlyn", "Brooklyn"],
-};
-
-const COUNTRY_MAJOR_CITIES: Record<string, string[]> = {
-  belgique: ["Belgium", "Bruxelles", "Brussels", "Antwerp", "Gent", "Ghent", "Liège"],
-  belgium: ["Belgique", "Bruxelles", "Brussels", "Antwerp", "Gent", "Ghent", "Liège"],
-};
-
-function normalizeKey(value: string) {
-  return value.trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-}
-
 function readLooseNicheVariants(niche: string) {
   return readTargetAiNicheSynonyms(niche);
-}
-
-function readLocationPhrases(locationLabel?: string | null) {
-  const location = parseTargetAiLocationParts(locationLabel);
-  const phrases: string[] = [];
-  const seen = new Set<string>();
-
-  function push(value: string | null | undefined) {
-    const trimmed = value?.trim();
-    if (!trimmed) return;
-    const key = normalizeKey(trimmed);
-    if (seen.has(key)) return;
-    seen.add(key);
-    phrases.push(trimmed);
-  }
-
-  push(location.city);
-  if (location.city) {
-    for (const district of CITY_DISTRICTS[normalizeKey(location.city)] ?? []) {
-      push(district);
-    }
-  }
-  push(location.region);
-  push(location.country);
-  push(location.label);
-
-  const countryKey = normalizeKey(location.country || location.city || location.label);
-  for (const city of COUNTRY_MAJOR_CITIES[countryKey] ?? []) {
-    push(city);
-  }
-
-  return phrases;
 }
 
 function buildLooseInstagramQuery(locationPhrase: string, nichePhrase: string) {
@@ -89,7 +42,7 @@ export function buildTargetAiLooseQueries(input: {
 }) {
   const maxQueries = input.maxQueries ?? 24;
   const nicheVariants = readLooseNicheVariants(input.niche);
-  const locationPhrases = readLocationPhrases(input.locationLabel);
+  const locationPhrases = readTargetAiLocationPhrases(input.locationLabel);
   const seen = new Set<string>();
   const output: string[] = [];
 
@@ -102,10 +55,17 @@ export function buildTargetAiLooseQueries(input: {
     output.push(normalized);
   }
 
-  const primaryVariants = nicheVariants.slice(0, 6);
+  if (locationPhrases.length === 0) {
+    for (const nichePhrase of nicheVariants.slice(0, 6)) {
+      push(`"${nichePhrase}" instagram`);
+    }
+    return output.slice(0, maxQueries);
+  }
 
+  const primaryVariants = nicheVariants.slice(0, 6);
   for (const locationPhrase of locationPhrases) {
-    for (const nichePhrase of primaryVariants.slice(0, locationPhrase === locationPhrases[0] ? primaryVariants.length : 3)) {
+    const variantLimit = locationPhrase === locationPhrases[0] ? primaryVariants.length : 3;
+    for (const nichePhrase of primaryVariants.slice(0, variantLimit)) {
       push(buildLooseInstagramQuery(locationPhrase, nichePhrase));
     }
   }
@@ -119,8 +79,8 @@ export function buildTargetAiStrictComplementQueries(input: {
   maxQueries?: number;
 }) {
   const maxQueries = input.maxQueries ?? 4;
-  const location = parseTargetAiLocationParts(input.locationLabel);
-  const primaryLocation = location.city || location.label;
+  const locationPhrases = readTargetAiLocationPhrases(input.locationLabel);
+  const primaryLocation = locationPhrases[0];
   const nicheVariants = readLooseNicheVariants(input.niche).slice(0, 3);
   const seen = new Set<string>();
   const output: string[] = [];

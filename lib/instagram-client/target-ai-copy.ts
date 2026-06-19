@@ -20,6 +20,9 @@ export function targetAiCopy(lang: TargetAiLang) {
     locationLabel: fr ? "Localisation (optionnelle)" : "Location (optional)",
     locationPlaceholder: fr ? "Rechercher une ville ou une région…" : "Search for a city or region…",
     locationEmpty: fr ? "Aucun résultat pour cette recherche." : "No results for this search.",
+    locationSelectionRequired: fr
+      ? "Sélectionnez une localisation dans la liste pour lancer la recherche."
+      : "Select a location from the list to launch the search.",
     back: fr ? "Retour" : "Back",
     launchSearch: fr ? "Lancer la recherche" : "Launch search",
     step3Title: fr ? "Confirmez vos comptes cibles" : "Confirm your target accounts",

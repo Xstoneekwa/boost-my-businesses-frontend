@@ -177,6 +177,8 @@ export default function ClientAiTargetSearchWizard({
 
   const selectedCandidates = candidates;
   const ineligiblePresent = hasVerifiedIneligibleSelection(selectedCandidates);
+  const locationTypedWithoutSelection = locationQuery.trim().length >= 2 && !selectedLocation;
+  const canLaunchSearch = !locationTypedWithoutSelection;
   const canValidate = selectedCandidates.length > 0 && !validating && !searching;
 
   function closeWizard() {
@@ -388,6 +390,9 @@ export default function ClientAiTargetSearchWizard({
             {locationQuery.trim().length >= 2 && !loadingLocations && locationSuggestions.length === 0 && !selectedLocation ? (
               <p className="cd-ai-hint">{copy.locationEmpty}</p>
             ) : null}
+            {locationTypedWithoutSelection ? (
+              <p className="cd-ai-hint">{copy.locationSelectionRequired}</p>
+            ) : null}
             {mapUrl ? (
               <div className="cd-ai-map">
                 <iframe title={copy.locationLabel} src={mapUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
@@ -395,7 +400,7 @@ export default function ClientAiTargetSearchWizard({
             ) : null}
             <div className="cd-ai-actions">
               <button type="button" className="cd-ai-back" onClick={() => setStep(1)}>{copy.back}</button>
-              <button type="button" className="cd-dwr-import" onClick={() => void launchSearch()}>{copy.launchSearch}</button>
+              <button type="button" className="cd-dwr-import" disabled={!canLaunchSearch} onClick={() => void launchSearch()}>{copy.launchSearch}</button>
             </div>
           </div>
         ) : null}

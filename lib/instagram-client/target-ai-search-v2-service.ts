@@ -6,7 +6,7 @@ import {
   saveTargetAiDiscoverySession,
   updateTargetAiDiscoverySessionCandidates,
 } from "./target-ai-discovery-session.ts";
-import { buildTargetAiGoogleQueries } from "./target-ai-google-query-builder.ts";
+import { buildTargetAiRuntimeQueryPlan } from "./target-ai-query-plan.ts";
 import { runTargetAiGoogleSerpDiscovery } from "./target-ai-google-serp-discovery.ts";
 import { resolveActiveTargetingAiConfig } from "./targeting-ai-config-store.ts";
 import type { SerpProfileCandidate } from "./target-ai-serp-extractor.ts";
@@ -307,6 +307,19 @@ export async function searchTargetAccountsWithAiV2(input: {
   const cached = getTargetAiDiscoverySession(sessionId);
   if (cached) {
     safeLog("session_cache_hit", { session_id: sessionId, candidates: cached.candidates.length });
+    safeLog("runtime_query_plan", {
+      session_cache: "hit",
+      normalizedLocation: locationLabel,
+      locationKind: "unknown",
+      locationTokens: [],
+      nicheTokens: [],
+      loose_queries_count: 0,
+      strict_queries_count: 0,
+      total_queries_count: 0,
+      pages_per_query: readIntEnv("TARGET_AI_V2_SERP_PAGES", 3, 2, 4),
+      max_queries_cap: readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 24, 12, 30),
+      first_20_queries: [],
+    });
     const verificationSummary = summarizeVerification(cached.candidates);
     return {
       status: cached.candidates.length > 0 ? "ok" : "no_candidates",
@@ -350,12 +363,59 @@ export async function searchTargetAccountsWithAiV2(input: {
   const discoveryMaxMs = readIntEnv("TARGET_AI_V2_DISCOVERY_MAX_MS", 75_000, 30_000, 90_000);
   const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 0, 0, 20);
 
-  const queries = buildTargetAiGoogleQueries({ niche, locationLabel, maxQueries });
+  const queryPlan = buildTargetAiRuntimeQueryPlan({ niche, locationLabel, maxQueries });
+  const queries = queryPlan.queries;
+
+  safeLog("runtime_query_plan", {
+    ...queryPlan,
+    session_cache: "miss",
+  });
+
+  if (queries.length === 0) {
+    safeLog("search_aborted", { reason: "empty_query_plan", locationLabel, niche });
+    return {
+      status: "no_candidates",
+      provider: "openai",
+      mode: "searchapi_loose_v21",
+      session_id: sessionId,
+      candidates: [],
+      unverifiedCandidates: [],
+      verifiedCandidates: [],
+      verificationSummary: summarizeVerification([]),
+      suggested_count: 0,
+      verified_count: 0,
+      avatar_resolved: 0,
+      error_code: "invalid_location",
+      debug: buildDebugSummary({
+        config,
+        startedAt,
+        queries: [],
+        locationLabel,
+        serpStats: {
+          candidates: [],
+          queriesExecuted: 0,
+          queriesSucceeded: 0,
+          queriesFailed: 0,
+          pagesFetched: 0,
+          organicResultsScanned: 0,
+          extractedCandidatesCount: 0,
+          stoppedReason: "empty_query_plan",
+        },
+        verifyStats: createTargetAiProfileVerifyStats(),
+        candidates: [],
+        autoVerifiedCount: 0,
+        stoppedReason: "empty_query_plan",
+      }),
+    };
+  }
+
   safeLog("google_queries_built", {
     count: queries.length,
     pages_per_query: pagesPerQuery,
     sample: queries.slice(0, 4),
     query_mode: "loose_first",
+    loose_queries_count: queryPlan.loose_queries_count,
+    strict_queries_count: queryPlan.strict_queries_count,
   });
 
   const serpStats = await runTargetAiGoogleSerpDiscovery({
@@ -441,6 +501,12 @@ export async function searchTargetAccountsWithAiV2(input: {
     profile_rate_limited_count: verifyStats.rateLimited,
     latency_ms: Date.now() - startedAt,
     stopped_reason: stoppedReason,
+    loose_queries_count: queryPlan.loose_queries_count,
+    strict_queries_count: queryPlan.strict_queries_count,
+    total_queries_executed: serpStats.queriesExecuted,
+    pages_per_query: pagesPerQuery,
+    location_kind: queryPlan.locationKind,
+    location_tokens_count: queryPlan.locationTokens.length,
   });
 
   return {

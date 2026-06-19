@@ -37,11 +37,14 @@ export default function TargetAvatar({
   const normalizedUsername = username.replace(/^@+/, "");
   const [from, to] = avatarPalette(normalizedUsername || "?");
   const initial = (normalizedUsername || "?").charAt(0).toUpperCase();
-  const proxySrc = clientTargetAvatarImagePath(accountId, {
-    targetId,
-    username: normalizedUsername,
-    avatarAvailable: avatarAvailable ?? Boolean(avatarUrl),
-  }) ?? (avatarUrl?.startsWith("/api/") ? avatarUrl : null);
+  const shouldUseProxy = avatarAvailable !== false;
+  const proxySrc = shouldUseProxy
+    ? clientTargetAvatarImagePath(accountId, {
+      targetId,
+      username: normalizedUsername,
+      avatarAvailable: avatarAvailable ?? Boolean(avatarUrl),
+    }) ?? (avatarUrl?.startsWith("/api/") ? avatarUrl : null)
+    : null;
   const baseClass = variant === "ai" ? "cd-ai-av" : "cd-tg2-av";
   const imageClass = variant === "ai" ? "cd-ai-av-img" : "cd-tg2-av-img";
 

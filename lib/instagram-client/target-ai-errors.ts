@@ -34,6 +34,10 @@ export function targetAiErrorMessage(lang: TargetAiLang, code: TargetAiErrorCode
       return fr
         ? "Aucun compte vérifié trouvé pour cette recherche. Essayez une niche plus précise ou une localisation différente."
         : "No verified accounts were found for this search. Try a more specific niche or a different location.";
+    case "invalid_location":
+      return fr
+        ? "Sélectionnez une localisation dans la liste pour lancer la recherche."
+        : "Select a location from the list to launch the search.";
     case "location_unavailable":
       return fr
         ? "La recherche de localisation est temporairement indisponible."
