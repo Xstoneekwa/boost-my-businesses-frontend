@@ -18,6 +18,39 @@ export function normalizeLegacyScheduleTimezone(timezone?: string | null) {
   return value && value !== "UTC" ? value : DEFAULT_BUSINESS_TIMEZONE;
 }
 
+export function zonedDateParts(date: Date, timezone = DEFAULT_BUSINESS_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: normalizeBusinessTimezone(timezone),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return {
+    year: read("year"),
+    month: read("month"),
+    day: read("day"),
+    hour: read("hour"),
+    minute: read("minute"),
+  };
+}
+
+export function businessDayKeyFromIso(value: string, timezone = DEFAULT_BUSINESS_TIMEZONE) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = zonedDateParts(date, timezone);
+  return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+export function businessMonthKeyFromIso(value: string, timezone = DEFAULT_BUSINESS_TIMEZONE) {
+  const dayKey = businessDayKeyFromIso(value, timezone);
+  return dayKey ? dayKey.slice(0, 7) : "";
+}
+
 function zonedParts(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,

@@ -59,6 +59,11 @@ function formatBillingDate(value: string, lang: "fr" | "en") {
   });
 }
 
+function formatSignedCount(value: number, lang: "fr" | "en") {
+  const formatted = new Intl.NumberFormat(lang === "fr" ? "fr-FR" : "en-US", { maximumFractionDigits: 1 }).format(value);
+  return value > 0 ? `+${formatted}` : formatted;
+}
+
 export function buildOverviewStats(
   insights: ClientAccountInsights | null,
   lang: "fr" | "en",
@@ -68,34 +73,42 @@ export function buildOverviewStats(
 
   if (!insights) {
     return [
-      { lbl: lang === "fr" ? "Ce mois-ci" : "This month", val: empty, sub: pending },
-      { lbl: lang === "fr" ? "Total gagné" : "Total gained", val: empty, sub: pending },
-      { lbl: lang === "fr" ? "Aujourd'hui" : "Today", val: empty, sub: pending },
-      { lbl: lang === "fr" ? "Moy. / jour" : "Daily avg.", val: empty, sub: pending },
+      { lbl: lang === "fr" ? "Ce mois-ci" : "This month", val: empty, sub: lang === "fr" ? "Interactions campagne" : "Campaign interactions" },
+      { lbl: lang === "fr" ? "Évolution abonnés" : "Follower change", val: empty, sub: pending },
+      { lbl: lang === "fr" ? "Aujourd'hui" : "Today", val: empty, sub: lang === "fr" ? "Interactions du jour" : "Today's interactions" },
+      { lbl: lang === "fr" ? "Moy. abonnés / jour" : "Avg. followers / day", val: empty, sub: pending },
     ];
   }
+
+  const interactions = insights.overview.campaignInteractions;
+  const followers = insights.overview.followerEvolution;
+  const followerSubtitle = lang === "fr" ? followers.subtitleFr : followers.subtitleEn;
 
   return [
     {
       lbl: lang === "fr" ? "Ce mois-ci" : "This month",
-      val: formatCount(insights.overview.monthGain, lang),
+      val: formatCount(interactions.monthInteractions, lang),
       sub: lang === "fr" ? "Interactions campagne" : "Campaign interactions",
       highlight: true,
     },
     {
-      lbl: lang === "fr" ? "Total gagné" : "Total gained",
-      val: formatCount(insights.overview.totalGain, lang),
-      sub: lang === "fr" ? "Sur la période chargée" : "On loaded period",
+      lbl: lang === "fr" ? "Évolution abonnés" : "Follower change",
+      val: followers.status === "available" && followers.netChange !== null
+        ? formatSignedCount(followers.netChange, lang)
+        : pending,
+      sub: followerSubtitle,
     },
     {
       lbl: lang === "fr" ? "Aujourd'hui" : "Today",
-      val: formatCount(insights.overview.todayCount, lang),
+      val: formatCount(interactions.todayInteractions, lang),
       sub: lang === "fr" ? "Interactions du jour" : "Today's interactions",
     },
     {
-      lbl: lang === "fr" ? "Moy. / jour" : "Daily avg.",
-      val: formatCount(insights.overview.dailyAverage, lang),
-      sub: lang === "fr" ? "30 derniers jours" : "Last 30 days",
+      lbl: lang === "fr" ? "Moy. abonnés / jour" : "Avg. followers / day",
+      val: followers.status === "available" && followers.dailyAverage !== null
+        ? formatCount(followers.dailyAverage, lang)
+        : pending,
+      sub: followerSubtitle,
     },
   ];
 }

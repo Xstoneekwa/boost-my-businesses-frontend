@@ -7,6 +7,8 @@ import {
   toStatsDaySocialCounters,
 } from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
+import { computeClientCampaignInteractionOverview, type ClientCampaignInteractionOverview } from "./client-campaign-interaction-stats";
+import { resolveClientFollowerEvolutionMetrics, type ClientFollowerEvolutionMetrics } from "./client-follower-evolution-metrics";
 import { readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -45,10 +47,8 @@ export type ClientAccountInsights = {
   campaignActive: boolean;
   statsDays: ClientStatsDay[];
   overview: {
-    monthGain: number;
-    totalGain: number;
-    todayCount: number;
-    dailyAverage: number;
+    campaignInteractions: ClientCampaignInteractionOverview;
+    followerEvolution: ClientFollowerEvolutionMetrics;
   };
   chartSeries: {
     d7: number[];
@@ -156,8 +156,10 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     filtersResult,
     activityRpcResult,
     packageSummaries,
+    settingsResult,
+    overviewEventsResult,
   ] = await Promise.all([
-    supabase.from("ig_accounts").select("id,username,status,admin_lifecycle_status").eq("id", accountId).maybeSingle(),
+    supabase.from("ig_accounts").select("id,username,status,admin_lifecycle_status,followers_count").eq("id", accountId).maybeSingle(),
     supabase.from("ig_action_logs").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(5000),
     supabase.from("ig_runs").select("id,status,created_at,started_at,total_follow,total_like,total_dm,total_story").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(1000),
     supabase.from("ig_interaction_events").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(5000),
@@ -171,6 +173,14 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       p_limit: 100,
     }),
     getAccountPackageSummaries([accountId]),
+    supabase.from("ig_account_settings").select("timezone").eq("account_id", accountId).maybeSingle(),
+    supabase
+      .from("ig_interaction_events")
+      .select("id,event_type,event_status,interaction_type,event_at,created_at")
+      .eq("account_id", accountId)
+      .gte("event_at", since.toISOString())
+      .order("event_at", { ascending: false })
+      .limit(10000),
   ]);
 
   if (accountResult.error || !accountResult.data?.id) return null;
@@ -222,13 +232,16 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
   }
 
   const statsDays = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
-  const last30 = statsDays.slice(-30);
-  const last7 = statsDays.slice(-7);
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const today = statsDays.find((day) => day.date === todayKey) ?? blankDay(todayKey);
-  const monthGain = last30.reduce((sum, day) => sum + day.totalInteractions, 0);
-  const totalGain = statsDays.reduce((sum, day) => sum + day.totalInteractions, 0);
-  const dailyAverage = last30.length ? Number((monthGain / last30.length).toFixed(1)) : 0;
+  const campaignInteractions = computeClientCampaignInteractionOverview(
+    (overviewEventsResult.data ?? []) as SupabaseRecord[],
+    readString((settingsResult.data as SupabaseRecord | null)?.timezone, ""),
+  );
+  const followerEvolution = resolveClientFollowerEvolutionMetrics({
+    currentFollowersCount: accountResult.data.followers_count == null
+      ? null
+      : readNumber(accountResult.data.followers_count, 0),
+    snapshotRows: [],
+  });
 
   const activityRows = !activityRpcResult.error && Array.isArray(activityRpcResult.data)
     ? (activityRpcResult.data as InteractionEvidenceRow[]).map(mapInteractionEvidenceRow)
@@ -269,10 +282,8 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     campaignActive: readString(accountResult.data.admin_lifecycle_status, readString(accountResult.data.status, "active")) === "active",
     statsDays,
     overview: {
-      monthGain,
-      totalGain,
-      todayCount: today.totalInteractions,
-      dailyAverage,
+      campaignInteractions,
+      followerEvolution,
     },
     chartSeries: {
       d7: buildChartSeries(statsDays, 7),
