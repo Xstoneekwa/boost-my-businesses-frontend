@@ -264,7 +264,7 @@ export function evaluateTargetReaddBlock(
     if (rowUsername !== normalized) return false;
     if (readString(row.archive_reason, "") !== TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON) return false;
     const blockedUntil = readString(row.readd_blocked_until, "");
-    if (!blockedUntil) return true;
+    if (!blockedUntil) return false;
     const untilMs = Date.parse(blockedUntil);
     return Number.isFinite(untilMs) && untilMs > now.getTime();
   });
