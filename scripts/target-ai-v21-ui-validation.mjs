@@ -71,6 +71,30 @@ function manualRelevanceEstimate(niche, candidates) {
   return { top10_relevant_estimate: relevant, top10_total: top10.length };
 }
 
+function buildReasonBreakdown(candidates) {
+  const keys = [
+    "out_of_target",
+    "out_of_location",
+    "low_followers",
+    "verified",
+    "unavailable",
+    "not_relevant",
+    "not_found",
+    "private",
+    "too_many_followers",
+    "pending_verification",
+    "rejected",
+    "unknown",
+  ];
+  const breakdown = Object.fromEntries(keys.map((key) => [key, 0]));
+  for (const row of candidates) {
+    if (row.eligible) continue;
+    const reason = row.ineligibleReasonCode || (row.verificationStatus === "pending" ? "pending_verification" : "unknown");
+    breakdown[reason] = (breakdown[reason] ?? 0) + 1;
+  }
+  return breakdown;
+}
+
 async function runCase(testCase, searchFn) {
   resetTargetAiDiscoverySessionsForTests();
   resetInstagramPublicProfileLookupGuardsForTests();
@@ -132,11 +156,12 @@ async function runCase(testCase, searchFn) {
     ineligible_count: ineligibleCandidates.length,
     pending_count: pendingCandidates.length,
     top10_eligible: eligibleCandidates.slice(0, 10).map((row) => row.username),
-    ineligible_examples: ineligibleCandidates.slice(0, 10).map((row) => ({
+    top10_ineligible: ineligibleCandidates.slice(0, 10).map((row) => ({
       username: row.username,
       reason: row.ineligibleReasonCode,
       title: row.serpTitle,
     })),
+    reason_breakdown: buildReasonBreakdown(candidates),
     manual_relevance: manualRelevanceEstimate(testCase.niche, candidates),
     search_completed: {
       event: "search_completed",

@@ -1,4 +1,5 @@
 import { parseTargetAiLocationParts } from "./target-ai-discovery-queries.ts";
+import { readTargetAiLocationMatchTerms } from "./target-ai-location-match.ts";
 import { combinedTextMatchesNiche, readTargetAiNicheMatchTerms } from "./target-ai-niche-match.ts";
 import type { SerpProfileCandidate } from "./target-ai-serp-extractor.ts";
 
@@ -174,17 +175,7 @@ const offZoneTitleCities = [
 ];
 
 function readLocationMatchTerms(locationLabel?: string | null) {
-  const location = parseTargetAiLocationParts(locationLabel);
-  const terms = new Set<string>();
-  if (location.city) terms.add(normalizeText(location.city));
-  if (location.region) terms.add(normalizeText(location.region));
-  if (location.country) terms.add(normalizeText(location.country));
-  if (location.label) {
-    for (const part of location.label.split(",").map((entry) => entry.trim()).filter(Boolean)) {
-      terms.add(normalizeText(part));
-    }
-  }
-  return [...terms].filter(Boolean);
+  return readTargetAiLocationMatchTerms(locationLabel);
 }
 
 function hasLocationHit(combined: string, sourceQuery: string, locationLabel?: string | null) {

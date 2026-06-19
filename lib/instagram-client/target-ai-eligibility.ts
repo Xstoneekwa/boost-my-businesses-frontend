@@ -57,7 +57,11 @@ export function evaluateAiTargetEligibility(input: {
   if (quality === "rejected_not_found" || input.verification_status === "not_found") {
     return { eligible: false, reasonCode: "not_found" };
   }
-  if (input.verification_status === "rate_limited") {
+  if (
+    input.verification_status === "rate_limited"
+    || quality === "provider_error"
+    || quality.includes("provider_")
+  ) {
     return { eligible: false, reasonCode: "unavailable" };
   }
   if (followers !== null && followers > CT_MANUAL_FOLLOWERS_MAX_GUARD) {
