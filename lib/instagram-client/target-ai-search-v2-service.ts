@@ -17,6 +17,8 @@ import { cacheResolvedAvatarUrl } from "./target-avatar-proxy-server.ts";
 import {
   applyTargetAiProfileVerifyStats,
   createTargetAiProfileVerifyStats,
+  readTargetAiVerifyConcurrency,
+  readTargetAiVerifyStaggerMs,
   verifyTargetAiProfileUsername,
 } from "./target-ai-profile-verify.ts";
 import { resolveTargetAiUiDiscoveryProfile } from "./target-ai-ui-discovery-profile.ts";
@@ -185,7 +187,7 @@ function buildDebugSummary(input: {
     max_displayed_results: input.config.max_displayed_results,
     max_searchapi_checks: readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 28, 0, 40),
     max_latency_ms: readIntEnv("TARGET_AI_V2_DISCOVERY_MAX_MS", 45_000, 20_000, 90_000),
-    profile_lookup_concurrency: 1,
+    profile_lookup_concurrency: readTargetAiVerifyConcurrency(),
     gpt_search_queries_count: 0,
     gpt_seed_usernames_count: 0,
     searchapi_discovery_queries_count: input.serpStats.queriesExecuted,
@@ -232,14 +234,25 @@ export async function verifyTargetAiUsernamesBatch(input: {
   locationLabel: string | null;
   serpByUsername: Map<string, SerpProfileCandidate & { serpScore?: number }>;
   concurrency?: number;
+  existingVerified?: Map<string, TargetAiSearchCandidate>;
 }) {
   const stats = createTargetAiProfileVerifyStats();
-  const concurrency = input.concurrency ?? 1;
+  const concurrency = input.concurrency ?? readTargetAiVerifyConcurrency();
+  const staggerMs = readTargetAiVerifyStaggerMs(concurrency);
   const verifiedByUsername = new Map<string, TargetAiSearchCandidate>();
+  const usernamesToVerify = input.usernames.filter((username) => {
+    const cached = input.existingVerified?.get(username);
+    if (cached && cached.verificationStatus !== "pending") {
+      verifiedByUsername.set(username, cached);
+      stats.duplicateSkipped += 1;
+      return false;
+    }
+    return true;
+  });
 
-  await mapWithConcurrency(input.usernames, concurrency, async (username, index) => {
-    if (index > 0) {
-      await new Promise((resolve) => setTimeout(resolve, readIntEnv("TARGET_AI_V2_VERIFY_DELAY_MS", 250, 150, 800)));
+  await mapWithConcurrency(usernamesToVerify, concurrency, async (username, index) => {
+    if (staggerMs > 0 && index > 0) {
+      await new Promise((resolve) => setTimeout(resolve, staggerMs));
     }
     const serp = input.serpByUsername.get(username);
     if (!serp) return null;
@@ -411,7 +424,6 @@ export async function searchTargetAccountsWithAiV2(input: {
   const maxSerpCandidates = readIntEnv("TARGET_AI_V2_MAX_SERP_CANDIDATES", uiDiscovery.maxSerpCandidates, 30, 80);
   const maxQueries = readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 24, 12, 30);
   const pagesPerQuery = readIntEnv("TARGET_AI_V2_SERP_PAGES", uiDiscovery.pagesPerQuery, 1, 4);
-  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 32, 0, 45);
 
   const queryPlan = buildTargetAiRuntimeQueryPlan({ niche, locationLabel, maxQueries });
   const queries = queryPlan.queries;
@@ -521,56 +533,24 @@ export async function searchTargetAccountsWithAiV2(input: {
   }
 
   const serpByUsername = new Map(rankedSerp.map((row) => [row.username, row]));
-  const autoVerifyUsernames = rankedSerp
+  const pendingToVerify = rankedSerp
     .filter((row) => needsTargetAiProfileVerification(evaluateSerpClientProjection({
       candidate: row,
       niche,
       locationLabel,
     })))
-    .slice(0, autoVerifyCount)
     .map((row) => row.username);
-  const { verifiedByUsername, stats: verifyStats } = autoVerifyUsernames.length > 0
+
+  const verifyConcurrency = readTargetAiVerifyConcurrency();
+  const { verifiedByUsername: workingVerifiedByUsername, stats: verifyStats } = pendingToVerify.length > 0
     ? await verifyTargetAiUsernamesBatch({
-      usernames: autoVerifyUsernames,
+      usernames: pendingToVerify,
       niche,
       locationLabel,
       serpByUsername,
-      concurrency: 1,
+      concurrency: verifyConcurrency,
     })
     : { verifiedByUsername: new Map<string, TargetAiSearchCandidate>(), stats: createTargetAiProfileVerifyStats() };
-
-  let workingVerifiedByUsername = verifiedByUsername;
-  const totalMaxMs = readIntEnv("TARGET_AI_V2_TOTAL_MAX_MS", 92_000, 70_000, 120_000);
-  const pendingAfterAutoVerify = rankedSerp
-    .map((row) => row.username)
-    .filter((username) => {
-      const candidate = workingVerifiedByUsername.get(username)
-        ?? mapSerpCandidateToSearchCandidate({ serp: serpByUsername.get(username)!, niche, locationLabel });
-      return candidate.verificationStatus === "pending";
-    });
-
-  if (pendingAfterAutoVerify.length > 0 && Date.now() - startedAt < totalMaxMs) {
-    const { verifiedByUsername: extraVerified, stats: extraStats } = await verifyTargetAiUsernamesBatch({
-      usernames: pendingAfterAutoVerify,
-      niche,
-      locationLabel,
-      serpByUsername,
-      concurrency: 1,
-    });
-    workingVerifiedByUsername = new Map([...workingVerifiedByUsername, ...extraVerified]);
-    verifyStats.checked += extraStats.checked;
-    verifyStats.found += extraStats.found;
-    verifyStats.foundPartial += extraStats.foundPartial;
-    verifyStats.notFound += extraStats.notFound;
-    verifyStats.providerError += extraStats.providerError;
-    verifyStats.rateLimited += extraStats.rateLimited;
-    verifyStats.timeout += extraStats.timeout;
-    verifyStats.invalidResponse += extraStats.invalidResponse;
-    verifyStats.retried += extraStats.retried;
-    for (const [reason, count] of extraStats.errorReasons.entries()) {
-      verifyStats.errorReasons.set(reason, (verifyStats.errorReasons.get(reason) ?? 0) + count);
-    }
-  }
 
   const merged = mergeSerpAndVerifiedCandidates({
     rankedSerp,
@@ -624,7 +604,7 @@ export async function searchTargetAccountsWithAiV2(input: {
     serp_candidates: rankedSerp.length,
     displayed_count: merged.candidates.length,
     auto_verified_count: verificationSummary.verified_count,
-    auto_verify_attempted: autoVerifyUsernames.length,
+    auto_verify_attempted: pendingToVerify.length,
     profile_found_count: verifyStats.found,
     profile_rate_limited_count: verifyStats.rateLimited,
     latency_ms: Date.now() - startedAt,
@@ -678,12 +658,18 @@ export async function verifyTargetAiSessionUsernames(input: {
   const serpByUsername = new Map(
     session.serpCandidates.map((row) => [row.username, row as SerpProfileCandidate & { serpScore?: number }]),
   );
+  const existingVerified = new Map(
+    session.candidates
+      .filter((candidate) => candidate.verificationStatus !== "pending")
+      .map((candidate) => [candidate.username, candidate]),
+  );
   const { verifiedByUsername, stats } = await verifyTargetAiUsernamesBatch({
     usernames: input.usernames.filter((username) => serpByUsername.has(username)),
     niche,
     locationLabel,
     serpByUsername,
-    concurrency: 1,
+    concurrency: readTargetAiVerifyConcurrency(),
+    existingVerified,
   });
 
   const updated = session.candidates.map((candidate) => verifiedByUsername.get(candidate.username) ?? candidate);

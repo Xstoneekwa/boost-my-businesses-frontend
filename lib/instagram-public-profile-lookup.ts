@@ -29,6 +29,8 @@ export type InstagramPublicProfileLookupOptions = {
   now?: () => Date;
   timeoutMs?: number;
   disableCache?: boolean;
+  minIntervalMs?: number;
+  maxPerMinute?: number;
 };
 
 const instagramUsernamePattern = /^[a-z0-9._]{1,30}$/;
@@ -160,11 +162,11 @@ function searchApiThrottleResult(inputUsername: string, options: InstagramPublic
 
 function checkSearchApiThrottle(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
   const nowMs = safeNowMs(options);
-  const minIntervalMs = readNonNegativeIntegerEnv(
+  const minIntervalMs = options.minIntervalMs ?? readNonNegativeIntegerEnv(
     "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS",
     defaultSearchApiMinIntervalMs,
   );
-  const maxPerMinute = readNonNegativeIntegerEnv(
+  const maxPerMinute = options.maxPerMinute ?? readNonNegativeIntegerEnv(
     "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MAX_PER_MINUTE",
     defaultSearchApiMaxPerMinute,
   );

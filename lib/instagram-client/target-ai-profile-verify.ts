@@ -80,25 +80,62 @@ export function createTargetAiProfileVerifyStats(): TargetAiProfileVerifyStats {
 
 export function readTargetAiProfileLookupConcurrency(configured: number, rateLimitHits = 0) {
   if (rateLimitHits >= 12) return 1;
-  const parsed = Number.isFinite(configured) ? configured : 4;
+  const parsed = Number.isFinite(configured) ? configured : 2;
   return Math.min(Math.max(parsed, 1), 2);
 }
 
-function isPartialFound(decision: ReturnType<typeof targetDecisionFromLookup>) {
-  return decision.verification_status === "found"
-    && (!decision.followers_count || !decision.avatar_url);
+function readIntEnv(name: string, fallback: number, min: number, max: number) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
 }
+
+export function readTargetAiVerifyConcurrency() {
+  const raw = process.env.TARGET_AI_VERIFY_CONCURRENCY?.trim()
+    ?? process.env.TARGET_AI_V2_VERIFY_CONCURRENCY?.trim();
+  if (!raw) return readTargetAiProfileLookupConcurrency(2);
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return 2;
+  return readTargetAiProfileLookupConcurrency(parsed);
+}
+
+export function readTargetAiVerifyLookupTimeoutMs() {
+  return readIntEnv("TARGET_AI_VERIFY_TIMEOUT_MS", 7000, 4000, 10000);
+}
+
+export function readTargetAiVerifyMinIntervalMs() {
+  return readIntEnv("TARGET_AI_VERIFY_MIN_INTERVAL_MS", 450, 200, 1000);
+}
+
+export function readTargetAiVerifyStaggerMs(concurrency: number) {
+  if (concurrency >= 2) return 0;
+  return readIntEnv("TARGET_AI_V2_VERIFY_DELAY_MS", 120, 0, 400);
+}
+
+export type TargetAiProfileVerifyOptions = {
+  timeoutMs?: number;
+  minIntervalMs?: number;
+  runtime?: TargetAiSearchRuntime;
+};
 
 export async function verifyTargetAiProfileUsername(
   username: string,
-  runtime?: TargetAiSearchRuntime,
+  options?: TargetAiProfileVerifyOptions,
 ) {
+  const runtime = options?.runtime;
   if (runtime) {
     await runtime.waitForCooldown();
     if (runtime.isTimeExceeded()) runtime.markStopped("time_budget_reached");
   }
 
-  const lookup = await lookupInstagramPublicProfile(username);
+  const lookupOptions = {
+    timeoutMs: options?.timeoutMs ?? readTargetAiVerifyLookupTimeoutMs(),
+    minIntervalMs: options?.minIntervalMs ?? readTargetAiVerifyMinIntervalMs(),
+  };
+
+  const lookup = await lookupInstagramPublicProfile(username, lookupOptions);
   if (lookup.status === "username_invalid") {
     const decision = evaluateTargetQuality({
       verification_status: "username_invalid",
@@ -126,7 +163,7 @@ export async function verifyTargetAiProfileUsername(
   ) {
     runtime.recordRetry();
     await new Promise((resolve) => setTimeout(resolve, runtime.limits.rateLimitCooldownMs));
-    const retryLookup = await lookupInstagramPublicProfile(username, { disableCache: true });
+    const retryLookup = await lookupInstagramPublicProfile(username, { ...lookupOptions, disableCache: true });
     if (retryLookup.status === "found" || retryLookup.status === "not_found") {
       return {
         decision: targetDecisionFromLookup(retryLookup),

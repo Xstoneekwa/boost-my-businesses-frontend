@@ -59,8 +59,12 @@ export function evaluateAiTargetEligibility(input: {
   }
   if (
     input.verification_status === "rate_limited"
+    || input.verification_status === "unavailable"
+    || input.verification_status === "provider_error"
+    || quality === "review_provider_unavailable"
     || quality === "provider_error"
-    || quality.includes("provider_")
+    || quality === "provider_timeout"
+    || quality.includes("provider_unavailable")
   ) {
     return { eligible: false, reasonCode: "unavailable" };
   }

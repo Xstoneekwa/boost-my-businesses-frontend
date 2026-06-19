@@ -322,7 +322,7 @@ async function verifyUsernames(
       return null;
     }
 
-    const result = await verifyTargetAiProfileUsername(username, runtime);
+    const result = await verifyTargetAiProfileUsername(username, { runtime });
     const candidate = mapVerifiedCandidate(
       username,
       result.decision,
