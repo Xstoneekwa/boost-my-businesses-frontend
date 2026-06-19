@@ -11,6 +11,10 @@ function includesTerm(haystack: string, term: string) {
   return haystack.includes(normalizeText(term));
 }
 
+function includesAny(haystack: string, terms: string[]) {
+  return terms.some((term) => includesTerm(haystack, term));
+}
+
 const businessTerms = [
   "restaurant",
   "clinic",
@@ -48,11 +52,39 @@ const offNichePenaltyTerms = [
   "museum",
   "musée",
   "fondation",
+  "foundation",
   "art ",
   "magazine",
   "diplo",
   "newspaper",
   "journal",
+  "centre scolaire",
+  "school",
+  "notre-dame",
+  "notre dame",
+  "notredame",
+  "church",
+  "église",
+];
+
+const weakProfilePenaltyTerms = [
+  "food guide",
+  "foodguide",
+  "food blogger",
+  "foodie",
+  "local guide",
+  "city guide",
+  "best restaurants in",
+  "magazine",
+  "media",
+  "eater_",
+  "eater ",
+  "corporate",
+  "event page",
+  "creator",
+  "influencer",
+  "blogger",
+  "noms",
 ];
 
 const genericUsernames = new Set([
@@ -65,11 +97,81 @@ const genericUsernames = new Set([
 ]);
 
 const foreignCityHints: Record<string, string[]> = {
-  johannesburg: ["paris", "lyon", "bordeaux", "geneve", "genève", "bruxelles", "brussels", "pretoria"],
-  bordeaux: ["johannesburg", "sandton", "paris", "lyon", "new york", "london"],
-  belgique: ["johannesburg", "sandton", "paris", "lyon", "bordeaux"],
-  belgium: ["johannesburg", "sandton", "paris", "lyon", "bordeaux"],
+  johannesburg: [
+    "paris",
+    "lyon",
+    "bordeaux",
+    "geneve",
+    "genève",
+    "bruxelles",
+    "brussels",
+    "pretoria",
+    "cape town",
+    "capetown",
+    "lilongwe",
+    "malawi",
+    "adelaide",
+    "washington dc",
+    "washington",
+    "mâcon",
+    "macon",
+    "rennes",
+    "france",
+    "marseille",
+  ],
+  bordeaux: ["johannesburg", "sandton", "paris", "lyon", "new york", "london", "cape town", "lilongwe"],
+  belgique: ["johannesburg", "sandton", "paris", "lyon", "bordeaux", "cape town"],
+  belgium: ["johannesburg", "sandton", "paris", "lyon", "bordeaux", "cape town"],
 };
+
+const johannesburgLocalTerms = [
+  "johannesburg",
+  "joburg",
+  "jhb",
+  "gauteng",
+  "sandton",
+  "rosebank",
+  "randburg",
+  "fourways",
+  "melrose",
+  "norwood",
+  "braamfontein",
+  "blairgowrie",
+  "bedfordview",
+  "south africa",
+];
+
+const chineseRestaurantBoostTerms = [
+  "chinese restaurant",
+  "restaurant chinois",
+  "dim sum",
+  "dumpling",
+  "dumplings",
+  "noodles",
+  "asian restaurant",
+  "halaal chinese",
+  "chinese food",
+  "chinese takeaway",
+  "chinese cuisine",
+];
+
+const offZoneTitleCities = [
+  "cape town",
+  "lilongwe",
+  "malawi",
+  "adelaide",
+  "paris",
+  "mâcon",
+  "macon",
+  "rennes",
+  "washington",
+  "washington dc",
+  "geneve",
+  "genève",
+  "lyon",
+  "bordeaux",
+  "marseille",
+];
 
 function readLocationMatchTerms(locationLabel?: string | null) {
   const location = parseTargetAiLocationParts(locationLabel);
@@ -103,6 +205,118 @@ function readForeignCityPenalty(locationLabel?: string | null) {
     for (const hint of foreignCityHints[key] ?? []) penalties.add(hint);
   }
   return [...penalties];
+}
+
+function isChineseRestaurantNiche(niche: string) {
+  const key = normalizeText(niche);
+  return key.includes("chinois") || key.includes("chinese");
+}
+
+function isAsianRestaurantNiche(niche: string) {
+  const key = normalizeText(niche);
+  return key.includes("asiatique") || key.includes("asian");
+}
+
+function readTitleLocationHint(title: string | null | undefined) {
+  const normalized = normalizeText(title);
+  const parts = normalized.split("·").map((entry) => entry.trim()).filter(Boolean);
+  if (parts.length <= 1) return null;
+  return parts[parts.length - 1] || null;
+}
+
+function hasChineseFoodSignal(combined: string) {
+  return includesAny(combined, [
+    "chinese",
+    "asian",
+    "dim sum",
+    "dumpling",
+    "noodle",
+    "ramen",
+    "sushi",
+    "halaal chinese",
+    "wok",
+    "cantonese",
+  ]);
+}
+
+function scoreOffZonePenalty(input: {
+  combined: string;
+  title: string | null | undefined;
+  locationLabel?: string | null;
+}) {
+  let penalty = 0;
+  const titleText = normalizeText(input.title);
+  const titleLocation = readTitleLocationHint(input.title);
+  const hasLocalSignal = includesAny(input.combined, johannesburgLocalTerms);
+
+  if (titleText) {
+    for (const city of offZoneTitleCities) {
+      if (includesTerm(titleText, city)) {
+        penalty += 24;
+      }
+    }
+  }
+
+  if (titleLocation) {
+    for (const city of offZoneTitleCities) {
+      if (includesTerm(titleLocation, city)) {
+        penalty += 22;
+      }
+    }
+  }
+
+  for (const foreignCity of readForeignCityPenalty(input.locationLabel)) {
+    if (!includesTerm(input.combined, foreignCity)) continue;
+    if (titleLocation && includesTerm(titleLocation, foreignCity)) {
+      penalty += 16;
+    } else if (!hasLocalSignal) {
+      penalty += 12;
+    } else {
+      penalty += 5;
+    }
+  }
+
+  return penalty;
+}
+
+function scoreChineseRestaurantRelevance(input: {
+  combined: string;
+  username: string;
+  title: string | null | undefined;
+  locHit: boolean;
+  nicheHit: boolean;
+  locationLabel?: string | null;
+}) {
+  let boost = 0;
+  let penalty = 0;
+
+  for (const term of chineseRestaurantBoostTerms) {
+    if (includesTerm(input.combined, term)) boost += 5;
+  }
+
+  if (includesAny(input.combined, johannesburgLocalTerms)) boost += 4;
+  if (input.locHit && input.nicheHit) boost += 10;
+  if (includesTerm(input.username, "restaurant") || input.username.includes(".restaurant")) boost += 6;
+  if (includesAny(input.username, ["dimsum", "dumpling", "chinese", "asian", "_jhb", "joburg"])) boost += 5;
+
+  if (includesAny(input.combined, ["coffeehouse", "coffee house", "cafe"]) && !hasChineseFoodSignal(input.combined)) {
+    penalty += 14;
+  }
+
+  for (const term of weakProfilePenaltyTerms) {
+    if (includesTerm(input.combined, term)) penalty += 7;
+  }
+
+  if (includesAny(input.username, ["noms", "guide", "foodguide", "eater"])) penalty += 12;
+  if (includesAny(input.username, ["basically", "coffeehouse", "coffee"])) penalty += 14;
+
+  penalty += scoreOffZonePenalty({
+    combined: input.combined,
+    title: input.title,
+    locationLabel: input.locationLabel,
+  });
+
+  return { boost, penalty };
 }
 
 export function scoreSerpProfileCandidate(input: {
@@ -143,13 +357,36 @@ export function scoreSerpProfileCandidate(input: {
   }
 
   for (const term of offNichePenaltyTerms) {
-    if (combined.includes(term)) score -= 8;
+    if (combined.includes(term)) score -= 10;
+  }
+
+  if (includesAny(combined, ["centre scolaire", "scolaire", "school", "university", "collège", "college"])) {
+    score -= 14;
   }
 
   for (const foreignCity of readForeignCityPenalty(input.locationLabel)) {
     if (combined.includes(foreignCity) && !hasLocationHit(combined, input.candidate.sourceQuery, input.locationLabel)) {
       score -= 10;
     }
+  }
+
+  if (isChineseRestaurantNiche(input.niche) || isAsianRestaurantNiche(input.niche)) {
+    const chineseScore = scoreChineseRestaurantRelevance({
+      combined,
+      username: normalizeText(input.candidate.username),
+      title: input.candidate.title,
+      locHit,
+      nicheHit,
+      locationLabel: input.locationLabel,
+    });
+    score += chineseScore.boost;
+    score -= chineseScore.penalty;
+  } else {
+    score -= scoreOffZonePenalty({
+      combined,
+      title: input.candidate.title,
+      locationLabel: input.locationLabel,
+    });
   }
 
   if (genericUsernames.has(normalizeText(input.candidate.username))) score -= 12;
