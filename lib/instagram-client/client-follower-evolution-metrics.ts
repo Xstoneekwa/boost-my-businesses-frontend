@@ -17,8 +17,8 @@ export function buildPendingClientFollowerEvolutionMetrics(): ClientFollowerEvol
     netChange: null,
     dailyAverage: null,
     coveredDays: null,
-    subtitleFr: "Sur les 30 derniers jours",
-    subtitleEn: "Over the last 30 days",
+    subtitleFr: "Historique des abonnés en cours de collecte",
+    subtitleEn: "Follower history collection in progress",
     missingSource: CLIENT_FOLLOWER_SNAPSHOT_SOURCE,
     futureCollectionProposal:
       "Add daily ig_account_follower_snapshots(account_id, captured_at, followers_count) and backfill from provider reads to compute net follower evolution.",
