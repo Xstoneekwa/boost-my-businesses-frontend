@@ -1,7 +1,7 @@
-import { runSearchApiThrottledFetch } from "../instagram-public-profile-lookup.ts";
 import {
   dedupeSerpProfileCandidates,
   extractSerpProfilesFromOrganicResults,
+  summarizeSerpExtractionFromOrganicResults,
   type SerpOrganicRow,
   type SerpProfileCandidate,
 } from "./target-ai-serp-extractor.ts";
@@ -10,9 +10,14 @@ export type TargetAiGoogleSerpDiscoveryStats = {
   queriesExecuted: number;
   queriesSucceeded: number;
   queriesFailed: number;
+  queriesThrottled: number;
   pagesFetched: number;
   organicResultsScanned: number;
   extractedCandidatesCount: number;
+  strictExtractedCount: number;
+  looseExtractedCount: number;
+  rejectedNonProfileCount: number;
+  rejectionsByReason: Record<string, number>;
   stoppedReason: string | null;
 };
 
@@ -60,14 +65,28 @@ async function fetchSearchApiPage(input: {
   url.searchParams.set("api_key", apiKey);
   if (input.page > 1) url.searchParams.set("page", String(input.page));
 
-  return runSearchApiThrottledFetch(
-    `google-serp:${input.query.slice(0, 48)}:p${input.page}`,
-    url.toString(),
-    {
-      fetcher: input.fetcher,
-      timeoutMs: input.timeoutMs,
-    },
-  );
+  const fetcher = input.fetcher ?? fetch;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetcher(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (response.status === 429) {
+      return { ok: false as const, status: 429, payload: null, reason: "rate_limited" };
+    }
+    if (!response.ok) {
+      return { ok: false as const, status: response.status, payload: null, reason: `provider_http_${response.status}` };
+    }
+    return { ok: true as const, status: response.status, payload: await response.json(), reason: "ok" };
+  } catch (error) {
+    const reason = error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_error";
+    return { ok: false as const, status: 0, payload: null, reason };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function runTargetAiGoogleSerpDiscovery(input: {
@@ -84,8 +103,9 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
   const queries = input.queries.filter(Boolean);
   const maxCandidates = input.maxCandidates ?? 80;
   const pagesPerQuery = Math.min(Math.max(input.pagesPerQuery ?? 3, 1), 4);
-  const maxDurationMs = input.maxDurationMs ?? 75_000;
-  const pageDelayMs = input.pageDelayMs ?? 350;
+  const maxDurationMs = input.maxDurationMs
+    ?? Math.min(Math.max(queries.length * pagesPerQuery * 2_500, 90_000), 240_000);
+  const pageDelayMs = input.pageDelayMs ?? 450;
   const timeoutMs = input.timeoutMs ?? 10_000;
   const startedAt = Date.now();
 
@@ -95,9 +115,14 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
       queriesExecuted: 0,
       queriesSucceeded: 0,
       queriesFailed: 0,
+      queriesThrottled: 0,
       pagesFetched: 0,
       organicResultsScanned: 0,
       extractedCandidatesCount: 0,
+      strictExtractedCount: 0,
+      looseExtractedCount: 0,
+      rejectedNonProfileCount: 0,
+      rejectionsByReason: {},
       stoppedReason: "discovery_not_configured",
     };
   }
@@ -105,8 +130,13 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
   let queriesExecuted = 0;
   let queriesSucceeded = 0;
   let queriesFailed = 0;
+  let queriesThrottled = 0;
   let pagesFetched = 0;
   let organicResultsScanned = 0;
+  let strictExtractedCount = 0;
+  let looseExtractedCount = 0;
+  let rejectedNonProfileCount = 0;
+  const rejectionsByReason: Record<string, number> = {};
   let stoppedReason: string | null = null;
   const collected: SerpProfileCandidate[] = [];
 
@@ -135,6 +165,7 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
       const response = await fetchSearchApiPage({ query, page, fetcher: input.fetcher, timeoutMs });
       if (!response.ok) {
         if (page === 1) queriesFailed += 1;
+        if (response.reason?.includes("thrott") || response.reason?.includes("rate")) queriesThrottled += 1;
         break;
       }
 
@@ -154,6 +185,16 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
       queriesSucceeded += 1;
       const organicResults = [...organicByLink.values()];
       organicResultsScanned += organicResults.length;
+      const extractionStats = summarizeSerpExtractionFromOrganicResults({
+        rows: organicResults,
+        sourceQuery: query,
+      });
+      strictExtractedCount += extractionStats.strict_extracted;
+      looseExtractedCount += extractionStats.loose_extracted;
+      rejectedNonProfileCount += extractionStats.rejected_non_profile;
+      for (const [reason, count] of Object.entries(extractionStats.rejections_by_reason)) {
+        rejectionsByReason[reason] = (rejectionsByReason[reason] || 0) + count;
+      }
       collected.push(...extractSerpProfilesFromOrganicResults({ rows: organicResults, sourceQuery: query }));
     }
   }
@@ -164,9 +205,14 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
     queriesExecuted,
     queriesSucceeded,
     queriesFailed,
+    queriesThrottled,
     pagesFetched,
     organicResultsScanned,
     extractedCandidatesCount: candidates.length,
+    strictExtractedCount,
+    looseExtractedCount,
+    rejectedNonProfileCount,
+    rejectionsByReason,
     stoppedReason: stoppedReason ?? (candidates.length > 0 ? "completed" : "insufficient_candidates"),
   };
 }

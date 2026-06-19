@@ -1,3 +1,4 @@
+import { readTargetAiHarnessLooseQueries } from "./target-ai-harness-loose-queries.ts";
 import { readTargetAiLocationPhrases } from "./target-ai-location-normalize.ts";
 import { readTargetAiNicheSynonyms } from "./target-ai-niche-match.ts";
 
@@ -41,6 +42,10 @@ export function buildTargetAiLooseQueries(input: {
   maxQueries?: number;
 }) {
   const maxQueries = input.maxQueries ?? 24;
+  const harnessQueries = readTargetAiHarnessLooseQueries({
+    niche: input.niche,
+    locationLabel: input.locationLabel,
+  });
   const nicheVariants = readLooseNicheVariants(input.niche);
   const locationPhrases = readTargetAiLocationPhrases(input.locationLabel);
   const seen = new Set<string>();
@@ -55,6 +60,11 @@ export function buildTargetAiLooseQueries(input: {
     output.push(normalized);
   }
 
+  if (harnessQueries?.length) {
+    for (const query of harnessQueries) push(query);
+    return output.slice(0, maxQueries);
+  }
+
   if (locationPhrases.length === 0) {
     for (const nichePhrase of nicheVariants.slice(0, 6)) {
       push(`"${nichePhrase}" instagram`);
@@ -62,7 +72,7 @@ export function buildTargetAiLooseQueries(input: {
     return output.slice(0, maxQueries);
   }
 
-  const primaryVariants = nicheVariants.slice(0, 6);
+  const primaryVariants = nicheVariants.slice(0, Math.min(nicheVariants.length, 8));
   for (const locationPhrase of locationPhrases) {
     const variantLimit = locationPhrase === locationPhrases[0] ? primaryVariants.length : 3;
     for (const nichePhrase of primaryVariants.slice(0, variantLimit)) {
@@ -150,7 +160,7 @@ export function buildTargetAiManualBenchmarkQueries(input: {
     loose: buildTargetAiLooseQueries({
       niche: input.niche,
       locationLabel: input.locationLabel,
-      maxQueries: 16,
+      maxQueries: 24,
     }),
   };
 }

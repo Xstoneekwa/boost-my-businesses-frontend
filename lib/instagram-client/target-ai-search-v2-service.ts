@@ -7,6 +7,7 @@ import {
   updateTargetAiDiscoverySessionCandidates,
 } from "./target-ai-discovery-session.ts";
 import { buildTargetAiRuntimeQueryPlan } from "./target-ai-query-plan.ts";
+import { buildTargetAiRuntimeHarnessDiff } from "./target-ai-runtime-harness-diff.ts";
 import { runTargetAiGoogleSerpDiscovery } from "./target-ai-google-serp-discovery.ts";
 import { resolveActiveTargetingAiConfig } from "./targeting-ai-config-store.ts";
 import type { SerpProfileCandidate } from "./target-ai-serp-extractor.ts";
@@ -344,9 +345,14 @@ export async function searchTargetAccountsWithAiV2(input: {
           queriesExecuted: 0,
           queriesSucceeded: 0,
           queriesFailed: 0,
+          queriesThrottled: 0,
           pagesFetched: 0,
           organicResultsScanned: 0,
           extractedCandidatesCount: cached.serpCandidates.length,
+          strictExtractedCount: cached.serpCandidates.length,
+          looseExtractedCount: 0,
+          rejectedNonProfileCount: 0,
+          rejectionsByReason: {},
           stoppedReason: "session_cache_hit",
         },
         verifyStats: createTargetAiProfileVerifyStats(),
@@ -360,11 +366,16 @@ export async function searchTargetAccountsWithAiV2(input: {
   const maxSerpCandidates = readIntEnv("TARGET_AI_V2_MAX_SERP_CANDIDATES", 60, 30, 80);
   const maxQueries = readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 24, 12, 30);
   const pagesPerQuery = readIntEnv("TARGET_AI_V2_SERP_PAGES", 3, 2, 4);
-  const discoveryMaxMs = readIntEnv("TARGET_AI_V2_DISCOVERY_MAX_MS", 75_000, 30_000, 90_000);
   const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 0, 0, 20);
 
   const queryPlan = buildTargetAiRuntimeQueryPlan({ niche, locationLabel, maxQueries });
   const queries = queryPlan.queries;
+  const discoveryMaxMs = readIntEnv(
+    "TARGET_AI_V2_DISCOVERY_MAX_MS",
+    Math.min(Math.max(queries.length * pagesPerQuery * 2_500, 120_000), 240_000),
+    60_000,
+    300_000,
+  );
 
   safeLog("runtime_query_plan", {
     ...queryPlan,
@@ -396,9 +407,14 @@ export async function searchTargetAccountsWithAiV2(input: {
           queriesExecuted: 0,
           queriesSucceeded: 0,
           queriesFailed: 0,
+          queriesThrottled: 0,
           pagesFetched: 0,
           organicResultsScanned: 0,
           extractedCandidatesCount: 0,
+          strictExtractedCount: 0,
+          looseExtractedCount: 0,
+          rejectedNonProfileCount: 0,
+          rejectionsByReason: {},
           stoppedReason: "empty_query_plan",
         },
         verifyStats: createTargetAiProfileVerifyStats(),
@@ -476,6 +492,32 @@ export async function searchTargetAccountsWithAiV2(input: {
     niche,
     locationLabel,
     maxDisplayed: maxSerpCandidates,
+  });
+
+  const harnessDiff = buildTargetAiRuntimeHarnessDiff({
+    niche,
+    locationLabel,
+    runtimeQueries: queries,
+    organicResultsScanned: serpStats.organicResultsScanned,
+    extractedCandidates: serpStats.candidates,
+    rankedUsernames: rankedSerp.map((row) => row.username),
+    displayedUsernames: merged.candidates.map((row) => row.username),
+    scoredCandidates: rankedSerp.map((row) => ({
+      username: row.username,
+      serpScore: row.serpScore,
+      sourceQuery: row.sourceQuery,
+    })),
+  });
+
+  safeLog("runtime_vs_harness_diff", {
+    ...harnessDiff,
+    instagram_urls: serpStats.organicResultsScanned,
+    profile_urls: serpStats.strictExtractedCount + serpStats.looseExtractedCount,
+    usernames_rejected: serpStats.rejectedNonProfileCount,
+    rejections_by_reason: serpStats.rejectionsByReason,
+    strict_extracted_count: serpStats.strictExtractedCount,
+    loose_extracted_count: serpStats.looseExtractedCount,
+    discovery_max_ms: discoveryMaxMs,
   });
 
   saveTargetAiDiscoverySession({
