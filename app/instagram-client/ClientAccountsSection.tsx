@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { resolveClientAccountConnectionUi } from "@/lib/instagram-client/client-account-connection-ui";
 
 export type ClientInstagramAccountView = {
   accountId: string;
@@ -177,33 +178,34 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
           <div className="cd-accounts-list">
             {items.map((account) => {
               const busy = actionState?.accountId === account.accountId;
+              const ui = resolveClientAccountConnectionUi(account, lang);
               return (
                 <article className="cd-account-row" key={account.accountId}>
                   <div className="cd-account-main">
                     <strong>@{account.username}</strong>
                     <small>{account.packageLabel}</small>
-                    <span className={`cd-account-pill${account.connected ? " connected" : ""}`}>{account.readinessLabel}</span>
+                    <span className={`cd-account-pill cd-account-pill-${ui.badgeTone}`}>{ui.badgeLabel}</span>
                   </div>
                   <div className="cd-account-actions">
                     <button
                       type="button"
-                      className="cd-btn cd-btn-soft"
-                      disabled={busy}
+                      className={`cd-btn cd-btn-soft cd-account-state cd-account-state-${ui.readinessTone}`}
+                      disabled={busy || ui.readinessDisabled}
                       onClick={() => void handleCheckReadiness(account.accountId)}
                     >
                       {busy && actionState?.kind === "readiness"
                         ? labelFor(lang, "Vérification…", "Checking…")
-                        : labelFor(lang, "Check readiness", "Check readiness")}
+                        : ui.readinessLabel}
                     </button>
                     <button
                       type="button"
-                      className="cd-btn cd-btn-primary"
-                      disabled={busy || account.connected}
+                      className={`cd-btn cd-account-state cd-account-state-${ui.connectTone}`}
+                      disabled={busy || ui.connectDisabled}
                       onClick={() => void handleConnect(account)}
                     >
                       {busy && actionState?.kind === "connect"
                         ? labelFor(lang, "Connexion…", "Connecting…")
-                        : labelFor(lang, "Connect", "Connect")}
+                        : ui.connectLabel}
                     </button>
                   </div>
                 </article>

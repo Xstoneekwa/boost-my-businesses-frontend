@@ -20,6 +20,14 @@ export type ClientBillingSummary = {
   invoicesAvailable: boolean;
 };
 
+export type ClientAccountManagerView = {
+  name: string;
+  subtitle: string;
+  email: string;
+  bookingUrl: string;
+  bio: string;
+};
+
 export type ClientWorkspaceView = {
   clientId: string;
   displayName: string;
@@ -36,9 +44,13 @@ export type ClientWorkspaceView = {
   subscriptionLabel: string;
   subscriptionStatus: string;
   subscriptionSince: string | null;
+  subscriptionPriceLabel: string;
+  subscriptionGrowthLabel: string;
+  subscriptionSupportLabel: string;
   campaignActive: boolean;
   linkedInstagramAccounts: ClientLinkedInstagramAccount[];
   billing: ClientBillingSummary;
+  accountManager: ClientAccountManagerView;
 };
 
 function readMetadataString(metadata: SupabaseRecord | null, key: string, fallback = "") {
@@ -179,6 +191,16 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     : null;
   const subscriptionType = readString(subscription?.subscription_type, "full_cycle");
   const subscriptionLabel = formatPackageLabel(subscriptionType, subscriptionMetadata);
+  const subscriptionPriceLabel = readMetadataString(subscriptionMetadata, "price_label", readMetadataString(subscriptionMetadata, "monthly_price_label"));
+  const subscriptionGrowthLabel = readMetadataString(subscriptionMetadata, "growth_estimate_label");
+  const subscriptionSupportLabel = readMetadataString(subscriptionMetadata, "support_label");
+  const accountManager = {
+    name: readMetadataString(metadata, "account_manager_name"),
+    subtitle: readMetadataString(metadata, "account_manager_subtitle"),
+    email: readMetadataString(metadata, "account_manager_email"),
+    bookingUrl: readMetadataString(metadata, "account_manager_booking_url"),
+    bio: readMetadataString(metadata, "account_manager_bio"),
+  };
 
   const linkedInstagramAccountsRaw = await loadLinkedInstagramAccounts(clientId);
   const packageSummaries = linkedInstagramAccountsRaw.length
@@ -210,9 +232,13 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     subscriptionLabel: primaryPackageLabel || subscriptionLabel,
     subscriptionStatus: readString(subscription?.status, "active"),
     subscriptionSince: readString(subscription?.starts_at) || readString(client.created_at) || null,
+    subscriptionPriceLabel,
+    subscriptionGrowthLabel,
+    subscriptionSupportLabel,
     campaignActive,
     linkedInstagramAccounts,
     billing: billingSummary(metadata),
+    accountManager,
   };
 }
 
