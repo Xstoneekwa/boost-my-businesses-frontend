@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
@@ -89,6 +89,12 @@ const AVPAL = [
 ];
 function avPal(h: string) { return AVPAL[h.charCodeAt(0) % AVPAL.length]; }
 
+function matchesTargetSearch(username: string, query: string) {
+  const normalizedQuery = query.trim().toLowerCase().replace(/^@+/, "");
+  if (!normalizedQuery) return true;
+  return username.trim().toLowerCase().replace(/^@+/, "").includes(normalizedQuery);
+}
+
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 const T = {
   fr: {
@@ -114,6 +120,8 @@ const T = {
     targeting: {
       intro:"Organisez votre campagne : les comptes que nous ciblons, votre liste blanche protégée et la liste noire que nous excluons.",
       detailBtn:"Ajouter les comptes cibles",
+      searchPh:"Rechercher un compte ciblé…",
+      searchEmpty:"Aucun compte ne correspond à votre recherche.",
       targets:"Comptes cibles", white:"Liste blanche", black:"Liste noire",
       placeholderW:"compte_protege", placeholderB:"compte_exclu",
       emptyT:"Aucun compte cible configuré pour le moment.", emptyW:"Aucun compte protégé.", emptyB:"Aucun compte exclu.",
@@ -185,6 +193,8 @@ const T = {
     targeting: {
       intro:"Organise your campaign: the accounts we target, your protected whitelist, and the blacklist we exclude.",
       detailBtn:"Add target accounts",
+      searchPh:"Search a target account…",
+      searchEmpty:"No accounts match your search.",
       targets:"Target accounts", white:"Whitelist", black:"Blacklist",
       placeholderW:"protected_account", placeholderB:"excluded_account",
       emptyT:"No target accounts yet.", emptyW:"No protected accounts.", emptyB:"No excluded accounts.",
@@ -550,6 +560,7 @@ export default function ClientDashboard({
   const [blacklist, setBlacklist] = useState(useLiveData ? accountInsights!.blacklist : INIT_BLACK);
   const [targetingLoading, setTargetingLoading] = useState(false);
   const [targetingMessage, setTargetingMessage] = useState<string | null>(null);
+  const [targetSearchQuery, setTargetSearchQuery] = useState("");
 
   const t = T[lang];
   const linkedAccountsForAccountTab: ClientLinkedInstagramAccount[] = workspace?.linkedInstagramAccounts?.length
@@ -589,6 +600,10 @@ export default function ClientDashboard({
     avatarUrl: null,
     avatarAvailable: false,
   }));
+  const filteredTargetingItems = useMemo(
+    () => targetingItems.filter((item) => matchesTargetSearch(item.targetUsername, targetSearchQuery)),
+    [targetingItems, targetSearchQuery],
+  );
   const targets = targetingItems.map((item) => item.targetUsername);
 
   const reloadTargeting = useCallback(async () => {
@@ -1057,10 +1072,21 @@ export default function ClientDashboard({
                   ? `${t.targeting.intro} · @${targetingUsername.replace(/^@+/, "")}`
                   : t.targeting.intro}
               </p>
-              <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)} disabled={!useLiveData || !targetingAccountId}>
-                <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
-                {t.targeting.detailBtn}
-              </button>
+              <div className="cd-tg2-topbar-actions">
+                <input
+                  type="search"
+                  className="cd-tg2-search"
+                  value={targetSearchQuery}
+                  onChange={(event) => setTargetSearchQuery(event.target.value)}
+                  placeholder={t.targeting.searchPh}
+                  aria-label={t.targeting.searchPh}
+                  disabled={!useLiveData && demoMode}
+                />
+                <button className="cd-tg2-detailbtn" onClick={() => setDrawerOpen(true)} disabled={!useLiveData || !targetingAccountId}>
+                  <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+                  {t.targeting.detailBtn}
+                </button>
+              </div>
             </div>
             {targetingMessage ? <p className="cd-setup-note" role="status">{targetingMessage}</p> : null}
             {targetingLoading && useLiveData ? (
@@ -1076,7 +1102,11 @@ export default function ClientDashboard({
                   <span className="cd-tg2-col-ct">{targets.length}</span>
                 </div>
                 <div className="cd-tg2-col-rows">
-                  {targetingItems.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyT}</div> : targetingItems.map((item) => (
+                  {targetingItems.length === 0 ? (
+                    <div className="cd-tg2-col-empty">{t.targeting.emptyT}</div>
+                  ) : filteredTargetingItems.length === 0 ? (
+                    <div className="cd-tg2-col-empty">{t.targeting.searchEmpty}</div>
+                  ) : filteredTargetingItems.map((item) => (
                     <div key={item.id} className="cd-tg2-li">
                       <TargetAvatar
                         accountId={targetingAccountId}
@@ -1482,7 +1512,11 @@ const CSS = `
 .cd-btn-full{width:100%;justify-content:center}
 
 /* Targeting */
-.cd-tg2-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.cd-tg2-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.cd-tg2-topbar-actions{display:flex;align-items:center;gap:10px;flex:1 1 320px;justify-content:flex-end;min-width:min(100%,280px)}
+.cd-tg2-search{flex:1 1 220px;min-width:0;max-width:360px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 12px;color:var(--ink);font-family:var(--font-b);font-size:.82rem;outline:none;transition:border-color var(--tr)}
+.cd-tg2-search:focus{border-color:var(--a-ring)}
+.cd-tg2-search::placeholder{color:var(--ink-mute)}
 .cd-tg2-intro{font-size:.84rem;color:var(--ink-dim);line-height:1.5;max-width:640px}
 .cd-tg2-detailbtn{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-d);font-weight:700;font-size:.8rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);padding:8px 14px;border-radius:var(--r-sm);transition:all var(--tr)}
 .cd-tg2-detailbtn:hover{border-color:var(--a-ring);color:var(--accent);transform:translateY(-1px)}
