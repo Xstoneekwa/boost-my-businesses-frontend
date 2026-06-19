@@ -63,8 +63,17 @@ function isPendingCandidate(row: ClientTargetAiCandidate) {
   return row.verificationStatus === "pending" || row.qualityStatus === "pending_verification";
 }
 
-function hasVerifiedIneligibleSelection(items: ClientTargetAiCandidate[]) {
-  return items.some((item) => item.verificationStatus === "found" && !item.eligible);
+function sortCandidatesForDisplay(items: ClientTargetAiCandidate[]) {
+  return [...items].sort((left, right) => {
+    const rank = (row: ClientTargetAiCandidate) => {
+      if (row.eligible) return 0;
+      if (row.verificationStatus === "found" && !row.eligible) return 1;
+      return 2;
+    };
+    const rankDiff = rank(left) - rank(right);
+    if (rankDiff !== 0) return rankDiff;
+    return (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0);
+  });
 }
 
 function mergeVerifiedCandidates(
@@ -160,7 +169,7 @@ export default function ClientAiTargetSearchWizard({
         lang,
         "target_ai_provider_error",
       );
-      setCandidates((rows) => mergeVerifiedCandidates(rows, Array.isArray(data.candidates) ? data.candidates : []));
+      setCandidates((rows) => sortCandidatesForDisplay(mergeVerifiedCandidates(rows, Array.isArray(data.candidates) ? data.candidates : [])));
     } catch {
       // Keep suggestions visible even if background enrichment fails quietly.
     } finally {
@@ -171,15 +180,21 @@ export default function ClientAiTargetSearchWizard({
   useEffect(() => {
     if (!open || searching || !sessionId || candidates.length === 0 || enrichStartedRef.current) return;
     enrichStartedRef.current = true;
-    const topPending = candidates.filter(isPendingCandidate).slice(0, 12).map((row) => row.username);
-    if (topPending.length > 0) void enrichCandidates(topPending);
+    const pendingUsernames = candidates.filter(isPendingCandidate).map((row) => row.username);
+    if (pendingUsernames.length > 0) void enrichCandidates(pendingUsernames);
   }, [open, searching, sessionId, candidates]);
 
-  const selectedCandidates = candidates;
-  const ineligiblePresent = hasVerifiedIneligibleSelection(selectedCandidates);
+  const selectedCandidates = useMemo(
+    () => sortCandidatesForDisplay(candidates),
+    [candidates],
+  );
+  const hasPendingCandidates = selectedCandidates.some(isPendingCandidate);
+  const eligibleCount = selectedCandidates.filter((row) => row.verificationStatus === "found" && row.eligible).length;
+  const ineligiblePresent = selectedCandidates.some((row) => row.verificationStatus === "found" && !row.eligible);
+  const analysisReady = !searching && !enriching && !hasPendingCandidates;
   const locationTypedWithoutSelection = locationQuery.trim().length >= 2 && !selectedLocation;
   const canLaunchSearch = !locationTypedWithoutSelection;
-  const canValidate = selectedCandidates.length > 0 && !validating && !searching;
+  const canValidate = analysisReady && eligibleCount > 0 && !validating;
 
   function closeWizard() {
     if (searching || validating || enriching) return;
@@ -210,7 +225,7 @@ export default function ClientAiTargetSearchWizard({
         lang,
         "target_ai_provider_error",
       );
-      setCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setCandidates(Array.isArray(data.candidates) ? sortCandidatesForDisplay(data.candidates) : []);
       setSessionId(typeof data.session_id === "string" ? data.session_id : "");
       if (!data.candidates?.length) {
         setStatusMessage(targetAiErrorMessage(lang, "no_candidates_found"));
@@ -259,7 +274,7 @@ export default function ClientAiTargetSearchWizard({
           lang,
           "target_ai_provider_error",
         );
-        workingCandidates = mergeVerifiedCandidates(workingCandidates, Array.isArray(data.candidates) ? data.candidates : []);
+        workingCandidates = sortCandidatesForDisplay(mergeVerifiedCandidates(workingCandidates, Array.isArray(data.candidates) ? data.candidates : []));
         setCandidates(workingCandidates);
       }
 
@@ -305,9 +320,12 @@ export default function ClientAiTargetSearchWizard({
   }
 
   function statusLabel(row: ClientTargetAiCandidate) {
-    if (isPendingCandidate(row)) return copy.suggestedProfile;
-    if (row.eligible) return copy.eligible;
-    return copy.ineligible;
+    return row.eligible ? copy.eligible : copy.ineligible;
+  }
+
+  function eligibilityReason(row: ClientTargetAiCandidate) {
+    if (row.eligible || isPendingCandidate(row) || !row.ineligibleReasonCode) return "";
+    return targetAiEligibilityLabel(lang, row.ineligibleReasonCode as AiTargetEligibilityReasonCode);
   }
 
   if (!open) return null;
@@ -412,16 +430,20 @@ export default function ClientAiTargetSearchWizard({
                 <span className="cd-ai-spinner" aria-hidden="true" />
                 <p>{copy.loadingBody}</p>
               </div>
+            ) : !analysisReady ? (
+              <div className="cd-ai-loading">
+                <span className="cd-ai-spinner" aria-hidden="true" />
+                <p>{copy.enriching}</p>
+              </div>
             ) : (
               <>
-                {enriching ? <p className="cd-ai-hint">{copy.enriching}</p> : null}
-                {ineligiblePresent ? <p className="cd-ai-warning">{copy.blockedValidation}</p> : null}
+                {ineligiblePresent ? <p className="cd-ai-hint">{copy.ineligibleHint}</p> : null}
                 {statusMessage ? <p className="cd-ai-hint">{statusMessage}</p> : null}
                 <div className="cd-ai-results">
                   {selectedCandidates.length === 0 && !statusMessage ? (
                     <p className="cd-ai-hint">{copy.emptySelection}</p>
                   ) : selectedCandidates.map((row) => (
-                    <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}${isPendingCandidate(row) ? " pending" : ""}`}>
+                    <div key={row.username} className={`cd-ai-row${row.eligible ? "" : " ineligible"}`}>
                       <AiCandidateAvatar
                         accountId={accountId}
                         username={row.username}
@@ -431,7 +453,7 @@ export default function ClientAiTargetSearchWizard({
                       <div className="cd-ai-row-main">
                         <div className="cd-ai-row-top">
                           <a href={row.profileUrl} target="_blank" rel="noopener noreferrer" className="cd-ai-handle">@{row.username}</a>
-                          <span className={`cd-ai-pill${row.eligible ? " ok" : isPendingCandidate(row) ? " pending" : " bad"}`}>
+                          <span className={`cd-ai-pill${row.eligible ? " ok" : " bad"}`}>
                             {statusLabel(row)}
                           </span>
                         </div>
@@ -440,9 +462,7 @@ export default function ClientAiTargetSearchWizard({
                             <span>{formatFollowers(row.followersCount, lang)} {copy.followers}</span>
                           ) : null}
                           {row.displayTitle ? <span>{row.displayTitle.slice(0, 120)}</span> : null}
-                          {!row.eligible && row.verificationStatus === "found" && row.ineligibleReasonCode ? (
-                            <span>{targetAiEligibilityLabel(lang, row.ineligibleReasonCode as AiTargetEligibilityReasonCode)}</span>
-                          ) : null}
+                          {eligibilityReason(row) ? <span>{eligibilityReason(row)}</span> : null}
                         </div>
                       </div>
                       <div className="cd-ai-row-actions">

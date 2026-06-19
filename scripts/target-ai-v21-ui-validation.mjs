@@ -92,7 +92,11 @@ async function runCase(testCase, searchFn) {
     title: row.serpTitle,
     verificationStatus: row.verificationStatus,
     eligible: row.eligible,
+    ineligibleReasonCode: row.ineligibleReasonCode,
   }));
+  const eligibleCandidates = candidates.filter((row) => row.eligible);
+  const ineligibleCandidates = candidates.filter((row) => row.verificationStatus === "found" && !row.eligible);
+  const pendingCandidates = candidates.filter((row) => row.verificationStatus === "pending");
 
   const scores = candidates.map((row) => row.relevanceScore ?? 0);
   const looseExtracted = candidates.filter((row) => !String(row.serpSourceQuery || "").includes("site:instagram.com")).length;
@@ -124,6 +128,15 @@ async function runCase(testCase, searchFn) {
     score_top: scores.length ? Math.max(...scores) : null,
     score_bottom: scores.length ? Math.min(...scores) : null,
     top20,
+    eligible_count: eligibleCandidates.length,
+    ineligible_count: ineligibleCandidates.length,
+    pending_count: pendingCandidates.length,
+    top10_eligible: eligibleCandidates.slice(0, 10).map((row) => row.username),
+    ineligible_examples: ineligibleCandidates.slice(0, 10).map((row) => ({
+      username: row.username,
+      reason: row.ineligibleReasonCode,
+      title: row.serpTitle,
+    })),
     manual_relevance: manualRelevanceEstimate(testCase.niche, candidates),
     search_completed: {
       event: "search_completed",

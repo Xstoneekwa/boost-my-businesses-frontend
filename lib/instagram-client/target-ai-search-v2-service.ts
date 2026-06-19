@@ -11,6 +11,7 @@ import { buildTargetAiRuntimeHarnessDiff } from "./target-ai-runtime-harness-dif
 import { runTargetAiGoogleSerpDiscovery } from "./target-ai-google-serp-discovery.ts";
 import { resolveActiveTargetingAiConfig } from "./targeting-ai-config-store.ts";
 import type { SerpProfileCandidate } from "./target-ai-serp-extractor.ts";
+import { evaluateSerpClientProjection, needsTargetAiProfileVerification } from "./target-ai-client-projection.ts";
 import { rankSerpProfileCandidates } from "./target-ai-serp-score.ts";
 import { cacheResolvedAvatarUrl } from "./target-avatar-proxy-server.ts";
 import {
@@ -89,8 +90,35 @@ export function mapSerpCandidateToSearchCandidate(input: {
     };
   }
 
+  const projection = evaluateSerpClientProjection({
+    candidate: input.serp,
+    niche: input.niche,
+    locationLabel: input.locationLabel,
+  });
+
+  if (!projection.needsProfileVerify) {
+    return {
+      username: input.serp.username,
+      followersCount: null,
+      avatarUrl: null,
+      avatarAvailable: false,
+      eligible: projection.eligible,
+      ineligibleReasonCode: projection.reasonCode,
+      profileUrl: input.serp.profileUrl,
+      isVerified: null,
+      isPrivate: null,
+      verificationStatus: projection.verificationStatus,
+      qualityStatus: projection.qualityStatus,
+      relevanceScore: projection.serpScore,
+      serpTitle: input.serp.title,
+      serpSnippet: input.serp.snippet,
+      serpSourceQuery: input.serp.sourceQuery,
+      serpPosition: input.serp.position,
+    };
+  }
+
   const relevanceScore = Math.max(
-    input.serp.serpScore ?? 0,
+    projection.serpScore,
     scoreTargetAiCandidateRelevance({
       username: input.serp.username,
       niche: input.niche,
@@ -154,7 +182,7 @@ function buildDebugSummary(input: {
     niche_present: true,
     location_present: Boolean(input.locationLabel),
     max_displayed_results: input.config.max_displayed_results,
-    max_searchapi_checks: readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 12, 8, 20),
+    max_searchapi_checks: readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 28, 0, 40),
     max_latency_ms: readIntEnv("TARGET_AI_V2_DISCOVERY_MAX_MS", 45_000, 20_000, 90_000),
     profile_lookup_concurrency: 1,
     gpt_search_queries_count: 0,
@@ -266,6 +294,19 @@ export async function verifyTargetAiUsernamesBatch(input: {
   return { verifiedByUsername, stats };
 }
 
+function sortCandidatesForDisplay(candidates: TargetAiSearchCandidate[]) {
+  return [...candidates].sort((left, right) => {
+    const rank = (row: TargetAiSearchCandidate) => {
+      if (row.eligible) return 0;
+      if (row.verificationStatus === "found" && !row.eligible) return 1;
+      return 2;
+    };
+    const rankDiff = rank(left) - rank(right);
+    if (rankDiff !== 0) return rankDiff;
+    return (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0);
+  });
+}
+
 export function mergeSerpAndVerifiedCandidates(input: {
   rankedSerp: Array<SerpProfileCandidate & { serpScore: number }>;
   verifiedByUsername: Map<string, TargetAiSearchCandidate>;
@@ -273,15 +314,17 @@ export function mergeSerpAndVerifiedCandidates(input: {
   locationLabel: string | null;
   maxDisplayed: number;
 }) {
-  const candidates = input.rankedSerp.slice(0, input.maxDisplayed).map((serp) => {
-    const verified = input.verifiedByUsername.get(serp.username);
-    if (verified) return verified;
-    return mapSerpCandidateToSearchCandidate({
-      serp,
-      niche: input.niche,
-      locationLabel: input.locationLabel,
-    });
-  });
+  const candidates = sortCandidatesForDisplay(
+    input.rankedSerp.slice(0, input.maxDisplayed).map((serp) => {
+      const verified = input.verifiedByUsername.get(serp.username);
+      if (verified) return verified;
+      return mapSerpCandidateToSearchCandidate({
+        serp,
+        niche: input.niche,
+        locationLabel: input.locationLabel,
+      });
+    }),
+  );
   return {
     candidates,
     unverifiedCandidates: candidates.filter((row) => row.verificationStatus === "pending"),
@@ -366,7 +409,7 @@ export async function searchTargetAccountsWithAiV2(input: {
   const maxSerpCandidates = readIntEnv("TARGET_AI_V2_MAX_SERP_CANDIDATES", 60, 30, 80);
   const maxQueries = readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 24, 12, 30);
   const pagesPerQuery = readIntEnv("TARGET_AI_V2_SERP_PAGES", 3, 2, 4);
-  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 0, 0, 20);
+  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 28, 0, 40);
 
   const queryPlan = buildTargetAiRuntimeQueryPlan({ niche, locationLabel, maxQueries });
   const queries = queryPlan.queries;
@@ -473,9 +516,14 @@ export async function searchTargetAccountsWithAiV2(input: {
   }
 
   const serpByUsername = new Map(rankedSerp.map((row) => [row.username, row]));
-  const autoVerifyUsernames = autoVerifyCount > 0
-    ? rankedSerp.slice(0, autoVerifyCount).map((row) => row.username)
-    : [];
+  const autoVerifyUsernames = rankedSerp
+    .filter((row) => needsTargetAiProfileVerification(evaluateSerpClientProjection({
+      candidate: row,
+      niche,
+      locationLabel,
+    })))
+    .slice(0, autoVerifyCount)
+    .map((row) => row.username);
   const { verifiedByUsername, stats: verifyStats } = autoVerifyUsernames.length > 0
     ? await verifyTargetAiUsernamesBatch({
       usernames: autoVerifyUsernames,

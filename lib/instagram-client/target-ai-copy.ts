@@ -27,8 +27,8 @@ export function targetAiCopy(lang: TargetAiLang) {
     launchSearch: fr ? "Lancer la recherche" : "Launch search",
     step3Title: fr ? "Confirmez vos comptes cibles" : "Confirm your target accounts",
     step3Body: fr
-      ? "Consultez les profils suggérés pour votre campagne. Retirez ceux que vous ne souhaitez pas utiliser avant de valider."
-      : "Review suggested profiles for your campaign. Remove any accounts you do not want before validating.",
+      ? "Consultez les comptes trouvés pour votre campagne. Seuls les comptes éligibles seront ajoutés à votre ciblage."
+      : "Review the accounts found for your campaign. Only eligible accounts will be added to your targeting.",
     loadingTitle: fr ? "Recherche en cours…" : "Searching…",
     loadingBody: fr
       ? "Nous analysons des profils Instagram pertinents pour votre campagne. Les premiers résultats arrivent dans quelques secondes."
@@ -43,11 +43,13 @@ export function targetAiCopy(lang: TargetAiLang) {
     openInstagram: fr ? "Ouvrir sur Instagram" : "Open on Instagram",
     eligible: fr ? "Éligible" : "Eligible",
     ineligible: fr ? "Non éligible" : "Not eligible",
-    suggestedProfile: fr ? "Profil suggéré" : "Suggested profile",
     followers: fr ? "abonnés" : "followers",
+    ineligibleHint: fr
+      ? "Les comptes non éligibles restent visibles pour information mais ne seront pas ajoutés."
+      : "Ineligible accounts remain visible for reference but will not be added.",
     blockedValidation: fr
-      ? "Retirez les comptes non éligibles avant de valider votre sélection."
-      : "Remove ineligible accounts before validating your selection.",
+      ? "Les comptes non éligibles ne seront pas ajoutés. Ajoutez au moins un compte éligible pour continuer."
+      : "Ineligible accounts will not be added. Add at least one eligible account to continue.",
     emptySelection: fr ? "Ajoutez au moins un compte à votre sélection." : "Add at least one account to your selection.",
     searchError: fr ? "La recherche IA n’a pas pu aboutir. Réessayez dans un instant." : "AI search could not complete. Please try again shortly.",
     validateError: fr ? "Impossible d’ajouter la sélection pour le moment." : "Could not add the selected accounts right now.",
@@ -69,11 +71,20 @@ export function targetAiEligibilityLabel(lang: TargetAiLang, reasonCode: AiTarge
     case "private":
       return fr ? "Compte privé" : "Private account";
     case "not_found":
-      return fr ? "Profil non disponible" : "Profile unavailable";
+    case "unavailable":
+      return fr ? "Profil indisponible" : "Profile unavailable";
     case "too_many_followers":
       return fr ? "Plus de 50 000 abonnés" : "More than 50,000 followers";
+    case "out_of_target":
+      return fr ? "Hors ciblage" : "Outside targeting";
+    case "out_of_location":
+      return fr ? "Hors localisation" : "Outside location";
+    case "not_relevant":
+      return fr ? "Profil non pertinent" : "Not relevant profile";
     case "pending_verification":
       return fr ? "Analyse en cours" : "Analysis in progress";
+    case "rejected":
+      return fr ? "Profil non pertinent" : "Not relevant profile";
     default:
       return fr ? "Hors critères" : "Outside criteria";
   }

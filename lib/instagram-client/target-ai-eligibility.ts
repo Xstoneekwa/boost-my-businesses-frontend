@@ -10,6 +10,10 @@ export type AiTargetEligibilityReasonCode =
   | "not_found"
   | "too_many_followers"
   | "pending_verification"
+  | "out_of_target"
+  | "out_of_location"
+  | "not_relevant"
+  | "unavailable"
   | "rejected"
   | null;
 
@@ -41,8 +45,20 @@ export function evaluateAiTargetEligibility(input: {
   if (quality === "rejected_private" || input.is_private === true) {
     return { eligible: false, reasonCode: "private" };
   }
+  if (quality === "rejected_out_of_target") {
+    return { eligible: false, reasonCode: "out_of_target" };
+  }
+  if (quality === "rejected_out_of_location") {
+    return { eligible: false, reasonCode: "out_of_location" };
+  }
+  if (quality === "rejected_not_relevant") {
+    return { eligible: false, reasonCode: "not_relevant" };
+  }
   if (quality === "rejected_not_found" || input.verification_status === "not_found") {
     return { eligible: false, reasonCode: "not_found" };
+  }
+  if (input.verification_status === "rate_limited") {
+    return { eligible: false, reasonCode: "unavailable" };
   }
   if (followers !== null && followers > CT_MANUAL_FOLLOWERS_MAX_GUARD) {
     return { eligible: false, reasonCode: "too_many_followers" };
