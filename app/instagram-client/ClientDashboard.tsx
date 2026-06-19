@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
+import ClientActivityPanel from "./ClientActivityPanel";
 import TargetAvatar from "./TargetAvatar";
 import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
 import { normalizeTargetUsername } from "@/lib/instagram-targets";
@@ -1049,15 +1050,16 @@ export default function ClientDashboard({
 
         {/* ACTIVITY */}
         {activeView === "activity" && (
-          <div className="cd-view">
+          <>
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
-            <div className="cd-card">
-              <div className="cd-card-hd"><h3>{t.activity.title}</h3></div>
-              <FeedList items={liveFeedItems} lang={lang}/>
-            </div>
-          </div>
+            <ClientActivityPanel
+              accountId={useLiveData ? targetingAccountId : null}
+              lang={lang}
+              enabled={useLiveData && Boolean(targetingAccountId)}
+            />
+          </>
         )}
 
         {/* TARGETING */}
@@ -1469,6 +1471,41 @@ const CSS = `
 .cd-card-hd h3{font-family:var(--font-d);font-weight:800;font-size:.95rem;color:var(--ink)}
 .cd-card-hd a{font-size:.78rem;font-weight:700;color:var(--accent);opacity:.85;transition:opacity var(--tr)}
 .cd-card-hd a:hover{opacity:1}
+
+/* Activity log */
+.cd-act-view{display:grid;gap:16px}
+.cd-act-head h2{font-family:var(--font-d);font-weight:900;font-size:1.15rem;color:var(--ink);margin:0 0 6px}
+.cd-act-head p{margin:0;color:var(--ink-dim);font-size:.84rem;line-height:1.5;max-width:760px}
+.cd-act-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+.cd-act-search{max-width:none;flex:1 1 280px}
+.cd-act-filter{display:grid;gap:4px;font-size:.72rem;color:var(--ink-mute)}
+.cd-act-filter select{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;color:var(--ink);font-family:var(--font-b);font-size:.82rem;outline:none}
+.cd-act-filter select:focus{border-color:var(--a-ring)}
+.cd-act-table-wrap{display:block;overflow:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.cd-act-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.cd-act-table th,.cd-act-table td{padding:10px 12px;border-bottom:1px solid var(--line-2);text-align:left;vertical-align:top}
+.cd-act-table th{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-mute);background:var(--surface-2)}
+.cd-act-table tr:last-child td{border-bottom:none}
+.cd-act-result{display:inline-flex;padding:2px 8px;border-radius:999px;font-size:.74rem;font-weight:700}
+.cd-act-result-success{background:var(--good-bg);color:var(--good)}
+.cd-act-result-skipped{background:var(--surface-2);color:var(--ink-dim)}
+.cd-act-result-failed{background:var(--bad-bg);color:var(--bad)}
+.cd-act-result-pending{background:var(--warn-bg);color:var(--warn)}
+.cd-act-cards{display:none;gap:12px}
+.cd-act-card{border:1px solid var(--line);border-radius:var(--r);padding:14px;background:var(--surface);display:grid;gap:8px}
+.cd-act-card-date{font-size:.74rem;color:var(--ink-mute)}
+.cd-act-card-row{display:flex;justify-content:space-between;gap:12px;font-size:.82rem}
+.cd-act-card-row span{color:var(--ink-mute)}
+.cd-act-card-row strong{color:var(--ink);text-align:right}
+.cd-act-card-detail{margin:0;font-size:.78rem;color:var(--ink-dim);line-height:1.45}
+.cd-act-empty,.cd-act-error{border:1px solid var(--line);border-radius:var(--r);padding:18px;background:var(--surface)}
+.cd-act-empty h3,.cd-act-error h3{margin:0 0 8px;font-family:var(--font-d);font-size:.95rem;color:var(--ink)}
+.cd-act-empty p,.cd-act-error p{margin:0;color:var(--ink-dim);font-size:.84rem;line-height:1.5}
+.cd-act-more{display:flex;justify-content:center;padding-top:4px}
+@media (max-width:960px){
+  .cd-act-table-wrap{display:none}
+  .cd-act-cards{display:grid}
+}
 
 /* Feed */
 .cd-feed{display:flex;flex-direction:column}
