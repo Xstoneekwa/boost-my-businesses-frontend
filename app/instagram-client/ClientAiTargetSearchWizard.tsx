@@ -202,6 +202,11 @@ export default function ClientAiTargetSearchWizard({
   }
 
   async function launchSearch() {
+    if (locationQuery.trim().length >= 2 && !selectedLocation) {
+      setError(copy.locationSelectionRequired);
+      setStep(2);
+      return;
+    }
     setSearching(true);
     setError("");
     setStatusMessage("");

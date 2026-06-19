@@ -19,6 +19,7 @@ import {
   createTargetAiProfileVerifyStats,
   verifyTargetAiProfileUsername,
 } from "./target-ai-profile-verify.ts";
+import { resolveTargetAiUiDiscoveryProfile } from "./target-ai-ui-discovery-profile.ts";
 import { scoreTargetAiCandidateRelevance } from "./target-ai-relevance-score.ts";
 import type {
   TargetAiSearchCandidate,
@@ -238,7 +239,7 @@ export async function verifyTargetAiUsernamesBatch(input: {
 
   await mapWithConcurrency(input.usernames, concurrency, async (username, index) => {
     if (index > 0) {
-      await new Promise((resolve) => setTimeout(resolve, readIntEnv("TARGET_AI_V2_VERIFY_DELAY_MS", 350, 150, 800)));
+      await new Promise((resolve) => setTimeout(resolve, readIntEnv("TARGET_AI_V2_VERIFY_DELAY_MS", 250, 150, 800)));
     }
     const serp = input.serpByUsername.get(username);
     if (!serp) return null;
@@ -406,18 +407,19 @@ export async function searchTargetAccountsWithAiV2(input: {
     };
   }
 
-  const maxSerpCandidates = readIntEnv("TARGET_AI_V2_MAX_SERP_CANDIDATES", 60, 30, 80);
+  const uiDiscovery = resolveTargetAiUiDiscoveryProfile({ niche, locationLabel });
+  const maxSerpCandidates = readIntEnv("TARGET_AI_V2_MAX_SERP_CANDIDATES", uiDiscovery.maxSerpCandidates, 30, 80);
   const maxQueries = readIntEnv("TARGET_AI_V2_MAX_GOOGLE_QUERIES", 24, 12, 30);
-  const pagesPerQuery = readIntEnv("TARGET_AI_V2_SERP_PAGES", 3, 2, 4);
-  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 28, 0, 40);
+  const pagesPerQuery = readIntEnv("TARGET_AI_V2_SERP_PAGES", uiDiscovery.pagesPerQuery, 1, 4);
+  const autoVerifyCount = readIntEnv("TARGET_AI_V2_AUTO_VERIFY_COUNT", 32, 0, 45);
 
   const queryPlan = buildTargetAiRuntimeQueryPlan({ niche, locationLabel, maxQueries });
   const queries = queryPlan.queries;
   const discoveryMaxMs = readIntEnv(
     "TARGET_AI_V2_DISCOVERY_MAX_MS",
-    Math.min(Math.max(queries.length * pagesPerQuery * 2_500, 120_000), 240_000),
-    60_000,
-    300_000,
+    uiDiscovery.discoveryMaxMs,
+    45_000,
+    120_000,
   );
 
   safeLog("runtime_query_plan", {
@@ -482,6 +484,9 @@ export async function searchTargetAccountsWithAiV2(input: {
     maxCandidates: maxSerpCandidates,
     pagesPerQuery,
     maxDurationMs: discoveryMaxMs,
+    earlyStopCandidateCount: uiDiscovery.earlyStopCandidateCount,
+    maxQueriesToExecute: uiDiscovery.maxQueriesToExecute,
+    thirdPageMinCandidates: uiDiscovery.thirdPageMinCandidates,
   });
 
   const rankedSerp = rankSerpProfileCandidates(serpStats.candidates, niche, locationLabel)
@@ -534,9 +539,42 @@ export async function searchTargetAccountsWithAiV2(input: {
     })
     : { verifiedByUsername: new Map<string, TargetAiSearchCandidate>(), stats: createTargetAiProfileVerifyStats() };
 
+  let workingVerifiedByUsername = verifiedByUsername;
+  const totalMaxMs = readIntEnv("TARGET_AI_V2_TOTAL_MAX_MS", 92_000, 70_000, 120_000);
+  const pendingAfterAutoVerify = rankedSerp
+    .map((row) => row.username)
+    .filter((username) => {
+      const candidate = workingVerifiedByUsername.get(username)
+        ?? mapSerpCandidateToSearchCandidate({ serp: serpByUsername.get(username)!, niche, locationLabel });
+      return candidate.verificationStatus === "pending";
+    });
+
+  if (pendingAfterAutoVerify.length > 0 && Date.now() - startedAt < totalMaxMs) {
+    const { verifiedByUsername: extraVerified, stats: extraStats } = await verifyTargetAiUsernamesBatch({
+      usernames: pendingAfterAutoVerify,
+      niche,
+      locationLabel,
+      serpByUsername,
+      concurrency: 1,
+    });
+    workingVerifiedByUsername = new Map([...workingVerifiedByUsername, ...extraVerified]);
+    verifyStats.checked += extraStats.checked;
+    verifyStats.found += extraStats.found;
+    verifyStats.foundPartial += extraStats.foundPartial;
+    verifyStats.notFound += extraStats.notFound;
+    verifyStats.providerError += extraStats.providerError;
+    verifyStats.rateLimited += extraStats.rateLimited;
+    verifyStats.timeout += extraStats.timeout;
+    verifyStats.invalidResponse += extraStats.invalidResponse;
+    verifyStats.retried += extraStats.retried;
+    for (const [reason, count] of extraStats.errorReasons.entries()) {
+      verifyStats.errorReasons.set(reason, (verifyStats.errorReasons.get(reason) ?? 0) + count);
+    }
+  }
+
   const merged = mergeSerpAndVerifiedCandidates({
     rankedSerp,
-    verifiedByUsername,
+    verifiedByUsername: workingVerifiedByUsername,
     niche,
     locationLabel,
     maxDisplayed: maxSerpCandidates,

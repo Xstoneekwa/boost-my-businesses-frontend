@@ -97,19 +97,25 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
   pageDelayMs?: number;
   fetcher?: typeof fetch;
   timeoutMs?: number;
+  earlyStopCandidateCount?: number;
+  maxQueriesToExecute?: number;
+  thirdPageMinCandidates?: number;
 }): Promise<TargetAiGoogleSerpDiscoveryResult> {
   const apiKey = readDiscoveryApiKey();
   const endpoint = readDiscoveryEndpoint();
   const queries = input.queries.filter(Boolean);
+  const executableQueries = queries.slice(0, input.maxQueriesToExecute ?? queries.length);
   const maxCandidates = input.maxCandidates ?? 80;
-  const pagesPerQuery = Math.min(Math.max(input.pagesPerQuery ?? 3, 1), 4);
+  const earlyStopCandidateCount = input.earlyStopCandidateCount ?? maxCandidates;
+  const pagesPerQueryCap = Math.min(Math.max(input.pagesPerQuery ?? 2, 1), 4);
+  const thirdPageMinCandidates = input.thirdPageMinCandidates ?? 25;
   const maxDurationMs = input.maxDurationMs
-    ?? Math.min(Math.max(queries.length * pagesPerQuery * 2_500, 90_000), 240_000);
-  const pageDelayMs = input.pageDelayMs ?? 450;
-  const timeoutMs = input.timeoutMs ?? 10_000;
+    ?? Math.min(Math.max(executableQueries.length * pagesPerQueryCap * 2_500, 60_000), 120_000);
+  const pageDelayMs = input.pageDelayMs ?? 280;
+  const timeoutMs = input.timeoutMs ?? 8_000;
   const startedAt = Date.now();
 
-  if (!apiKey || !endpoint || queries.length === 0) {
+  if (!apiKey || !endpoint || executableQueries.length === 0) {
     return {
       candidates: [],
       queriesExecuted: 0,
@@ -140,9 +146,13 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
   let stoppedReason: string | null = null;
   const collected: SerpProfileCandidate[] = [];
 
-  for (const query of queries) {
+  for (const query of executableQueries) {
     if (collected.length >= maxCandidates) {
       stoppedReason = "candidate_cap_reached";
+      break;
+    }
+    if (collected.length >= earlyStopCandidateCount) {
+      stoppedReason = "enough_candidates";
       break;
     }
     if (Date.now() - startedAt >= maxDurationMs) {
@@ -153,13 +163,16 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
     queriesExecuted += 1;
     const organicByLink = new Map<string, SerpOrganicRow>();
     let querySucceeded = false;
+    const pagesForQuery = collected.length < thirdPageMinCandidates
+      ? Math.min(pagesPerQueryCap, 3)
+      : Math.min(pagesPerQueryCap, 2);
 
-    for (let page = 1; page <= pagesPerQuery; page += 1) {
+    for (let page = 1; page <= pagesForQuery; page += 1) {
       if (Date.now() - startedAt >= maxDurationMs) {
         stoppedReason = "time_budget_reached";
         break;
       }
-      if (collected.length >= maxCandidates) break;
+      if (collected.length >= maxCandidates || collected.length >= earlyStopCandidateCount) break;
 
       pagesFetched += 1;
       const response = await fetchSearchApiPage({ query, page, fetcher: input.fetcher, timeoutMs });
@@ -176,7 +189,7 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
         organicByLink.set(key, row);
       }
 
-      if (page < pagesPerQuery) {
+      if (page < pagesForQuery) {
         await new Promise((resolve) => setTimeout(resolve, pageDelayMs));
       }
     }
@@ -197,6 +210,16 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
       }
       collected.push(...extractSerpProfilesFromOrganicResults({ rows: organicResults, sourceQuery: query }));
     }
+
+    if (collected.length >= earlyStopCandidateCount) {
+      stoppedReason = "enough_candidates";
+      break;
+    }
+    if (collected.length >= maxCandidates) {
+      stoppedReason = "candidate_cap_reached";
+      break;
+    }
+    if (stoppedReason === "time_budget_reached") break;
   }
 
   const candidates = dedupeSerpProfileCandidates(collected, maxCandidates);

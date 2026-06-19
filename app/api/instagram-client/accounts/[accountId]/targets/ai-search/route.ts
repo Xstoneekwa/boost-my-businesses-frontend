@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readString, rejectTechnicalClientFields } from "@/lib/instagram-client/_utils";
 import { authorizeClientTargetAiRoute, jsonTargetAiError } from "@/lib/instagram-client/target-ai-route-auth";
 import { serializeTargetAiCandidateForClient } from "@/lib/instagram-client/target-ai-candidate-avatar";
+import { buildTargetAiRuntimeQueryPlan } from "@/lib/instagram-client/target-ai-query-plan";
 import { searchTargetAccountsWithAi, type TargetAiSearchResult } from "@/lib/instagram-client/target-ai-search-service";
 import type { TargetAiSearchV2Result } from "@/lib/instagram-client/target-ai-search-v2-service";
 
@@ -53,10 +54,18 @@ export async function POST(
   }
 
   const normalizedAccountId = accountId?.trim() ?? "";
+  const location = readLocation(body?.location);
+  if (location) {
+    const queryPlan = buildTargetAiRuntimeQueryPlan({ niche, locationLabel: location.label });
+    if (queryPlan.queries.length === 0) {
+      return jsonTargetAiError("invalid_location", 400);
+    }
+  }
+
   const result = await searchTargetAccountsWithAi({
     accountId: normalizedAccountId,
     niche,
-    location: readLocation(body?.location),
+    location,
     maxCandidates: typeof body?.max_candidates === "number" ? body.max_candidates : undefined,
   });
 
@@ -64,27 +73,10 @@ export async function POST(
 
   if (result.status === "no_candidates") {
     const errorCode = result.error_code === "invalid_location" ? "invalid_location" : "no_candidates_found";
-    return NextResponse.json({
-      ok: false,
-      error_code: errorCode,
-      error: "No relevant accounts were found.",
-      data: {
-        status: result.status,
-        provider: result.provider,
-        candidates: [],
-        summary: {
-          suggested_count: result.suggested_count,
-          verified_count: result.verified_count,
-          avatar_resolved: result.avatar_resolved,
-          error_code: result.error_code,
-          prompt_version: result.debug.prompt_version,
-          prompt_source: result.debug.prompt_source,
-          found_count: result.debug.found_count,
-          eligible_count: result.debug.eligible_count,
-          displayed_count: result.debug.displayed_count,
-        },
-      },
-    }, { status: 422 });
+    if (errorCode === "invalid_location") {
+      return jsonTargetAiError("invalid_location", 400);
+    }
+    return jsonTargetAiError("no_candidates_found", 404);
   }
 
   if (result.error_code === "target_ai_provider_error") {

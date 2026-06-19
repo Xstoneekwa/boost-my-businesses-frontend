@@ -45,7 +45,7 @@ export async function GET(
 
   const upstream = await resolveTargetAvatarUpstream({ username, storedAvatarUrl });
   if (!upstream?.body) {
-    return NextResponse.json({ ok: false, error: "avatar_unavailable" }, { status: 502 });
+    return new NextResponse(null, { status: 404 });
   }
 
   if (upstream.refreshedFromProvider) {
