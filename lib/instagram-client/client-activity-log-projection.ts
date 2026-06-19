@@ -106,14 +106,14 @@ export function clientActivityActionLabel(
     story_view: "Story consultée",
     dm_sent: "Message envoyé",
     dm: "Message envoyé",
-    mute_success: "Compte protégé",
-    target_add_single: "Compte ciblé ajouté",
-    target_add_bulk: "Comptes ciblés ajoutés",
-    target_archive: "Compte ciblé retiré",
-    target_restore: "Compte ciblé restauré",
-    target_reset: "Compte ciblé réinitialisé",
-    target_verify: "Compte ciblé vérifié",
-    target_quality_decision: "Décision sur compte ciblé",
+    mute_success: "Compte mis en sourdine",
+    target_add_single: "Compte cible ajouté",
+    target_add_bulk: "Comptes cibles ajoutés",
+    target_archive: "Compte cible retiré",
+    target_restore: "Compte cible restauré",
+    target_reset: "Compte cible réinitialisé",
+    target_verify: "Compte cible vérifié",
+    target_quality_decision: "Décision sur compte cible",
     target_runtime_error_non_exhaustion: "Action campagne",
     profile_visit: "Profil consulté",
   };
@@ -130,7 +130,7 @@ export function clientActivityActionLabel(
     story_view: "Story viewed",
     dm_sent: "Message sent",
     dm: "Message sent",
-    mute_success: "Account protected",
+    mute_success: "Account muted",
     target_add_single: "Target account added",
     target_add_bulk: "Target accounts added",
     target_archive: "Target account removed",
@@ -249,14 +249,45 @@ export function clientActivityDetailLabel(
     if (accepted && accepted > 0) {
       return lang === "en"
         ? `${accepted} target account${accepted > 1 ? "s" : ""} added`
-        : `${accepted} compte${accepted > 1 ? "s" : ""} ciblé${accepted > 1 ? "s" : ""} ajouté${accepted > 1 ? "s" : ""}`;
+        : `${accepted} compte${accepted > 1 ? "s" : ""} cible${accepted > 1 ? "s" : ""} ajouté${accepted > 1 ? "s" : ""}`;
     }
   }
 
   if (eventType === "target_runtime_error_non_exhaustion") {
-    return lang === "en" ? "Action could not be completed on this target account." : "Action non réalisée sur ce compte ciblé.";
+    return lang === "en" ? "Action could not be completed on this target account." : "Action non réalisée sur ce compte cible.";
   }
 
+  return null;
+}
+
+function readPayloadBoolean(payload: SafeRecord | null | undefined, key: string) {
+  if (!payload || typeof payload !== "object") return false;
+  const value = payload[key];
+  if (typeof value === "boolean") return value;
+  return readString(value, "").toLowerCase() === "true";
+}
+
+export function clientActivityMuteDetailLabel(
+  payload: SafeRecord | null | undefined,
+  lang: Lang = "fr",
+): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const mutedPosts = readPayloadBoolean(payload, "muted_posts");
+  const mutedStories = readPayloadBoolean(payload, "muted_stories");
+  const mutePartial = readPayloadBoolean(payload, "mute_partial");
+
+  if (mutedPosts && mutedStories) {
+    return lang === "en" ? "Posts and stories hidden" : "Publications et stories masquées";
+  }
+  if (mutedPosts) {
+    return lang === "en" ? "Posts hidden" : "Publications masquées";
+  }
+  if (mutedStories) {
+    return lang === "en" ? "Stories hidden" : "Stories masquées";
+  }
+  if (mutePartial) {
+    return lang === "en" ? "Partial mute applied" : "Mise en sourdine partielle";
+  }
   return null;
 }
 
@@ -346,11 +377,16 @@ export function mapClientInteractionEvent(
 
   const occurredAt = readString(row.event_at, "") || readString(row.created_at, "");
   const id = readString(row.id, "unknown");
-  const detailLabel = clientActivityDetailLabel({
-    reason: readString(row.event_reason, "") || null,
-    eventType,
-    lang,
-  });
+  const payload = row.payload && typeof row.payload === "object"
+    ? row.payload as SafeRecord
+    : null;
+  const detailLabel = eventType === "mute_success"
+    ? clientActivityMuteDetailLabel(payload, lang)
+    : clientActivityDetailLabel({
+      reason: readString(row.event_reason, "") || null,
+      eventType,
+      lang,
+    });
 
   return {
     occurredAt,
@@ -406,6 +442,17 @@ export function mapClientTargetAuditEvent(
 export function collectForbiddenClientActivityTerms(payload: unknown) {
   const serialized = JSON.stringify(payload).toLowerCase();
   return FORBIDDEN_CLIENT_ACTIVITY_TERMS.filter((term) => serialized.includes(term.trim()));
+}
+
+const FORBIDDEN_AMBIGUOUS_CLIENT_LABELS = [
+  "Compte ciblé",
+  "Comptes ciblés",
+  "Compte protégé",
+];
+
+export function collectForbiddenAmbiguousClientLabels(payload: unknown) {
+  const serialized = JSON.stringify(payload);
+  return FORBIDDEN_AMBIGUOUS_CLIENT_LABELS.filter((label) => serialized.includes(label));
 }
 
 export function clientActivityPeriodSince(period: ClientActivityQuery["period"]) {

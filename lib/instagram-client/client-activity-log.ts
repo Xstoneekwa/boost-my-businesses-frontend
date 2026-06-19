@@ -22,6 +22,8 @@ export {
   clientActivityActionLabel,
   clientActivityDetailLabel,
   clientActivityResultLabel,
+  clientActivityMuteDetailLabel,
+  collectForbiddenAmbiguousClientLabels,
   collectForbiddenClientActivityTerms,
   decodeClientActivityCursor,
   encodeClientActivityCursor,
@@ -47,7 +49,7 @@ export async function loadClientAccountActivity(
     supabase.from("ig_accounts").select("id,username").eq("id", accountId).maybeSingle(),
     supabase
       .from("ig_interaction_events")
-      .select("id,event_type,event_status,event_reason,event_at,created_at,username,source_target_username,interaction_type")
+      .select("id,event_type,event_status,event_reason,event_at,created_at,username,source_target_username,interaction_type,payload")
       .eq("account_id", accountId)
       .gte("event_at", since)
       .order("event_at", { ascending: false })
