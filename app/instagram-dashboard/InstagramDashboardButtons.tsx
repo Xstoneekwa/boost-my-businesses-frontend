@@ -4735,7 +4735,7 @@ function SourcesPolicyPanel({
   const items = targetsOverview?.items ?? [];
   const eligibleTargets = items.filter(isValidEligibleTarget);
   const nextTarget = eligibleTargets[0] ?? null;
-  const fbrTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.fbrPercent !== null);
+  const fbrTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.fbrMetricsReliable && item.fbrPercent !== null);
   const followsSentTargets = items.filter((item) => !isArchivedOrDeletedTarget(item) && item.followsSent !== null);
   const insufficientDataTargets = items.filter(
     (item) => !isArchivedOrDeletedTarget(item) && item.followsSent !== null && item.followsSent > 0 && item.followsSent < 100,

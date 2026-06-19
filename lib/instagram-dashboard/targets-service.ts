@@ -29,6 +29,10 @@ import {
 } from "@/lib/instagram-targets";
 import type { TargetSafeRow } from "@/app/instagram-dashboard/targets-data";
 import {
+  readFollowbacksMetricsReliableAt,
+  resolveTargetFbrMetrics,
+} from "./target-fbr-metrics.ts";
+import {
   evaluateTargetReaddBlock,
   shouldAllowAutoArchiveRestoreOverride,
   TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON,
@@ -91,18 +95,20 @@ export function safeTargetRow(row: SupabaseRecord): TargetSafeRow {
   const followersCount = readNumber(row.followers_count ?? row.followers, Number.NaN);
   const followsSentCount = readNumber(row.follows_sent_count, Number.NaN);
   const followbacksCount = readNumber(row.followbacks_count, Number.NaN);
+  const followbacksMetricsReliableAt = readFollowbacksMetricsReliableAt(row);
   const storedFollowbackRatio = readNumber(row.followback_ratio ?? row.fbr_percent, Number.NaN);
-  const followbackRatio = Number.isFinite(storedFollowbackRatio)
-    ? storedFollowbackRatio
-    : Number.isFinite(followsSentCount) && followsSentCount > 0 && Number.isFinite(followbacksCount)
-      ? (followbacksCount / followsSentCount) * 100
-      : Number.NaN;
+  const fbrMetrics = resolveTargetFbrMetrics({
+    follows_sent_count: Number.isFinite(followsSentCount) ? followsSentCount : 0,
+    followbacks_count: Number.isFinite(followbacksCount) ? followbacksCount : 0,
+    followback_ratio: Number.isFinite(storedFollowbackRatio) ? storedFollowbackRatio : null,
+    followbacks_metrics_reliable_at: followbacksMetricsReliableAt,
+  });
   const id = readString(row.id ?? row.target_id, "");
   const targetUsername = normalizeTargetUsername(
     readString(row.normalized_username, readString(row.target_username, readString(row.input_username, ""))),
   );
   const qualityStatus = readString(row.quality_status, "unknown");
-  const safeFbr = Number.isFinite(followbackRatio) ? followbackRatio : null;
+  const safeFbr = fbrMetrics.fbrPercent;
   const safeFollowsSent = Number.isFinite(followsSentCount) ? followsSentCount : null;
   const safeFollowbacks = Number.isFinite(followbacksCount) ? followbacksCount : null;
   const performanceStatus = performanceStatusFromTargetMetrics(qualityStatus, safeFbr, safeFollowsSent);
@@ -143,6 +149,8 @@ export function safeTargetRow(row: SupabaseRecord): TargetSafeRow {
     followback_ratio: safeFbr,
     follows_sent_count: safeFollowsSent,
     followbacks_count: safeFollowbacks,
+    followbacks_metrics_reliable_at: followbacksMetricsReliableAt,
+    fbrMetricsReliable: fbrMetrics.metricsReliable,
     performance_status: performanceStatus,
     followsSent: safeFollowsSent,
     followbacks: safeFollowbacks,

@@ -41,6 +41,8 @@ export type TargetSafeRow = {
   followback_ratio?: number | null;
   follows_sent_count?: number | null;
   followbacks_count?: number | null;
+  followbacks_metrics_reliable_at?: string | null;
+  fbrMetricsReliable?: boolean;
   performance_status?: TargetPerformanceStatus | null;
   followsSent?: number | null;
   followbacks?: number | null;
@@ -88,6 +90,7 @@ export type TargetAccountItem = {
   performanceStatus: TargetPerformanceStatus;
   performanceLabel: string;
   fbrPercent: number | null;
+  fbrMetricsReliable: boolean;
   followsSent: number | null;
   followbacks: number | null;
   followersCount: number | null;
@@ -301,15 +304,28 @@ export function targetPerformanceHelper(status: TargetPerformanceStatus) {
   return "FBR is >= 15% after at least 100 follows sent.";
 }
 
-export function targetFbrLabel(fbrPercent: number | null, followsSent: number | null = null) {
+export function targetFbrLabel(
+  fbrPercent: number | null,
+  followsSent: number | null = null,
+  metricsReliable = true,
+) {
+  if (followsSent !== null && followsSent > 0 && !metricsReliable) return "Non mesuré";
   if (fbrPercent === null) return "—";
-  if (followsSent !== null && followsSent > 0 && followsSent < 100) return "Insufficient";
   return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(fbrPercent)}%`;
 }
 
-export function targetFbrHelper(fbrPercent: number | null, followsSent: number | null = null) {
+export function targetFbrHelper(
+  fbrPercent: number | null,
+  followsSent: number | null = null,
+  metricsReliable = true,
+) {
+  if (followsSent !== null && followsSent > 0 && !metricsReliable) {
+    return "Followbacks not measured yet for this CT. Ratio hidden until worker certifies followbacks_count.";
+  }
   if (fbrPercent === null) return "FBR is followers gained divided by follows sent from this CT. No runtime data yet.";
-  if (followsSent !== null && followsSent < 100) return "FBR is calculable, but fewer than 100 follows have been sent from this CT.";
+  if (followsSent !== null && followsSent < 100) {
+    return "FBR from certified followbacks. Performance verdict still needs at least 100 follows sent.";
+  }
   return "Exact followback ratio from runtime CT usage.";
 }
 
@@ -317,13 +333,14 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const followersCount = typeof row.followers_count === "number" ? row.followers_count : null;
   const followsSent = typeof row.follows_sent_count === "number" ? row.follows_sent_count : typeof row.followsSent === "number" ? row.followsSent : null;
   const followbacks = typeof row.followbacks_count === "number" ? row.followbacks_count : typeof row.followbacks === "number" ? row.followbacks : null;
-  const fbrPercent = typeof row.followback_ratio === "number"
-    ? row.followback_ratio
-    : typeof row.fbrPercent === "number"
-      ? row.fbrPercent
-    : followsSent && followsSent > 0 && followbacks !== null
-      ? (followbacks / followsSent) * 100
-      : null;
+  const fbrMetricsReliable = row.fbrMetricsReliable ?? Boolean(row.followbacks_metrics_reliable_at);
+  const fbrPercent = typeof row.fbrPercent === "number"
+    ? row.fbrPercent
+    : typeof row.followback_ratio === "number" && fbrMetricsReliable
+      ? row.followback_ratio
+      : followsSent && followsSent > 0 && followbacks !== null && fbrMetricsReliable
+        ? (followbacks / followsSent) * 100
+        : null;
   const addedAt = row.added_at || row.created_at;
   const deletedAt = row.deleted_at ?? null;
   const archivedAt = row.archived_at ?? null;
@@ -361,6 +378,7 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
     performanceStatus,
     performanceLabel: targetPerformanceLabel(performanceStatus),
     fbrPercent,
+    fbrMetricsReliable,
     followsSent,
     followbacks,
     followersCount,

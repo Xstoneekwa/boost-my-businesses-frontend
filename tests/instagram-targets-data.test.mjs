@@ -74,6 +74,8 @@ test("performance is based on runtime FBR only, never followers count", () => {
     followback_ratio: 15,
     follows_sent_count: 120,
     followbacks_count: 18,
+    followbacks_metrics_reliable_at: "2026-06-15T12:00:00.000Z",
+    fbrMetricsReliable: true,
   });
 
   assert.equal(eligibleWithoutFbr.performanceLabel, "Pending");
@@ -108,6 +110,8 @@ test("overview counts rejected and performance separately", () => {
       followback_ratio: 7.9,
       follows_sent_count: 100,
       followbacks_count: 7,
+      followbacks_metrics_reliable_at: "2026-06-15T12:00:00.000Z",
+      fbrMetricsReliable: true,
     },
   ]);
 
@@ -122,6 +126,7 @@ test("maps P1c metrics and computes FBR from counters when ratio is absent", () 
     followback_ratio: null,
     follows_sent_count: 10,
     followbacks_count: 1,
+    followbacks_metrics_reliable_at: "2026-06-15T12:00:00.000Z",
     last_selected_at: "2026-06-02T00:00:00.000Z",
     last_used_at: "2026-06-02T00:05:00.000Z",
     last_successful_candidate_at: "2026-06-02T00:06:00.000Z",
@@ -129,13 +134,14 @@ test("maps P1c metrics and computes FBR from counters when ratio is absent", () 
     exhaustion_reason: "no_candidates_after_sparse_scrolls",
     cooldown_until: "2026-06-03T00:00:00.000Z",
     metrics_updated_at: "2026-06-02T00:08:00.000Z",
+    fbrMetricsReliable: true,
   });
 
   assert.equal(item.followsSent, 10);
   assert.equal(item.followbacks, 1);
   assert.equal(item.fbrPercent, 10);
   assert.equal(item.performanceLabel, "Insufficient data");
-  assert.equal(targetFbrLabel(item.fbrPercent, item.followsSent), "Insufficient");
+  assert.equal(targetFbrLabel(item.fbrPercent, item.followsSent, item.fbrMetricsReliable), "10%");
   assert.equal(item.lastUsedAt, "2026-06-02T00:05:00.000Z");
   assert.equal(item.lastSelectedAt, "2026-06-02T00:00:00.000Z");
   assert.equal(item.lastSuccessfulCandidateAt, "2026-06-02T00:06:00.000Z");
@@ -152,6 +158,8 @@ test("does not label low FBR as poor before minimum sample size", () => {
     followback_ratio: 4,
     follows_sent_count: 99,
     followbacks_count: 4,
+    followbacks_metrics_reliable_at: "2026-06-15T12:00:00.000Z",
+    fbrMetricsReliable: true,
   });
 
   assert.equal(item.performanceLabel, "Insufficient data");

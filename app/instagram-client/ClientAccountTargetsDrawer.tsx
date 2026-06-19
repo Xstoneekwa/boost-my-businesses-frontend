@@ -17,6 +17,7 @@ import {
   type TargetSafeRow,
   type TargetsOverview,
 } from "@/app/instagram-dashboard/targets-data";
+import { targetFbrClientLabel } from "@/lib/instagram-dashboard/target-fbr-metrics";
 import ClientAiTargetSearchWizard from "./ClientAiTargetSearchWizard";
 import {
   clientAiTargetingButtonLabel,
@@ -501,7 +502,7 @@ export default function ClientAccountTargetsDrawer({
                 const e = eligMap[elig];
                 const foll = fmtK(r.followersCount, lang);
                 const verTxt = r.verificationStatus === "found" ? td.found : td.notFound;
-                const fbr = r.fbrPercent == null ? "—" : `${r.fbrPercent.toFixed(1).replace(".", ",")}%`;
+                const fbr = targetFbrClientLabel(r.fbrPercent, r.followsSent, r.fbrMetricsReliable, lang);
                 const perfLabel = targetPerformanceLabel(r.performanceStatus);
                 const perfTxt = r.performanceStatus === "pending" || r.performanceStatus === "insufficient_data"
                   ? td.perf.pending

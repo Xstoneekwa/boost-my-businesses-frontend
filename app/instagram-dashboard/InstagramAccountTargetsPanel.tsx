@@ -801,7 +801,7 @@ export default function InstagramAccountTargetsPanel({
                         <PerformanceBadge row={row} />
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
-                        <span title={targetFbrHelper(row.fbrPercent, row.followsSent)}>{targetFbrLabel(row.fbrPercent, row.followsSent)}</span>
+                        <span title={targetFbrHelper(row.fbrPercent, row.followsSent, row.fbrMetricsReliable)}>{targetFbrLabel(row.fbrPercent, row.followsSent, row.fbrMetricsReliable)}</span>
                       </td>
                       <td className="border-y border-white/6 bg-white/[0.03] px-2 py-2.5 text-center text-xs font-bold text-slate-300">
                         <span title={row.followbacks !== null ? `${metricText(row.followbacks)} followbacks attributed` : "Followbacks pending attribution"}>
