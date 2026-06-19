@@ -256,8 +256,16 @@ export async function verifyTargetAiUsernamesBatch(input: {
     }
     const serp = input.serpByUsername.get(username);
     if (!serp) return null;
+    const projection = evaluateSerpClientProjection({
+      candidate: serp,
+      niche: input.niche,
+      locationLabel: input.locationLabel,
+    });
     const result = await verifyTargetAiProfileUsername(username);
     const eligibility = evaluateAiTargetEligibility({
+      niche: input.niche,
+      locHit: projection.locHit,
+      nicheHit: projection.nicheHit,
       quality_status: result.decision.quality_status,
       status: result.decision.status,
       followers_count: result.decision.followers_count,
