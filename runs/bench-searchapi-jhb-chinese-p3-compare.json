@@ -1,0 +1,1751 @@
+{
+  "generated_at": "2026-06-19T08:47:55.373Z",
+  "provider": "searchapi",
+  "provider_label": "SearchAPI Google",
+  "pages": 3,
+  "duration_ms": 146873,
+  "api_key_env": "INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY",
+  "missing_providers": {
+    "serper": "missing (SERPER_API_KEY | TARGET_AI_SERPER_API_KEY)",
+    "serpapi": "missing (SERPAPI_API_KEY | TARGET_AI_SERPAPI_KEY)",
+    "bing": "missing (BING_SEARCH_API_KEY | AZURE_BING_SEARCH_KEY | TARGET_AI_BING_API_KEY)"
+  },
+  "reports": [
+    {
+      "id": "A",
+      "key": "johannesburg_chinese",
+      "niche": "restaurant chinois",
+      "locationLabel": "Johannesburg, Gauteng, South Africa",
+      "strict": {
+        "query_count": 4,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 28916,
+        "organic_results_count": 110,
+        "instagram_urls_count": 100,
+        "profile_urls_count": 13,
+        "rejected_non_profile_count": 87,
+        "extracted_usernames_unique": 13,
+        "relevant_usernames_unique": 13,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 87
+        },
+        "top20": [
+          {
+            "username": "notredameozanam",
+            "profileUrl": "https://www.instagram.com/notredameozanam/",
+            "title": "Centre scolaire Notre-Dame Ozanam Mâcon ...",
+            "snippet": "... restaurant chinois où nous avons goûté une fondue chinoise ainsi qu'un ... De Johannesburg à Sydney, en passant par Cape Town et bien d'autres ...",
+            "score": 25,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "ouestfrance.rennes",
+            "profileUrl": "https://www.instagram.com/ouestfrance.rennes/",
+            "title": "Ouest-France Rennes (@ouestfrance.rennes)",
+            "snippet": "... Johannesburg (Afrique du Sud). C'est le contact-tracing des autorités qui a ... 5️⃣@nnouilles_nouilles est un nouveau restaurant chinois, situé au 48 rue ...",
+            "score": 23,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "hatoumata.m",
+            "profileUrl": "https://www.instagram.com/hatoumata.m/",
+            "title": "Hatoumata Magassa | Stratège Afrique 🌍 (@hatoumata.m)",
+            "snippet": "Johannesburg 2025 — let's build Africa's next opportunities together.",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "klumnet",
+            "profileUrl": "https://www.instagram.com/klumnet/",
+            "title": "Klumnet (@klumnet) • Instagram photos and videos",
+            "snippet": "... restaurant pour manger une pizza. Car cet individu aime les pizzas en ... site internet de Gala, monument de l'investigation indépendante. Aucune des ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "annie.daigle.voyage_",
+            "profileUrl": "https://www.instagram.com/annie.daigle.voyage_/",
+            "title": "Annie Daigle (@annie.daigle.voyage_)",
+            "snippet": "... Restaurant(s) 5 Bar(s) • Hôtel contemporain situé sur la vaste plage de ... Johannesburg et admirez son mélange d'architecture à la fois historique et ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "iamchris.ka",
+            "profileUrl": "https://www.instagram.com/iamchris.ka/",
+            "title": "Chris Hyconiq Ka (@iamchris.ka)",
+            "snippet": "Throwback to Spring '25 Au restaurant du frérot @alphawaraba @wukong ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "lunalitesoftware",
+            "profileUrl": "https://www.instagram.com/lunalitesoftware/",
+            "title": "LUNALITE Software (@lunalitesoftware)",
+            "snippet": "Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) est prêt à conquérir ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "lotus_rosebank",
+            "profileUrl": "https://www.instagram.com/lotus_rosebank/",
+            "title": "Lotus Chinese Restaurant (@lotus_rosebank)",
+            "snippet": "Lotus Chinese Restaurant Sunday, 9 February 12:00 PM – 2:30 PM 160 Jan Smuts Avenue, Rosebank, Johannesburg R199 per person (Kids under 10 ...",
+            "score": 19,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"chinese restaurant\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "fondationcarmignac",
+            "profileUrl": "https://www.instagram.com/fondationcarmignac/",
+            "title": "Fondation Carmignac (@fondationcarmignac) · Porquerolles",
+            "snippet": "... restaurant Le Poisson Ivre - un tote-bag contenant le catalogue de l ... Johannesburg ...",
+            "score": 15,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "a2zartgalleryparis",
+            "profileUrl": "https://www.instagram.com/a2zartgalleryparis/",
+            "title": "A2Z Art Gallery Paris (@a2zartgalleryparis)",
+            "snippet": "1978, Johannesburg, South Africa) is based in Johannesburg. Her practice ... chinois à avoir libéré l'Art chinois de la propagande maoïste. Il dédie sa ...",
+            "score": 12,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "fondation_af",
+            "profileUrl": "https://www.instagram.com/fondation_af/",
+            "title": "Fondation des Alliances Françaises (@fondation_af) · Paris",
+            "snippet": "... Johannesburg ! @afjohannesburg L'Alliance Française a eu l'honneur d ... chinois. Elles sont issues de la sélection des 200 meilleures ...",
+            "score": 11,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "amismondediplo",
+            "profileUrl": "https://www.instagram.com/amismondediplo/",
+            "title": "Les Amis du Monde diplo ⏚ (@amismondediplo) · Paris",
+            "snippet": "... chinois, par Arsène Ruhlmann Au Salvador, la surenchère de M. Bukele, par ... restaurant #macron #cuisine #allemagne ...",
+            "score": 11,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          },
+          {
+            "username": "polkamagazine",
+            "profileUrl": "https://www.instagram.com/polkamagazine/",
+            "title": "Polka Magazine (@polkamagazine)",
+            "snippet": "Un alien qui commande au restaurant chinois face à une vendeuse pas ... Johannesburg, 2006. © Raymond Depardon / @magnumphotos. 2. Poilley, 1973 ...",
+            "score": 10,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 29,
+            "instagram_urls_count": 29,
+            "profile_urls_count": 9,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 9,
+            "relevant_usernames_count": 9,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [
+              {
+                "username": "hatoumata.m",
+                "profileUrl": "https://www.instagram.com/hatoumata.m/",
+                "title": "Hatoumata Magassa | Stratège Afrique 🌍 (@hatoumata.m)",
+                "snippet": "Johannesburg 2025 — let's build Africa's next opportunities together.",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "klumnet",
+                "profileUrl": "https://www.instagram.com/klumnet/",
+                "title": "Klumnet (@klumnet) • Instagram photos and videos",
+                "snippet": "... restaurant pour manger une pizza. Car cet individu aime les pizzas en ... site internet de Gala, monument de l'investigation indépendante. Aucune des ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "annie.daigle.voyage_",
+                "profileUrl": "https://www.instagram.com/annie.daigle.voyage_/",
+                "title": "Annie Daigle (@annie.daigle.voyage_)",
+                "snippet": "... Restaurant(s) 5 Bar(s) • Hôtel contemporain situé sur la vaste plage de ... Johannesburg et admirez son mélange d'architecture à la fois historique et ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "iamchris.ka",
+                "profileUrl": "https://www.instagram.com/iamchris.ka/",
+                "title": "Chris Hyconiq Ka (@iamchris.ka)",
+                "snippet": "Throwback to Spring '25 Au restaurant du frérot @alphawaraba @wukong ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "lunalitesoftware",
+                "profileUrl": "https://www.instagram.com/lunalitesoftware/",
+                "title": "LUNALITE Software (@lunalitesoftware)",
+                "snippet": "Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) Ce robot humanoïde chinois qui sait tout faire (même du kung-fu !) est prêt à conquérir ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "fondationcarmignac",
+                "profileUrl": "https://www.instagram.com/fondationcarmignac/",
+                "title": "Fondation Carmignac (@fondationcarmignac) · Porquerolles",
+                "snippet": "... restaurant Le Poisson Ivre - un tote-bag contenant le catalogue de l ... Johannesburg ...",
+                "score": 15,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "a2zartgalleryparis",
+                "profileUrl": "https://www.instagram.com/a2zartgalleryparis/",
+                "title": "A2Z Art Gallery Paris (@a2zartgalleryparis)",
+                "snippet": "1978, Johannesburg, South Africa) is based in Johannesburg. Her practice ... chinois à avoir libéré l'Art chinois de la propagande maoïste. Il dédie sa ...",
+                "score": 12,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "fondation_af",
+                "profileUrl": "https://www.instagram.com/fondation_af/",
+                "title": "Fondation des Alliances Françaises (@fondation_af) · Paris",
+                "snippet": "... Johannesburg ! @afjohannesburg L'Alliance Française a eu l'honneur d ... chinois. Elles sont issues de la sélection des 200 meilleures ...",
+                "score": 11,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "amismondediplo",
+                "profileUrl": "https://www.instagram.com/amismondediplo/",
+                "title": "Les Amis du Monde diplo ⏚ (@amismondediplo) · Paris",
+                "snippet": "... chinois, par Arsène Ruhlmann Au Salvador, la surenchère de M. Bukele, par ... restaurant #macron #cuisine #allemagne ...",
+                "score": 11,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant\" \"chinois\" \"site internet\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8675,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 22,
+            "instagram_urls_count": 22,
+            "profile_urls_count": 3,
+            "rejected_non_profile_count": 19,
+            "extracted_usernames_count": 3,
+            "relevant_usernames_count": 3,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 19
+            },
+            "top20": [
+              {
+                "username": "notredameozanam",
+                "profileUrl": "https://www.instagram.com/notredameozanam/",
+                "title": "Centre scolaire Notre-Dame Ozanam Mâcon ...",
+                "snippet": "... restaurant chinois où nous avons goûté une fondue chinoise ainsi qu'un ... De Johannesburg à Sydney, en passant par Cape Town et bien d'autres ...",
+                "score": 25,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "ouestfrance.rennes",
+                "profileUrl": "https://www.instagram.com/ouestfrance.rennes/",
+                "title": "Ouest-France Rennes (@ouestfrance.rennes)",
+                "snippet": "... Johannesburg (Afrique du Sud). C'est le contact-tracing des autorités qui a ... 5️⃣@nnouilles_nouilles est un nouveau restaurant chinois, situé au 48 rue ...",
+                "score": 23,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              },
+              {
+                "username": "polkamagazine",
+                "profileUrl": "https://www.instagram.com/polkamagazine/",
+                "title": "Polka Magazine (@polkamagazine)",
+                "snippet": "Un alien qui commande au restaurant chinois face à une vendeuse pas ... Johannesburg, 2006. © Raymond Depardon / @magnumphotos. 2. Poilley, 1973 ...",
+                "score": 10,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"restaurant chinois\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8738,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 4
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese restaurant\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 30,
+            "instagram_urls_count": 30,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 29,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 29
+            },
+            "top20": [
+              {
+                "username": "lotus_rosebank",
+                "profileUrl": "https://www.instagram.com/lotus_rosebank/",
+                "title": "Lotus Chinese Restaurant (@lotus_rosebank)",
+                "snippet": "Lotus Chinese Restaurant Sunday, 9 February 12:00 PM – 2:30 PM 160 Jan Smuts Avenue, Rosebank, Johannesburg R199 per person (Kids under 10 ...",
+                "score": 19,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"chinese restaurant\" site:instagram.com -inurl:/p/ -inurl:explore",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4535,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese food\" site:instagram.com -inurl:/p/ -inurl:explore",
+            "queryMode": "strict",
+            "organic_results_count": 29,
+            "instagram_urls_count": 19,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 19,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 19
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6968,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      },
+      "loose": {
+        "query_count": 15,
+        "failed_queries": 0,
+        "throttled_pages": 0,
+        "duration_ms": 109347,
+        "organic_results_count": 395,
+        "instagram_urls_count": 242,
+        "profile_urls_count": 32,
+        "rejected_non_profile_count": 207,
+        "extracted_usernames_unique": 24,
+        "relevant_usernames_unique": 20,
+        "rejections_by_reason": {
+          "instagram_non_profile_url": 207
+        },
+        "top20": [
+          {
+            "username": "lovemesojhb",
+            "profileUrl": "https://www.instagram.com/lovemesojhb/?hl=en",
+            "title": "Love Me So (@lovemesojhb) · Johannesburg",
+            "snippet": "... asian #restaurant #johannesburg #instagood #instadaily #instadaily #lovemeso ... #foodie #yummy #food #asian #restaurant #instafood #instadaily #instafollow #vibe ...",
+            "score": 35,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "dumplingdza",
+            "profileUrl": "https://www.instagram.com/dumplingdza/",
+            "title": "DumplingD (@dumplingdza) · Johannesburg",
+            "snippet": "Dim sum dumplings folded by hand & served frozen to you. Cook from frozen & have a dim sum feast at home. Deliveries in Johannesburg & surrounds only.",
+            "score": 33,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "dimsumjoburg_halaal",
+            "profileUrl": "https://www.instagram.com/dimsumjoburg_halaal/",
+            "title": "(@dimsumjoburg_halaal) • Instagram photos and videos",
+            "snippet": "Halaal Dim Sum Frozen & Easy to prepare Collection & Delivery options Batch Made · Versatile Bamboo Steamers, various sizes available · Proud Johannesburg ...",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "asian_herbivore",
+            "profileUrl": "https://www.instagram.com/asian_herbivore/reels/",
+            "title": "Asian Herbivore (@asian_herbivore)",
+            "snippet": "Redefining Asian Fusion. 100% Meat-Free. Melrose Crossing, Johannesburg Mojo Market, Cape Town (Express) Ramen • Rice • Bao • Sushi • Tacos.",
+            "score": 32,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "pron.restaurant",
+            "profileUrl": "https://www.instagram.com/pron.restaurant/?hl=en",
+            "title": "People's Republic Of Noodles (@pron.restaurant)",
+            "snippet": "People's Republic Of Noodles (@pron.restaurant) · Johannesburg. Instagram. Log in · Open app · pron.restaurant's profile picture ...",
+            "score": 31,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "merakicoffeehouse_",
+            "profileUrl": "https://www.instagram.com/merakicoffeehouse_/",
+            "title": "Nice Halaal Restaurant in Cape Town",
+            "snippet": "... Johannesburg, Halaal Restaurants in Waterfront ... Instagram: [@merakicoffeehouse_](https://www.instagram.com/merakicoffeehouse_/) ... Halaal Chinese Restaurant ...",
+            "score": 31,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "loose"
+          },
+          {
+            "username": "noodz",
+            "profileUrl": "https://www.instagram.com/noodz/?hl=en",
+            "title": "NOODLES (@noodz) • Instagram photos and videos",
+            "snippet": "... JOHANNESBURG. WHO AM I?! Literal girls saying they had been following me on tumblr since i was 16. I FELT SO SEEN IN ANOTHER COUNTRY. THANK YOU SOUTH AFRICA ...",
+            "score": 29,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "nickhammangram",
+            "profileUrl": "https://www.instagram.com/nickhammangram/?hl=en",
+            "title": "Nick Hamman ✌ (@nickhammangram)",
+            "snippet": "... Noodles” or “Xinjiang Hand-Pulled Noodles.” I decided to go for the ... noodles Address: Shop3-4, 7th Avenue, Rivonia, Johannesburg 2193 ...",
+            "score": 28,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "tea_and_antique",
+            "profileUrl": "https://www.instagram.com/tea_and_antique/reels/",
+            "title": "Tea And Antique Johannesburg (@tea_and_antique)",
+            "snippet": "Tea And Antique Johannesburg. 15.2K followers. 142 following. Tea & Antique Chinese home cooking & tea Sandton & Bedfordview Dumplings · Noodles · Daily ...",
+            "score": 28,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "dumplingdarlingsa",
+            "profileUrl": "https://www.instagram.com/dumplingdarlingsa/",
+            "title": "Dumpling Darling (@dumplingdarlingsa)",
+            "snippet": "Home of the first Authentic Homemade Soup Dumplings in SA! Pre-orders open every Sunday at 5pm. Collection available in Randburg Randpark Ridge ...",
+            "score": 27,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "tang_sandton",
+            "profileUrl": "https://www.instagram.com/tang_sandton/",
+            "title": "TANG ™️ (@tang_sandton) · Sandton",
+            "snippet": "... Truly honoured and deeply grateful for this ... Johannesburg. We're celebrating the grand reopening of your Asian-inspired ...",
+            "score": 27,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "nezes_den",
+            "profileUrl": "https://www.instagram.com/nezes_den/",
+            "title": "NeZe's Den (@nezes_den)",
+            "snippet": "2 boxes are better than 1 DM to place an order now #johannesburg #dumplings #chillioildumplings · 12 Wontons = 12 Reasons to Smile!",
+            "score": 26,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "munaf1.0",
+            "profileUrl": "https://www.instagram.com/munaf1.0/",
+            "title": "Munaf Sheikh (@munaf1.0)",
+            "snippet": "... Allan Gray year end 2022, with Cape Town, Bloemfontein, Durban, Johannesburg, Pretoria, Port Elizabeth, Namibia and Botswana. Beautiful, super ...",
+            "score": 26,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "bluegingermw",
+            "profileUrl": "https://www.instagram.com/bluegingermw/",
+            "title": "Blue Ginger (@bluegingermw) · Lilongwe",
+            "snippet": "... Johannesburg #HalaalGoodsMarket is the first Artisanal Halaal Food and ... Eid ...",
+            "score": 25,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "chunky_chau_restaurant",
+            "profileUrl": "https://www.instagram.com/chunky_chau_restaurant/reels/",
+            "title": "Chunky Chau (@chunky_chau_restaurant) · Johannesburg",
+            "snippet": "Best Asian Restaurant in Johannesburg, crowned by Luxe. Contact for more information: ◾️ 087 711 3880 Sandton ◾️ 010 590 8777 Rosebank ◾️reservations ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "zioux_jhb",
+            "profileUrl": "https://www.instagram.com/zioux_jhb/?hl=en",
+            "title": "Zioux (@zioux_jhb) • Instagram photos and videos",
+            "snippet": "... Johannesburg. Charred edges with a bold heart. Discover the ...",
+            "score": 24,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "basicallybedfordview",
+            "profileUrl": "https://www.instagram.com/basicallybedfordview/",
+            "title": "Basically Bedfordview (@basicallybedfordview)",
+            "snippet": "... Johannesburg ...",
+            "score": 22,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "popular",
+            "profileUrl": "https://www.instagram.com/popular/",
+            "title": "Best Asian Restaurant Johannesburg",
+            "snippet": "Best Asian Restaurant Johannesburg · From the wok to your table! At House of Canton, every dish · When the room's full, you know it's a good one. Tiān38 350 ...",
+            "score": 21,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+            "mode": "loose"
+          },
+          {
+            "username": "melrose_restaurant",
+            "profileUrl": "https://www.instagram.com/melrose_restaurant/?hl=en",
+            "title": "Melrose Restaurant & Rooftop Bar (@melrose_restaurant)",
+            "snippet": "We're honoured to share that Melrose Restaurant has been awarded by the Australian Good Food Guide for 2026. This recognition reflects the care, consistency and ...",
+            "score": 21,
+            "locHit": false,
+            "nicheHit": true,
+            "relevant": false,
+            "sourceQuery": "\"melrose\" \"asian restaurant\" instagram",
+            "mode": "strict"
+          },
+          {
+            "username": "beijingoperajhb",
+            "profileUrl": "https://www.instagram.com/beijingoperajhb/?hl=en",
+            "title": "Beijing Opera (@beijingoperajhb) · Blairgowrie, Gauteng",
+            "snippet": "98 Conrad Drive, Blairgowrie Johannesburg Open Weekly Thursday - Sunday hello@beijingopera.co.za or WhatsApp 0822564602. Follow. Message ...",
+            "score": 18,
+            "locHit": true,
+            "nicheHit": true,
+            "relevant": true,
+            "sourceQuery": "\"johannesburg\" \"dim sum\" instagram",
+            "mode": "strict"
+          }
+        ],
+        "per_query": [
+          {
+            "query": "\"johannesburg\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 19,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 18,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 18
+            },
+            "top20": [
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/reels/",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "... I'm Nick Hamman and I'm looking for the best Chinese ... I'm Nick ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"chinese restaurant\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5781,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese food\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 14,
+            "profile_urls_count": 2,
+            "rejected_non_profile_count": 12,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 12
+            },
+            "top20": [
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/reels/",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "I'm Nick ... I'm Nick Hamman and I'm looking for the best Chinese food ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"chinese food\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7429,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"chinese takeaway\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 20,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 20,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 20
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10002,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"dim sum\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 2,
+            "rejected_non_profile_count": 15,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 2,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 15
+            },
+            "top20": [
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/?hl=en",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "I'm Nick Hamman and I want to show you my Johannesburg. If you follow me you'll know that I ...",
+                "score": 18,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dim sum\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "beijingoperajhb",
+                "profileUrl": "https://www.instagram.com/beijingoperajhb/?hl=en",
+                "title": "Beijing Opera (@beijingoperajhb) · Blairgowrie, Gauteng",
+                "snippet": "98 Conrad Drive, Blairgowrie Johannesburg Open Weekly Thursday - Sunday hello@beijingopera.co.za or WhatsApp 0822564602. Follow. Message ...",
+                "score": 18,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dim sum\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 8855,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"dumplings\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 25,
+            "instagram_urls_count": 13,
+            "profile_urls_count": 7,
+            "rejected_non_profile_count": 6,
+            "extracted_usernames_count": 7,
+            "relevant_usernames_count": 7,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 6
+            },
+            "top20": [
+              {
+                "username": "dumplingdza",
+                "profileUrl": "https://www.instagram.com/dumplingdza/",
+                "title": "DumplingD (@dumplingdza) · Johannesburg",
+                "snippet": "Dim sum dumplings folded by hand & served frozen to you. Cook from frozen & have a dim sum feast at home. Deliveries in Johannesburg & surrounds only.",
+                "score": 33,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "dimsumjoburg_halaal",
+                "profileUrl": "https://www.instagram.com/dimsumjoburg_halaal/",
+                "title": "(@dimsumjoburg_halaal) • Instagram photos and videos",
+                "snippet": "Halaal Dim Sum Frozen & Easy to prepare Collection & Delivery options Batch Made · Versatile Bamboo Steamers, various sizes available · Proud Johannesburg ...",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "tea_and_antique",
+                "profileUrl": "https://www.instagram.com/tea_and_antique/reels/",
+                "title": "Tea And Antique Johannesburg (@tea_and_antique)",
+                "snippet": "Tea And Antique Johannesburg. 15.2K followers. 142 following. Tea & Antique Chinese home cooking & tea Sandton & Bedfordview Dumplings · Noodles · Daily ...",
+                "score": 28,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "dumplingdarlingsa",
+                "profileUrl": "https://www.instagram.com/dumplingdarlingsa/",
+                "title": "Dumpling Darling (@dumplingdarlingsa)",
+                "snippet": "Home of the first Authentic Homemade Soup Dumplings in SA! Pre-orders open every Sunday at 5pm. Collection available in Randburg Randpark Ridge ...",
+                "score": 27,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nezes_den",
+                "profileUrl": "https://www.instagram.com/nezes_den/",
+                "title": "NeZe's Den (@nezes_den)",
+                "snippet": "2 boxes are better than 1 DM to place an order now #johannesburg #dumplings #chillioildumplings · 12 Wontons = 12 Reasons to Smile!",
+                "score": 26,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/?hl=en",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "I'm Nick Hamman and I want to show you my Johannesburg. If you follow me you'll know that I ...",
+                "score": 22,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "eatingwithmarbz",
+                "profileUrl": "https://www.instagram.com/eatingwithmarbz/",
+                "title": "Mmabalane.S (@eatingwithmarbz) · Johannesburg, Gauteng",
+                "snippet": "... johannesburg. The most important meal of the day ft Honey and ...",
+                "score": 18,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"dumplings\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 4575,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 7
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"noodles\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 24,
+            "instagram_urls_count": 12,
+            "profile_urls_count": 5,
+            "rejected_non_profile_count": 7,
+            "extracted_usernames_count": 4,
+            "relevant_usernames_count": 4,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 7
+            },
+            "top20": [
+              {
+                "username": "pron.restaurant",
+                "profileUrl": "https://www.instagram.com/pron.restaurant/?hl=en",
+                "title": "People's Republic Of Noodles (@pron.restaurant)",
+                "snippet": "People's Republic Of Noodles (@pron.restaurant) · Johannesburg. Instagram. Log in · Open app · pron.restaurant's profile picture ...",
+                "score": 31,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "noodz",
+                "profileUrl": "https://www.instagram.com/noodz/?hl=en",
+                "title": "NOODLES (@noodz) • Instagram photos and videos",
+                "snippet": "... JOHANNESBURG. WHO AM I?! Literal girls saying they had been following me on tumblr since i was 16. I FELT SO SEEN IN ANOTHER COUNTRY. THANK YOU SOUTH AFRICA ...",
+                "score": 29,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "nickhammangram",
+                "profileUrl": "https://www.instagram.com/nickhammangram/?hl=en",
+                "title": "Nick Hamman ✌ (@nickhammangram)",
+                "snippet": "... Noodles” or “Xinjiang Hand-Pulled Noodles.” I decided to go for the ... noodles Address: Shop3-4, 7th Avenue, Rivonia, Johannesburg 2193 ...",
+                "score": 28,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Best Ramen In Johannesburg",
+                "snippet": "... noodles. Choose from six ramen bowls, including Tonkotsu. - Momo & O ... Best Ramen In Johannesburg. If you're craving the best ramen in Johannesburg ...",
+                "score": 9,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"noodles\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5779,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 8
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"asian restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 21,
+            "profile_urls_count": 6,
+            "rejected_non_profile_count": 15,
+            "extracted_usernames_count": 6,
+            "relevant_usernames_count": 6,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 15
+            },
+            "top20": [
+              {
+                "username": "lovemesojhb",
+                "profileUrl": "https://www.instagram.com/lovemesojhb/?hl=en",
+                "title": "Love Me So (@lovemesojhb) · Johannesburg",
+                "snippet": "... asian #restaurant #johannesburg #instagood #instadaily #instadaily #lovemeso ... #foodie #yummy #food #asian #restaurant #instafood #instadaily #instafollow #vibe ...",
+                "score": 35,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "asian_herbivore",
+                "profileUrl": "https://www.instagram.com/asian_herbivore/reels/",
+                "title": "Asian Herbivore (@asian_herbivore)",
+                "snippet": "Redefining Asian Fusion. 100% Meat-Free. Melrose Crossing, Johannesburg Mojo Market, Cape Town (Express) Ramen • Rice • Bao • Sushi • Tacos.",
+                "score": 32,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "tang_sandton",
+                "profileUrl": "https://www.instagram.com/tang_sandton/",
+                "title": "TANG ™️ (@tang_sandton) · Sandton",
+                "snippet": "... Truly honoured and deeply grateful for this ... Johannesburg. We're celebrating the grand reopening of your Asian-inspired ...",
+                "score": 27,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "chunky_chau_restaurant",
+                "profileUrl": "https://www.instagram.com/chunky_chau_restaurant/reels/",
+                "title": "Chunky Chau (@chunky_chau_restaurant) · Johannesburg",
+                "snippet": "Best Asian Restaurant in Johannesburg, crowned by Luxe. Contact for more information: ◾️ 087 711 3880 Sandton ◾️ 010 590 8777 Rosebank ◾️reservations ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "zioux_jhb",
+                "profileUrl": "https://www.instagram.com/zioux_jhb/?hl=en",
+                "title": "Zioux (@zioux_jhb) • Instagram photos and videos",
+                "snippet": "... Johannesburg. Charred edges with a bold heart. Discover the ...",
+                "score": 24,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Best Asian Restaurant Johannesburg",
+                "snippet": "Best Asian Restaurant Johannesburg · From the wok to your table! At House of Canton, every dish · When the room's full, you know it's a good one. Tiān38 350 ...",
+                "score": 21,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"asian restaurant\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6600,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"johannesburg\" \"halaal chinese\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 16,
+            "instagram_urls_count": 7,
+            "profile_urls_count": 3,
+            "rejected_non_profile_count": 2,
+            "extracted_usernames_count": 4,
+            "relevant_usernames_count": 4,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 2
+            },
+            "top20": [
+              {
+                "username": "merakicoffeehouse_",
+                "profileUrl": "https://www.instagram.com/merakicoffeehouse_/",
+                "title": "Nice Halaal Restaurant in Cape Town",
+                "snippet": "... Johannesburg, Halaal Restaurants in Waterfront ... Instagram: [@merakicoffeehouse_](https://www.instagram.com/merakicoffeehouse_/) ... Halaal Chinese Restaurant ...",
+                "score": 31,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "loose"
+              },
+              {
+                "username": "munaf1.0",
+                "profileUrl": "https://www.instagram.com/munaf1.0/",
+                "title": "Munaf Sheikh (@munaf1.0)",
+                "snippet": "... Allan Gray year end 2022, with Cape Town, Bloemfontein, Durban, Johannesburg, Pretoria, Port Elizabeth, Namibia and Botswana. Beautiful, super ...",
+                "score": 26,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "bluegingermw",
+                "profileUrl": "https://www.instagram.com/bluegingermw/",
+                "title": "Blue Ginger (@bluegingermw) · Lilongwe",
+                "snippet": "... Johannesburg #HalaalGoodsMarket is the first Artisanal Halaal Food and ... Eid ...",
+                "score": 25,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "basicallybedfordview",
+                "profileUrl": "https://www.instagram.com/basicallybedfordview/",
+                "title": "Basically Bedfordview (@basicallybedfordview)",
+                "snippet": "... Johannesburg ...",
+                "score": 22,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"johannesburg\" \"halaal chinese\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 10041,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 8
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 0
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"sandton\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 27,
+            "instagram_urls_count": 18,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 18,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 18
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5895,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"sandton\" \"dim sum\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 24,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 22,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 22
+            },
+            "top20": [
+              {
+                "username": "dhinebitesweet",
+                "profileUrl": "https://www.instagram.com/dhinebitesweet/",
+                "title": "Authentic Chinese Restaurant in Sandton | Enjoy Delicious Dim Sum",
+                "snippet": "Authentic Chinese Restaurant in Sandton | Enjoy Delicious Dim Sum ... Instagram: https://www.instagram.com/dhinebitesweet/ Tiktok: https ...",
+                "score": 14,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"dim sum\" instagram",
+                "mode": "loose"
+              },
+              {
+                "username": "tang_sandton",
+                "profileUrl": "https://www.instagram.com/tang_sandton/reels/",
+                "title": "TANG ™️ (@tang_sandton) · Sandton",
+                "snippet": "... dim sum and a Lunar drink to guests who have made reservations for either of the two days. To the Year of the Dragon! 龍⁠ ⁠ Chinese New Year at TANG 龍 ...",
+                "score": 4,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"sandton\" \"dim sum\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6124,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"rosebank\" \"asian restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 28,
+            "instagram_urls_count": 13,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 12,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 1,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 12
+            },
+            "top20": [
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Best Asian Restaurant Johannesburg",
+                "snippet": "Best Asian Restaurant Johannesburg. Watch reels about best asian restaurant ... rosebank #johannesburg #southafrica. For the plans you make, and the ones ...",
+                "score": 6,
+                "locHit": true,
+                "nicheHit": true,
+                "relevant": true,
+                "sourceQuery": "\"rosebank\" \"asian restaurant\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 9344,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"randburg\" \"chinese takeaway\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 29,
+            "instagram_urls_count": 19,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 18,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 18
+            },
+            "top20": [
+              {
+                "username": "marike.victor",
+                "profileUrl": "https://www.instagram.com/marike.victor/",
+                "title": "Marike Victor",
+                "snippet": "Sorta like Chinese takeaway, but keto compliant. I love chowmein. I ...",
+                "score": 6,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"randburg\" \"chinese takeaway\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 7455,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"fourways\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 25,
+            "instagram_urls_count": 17,
+            "profile_urls_count": 0,
+            "rejected_non_profile_count": 17,
+            "extracted_usernames_count": 0,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 17
+            },
+            "top20": [],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 9859,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"melrose\" \"asian restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 26,
+            "instagram_urls_count": 13,
+            "profile_urls_count": 1,
+            "rejected_non_profile_count": 12,
+            "extracted_usernames_count": 1,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 12
+            },
+            "top20": [
+              {
+                "username": "melrose_restaurant",
+                "profileUrl": "https://www.instagram.com/melrose_restaurant/?hl=en",
+                "title": "Melrose Restaurant & Rooftop Bar (@melrose_restaurant)",
+                "snippet": "We're honoured to share that Melrose Restaurant has been awarded by the Australian Good Food Guide for 2026. This recognition reflects the care, consistency and ...",
+                "score": 21,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"melrose\" \"asian restaurant\" instagram",
+                "mode": "strict"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 6423,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 9
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          },
+          {
+            "query": "\"norwood\" \"chinese restaurant\" instagram",
+            "queryMode": "loose",
+            "organic_results_count": 28,
+            "instagram_urls_count": 15,
+            "profile_urls_count": 2,
+            "rejected_non_profile_count": 13,
+            "extracted_usernames_count": 2,
+            "relevant_usernames_count": 0,
+            "duplicate_count": 0,
+            "rejections_by_reason": {
+              "instagram_non_profile_url": 13
+            },
+            "top20": [
+              {
+                "username": "kosherjunkie",
+                "profileUrl": "https://www.instagram.com/kosherjunkie/reels/",
+                "title": "Kosher Junkie (@kosherjunkie)",
+                "snippet": "... Norwood Ave Abu Laffa – 116 Norwood Ave @pksbytheshore – 244 Norwood Avenue @dougiesbbqdeal – 256 Norwood Ave #2 @yallagrillnj – 214 Roosevelt Avenue Sheng ...",
+                "score": 10,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"norwood\" \"chinese restaurant\" instagram",
+                "mode": "strict"
+              },
+              {
+                "username": "popular",
+                "profileUrl": "https://www.instagram.com/popular/",
+                "title": "Pf Changs Norwood",
+                "snippet": "P.F. Chang's in Norwood is a Chinese restaurant located at 2633 Edmondson Rd, Cincinnati, OH 45209, offering dine-in, delivery, takeout, and catering ...",
+                "score": 9,
+                "locHit": false,
+                "nicheHit": true,
+                "relevant": false,
+                "sourceQuery": "\"norwood\" \"chinese restaurant\" instagram",
+                "mode": "loose"
+              }
+            ],
+            "ok": true,
+            "reason": null,
+            "duration_ms": 5185,
+            "pages_fetched": [
+              {
+                "page": 1,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 2,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              },
+              {
+                "page": 3,
+                "ok": true,
+                "reason": "ok",
+                "organic_count": 10
+              }
+            ],
+            "throttled_pages": 0
+          }
+        ]
+      }
+    }
+  ]
+}
