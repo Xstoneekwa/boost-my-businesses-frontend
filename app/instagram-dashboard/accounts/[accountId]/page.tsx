@@ -25,6 +25,7 @@ import {
   type TargetSafeRow,
   type TargetsOverview,
 } from "../../targets-data";
+import { safeAdminTargetRow } from "@/lib/instagram-dashboard/targets-service";
 
 export const dynamic = "force-dynamic";
 
@@ -86,38 +87,7 @@ function readBooleanNullable(value: unknown) {
 }
 
 function mapSafeTargetRow(row: Record<string, unknown>): TargetSafeRow {
-  const id = readString(row.id ?? row.target_id);
-  const createdAt = readString(row.created_at);
-  const targetUsername = readString(row.normalized_username, readString(row.target_username, readString(row.input_username)));
-
-  return {
-    target_id: id,
-    id,
-    account_id: readString(row.account_id),
-    input_username: readString(row.input_username) || null,
-    normalized_username: targetUsername || null,
-    canonical_username: readString(row.canonical_username) || null,
-    target_username: targetUsername,
-    status: readString(row.status, "unknown"),
-    verification_status: readString(row.verification_status, "pending"),
-    verification_reason: readString(row.verification_reason) || null,
-    quality_status: readString(row.quality_status, "unknown"),
-    avatar_url: null,
-    source: readString(row.source, "unknown"),
-    actor_type: readString(row.actor_type) || null,
-    rejected_reason: readString(row.rejected_reason) || null,
-    batch_id: readString(row.batch_id) || null,
-    provider_checked_at: readString(row.provider_checked_at) || null,
-    created_at: createdAt,
-    updated_at: readString(row.updated_at, createdAt),
-    followers_count: readNumberNullable(row.followers_count),
-    is_verified: readBooleanNullable(row.is_verified),
-    is_private: readBooleanNullable(row.is_private),
-    followback_ratio: readNumberNullable(row.followback_ratio ?? row.fbr_percent),
-    added_at: readString(row.added_at) || null,
-    deleted_at: readString(row.deleted_at) || null,
-    archived_at: readString(row.archived_at) || null,
-  };
+  return safeAdminTargetRow(row);
 }
 
 async function getAccountTargetsOverview(accountId: string): Promise<{ overview: TargetsOverview; unavailable: boolean }> {
@@ -125,7 +95,7 @@ async function getAccountTargetsOverview(accountId: string): Promise<{ overview:
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
       .from("ig_targets")
-      .select("id, account_id, input_username, normalized_username, canonical_username, target_username, status, verification_status, verification_reason, quality_status, source, actor_type, rejected_reason, batch_id, provider_checked_at, created_at, updated_at, followers_count, is_verified, is_private, deleted_at, archived_at")
+      .select("id, account_id, input_username, normalized_username, canonical_username, target_username, status, verification_status, verification_reason, quality_status, source, actor_type, rejected_reason, batch_id, provider_checked_at, created_at, updated_at, followers_count, is_verified, is_private, deleted_at, archived_at, archive_reason, auto_archived_at, readd_blocked_permanently, readd_block_reason")
       .eq("account_id", accountId)
       .order("created_at", { ascending: false })
       .limit(50);

@@ -2,7 +2,7 @@ import {
   addAccountTargetSingle,
   addAccountTargetsBulk,
   archiveAccountTargets,
-  listAccountTargets,
+  listAdminAccountTargets,
   restoreAccountTarget,
   type TargetsServiceContext,
 } from "@/lib/instagram-dashboard/targets-service";
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
     const accountId = getAccountId(request);
     if (!accountId) return jsonError("Missing account_id.", 400);
 
-    const result = await listAccountTargets(accountId);
+    const result = await listAdminAccountTargets(accountId);
     if (!result.ok) return jsonError(result.error, result.status);
     return jsonOk(result.data);
   } catch (error) {

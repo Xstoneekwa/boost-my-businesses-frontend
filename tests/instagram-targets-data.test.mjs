@@ -8,6 +8,7 @@ import {
   targetPerformanceFromFbr,
   targetPerformanceLabel,
 } from "../app/instagram-dashboard/targets-data.ts";
+import { targetAdminAutoArchiveLabel } from "../lib/instagram-dashboard/target-auto-archive-low-fbr-policy.ts";
 
 const baseRow = {
   id: "target-1",
@@ -164,4 +165,24 @@ test("does not label low FBR as poor before minimum sample size", () => {
 
   assert.equal(item.performanceLabel, "Insufficient data");
   assert.notEqual(item.performanceLabel, "Bad");
+});
+
+test("maps admin auto-archive metadata and internal archived label", () => {
+  const item = mapTargetRow({
+    ...baseRow,
+    id: "target-auto-archived",
+    status: "archived",
+    archived_at: "2026-06-20T03:00:00.000Z",
+    archive_reason: "auto_low_followback_ratio",
+    auto_archived_at: "2026-06-20T03:00:00.000Z",
+    readd_blocked_permanently: true,
+    readd_block_reason: "auto_low_followback_ratio",
+  });
+
+  assert.equal(item.archiveReason, "auto_low_followback_ratio");
+  assert.equal(item.autoArchivedAt, "2026-06-20T03:00:00.000Z");
+  assert.equal(item.readdBlockedPermanently, true);
+  assert.equal(item.readdBlockReason, "auto_low_followback_ratio");
+  assert.equal(item.adminAutoArchiveLabel, "Mis de côté automatiquement — FBR faible");
+  assert.equal(targetAdminAutoArchiveLabel({ archiveReason: null, autoArchivedAt: "2026-06-20T03:00:00.000Z" }), "Archive automatique — rendement insuffisant");
 });

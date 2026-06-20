@@ -58,7 +58,7 @@ Route (ops only, token-protected):
 `GET|POST /api/instagram-dashboard/targets/auto-archive-low-fbr-cron`
 
 - Global scan all eligible active targets (paginated batches)
-- Lock via `claim_ct_target_verification_scheduler_lock` with dedicated worker id
+- Lock via `claim_target_auto_archive_low_fbr_scheduler_lock` with dedicated worker id
 - Idempotent: already-archived rows excluded from scan
 
 Local/script dry-run:

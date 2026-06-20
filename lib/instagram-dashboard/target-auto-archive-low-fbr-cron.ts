@@ -5,11 +5,15 @@ import {
   type TargetAutoArchiveGlobalResult,
 } from "./target-auto-archive-low-fbr-executor";
 import { targetAutoArchiveLowFbrFlags } from "./target-auto-archive-low-fbr-policy";
+import {
+  type TargetAutoArchiveLowFbrLockClient,
+  withTargetAutoArchiveLowFbrSchedulerLock,
+} from "./target-auto-archive-low-fbr-scheduler-lock";
 
 export type TargetAutoArchiveCronSkipReason =
   | "cron_disabled"
   | "cron_token_not_configured"
-  | "scheduler_lock_busy";
+  | "already_running";
 
 export type TargetAutoArchiveCronAuthReason =
   | "missing_caller_token"
@@ -38,6 +42,8 @@ export type TargetAutoArchiveCronRun =
 
 const CRON_TOKEN_HEADER = "x-target-auto-archive-low-fbr-cron-token";
 const DEFAULT_WORKER_ID = "target_auto_archive_low_fbr_cron";
+
+export type TargetAutoArchiveLowFbrSupabaseClient = TargetAutoArchiveLowFbrLockClient;
 
 function readEnvBoolean(value: string | undefined, fallback: boolean) {
   if (value == null || value.trim() === "") return fallback;
@@ -98,39 +104,6 @@ export function evaluateTargetAutoArchiveLowFbrCronAuth(
   return { ok: true };
 }
 
-function readBooleanRpcData(data: unknown) {
-  if (data === true || data === false) return data;
-  if (data === "true" || data === "t" || data === 1) return true;
-  if (data === "false" || data === "f" || data === 0) return false;
-  return false;
-}
-
-async function claimSchedulerLock(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  workerId: string,
-  ttlSeconds: number,
-) {
-  const { data, error } = await supabase.rpc("claim_ct_target_verification_scheduler_lock", {
-    worker_id: workerId,
-    ttl_seconds: ttlSeconds,
-  });
-  if (error) throw new Error(error.message || "scheduler_lock_claim_failed");
-  return readBooleanRpcData(data);
-}
-
-async function releaseSchedulerLock(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  workerId: string,
-) {
-  try {
-    await supabase.rpc("release_ct_target_verification_scheduler_lock", {
-      worker_id: workerId,
-    });
-  } catch {
-    // Best-effort release.
-  }
-}
-
 function emptySummary(): TargetAutoArchiveGlobalResult {
   const flags = targetAutoArchiveLowFbrFlags();
   return {
@@ -150,10 +123,13 @@ function emptySummary(): TargetAutoArchiveGlobalResult {
 export async function runTargetAutoArchiveLowFbrCron(input: {
   callerToken?: string | null;
   env?: NodeJS.ProcessEnv;
+  supabase?: TargetAutoArchiveLowFbrSupabaseClient;
+  runPolicy?: () => Promise<TargetAutoArchiveGlobalResult>;
 } = {}): Promise<TargetAutoArchiveCronRun> {
   const cronEnv = readTargetAutoArchiveLowFbrCronEnv(input.env);
   const policyFlags = targetAutoArchiveLowFbrFlags(input.env);
   const auth = evaluateTargetAutoArchiveLowFbrCronAuth(cronEnv, input.callerToken);
+  const runPolicy = input.runPolicy ?? runTargetAutoArchiveLowFbrPolicyGlobal;
 
   if (!auth.ok) {
     return {
@@ -185,42 +161,39 @@ export async function runTargetAutoArchiveLowFbrCron(input: {
     };
   }
 
-  const supabase = createSupabaseClient();
-  let lockAcquired = false;
+  const supabase = (input.supabase ?? createSupabaseClient()) as TargetAutoArchiveLowFbrSupabaseClient;
 
-  try {
-    lockAcquired = await claimSchedulerLock(supabase, cronEnv.workerId, cronEnv.lockTtlSeconds);
-    if (!lockAcquired) {
-      return {
-        status: 200,
-        result: {
-          enabled: cronEnv.enabled,
-          dry_run: policyFlags.dryRun,
-          worker_id: cronEnv.workerId,
-          lock_acquired: false,
-          skipped: true,
-          reason: "scheduler_lock_busy",
-          summary: emptySummary(),
-        },
-      };
-    }
+  const lockedRun = await withTargetAutoArchiveLowFbrSchedulerLock(supabase, {
+    workerId: cronEnv.workerId,
+    ttlSeconds: cronEnv.lockTtlSeconds,
+    run: runPolicy,
+  });
 
-    const summary = await runTargetAutoArchiveLowFbrPolicyGlobal();
+  if (!lockedRun.ok) {
     return {
       status: 200,
       result: {
         enabled: cronEnv.enabled,
         dry_run: policyFlags.dryRun,
         worker_id: cronEnv.workerId,
-        lock_acquired: true,
-        skipped: false,
-        reason: null,
-        summary,
+        lock_acquired: false,
+        skipped: true,
+        reason: lockedRun.reason,
+        summary: emptySummary(),
       },
     };
-  } finally {
-    if (lockAcquired) {
-      await releaseSchedulerLock(supabase, cronEnv.workerId);
-    }
   }
+
+  return {
+    status: 200,
+    result: {
+      enabled: cronEnv.enabled,
+      dry_run: policyFlags.dryRun,
+      worker_id: cronEnv.workerId,
+      lock_acquired: true,
+      skipped: false,
+      reason: null,
+      summary: lockedRun.result,
+    },
+  };
 }

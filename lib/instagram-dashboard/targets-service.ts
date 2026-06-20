@@ -176,6 +176,18 @@ export function safeTargetRow(row: SupabaseRecord): TargetSafeRow {
   };
 }
 
+export function safeAdminTargetRow(row: SupabaseRecord): TargetSafeRow {
+  return {
+    ...safeTargetRow(row),
+    archive_reason: readString(row.archive_reason, "") || null,
+    auto_archived_at: readDateString(row, "auto_archived_at"),
+    readd_blocked_permanently: typeof row.readd_blocked_permanently === "boolean"
+      ? row.readd_blocked_permanently
+      : null,
+    readd_block_reason: readString(row.readd_block_reason, "") || null,
+  };
+}
+
 function isDeletedTarget(row: SupabaseRecord) {
   const status = readString(row.status, "").toLowerCase();
   return status === "deleted" || Boolean(readString(row.deleted_at, ""));
@@ -413,6 +425,18 @@ export async function listAccountTargets(accountId: string): Promise<TargetsServ
 
   if (error) return { ok: false, error: error.message, status: 500 };
   return { ok: true, data: ((data ?? []) as SupabaseRecord[]).map(safeTargetRow) };
+}
+
+export async function listAdminAccountTargets(accountId: string): Promise<TargetsServiceResult<TargetSafeRow[]>> {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase
+    .from("ig_targets")
+    .select("*")
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false });
+
+  if (error) return { ok: false, error: error.message, status: 500 };
+  return { ok: true, data: ((data ?? []) as SupabaseRecord[]).map(safeAdminTargetRow) };
 }
 
 export async function addAccountTargetSingle(

@@ -785,6 +785,9 @@ export default function InstagramAccountTargetsPanel({
                             {row.canonicalUsername && row.canonicalUsername !== row.targetUsername ? (
                               <small className="block text-[11px] text-amber-200">canonical @{row.canonicalUsername}</small>
                             ) : null}
+                            {listFilter === "archived" && row.adminAutoArchiveLabel ? (
+                              <small className="mt-0.5 block text-[11px] italic text-slate-500">{row.adminAutoArchiveLabel}</small>
+                            ) : null}
                           </div>
                         </div>
                       </td>

@@ -1,3 +1,7 @@
+import {
+  targetAdminAutoArchiveLabel,
+} from "../../lib/instagram-dashboard/target-auto-archive-low-fbr-policy.ts";
+
 export type TargetHealthStatus = "good" | "monitor" | "poor" | "unknown" | "pending_source";
 export type TargetPerformanceStatus = "good" | "avg" | "bad" | "insufficient_data" | "pending" | "not_applicable";
 export type TargetQualityStatus =
@@ -65,6 +69,10 @@ export type TargetSafeRow = {
   added_at?: string | null;
   deleted_at?: string | null;
   archived_at?: string | null;
+  archive_reason?: string | null;
+  auto_archived_at?: string | null;
+  readd_blocked_permanently?: boolean | null;
+  readd_block_reason?: string | null;
 };
 
 export type TargetListFilter = "all" | "active" | "pending" | "rejected" | "archived";
@@ -112,6 +120,11 @@ export type TargetAccountItem = {
   syncStatus: TargetSyncStatus;
   archivedAt: string | null;
   deletedAt: string | null;
+  archiveReason: string | null;
+  autoArchivedAt: string | null;
+  readdBlockedPermanently: boolean;
+  readdBlockReason: string | null;
+  adminAutoArchiveLabel: string | null;
   auditEventId: string | null;
   isFutureMetricPending: boolean;
   isSyncPending: boolean;
@@ -329,6 +342,8 @@ export function targetFbrHelper(
   return "Exact followback ratio from runtime CT usage.";
 }
 
+export { targetAdminAutoArchiveLabel } from "../../lib/instagram-dashboard/target-auto-archive-low-fbr-policy.ts";
+
 export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const followersCount = typeof row.followers_count === "number" ? row.followers_count : null;
   const followsSent = typeof row.follows_sent_count === "number" ? row.follows_sent_count : typeof row.followsSent === "number" ? row.followsSent : null;
@@ -344,6 +359,10 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
   const addedAt = row.added_at || row.created_at;
   const deletedAt = row.deleted_at ?? null;
   const archivedAt = row.archived_at ?? null;
+  const archiveReason = row.archive_reason ?? null;
+  const autoArchivedAt = row.auto_archived_at ?? null;
+  const readdBlockedPermanently = row.readd_blocked_permanently === true;
+  const readdBlockReason = row.readd_block_reason ?? null;
   const qualityStatus = (row.quality_status || "unknown") as TargetQualityStatus;
   const healthStatus = qualityStatus !== "unknown" ? (qualityStatus === "eligible" ? "good" : qualityStatus.startsWith("review_") ? "monitor" : "poor") : targetHealthFromFbr(fbrPercent, followsSent);
   const performanceStatus = row.performance_status || row.performanceStatus || targetPerformanceFromFbr(qualityStatus, fbrPercent, followsSent);
@@ -400,6 +419,11 @@ export function mapTargetRow(row: TargetSafeRow): TargetAccountItem {
     syncStatus: "unknown",
     archivedAt,
     deletedAt,
+    archiveReason,
+    autoArchivedAt,
+    readdBlockedPermanently,
+    readdBlockReason,
+    adminAutoArchiveLabel: targetAdminAutoArchiveLabel({ archiveReason, autoArchivedAt }),
     auditEventId: null,
     isFutureMetricPending: row.verification_status !== "found" || followsSent === null || followsSent <= 0,
     isSyncPending: row.status === "pending_verification",

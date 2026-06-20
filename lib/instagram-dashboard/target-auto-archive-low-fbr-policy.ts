@@ -287,6 +287,19 @@ export function evaluateTargetReaddBlock(
   };
 }
 
+export function targetAdminAutoArchiveLabel(item: {
+  archiveReason?: string | null;
+  autoArchivedAt?: string | null;
+}): string | null {
+  if (item.archiveReason === TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON) {
+    return "Mis de côté automatiquement — FBR faible";
+  }
+  if (item.autoArchivedAt) {
+    return "Archive automatique — rendement insuffisant";
+  }
+  return null;
+}
+
 export function clientSafeAutoArchiveDetailLabel(lang: "fr" | "en" = "fr") {
   return lang === "en"
     ? "Set aside after performance review"
