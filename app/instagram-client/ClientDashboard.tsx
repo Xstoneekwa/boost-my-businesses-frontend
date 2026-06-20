@@ -1688,6 +1688,7 @@ const CSS = `
 .cd-progress-step strong{display:block;font-size:.95rem}
 .cd-progress-step small{display:block;margin-top:3px;color:#778299;font-size:.8rem;overflow-wrap:anywhere}
 .cd-progress-action{margin:0;border:1px solid rgba(245,158,11,.35);border-radius:12px;background:rgba(120,53,15,.22);color:#FDE68A;padding:10px 12px;font-size:.84rem;line-height:1.45}
+.cd-progress-action-success{border-color:rgba(34,197,94,.35);background:rgba(6,78,59,.22);color:#BBF7D0}
 .cd-s-title{font-family:var(--font-d);font-weight:800;font-size:.95rem;margin-bottom:14px;color:var(--ink)}
 .cd-fg{margin-bottom:12px}
 .cd-fl{font-size:.72rem;font-weight:700;color:var(--ink-mute);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;display:block}
