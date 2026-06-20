@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
-import { projectClientAccountRow } from "@/lib/instagram-client/account-projection";
+import { loadClientInstagramAccounts } from "@/lib/instagram-client/load-client-instagram-accounts";
 import { loadClientAccountInsights, type ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
 import { loadClientFollowerGrowthSeries } from "@/lib/instagram-client/load-client-follower-growth";
 import { getClientWorkspaceView, type ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
@@ -96,57 +96,7 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
 }
 
 async function getClientDashboardAccounts(clientId: string): Promise<ClientInstagramAccount[]> {
-  if (!clientId) return [];
-  const supabase = createSupabaseClient();
-  const { data: links, error: linkError } = await supabase
-    .from("client_instagram_accounts")
-    .select("account_id,onboarding_status,provisioning_status,login_status")
-    .eq("client_id", clientId)
-    .limit(100);
-
-  if (linkError || !Array.isArray(links) || links.length === 0) return [];
-  const accountIds = [...new Set((links as SupabaseRecord[]).map((row) => readString(row.account_id)).filter(Boolean))];
-  if (!accountIds.length) return [];
-
-  const [{ data: accounts }, { data: packages }] = await Promise.all([
-    supabase
-      .from("ig_accounts")
-      .select("id,username,status,admin_lifecycle_status")
-      .in("id", accountIds),
-    supabase
-      .from("account_commercial_packages")
-      .select("account_id,package_code,status")
-      .in("account_id", accountIds)
-      .eq("status", "active"),
-  ]);
-
-  const packageByAccount = new Map((Array.isArray(packages) ? packages as SupabaseRecord[] : [])
-    .map((row): [string, string] => [readString(row.account_id), readString(row.package_code, "growth")])
-    .filter(([id]) => Boolean(id)));
-  const linkByAccount = new Map((links as SupabaseRecord[])
-    .map((row): [string, SupabaseRecord] => [readString(row.account_id), row])
-    .filter(([id]) => Boolean(id)));
-
-  return (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
-    .map((row) => {
-      const accountId = readString(row.id);
-      const link = linkByAccount.get(accountId);
-      const loginStatus = readString(link?.login_status, "unknown");
-      const onboardingStatus = readString(link?.onboarding_status, "pending");
-      const provisioningStatus = readString(link?.provisioning_status, "not_started");
-      const assignmentStatus = onboardingStatus === "ready" ? "assigned" : "pending_assignment";
-      return projectClientAccountRow({
-        accountId,
-        username: readString(row.username, "Instagram account"),
-        packageLabel: packageByAccount.get(accountId) || "Growth",
-        accountStatus: readString(row.admin_lifecycle_status, readString(row.status, "active")),
-        onboardingStatus,
-        provisioningStatus,
-        loginStatus,
-        assignmentStatus,
-      });
-    })
-    .filter((row) => Boolean(row.accountId));
+  return loadClientInstagramAccounts(clientId);
 }
 
 function sortClientInstagramAccounts(accounts: ClientInstagramAccount[]) {

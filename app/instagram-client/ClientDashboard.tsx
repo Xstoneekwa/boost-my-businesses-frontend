@@ -1489,12 +1489,14 @@ const CSS = `
 .cd-setup-note{color:var(--ink-mute)!important;font-size:.84rem!important}
 .cd-accounts-panel{display:grid;gap:14px;margin-bottom:14px}
 .cd-accounts-panel .cd-card-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+.cd-accounts-header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .cd-btn-compact{font-size:.78rem;padding:8px 12px}
 .cd-accounts-list{display:grid;gap:10px}
 .cd-account-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface-2)}
 .cd-account-main{display:grid;gap:4px;min-width:0}
 .cd-account-main strong{font-family:var(--font-d);font-size:.95rem;color:var(--ink)}
 .cd-account-main small{color:var(--ink-mute);font-size:.78rem;text-transform:capitalize}
+.cd-account-subtext{margin:0;color:var(--ink-dim);font-size:.78rem;line-height:1.4}
 .cd-account-pill{display:inline-flex;width:fit-content;padding:4px 8px;border-radius:999px;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn);font-size:.72rem;font-weight:700}
 .cd-account-pill.connected,.cd-account-pill-success{background:var(--good-bg);border-color:var(--good-line);color:var(--good)}
 .cd-account-pill-warning{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)}

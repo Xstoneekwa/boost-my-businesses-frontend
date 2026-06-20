@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { resolveClientAccountConnectionUi } from "@/lib/instagram-client/client-account-connection-ui";
 
@@ -15,6 +15,7 @@ export type ClientInstagramAccountView = {
   assignmentStatus: string;
   readinessLabel: string;
   connected: boolean;
+  operationPending?: boolean;
 };
 
 type Props = {
@@ -24,11 +25,25 @@ type Props = {
 
 type ActionState = {
   accountId: string;
-  kind: "readiness" | "connect" | "create";
+  kind: "readiness" | "connect" | "create" | "refresh";
 } | null;
+
+const POLL_INTERVAL_MS = 8000;
+const POLL_MAX_ATTEMPTS = 12;
 
 function labelFor(lang: "fr" | "en", fr: string, en: string) {
   return lang === "fr" ? fr : en;
+}
+
+function mergeAccountRow(
+  current: ClientInstagramAccountView,
+  next: Partial<ClientInstagramAccountView> & { accountId: string },
+): ClientInstagramAccountView {
+  return {
+    ...current,
+    ...next,
+    accountId: next.accountId,
+  };
 }
 
 export default function ClientAccountsSection({ lang, accounts }: Props) {
@@ -42,6 +57,12 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [actionState, setActionState] = useState<ActionState>(null);
+  const [polling, setPolling] = useState(false);
+  const pollAttemptsRef = useRef(0);
+
+  useEffect(() => {
+    setItems(accounts);
+  }, [accounts]);
 
   const canAddAccount = useMemo(() => items.length < 5, [items.length]);
   const isEmpty = items.length === 0;
@@ -49,6 +70,104 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   function pushMessage(text: string, tone: "success" | "error" = "success") {
     setMessage(text);
     setMessageTone(tone);
+  }
+
+  const refreshFromServer = useCallback(async () => {
+    const response = await fetch("/api/instagram-client/accounts", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json() as {
+      ok?: boolean;
+      error?: string;
+      data?: { accounts?: ClientInstagramAccountView[] };
+    };
+    if (!response.ok || payload.ok === false || !Array.isArray(payload.data?.accounts)) {
+      throw new Error(payload.error || labelFor(lang, "Impossible d'actualiser les comptes.", "Could not refresh accounts."));
+    }
+    setItems(payload.data.accounts);
+    router.refresh();
+    return payload.data.accounts;
+  }, [lang, router]);
+
+  const startBoundedPolling = useCallback(() => {
+    pollAttemptsRef.current = 0;
+    setPolling(true);
+  }, []);
+
+  useEffect(() => {
+    if (!polling) return undefined;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      pollAttemptsRef.current += 1;
+      try {
+        await refreshFromServer();
+      } catch {
+        // Keep polling until the bounded window ends.
+      }
+      if (pollAttemptsRef.current >= POLL_MAX_ATTEMPTS) {
+        setPolling(false);
+      }
+    };
+
+    void tick();
+    const intervalId = window.setInterval(() => {
+      void tick();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [polling, refreshFromServer]);
+
+  function applyServerAccount(account: ClientInstagramAccountView | null | undefined) {
+    if (!account?.accountId) return null;
+    setItems((current) => {
+      const existing = current.find((row) => row.accountId === account.accountId);
+      if (!existing) return [...current, account];
+      return current.map((row) => (row.accountId === account.accountId ? mergeAccountRow(row, account) : row));
+    });
+    return account;
+  }
+
+  function messageForAccount(account: ClientInstagramAccountView | null | undefined) {
+    if (!account) {
+      return labelFor(lang, "État mis à jour.", "Status updated.");
+    }
+    const ui = resolveClientAccountConnectionUi(account, lang);
+    if (ui.phase === "preparing") {
+      return labelFor(lang, "Préparation en cours. Nous vérifions votre compte.", "Setup in progress. We are verifying your account.");
+    }
+    if (ui.phase === "ready") {
+      return labelFor(lang, "Compte connecté et prêt.", "Account connected and ready.");
+    }
+    if (ui.phase === "action_required") {
+      return labelFor(lang, "Une vérification est nécessaire.", "A verification is required.");
+    }
+    if (ui.phase === "connected") {
+      return labelFor(lang, "Compte connecté.", "Account connected.");
+    }
+    return labelFor(lang, "Compte Instagram ajouté.", "Instagram account added.");
+  }
+
+  async function handleManualRefresh() {
+    if (actionState) return;
+    setActionState({ accountId: "all", kind: "refresh" });
+    setMessage("");
+    try {
+      const refreshed = await refreshFromServer();
+      const stillPending = refreshed.some((account) => resolveClientAccountConnectionUi(account, lang).isAsyncPending);
+      if (stillPending) startBoundedPolling();
+      pushMessage(labelFor(lang, "Liste actualisée.", "List refreshed."), "success");
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible d'actualiser les comptes.", "Could not refresh accounts."), "error");
+    } finally {
+      setActionState(null);
+    }
   }
 
   async function handleCreateAccount(event: React.FormEvent) {
@@ -75,23 +194,19 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || labelFor(lang, "Impossible d'ajouter le compte.", "Could not add account."));
       }
-      const account = payload.data?.account;
-      if (account) {
-        setItems((current) => [...current.filter((row) => row.accountId !== account.accountId), account]);
-      }
+
+      const refreshed = await refreshFromServer();
+      const account = refreshed.find((row) => row.accountId === payload.data?.account?.accountId)
+        ?? applyServerAccount(payload.data?.account);
       setModalOpen(false);
       setUsername("");
       setEmail("");
       setPassword("");
       setNotes("");
-      const setupPending = payload.data?.assignment?.status === "pending_assignment";
-      pushMessage(
-        setupPending
-          ? labelFor(lang, "Compte ajouté — configuration en cours.", "Account added — setup pending.")
-          : labelFor(lang, "Compte Instagram ajouté.", "Instagram account added."),
-        "success",
-      );
-      router.refresh();
+      pushMessage(messageForAccount(account ?? payload.data?.account ?? null), "success");
+      if (account && resolveClientAccountConnectionUi(account, lang).isAsyncPending) {
+        startBoundedPolling();
+      }
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible d'ajouter le compte.", "Could not add account."), "error");
     } finally {
@@ -107,19 +222,22 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         method: "POST",
         headers: { Accept: "application/json" },
       });
-      const payload = await response.json() as { ok?: boolean; error?: string; data?: { message?: string; connected?: boolean } };
+      const payload = await response.json() as {
+        ok?: boolean;
+        error?: string;
+        data?: { account?: ClientInstagramAccountView; message?: string; connected?: boolean };
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || labelFor(lang, "Impossible de vérifier l'état.", "Could not check readiness."));
       }
-      setItems((current) => current.map((row) => row.accountId === accountId
-        ? {
-          ...row,
-          readinessLabel: payload.data?.message || row.readinessLabel,
-          connected: payload.data?.connected === true,
-        }
-        : row));
-      pushMessage(payload.data?.message || labelFor(lang, "État mis à jour.", "Status updated."), "success");
-      router.refresh();
+
+      const refreshed = await refreshFromServer();
+      const account = refreshed.find((row) => row.accountId === accountId)
+        ?? applyServerAccount(payload.data?.account);
+      pushMessage(messageForAccount(account ?? null), "success");
+      if (account && resolveClientAccountConnectionUi(account, lang).isAsyncPending) {
+        startBoundedPolling();
+      }
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible de vérifier l'état.", "Could not check readiness."), "error");
     } finally {
@@ -135,19 +253,22 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         method: "POST",
         headers: { Accept: "application/json" },
       });
-      const payload = await response.json() as { ok?: boolean; error?: string; data?: { message?: string; connected?: boolean; request_queued?: boolean } };
+      const payload = await response.json() as {
+        ok?: boolean;
+        error?: string;
+        data?: { account?: ClientInstagramAccountView; message?: string; connected?: boolean; request_queued?: boolean };
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || labelFor(lang, "Connexion indisponible.", "Connect unavailable."));
       }
-      setItems((current) => current.map((row) => row.accountId === account.accountId
-        ? {
-          ...row,
-          readinessLabel: payload.data?.message || row.readinessLabel,
-          connected: payload.data?.connected === true,
-        }
-        : row));
-      pushMessage(payload.data?.message || labelFor(lang, "Connexion lancée.", "Connect started."), "success");
-      router.refresh();
+
+      const refreshed = await refreshFromServer();
+      const nextAccount = refreshed.find((row) => row.accountId === account.accountId)
+        ?? applyServerAccount(payload.data?.account);
+      pushMessage(messageForAccount(nextAccount ?? null), "success");
+      if (nextAccount && resolveClientAccountConnectionUi(nextAccount, lang).isAsyncPending) {
+        startBoundedPolling();
+      }
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : labelFor(lang, "Connexion indisponible.", "Connect unavailable."), "error");
     } finally {
@@ -155,21 +276,40 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     }
   }
 
+  const showGlobalRefresh = useMemo(
+    () => items.some((account) => resolveClientAccountConnectionUi(account, lang).showRefresh),
+    [items, lang],
+  );
+
   return (
     <>
       <section className="cd-card cd-accounts-panel">
         <div className="cd-card-hd">
           <h3>{labelFor(lang, "Mes comptes Instagram", "My Instagram accounts")}</h3>
-          {canAddAccount && !isEmpty ? (
-            <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" onClick={() => setModalOpen(true)}>
-              {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
-            </button>
-          ) : null}
+          <div className="cd-accounts-header-actions">
+            {showGlobalRefresh ? (
+              <button
+                type="button"
+                className="cd-btn cd-btn-soft cd-btn-compact"
+                disabled={Boolean(actionState)}
+                onClick={() => void handleManualRefresh()}
+              >
+                {actionState?.kind === "refresh"
+                  ? labelFor(lang, "Actualisation…", "Refreshing…")
+                  : labelFor(lang, "Actualiser", "Refresh")}
+              </button>
+            ) : null}
+            {canAddAccount && !isEmpty ? (
+              <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" onClick={() => setModalOpen(true)}>
+                {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {isEmpty ? (
           <div className="cd-accounts-empty">
-            <p>{labelFor(lang, "Aucun compte Instagram lié pour le moment.", "No Instagram account linked yet.")}</p>
+            <p>{labelFor(lang, "Aucun compte Instagram ajouté.", "No Instagram account added yet.")}</p>
             <button type="button" className="cd-btn cd-btn-primary" onClick={() => setModalOpen(true)}>
               {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
             </button>
@@ -185,8 +325,21 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                     <strong>@{account.username}</strong>
                     <small>{account.packageLabel}</small>
                     <span className={`cd-account-pill cd-account-pill-${ui.badgeTone}`}>{ui.badgeLabel}</span>
+                    {ui.subtext ? <p className="cd-account-subtext">{ui.subtext}</p> : null}
                   </div>
                   <div className="cd-account-actions">
+                    {ui.showRefresh ? (
+                      <button
+                        type="button"
+                        className="cd-btn cd-btn-soft cd-btn-compact"
+                        disabled={Boolean(actionState)}
+                        onClick={() => void handleManualRefresh()}
+                      >
+                        {actionState?.kind === "refresh"
+                          ? labelFor(lang, "Actualisation…", "Refreshing…")
+                          : labelFor(lang, "Actualiser", "Refresh")}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className={`cd-btn cd-btn-soft cd-account-state cd-account-state-${ui.readinessTone}`}
@@ -231,8 +384,8 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
             <p className="cd-connect-copy">
               {labelFor(
                 lang,
-                "Ajoutez votre compte Instagram. Nous gérons automatiquement l'attribution technique — aucun téléphone ou clone à choisir.",
-                "Add your Instagram account. We handle technical assignment automatically — no phone or clone to choose.",
+                "Ajoutez votre compte Instagram. Nous préparons ensuite la connexion automatiquement — aucune configuration technique de votre côté.",
+                "Add your Instagram account. We then prepare the connection automatically — no technical setup on your side.",
               )}
             </p>
             <form className="cd-add-account-form" onSubmit={(event) => void handleCreateAccount(event)}>

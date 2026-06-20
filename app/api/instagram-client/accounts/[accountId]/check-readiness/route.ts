@@ -24,6 +24,7 @@ export async function POST(
   const result = await checkClientAccountReadiness({
     accountId: normalizedAccountId,
     userId: session.userId,
+    clientId: session.clientId,
     dryRun: readBoolean(body?.dry_run, false),
   });
 

@@ -81,12 +81,6 @@ export function projectClientAccountRow(input: ClientAccountProjectionInput) {
   const provisioningStatus = readString(input.provisioningStatus, "not_started");
   const assignmentStatus = readString(input.assignmentStatus, onboardingStatus === "ready" ? "assigned" : "pending_assignment");
   const connected = loginStatus.toLowerCase() === "connected";
-  let readinessLabel = "Waiting for assignment";
-  if (connected) readinessLabel = "Account connected";
-  else if (input.readinessStatus) readinessLabel = input.readinessStatus;
-  else if (assignmentStatus.includes("pending")) readinessLabel = "Device setup pending";
-  else if (provisioningStatus === "ready") readinessLabel = "Ready to connect";
-  else if (loginStatus === "needs_assistance") readinessLabel = "Needs assistance";
 
   return {
     accountId: input.accountId,
@@ -97,7 +91,7 @@ export function projectClientAccountRow(input: ClientAccountProjectionInput) {
     provisioningStatus,
     loginStatus,
     assignmentStatus,
-    readinessLabel,
+    readinessLabel: "",
     connected,
   };
 }

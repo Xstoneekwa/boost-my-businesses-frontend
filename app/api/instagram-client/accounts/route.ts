@@ -1,5 +1,6 @@
 import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_utils";
 import { createClientInstagramAccount } from "@/lib/instagram-client/create-account";
+import { loadClientInstagramAccounts } from "@/lib/instagram-client/load-client-instagram-accounts";
 import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
 import {
   readBoolean,
@@ -18,6 +19,14 @@ type CreateBody = {
   notes?: unknown;
   dry_run?: unknown;
 };
+
+export async function GET() {
+  const session = await requireClientInstagramSession();
+  if (!session.ok) return jsonError(session.error, session.status);
+
+  const accounts = await loadClientInstagramAccounts(session.clientId);
+  return jsonOk({ accounts });
+}
 
 export async function POST(request: Request) {
   const session = await requireClientInstagramSession();
