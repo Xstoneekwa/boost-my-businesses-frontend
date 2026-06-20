@@ -1,6 +1,7 @@
 import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
 import { countLinkedInstagramAccountsForClient, countReservedEntitlementsForClient } from "@/lib/commercial/entitlements";
+import { QUOTE_UNAVAILABLE_EN, QUOTE_UNAVAILABLE_FR } from "@/lib/commercial/checkout-api-messages";
 import { buildCommercialQuote } from "@/lib/commercial/pricing";
 import { deriveAgencyModeSnapshot } from "@/lib/commercial/agency";
 import { projectSimulatedCheckoutAvailability } from "@/lib/commercial/simulated-checkout-guard";
@@ -17,47 +18,62 @@ type QuoteBody = {
 };
 
 export async function POST(request: Request) {
-  const body = await readJsonBody<QuoteBody>(request);
-  const planKey = readString(body?.plan_key);
-  const billingIntervalMonths = Number(body?.billing_interval_months ?? 1);
-  const outreachAddonKey = readString(body?.outreach_addon_key) || null;
+  try {
+    const body = await readJsonBody<QuoteBody>(request);
+    const planKey = readString(body?.plan_key);
+    const billingIntervalMonths = Number(body?.billing_interval_months ?? 1);
+    const outreachAddonKey = readString(body?.outreach_addon_key) || null;
 
-  let clientId = readString(body?.client_id);
-  const session = await requireClientInstagramSession();
-  if (session.ok) {
-    clientId = session.clientId;
-  }
+    let clientId = readString(body?.client_id);
+    const session = await requireClientInstagramSession();
+    if (session.ok) {
+      clientId = session.clientId;
+    }
 
-  let purchaserEmail = readString(body?.purchaser_email);
-  if (!purchaserEmail && session.ok) {
+    let purchaserEmail = readString(body?.purchaser_email);
+    if (!purchaserEmail && session.ok) {
+      const supabase = createSupabaseClient();
+      const { data } = await supabase.auth.admin.getUserById(session.userId);
+      purchaserEmail = readString(data.user?.email);
+    }
+
     const supabase = createSupabaseClient();
-    const { data } = await supabase.auth.admin.getUserById(session.userId);
-    purchaserEmail = readString(data.user?.email);
+    const linkedCount = clientId ? await countLinkedInstagramAccountsForClient(supabase, clientId) : 0;
+    const reservedCount = clientId ? await countReservedEntitlementsForClient(supabase, clientId) : 0;
+    const agencySnapshot = deriveAgencyModeSnapshot({ linkedAccountCount: linkedCount, reservedEntitlementCount: reservedCount });
+    const billableAccountCount = agencySnapshot.billableAccountCount + 1;
+
+    const quote = buildCommercialQuote({
+      planKey,
+      billingIntervalMonths,
+      outreachAddonKey,
+      billableAccountCount,
+    });
+    if ("error" in quote) {
+      return jsonError("Invalid checkout selection.", 400, {
+        code: quote.error,
+        message_fr: "Sélection checkout invalide.",
+        message_en: "Invalid checkout selection.",
+      });
+    }
+
+    const availability = projectSimulatedCheckoutAvailability(purchaserEmail || null);
+
+    return jsonOk({
+      quote,
+      agency: agencySnapshot,
+      simulatedCheckoutEnabled: availability.simulatedCheckoutEnabled,
+      simulatedActivationAvailable: availability.simulatedActivationAvailable,
+      requiresEmail: availability.requiresEmail,
+      activationMessageFr: availability.messageFr,
+      activationMessageEn: availability.messageEn,
+    });
+  } catch (error) {
+    console.error("[commercial/checkout/quote] unexpected failure", error);
+    return jsonError(QUOTE_UNAVAILABLE_FR, 500, {
+      code: "quote_failed",
+      message_fr: QUOTE_UNAVAILABLE_FR,
+      message_en: QUOTE_UNAVAILABLE_EN,
+    });
   }
-
-  const supabase = createSupabaseClient();
-  const linkedCount = clientId ? await countLinkedInstagramAccountsForClient(supabase, clientId) : 0;
-  const reservedCount = clientId ? await countReservedEntitlementsForClient(supabase, clientId) : 0;
-  const agencySnapshot = deriveAgencyModeSnapshot({ linkedAccountCount: linkedCount, reservedEntitlementCount: reservedCount });
-  const billableAccountCount = agencySnapshot.billableAccountCount + 1;
-
-  const quote = buildCommercialQuote({
-    planKey,
-    billingIntervalMonths,
-    outreachAddonKey,
-    billableAccountCount,
-  });
-  if ("error" in quote) return jsonError("Invalid checkout selection.", 400, { code: quote.error });
-
-  const availability = projectSimulatedCheckoutAvailability(purchaserEmail || null);
-
-  return jsonOk({
-    quote,
-    agency: agencySnapshot,
-    simulatedCheckoutEnabled: availability.simulatedCheckoutEnabled,
-    simulatedActivationAvailable: availability.simulatedActivationAvailable,
-    requiresEmail: availability.requiresEmail,
-    activationMessageFr: availability.messageFr,
-    activationMessageEn: availability.messageEn,
-  });
 }

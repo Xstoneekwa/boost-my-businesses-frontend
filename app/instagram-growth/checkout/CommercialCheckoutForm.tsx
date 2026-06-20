@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  CHECKOUT_UNAVAILABLE_FR,
+  QUOTE_UNAVAILABLE_EN,
+  QUOTE_UNAVAILABLE_FR,
+} from "@/lib/commercial/checkout-api-messages";
+import { parseCheckoutApiResponse } from "@/lib/commercial/parse-checkout-api-response";
+import {
   COMMERCIAL_PLANS,
   OUTREACH_ADDONS,
   isOutreachAddonKey,
@@ -95,29 +101,28 @@ export default function CommercialCheckoutForm(props: {
           purchaser_email: props.flowType === "first_purchase" ? email.trim() : undefined,
         }),
       });
-      const payload = await response.json() as {
-        ok?: boolean;
-        error?: string;
-        data?: {
-          quote?: QuotePayload;
-          simulatedActivationAvailable?: boolean;
-          activationMessageFr?: string | null;
-          activationMessageEn?: string | null;
-        };
-      };
+      const parsed = await parseCheckoutApiResponse<{
+        quote?: QuotePayload;
+        simulatedActivationAvailable?: boolean;
+        activationMessageFr?: string | null;
+        activationMessageEn?: string | null;
+      }>(response, {
+        messageFr: QUOTE_UNAVAILABLE_FR,
+        messageEn: QUOTE_UNAVAILABLE_EN,
+      });
       if (cancelled) return;
-      if (!response.ok || payload.ok === false || !payload.data?.quote) {
+      if (!parsed.ok || !parsed.data?.quote) {
         setQuote(null);
         setActivationAvailable(false);
         setActivationNotice("");
-        setError(payload.error || (lang === "fr" ? "Impossible de calculer le devis." : "Could not compute quote."));
+        setError(lang === "fr" ? parsed.clientMessageFr : parsed.clientMessageEn);
         return;
       }
-      setQuote(payload.data.quote);
-      setActivationAvailable(Boolean(payload.data.simulatedActivationAvailable));
+      setQuote(parsed.data.quote);
+      setActivationAvailable(Boolean(parsed.data.simulatedActivationAvailable));
       const notice = lang === "fr"
-        ? payload.data.activationMessageFr
-        : payload.data.activationMessageEn;
+        ? parsed.data.activationMessageFr
+        : parsed.data.activationMessageEn;
       setActivationNotice(notice?.trim() || "");
     }
     void loadQuote();
@@ -141,24 +146,25 @@ export default function CommercialCheckoutForm(props: {
           flow_type: props.flowType,
         }),
       });
-      const payload = await response.json() as {
-        ok?: boolean;
-        error?: string;
-        code?: string;
+      const parsed = await parseCheckoutApiResponse<{
+        redirect_path?: string;
         message_fr?: string;
         message_en?: string;
-        data?: { redirect_path?: string; message_fr?: string; message_en?: string };
-      };
-      if (!response.ok || payload.ok === false) {
-        const clientMessage = lang === "fr"
-          ? payload.message_fr ?? payload.error
-          : payload.message_en ?? payload.error;
-        throw new Error(clientMessage || (lang === "fr" ? "Activation impossible." : "Activation failed."));
+      }>(response, {
+        messageFr: CHECKOUT_UNAVAILABLE_FR,
+      });
+      if (!parsed.ok) {
+        throw new Error(lang === "fr" ? parsed.clientMessageFr : parsed.clientMessageEn);
       }
-      setSuccess(lang === "fr" ? payload.data?.message_fr ?? "" : payload.data?.message_en ?? "");
-      router.push(payload.data?.redirect_path || "/instagram-client");
+      setSuccess(lang === "fr" ? parsed.data?.message_fr ?? "" : parsed.data?.message_en ?? "");
+      router.push(parsed.data?.redirect_path || "/instagram-client");
     } catch (activationError) {
-      setError(activationError instanceof Error ? activationError.message : String(activationError));
+      const message = activationError instanceof Error ? activationError.message : String(activationError);
+      if (!message.includes("JSON.parse")) {
+        setError(message);
+      } else {
+        setError(CHECKOUT_UNAVAILABLE_FR);
+      }
     } finally {
       setLoading(false);
     }
