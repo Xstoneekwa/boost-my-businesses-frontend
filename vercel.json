@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/instagram-dashboard/targets/auto-archive-low-fbr-cron",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
