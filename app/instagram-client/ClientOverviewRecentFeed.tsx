@@ -1,7 +1,7 @@
 "use client";
 
 import type { ClientOverviewRecentFeedItem } from "@/lib/instagram-client/client-overview-recent-feed-projection";
-import { formatOverviewRecentFeedTimestamp } from "@/lib/instagram-client/client-overview-recent-feed-projection";
+import { formatOverviewRecentFeedBusinessDate } from "@/lib/instagram-client/client-overview-recent-feed-projection";
 
 type Lang = "fr" | "en";
 
@@ -105,7 +105,7 @@ export default function ClientOverviewRecentFeed({
             <div className="cd-orf-summary">
               <SummaryText text={lang === "en" ? item.summaryEn : item.summaryFr} count={item.count} lang={lang} />
             </div>
-            <div className="cd-orf-meta">{formatOverviewRecentFeedTimestamp(item.latestAt, lang)}</div>
+            <div className="cd-orf-meta">{formatOverviewRecentFeedBusinessDate(item.businessDayKey, lang)}</div>
             <div className="cd-orf-foot">
               <span className={`cd-orf-pill cd-orf-pill-${item.iconKind}`}>
                 {lang === "en" ? item.categoryLabelEn : item.categoryLabelFr}

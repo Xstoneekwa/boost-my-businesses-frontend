@@ -10,7 +10,7 @@ import { readString } from "./guards.ts";
 
 export type OverviewRecentFeedActionKind = "follow" | "like" | "dm" | "story" | "unfollow";
 
-export const OVERVIEW_RECENT_FEED_WINDOW_DAYS = 14;
+export const OVERVIEW_RECENT_FEED_ACTIVE_BUSINESS_DAYS = 2;
 export const OVERVIEW_RECENT_FEED_MAX_GROUPS = 5;
 
 export type OverviewRecentFeedSourceEvent = {
@@ -22,8 +22,8 @@ export type OverviewRecentFeedSourceEvent = {
   sourceTargetUsername: string | null;
   touchedUsername: string | null;
   accountId: string | null;
-  sessionKey: string | null;
   businessDayKey: string;
+  actionKind: OverviewRecentFeedActionKind;
 };
 
 export type ClientOverviewRecentFeedItem = {
@@ -32,6 +32,7 @@ export type ClientOverviewRecentFeedItem = {
   count: number;
   distinctTouchedCount: number;
   sourceTargetUsername: string | null;
+  businessDayKey: string;
   summaryFr: string;
   summaryEn: string;
   categoryLabelFr: string;
@@ -49,12 +50,6 @@ function normalizeUsername(value: unknown) {
 
 function pluralFr(count: number, singular: string, plural: string) {
   return count > 1 ? plural : singular;
-}
-
-function subtractCalendarDays(dayKey: string, days: number) {
-  const [year, month, day] = dayKey.split("-").map(Number);
-  const utc = new Date(Date.UTC(year, month - 1, day - days, 12, 0, 0, 0));
-  return utc.toISOString().slice(0, 10);
 }
 
 export function resolveOverviewFeedActionKind(row: Record<string, unknown>): OverviewRecentFeedActionKind | null {
@@ -158,41 +153,23 @@ function buildSummary(
   return `${n} ${pluralFr(count, "compte retiré de la campagne", "comptes retirés de la campagne")}`;
 }
 
-export function resolveOverviewFeedSessionKey(row: Record<string, unknown>) {
-  const runId = readString(row.run_id, "");
-  if (runId) return `run:${runId}`;
-
-  const requestId = readString(row.request_id, "");
-  if (requestId) return `req:${requestId}`;
-
-  const sessionId = readString(row.session_id, "");
-  if (sessionId) return `sess:${sessionId}`;
-
-  return null;
-}
-
 export function resolveOverviewFeedGroupKey(input: {
+  accountId?: string | null;
   actionKind: OverviewRecentFeedActionKind;
   sourceTargetUsername: string | null;
-  sessionKey: string | null;
   businessDayKey: string;
 }) {
+  const account = input.accountId ?? "__none__";
   const source = input.sourceTargetUsername ?? "__none__";
-  const bucket = input.sessionKey ?? `day:${input.businessDayKey}`;
-  return `${input.actionKind}::${source}::${bucket}`;
+  return `${account}::${input.businessDayKey}::${input.actionKind}::${source}`;
 }
 
-export function eventInOverviewRecentBusinessWindow(
-  eventAt: string,
-  timezone: string,
-  windowDays: number,
-  now: Date,
+export function resolveOverviewRecentActiveBusinessDays(
+  events: Array<{ businessDayKey: string }>,
+  activeDayCount = OVERVIEW_RECENT_FEED_ACTIVE_BUSINESS_DAYS,
 ) {
-  const eventDay = businessDayKeyFromIso(eventAt, timezone);
-  const todayDay = businessDayKeyFromIso(now.toISOString(), timezone);
-  if (!eventDay || !todayDay) return false;
-  const minDay = subtractCalendarDays(todayDay, Math.max(windowDays - 1, 0));
-  return eventDay >= minDay && eventDay <= todayDay;
+  const uniqueDays = [...new Set(events.map((event) => event.businessDayKey).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+  return uniqueDays.slice(0, Math.max(activeDayCount, 1));
 }
 
 function shouldIncludeTouchedUsername(
@@ -222,6 +199,8 @@ export function mapOverviewRecentFeedSourceEvent(
   if (!eventAt) return null;
 
   const businessTimezone = normalizeBusinessTimezone(options.businessTimezone);
+  const businessDayKey = businessDayKeyFromIso(eventAt, businessTimezone);
+  if (!businessDayKey) return null;
 
   return {
     id: readString(row.id, `${actionKind}-${eventAt}`),
@@ -232,9 +211,31 @@ export function mapOverviewRecentFeedSourceEvent(
     sourceTargetUsername: normalizeUsername(row.source_target_username),
     touchedUsername: normalizeUsername(row.username),
     accountId: rowAccountId || null,
-    sessionKey: resolveOverviewFeedSessionKey(row),
-    businessDayKey: businessDayKeyFromIso(eventAt, businessTimezone),
+    businessDayKey,
+    actionKind,
   };
+}
+
+function collectOverviewRecentFeedEvents(
+  rows: Record<string, unknown>[],
+  options: {
+    accountId?: string | null;
+    businessTimezone?: string | null;
+  },
+) {
+  const accountId = readString(options.accountId, "") || null;
+  const businessTimezone = normalizeBusinessTimezone(options.businessTimezone);
+  const seenIds = new Set<string>();
+  const events: OverviewRecentFeedSourceEvent[] = [];
+
+  for (const row of rows) {
+    const event = mapOverviewRecentFeedSourceEvent(row, { businessTimezone, accountId });
+    if (!event || seenIds.has(event.id)) continue;
+    seenIds.add(event.id);
+    events.push(event);
+  }
+
+  return events;
 }
 
 export function buildOverviewRecentFeedGroupDetails(
@@ -243,38 +244,38 @@ export function buildOverviewRecentFeedGroupDetails(
     accountUsername?: string | null;
     accountId?: string | null;
     businessTimezone?: string | null;
-    windowDays?: number;
-    now?: Date;
+    activeBusinessDays?: number;
   } = {},
 ) {
   const accountUsername = normalizeUsername(options.accountUsername);
   const accountId = readString(options.accountId, "") || null;
-  const businessTimezone = normalizeBusinessTimezone(options.businessTimezone);
-  const windowDays = Math.max(options.windowDays ?? OVERVIEW_RECENT_FEED_WINDOW_DAYS, 1);
-  const now = options.now ?? new Date();
+  const activeBusinessDays = Math.max(options.activeBusinessDays ?? OVERVIEW_RECENT_FEED_ACTIVE_BUSINESS_DAYS, 1);
+  const events = collectOverviewRecentFeedEvents(rows, {
+    accountId,
+    businessTimezone: options.businessTimezone,
+  });
+  const activeDays = resolveOverviewRecentActiveBusinessDays(events, activeBusinessDays);
+  if (!activeDays.length) return [];
 
+  const activeDaySet = new Set(activeDays);
   const groups = new Map<string, {
     groupKey: string;
     actionKind: OverviewRecentFeedActionKind;
     sourceTargetUsername: string | null;
+    businessDayKey: string;
     count: number;
     latestAt: string;
     touched: string[];
     ids: string[];
   }>();
 
-  for (const row of rows) {
-    const event = mapOverviewRecentFeedSourceEvent(row, { businessTimezone, accountId });
-    if (!event) continue;
-    if (!eventInOverviewRecentBusinessWindow(event.eventAt, businessTimezone, windowDays, now)) continue;
-
-    const actionKind = resolveOverviewFeedActionKind(row);
-    if (!actionKind) continue;
+  for (const event of events) {
+    if (!activeDaySet.has(event.businessDayKey)) continue;
 
     const groupKey = resolveOverviewFeedGroupKey({
-      actionKind,
+      accountId: event.accountId ?? accountId,
+      actionKind: event.actionKind,
       sourceTargetUsername: event.sourceTargetUsername,
-      sessionKey: event.sessionKey,
       businessDayKey: event.businessDayKey,
     });
 
@@ -282,8 +283,9 @@ export function buildOverviewRecentFeedGroupDetails(
     if (!existing) {
       groups.set(groupKey, {
         groupKey,
-        actionKind,
+        actionKind: event.actionKind,
         sourceTargetUsername: event.sourceTargetUsername,
+        businessDayKey: event.businessDayKey,
         count: 1,
         latestAt: event.eventAt,
         touched: shouldIncludeTouchedUsername(event.touchedUsername, accountUsername, event.sourceTargetUsername)
@@ -317,24 +319,17 @@ export function buildClientOverviewRecentFeed(
     accountUsername?: string | null;
     accountId?: string | null;
     businessTimezone?: string | null;
-    windowDays?: number;
-    now?: Date;
+    activeBusinessDays?: number;
   } = {},
 ): ClientOverviewRecentFeedItem[] {
   const lang = options.lang === "en" ? "en" : "fr";
   const limit = Math.min(Math.max(options.limit ?? OVERVIEW_RECENT_FEED_MAX_GROUPS, 1), OVERVIEW_RECENT_FEED_MAX_GROUPS);
-  const accountUsername = normalizeUsername(options.accountUsername);
-  const accountId = readString(options.accountId, "") || null;
-  const businessTimezone = normalizeBusinessTimezone(options.businessTimezone);
-  const windowDays = Math.max(options.windowDays ?? OVERVIEW_RECENT_FEED_WINDOW_DAYS, 1);
-  const now = options.now ?? new Date();
 
   const groups = buildOverviewRecentFeedGroupDetails(rows, {
-    accountUsername,
-    accountId,
-    businessTimezone,
-    windowDays,
-    now,
+    accountUsername: options.accountUsername,
+    accountId: options.accountId,
+    businessTimezone: options.businessTimezone,
+    activeBusinessDays: options.activeBusinessDays,
   });
 
   return groups
@@ -346,11 +341,12 @@ export function buildClientOverviewRecentFeed(
       const overflowCount = Math.max(0, distinctTouchedCount - visibleTouched.length);
 
       return {
-        id: `${group.actionKind}-${group.sourceTargetUsername ?? "none"}-${group.latestAt}`,
+        id: `${group.actionKind}-${group.sourceTargetUsername ?? "none"}-${group.businessDayKey}`,
         actionKind: group.actionKind,
         count: group.count,
         distinctTouchedCount,
         sourceTargetUsername: group.sourceTargetUsername,
+        businessDayKey: group.businessDayKey,
         summaryFr: buildSummary(group.actionKind, group.count, group.sourceTargetUsername, "fr"),
         summaryEn: buildSummary(group.actionKind, group.count, group.sourceTargetUsername, "en"),
         categoryLabelFr: labels.fr,
@@ -363,14 +359,23 @@ export function buildClientOverviewRecentFeed(
     });
 }
 
-export function formatOverviewRecentFeedTimestamp(value: string, lang: "fr" | "en") {
-  const date = new Date(value);
+export function formatOverviewRecentFeedBusinessDate(businessDayKey: string, lang: "fr" | "en") {
+  const [year, month, day] = businessDayKey.split("-").map(Number);
+  if (!year || !month || !day) return lang === "fr" ? "Récemment" : "Recently";
+  const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
   if (Number.isNaN(date.getTime())) return lang === "fr" ? "Récemment" : "Recently";
-
   return date.toLocaleString(lang === "fr" ? "fr-FR" : "en-US", {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  });
+}
+
+/** @deprecated Use formatOverviewRecentFeedBusinessDate with businessDayKey */
+export function formatOverviewRecentFeedTimestamp(value: string, lang: "fr" | "en") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return lang === "fr" ? "Récemment" : "Recently";
+  return date.toLocaleString(lang === "fr" ? "fr-FR" : "en-US", {
+    month: "short",
+    day: "numeric",
   });
 }

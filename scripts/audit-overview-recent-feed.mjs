@@ -7,7 +7,10 @@ import { createClient } from "@supabase/supabase-js";
 import {
   buildClientOverviewRecentFeed,
   buildOverviewRecentFeedGroupDetails,
+  formatOverviewRecentFeedBusinessDate,
+  resolveOverviewRecentActiveBusinessDays,
 } from "../lib/instagram-client/client-overview-recent-feed-projection.ts";
+import { mapOverviewRecentFeedSourceEvent } from "../lib/instagram-client/client-overview-recent-feed-projection.ts";
 
 const ACCOUNT_ID = process.argv[2] || "83de9cc9-5c37-42d1-9edc-c924352b17b1";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -22,7 +25,6 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-const now = new Date();
 const since = new Date();
 since.setUTCDate(since.getUTCDate() - 90);
 since.setUTCHours(0, 0, 0, 0);
@@ -48,22 +50,23 @@ const timezone = settingsResult.data?.timezone || "Africa/Johannesburg";
 const username = String(accountResult.data.username || "").replace(/^@+/, "").toLowerCase();
 const rows = eventsResult.data ?? [];
 
+const mappedEvents = rows
+  .map((row) => mapOverviewRecentFeedSourceEvent(row, { accountId: ACCOUNT_ID, businessTimezone: timezone }))
+  .filter(Boolean);
+const activeDays = resolveOverviewRecentActiveBusinessDays(mappedEvents, 2);
+
 const feed = buildClientOverviewRecentFeed(rows, {
   accountId: ACCOUNT_ID,
   accountUsername: username,
   businessTimezone: timezone,
-  windowDays: 14,
   limit: 5,
-  now,
 });
 
-const groups = buildOverviewRecentFeedGroupDetails(rows, {
+const allGroups = buildOverviewRecentFeedGroupDetails(rows, {
   accountId: ACCOUNT_ID,
   accountUsername: username,
   businessTimezone: timezone,
-  windowDays: 14,
-  now,
-}).slice(0, 5);
+});
 
 function actionLabel(kind) {
   return ({
@@ -75,24 +78,16 @@ function actionLabel(kind) {
   })[kind] || kind;
 }
 
-const table = groups.map((group, index) => {
-  const item = feed[index];
+const table = allGroups.map((group) => {
+  const item = feed.find((entry) => entry.id === `${group.actionKind}-${group.sourceTargetUsername ?? "none"}-${group.businessDayKey}`);
   return {
+    date_business: formatOverviewRecentFeedBusinessDate(group.businessDayKey, "fr"),
     action: actionLabel(group.actionKind),
     compte_cible: group.sourceTargetUsername ? `@${group.sourceTargetUsername}` : "—",
-    date_groupe: new Date(group.latestAt).toLocaleString("fr-FR", {
-      timeZone: timezone,
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    events_reels: group.count,
+    events_success: group.count,
     comptes_touches_distincts: group.touched.length,
-    nombre_phrase: item?.count ?? group.count,
+    texte_ui: item?.summaryFr ?? null,
     bubble_plus_n: item?.overflowCount ?? Math.max(0, group.touched.length - 3),
-    groupe_interne: group.groupKey.replace(/run:|req:|sess:/g, "[session]:"),
-    resume: item?.summaryFr ?? null,
   };
 });
 
@@ -100,5 +95,15 @@ console.log(JSON.stringify({
   account_id: ACCOUNT_ID,
   username: `@${username}`,
   timezone,
+  active_business_days: activeDays,
   feed_groups: table,
+  overview_top5: feed.map((item) => ({
+    date_business: formatOverviewRecentFeedBusinessDate(item.businessDayKey, "fr"),
+    action: actionLabel(item.actionKind),
+    compte_cible: item.sourceTargetUsername ? `@${item.sourceTargetUsername}` : "—",
+    events_success: item.count,
+    comptes_touches_distincts: item.distinctTouchedCount,
+    texte_ui: item.summaryFr,
+    bubble_plus_n: item.overflowCount,
+  })),
 }, null, 2));

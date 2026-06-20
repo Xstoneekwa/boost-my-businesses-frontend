@@ -272,7 +272,6 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       accountUsername,
       businessTimezone,
       limit: 5,
-      windowDays: 14,
     },
   );
 
