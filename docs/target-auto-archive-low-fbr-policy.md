@@ -1,84 +1,97 @@
-# Target auto-archive — low followback ratio (design only)
+# Target auto-archive — low followback ratio (production policy)
 
-Status: **designed + scaffolded, not production-active**.
+Status: **production-ready with env gates**.
 
-## Product rule (future)
+## Product rule (platform-wide)
 
-Archive a target account (soft) when **all** are true:
+Soft-archive a target when **all** are true for the same `account_id` + normalized username:
 
-1. `follows_sent_count >= 100` for the same `account_id` + target username
-2. `followback_ratio <= 8%` (aligned with existing P1c classifier)
-3. `followbacks_metrics_reliable_at IS NOT NULL` (mandatory reliability gate)
+1. `follows_sent_count >= 100`
+2. `followback_ratio < 8%` (**strict** — exactly 8.0% is **not** archived)
+3. `followbacks_metrics_reliable_at IS NOT NULL`
+4. `quality_status = eligible` and target active (not archived/deleted)
 
 Action:
 
-- soft archive only (`status = archived`)
+- `status = archived` (soft archive only)
 - `archive_reason = auto_low_followback_ratio`
-- `auto_archived_at` set
-- `readd_blocked_until = now + 90 days` (same campaign / `account_id`)
+- `auto_archived_at = now()`
+- **Permanent re-add block** (same campaign):
+  - `readd_blocked_permanently = true`
+  - `readd_block_reason = auto_low_followback_ratio`
+  - `readd_blocked_at = now()`
+  - `readd_blocked_until = null` (no 90-day window)
 
 Never hard delete.
 
-## Metrics reliability audit (2026-06-15)
+## Never auto-archive when
 
-| Metric | Reliable today? | Evidence |
-|--------|-----------------|----------|
-| `follows_sent_count` | **Mostly yes** | Incremented by worker via `record_follow_source_follow_success` → RPC `increment_ig_target_follows_sent_p1c` per `target_id` |
-| `followbacks_count` | **No** | Column exists; worker never writes it; prod max = 0 |
-| `followback_ratio` | **No for policy** | DB trigger computes `followbacks / follows`; with `followbacks_count = 0` and `follows > 0` → artificial **0%** |
+- `follows_sent_count < 100`
+- `followbacks_metrics_reliable_at IS NULL`
+- `followback_ratio IS NULL`
+- FBR not measured (0 followbacks without certification → **non mesuré**, not 0%)
+- already archived/deleted
 
-Conclusion: **`metricsReliable = false`** until worker certifies CT-level followbacks and sets `followbacks_metrics_reliable_at`.
-
-Prod snapshot: max `follows_sent_count = 18`, zero targets with `>= 100` follows, zero with `followbacks_count > 0`.
-
-## Feature flags (default safe)
+## Feature flags
 
 ```env
 TARGET_AUTO_ARCHIVE_LOW_FBR_ENABLED=false
 TARGET_AUTO_ARCHIVE_LOW_FBR_DRY_RUN=true
 TARGET_AUTO_ARCHIVE_ALLOW_ADMIN_RESTORE=false
+
+TARGET_AUTO_ARCHIVE_LOW_FBR_CRON_ENABLED=false
+TARGET_AUTO_ARCHIVE_LOW_FBR_CRON_TOKEN=...
+TARGET_AUTO_ARCHIVE_LOW_FBR_CRON_LOCK_TTL_SECONDS=900
+TARGET_AUTO_ARCHIVE_LOW_FBR_CRON_WORKER_ID=target_auto_archive_low_fbr_cron
 ```
 
-Execution requires **all**:
+Execution requires **all** for real writes:
 
 - `ENABLED=true`
 - `DRY_RUN=false`
-- candidate eligible
-- metrics reliable
+- candidate eligible + metrics reliable
+
+## Daily scheduler
+
+Route (ops only, token-protected):
+
+`GET|POST /api/instagram-dashboard/targets/auto-archive-low-fbr-cron`
+
+- Global scan all eligible active targets (paginated batches)
+- Lock via `claim_ct_target_verification_scheduler_lock` with dedicated worker id
+- Idempotent: already-archived rows excluded from scan
+
+Local/script dry-run:
+
+```bash
+TARGET_AUTO_ARCHIVE_LOW_FBR_ENABLED=true \
+TARGET_AUTO_ARCHIVE_LOW_FBR_DRY_RUN=true \
+node scripts/run-target-auto-archive-low-fbr.mjs
+```
 
 ## Re-add blocking
 
-Guard wired in shared `targets-service.ts`:
+Guard in shared `targets-service.ts` for:
 
-- client manual add
-- client bulk / Target AI bulk (`addAccountTargetsBulk`)
-- admin/BotApp routes delegating to the same service
-- restore blocked while `readd_blocked_until` active (admin override env only)
+- client manual / bulk / Target AI
+- admin / BotApp relay (same service)
+- **restore blocked** for `auto_low_followback_ratio` unless `TARGET_AUTO_ARCHIVE_ALLOW_ADMIN_RESTORE=true`
 
 Client message:
 
 > Ce compte cible a été mis de côté pour cette campagne.
 
-## Audit events
+Scope: same `account_id` + normalized username only.
 
-Internal operations (not client-facing):
+## Audit events
 
 - `target_auto_archived_low_followback_ratio`
 - `target_readd_blocked_low_followback_ratio`
-
-Client Activity Log label (future): **Compte cible mis de côté**
-
-## Activation checklist (future GO)
-
-1. Worker: durable CT followback attribution from `ig_interacted_users.source_target_id`
-2. Worker: increment `ig_targets.followbacks_count` + set `followbacks_metrics_reliable_at`
-3. Tests on real attribution paths
-4. Enable dry-run review in staging
-5. Liam GO → `ENABLED=true`, `DRY_RUN=false`
 
 ## Files
 
 - `lib/instagram-dashboard/target-auto-archive-low-fbr-policy.ts`
 - `lib/instagram-dashboard/target-auto-archive-low-fbr-executor.ts`
-- `lib/instagram-dashboard/target-auto-archive-low-fbr.test.mjs`
-- `supabase/migrations/20260615180000_target_auto_archive_low_fbr_foundation.sql`
+- `lib/instagram-dashboard/target-auto-archive-low-fbr-cron.ts`
+- `app/api/instagram-dashboard/targets/auto-archive-low-fbr-cron/route.ts`
+- `supabase/migrations/20260615190000_target_auto_archive_low_fbr_permanent_block.sql`

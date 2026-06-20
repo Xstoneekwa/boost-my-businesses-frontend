@@ -2,7 +2,6 @@ import { readString } from "../instagram-client/guards.ts";
 
 export const TARGET_AUTO_ARCHIVE_LOW_FBR_THRESHOLD_PERCENT = 8;
 export const TARGET_AUTO_ARCHIVE_LOW_FBR_MIN_FOLLOWS_SENT = 100;
-export const TARGET_AUTO_ARCHIVE_LOW_FBR_READD_BLOCK_DAYS = 90;
 export const TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON = "auto_low_followback_ratio";
 export const TARGET_AUTO_ARCHIVE_LOW_FBR_AUDIT_OPERATION = "target_auto_archived_low_followback_ratio";
 export const TARGET_AUTO_ARCHIVE_READD_BLOCKED_AUDIT_REASON = "target_readd_blocked_low_followback_ratio";
@@ -22,6 +21,9 @@ export type TargetReaddRow = {
   archived_at?: string | null;
   archive_reason?: string | null;
   readd_blocked_until?: string | null;
+  readd_blocked_permanently?: boolean | null;
+  readd_block_reason?: string | null;
+  readd_blocked_at?: string | null;
 };
 
 export type MetricsReliabilityEvaluation = {
@@ -78,6 +80,10 @@ function readCount(value: unknown) {
 function readRatio(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isBelowAutoArchiveThreshold(ratio: number) {
+  return ratio < TARGET_AUTO_ARCHIVE_LOW_FBR_THRESHOLD_PERCENT;
 }
 
 export function evaluateTargetFollowbackMetricsReliability(
@@ -171,20 +177,20 @@ export function classifyLowFbrPerformance(
   }
 
   if (!reliability.metricsReliable) {
-    const performanceStatus = ratio <= TARGET_AUTO_ARCHIVE_LOW_FBR_THRESHOLD_PERCENT ? "bad" : ratio < 15 ? "avg" : "good";
+    const performanceStatus = isBelowAutoArchiveThreshold(ratio) ? "bad" : ratio < 15 ? "avg" : "good";
     return {
       eligible: false,
       metricsReliable: false,
       followsSent,
       followbackRatio: ratio,
       performanceStatus,
-      reviewCandidate: ratio <= TARGET_AUTO_ARCHIVE_LOW_FBR_THRESHOLD_PERCENT,
+      reviewCandidate: isBelowAutoArchiveThreshold(ratio),
       wouldArchive: false,
       blockReason: reliability.reason,
     };
   }
 
-  if (ratio <= TARGET_AUTO_ARCHIVE_LOW_FBR_THRESHOLD_PERCENT) {
+  if (isBelowAutoArchiveThreshold(ratio)) {
     return {
       eligible: true,
       metricsReliable: true,
@@ -233,12 +239,6 @@ export function shouldExecuteTargetAutoArchiveLowFbr(
   return true;
 }
 
-export function computeTargetReaddBlockedUntil(from: Date = new Date()) {
-  const until = new Date(from);
-  until.setUTCDate(until.getUTCDate() + TARGET_AUTO_ARCHIVE_LOW_FBR_READD_BLOCK_DAYS);
-  return until.toISOString();
-}
-
 function normalizeUsername(value: unknown) {
   return readString(value, "").trim().replace(/^@+/, "").toLowerCase();
 }
@@ -248,10 +248,21 @@ function isArchivedRow(row: TargetReaddRow) {
   return status === "archived" || Boolean(readString(row.archived_at, ""));
 }
 
+export function isPermanentAutoLowFbrReaddBlock(row: TargetReaddRow) {
+  const archiveReason = readString(row.archive_reason, "");
+  const blockReason = readString(row.readd_block_reason, "");
+  if (archiveReason !== TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON
+    && blockReason !== TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON) {
+    return false;
+  }
+  if (row.readd_blocked_permanently === true) return true;
+  if (blockReason === TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON) return true;
+  return isArchivedRow(row) && archiveReason === TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON;
+}
+
 export function evaluateTargetReaddBlock(
   rows: TargetReaddRow[],
   targetUsername: string,
-  now: Date = new Date(),
 ): TargetReaddBlockEvaluation {
   const normalized = normalizeUsername(targetUsername);
   if (!normalized) {
@@ -259,14 +270,9 @@ export function evaluateTargetReaddBlock(
   }
 
   const blockedRow = rows.find((row) => {
-    if (!isArchivedRow(row)) return false;
     const rowUsername = normalizeUsername(row.normalized_username ?? row.target_username);
     if (rowUsername !== normalized) return false;
-    if (readString(row.archive_reason, "") !== TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON) return false;
-    const blockedUntil = readString(row.readd_blocked_until, "");
-    if (!blockedUntil) return false;
-    const untilMs = Date.parse(blockedUntil);
-    return Number.isFinite(untilMs) && untilMs > now.getTime();
+    return isPermanentAutoLowFbrReaddBlock(row);
   });
 
   if (!blockedRow) {

@@ -724,15 +724,13 @@ export async function restoreAccountTarget(
     && !shouldAllowAutoArchiveRestoreOverride(ctx.actorType)
   ) {
     const block = evaluateTargetReaddBlock(rows, readString(row.normalized_username, readString(row.target_username, "")));
-    if (block.blocked) {
-      return {
-        ok: false,
-        error: ctx.actorType === "client"
-          ? (block.clientMessageFr ?? "Ce compte cible a été mis de côté pour cette campagne.")
-          : "Restore is blocked until the performance re-add window expires or an admin override is enabled.",
-        status: 409,
-      };
-    }
+    return {
+      ok: false,
+      error: ctx.actorType === "client"
+        ? (block.clientMessageFr ?? "Ce compte cible a été mis de côté pour cette campagne.")
+        : "Restore is blocked for targets set aside by the low performance policy. Admin override env is required.",
+      status: 409,
+    };
   }
   if (hasActiveDuplicateForRestore(row, rows)) return { ok: false, error: "duplicate_existing_active", status: 409 };
 
