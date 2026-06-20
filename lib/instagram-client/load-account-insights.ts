@@ -9,6 +9,10 @@ import {
 import { createSupabaseClient } from "@/lib/supabase";
 import { computeClientCampaignInteractionOverview, type ClientCampaignInteractionOverview } from "./client-campaign-interaction-stats";
 import { resolveClientFollowerEvolutionMetrics, type ClientFollowerEvolutionMetrics } from "./client-follower-evolution-metrics";
+import {
+  buildClientOverviewRecentFeed,
+  type ClientOverviewRecentFeedItem,
+} from "./client-overview-recent-feed-projection";
 import { readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -56,6 +60,7 @@ export type ClientAccountInsights = {
     d90: number[];
   };
   activity: ClientActivityFeedItem[];
+  recentFeed: ClientOverviewRecentFeedItem[];
   targets: ClientTargetListItem[];
   whitelist: string[];
   blacklist: string[];
@@ -177,7 +182,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     supabase.from("ig_account_settings").select("timezone").eq("account_id", accountId).maybeSingle(),
     supabase
       .from("ig_interaction_events")
-      .select("id,event_type,event_status,interaction_type,event_at,created_at")
+      .select("id,account_id,run_id,request_id,session_id,event_type,event_status,interaction_type,event_at,created_at,username,source_target_username")
       .eq("account_id", accountId)
       .gte("event_at", since.toISOString())
       .order("event_at", { ascending: false })
@@ -258,6 +263,18 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       actionType: labels.type,
     } satisfies ClientActivityFeedItem;
   });
+  const accountUsername = readString(accountResult.data.username, "").replace(/^@+/, "").toLowerCase();
+  const businessTimezone = readString((settingsResult.data as SupabaseRecord | null)?.timezone, "");
+  const recentFeed = buildClientOverviewRecentFeed(
+    (overviewEventsResult.data ?? []) as SupabaseRecord[],
+    {
+      accountId,
+      accountUsername,
+      businessTimezone,
+      limit: 5,
+      windowDays: 14,
+    },
+  );
 
   const targets = ((targetsResult.data ?? []) as SupabaseRecord[])
     .filter(isActiveTarget)
@@ -292,6 +309,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       d90: buildChartSeries(statsDays, 90),
     },
     activity,
+    recentFeed,
     targets,
     whitelist: parseListField(filters?.whitelist_words),
     blacklist: parseListField(filters?.blacklist_accounts),

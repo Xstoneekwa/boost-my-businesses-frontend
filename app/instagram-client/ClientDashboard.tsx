@@ -7,6 +7,7 @@ import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
 import ClientActivityPanel from "./ClientActivityPanel";
+import ClientOverviewRecentFeed from "./ClientOverviewRecentFeed";
 import TargetAvatar from "./TargetAvatar";
 import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
 import { normalizeTargetUsername } from "@/lib/instagram-targets";
@@ -29,7 +30,6 @@ import {
 type Lang = "fr" | "en";
 type Theme = "dark" | "light";
 type View = "overview" | "activity" | "targeting" | "account";
-type FeedType = "fo" | "li" | "dm" | "st";
 
 type ClientDashboardActionNotification = {
   id: string;
@@ -53,8 +53,6 @@ type ClientProgressSnapshot = {
   process_log: Array<{ id: string; timestamp: string; phase: string; message: string }>;
 };
 
-type FeedItem = { t: FeedType; fr: string; en: string; n: number; time: string; timeEn: string };
-
 interface Props {
   userId: string;
   tenantId: string;
@@ -69,22 +67,6 @@ interface Props {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LANG_KEY = "bmb_dash_lang";
 const THEME_KEY = "bmb_th";
-
-// ─── Mock data (activity feed demo only — never used for follower chart) ───────
-const FD: FeedItem[] = [
-  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:47, time:"Aujourd'hui · 14:32", timeEn:"Today · 2:32 PM" },
-  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:62, time:"Aujourd'hui · 12:15", timeEn:"Today · 12:15 PM" },
-  { t:"st", fr:"Vues de stories",      en:"Story views",     n:31, time:"Aujourd'hui · 09:40", timeEn:"Today · 9:40 AM" },
-  { t:"dm", fr:"DMs de bienvenue",     en:"Welcome DMs",     n:8,  time:"Aujourd'hui · 08:00", timeEn:"Today · 8:00 AM" },
-  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:45, time:"Hier · 18:22",        timeEn:"Yesterday · 6:22 PM" },
-  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:58, time:"Hier · 15:10",        timeEn:"Yesterday · 3:10 PM" },
-  { t:"st", fr:"Vues de stories",      en:"Story views",     n:29, time:"Hier · 11:05",        timeEn:"Yesterday · 11:05 AM" },
-  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:50, time:"2 juin · 17:30",      timeEn:"Jun 2 · 5:30 PM" },
-  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:65, time:"2 juin · 13:20",      timeEn:"Jun 2 · 1:20 PM" },
-  { t:"dm", fr:"DMs de bienvenue",     en:"Welcome DMs",     n:6,  time:"2 juin · 09:15",      timeEn:"Jun 2 · 9:15 AM" },
-  { t:"fo", fr:"Abonnements envoyés",  en:"Follows sent",    n:44, time:"1 juin · 20:00",      timeEn:"Jun 1 · 8:00 PM" },
-  { t:"li", fr:"Likes ciblés",         en:"Targeted likes",  n:55, time:"1 juin · 16:45",      timeEn:"Jun 1 · 4:45 PM" },
-];
 
 const INIT_TARGETS = ["mode_paris_fr","luxeboutique_fr","styliste_officiel","fashionweek_fr","createur_mode","parisienne_style","atelier_couture_fr","galerie_lafayette"];
 const INIT_WHITE   = ["demo_protected","demo_vip","demo_partner"];
@@ -266,37 +248,7 @@ function smoothPath(pts: [number,number][]) {
   return d;
 }
 
-// ─── Feed icons ───────────────────────────────────────────────────────────────
-const FeedIcon = ({ type }: { type: FeedType }) => {
-  const props = { width:14, height:14, fill:"none", strokeWidth:2, strokeLinecap:"round" as const, strokeLinejoin:"round" as const };
-  if (type === "fo") return <svg viewBox="0 0 24 24" {...props}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>;
-  if (type === "li") return <svg viewBox="0 0 24 24" {...props}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>;
-  if (type === "dm") return <svg viewBox="0 0 24 24" {...props}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-  return <svg viewBox="0 0 24 24" {...props}><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>;
-};
-
-function formatActivityTimestamp(value: string | null, lang: Lang) {
-  if (!value) return lang === "fr" ? "Récemment" : "Recently";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return lang === "fr" ? "Récemment" : "Recently";
-  return date.toLocaleString(lang === "fr" ? "fr-FR" : "en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function mapInsightsActivity(items: ClientAccountInsights["activity"], lang: Lang): FeedItem[] {
-  return items.map((item) => ({
-    t: item.actionType as FeedType,
-    fr: item.labelFr,
-    en: item.labelEn,
-    n: item.count,
-    time: formatActivityTimestamp(item.timestamp, "fr"),
-    timeEn: formatActivityTimestamp(item.timestamp, "en"),
-  }));
-}
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function formatLinkedAccountLine(account: ClientLinkedInstagramAccount, lang: Lang) {
   const status = account.connected
@@ -348,28 +300,6 @@ function PaymentBillingDrawer({ open, onClose, lang, t, billing }: {
         </div>
       </aside>
     </>
-  );
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function FeedList({ items, lang, emptyLabel }: { items: FeedItem[]; lang: Lang; emptyLabel?: string }) {
-  if (items.length === 0) {
-    return <div className="cd-tg2-col-empty">{emptyLabel || (lang === "fr" ? "Aucune activité disponible pour le moment" : "No activity available yet")}</div>;
-  }
-  return (
-    <div className="cd-feed">
-      {items.map((d, i) => (
-        <div key={i} className="cd-fi">
-          <div className={`cd-fi-ic cd-fi-${d.t}`}><FeedIcon type={d.t} /></div>
-          <div className="cd-fi-body">
-            <div className="cd-fi-title">{lang === "en" ? d.en : d.fr}</div>
-            <div className="cd-fi-meta">{lang === "en" ? d.timeEn : d.time}</div>
-          </div>
-          <div className="cd-fi-n">{d.n}</div>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -819,10 +749,10 @@ export default function ClientDashboard({
 
   const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
   const sidebarPlan = workspace?.subscriptionLabel || accountInsights?.packageLabel || "—";
-  const activityBadge = hasOverviewInsights ? (accountInsights?.activity.length || undefined) : undefined;
-  const liveFeedItems = hasOverviewInsights
-    ? mapInsightsActivity(accountInsights!.activity, lang)
-    : [];
+  const activityBadge = hasOverviewInsights && accountInsights?.recentFeed.length
+    ? accountInsights.recentFeed.reduce((sum, item) => sum + item.count, 0)
+    : undefined;
+  const overviewRecentFeed = hasOverviewInsights ? (accountInsights?.recentFeed ?? []) : [];
   const overviewStats = buildOverviewStats(accountInsights, lang);
   const followerChartUsername = primaryAccount?.username || accountInsights?.username || initialFollowerGrowth?.username || null;
   const followerChartTitle = buildFollowerChartTitle(followerChartUsername, lang);
@@ -1093,7 +1023,13 @@ export default function ClientDashboard({
                   <h3>{t.feed.title}</h3>
                   <a href="#" onClick={e => { e.preventDefault(); handleNavigate("activity"); }}>{t.feed.seeAll}</a>
                 </div>
-                <FeedList items={liveFeedItems.slice(0, 5)} lang={lang} emptyLabel={lang === "fr" ? "Données en cours" : "Data pending"}/>
+                <ClientOverviewRecentFeed
+                  items={overviewRecentFeed}
+                  lang={lang}
+                  emptyLabel={lang === "fr"
+                    ? "Les premières activités de votre campagne apparaîtront ici."
+                    : "Your campaign activity will appear here once it starts."}
+                />
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                 {/* Plan card */}
@@ -1616,7 +1552,37 @@ const CSS = `
   .cd-act-cards{display:grid}
 }
 
-/* Feed */
+/* Overview recent feed */
+.cd-orf{display:flex;flex-direction:column;gap:0;padding:2px 0}
+.cd-orf-empty{padding:18px 4px;font-size:.84rem;color:var(--ink-mute);line-height:1.55}
+.cd-orf-item{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px 12px;padding:14px 0;border-bottom:1px solid var(--line-2)}
+.cd-orf-item:last-child{border-bottom:none;padding-bottom:0}
+.cd-orf-rail{position:relative;display:flex;justify-content:center}
+.cd-orf-line{position:absolute;top:34px;bottom:-14px;left:50%;width:2px;transform:translateX(-50%);background:var(--line-2)}
+.cd-orf-icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line);position:relative;z-index:1}
+.cd-orf-icon svg{stroke-width:2.1}
+.cd-orf-icon-fo svg{stroke:#5a6cf5}
+.cd-orf-icon-li svg{stroke:var(--accent)}
+.cd-orf-icon-dm svg{stroke:var(--good)}
+.cd-orf-icon-st svg{stroke:var(--warn)}
+.cd-orf-icon-uf svg{stroke:var(--ink-mute)}
+.cd-orf-body{min-width:0;display:flex;flex-direction:column;gap:4px}
+.cd-orf-summary{font-size:.84rem;font-weight:600;color:var(--ink);line-height:1.45}
+.cd-orf-highlight{color:#8ea2ff;font-weight:800}
+.cd-orf-meta{font-size:.72rem;color:var(--ink-mute)}
+.cd-orf-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.cd-orf-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:100px;font-size:.68rem;font-weight:700;letter-spacing:.02em;border:1px solid transparent}
+.cd-orf-pill-fo{background:rgba(90,108,245,.12);color:#8ea2ff;border-color:rgba(90,108,245,.22)}
+.cd-orf-pill-li{background:rgba(232,160,48,.12);color:var(--accent);border-color:rgba(232,160,48,.22)}
+.cd-orf-pill-dm{background:rgba(52,211,153,.12);color:var(--good);border-color:rgba(52,211,153,.22)}
+.cd-orf-pill-st{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.22)}
+.cd-orf-pill-uf{background:rgba(255,255,255,.05);color:var(--ink-mute);border-color:var(--line)}
+.cd-orf-avatars{display:inline-flex;align-items:center;margin-left:2px}
+.cd-orf-av{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.62rem;font-weight:800;color:#fff;border:2px solid var(--surface);margin-left:-7px}
+.cd-orf-av:first-child{margin-left:0}
+.cd-orf-more{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.62rem;font-weight:800;color:var(--ink-mute);background:var(--surface-2);border:2px solid var(--surface);margin-left:-7px}
+
+/* Feed (legacy list styles retained for other surfaces) */
 .cd-feed{display:flex;flex-direction:column}
 .cd-fi{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-2)}
 .cd-fi:last-child{border-bottom:none;padding-bottom:0}
