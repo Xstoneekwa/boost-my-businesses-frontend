@@ -6,9 +6,15 @@ import {
   normalizeInstagramPublicUsername,
 } from "@/lib/instagram-public-profile-lookup";
 import {
-  defaultAddProfileCommercialPackage,
+  isAddProfileCommercialPackage,
   resolveAddProfilePackagePreset,
+  type AddProfileCommercialPackage,
 } from "@/lib/instagram-dashboard/add-profile-packages";
+import {
+  entitlementToAddProfileInput,
+  getReservedEntitlementForClient,
+  markEntitlementConsumed,
+} from "@/lib/commercial/entitlements";
 import { applyAddProfileRuntimeDefaults } from "@/lib/instagram-dashboard/add-profile-runtime-defaults";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
@@ -172,7 +178,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
 
   const linkedCount = await countClientAccounts(supabase, input.clientId);
   const maxAccounts = clientMaxAccountsLimit();
-  if (linkedCount >= maxAccounts) {
+  if (linkedCount >= maxAccounts && Number.isFinite(maxAccounts)) {
     return { ok: false, status: 409, error: "Maximum number of Instagram accounts reached for your plan.", code: "max_accounts_reached" };
   }
 
@@ -194,8 +200,34 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     return { ok: false, status: 409, error: "This Instagram account is already linked to your workspace.", code: "username_already_linked" };
   }
 
-  const commercialPackage = defaultAddProfileCommercialPackage();
-  const packagePreset = resolveAddProfilePackagePreset({ commercialPackage, runtimeMode: "safe_setup", addons: [] });
+  const reservedEntitlement = await getReservedEntitlementForClient(supabase, input.clientId);
+  if (!reservedEntitlement?.id) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Choose and activate a plan before adding an Instagram account.",
+      code: "entitlement_required",
+    };
+  }
+
+  const entitlementSelection = entitlementToAddProfileInput(reservedEntitlement);
+  const commercialPackage = isAddProfileCommercialPackage(entitlementSelection.commercialPackage)
+    ? entitlementSelection.commercialPackage
+    : null;
+  if (!commercialPackage) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Your selected plan cannot be applied to this account.",
+      code: "entitlement_package_invalid",
+    };
+  }
+
+  const packagePreset = resolveAddProfilePackagePreset({
+    commercialPackage,
+    runtimeMode: "safe_setup",
+    addons: entitlementSelection.addons,
+  });
 
   if (dryRun) {
     return {
@@ -297,11 +329,18 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     clientId: input.clientId,
     commercialPackage,
     runtimeMode: "safe_setup",
-    addons: [],
+    addons: entitlementSelection.addons,
+    outreachVariant: entitlementSelection.outreachVariant,
+    entitlementId: reservedEntitlement.id,
   });
   if (!ownership.ok) {
     return { ok: false, status: 500, error: "Could not link account to your client workspace.", code: ownership.reason };
   }
+
+  await markEntitlementConsumed(supabase, {
+    entitlementId: reservedEntitlement.id,
+    accountId,
+  });
 
   await applyAddProfileRuntimeDefaults(supabase, {
     accountId,

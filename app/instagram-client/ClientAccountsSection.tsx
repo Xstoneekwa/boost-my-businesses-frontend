@@ -78,6 +78,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const [actionAccountId, setActionAccountId] = useState<string | null>(null);
   const [processModal, setProcessModal] = useState<ProcessModalState | null>(null);
   const [processRefreshing, setProcessRefreshing] = useState(false);
+  const [entitlementReady, setEntitlementReady] = useState<boolean | null>(null);
   const pollAttemptsRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
 
@@ -85,9 +86,39 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     setItems(accounts);
   }, [accounts]);
 
-  const canAddAccount = useMemo(() => items.length < 5, [items.length]);
-  const isEmpty = items.length === 0;
+  useEffect(() => {
+    let cancelled = false;
+    async function loadEntitlementGate() {
+      try {
+        const response = await fetch("/api/instagram-client/entitlements/reserved", {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        const payload = await response.json() as {
+          ok?: boolean;
+          data?: { can_add_account_directly?: boolean };
+        };
+        if (cancelled) return;
+        setEntitlementReady(Boolean(payload.ok && payload.data?.can_add_account_directly));
+      } catch {
+        if (!cancelled) setEntitlementReady(false);
+      }
+    }
+    void loadEntitlementGate();
+    return () => { cancelled = true; };
+  }, [items.length]);
+
   const actionBusy = actionKind !== null;
+  const isEmpty = items.length === 0;
+
+  function handleAddAccountClick() {
+    if (entitlementReady) {
+      setFormOpen(true);
+      return;
+    }
+    router.push("/instagram-client/choose-plan");
+  }
 
   function pushMessage(text: string, tone: "success" | "error" = "success") {
     setMessage(text);
@@ -421,8 +452,8 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                   : labelFor(lang, "Actualiser", "Refresh")}
               </button>
             ) : null}
-            {canAddAccount && !isEmpty ? (
-              <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" disabled={Boolean(processModal)} onClick={() => setFormOpen(true)}>
+            {!isEmpty ? (
+              <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
                 {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
               </button>
             ) : null}
@@ -432,7 +463,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         {isEmpty ? (
           <div className="cd-accounts-empty">
             <p>{labelFor(lang, "Aucun compte Instagram ajouté.", "No Instagram account added yet.")}</p>
-            <button type="button" className="cd-btn cd-btn-primary" disabled={Boolean(processModal)} onClick={() => setFormOpen(true)}>
+            <button type="button" className="cd-btn cd-btn-primary" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
               {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
             </button>
           </div>

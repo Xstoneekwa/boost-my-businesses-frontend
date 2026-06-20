@@ -60,7 +60,7 @@ export function rejectTechnicalClientFields(body: Record<string, unknown> | null
 export function clientMaxAccountsLimit() {
   const fromEnv = Number(process.env.INSTAGRAM_CLIENT_MAX_ACCOUNTS ?? "");
   if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv);
-  return 5;
+  return Number.POSITIVE_INFINITY;
 }
 
 export type ClientAccountProjectionInput = {

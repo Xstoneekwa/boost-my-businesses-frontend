@@ -29,6 +29,8 @@ export type EnsureAddProfileOwnershipInput = {
   addons?: string[];
   runtimeMode: AddProfileRuntimeMode | string;
   clientId?: string;
+  outreachVariant?: string | null;
+  entitlementId?: string | null;
 };
 
 export type EnsureAddProfileOwnershipResult =
@@ -93,6 +95,7 @@ async function ensureAccountCommercialPackage(
   accountId: string,
   commercialPackageCode: string,
   source: string,
+  metadataSafe: Record<string, unknown> = {},
 ) {
   const { data: existing, error: existingError } = await supabase
     .from("account_commercial_packages")
@@ -121,6 +124,7 @@ async function ensureAccountCommercialPackage(
     metadata_safe: {
       source: "add_profile",
       source_surface: "admin_dashboard",
+      ...metadataSafe,
     },
   });
 
@@ -325,7 +329,11 @@ export async function ensureAddProfileOwnership(
     }
 
     await ensureCommercialPackagePreset(supabase, preset);
-    await ensureAccountCommercialPackage(supabase, input.accountId, commercialPackageCode, "add_profile");
+    await ensureAccountCommercialPackage(supabase, input.accountId, commercialPackageCode, "add_profile", {
+      ...(input.outreachVariant ? { outreach_variant: input.outreachVariant } : {}),
+      ...(input.entitlementId ? { entitlement_id: input.entitlementId } : {}),
+      source_surface: "instagram_client",
+    });
     await ensureAccountCommercialAddons(supabase, input.accountId, addonCodes);
     const clientInstagramAccountId = await ensureClientInstagramAccount(
       supabase,
