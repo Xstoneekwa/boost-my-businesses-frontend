@@ -7,6 +7,7 @@ import { LogOut } from "lucide-react";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
 import ClientActivityPanel from "./ClientActivityPanel";
+import ClientDmTemplatesSection from "./ClientDmTemplatesSection";
 import ClientOverviewRecentFeed from "./ClientOverviewRecentFeed";
 import TargetAvatar from "./TargetAvatar";
 import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
@@ -29,7 +30,7 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
 type Theme = "dark" | "light";
-type View = "overview" | "activity" | "targeting" | "account";
+type View = "overview" | "activity" | "targeting" | "dm-templates" | "account";
 
 type ClientDashboardActionNotification = {
   id: string;
@@ -87,7 +88,7 @@ function matchesTargetSearch(username: string, query: string) {
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 const T = {
   fr: {
-    views: { overview:"Vue d'ensemble", activity:"Activité", targeting:"Ciblage", account:"Mon compte" },
+    views: { overview:"Vue d'ensemble", activity:"Activité", targeting:"Ciblage", "dm-templates":"DM Templates", account:"Mon compte" },
     nav: { dashboard:"Tableau de bord", campaign:"Campagne", myaccount:"Mon compte" },
     topbar: { active:"Campagne active" },
     stats: [
@@ -161,7 +162,7 @@ const T = {
     preview:"Aperçu démo — liez votre compte Instagram pour activer les données réelles de votre campagne.",
   },
   en: {
-    views: { overview:"Overview", activity:"Activity", targeting:"Targeting", account:"My account" },
+    views: { overview:"Overview", activity:"Activity", targeting:"Targeting", "dm-templates":"DM Templates", account:"My account" },
     nav: { dashboard:"Dashboard", campaign:"Campaign", myaccount:"Account" },
     topbar: { active:"Campaign active" },
     stats: [
@@ -900,6 +901,7 @@ export default function ClientDashboard({
     { view:"overview",  label:t.views.overview,  section:t.nav.dashboard, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
     { view:"activity",  label:t.views.activity,  icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>, badge:activityBadge },
     { view:"targeting", label:t.views.targeting, section:t.nav.campaign, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg> },
+    { view:"dm-templates", label:t.views["dm-templates"], icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="14" x2="13" y2="14"/></svg> },
     { view:"account",   label:t.views.account,   section:t.nav.myaccount, icon:<svg viewBox="0 0 24 24" width={15} height={15} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
   ];
 
@@ -1215,6 +1217,17 @@ export default function ClientDashboard({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* DM TEMPLATES */}
+        {activeView === "dm-templates" && (
+          <div className="cd-view">
+            <ClientDmTemplatesSection
+              lang={lang}
+              accounts={hasLinkedInstagramAccount ? initialAccounts : []}
+              hasLinkedInstagramAccount={hasLinkedInstagramAccount}
+            />
           </div>
         )}
 
@@ -1821,8 +1834,41 @@ const CSS = `
 .cd-ai-help{font-size:.82rem;color:var(--accent);text-decoration:none}
 .cd-ai-help:hover{text-decoration:underline}
 
+/* DM Templates */
+.cd-dm-wrap{display:grid;gap:18px}
+.cd-dm-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.cd-dm-account-label{font-family:var(--font-d);font-weight:700;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute)}
+.cd-dm-account-select{min-width:220px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);border-radius:var(--r-sm);padding:10px 12px;font-size:.88rem}
+.cd-dm-pack-pill{font-family:var(--font-d);font-weight:700;font-size:.72rem;padding:6px 10px;border-radius:999px;border:1px solid var(--line);color:var(--ink-dim);background:var(--surface-2)}
+.cd-dm-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.cd-dm-card{display:grid;gap:14px;border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:18px}
+.cd-dm-card-welcome{border-color:rgba(52,211,153,.28);background:linear-gradient(180deg,rgba(16,185,129,.08),var(--surface) 42%)}
+.cd-dm-card-outreach{border-color:rgba(90,108,245,.28);background:linear-gradient(180deg,rgba(90,108,245,.08),var(--surface) 42%)}
+.cd-dm-card-locked .cd-dm-fields-disabled{opacity:.55;pointer-events:none;filter:grayscale(.15)}
+.cd-dm-card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.cd-dm-card-head h3{margin:0;font-family:var(--font-d);font-size:1.05rem;font-weight:800;letter-spacing:-.02em}
+.cd-dm-card-head p{margin:6px 0 0;color:var(--ink-dim);font-size:.84rem;line-height:1.45}
+.cd-dm-save-status{font-family:var(--font-d);font-size:.72rem;font-weight:700;padding:5px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink-mute)}
+.cd-dm-save-saving{color:var(--warn);border-color:rgba(251,191,36,.35)}
+.cd-dm-save-saved{color:var(--good);border-color:var(--good-line)}
+.cd-dm-save-error{color:var(--bad);border-color:var(--bad-line)}
+.cd-dm-locked-panel{display:grid;gap:12px;padding:14px;border-radius:12px;border:1px solid rgba(52,211,153,.25);background:rgba(16,185,129,.08)}
+.cd-dm-card-outreach .cd-dm-locked-panel{border-color:rgba(90,108,245,.25);background:rgba(90,108,245,.08)}
+.cd-dm-locked-copy{margin:0;color:var(--ink);font-size:.88rem;line-height:1.5}
+.cd-dm-cta{display:inline-flex;align-items:center;justify-content:center;width:fit-content;padding:11px 16px;border-radius:999px;background:var(--accent);color:#04120d;font-family:var(--font-d);font-weight:800;font-size:.84rem;text-decoration:none}
+.cd-dm-cta:hover{filter:brightness(1.05)}
+.cd-dm-offer-unavailable{margin:0;color:var(--ink-mute);font-size:.82rem}
+.cd-dm-fields{display:grid;gap:10px}
+.cd-dm-textarea{width:100%;min-height:140px;resize:vertical;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:12px 14px;font-size:.88rem;line-height:1.45}
+.cd-dm-var-hint{margin:0;color:var(--ink-mute);font-size:.78rem}
+.cd-dm-toggle-row{display:inline-flex;align-items:center;gap:10px;color:var(--ink);font-size:.86rem}
+.cd-dm-empty{display:grid;gap:10px;padding:28px;border:1px dashed var(--line);border-radius:16px;background:var(--surface)}
+.cd-dm-empty-title{margin:0;font-family:var(--font-d);font-size:1.1rem;font-weight:800}
+.cd-dm-empty-body{margin:0;color:var(--ink-dim);font-size:.9rem;line-height:1.5}
+
 /* Responsive */
 @media(max-width:1100px){
+  .cd-dm-cards{grid-template-columns:1fr}
   .cd-stats-row{grid-template-columns:1fr 1fr}
   .cd-two-col{grid-template-columns:1fr}
   .cd-tg2-cols{grid-template-columns:1fr}

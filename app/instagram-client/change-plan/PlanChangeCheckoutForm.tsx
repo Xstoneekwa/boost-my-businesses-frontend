@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { parseCheckoutApiResponse } from "@/lib/commercial/parse-checkout-api-response";
 import { COMMERCIAL_PLANS, isPlanKey, type PlanKey } from "@/lib/commercial/catalog";
 
@@ -52,7 +52,19 @@ function formatDate(iso: string, lang: "fr" | "en") {
 export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
   const lang = props.lang ?? "fr";
   const router = useRouter();
-  const [targetPlanKey, setTargetPlanKey] = useState<PlanKey>("growth");
+  const searchParams = useSearchParams();
+  const intention = searchParams.get("intention")?.trim() ?? "";
+  const targetFromQuery = searchParams.get("target")?.trim() ?? "";
+  const initialTargetPlan: PlanKey = intention === "welcome_dm" && isPlanKey(targetFromQuery)
+    ? targetFromQuery
+    : intention === "welcome_dm"
+      ? "pro"
+      : "growth";
+  const [targetPlanKey, setTargetPlanKey] = useState<PlanKey>(initialTargetPlan);
+  useEffect(() => {
+    setTargetPlanKey(initialTargetPlan);
+  }, [initialTargetPlan]);
+
   const quoteIdempotencyKey = useMemo(
     () => `${targetPlanKey}:${crypto.randomUUID()}`,
     [targetPlanKey],
@@ -145,7 +157,17 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
           : "Plan change — internal simulation, no real payment collected."}
       </div>
 
-      <h1>{lang === "fr" ? "Changer de formule" : "Change plan"}</h1>
+      <h1>{intention === "welcome_dm"
+        ? (lang === "fr" ? "Passer à Pro — message de bienvenue" : "Upgrade to Pro — welcome message")
+        : (lang === "fr" ? "Changer de formule" : "Change plan")}</h1>
+
+      {intention === "welcome_dm" ? (
+        <p style={{ color: "#a1a1aa", marginTop: -8, marginBottom: 16 }}>
+          {lang === "fr"
+            ? "Le message de bienvenue est inclus à partir de la formule Pro."
+            : "Welcome messages are included from the Pro plan upward."}
+        </p>
+      ) : null}
 
       <div className="commercial-checkout-grid">
         <label>
