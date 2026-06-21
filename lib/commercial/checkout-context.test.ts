@@ -13,6 +13,10 @@ test("resolveCheckoutContext maps flow types", () => {
     resolveCheckoutContext({ flowType: "additional_account" }),
     "existing_workspace_add_account",
   );
+  assert.equal(
+    resolveCheckoutContext({ flowType: "plan_change" }),
+    "existing_workspace_plan_change",
+  );
 });
 
 test("public checkout blocks when browser session email differs from purchaser email", () => {
@@ -65,6 +69,17 @@ test("public checkout without session blocks when purchaser auth user already ha
   }
 });
 
+test("public checkout allows incomplete resumable tenant without blocking", () => {
+  const result = evaluatePublicCheckoutConflict({
+    checkoutContext: "public_new_workspace",
+    session: null,
+    purchaserEmail: "resume@example.com",
+    purchaserAuthUserHasTenant: true,
+    purchaserHasIncompleteResumableCheckout: true,
+  });
+  assert.equal(result.ok, true);
+});
+
 test("public checkout without session allows brand-new purchaser", () => {
   const result = evaluatePublicCheckoutConflict({
     checkoutContext: "public_new_workspace",
@@ -97,6 +112,12 @@ test("public checkout success uses email login handoff", () => {
 
 test("add-account checkout success returns dashboard handoff", () => {
   const handoff = resolveCheckoutHandoff("existing_workspace_add_account");
+  assert.equal(handoff.type, "dashboard");
+  assert.equal(handoff.redirectPath, "/instagram-client");
+});
+
+test("plan change checkout returns dashboard handoff", () => {
+  const handoff = resolveCheckoutHandoff("existing_workspace_plan_change");
   assert.equal(handoff.type, "dashboard");
   assert.equal(handoff.redirectPath, "/instagram-client");
 });

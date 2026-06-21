@@ -1,6 +1,9 @@
 import type { CheckoutFlowType } from "./catalog";
 
-export type CheckoutContext = "public_new_workspace" | "existing_workspace_add_account";
+export type CheckoutContext =
+  | "public_new_workspace"
+  | "existing_workspace_add_account"
+  | "existing_workspace_plan_change";
 
 export type CheckoutSessionSnapshot = {
   userId: string;
@@ -33,6 +36,9 @@ export function resolveCheckoutContext(input: {
   if (input.flowType === "additional_account") {
     return "existing_workspace_add_account";
   }
+  if (input.flowType === "plan_change") {
+    return "existing_workspace_plan_change";
+  }
   return "public_new_workspace";
 }
 
@@ -45,6 +51,7 @@ export function evaluatePublicCheckoutConflict(input: {
   session: CheckoutSessionSnapshot | null;
   purchaserEmail: string;
   purchaserAuthUserHasTenant: boolean;
+  purchaserHasIncompleteResumableCheckout?: boolean;
 }): PublicCheckoutConflict {
   if (input.checkoutContext !== "public_new_workspace") {
     return { ok: true };
@@ -78,7 +85,7 @@ export function evaluatePublicCheckoutConflict(input: {
     };
   }
 
-  if (input.purchaserAuthUserHasTenant) {
+  if (input.purchaserAuthUserHasTenant && !input.purchaserHasIncompleteResumableCheckout) {
     return {
       ok: false,
       code: "existing_workspace_use_choose_plan",
@@ -96,6 +103,9 @@ export function evaluatePublicCheckoutConflict(input: {
 export function resolveCheckoutHandoff(checkoutContext: CheckoutContext): CheckoutHandoff {
   if (checkoutContext === "public_new_workspace") {
     return { type: "email_login", loginPath: "/instagram-login" };
+  }
+  if (checkoutContext === "existing_workspace_plan_change") {
+    return { type: "dashboard", redirectPath: "/instagram-client" };
   }
   return { type: "dashboard", redirectPath: "/instagram-client" };
 }

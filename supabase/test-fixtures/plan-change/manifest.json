@@ -1,0 +1,320 @@
+{
+  "harness": "plan-change-test",
+  "version": 2,
+  "description": "Schema-only test harness for Plan Change validation on isolated Supabase project nxntngkhkoynljcagmkq. Not applied via supabase db push.",
+  "allowedTargetProjectRef": "nxntngkhkoynljcagmkq",
+  "forbiddenProjectRefs": ["zgafnshkjywfltxgbtzg"],
+  "forbiddenClientIds": [
+    "c51267f5-6c0d-46db-8ba0-7f1746a7b4bc",
+    "c37c9143-ee14-4c9a-9a60-226759241733"
+  ],
+  "snapshot": {
+    "relativePath": "public-schema-canonical.snapshot.sql",
+    "schema": "public",
+    "sourceDescription": "Canonical public schema from shared reference database (structure only, no data)",
+    "sha256": null,
+    "generatedAt": null,
+    "generatorCommandHint": "pg_dump --schema-only --no-owner --schema=public (preserve GRANT/REVOKE/RLS; never use --no-privileges, --clean, or --create)",
+    "forbiddenPgDumpFlags": ["--no-privileges", "--clean", "--create"]
+  },
+  "externalDependencies": {
+    "auditStatus": "complete",
+    "extensions": [],
+    "schemas": ["auth"],
+    "functions": ["set_updated_at", "validate_client_subscription_type"],
+    "roles": ["anon", "authenticated", "service_role", "postgres"],
+    "customTypes": ["user_role"],
+    "auditNote": "complete = audit-minimal-baseline-contract validated on source; snapshot generation still requires explicit written GO"
+  },
+  "confirmedCatalogEvidence": {
+    "auditedAt": "2026-06-15",
+    "validatedBy": "audit-minimal-baseline-contract.sql",
+    "sourceProjectRef": "zgafnshkjywfltxgbtzg",
+    "testProjectRef": "nxntngkhkoynljcagmkq",
+    "testDatabaseState": "empty applicative public schema; auth.users present; Supabase extensions/roles available; no Plan Change objects",
+    "sourcePublicTables": [
+      "clients",
+      "ig_devices",
+      "ig_accounts",
+      "tenant_users",
+      "client_users",
+      "client_subscriptions",
+      "client_instagram_accounts",
+      "commercial_checkout_sessions",
+      "client_account_entitlements",
+      "commercial_checkout_audit_events"
+    ],
+    "planChangeObjectsAbsent": true,
+    "externalSchemas": ["auth"],
+    "externalTables": ["auth.users"],
+    "customTypes": [
+      {
+        "name": "user_role",
+        "schema": "public",
+        "kind": "enum",
+        "usedBy": ["tenant_users.role"]
+      }
+    ],
+    "ddlAudit": {
+      "columnsAuditedOnAllTables": true,
+      "constraintsAudited": {
+        "primaryKey": true,
+        "foreignKey": true,
+        "unique": true,
+        "check": true
+      },
+      "indexesAudited": {
+        "allScopeTables": true,
+        "includesPartialIndexes": true,
+        "includesExpressionIndexes": true
+      }
+    },
+    "extensionsRequiredByScope": [],
+    "triggerFunctions": [
+      {
+        "name": "set_updated_at",
+        "language": "plpgsql",
+        "volatility": "volatile",
+        "securityDefiner": false,
+        "hasFunctionConfig": false
+      },
+      {
+        "name": "validate_client_subscription_type",
+        "language": "plpgsql",
+        "volatility": "volatile",
+        "securityDefiner": false,
+        "hasFunctionConfig": true,
+        "snapshotFidelityRequirement": "Future schema-only export must preserve function configuration (proconfig); never inspect or store function body in manifest"
+      }
+    ],
+    "requiredTriggerFunctions": ["set_updated_at", "validate_client_subscription_type"],
+    "excludedTriggers": [
+      {
+        "name": "ig_accounts_release_schedule_capacity_on_admin_lifecycle",
+        "table": "ig_accounts",
+        "function": "release_schedule_capacity_on_account_admin_lifecycle",
+        "timing": "AFTER UPDATE",
+        "securityDefiner": true,
+        "reason": "Scheduler lifecycle UPDATE on ig_accounts — out of Plan Change harness scope"
+      }
+    ],
+    "rls": {
+      "enabledOnAllPublicTables": true,
+      "explicitClientPoliciesOnlyOn": [
+        "clients",
+        "client_users",
+        "client_subscriptions",
+        "client_instagram_accounts"
+      ],
+      "note": "Do not invent policies on other tables"
+    },
+    "grants": {
+      "strategy": "observe source broad SQL grants for anon/authenticated/service_role/postgres; RLS is row guard; no arbitrary GRANT/REVOKE in harness"
+    },
+    "snapshotFidelityNotes": [
+      "Preserve validate_client_subscription_type function configuration in future pg_dump export",
+      "Do not store or inspect function bodies in manifest",
+      "Do not invent RLS policies beyond the four client tables with explicit policies on source"
+    ]
+  },
+  "minimalHarnessScope": [
+    {
+      "object": "clients",
+      "category": "table",
+      "reason": "Checkout baseline root tenant entity",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "ig_devices",
+      "category": "table",
+      "reason": "Device registry in minimal FK closure before ig_accounts",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "ig_accounts",
+      "category": "table",
+      "reason": "Instagram account binding for checkout entitlements",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "tenant_users",
+      "category": "table",
+      "reason": "Tenant membership; uses public.user_role enum",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "client_users",
+      "category": "table",
+      "reason": "Client membership with explicit RLS policies",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "client_subscriptions",
+      "category": "table",
+      "reason": "Subscription state for plan change proration source",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "client_instagram_accounts",
+      "category": "table",
+      "reason": "Client-to-account capacity linkage",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "commercial_checkout_sessions",
+      "category": "table",
+      "reason": "Checkout session baseline for entitlement activation",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "client_account_entitlements",
+      "category": "table",
+      "reason": "Entitlement ledger baseline before plan change migration",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": true,
+      "included": true
+    },
+    {
+      "object": "commercial_checkout_audit_events",
+      "category": "table",
+      "reason": "Checkout audit trail baseline",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": false,
+      "included": true
+    },
+    {
+      "object": "user_role",
+      "category": "enum",
+      "reason": "Required custom type for tenant_users.role",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": false,
+      "included": true
+    },
+    {
+      "object": "auth.users",
+      "category": "external_table",
+      "reason": "Only external FK target confirmed in minimal closure",
+      "proofSource": "manual source and test catalogue audit",
+      "requiredForDbRpc": true,
+      "requiredForE2e": false,
+      "included": true
+    },
+    {
+      "object": "set_updated_at",
+      "category": "function",
+      "reason": "Minimal updated_at trigger function in scope",
+      "proofSource": "manual source catalogue audit zgafnshkjywfltxgbtzg",
+      "requiredForDbRpc": true,
+      "requiredForE2e": false,
+      "included": true
+    },
+    {
+      "object": "validate_client_subscription_type",
+      "category": "function",
+      "reason": "Minimal subscription type validation trigger function; function config must be preserved in snapshot export",
+      "proofSource": "audit-minimal-trigger-functions.sql on source",
+      "requiredForDbRpc": true,
+      "requiredForE2e": false,
+      "included": true,
+      "hasFunctionConfig": true,
+      "snapshotFidelityRequirement": "Preserve proconfig in future schema-only export; never store function body in manifest"
+    },
+    {
+      "object": "ig_accounts_release_schedule_capacity_on_admin_lifecycle",
+      "category": "trigger",
+      "reason": "SECURITY DEFINER scheduler lifecycle UPDATE — excluded from harness",
+      "proofSource": "manual source catalogue audit — explicit exclusion",
+      "requiredForDbRpc": false,
+      "requiredForE2e": false,
+      "included": false
+    }
+  ],
+  "secretPolicy": {
+    "allowedSqlRoleIdentifiers": ["service_role", "anon", "authenticated", "postgres", "PUBLIC"],
+    "forbiddenSecretPatterns": [
+      "postgresql_url_with_password",
+      "password_assignment",
+      "jwt_like",
+      "supabase_key_sb_prefix",
+      "bearer_token",
+      "service_role_key_value",
+      "copy",
+      "insert_into"
+    ],
+    "note": "GRANT/REVOKE TO service_role|anon|authenticated|postgres is allowed; real keys/tokens/URLs are forbidden"
+  },
+  "requiredCheckoutObjects": {
+    "tables": [
+      "clients",
+      "ig_devices",
+      "ig_accounts",
+      "tenant_users",
+      "client_users",
+      "client_subscriptions",
+      "client_instagram_accounts",
+      "commercial_checkout_sessions",
+      "client_account_entitlements",
+      "commercial_checkout_audit_events"
+    ]
+  },
+  "forbiddenBeforePlanChangeMigration": {
+    "tables": ["commercial_plan_change_quotes", "client_credit_ledger"],
+    "functions": ["activate_commercial_plan_change"],
+    "reason": "Plan change migration must be applied and validated after canonical checkout snapshot"
+  },
+  "planChangeMigration": {
+    "relativePath": "../../migrations/20260621120000_commercial_plan_change.sql",
+    "filename": "20260621120000_commercial_plan_change.sql",
+    "reapplyCheckoutMigration": false,
+    "checkoutMigrationReference": "20260615143000_commercial_checkout_entitlements.sql",
+    "note": "Do not re-apply checkout migration if snapshot already contains live checkout schema"
+  },
+  "connectionContract": {
+    "restProbeEnv": ["PLAN_CHANGE_TEST_SUPABASE_URL", "PLAN_CHANGE_TEST_SERVICE_ROLE_KEY"],
+    "psqlApplyEnv": ["PLAN_CHANGE_TEST_DATABASE_URL"],
+    "auditSourceEnv": ["REFERENCE_SCHEMA_PROJECT_REF", "REFERENCE_SCHEMA_DATABASE_URL"],
+    "auditTargetEnv": ["PLAN_CHANGE_TEST_SUPABASE_URL", "PLAN_CHANGE_TEST_DATABASE_URL"],
+    "psqlApplyRules": [
+      "PLAN_CHANGE_TEST_DATABASE_URL required for psql apply",
+      "Must target nxntngkhkoynljcagmkq only",
+      "Local session env only — never commit, never .env.local, never log URL",
+      "service_role key is not a psql substitute"
+    ]
+  },
+  "requiredEnvVars": [
+    "PLAN_CHANGE_DB_TEST_CONFIRM",
+    "PLAN_CHANGE_TEST_SUPABASE_URL",
+    "PLAN_CHANGE_TEST_SERVICE_ROLE_KEY",
+    "PLAN_CHANGE_TEST_DATABASE_URL"
+  ],
+  "requiredEnvValues": {
+    "PLAN_CHANGE_DB_TEST_CONFIRM": "isolated-test-only"
+  }
+}

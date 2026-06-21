@@ -14,6 +14,7 @@ export type OverviewSubscriptionCard = {
   price: string;
   period: string;
   growthEstimate: string;
+  billingDateLabel: string;
   nextBilling: string;
   support: string;
 };
@@ -123,13 +124,21 @@ export function buildSubscriptionOverviewCard(
   lang: "fr" | "en",
 ): OverviewSubscriptionCard {
   const pending = pendingLabel(lang);
-  const billingConfigured = workspace?.billing?.status === "configured";
-  const nextBilling = billingConfigured && workspace?.billing?.nextBillingLabel
-    ? formatBillingDate(workspace.billing.nextBillingLabel, lang)
-    : pending;
+  const toConfigure = lang === "fr" ? "À configurer" : "To be configured";
+  const billingDateLabel = workspace?.billingDisplayMode === "next_billing"
+    ? (lang === "fr" ? "Prochain prélèvement" : "Next billing")
+    : (lang === "fr" ? "Échéance de l'abonnement" : "Subscription end date");
+
+  const billingIso = workspace?.billing?.nextBillingLabel
+    || workspace?.subscriptionPeriodEnd
+    || workspace?.billing?.periodEndLabel
+    || "";
+  const nextBilling = billingIso
+    ? formatBillingDate(billingIso, lang)
+    : toConfigure;
 
   return {
-    planName: workspace?.subscriptionLabel || packageLabel || dashValue(),
+    planName: workspace?.clientPlanLabel || packageLabel || dashValue(),
     statusLabel: workspace?.subscriptionStatus === "active"
       ? (lang === "fr" ? "Actif" : "Active")
       : pending,
@@ -138,6 +147,7 @@ export function buildSubscriptionOverviewCard(
       ? (lang === "fr" ? "/mois" : "/mo")
       : "",
     growthEstimate: workspace?.subscriptionGrowthLabel || pending,
+    billingDateLabel,
     nextBilling,
     support: workspace?.subscriptionSupportLabel || pending,
   };

@@ -103,6 +103,7 @@ export async function POST(request: Request) {
       entitlement_id: result.entitlementId,
       client_id: result.clientId,
       checkout_context: result.checkoutContext,
+      activation_completion_verified: result.activationCompletionVerified,
       handoff_type: handoff.type,
       login_path: handoff.type === "email_login" ? handoff.loginPath : null,
       redirect_path: result.redirectPath,

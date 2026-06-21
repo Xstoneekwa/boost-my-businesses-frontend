@@ -152,7 +152,7 @@ export async function insertCheckoutAuditEvent(
     payload?: Row;
   },
 ) {
-  await supabase.from("commercial_checkout_audit_events").insert({
+  const { error } = await supabase.from("commercial_checkout_audit_events").insert({
     checkout_session_id: input.checkoutSessionId ?? null,
     entitlement_id: input.entitlementId ?? null,
     event_type: input.eventType,
@@ -160,6 +160,13 @@ export async function insertCheckoutAuditEvent(
     client_id: input.clientId ?? null,
     payload: input.payload ?? {},
   });
+  if (error) {
+    return {
+      ok: false as const,
+      postgresCode: typeof error.code === "string" ? error.code : undefined,
+    };
+  }
+  return { ok: true as const };
 }
 
 export function entitlementToAddProfileInput(entitlement: ClientAccountEntitlementRow) {

@@ -16,13 +16,25 @@ import {
   type CheckoutContext,
   type CheckoutSessionSnapshot,
 } from "./checkout-context";
+import { logCheckoutActivation } from "./checkout-activation-log.ts";
+import {
+  compensateFailedActivationAttempt,
+  type ActivationAttemptTracker,
+} from "./checkout-compensation.ts";
+import { verifyActivationCompletion } from "./checkout-completion.ts";
+import { resolveSimulatedPublicAuth, lookupPurchaserAuthState } from "./checkout-auth.ts";
+import { findIncompleteCheckoutSessionForClient } from "./checkout-provisioning-state.ts";
+import {
+  buildClientUserInsertPayload,
+  buildSimulatedCheckoutSubscriptionPayload,
+  buildTenantUserInsertPayload,
+} from "./checkout-workspace-payloads.ts";
 import {
   countLinkedInstagramAccountsForClient,
   countReservedEntitlementsForClient,
   insertCheckoutAuditEvent,
 } from "./entitlements";
 import { buildCommercialQuote } from "./pricing";
-import { ensureSimulatedPublicAuthUser, lookupPurchaserAuthState } from "./checkout-auth";
 import { validatePublicCheckoutPassword } from "./checkout-password";
 import { canUseSimulatedCheckoutForEmail, simulatedCheckoutClientMessages } from "./simulated-checkout-guard";
 import { CHECKOUT_UNAVAILABLE_EN, CHECKOUT_UNAVAILABLE_FR } from "./checkout-api-messages.ts";
@@ -55,15 +67,36 @@ export type ActivateCheckoutResult =
     redirectPath: string | null;
     handoff: ReturnType<typeof resolveCheckoutHandoff>;
     checkoutContext: CheckoutContext;
+    activationCompletionVerified: true;
     quote: ReturnType<typeof buildCommercialQuote> extends infer T
       ? T extends { ok: false } ? never : T
       : never;
   }
   | { ok: false; status: number; error: string; code: string; messageFr?: string; messageEn?: string; redirectPath?: string | null; handoff?: ReturnType<typeof resolveCheckoutHandoff> };
 
+class CheckoutActivationStageError extends Error {
+  stage: string;
+  reason: string;
+  postgresCode?: string;
+
+  constructor(stage: string, reason: string, postgresCode?: string) {
+    super(reason);
+    this.stage = stage;
+    this.reason = reason;
+    this.postgresCode = postgresCode;
+  }
+}
+
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+function postgresCodeFromError(error: unknown) {
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return undefined;
 }
 
 function activationFailure(
@@ -84,6 +117,39 @@ function activationFailure(
     messageEn: messages.messageEn,
     code,
   };
+}
+
+async function failWithCompensation(
+  supabase: SupabaseClient,
+  tracker: ActivationAttemptTracker,
+  input: {
+    status: number;
+    code: string;
+    stage: string;
+    reason: string;
+    postgresCode?: string;
+    messageFr?: string;
+    messageEn?: string;
+  },
+): Promise<Extract<ActivateCheckoutResult, { ok: false }>> {
+  await compensateFailedActivationAttempt(supabase, tracker, {
+    stage: input.stage,
+    reason: input.reason,
+    postgresCode: input.postgresCode,
+  });
+  logCheckoutActivation({
+    event: "checkout_activation_failed",
+    idempotencyKey: tracker.idempotencyKey,
+    authUserId: tracker.authUserId,
+    clientId: tracker.clientId,
+    stage: input.stage,
+    reason: input.reason,
+    postgresCode: input.postgresCode,
+  });
+  return activationFailure(input.status, input.code, {
+    messageFr: input.messageFr,
+    messageEn: input.messageEn,
+  });
 }
 
 async function findExistingActivatedSession(supabase: SupabaseClient, idempotencyKey: string) {
@@ -145,12 +211,18 @@ async function ensureClientWorkspace(
   input: {
     checkoutContext: CheckoutContext;
     clientId?: string | null;
+    resumeClientId?: string | null;
     email: string;
     authUserId: string;
     displayName: string;
+    idempotencyKey: string;
+    tracker?: ActivationAttemptTracker;
   },
 ) {
-  let clientId = input.checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
+  let clientId = input.resumeClientId?.trim()
+    || (input.checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "");
+  let clientCreatedThisAttempt = false;
+
   if (!clientId) {
     const { data: createdClient, error: clientError } = await supabase
       .from("clients")
@@ -167,9 +239,26 @@ async function ensureClientWorkspace(
       })
       .select("id")
       .single<Row>();
-    if (clientError || !createdClient?.id) throw new Error("client_create_failed");
+    if (clientError || !createdClient?.id) {
+      throw new CheckoutActivationStageError("client_create", "client_create_failed", postgresCodeFromError(clientError));
+    }
     clientId = readString(createdClient.id);
+    clientCreatedThisAttempt = true;
+    if (input.tracker) {
+      input.tracker.clientId = clientId;
+      input.tracker.clientCreatedThisAttempt = true;
+    }
+    logCheckoutActivation({
+      event: "checkout_workspace_created",
+      idempotencyKey: input.idempotencyKey,
+      authUserId: input.authUserId,
+      clientId,
+      stage: "client_create",
+    });
   } else {
+    if (input.tracker) {
+      input.tracker.clientId = clientId;
+    }
     const { data: existingClient, error: existingClientError } = await supabase
       .from("clients")
       .select("id,status")
@@ -177,33 +266,54 @@ async function ensureClientWorkspace(
       .limit(1)
       .maybeSingle<Row>();
     if (existingClientError || !existingClient?.id || readString(existingClient.status) !== "active") {
-      throw new Error("client_unavailable");
+      throw new CheckoutActivationStageError("client_validate", "client_unavailable", postgresCodeFromError(existingClientError));
     }
   }
 
   const { data: tenantUser } = await supabase
     .from("tenant_users")
-    .select("user_id,tenant_id")
+    .select("user_id,tenant_id,role")
     .eq("user_id", input.authUserId)
     .limit(1)
     .maybeSingle<Row>();
 
+  const hadTenantBeforeLink = Boolean(tenantUser?.user_id);
+
   if (!tenantUser?.user_id) {
-    const { error: tenantInsertError } = await supabase.from("tenant_users").insert({
-      user_id: input.authUserId,
-      tenant_id: clientId,
-      role: "client",
+    const tenantPayload = buildTenantUserInsertPayload({
+      authUserId: input.authUserId,
+      clientId,
     });
-    if (tenantInsertError) throw new Error("tenant_user_create_failed");
+    const { error: tenantInsertError } = await supabase.from("tenant_users").insert(tenantPayload);
+    if (tenantInsertError) {
+      throw new CheckoutActivationStageError(
+        "tenant_user_create",
+        "tenant_user_create_failed",
+        postgresCodeFromError(tenantInsertError),
+      );
+    }
+    logCheckoutActivation({
+      event: "checkout_tenant_user_created",
+      idempotencyKey: input.idempotencyKey,
+      authUserId: input.authUserId,
+      clientId,
+      stage: "tenant_user_create",
+    });
   } else if (readString(tenantUser.tenant_id) !== clientId) {
     if (input.checkoutContext === "public_new_workspace") {
-      throw new Error("tenant_user_already_linked");
+      throw new CheckoutActivationStageError("tenant_user_create", "tenant_user_already_linked");
     }
     const { error: tenantUpdateError } = await supabase
       .from("tenant_users")
       .update({ tenant_id: clientId })
       .eq("user_id", input.authUserId);
-    if (tenantUpdateError) throw new Error("tenant_user_update_failed");
+    if (tenantUpdateError) {
+      throw new CheckoutActivationStageError(
+        "tenant_user_update",
+        "tenant_user_update_failed",
+        postgresCodeFromError(tenantUpdateError),
+      );
+    }
   }
 
   const { data: clientUser } = await supabase
@@ -215,19 +325,28 @@ async function ensureClientWorkspace(
     .maybeSingle<Row>();
 
   if (!clientUser?.id) {
-    const { error: clientUserError } = await supabase.from("client_users").insert({
-      client_id: clientId,
-      auth_user_id: input.authUserId,
-      role: "owner",
-      status: "active",
-    });
-    if (clientUserError) throw new Error("client_user_create_failed");
+    const { error: clientUserError } = await supabase
+      .from("client_users")
+      .insert(buildClientUserInsertPayload({ clientId, authUserId: input.authUserId }));
+    if (clientUserError) {
+      throw new CheckoutActivationStageError(
+        "client_user_create",
+        "client_user_create_failed",
+        postgresCodeFromError(clientUserError),
+      );
+    }
   } else if (readString(clientUser.status) !== "active") {
     const { error: clientUserUpdateError } = await supabase
       .from("client_users")
       .update({ status: "active" })
       .eq("id", clientUser.id);
-    if (clientUserUpdateError) throw new Error("client_user_update_failed");
+    if (clientUserUpdateError) {
+      throw new CheckoutActivationStageError(
+        "client_user_update",
+        "client_user_update_failed",
+        postgresCodeFromError(clientUserUpdateError),
+      );
+    }
   }
 
   const { data: existingSubscription } = await supabase
@@ -239,25 +358,63 @@ async function ensureClientWorkspace(
     .maybeSingle<Row>();
 
   if (!existingSubscription?.id) {
-    const { error: subscriptionError } = await supabase.from("client_subscriptions").insert({
-      client_id: clientId,
-      subscription_type: "full_cycle",
-      status: "active",
-      metadata: {
-        source: "simulated_checkout",
-        billing_mode: "per_account_entitlement",
-      },
-    });
-    if (subscriptionError) throw new Error("client_subscription_create_failed");
+    const { error: subscriptionError } = await supabase
+      .from("client_subscriptions")
+      .insert(buildSimulatedCheckoutSubscriptionPayload(clientId));
+    if (subscriptionError) {
+      throw new CheckoutActivationStageError(
+        "client_subscription_create",
+        "client_subscription_create_failed",
+        postgresCodeFromError(subscriptionError),
+      );
+    }
   }
 
-  return clientId;
+  const tenantLinkedThisAttempt = hadTenantBeforeLink
+    ? readString(tenantUser?.tenant_id) === clientId
+    : true;
+
+  return { clientId, clientCreatedThisAttempt, tenantLinkedThisAttempt };
+}
+
+async function finalizeSuccessfulActivation(
+  supabase: SupabaseClient,
+  input: {
+    idempotencyKey: string;
+    authUserId: string;
+    clientId: string;
+    checkoutSessionId: string;
+    entitlementId: string;
+  },
+) {
+  const completion = await verifyActivationCompletion(supabase, input);
+  if (!completion.ok) {
+    throw new CheckoutActivationStageError("activation_completion_verify", completion.reason);
+  }
+  logCheckoutActivation({
+    event: "checkout_activation_completion_verified",
+    idempotencyKey: input.idempotencyKey,
+    authUserId: input.authUserId,
+    clientId: input.clientId,
+    stage: "activation_completion_verify",
+  });
+  return completion.activationCompletionVerified;
 }
 
 export async function activateClientAccountEntitlementFromCheckout(
   supabase: SupabaseClient,
   input: ActivateCheckoutInput,
 ): Promise<ActivateCheckoutResult> {
+  const tracker: ActivationAttemptTracker = {
+    idempotencyKey: input.idempotencyKey.trim(),
+    authCreatedThisAttempt: false,
+    authUserId: null,
+    clientCreatedThisAttempt: false,
+    clientId: null,
+    tenantLinkedThisAttempt: false,
+    resumedIncompleteCheckout: false,
+  };
+
   try {
     if (input.mode !== "simulated") {
       return activationFailure(501, "stripe_not_enabled", {
@@ -270,6 +427,13 @@ export async function activateClientAccountEntitlementFromCheckout(
     const checkoutContext = resolveCheckoutContext({ flowType: input.flowType });
     const handoff = resolveCheckoutHandoff(checkoutContext);
     const redirectPath = handoffToRedirectPath(handoff);
+
+    logCheckoutActivation({
+      event: "checkout_public_activation_started",
+      idempotencyKey: tracker.idempotencyKey,
+      stage: checkoutContext,
+    });
+
     const guard = canUseSimulatedCheckoutForEmail(email);
     if (!guard.ok) {
       const messages = simulatedCheckoutClientMessages(guard.reason);
@@ -283,15 +447,14 @@ export async function activateClientAccountEntitlementFromCheckout(
       };
     }
 
-    const idempotencyKey = input.idempotencyKey.trim();
-    if (!idempotencyKey) {
+    if (!tracker.idempotencyKey) {
       return activationFailure(400, "idempotency_required", {
         messageFr: "Impossible de confirmer cette activation de test.",
         messageEn: "Could not confirm this test activation.",
       });
     }
 
-    const existing = await findExistingActivatedSession(supabase, idempotencyKey);
+    const existing = await findExistingActivatedSession(supabase, tracker.idempotencyKey);
     if (existing.kind === "storage_error") {
       return activationFailure(503, "checkout_storage_unavailable");
     }
@@ -323,6 +486,13 @@ export async function activateClientAccountEntitlementFromCheckout(
     }
 
     if (existing.kind === "found") {
+      const verified = await finalizeSuccessfulActivation(supabase, {
+        idempotencyKey: tracker.idempotencyKey,
+        authUserId: existing.authUserId ?? "",
+        clientId: existing.clientId,
+        checkoutSessionId: existing.checkoutSessionId,
+        entitlementId: existing.entitlementId,
+      });
       return {
         ok: true,
         idempotentReplay: true,
@@ -333,26 +503,29 @@ export async function activateClientAccountEntitlementFromCheckout(
         redirectPath,
         handoff,
         checkoutContext,
+        activationCompletionVerified: verified,
         quote: quoteResult,
       };
     }
 
     let scopedClientId = checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
     let scopedAuthUserId = checkoutContext === "public_new_workspace" ? null : input.authUserId?.trim() || null;
+    let resumeClientId: string | null = null;
+    let resumeExistingCheckoutSessionId: string | null = null;
+    let resumeExistingEntitlementId: string | null = null;
 
     if (checkoutContext === "public_new_workspace" && existing.kind !== "partial") {
-      let purchaserAuthUserHasTenant = false;
       const purchaserAuthState = await lookupPurchaserAuthState(supabase, email);
       if (!purchaserAuthState.ok) {
         return activationFailure(503, "checkout_storage_unavailable");
       }
-      purchaserAuthUserHasTenant = purchaserAuthState.hasTenant;
 
       const conflict = evaluatePublicCheckoutConflict({
         checkoutContext,
         session: input.browserSession ?? null,
         purchaserEmail: email,
-        purchaserAuthUserHasTenant,
+        purchaserAuthUserHasTenant: purchaserAuthState.hasTenant,
+        purchaserHasIncompleteResumableCheckout: purchaserAuthState.hasIncompleteResumableCheckout,
       });
       if (!conflict.ok) {
         const conflictHandoff = conflict.redirectPath === "/instagram-client/choose-plan"
@@ -377,6 +550,7 @@ export async function activateClientAccountEntitlementFromCheckout(
     let clientId = scopedClientId;
     let authUserId = scopedAuthUserId;
     let checkoutSessionId = existing.kind === "partial" ? existing.checkoutSessionId : "";
+    let existingEntitlementId = "";
 
     if (existing.kind === "partial") {
       clientId = existing.clientId;
@@ -410,24 +584,62 @@ export async function activateClientAccountEntitlementFromCheckout(
 
       if (!authUserId) {
         if (checkoutContext === "public_new_workspace") {
-          const authResult = await ensureSimulatedPublicAuthUser(supabase, {
+          const authResult = await resolveSimulatedPublicAuth(supabase, {
             email,
             password: input.password ?? "",
+            idempotencyKey: tracker.idempotencyKey,
           });
           if (!authResult.ok) {
             return activationFailure(
-              authResult.code === "auth_user_exists_no_workspace" ? 409 : 503,
+              authResult.code === "auth_user_exists_no_workspace" || authResult.code === "password_verification_failed"
+                ? (authResult.code === "password_verification_failed" ? 401 : 409)
+                : 503,
               authResult.code,
               { messageFr: authResult.messageFr, messageEn: authResult.messageEn },
             );
           }
           authUserId = authResult.authUserId;
+          tracker.authUserId = authUserId;
+          tracker.authCreatedThisAttempt = authResult.createdAuth;
+          tracker.resumedIncompleteCheckout = authResult.resumedOrphan;
+          resumeClientId = authResult.resumeClientId;
+          resumeExistingCheckoutSessionId = authResult.existingCheckoutSessionId;
+          resumeExistingEntitlementId = authResult.existingEntitlementId;
+
+          if (authResult.resumeMode === "replay_complete" && authResult.existingCheckoutSessionId && authResult.existingEntitlementId) {
+            const verified = await finalizeSuccessfulActivation(supabase, {
+              idempotencyKey: tracker.idempotencyKey,
+              authUserId: authResult.authUserId,
+              clientId: authResult.resumeClientId ?? "",
+              checkoutSessionId: authResult.existingCheckoutSessionId,
+              entitlementId: authResult.existingEntitlementId,
+            }).catch((error) => {
+              if (error instanceof CheckoutActivationStageError) return null;
+              throw error;
+            });
+            if (verified) {
+              return {
+                ok: true,
+                idempotentReplay: true,
+                checkoutSessionId: authResult.existingCheckoutSessionId,
+                entitlementId: authResult.existingEntitlementId,
+                clientId: authResult.resumeClientId ?? "",
+                authUserId: authResult.authUserId,
+                redirectPath,
+                handoff,
+                checkoutContext,
+                activationCompletionVerified: verified,
+                quote: finalQuote,
+              };
+            }
+          }
         } else if (input.authUserId) {
           const sessionAuth = await ensureSessionAuthUserId(supabase, input.authUserId);
           if (!sessionAuth.ok) {
             return activationFailure(503, "auth_user_unavailable");
           }
           authUserId = sessionAuth.authUserId;
+          tracker.authUserId = authUserId;
         } else {
           return activationFailure(401, "session_required", {
             messageFr: "Connexion client requise pour cet achat.",
@@ -437,55 +649,58 @@ export async function activateClientAccountEntitlementFromCheckout(
       }
 
       const plan = COMMERCIAL_PLANS[finalQuote.planKey as PlanKey];
-      clientId = await ensureClientWorkspace(supabase, {
+      const workspace = await ensureClientWorkspace(supabase, {
         checkoutContext,
         clientId: clientId || null,
+        resumeClientId,
         email,
         authUserId,
         displayName: plan.displayName,
+        idempotencyKey: tracker.idempotencyKey,
+        tracker,
       });
+      clientId = workspace.clientId;
+      tracker.clientId = clientId;
+      tracker.clientCreatedThisAttempt = workspace.clientCreatedThisAttempt;
+      tracker.tenantLinkedThisAttempt = workspace.tenantLinkedThisAttempt;
+
+      if (!checkoutSessionId && resumeExistingCheckoutSessionId) {
+        checkoutSessionId = resumeExistingCheckoutSessionId;
+      } else if (!checkoutSessionId && resumeClientId) {
+        const incompleteSession = await findIncompleteCheckoutSessionForClient(supabase, resumeClientId);
+        if (incompleteSession.kind === "partial") {
+          checkoutSessionId = incompleteSession.checkoutSessionId;
+          authUserId = authUserId ?? incompleteSession.authUserId;
+        } else if (incompleteSession.kind === "storage_error") {
+          return activationFailure(503, "checkout_storage_unavailable");
+        }
+      }
+
+      if (!existingEntitlementId && resumeExistingEntitlementId) {
+        existingEntitlementId = resumeExistingEntitlementId;
+      }
     }
+
+    if (!authUserId) {
+      return activationFailure(500, "activation_failed");
+    }
+    tracker.authUserId = authUserId;
+    tracker.clientId = clientId;
 
     const plan = COMMERCIAL_PLANS[finalQuote.planKey as PlanKey];
     const outreachAddon = finalQuote.outreachAddonKey
       ? OUTREACH_ADDONS[finalQuote.outreachAddonKey as OutreachAddonKey]
       : null;
 
-    if (!authUserId) {
-      if (checkoutContext === "public_new_workspace") {
-        const authResult = await ensureSimulatedPublicAuthUser(supabase, {
-          email,
-          password: input.password ?? "",
-        });
-        if (!authResult.ok) {
-          return activationFailure(
-            authResult.code === "auth_user_exists_no_workspace" ? 409 : 503,
-            authResult.code,
-            { messageFr: authResult.messageFr, messageEn: authResult.messageEn },
-          );
-        }
-        authUserId = authResult.authUserId;
-      } else if (input.authUserId) {
-        const sessionAuth = await ensureSessionAuthUserId(supabase, input.authUserId);
-        if (!sessionAuth.ok) {
-          return activationFailure(503, "auth_user_unavailable");
-        }
-        authUserId = sessionAuth.authUserId;
-      } else {
-        return activationFailure(401, "session_required", {
-          messageFr: "Connexion client requise pour cet achat.",
-          messageEn: "Client login is required for this purchase.",
-        });
-      }
-    }
-
     const now = new Date().toISOString();
 
-    if (existing.kind !== "partial") {
+    const skipCheckoutSessionInsert = existing.kind === "partial" || Boolean(checkoutSessionId);
+
+    if (!skipCheckoutSessionInsert) {
       const { data: checkoutSession, error: checkoutError } = await supabase
         .from("commercial_checkout_sessions")
         .insert({
-          idempotency_key: idempotencyKey,
+          idempotency_key: tracker.idempotencyKey,
           flow_type: input.flowType,
           status: "checkout_activated_test",
           client_id: clientId,
@@ -518,16 +733,21 @@ export async function activateClientAccountEntitlementFromCheckout(
         .single<Row>();
 
       if (checkoutError || !checkoutSession?.id) {
-        console.error("[commercial/checkout/activate] checkout session create failed", {
-          idempotencyKey,
-          checkoutError,
+        return failWithCompensation(supabase, tracker, {
+          status: 500,
+          code: "checkout_create_failed",
+          stage: "checkout_session_create",
+          reason: "checkout_create_failed",
+          postgresCode: postgresCodeFromError(checkoutError),
         });
-        return activationFailure(500, "checkout_create_failed");
       }
       checkoutSessionId = readString(checkoutSession.id);
     }
 
-    const { data: entitlement, error: entitlementError } = await supabase
+    let entitlementId = existingEntitlementId;
+
+    if (!entitlementId) {
+      const { data: entitlement, error: entitlementError } = await supabase
       .from("client_account_entitlements")
       .insert({
         client_id: clientId,
@@ -557,36 +777,92 @@ export async function activateClientAccountEntitlementFromCheckout(
       .select("id")
       .single<Row>();
 
-    if (entitlementError || !entitlement?.id) {
-      console.error("[commercial/checkout/activate] entitlement create failed", {
-        idempotencyKey,
-        checkoutSessionId,
-        entitlementError,
-      });
-      return activationFailure(500, "entitlement_create_failed");
+      if (entitlementError || !entitlement?.id) {
+        return failWithCompensation(supabase, tracker, {
+          status: 500,
+          code: "entitlement_create_failed",
+          stage: "entitlement_create",
+          reason: "entitlement_create_failed",
+          postgresCode: postgresCodeFromError(entitlementError),
+        });
+      }
+
+      entitlementId = readString(entitlement.id);
+    }
+    const auditPayload = {
+      plan_key: finalQuote.planKey,
+      billing_interval_months: finalQuote.billingIntervalMonths,
+      outreach_addon_key: finalQuote.outreachAddonKey,
+      total_period_cents: finalQuote.totalPeriodCents,
+      idempotency_key: tracker.idempotencyKey,
+      flow_type: input.flowType,
+      checkout_context: checkoutContext,
+    };
+    if ("password" in auditPayload) {
+      throw new Error("audit_payload_password_leak_guard");
     }
 
-    const entitlementId = readString(entitlement.id);
-    await insertCheckoutAuditEvent(supabase, {
-      checkoutSessionId,
-      entitlementId,
-      eventType: "simulated_checkout_activated",
-      actorEmail: email,
-      clientId,
-      payload: {
-        plan_key: finalQuote.planKey,
-        billing_interval_months: finalQuote.billingIntervalMonths,
-        outreach_addon_key: finalQuote.outreachAddonKey,
-        total_period_cents: finalQuote.totalPeriodCents,
-        idempotency_key: idempotencyKey,
-        flow_type: input.flowType,
-        checkout_context: checkoutContext,
-      },
-    });
+    const { data: existingAudit, error: existingAuditError } = await supabase
+      .from("commercial_checkout_audit_events")
+      .select("id")
+      .eq("checkout_session_id", checkoutSessionId)
+      .limit(1)
+      .maybeSingle<Row>();
+    if (existingAuditError) {
+      return failWithCompensation(supabase, tracker, {
+        status: 503,
+        code: "checkout_storage_unavailable",
+        stage: "audit_event_lookup",
+        reason: "audit_event_lookup_failed",
+        postgresCode: postgresCodeFromError(existingAuditError),
+      });
+    }
+
+    if (!existingAudit?.id) {
+      const auditResult = await insertCheckoutAuditEvent(supabase, {
+        checkoutSessionId,
+        entitlementId,
+        eventType: "simulated_checkout_activated",
+        actorEmail: email,
+        clientId,
+        payload: auditPayload,
+      });
+      if (!auditResult.ok) {
+        return failWithCompensation(supabase, tracker, {
+          status: 500,
+          code: "audit_create_failed",
+          stage: "audit_event_create",
+          reason: "audit_create_failed",
+          postgresCode: auditResult.postgresCode,
+        });
+      }
+    }
+
+    let activationCompletionVerified: true;
+    try {
+      activationCompletionVerified = await finalizeSuccessfulActivation(supabase, {
+        idempotencyKey: tracker.idempotencyKey,
+        authUserId,
+        clientId,
+        checkoutSessionId,
+        entitlementId,
+      });
+    } catch (error) {
+      if (error instanceof CheckoutActivationStageError) {
+        return failWithCompensation(supabase, tracker, {
+          status: 500,
+          code: "activation_failed",
+          stage: error.stage,
+          reason: error.reason,
+          postgresCode: error.postgresCode,
+        });
+      }
+      throw error;
+    }
 
     return {
       ok: true,
-      idempotentReplay: existing.kind === "partial",
+      idempotentReplay: existing.kind === "partial" || tracker.resumedIncompleteCheckout,
       checkoutSessionId,
       entitlementId,
       clientId,
@@ -594,21 +870,39 @@ export async function activateClientAccountEntitlementFromCheckout(
       redirectPath,
       handoff,
       checkoutContext,
+      activationCompletionVerified,
       quote: finalQuote,
     };
   } catch (error) {
-    console.error("[commercial/checkout/activate] unexpected failure", {
-      idempotencyKey: input.idempotencyKey,
-      error,
-    });
-    if (error instanceof Error && error.message === "tenant_user_already_linked") {
-      return activationFailure(409, "existing_workspace_use_choose_plan", {
-        messageFr:
-          "Un espace client existe déjà pour cette adresse e-mail. Connectez-vous pour ajouter un compte depuis votre espace client.",
-        messageEn:
-          "A client workspace already exists for this email address. Sign in to add an account from your workspace.",
+    if (error instanceof CheckoutActivationStageError) {
+      return failWithCompensation(supabase, tracker, {
+        status: error.reason === "tenant_user_already_linked" ? 409 : 500,
+        code: error.reason === "tenant_user_already_linked"
+          ? "existing_workspace_use_choose_plan"
+          : "activation_failed",
+        stage: error.stage,
+        reason: error.reason,
+        postgresCode: error.postgresCode,
+        messageFr: error.reason === "tenant_user_already_linked"
+          ? "Un espace client existe déjà pour cette adresse e-mail. Connectez-vous pour ajouter un compte depuis votre espace client."
+          : undefined,
+        messageEn: error.reason === "tenant_user_already_linked"
+          ? "A client workspace already exists for this email address. Sign in to add an account from your workspace."
+          : undefined,
       });
     }
+    logCheckoutActivation({
+      event: "checkout_activation_failed",
+      idempotencyKey: tracker.idempotencyKey,
+      authUserId: tracker.authUserId,
+      clientId: tracker.clientId,
+      stage: "unexpected",
+      reason: "activation_failed",
+    });
+    await compensateFailedActivationAttempt(supabase, tracker, {
+      stage: "unexpected",
+      reason: "activation_failed",
+    });
     return activationFailure(500, "activation_failed");
   }
 }

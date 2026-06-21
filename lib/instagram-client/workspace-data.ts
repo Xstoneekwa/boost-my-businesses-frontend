@@ -2,6 +2,11 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
 import { projectClientAccountRow } from "./account-projection";
 import { readString, rejectTechnicalClientFields } from "./guards";
+import {
+  loadClientCommercialSubscriptionRow,
+  projectClientSubscriptionDisplay,
+  type ClientBillingDisplayMode,
+} from "./client-subscription-projection";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -18,6 +23,8 @@ export type ClientBillingSummary = {
   nextBillingLabel: string;
   paymentMethodLabel: string;
   invoicesAvailable: boolean;
+  displayMode: ClientBillingDisplayMode;
+  periodEndLabel: string;
 };
 
 export type ClientAccountManagerView = {
@@ -39,8 +46,11 @@ export type ClientWorkspaceView = {
   phone: string;
   servicePageUrl: string;
   preferredLanguage: "fr" | "en";
+  clientPlanLabel: string;
   memberSince: string | null;
-  subscriptionType: string;
+  subscriptionPeriodEnd: string | null;
+  billingDisplayMode: ClientBillingDisplayMode;
+  paymentMethodDisplay: string;
   subscriptionLabel: string;
   subscriptionStatus: string;
   subscriptionSince: string | null;
@@ -65,10 +75,25 @@ function splitDisplayName(displayName: string) {
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 }
 
-function formatPackageLabel(code: string, metadata: SupabaseRecord | null) {
-  const label = readMetadataString(metadata, "label");
-  if (label) return label;
-  return code.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+function billingSummary(metadata: SupabaseRecord | null, subscription: {
+  billingDisplayMode: ClientBillingDisplayMode;
+  paymentMethodDisplay: string;
+  subscriptionPeriodEnd: string | null;
+}): ClientBillingSummary {
+  const paymentMethod = readMetadataString(metadata, "payment_method_label");
+  const nextBillingAt = readMetadataString(metadata, "next_billing_at");
+  const billingProvider = readMetadataString(metadata, "billing_provider");
+  const configured = Boolean(paymentMethod || nextBillingAt || billingProvider);
+  return {
+    status: configured ? "configured" : "not_configured",
+    nextBillingLabel: subscription.billingDisplayMode === "next_billing"
+      ? (nextBillingAt || "")
+      : (subscription.subscriptionPeriodEnd || ""),
+    paymentMethodLabel: subscription.paymentMethodDisplay || paymentMethod || "",
+    invoicesAvailable: readMetadataString(metadata, "billing_invoices_enabled") === "true",
+    displayMode: subscription.billingDisplayMode,
+    periodEndLabel: subscription.subscriptionPeriodEnd || "",
+  };
 }
 
 function clientFriendlyLinkStatus(loginStatus: string, onboardingStatus: string) {
@@ -76,19 +101,6 @@ function clientFriendlyLinkStatus(loginStatus: string, onboardingStatus: string)
   if (onboardingStatus === "ready") return "Ready";
   if (loginStatus === "needs_2fa" || loginStatus === "checkpoint") return "Verification required";
   return "Setup pending";
-}
-
-function billingSummary(metadata: SupabaseRecord | null): ClientBillingSummary {
-  const paymentMethod = readMetadataString(metadata, "payment_method_label");
-  const nextBillingAt = readMetadataString(metadata, "next_billing_at");
-  const billingProvider = readMetadataString(metadata, "billing_provider");
-  const configured = Boolean(paymentMethod || nextBillingAt || billingProvider);
-  return {
-    status: configured ? "configured" : "not_configured",
-    nextBillingLabel: nextBillingAt || "",
-    paymentMethodLabel: paymentMethod || "",
-    invoicesAvailable: readMetadataString(metadata, "billing_invoices_enabled") === "true",
-  };
 }
 
 async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLinkedInstagramAccount[]> {
@@ -177,7 +189,7 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
 
   const { data: subscriptions } = await supabase
     .from("client_subscriptions")
-    .select("subscription_type,status,starts_at,metadata")
+    .select("status,starts_at,metadata")
     .eq("client_id", clientId)
     .eq("status", "active")
     .order("starts_at", { ascending: false })
@@ -189,11 +201,23 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
   const subscriptionMetadata = subscription?.metadata && typeof subscription.metadata === "object"
     ? subscription.metadata as SupabaseRecord
     : null;
-  const subscriptionType = readString(subscription?.subscription_type, "full_cycle");
-  const subscriptionLabel = formatPackageLabel(subscriptionType, subscriptionMetadata);
-  const subscriptionPriceLabel = readMetadataString(subscriptionMetadata, "price_label", readMetadataString(subscriptionMetadata, "monthly_price_label"));
-  const subscriptionGrowthLabel = readMetadataString(subscriptionMetadata, "growth_estimate_label");
-  const subscriptionSupportLabel = readMetadataString(subscriptionMetadata, "support_label");
+  const subscriptionStartsAt = readString(subscription?.starts_at) || null;
+
+  const commercial = await loadClientCommercialSubscriptionRow(supabase, clientId);
+  const subscriptionProjection = projectClientSubscriptionDisplay({
+    commercial,
+    subscriptionStartsAt,
+    clientCreatedAt: readString(client.created_at) || null,
+    clientMetadata: metadata,
+    preferredLanguage,
+  });
+
+  const subscriptionGrowthLabel = subscriptionProjection.subscriptionGrowthLabel
+    || readMetadataString(subscriptionMetadata, "growth_estimate_label");
+  const subscriptionPriceLabel = subscriptionProjection.subscriptionPriceLabel
+    || readMetadataString(subscriptionMetadata, "price_label", readMetadataString(subscriptionMetadata, "monthly_price_label"));
+  const subscriptionSupportLabel = subscriptionProjection.subscriptionSupportLabel
+    || readMetadataString(subscriptionMetadata, "support_label");
   const accountManager = {
     name: readMetadataString(metadata, "account_manager_name"),
     subtitle: readMetadataString(metadata, "account_manager_subtitle"),
@@ -210,11 +234,10 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     ...row,
     packageLabel: packageSummaries.get(row.accountId)?.commercialPackageLabel || row.packageLabel,
   }));
-  const primaryPackageLabel = linkedInstagramAccounts.length
-    ? packageSummaries.get(linkedInstagramAccounts[0].accountId)?.commercialPackageLabel
-    : null;
   const campaignActive = linkedInstagramAccounts.some((row) => row.connected)
     || [...packageSummaries.values()].some((summary) => summary.commercialPackageLabel && summary.commercialPackageLabel !== "Package pending");
+
+  const billing = billingSummary(metadata, subscriptionProjection);
 
   return {
     clientId,
@@ -227,17 +250,20 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     phone: readMetadataString(metadata, "phone"),
     servicePageUrl: readMetadataString(metadata, "service_page_url", "/instagram-growth"),
     preferredLanguage,
-    memberSince: readString(client.created_at) || null,
-    subscriptionType,
-    subscriptionLabel: primaryPackageLabel || subscriptionLabel,
-    subscriptionStatus: readString(subscription?.status, "active"),
-    subscriptionSince: readString(subscription?.starts_at) || readString(client.created_at) || null,
+    clientPlanLabel: subscriptionProjection.clientPlanLabel,
+    memberSince: subscriptionProjection.memberSince,
+    subscriptionPeriodEnd: subscriptionProjection.subscriptionPeriodEnd,
+    billingDisplayMode: subscriptionProjection.billingDisplayMode,
+    paymentMethodDisplay: subscriptionProjection.paymentMethodDisplay,
+    subscriptionLabel: subscriptionProjection.clientPlanLabel,
+    subscriptionStatus: readString(subscription?.status, subscriptionProjection.subscriptionStatus),
+    subscriptionSince: subscriptionStartsAt || subscriptionProjection.memberSince,
     subscriptionPriceLabel,
     subscriptionGrowthLabel,
     subscriptionSupportLabel,
     campaignActive,
     linkedInstagramAccounts,
-    billing: billingSummary(metadata),
+    billing,
     accountManager,
   };
 }

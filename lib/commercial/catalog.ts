@@ -2,7 +2,7 @@ export type PlanKey = "growth" | "pro" | "premium";
 export type OutreachAddonKey = "outreach_standard" | "outreach_ai";
 export type BillingIntervalMonths = 1 | 3 | 6 | 12;
 export type DiscountType = "none" | "term" | "agency";
-export type CheckoutFlowType = "first_purchase" | "additional_account";
+export type CheckoutFlowType = "first_purchase" | "additional_account" | "plan_change";
 export type CheckoutSessionStatus = "checkout_pending" | "checkout_activated_test" | "checkout_cancelled";
 export type EntitlementStatus = "entitlement_reserved" | "entitlement_consumed" | "entitlement_cancelled";
 
@@ -55,6 +55,13 @@ export const COMMERCIAL_PLANS: Record<PlanKey, CommercialPlanDefinition> = {
     growthEstimateLabelEn: "~300–800 followers",
     outreachEligible: true,
   },
+};
+
+/** Max linked Instagram accounts allowed per commercial pack (downsell preflight). */
+export const PLAN_MAX_LINKED_ACCOUNTS: Record<PlanKey, number> = {
+  growth: 1,
+  pro: 5,
+  premium: 10,
 };
 
 export const OUTREACH_ADDONS: Record<OutreachAddonKey, OutreachAddonDefinition> = {

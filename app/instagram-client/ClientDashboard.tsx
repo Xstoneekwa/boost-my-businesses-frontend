@@ -125,6 +125,7 @@ const T = {
       planLabel:"Formule active", planVal:"Pro — 197€/mois",
       since:"Membre depuis", sinceVal:"15 janvier 2026",
       next:"Prochain prélèvement", nextVal:"3 juillet 2026 — 197€",
+      periodEnd:"Échéance de l'abonnement",
       pay:"Moyen de paiement", payVal:"•••• •••• •••• 4242",
       changePlan:"Changer de formule",
       connectTitle:"Connexion Instagram",
@@ -198,6 +199,7 @@ const T = {
       planLabel:"Active plan", planVal:"Pro — €197/mo",
       since:"Member since", sinceVal:"January 15, 2026",
       next:"Next billing", nextVal:"July 3, 2026 — €197",
+      periodEnd:"Subscription end date",
       pay:"Billing method", payVal:"•••• •••• •••• 4242",
       changePlan:"Change plan",
       connectTitle:"Instagram connection",
@@ -522,7 +524,6 @@ export default function ClientDashboard({
   const [chartPeriod, setChartPeriod]   = useState<FollowerChartPeriod>("all");
   const [drawerOpen, setDrawerOpen]     = useState(false);
   const [billingDrawerOpen, setBillingDrawerOpen] = useState(false);
-  const [planHelpOpen, setPlanHelpOpen] = useState(false);
   const [loggingOut, setLoggingOut]     = useState(false);
   const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
   const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
@@ -748,7 +749,7 @@ export default function ClientDashboard({
   const handleNavigate = useCallback((view: View) => setActiveView(view), []);
 
   const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
-  const sidebarPlan = workspace?.subscriptionLabel || accountInsights?.packageLabel || "—";
+  const sidebarPlan = workspace?.clientPlanLabel || accountInsights?.packageLabel || "—";
   const activityBadge = hasOverviewInsights && accountInsights?.recentFeed.length
     ? accountInsights.recentFeed.reduce((sum, item) => sum + item.count, 0)
     : undefined;
@@ -777,7 +778,7 @@ export default function ClientDashboard({
     }
     return buildFollowerChartViews(initialFollowerGrowth.bundle, lang);
   }, [initialFollowerGrowth, lang]);
-  const subscriptionPlanValue = workspace?.subscriptionLabel || accountInsights?.packageLabel || "";
+  const subscriptionPlanValue = workspace?.clientPlanLabel || accountInsights?.packageLabel || "";
   const subscriptionCard = buildSubscriptionOverviewCard(workspace, subscriptionPlanValue, lang);
   const accountManagerCard = buildAccountManagerOverview(workspace, lang, {
     subtitle: t.mgr.sub,
@@ -788,12 +789,14 @@ export default function ClientDashboard({
   const memberSinceValue = workspace?.memberSince
     ? new Date(workspace.memberSince).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
     : "";
-  const nextBillingValue = workspace?.billing?.status === "configured" && workspace.billing.nextBillingLabel
-    ? new Date(workspace.billing.nextBillingLabel).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
+  const billingDateLabel = workspace?.billingDisplayMode === "next_billing"
+    ? t.account.next
+    : t.account.periodEnd;
+  const billingDateIso = workspace?.billing?.nextBillingLabel || workspace?.subscriptionPeriodEnd || "";
+  const billingDateValue = billingDateIso
+    ? new Date(billingDateIso).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
     : t.account.nextPending;
-  const paymentMethodValue = workspace?.billing?.status === "configured" && workspace.billing.paymentMethodLabel
-    ? workspace.billing.paymentMethodLabel
-    : t.account.billingNoMethod;
+  const paymentMethodValue = workspace?.paymentMethodDisplay || t.account.billingNoMethod;
   const instagramSummary = linkedAccountsForAccountTab.length
     ? linkedAccountsForAccountTab.map((account) => formatLinkedAccountLine(account, lang)).join("\n")
     : (lang === "fr" ? "Aucun compte lié" : "No linked account");
@@ -1041,7 +1044,7 @@ export default function ClientDashboard({
                   <div className="cd-plan-price">{subscriptionCard.price}<small>{subscriptionCard.period}</small></div>
                   <div className="cd-plan-rows">
                     <div className="cd-pr"><span className="cd-pr-l">{t.plan.growth}</span><span className="cd-pr-v cd-a">{subscriptionCard.growthEstimate}</span></div>
-                    <div className="cd-pr"><span className="cd-pr-l">{t.plan.nextBill}</span><span className="cd-pr-v">{subscriptionCard.nextBilling}</span></div>
+                    <div className="cd-pr"><span className="cd-pr-l">{subscriptionCard.billingDateLabel}</span><span className="cd-pr-v">{subscriptionCard.nextBilling}</span></div>
                     <div className="cd-pr"><span className="cd-pr-l">{t.plan.support}</span><span className="cd-pr-v cd-g">{subscriptionCard.support}</span></div>
                   </div>
                   <button className="cd-btn cd-btn-primary cd-btn-full" onClick={() => handleNavigate("account")}>
@@ -1273,7 +1276,7 @@ export default function ClientDashboard({
                 {[
                   { lbl:t.account.planLabel, val:subscriptionPlanValue || (lang === "fr" ? "Non renseigné" : "Not available") },
                   { lbl:t.account.since,     val:memberSinceValue || (lang === "fr" ? "Non renseigné" : "Not available") },
-                  { lbl:t.account.next,      val:nextBillingValue },
+                  { lbl:billingDateLabel,    val:billingDateValue },
                 ].map(({ lbl, val }) => (
                   <div key={lbl} className="cd-fg">
                     <label className="cd-fl">{lbl}</label>
@@ -1287,10 +1290,7 @@ export default function ClientDashboard({
                     {t.account.managePayment}
                   </button>
                 </div>
-                <button className="cd-btn cd-btn-soft" type="button" onClick={() => setPlanHelpOpen(true)}>{t.account.changePlan}</button>
-                {planHelpOpen ? (
-                  <p className="cd-setup-note">{t.account.changePlanHelp}</p>
-                ) : null}
+                <a className="cd-btn cd-btn-soft" href="/instagram-client/change-plan">{t.account.changePlan}</a>
               </div>
             </div>
           </div>
