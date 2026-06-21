@@ -84,6 +84,8 @@ export default function CommercialCheckoutForm(props: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [handoffLoginPath, setHandoffLoginPath] = useState<string | null>(null);
+  const [conflictRedirectPath, setConflictRedirectPath] = useState<string | null>(null);
   const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
 
   useEffect(() => {
@@ -99,6 +101,7 @@ export default function CommercialCheckoutForm(props: {
           billing_interval_months: months,
           outreach_addon_key: outreach || null,
           purchaser_email: props.flowType === "first_purchase" ? email.trim() : undefined,
+          flow_type: props.flowType,
         }),
       });
       const parsed = await parseCheckoutApiResponse<{
@@ -133,6 +136,8 @@ export default function CommercialCheckoutForm(props: {
     setLoading(true);
     setError("");
     setSuccess("");
+    setHandoffLoginPath(null);
+    setConflictRedirectPath(null);
     try {
       const response = await fetch("/api/commercial/checkout/simulated/activate", {
         method: "POST",
@@ -147,17 +152,31 @@ export default function CommercialCheckoutForm(props: {
         }),
       });
       const parsed = await parseCheckoutApiResponse<{
-        redirect_path?: string;
+        redirect_path?: string | null;
+        handoff_type?: string;
+        login_path?: string | null;
         message_fr?: string;
         message_en?: string;
       }>(response, {
         messageFr: CHECKOUT_UNAVAILABLE_FR,
       });
       if (!parsed.ok) {
+        const redirectPath = typeof parsed.payload?.redirect_path === "string"
+          ? parsed.payload.redirect_path
+          : null;
+        if (redirectPath) {
+          setConflictRedirectPath(redirectPath);
+        }
         throw new Error(lang === "fr" ? parsed.clientMessageFr : parsed.clientMessageEn);
       }
       setSuccess(lang === "fr" ? parsed.data?.message_fr ?? "" : parsed.data?.message_en ?? "");
-      router.push(parsed.data?.redirect_path || "/instagram-client");
+      if (parsed.data?.handoff_type === "email_login") {
+        setHandoffLoginPath(parsed.data?.login_path || "/instagram-login");
+        return;
+      }
+      if (parsed.data?.redirect_path) {
+        router.push(parsed.data.redirect_path);
+      }
     } catch (activationError) {
       const message = activationError instanceof Error ? activationError.message : String(activationError);
       if (!message.includes("JSON.parse")) {
@@ -249,6 +268,20 @@ export default function CommercialCheckoutForm(props: {
       {error ? <p className="commercial-checkout-error">{error}</p> : null}
       {activationNotice ? <p className="commercial-checkout-notice">{activationNotice}</p> : null}
       {success ? <p className="commercial-checkout-success">{success}</p> : null}
+      {handoffLoginPath ? (
+        <p className="commercial-checkout-handoff">
+          <a href={handoffLoginPath}>
+            {lang === "fr" ? "Accéder à la connexion client" : "Go to client login"}
+          </a>
+        </p>
+      ) : null}
+      {conflictRedirectPath ? (
+        <p className="commercial-checkout-handoff">
+          <a href={conflictRedirectPath}>
+            {lang === "fr" ? "Continuer depuis mon espace client" : "Continue from my client workspace"}
+          </a>
+        </p>
+      ) : null}
 
       <button
         type="button"
@@ -279,6 +312,8 @@ export default function CommercialCheckoutForm(props: {
         .commercial-checkout-error { color: #fca5a5; }
         .commercial-checkout-notice { color: #fcd34d; }
         .commercial-checkout-success { color: #86efac; }
+        .commercial-checkout-handoff { margin-top: 12px; }
+        .commercial-checkout-handoff a { color: #93c5fd; font-weight: 600; }
       `}</style>
     </div>
   );

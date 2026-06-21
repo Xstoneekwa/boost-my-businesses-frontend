@@ -10,6 +10,9 @@ export type CheckoutApiEnvelope<TData = unknown> = {
   code?: string;
   message_fr?: string;
   message_en?: string;
+  redirect_path?: string | null;
+  handoff_type?: string | null;
+  login_path?: string | null;
   data?: TData;
 };
 

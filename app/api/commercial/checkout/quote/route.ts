@@ -15,6 +15,7 @@ type QuoteBody = {
   outreach_addon_key?: unknown;
   client_id?: unknown;
   purchaser_email?: unknown;
+  flow_type?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -23,11 +24,15 @@ export async function POST(request: Request) {
     const planKey = readString(body?.plan_key);
     const billingIntervalMonths = Number(body?.billing_interval_months ?? 1);
     const outreachAddonKey = readString(body?.outreach_addon_key) || null;
+    const flowTypeRaw = readString(body?.flow_type, "first_purchase");
+    const flowType = flowTypeRaw === "additional_account" ? "additional_account" : "first_purchase";
 
     let clientId = readString(body?.client_id);
     const session = await requireClientInstagramSession();
-    if (session.ok) {
+    if (session.ok && flowType === "additional_account") {
       clientId = session.clientId;
+    } else {
+      clientId = "";
     }
 
     let purchaserEmail = readString(body?.purchaser_email);

@@ -8,6 +8,15 @@ import {
   type PlanKey,
 } from "./catalog";
 import {
+  evaluatePublicCheckoutConflict,
+  normalizeCheckoutEmail,
+  resolveCheckoutContext,
+  resolveCheckoutHandoff,
+  handoffToRedirectPath,
+  type CheckoutContext,
+  type CheckoutSessionSnapshot,
+} from "./checkout-context";
+import {
   countLinkedInstagramAccountsForClient,
   countReservedEntitlementsForClient,
   insertCheckoutAuditEvent,
@@ -27,6 +36,7 @@ export type ActivateCheckoutInput = {
   flowType: CheckoutFlowType;
   clientId?: string | null;
   authUserId?: string | null;
+  browserSession?: CheckoutSessionSnapshot | null;
   mode: "simulated" | "stripe";
 };
 
@@ -38,12 +48,14 @@ export type ActivateCheckoutResult =
     entitlementId: string;
     clientId: string;
     authUserId: string | null;
-    redirectPath: string;
+    redirectPath: string | null;
+    handoff: ReturnType<typeof resolveCheckoutHandoff>;
+    checkoutContext: CheckoutContext;
     quote: ReturnType<typeof buildCommercialQuote> extends infer T
       ? T extends { ok: false } ? never : T
       : never;
   }
-  | { ok: false; status: number; error: string; code: string; messageFr?: string; messageEn?: string };
+  | { ok: false; status: number; error: string; code: string; messageFr?: string; messageEn?: string; redirectPath?: string | null; handoff?: ReturnType<typeof resolveCheckoutHandoff> };
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
@@ -139,11 +151,31 @@ async function ensureAuthUserId(supabase: SupabaseClient, email: string) {
   return { ok: true as const, authUserId: data.user.id };
 }
 
+async function authUserHasTenant(supabase: SupabaseClient, authUserId: string) {
+  const { data, error } = await supabase
+    .from("tenant_users")
+    .select("tenant_id")
+    .eq("user_id", authUserId)
+    .limit(1)
+    .maybeSingle<Row>();
+  if (error) {
+    console.error("[commercial/checkout/activate] tenant lookup failed", { authUserId, error });
+    return { ok: false as const };
+  }
+  return { ok: true as const, hasTenant: Boolean(data?.tenant_id) };
+}
+
 async function ensureClientWorkspace(
   supabase: SupabaseClient,
-  input: { clientId?: string | null; email: string; authUserId: string; displayName: string },
+  input: {
+    checkoutContext: CheckoutContext;
+    clientId?: string | null;
+    email: string;
+    authUserId: string;
+    displayName: string;
+  },
 ) {
-  let clientId = input.clientId?.trim() || "";
+  let clientId = input.checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
   if (!clientId) {
     const { data: createdClient, error: clientError } = await supabase
       .from("clients")
@@ -189,6 +221,9 @@ async function ensureClientWorkspace(
     });
     if (tenantInsertError) throw new Error("tenant_user_create_failed");
   } else if (readString(tenantUser.tenant_id) !== clientId) {
+    if (input.checkoutContext === "public_new_workspace") {
+      throw new Error("tenant_user_already_linked");
+    }
     const { error: tenantUpdateError } = await supabase
       .from("tenant_users")
       .update({ tenant_id: clientId })
@@ -256,7 +291,10 @@ export async function activateClientAccountEntitlementFromCheckout(
       });
     }
 
-    const email = input.purchaserEmail.trim().toLowerCase();
+    const email = normalizeCheckoutEmail(input.purchaserEmail);
+    const checkoutContext = resolveCheckoutContext({ flowType: input.flowType });
+    const handoff = resolveCheckoutHandoff(checkoutContext);
+    const redirectPath = handoffToRedirectPath(handoff);
     const guard = canUseSimulatedCheckoutForEmail(email);
     if (!guard.ok) {
       const messages = simulatedCheckoutClientMessages(guard.reason);
@@ -304,14 +342,55 @@ export async function activateClientAccountEntitlementFromCheckout(
         entitlementId: existing.entitlementId,
         clientId: existing.clientId,
         authUserId: existing.authUserId,
-        redirectPath: "/instagram-client",
+        redirectPath,
+        handoff,
+        checkoutContext,
         quote: quoteResult,
       };
     }
 
+    let scopedClientId = checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
+    let scopedAuthUserId = checkoutContext === "public_new_workspace" ? null : input.authUserId?.trim() || null;
+
+    if (checkoutContext === "public_new_workspace" && existing.kind !== "partial") {
+      let purchaserAuthUserHasTenant = false;
+      const existingAuthUserId = await findAuthUserIdByEmail(supabase, email);
+      if (existingAuthUserId) {
+        const tenantLookup = await authUserHasTenant(supabase, existingAuthUserId);
+        if (!tenantLookup.ok) {
+          return activationFailure(503, "checkout_storage_unavailable");
+        }
+        purchaserAuthUserHasTenant = tenantLookup.hasTenant;
+      }
+
+      const conflict = evaluatePublicCheckoutConflict({
+        checkoutContext,
+        session: input.browserSession ?? null,
+        purchaserEmail: email,
+        purchaserAuthUserHasTenant,
+      });
+      if (!conflict.ok) {
+        const conflictHandoff = conflict.redirectPath === "/instagram-client/choose-plan"
+          ? { type: "choose_plan" as const, redirectPath: conflict.redirectPath }
+          : conflict.redirectPath === "/instagram-login"
+            ? { type: "email_login" as const, loginPath: conflict.redirectPath }
+            : undefined;
+        return {
+          ok: false,
+          status: 409,
+          error: conflict.messageFr,
+          messageFr: conflict.messageFr,
+          messageEn: conflict.messageEn,
+          code: conflict.code,
+          redirectPath: conflict.redirectPath,
+          handoff: conflictHandoff,
+        };
+      }
+    }
+
     let finalQuote = quoteResult;
-    let clientId = input.clientId?.trim() || "";
-    let authUserId = input.authUserId?.trim() || null;
+    let clientId = scopedClientId;
+    let authUserId = scopedAuthUserId;
     let checkoutSessionId = existing.kind === "partial" ? existing.checkoutSessionId : "";
 
     if (existing.kind === "partial") {
@@ -354,6 +433,7 @@ export async function activateClientAccountEntitlementFromCheckout(
 
       const plan = COMMERCIAL_PLANS[finalQuote.planKey as PlanKey];
       clientId = await ensureClientWorkspace(supabase, {
+        checkoutContext,
         clientId: clientId || null,
         email,
         authUserId,
@@ -402,7 +482,10 @@ export async function activateClientAccountEntitlementFromCheckout(
           outreach_period_total_cents: finalQuote.outreachLine?.billingPeriodTotalCents ?? null,
           total_period_cents: finalQuote.totalPeriodCents,
           catalog_snapshot: finalQuote.catalogSnapshot,
-          metadata: { mode: "simulated" },
+          metadata: {
+            mode: "simulated",
+            checkout_context: checkoutContext,
+          },
           activated_at: now,
           updated_at: now,
         })
@@ -442,6 +525,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         metadata: {
           growth_estimate_label: plan.growthEstimateLabelFr,
           checkout_mode: "simulated",
+          checkout_context: checkoutContext,
         },
         updated_at: now,
       })
@@ -471,6 +555,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         total_period_cents: finalQuote.totalPeriodCents,
         idempotency_key: idempotencyKey,
         flow_type: input.flowType,
+        checkout_context: checkoutContext,
       },
     });
 
@@ -481,7 +566,9 @@ export async function activateClientAccountEntitlementFromCheckout(
       entitlementId,
       clientId,
       authUserId,
-      redirectPath: "/instagram-client",
+      redirectPath,
+      handoff,
+      checkoutContext,
       quote: finalQuote,
     };
   } catch (error) {
@@ -489,6 +576,14 @@ export async function activateClientAccountEntitlementFromCheckout(
       idempotencyKey: input.idempotencyKey,
       error,
     });
+    if (error instanceof Error && error.message === "tenant_user_already_linked") {
+      return activationFailure(409, "existing_workspace_use_choose_plan", {
+        messageFr:
+          "Un espace client existe déjà pour cette adresse e-mail. Connectez-vous pour ajouter un compte depuis votre espace client.",
+        messageEn:
+          "A client workspace already exists for this email address. Sign in to add an account from your workspace.",
+      });
+    }
     return activationFailure(500, "activation_failed");
   }
 }

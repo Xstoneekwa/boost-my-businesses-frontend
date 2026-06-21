@@ -30,9 +30,24 @@ export async function POST(request: Request) {
     const flowTypeRaw = readString(body?.flow_type, "first_purchase");
     const flowType = flowTypeRaw === "additional_account" ? "additional_account" : "first_purchase";
 
+    const supabase = createSupabaseClient();
     const session = await requireClientInstagramSession();
-    const clientId = session.ok ? session.clientId : null;
-    const authUserId = session.ok ? session.userId : null;
+    let sessionEmail = "";
+    if (session.ok) {
+      const { data } = await supabase.auth.admin.getUserById(session.userId);
+      sessionEmail = readString(data.user?.email);
+    }
+
+    const browserSession = session.ok
+      ? {
+        userId: session.userId,
+        clientId: session.clientId,
+        sessionEmail,
+      }
+      : null;
+
+    const clientId = flowType === "additional_account" && session.ok ? session.clientId : null;
+    const authUserId = flowType === "additional_account" && session.ok ? session.userId : null;
 
     if (flowType === "additional_account" && !clientId) {
       return checkoutActivationError(401, "session_required", {
@@ -43,7 +58,6 @@ export async function POST(request: Request) {
 
     let email = purchaserEmail;
     if (!email && authUserId) {
-      const supabase = createSupabaseClient();
       const { data } = await supabase.auth.admin.getUserById(authUserId);
       email = readString(data.user?.email);
     }
@@ -54,7 +68,6 @@ export async function POST(request: Request) {
       });
     }
 
-    const supabase = createSupabaseClient();
     const result = await activateClientAccountEntitlementFromCheckout(supabase, {
       planKey,
       billingIntervalMonths,
@@ -64,6 +77,7 @@ export async function POST(request: Request) {
       flowType,
       clientId,
       authUserId,
+      browserSession,
       mode: "simulated",
     });
 
@@ -71,22 +85,38 @@ export async function POST(request: Request) {
       return checkoutActivationError(result.status, result.code, {
         messageFr: result.messageFr ?? result.error,
         messageEn: result.messageEn,
+        redirectPath: result.redirectPath,
+        handoff: result.handoff,
       });
     }
+
+    const handoff = result.handoff;
+    const isPublicHandoff = handoff.type === "email_login";
 
     return checkoutJsonOk({
       idempotent_replay: result.idempotentReplay,
       checkout_session_id: result.checkoutSessionId,
       entitlement_id: result.entitlementId,
       client_id: result.clientId,
+      checkout_context: result.checkoutContext,
+      handoff_type: handoff.type,
+      login_path: handoff.type === "email_login" ? handoff.loginPath : null,
       redirect_path: result.redirectPath,
       quote: result.quote,
       message_fr: result.idempotentReplay
-        ? "Activation de test déjà confirmée pour cette session."
-        : "Activation de test confirmée. Aucun paiement n'a été encaissé. Votre espace client est prêt.",
+        ? (isPublicHandoff
+          ? "Activation de test déjà confirmée. Connectez-vous pour accéder à votre espace client."
+          : "Activation de test déjà confirmée pour cette session.")
+        : (isPublicHandoff
+          ? "Activation de test confirmée. Aucun paiement n'a été encaissé. Vérifiez votre e-mail pour accéder à votre espace client."
+          : "Activation de test confirmée. Aucun paiement n'a été encaissé. Votre espace client est prêt."),
       message_en: result.idempotentReplay
-        ? "Test activation was already confirmed for this session."
-        : "Test activation confirmed. No payment was collected. Your client workspace is ready.",
+        ? (isPublicHandoff
+          ? "Test activation was already confirmed. Sign in to access your client workspace."
+          : "Test activation was already confirmed for this session.")
+        : (isPublicHandoff
+          ? "Test activation confirmed. No payment was collected. Check your email to access your client workspace."
+          : "Test activation confirmed. No payment was collected. Your client workspace is ready."),
     });
   } catch (error) {
     return checkoutActivationUnexpectedError(error);
