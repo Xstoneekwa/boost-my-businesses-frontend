@@ -15,6 +15,8 @@ type ActivateBody = {
   billing_interval_months?: unknown;
   outreach_addon_key?: unknown;
   purchaser_email?: unknown;
+  password?: unknown;
+  password_confirmation?: unknown;
   idempotency_key?: unknown;
   flow_type?: unknown;
 };
@@ -78,6 +80,8 @@ export async function POST(request: Request) {
       clientId,
       authUserId,
       browserSession,
+      password: flowType === "first_purchase" ? readString(body?.password) : null,
+      passwordConfirmation: flowType === "first_purchase" ? readString(body?.password_confirmation) : null,
       mode: "simulated",
     });
 
@@ -108,14 +112,14 @@ export async function POST(request: Request) {
           ? "Activation de test déjà confirmée. Connectez-vous pour accéder à votre espace client."
           : "Activation de test déjà confirmée pour cette session.")
         : (isPublicHandoff
-          ? "Activation de test confirmée. Aucun paiement n'a été encaissé. Vérifiez votre e-mail pour accéder à votre espace client."
+          ? "Activation de test confirmée. Aucun paiement n'a été encaissé. Votre espace client est prêt. Connectez-vous pour poursuivre."
           : "Activation de test confirmée. Aucun paiement n'a été encaissé. Votre espace client est prêt."),
       message_en: result.idempotentReplay
         ? (isPublicHandoff
           ? "Test activation was already confirmed. Sign in to access your client workspace."
           : "Test activation was already confirmed for this session.")
         : (isPublicHandoff
-          ? "Test activation confirmed. No payment was collected. Check your email to access your client workspace."
+          ? "Test activation confirmed. No payment was collected. Your client workspace is ready. Sign in to continue."
           : "Test activation confirmed. No payment was collected. Your client workspace is ready."),
     });
   } catch (error) {

@@ -7,6 +7,12 @@ import {
   QUOTE_UNAVAILABLE_EN,
   QUOTE_UNAVAILABLE_FR,
 } from "@/lib/commercial/checkout-api-messages";
+import {
+  CHECKOUT_PASSWORD_MIN_LENGTH,
+  publicCheckoutPasswordRulesEn,
+  publicCheckoutPasswordRulesFr,
+  validatePublicCheckoutPassword,
+} from "@/lib/commercial/checkout-password";
 import { parseCheckoutApiResponse } from "@/lib/commercial/parse-checkout-api-response";
 import {
   COMMERCIAL_PLANS,
@@ -65,6 +71,7 @@ export default function CommercialCheckoutForm(props: {
   const lang = props.lang ?? "fr";
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isPublicCheckout = props.flowType === "first_purchase";
   const [planKey, setPlanKey] = useState<PlanKey>(
     isPlanKey(props.initialPlan ?? searchParams.get("plan") ?? "pro") ? (props.initialPlan ?? searchParams.get("plan") ?? "pro") as PlanKey : "pro",
   );
@@ -78,15 +85,38 @@ export default function CommercialCheckoutForm(props: {
     return isOutreachAddonKey(raw) ? raw : "";
   });
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordInlineError, setPasswordInlineError] = useState("");
   const [quote, setQuote] = useState<QuotePayload | null>(null);
   const [activationAvailable, setActivationAvailable] = useState(false);
   const [activationNotice, setActivationNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [activationComplete, setActivationComplete] = useState(false);
   const [handoffLoginPath, setHandoffLoginPath] = useState<string | null>(null);
   const [conflictRedirectPath, setConflictRedirectPath] = useState<string | null>(null);
   const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
+
+  const passwordReady = useMemo(() => {
+    if (!isPublicCheckout) return true;
+    return validatePublicCheckoutPassword({ password, passwordConfirmation }).ok;
+  }, [isPublicCheckout, password, passwordConfirmation]);
+
+  useEffect(() => {
+    if (!isPublicCheckout) {
+      setPasswordInlineError("");
+      return;
+    }
+    if (!password && !passwordConfirmation) {
+      setPasswordInlineError("");
+      return;
+    }
+    const validation = validatePublicCheckoutPassword({ password, passwordConfirmation });
+    setPasswordInlineError(validation.ok ? "" : (lang === "fr" ? validation.messageFr : validation.messageEn));
+  }, [isPublicCheckout, password, passwordConfirmation, lang]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +130,7 @@ export default function CommercialCheckoutForm(props: {
           plan_key: planKey,
           billing_interval_months: months,
           outreach_addon_key: outreach || null,
-          purchaser_email: props.flowType === "first_purchase" ? email.trim() : undefined,
+          purchaser_email: isPublicCheckout ? email.trim() : undefined,
           flow_type: props.flowType,
         }),
       });
@@ -130,9 +160,17 @@ export default function CommercialCheckoutForm(props: {
     }
     void loadQuote();
     return () => { cancelled = true; };
-  }, [planKey, months, outreach, email, lang, props.flowType]);
+  }, [planKey, months, outreach, email, lang, props.flowType, isPublicCheckout]);
 
   async function onActivate() {
+    if (isPublicCheckout) {
+      const validation = validatePublicCheckoutPassword({ password, passwordConfirmation });
+      if (!validation.ok) {
+        setPasswordInlineError(lang === "fr" ? validation.messageFr : validation.messageEn);
+        return;
+      }
+    }
+
     setLoading(true);
     setError("");
     setSuccess("");
@@ -147,6 +185,8 @@ export default function CommercialCheckoutForm(props: {
           billing_interval_months: months,
           outreach_addon_key: outreach || null,
           purchaser_email: email,
+          password: isPublicCheckout ? password : undefined,
+          password_confirmation: isPublicCheckout ? passwordConfirmation : undefined,
           idempotency_key: idempotencyKey,
           flow_type: props.flowType,
         }),
@@ -171,6 +211,7 @@ export default function CommercialCheckoutForm(props: {
       }
       setSuccess(lang === "fr" ? parsed.data?.message_fr ?? "" : parsed.data?.message_en ?? "");
       if (parsed.data?.handoff_type === "email_login") {
+        setActivationComplete(true);
         setHandoffLoginPath(parsed.data?.login_path || "/instagram-login");
         return;
       }
@@ -187,6 +228,33 @@ export default function CommercialCheckoutForm(props: {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (activationComplete && handoffLoginPath) {
+    return (
+      <div className="commercial-checkout">
+        <div className="commercial-checkout-success-panel">
+          <h1>{lang === "fr" ? "Activation de test confirmée" : "Test activation confirmed"}</h1>
+          <p>{success}</p>
+          <p className="commercial-checkout-success-note">
+            {lang === "fr"
+              ? "Aucun paiement n'a été encaissé. Votre espace client est prêt."
+              : "No payment was collected. Your client workspace is ready."}
+          </p>
+          <a className="commercial-checkout-success-cta" href={handoffLoginPath}>
+            {lang === "fr" ? "Se connecter à mon espace" : "Sign in to my workspace"}
+          </a>
+        </div>
+        <style jsx>{`
+          .commercial-checkout { max-width: 720px; margin: 0 auto; padding: 32px 20px; color: #f5f5f4; }
+          .commercial-checkout-success-panel { padding: 28px; border: 1px solid rgba(16,185,129,.35); border-radius: 16px; background: rgba(16,185,129,.08); }
+          .commercial-checkout-success-panel h1 { margin: 0 0 12px; font-size: 1.5rem; }
+          .commercial-checkout-success-panel p { margin: 0 0 10px; line-height: 1.5; }
+          .commercial-checkout-success-note { color: #d1fae5; }
+          .commercial-checkout-success-cta { display: inline-block; margin-top: 18px; padding: 12px 18px; border-radius: 999px; background: #10b981; color: #04120d; font-weight: 700; text-decoration: none; }
+        `}</style>
+      </div>
+    );
   }
 
   return (
@@ -226,11 +294,49 @@ export default function CommercialCheckoutForm(props: {
           <label><input type="radio" name="outreach" checked={outreach === "outreach_ai"} onChange={() => setOutreach("outreach_ai")} /> {OUTREACH_ADDONS.outreach_ai.displayNameFr}</label>
         </fieldset>
 
-        {props.flowType === "first_purchase" && (
-          <label>
-            Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="vous@exemple.com" />
-          </label>
+        {isPublicCheckout && (
+          <>
+            <label>
+              {lang === "fr" ? "Adresse e-mail de connexion" : "Login email address"}
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="vous@exemple.com"
+              />
+            </label>
+
+            <label>
+              {lang === "fr" ? "Créer votre mot de passe" : "Create your password"}
+              <div className="password-field">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
+                />
+                <button type="button" className="password-toggle" onClick={() => setShowPassword((v) => !v)}>
+                  {showPassword
+                    ? (lang === "fr" ? "Masquer" : "Hide")
+                    : (lang === "fr" ? "Afficher" : "Show")}
+                </button>
+              </div>
+              <span className="field-hint">{lang === "fr" ? publicCheckoutPasswordRulesFr() : publicCheckoutPasswordRulesEn()}</span>
+            </label>
+
+            <label>
+              {lang === "fr" ? "Confirmer votre mot de passe" : "Confirm your password"}
+              <input
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                value={passwordConfirmation}
+                onChange={(e) => setPasswordConfirmation(e.target.value)}
+                minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
+              />
+            </label>
+          </>
         )}
       </div>
 
@@ -266,19 +372,14 @@ export default function CommercialCheckoutForm(props: {
       )}
 
       {error ? <p className="commercial-checkout-error">{error}</p> : null}
+      {passwordInlineError ? <p className="commercial-checkout-error">{passwordInlineError}</p> : null}
       {activationNotice ? <p className="commercial-checkout-notice">{activationNotice}</p> : null}
-      {success ? <p className="commercial-checkout-success">{success}</p> : null}
-      {handoffLoginPath ? (
-        <p className="commercial-checkout-handoff">
-          <a href={handoffLoginPath}>
-            {lang === "fr" ? "Accéder à la connexion client" : "Go to client login"}
-          </a>
-        </p>
-      ) : null}
       {conflictRedirectPath ? (
         <p className="commercial-checkout-handoff">
           <a href={conflictRedirectPath}>
-            {lang === "fr" ? "Continuer depuis mon espace client" : "Continue from my client workspace"}
+            {conflictRedirectPath === "/instagram-login"
+              ? (lang === "fr" ? "Se connecter" : "Sign in")
+              : (lang === "fr" ? "Continuer depuis mon espace client" : "Continue from my client workspace")}
           </a>
         </p>
       ) : null}
@@ -289,7 +390,8 @@ export default function CommercialCheckoutForm(props: {
           loading
           || !quote
           || !activationAvailable
-          || (props.flowType === "first_purchase" && !email.trim())
+          || (isPublicCheckout && !email.trim())
+          || (isPublicCheckout && !passwordReady)
         }
         onClick={() => void onActivate()}
       >
@@ -304,6 +406,9 @@ export default function CommercialCheckoutForm(props: {
         .commercial-checkout-grid { display: grid; gap: 16px; margin: 20px 0; }
         label, fieldset { display: grid; gap: 8px; }
         select, input { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.04); color: inherit; }
+        .password-field { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+        .password-toggle { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.06); color: inherit; cursor: pointer; }
+        .field-hint { color: #a8a29e; font-size: 0.9rem; }
         .commercial-checkout-lines { display: grid; gap: 16px; margin: 24px 0; }
         .line { padding: 16px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: rgba(255,255,255,.03); }
         .line.total { border-color: rgba(16,185,129,.35); }
@@ -311,7 +416,6 @@ export default function CommercialCheckoutForm(props: {
         button:disabled { opacity: .55; cursor: not-allowed; }
         .commercial-checkout-error { color: #fca5a5; }
         .commercial-checkout-notice { color: #fcd34d; }
-        .commercial-checkout-success { color: #86efac; }
         .commercial-checkout-handoff { margin-top: 12px; }
         .commercial-checkout-handoff a { color: #93c5fd; font-weight: 600; }
       `}</style>

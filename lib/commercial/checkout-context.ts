@@ -71,9 +71,9 @@ export function evaluatePublicCheckoutConflict(input: {
       ok: false,
       code: "existing_workspace_use_choose_plan",
       messageFr:
-        "Vous possédez déjà un espace client. Pour ajouter un compte Instagram supplémentaire, continuez depuis votre espace client.",
+        "Vous possédez déjà un espace client. Ajoutez un nouveau compte depuis votre espace client.",
       messageEn:
-        "You already have a client workspace. To add another Instagram account, continue from your client workspace.",
+        "You already have a client workspace. Add a new account from your client workspace.",
       redirectPath: "/instagram-client/choose-plan",
     };
   }

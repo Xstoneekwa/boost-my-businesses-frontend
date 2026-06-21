@@ -22,6 +22,8 @@ import {
   insertCheckoutAuditEvent,
 } from "./entitlements";
 import { buildCommercialQuote } from "./pricing";
+import { ensureSimulatedPublicAuthUser, lookupPurchaserAuthState } from "./checkout-auth";
+import { validatePublicCheckoutPassword } from "./checkout-password";
 import { canUseSimulatedCheckoutForEmail, simulatedCheckoutClientMessages } from "./simulated-checkout-guard";
 import { CHECKOUT_UNAVAILABLE_EN, CHECKOUT_UNAVAILABLE_FR } from "./checkout-api-messages.ts";
 
@@ -37,6 +39,8 @@ export type ActivateCheckoutInput = {
   clientId?: string | null;
   authUserId?: string | null;
   browserSession?: CheckoutSessionSnapshot | null;
+  password?: string | null;
+  passwordConfirmation?: string | null;
   mode: "simulated" | "stripe";
 };
 
@@ -127,42 +131,13 @@ async function findExistingActivatedSession(supabase: SupabaseClient, idempotenc
   };
 }
 
-async function findAuthUserIdByEmail(supabase: SupabaseClient, email: string) {
-  const normalized = email.trim().toLowerCase();
-  const { data, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (error) {
-    console.error("[commercial/checkout/activate] auth user lookup failed", { email: normalized, error });
-    return null;
-  }
-  const match = (data.users ?? []).find((user) => (user.email ?? "").trim().toLowerCase() === normalized);
-  return match?.id ?? null;
-}
-
-async function ensureAuthUserId(supabase: SupabaseClient, email: string) {
-  const existing = await findAuthUserIdByEmail(supabase, email);
-  if (existing) return { ok: true as const, authUserId: existing };
-  const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/instagram-login`,
-  });
+async function ensureSessionAuthUserId(supabase: SupabaseClient, authUserId: string) {
+  const { data, error } = await supabase.auth.admin.getUserById(authUserId);
   if (error || !data.user?.id) {
-    console.error("[commercial/checkout/activate] auth user create failed", { email, error });
+    console.error("[commercial/checkout/activate] session auth user lookup failed", { authUserId, error });
     return { ok: false as const };
   }
   return { ok: true as const, authUserId: data.user.id };
-}
-
-async function authUserHasTenant(supabase: SupabaseClient, authUserId: string) {
-  const { data, error } = await supabase
-    .from("tenant_users")
-    .select("tenant_id")
-    .eq("user_id", authUserId)
-    .limit(1)
-    .maybeSingle<Row>();
-  if (error) {
-    console.error("[commercial/checkout/activate] tenant lookup failed", { authUserId, error });
-    return { ok: false as const };
-  }
-  return { ok: true as const, hasTenant: Boolean(data?.tenant_id) };
 }
 
 async function ensureClientWorkspace(
@@ -321,6 +296,19 @@ export async function activateClientAccountEntitlementFromCheckout(
       return activationFailure(503, "checkout_storage_unavailable");
     }
 
+    if (checkoutContext === "public_new_workspace" && existing.kind === "missing") {
+      const passwordValidation = validatePublicCheckoutPassword({
+        password: input.password ?? "",
+        passwordConfirmation: input.passwordConfirmation ?? "",
+      });
+      if (!passwordValidation.ok) {
+        return activationFailure(400, passwordValidation.code, {
+          messageFr: passwordValidation.messageFr,
+          messageEn: passwordValidation.messageEn,
+        });
+      }
+    }
+
     const quoteResult = buildCommercialQuote({
       planKey: input.planKey,
       billingIntervalMonths: input.billingIntervalMonths,
@@ -354,14 +342,11 @@ export async function activateClientAccountEntitlementFromCheckout(
 
     if (checkoutContext === "public_new_workspace" && existing.kind !== "partial") {
       let purchaserAuthUserHasTenant = false;
-      const existingAuthUserId = await findAuthUserIdByEmail(supabase, email);
-      if (existingAuthUserId) {
-        const tenantLookup = await authUserHasTenant(supabase, existingAuthUserId);
-        if (!tenantLookup.ok) {
-          return activationFailure(503, "checkout_storage_unavailable");
-        }
-        purchaserAuthUserHasTenant = tenantLookup.hasTenant;
+      const purchaserAuthState = await lookupPurchaserAuthState(supabase, email);
+      if (!purchaserAuthState.ok) {
+        return activationFailure(503, "checkout_storage_unavailable");
       }
+      purchaserAuthUserHasTenant = purchaserAuthState.hasTenant;
 
       const conflict = evaluatePublicCheckoutConflict({
         checkoutContext,
@@ -424,11 +409,31 @@ export async function activateClientAccountEntitlementFromCheckout(
       }
 
       if (!authUserId) {
-        const authResult = await ensureAuthUserId(supabase, email);
-        if (!authResult.ok) {
-          return activationFailure(503, "auth_user_unavailable");
+        if (checkoutContext === "public_new_workspace") {
+          const authResult = await ensureSimulatedPublicAuthUser(supabase, {
+            email,
+            password: input.password ?? "",
+          });
+          if (!authResult.ok) {
+            return activationFailure(
+              authResult.code === "auth_user_exists_no_workspace" ? 409 : 503,
+              authResult.code,
+              { messageFr: authResult.messageFr, messageEn: authResult.messageEn },
+            );
+          }
+          authUserId = authResult.authUserId;
+        } else if (input.authUserId) {
+          const sessionAuth = await ensureSessionAuthUserId(supabase, input.authUserId);
+          if (!sessionAuth.ok) {
+            return activationFailure(503, "auth_user_unavailable");
+          }
+          authUserId = sessionAuth.authUserId;
+        } else {
+          return activationFailure(401, "session_required", {
+            messageFr: "Connexion client requise pour cet achat.",
+            messageEn: "Client login is required for this purchase.",
+          });
         }
-        authUserId = authResult.authUserId;
       }
 
       const plan = COMMERCIAL_PLANS[finalQuote.planKey as PlanKey];
@@ -447,11 +452,31 @@ export async function activateClientAccountEntitlementFromCheckout(
       : null;
 
     if (!authUserId) {
-      const authResult = await ensureAuthUserId(supabase, email);
-      if (!authResult.ok) {
-        return activationFailure(503, "auth_user_unavailable");
+      if (checkoutContext === "public_new_workspace") {
+        const authResult = await ensureSimulatedPublicAuthUser(supabase, {
+          email,
+          password: input.password ?? "",
+        });
+        if (!authResult.ok) {
+          return activationFailure(
+            authResult.code === "auth_user_exists_no_workspace" ? 409 : 503,
+            authResult.code,
+            { messageFr: authResult.messageFr, messageEn: authResult.messageEn },
+          );
+        }
+        authUserId = authResult.authUserId;
+      } else if (input.authUserId) {
+        const sessionAuth = await ensureSessionAuthUserId(supabase, input.authUserId);
+        if (!sessionAuth.ok) {
+          return activationFailure(503, "auth_user_unavailable");
+        }
+        authUserId = sessionAuth.authUserId;
+      } else {
+        return activationFailure(401, "session_required", {
+          messageFr: "Connexion client requise pour cet achat.",
+          messageEn: "Client login is required for this purchase.",
+        });
       }
-      authUserId = authResult.authUserId;
     }
 
     const now = new Date().toISOString();
