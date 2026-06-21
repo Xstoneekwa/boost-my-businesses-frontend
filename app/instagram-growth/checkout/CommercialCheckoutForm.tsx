@@ -136,6 +136,8 @@ export default function CommercialCheckoutForm(props: {
       });
       const parsed = await parseCheckoutApiResponse<{
         quote?: QuotePayload;
+        simulationAvailable?: boolean;
+        simulationUnavailableReason?: string | null;
         simulatedActivationAvailable?: boolean;
         activationMessageFr?: string | null;
         activationMessageEn?: string | null;
@@ -152,10 +154,15 @@ export default function CommercialCheckoutForm(props: {
         return;
       }
       setQuote(parsed.data.quote);
-      setActivationAvailable(Boolean(parsed.data.simulatedActivationAvailable));
-      const notice = lang === "fr"
-        ? parsed.data.activationMessageFr
-        : parsed.data.activationMessageEn;
+      const simulationAllowed = isPublicCheckout
+        ? Boolean(parsed.data.simulationAvailable)
+        : Boolean(parsed.data.simulatedActivationAvailable);
+      setActivationAvailable(simulationAllowed);
+      const notice = isPublicCheckout
+        ? null
+        : (lang === "fr"
+          ? parsed.data.activationMessageFr
+          : parsed.data.activationMessageEn);
       setActivationNotice(notice?.trim() || "");
     }
     void loadQuote();

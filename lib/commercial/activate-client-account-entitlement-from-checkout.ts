@@ -36,7 +36,8 @@ import {
 } from "./entitlements";
 import { buildCommercialQuote } from "./pricing";
 import { validatePublicCheckoutPassword } from "./checkout-password";
-import { canUseSimulatedCheckoutForEmail, simulatedCheckoutClientMessages } from "./simulated-checkout-guard";
+import { confirmCommercialPayment } from "./confirm-commercial-payment.ts";
+import { canUseSimulatedCheckoutForEmail, simulatedCheckoutClientMessages } from "./simulated-checkout-guard.ts";
 import { CHECKOUT_UNAVAILABLE_EN, CHECKOUT_UNAVAILABLE_FR } from "./checkout-api-messages.ts";
 
 type Row = Record<string, unknown>;
@@ -434,19 +435,6 @@ export async function activateClientAccountEntitlementFromCheckout(
       stage: checkoutContext,
     });
 
-    const guard = canUseSimulatedCheckoutForEmail(email);
-    if (!guard.ok) {
-      const messages = simulatedCheckoutClientMessages(guard.reason);
-      return {
-        ok: false,
-        status: 403,
-        error: messages.messageFr,
-        messageFr: messages.messageFr,
-        messageEn: messages.messageEn,
-        code: guard.reason,
-      };
-    }
-
     if (!tracker.idempotencyKey) {
       return activationFailure(400, "idempotency_required", {
         messageFr: "Impossible de confirmer cette activation de test.",
@@ -457,6 +445,23 @@ export async function activateClientAccountEntitlementFromCheckout(
     const existing = await findExistingActivatedSession(supabase, tracker.idempotencyKey);
     if (existing.kind === "storage_error") {
       return activationFailure(503, "checkout_storage_unavailable");
+    }
+
+    if (existing.kind !== "found") {
+      if (checkoutContext !== "public_new_workspace") {
+        const guard = canUseSimulatedCheckoutForEmail(email);
+        if (!guard.ok) {
+          const messages = simulatedCheckoutClientMessages(guard.reason);
+          return {
+            ok: false,
+            status: 403,
+            error: messages.messageFr,
+            messageFr: messages.messageFr,
+            messageEn: messages.messageEn,
+            code: guard.reason,
+          };
+        }
+      }
     }
 
     if (checkoutContext === "public_new_workspace" && existing.kind === "missing") {
@@ -483,6 +488,26 @@ export async function activateClientAccountEntitlementFromCheckout(
         messageFr: "Sélection checkout invalide.",
         messageEn: "Invalid checkout selection.",
       });
+    }
+
+    if (existing.kind !== "found" && checkoutContext === "public_new_workspace") {
+      const payment = confirmCommercialPayment({
+        provider: "simulated",
+        purchaserEmail: email,
+        amountDueCents: quoteResult.totalPeriodCents,
+        idempotencyKey: tracker.idempotencyKey,
+        checkoutContext,
+      });
+      if (!payment.ok) {
+        return {
+          ok: false,
+          status: 403,
+          error: payment.messageFr,
+          messageFr: payment.messageFr,
+          messageEn: payment.messageEn,
+          code: payment.code,
+        };
+      }
     }
 
     if (existing.kind === "found") {
@@ -724,6 +749,8 @@ export async function activateClientAccountEntitlementFromCheckout(
           catalog_snapshot: finalQuote.catalogSnapshot,
           metadata: {
             mode: "simulated",
+            payment_provider: "simulated",
+            payment_status: "simulated_confirmed",
             checkout_context: checkoutContext,
           },
           activated_at: now,

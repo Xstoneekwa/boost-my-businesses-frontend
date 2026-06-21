@@ -12,16 +12,12 @@ import {
   createCheckoutMockSupabase,
   mockPasswordSignIn,
 } from "./checkout-test-mock-supabase.ts";
+import { withInitialCheckoutAllowlist } from "./initial-checkout-test-env.ts";
 
-const TEST_ENV = {
-  SIMULATED_CHECKOUT_ENABLED: "true",
-  SIMULATED_CHECKOUT_EMAIL_ALLOWLIST: "resume@example.com,new@example.com",
-  NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key",
-};
+const TEST_ENV = withInitialCheckoutAllowlist(["resume@example.invalid", "new@example.invalid"]);
 
 const PASSWORD = "ValidPassword12!";
-const EMAIL = "resume@example.com";
+const EMAIL = "resume@example.invalid";
 
 function activationInput(idempotencyKey: string) {
   return {

@@ -10,18 +10,14 @@ import {
   createCheckoutMockSupabase,
   mockPasswordSignIn,
 } from "./checkout-test-mock-supabase.ts";
+import { withInitialCheckoutAllowlist } from "./initial-checkout-test-env.ts";
 
 const REAL_AUTH_ID = "f2072cd8-98bb-42cf-9590-0d1507a23d2d";
 const REAL_CLIENT_ID = "c51267f5-6c0d-46db-8ba0-7f1746a7b4bc";
-const ORPHAN_EMAIL = "xstonekwa@hotmail.com";
+const ORPHAN_EMAIL = "orphan_resume@example.invalid";
 const PASSWORD = "ValidPassword12!";
 
-const TEST_ENV = {
-  SIMULATED_CHECKOUT_ENABLED: "true",
-  SIMULATED_CHECKOUT_EMAIL_ALLOWLIST: ORPHAN_EMAIL,
-  NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key",
-};
+const TEST_ENV = withInitialCheckoutAllowlist([ORPHAN_EMAIL]);
 
 function orphanMockStore() {
   return createCheckoutMockSupabase({

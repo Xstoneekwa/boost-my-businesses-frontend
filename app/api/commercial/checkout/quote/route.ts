@@ -5,6 +5,7 @@ import { QUOTE_UNAVAILABLE_EN, QUOTE_UNAVAILABLE_FR } from "@/lib/commercial/che
 import { buildCommercialQuote } from "@/lib/commercial/pricing";
 import { deriveAgencyModeSnapshot } from "@/lib/commercial/agency";
 import { projectSimulatedCheckoutAvailability } from "@/lib/commercial/simulated-checkout-guard";
+import { projectInitialCheckoutSimulationAvailability } from "@/lib/commercial/initial-checkout-simulation-guard";
 import { requireClientInstagramSession, readString } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
@@ -62,16 +63,30 @@ export async function POST(request: Request) {
       });
     }
 
-    const availability = projectSimulatedCheckoutAvailability(purchaserEmail || null);
+    const availability = flowType === "first_purchase"
+      ? projectInitialCheckoutSimulationAvailability(purchaserEmail || null)
+      : null;
+    const legacyAvailability = flowType === "additional_account"
+      ? projectSimulatedCheckoutAvailability(purchaserEmail || null)
+      : null;
+
+    if (flowType === "first_purchase") {
+      return jsonOk({
+        quote,
+        agency: agencySnapshot,
+        simulationAvailable: availability?.simulationAvailable ?? false,
+        simulationUnavailableReason: availability?.simulationUnavailableReason ?? null,
+      });
+    }
 
     return jsonOk({
       quote,
       agency: agencySnapshot,
-      simulatedCheckoutEnabled: availability.simulatedCheckoutEnabled,
-      simulatedActivationAvailable: availability.simulatedActivationAvailable,
-      requiresEmail: availability.requiresEmail,
-      activationMessageFr: availability.messageFr,
-      activationMessageEn: availability.messageEn,
+      simulatedCheckoutEnabled: legacyAvailability?.simulatedCheckoutEnabled ?? false,
+      simulatedActivationAvailable: legacyAvailability?.simulatedActivationAvailable ?? false,
+      requiresEmail: legacyAvailability?.requiresEmail ?? false,
+      activationMessageFr: legacyAvailability?.messageFr,
+      activationMessageEn: legacyAvailability?.messageEn,
     });
   } catch (error) {
     console.error("[commercial/checkout/quote] unexpected failure", error);

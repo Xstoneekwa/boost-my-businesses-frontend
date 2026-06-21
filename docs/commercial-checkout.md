@@ -33,7 +33,19 @@ Variables :
 
 - `SIMULATED_CHECKOUT_ENABLED=true`
 - `SIMULATED_CHECKOUT_EMAIL_ALLOWLIST=email@domain.com`
-- `SIMULATED_CHECKOUT_ALLOW_PRODUCTION=true` (prod uniquement si explicitement autorisé)
+
+### Premier checkout (`first_purchase`) — fail-closed test-only
+
+En plus des variables ci-dessus, la simulation initiale exige côté **serveur** :
+
+- `SUPABASE_URL` pointant vers la ref isolée `nxntngkhkoynljcagmkq` (jamais `NEXT_PUBLIC_*` pour la décision)
+- `SIMULATED_CHECKOUT_ISOLATED_TEST_CONFIRM=isolated-test-only`
+- e-mail strictement `*@example.invalid`
+- e-mail présent dans l'allowlist
+
+Sinon : `403` (`simulated_checkout_forbidden` / `simulation_unavailable`), zéro provisioning.
+
+Le changement de formule (Plan Change) conserve ses guards existants.
 
 ## Migration
 

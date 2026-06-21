@@ -1,0 +1,2 @@
+# Local run state (credentials, manifests) — never commit
+.run-state/

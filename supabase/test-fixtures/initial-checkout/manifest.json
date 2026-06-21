@@ -1,0 +1,9 @@
+{
+  "name": "initial-checkout-isolated-e2e",
+  "version": 1,
+  "allowedRef": "nxntngkhkoynljcagmkq",
+  "forbiddenRef": "zgafnshkjywfltxgbtzg",
+  "fictionalEmailDomain": "@example.invalid",
+  "requiredServerConfirm": "isolated-test-only",
+  "requiredServerSupabaseEnv": "SUPABASE_URL"
+}

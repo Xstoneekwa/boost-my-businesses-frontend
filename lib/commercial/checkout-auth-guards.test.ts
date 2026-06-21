@@ -11,18 +11,14 @@ import {
   createCheckoutMockSupabase,
   mockPasswordSignIn,
 } from "./checkout-test-mock-supabase.ts";
+import { withInitialCheckoutAllowlist } from "./initial-checkout-test-env.ts";
 
 const PASSWORD = "ValidPassword12!";
-const PURCHASER_EMAIL = "resume@example.com";
-const OTHER_CLIENT_EMAIL = "other@example.com";
+const PURCHASER_EMAIL = "resume@example.invalid";
+const OTHER_CLIENT_EMAIL = "other@example.invalid";
 const LIAM_CLIENT_ID = "c37c9143-ee14-4c9a-9a60-226759241733";
 
-const TEST_ENV = {
-  SIMULATED_CHECKOUT_ENABLED: "true",
-  SIMULATED_CHECKOUT_EMAIL_ALLOWLIST: `${PURCHASER_EMAIL},${OTHER_CLIENT_EMAIL},new@example.com`,
-  NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key",
-};
+const TEST_ENV = withInitialCheckoutAllowlist([PURCHASER_EMAIL, OTHER_CLIENT_EMAIL, "new@example.invalid"]);
 
 function activationInput(email = PURCHASER_EMAIL) {
   return {
