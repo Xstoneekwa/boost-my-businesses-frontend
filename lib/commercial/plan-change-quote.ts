@@ -115,6 +115,10 @@ export async function createPlanChangeQuote(
         fr: "Votre abonnement actif n'est plus éligible au changement de formule.",
         en: "Your active subscription is no longer eligible for plan change.",
       },
+      source_revision_unavailable: {
+        fr: "Impossible de sécuriser le changement de formule pour le moment. Réessayez ou contactez le support.",
+        en: "Could not secure the plan change right now. Try again or contact support.",
+      },
     };
     const msg = messages[sourceResult.code] ?? messages.source_not_found;
     return {

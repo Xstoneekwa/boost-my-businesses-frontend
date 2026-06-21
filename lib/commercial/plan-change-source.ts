@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createHash } from "node:crypto";
 import {
   COMMERCIAL_PLANS,
   type BillingIntervalMonths,
@@ -33,7 +32,8 @@ export type PlanChangeSourceErrorCode =
   | "source_ambiguous_pricing"
   | "source_currency_unsupported"
   | "source_period_invalid"
-  | "source_inactive";
+  | "source_inactive"
+  | "source_revision_unavailable";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
@@ -65,16 +65,25 @@ function isWorkspaceCommercialSession(row: Row) {
   return true;
 }
 
-export function buildSourceRevision(entitlement: Row, session: Row, commercialPeriodValueCents: number) {
-  const raw = [
-    readString(entitlement.updated_at),
-    readString(session.updated_at),
-    readString(entitlement.plan_key),
-    String(commercialPeriodValueCents),
-    readString(entitlement.id),
-    readString(session.id),
-  ].join("|");
-  return createHash("md5").update(raw).digest("hex");
+export async function loadCommercialPlanChangeSourceRevision(
+  supabase: SupabaseClient,
+  input: {
+    entitlementId: string;
+    sessionId: string;
+    activeCommercialPeriodValueCents: number;
+  },
+): Promise<string | null> {
+  const { data, error } = await supabase.rpc("commercial_plan_change_source_revision_for_source", {
+    p_entitlement_id: input.entitlementId,
+    p_session_id: input.sessionId,
+    p_active_commercial_period_value_cents: input.activeCommercialPeriodValueCents,
+  });
+
+  if (error || typeof data !== "string" || !data.trim()) {
+    return null;
+  }
+
+  return data.trim();
 }
 
 export function resolvePeriodEndAt(periodStartAt: string, billingIntervalMonths: BillingIntervalMonths) {
@@ -229,6 +238,15 @@ export async function loadPlanChangeSource(
     return { ok: false, code: "source_inactive" };
   }
 
+  const sourceRevision = await loadCommercialPlanChangeSourceRevision(supabase, {
+    entitlementId: readString(entitlement.id),
+    sessionId: readString(sessionRow.id),
+    activeCommercialPeriodValueCents,
+  });
+  if (!sourceRevision) {
+    return { ok: false, code: "source_revision_unavailable" };
+  }
+
   return {
     ok: true,
     source: {
@@ -241,7 +259,7 @@ export async function loadPlanChangeSource(
       periodStartAt,
       periodEndAt,
       activeCommercialPeriodValueCents,
-      sourceRevision: buildSourceRevision(entitlement, sessionRow, activeCommercialPeriodValueCents),
+      sourceRevision,
       purchaserEmail: readString(sessionRow.purchaser_email),
       billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
     },

@@ -144,6 +144,7 @@ describe("harness tree integrity", () => {
     "classify-environment.test.mjs",
     "docs/plan-change-test-harness.md",
     "fast-track",
+    "ui-api-e2e",
     "harness-contract.mjs",
     "harness-manifest-contract.mjs",
     "harness-manifest-contract.test.mjs",

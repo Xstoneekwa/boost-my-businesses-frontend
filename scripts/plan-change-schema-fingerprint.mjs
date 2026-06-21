@@ -6,6 +6,7 @@
 export const MIGRATION_VERSIONS = {
   checkout: "20260615143000_commercial_checkout_entitlements.sql",
   planChange: "20260621120000_commercial_plan_change.sql",
+  planChangeSourceRevision: "20260622120000_commercial_plan_change_source_revision.sql",
 };
 
 export const FINGERPRINT_TABLES = [
@@ -83,4 +84,9 @@ export const RPC_EXPECTED = {
   args: ["p_quote_id", "p_idempotency_key", "p_actor_email", "p_simulated_activation"],
   securityDefiner: true,
   searchPath: "public",
+};
+
+export const SOURCE_REVISION_RPC = {
+  canonical: "commercial_plan_change_source_revision",
+  forSource: "commercial_plan_change_source_revision_for_source",
 };

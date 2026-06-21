@@ -63,6 +63,10 @@ function runNodeTests() {
         .filter((f) => f.endsWith(".test.mjs"))
         .map((f) => join(ROOT, f)),
       join(ROOT, "fast-track/apply-fast-track-plan-change.test.mjs"),
+      join(ROOT, "ui-api-e2e/ui-api-e2e.test.mjs"),
+      join(REPO_ROOT, "lib/commercial/plan-change-source-revision.test.mjs"),
+      join(REPO_ROOT, "lib/commercial/plan-change-quote-activation.test.mjs"),
+      join(REPO_ROOT, "lib/commercial/plan-change-checkout-idempotency.test.mjs"),
     ],
     { cwd: REPO_ROOT, stdio: "inherit" }
   );
@@ -80,6 +84,10 @@ const checks = [
   run("bash -n fast-track/apply-fast-track-plan-change.sh", () =>
     bashSyntax("fast-track/apply-fast-track-plan-change.sh")
   ),
+  run("bash -n ui-api-e2e/preflight-ui-api-e2e.sh", () =>
+    bashSyntax("ui-api-e2e/preflight-ui-api-e2e.sh")
+  ),
+  run("bash -n ui-api-e2e/apply-ui-api-e2e.sh", () => bashSyntax("ui-api-e2e/apply-ui-api-e2e.sh")),
   run("bash -n audit-reference-schema.sh", () => bashSyntax("audit-reference-schema.sh")),
   run("bash -n audit-test-target.sh", () => bashSyntax("audit-test-target.sh")),
   run("audit SQL static validation", validateAuditSqlFiles),

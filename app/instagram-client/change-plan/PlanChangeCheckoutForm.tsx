@@ -57,7 +57,6 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
     () => `${targetPlanKey}:${crypto.randomUUID()}`,
     [targetPlanKey],
   );
-  const activateIdempotencyKey = useMemo(() => crypto.randomUUID(), []);
   const [currentPlan, setCurrentPlan] = useState<CurrentPlan | null>(null);
   const [quote, setQuote] = useState<PlanChangeQuote | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,7 +110,7 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
           quote_id: quote.quoteId,
-          idempotency_key: activateIdempotencyKey,
+          idempotency_key: quote.idempotencyKey,
         }),
       });
       const parsed = await parseCheckoutApiResponse<{
