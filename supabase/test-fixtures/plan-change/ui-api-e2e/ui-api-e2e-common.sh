@@ -124,3 +124,53 @@ ui_api_generate_run_id() {
 ui_api_test_email_for_run() {
   echo "plan_change_ui_test_${1}@example.invalid"
 }
+
+ui_api_payment_email_for_run() {
+  echo "plan_change_ui_payment_${1}@example.invalid"
+}
+
+ui_api_refuse_key_in_next_public() {
+  local prefix="$1"
+  local env_name="$2"
+  local key="${!env_name:-}"
+  if [[ -z "${key}" ]]; then
+    return 0
+  fi
+  local name
+  while IFS= read -r name; do
+    [[ -z "${name}" ]] && continue
+    if [[ "${name}" == NEXT_PUBLIC_* ]]; then
+      local value="${!name:-}"
+      if [[ -n "${value}" && "${value}" == "${key}" ]]; then
+        ui_api_fail "${prefix}" "Secret from ${env_name} must not be exported via ${name}"
+      fi
+    fi
+  done < <(compgen -e || true)
+}
+
+ui_api_assert_next_public_supabase_ref() {
+  local prefix="$1"
+  ui_api_require_env "${prefix}" NEXT_PUBLIC_SUPABASE_URL
+  local public_ref
+  public_ref="$(echo "${NEXT_PUBLIC_SUPABASE_URL}" | sed -E 's#https?://([^.]+)\..*#\1#')"
+  if [[ "${public_ref}" == "${FORBIDDEN_REF}" ]]; then
+    ui_api_fail "${prefix}" "NEXT_PUBLIC_SUPABASE_URL points at forbidden shared ref ${FORBIDDEN_REF}"
+  fi
+  if [[ "${public_ref}" != "${ALLOWED_REF}" ]]; then
+    ui_api_fail "${prefix}" "NEXT_PUBLIC_SUPABASE_URL must target ${ALLOWED_REF}"
+  fi
+}
+
+ui_api_secure_run_state_permissions() {
+  local run_state_dir="$1"
+  shift
+  if [[ -d "${run_state_dir}" ]]; then
+    chmod 700 "${run_state_dir}" 2>/dev/null || true
+  fi
+  local file
+  for file in "$@"; do
+    if [[ -f "${file}" ]]; then
+      chmod 600 "${file}" 2>/dev/null || true
+    fi
+  done
+}

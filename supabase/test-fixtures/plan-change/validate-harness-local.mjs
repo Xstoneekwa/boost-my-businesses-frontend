@@ -88,6 +88,12 @@ const checks = [
     bashSyntax("ui-api-e2e/preflight-ui-api-e2e.sh")
   ),
   run("bash -n ui-api-e2e/apply-ui-api-e2e.sh", () => bashSyntax("ui-api-e2e/apply-ui-api-e2e.sh")),
+  run("bash -n ui-api-e2e/prepare-visual-smoke.sh", () =>
+    bashSyntax("ui-api-e2e/prepare-visual-smoke.sh")
+  ),
+  run("bash -n ui-api-e2e/start-visual-smoke-next.sh", () =>
+    bashSyntax("ui-api-e2e/start-visual-smoke-next.sh")
+  ),
   run("bash -n audit-reference-schema.sh", () => bashSyntax("audit-reference-schema.sh")),
   run("bash -n audit-test-target.sh", () => bashSyntax("audit-test-target.sh")),
   run("audit SQL static validation", validateAuditSqlFiles),

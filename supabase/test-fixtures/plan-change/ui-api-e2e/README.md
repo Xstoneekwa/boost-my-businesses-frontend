@@ -116,6 +116,56 @@ cd supabase/test-fixtures/plan-change/ui-api-e2e && ./apply-ui-api-e2e.sh --appl
 
 Cible : **8/8 PASS** sans alignement manuel de `source_revision` ni patch SQL ad hoc.
 
+## Smoke visuel navigateur (préparation manuelle)
+
+Prépare **deux comptes fictifs indépendants** en Growth sur `nxntngkhkoynljcagmkq`, sans activation automatique ni appels API runner.
+
+| Compte | E-mail | Rôle |
+|--------|--------|------|
+| Payment probe | `plan_change_ui_payment_<run-id>@example.invalid` | **Non** allowlisté — test `payment_required` |
+| Principal | `plan_change_ui_test_<run-id>@example.invalid` | Allowlisté — activation simulée |
+
+Les mots de passe sont **uniquement** dans `.run-state/visual-smoke-latest.json` (gitignored, chmod 600). Ils ne figurent jamais dans le terminal, les logs ni ce README.
+
+### 1. Préparation fixture (après GO explicite)
+
+```bash
+cd supabase/test-fixtures/plan-change/ui-api-e2e && \
+  PLAN_CHANGE_DB_TEST_CONFIRM=isolated-test-only \
+  PLAN_CHANGE_TEST_SUPABASE_URL='https://nxntngkhkoynljcagmkq.supabase.co' \
+  PLAN_CHANGE_TEST_DATABASE_URL='postgresql://…@db.nxntngkhkoynljcagmkq.supabase.co:5432/postgres' \
+  PLAN_CHANGE_TEST_SERVICE_ROLE_KEY='…' \
+  ./prepare-visual-smoke.sh --apply
+```
+
+Sans `--apply` : dry-run uniquement.
+
+### 2. Démarrer Next.js test-only
+
+```bash
+cd supabase/test-fixtures/plan-change/ui-api-e2e && \
+  export NEXT_PUBLIC_SUPABASE_URL='https://nxntngkhkoynljcagmkq.supabase.co' \
+  export NEXT_PUBLIC_SUPABASE_ANON_KEY='…' \
+  export SUPABASE_SERVICE_ROLE_KEY='…' \
+  export SIMULATED_CHECKOUT_ENABLED=true \
+  export SIMULATED_CHECKOUT_EMAIL_ALLOWLIST='plan_change_ui_test_<run-id>@example.invalid' \
+  ./start-visual-smoke-next.sh
+```
+
+Le script vérifie la ref isolée, refuse `zgafnshkjywfltxgbtzg`, refuse le service role dans `NEXT_PUBLIC_*`, et exige que l’allowlist corresponde au compte principal du manifest `.run-state/visual-smoke-manifest.json`.
+
+### 3. Parcours humain exact
+
+1. Charger les mots de passe depuis `.run-state/visual-smoke-latest.json` (champs `main.password` et `paymentProbe.password`).
+2. Se connecter avec le **payment probe** (non allowlisté).
+3. Ouvrir **Change Plan** (Growth → Pro), vérifier un **montant dû > 0**.
+4. Cliquer **Confirmer** → constater `payment_required` (pas d’activation).
+5. Se déconnecter.
+6. Se connecter avec le **compte principal** (allowlisté).
+7. Ouvrir **Change Plan**, vérifier le même type de quote (montant dû > 0), confirmer l’**activation simulée**.
+8. Retour **dashboard** → plan **Pro** visible.
+9. Recharger / double-clic contrôlé sur confirmer → pas de doublon (message idempotent ou état stable).
+
 ## Tests statiques (sans DB)
 
 ```bash
