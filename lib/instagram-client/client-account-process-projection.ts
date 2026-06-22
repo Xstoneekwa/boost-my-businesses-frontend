@@ -31,6 +31,7 @@ export type AddAccountProcessInput = {
   phase: "submitting" | "creating" | "refreshing" | "complete" | "error";
   account?: ClientAccountStateInput & { username?: string; accountId?: string } | null;
   errorMessage?: string | null;
+  errorCode?: string | null;
 };
 
 export type ConnectProcessInput = {
@@ -60,6 +61,37 @@ function step(
 
 function provisioningActive(status: string) {
   return ["in_progress", "running", "pending", "provisioning"].includes(status);
+}
+
+const USERNAME_VALIDATION_ERROR_CODES = new Set([
+  "username_required",
+  "username_invalid",
+  "username_not_found",
+  "username_verification_failed",
+]);
+
+function isUsernameValidationError(code?: string | null) {
+  return Boolean(code && USERNAME_VALIDATION_ERROR_CODES.has(code));
+}
+
+function addAccountValidateStepStatus(phase: AddAccountProcessInput["phase"], errorCode?: string | null): ProcessStepStatus {
+  if (phase === "submitting") return "running";
+  if (phase === "error" && isUsernameValidationError(errorCode)) return "failed";
+  if (phase === "error") return "done";
+  return "done";
+}
+
+function addAccountWorkspaceStepStatus(
+  phase: AddAccountProcessInput["phase"],
+  errorCode: string | null | undefined,
+  hasAccount: boolean,
+): ProcessStepStatus {
+  if (phase === "creating" || phase === "submitting") return "running";
+  if (phase === "error" && isUsernameValidationError(errorCode)) return "pending";
+  if (phase === "error") return "failed";
+  if (hasAccount) return "done";
+  if (phase === "refreshing") return "running";
+  return "pending";
 }
 
 export function clientSafeProcessErrorMessage(
@@ -115,7 +147,7 @@ export function clientSafeProcessErrorMessage(
 }
 
 export function projectAddAccountProcess(input: AddAccountProcessInput): ClientProcessProjection {
-  const { lang, phase, account, errorMessage } = input;
+  const { lang, phase, account, errorMessage, errorCode } = input;
   const ui = account ? resolveClientAccountState(account, lang) : null;
   const provisioningStatus = normalize(account?.provisioningStatus);
   const hasAccount = Boolean(account?.accountId);
@@ -125,21 +157,13 @@ export function projectAddAccountProcess(input: AddAccountProcessInput): ClientP
       "validate",
       label(lang, "Validation du compte", "Account validation"),
       label(lang, "Nous vérifions le nom d'utilisateur.", "We verify the username."),
-      phase === "submitting" ? "running" : phase === "error" ? "failed" : "done",
+      addAccountValidateStepStatus(phase, errorCode),
     ),
     step(
       "add",
       label(lang, "Ajout du compte à votre espace", "Adding account to your workspace"),
       label(lang, "Création du compte dans votre espace client.", "Creating the account in your client workspace."),
-      phase === "creating" || phase === "submitting"
-        ? "running"
-        : phase === "error"
-          ? "failed"
-          : hasAccount
-            ? "done"
-            : phase === "refreshing"
-              ? "running"
-              : "pending",
+      addAccountWorkspaceStepStatus(phase, errorCode, hasAccount),
     ),
     step(
       "prepare",
@@ -422,15 +446,125 @@ export function projectConnectProcess(input: ConnectProcessInput): ClientProcess
 }
 
 export function projectReadinessProcess(input: ConnectProcessInput): ClientProcessProjection {
-  const base = projectConnectProcess({ ...input, phase: input.phase === "starting" ? "submitting" : input.phase });
+  const lang = input.lang;
+  const phase = input.phase;
+  const readinessStatus = normalize(input.account?.clientReadinessStatus);
+  const ready = readinessStatus === "ready_to_connect";
+  const complete = phase === "complete";
+  const running = phase === "starting" || phase === "submitting";
+  const errored = phase === "error";
+
+  const accountStepStatus: ProcessStepStatus = "done";
+  const configStepStatus: ProcessStepStatus = running
+    ? "running"
+    : errored
+      ? "failed"
+      : complete
+        ? "done"
+        : "pending";
+  const preparationStepStatus: ProcessStepStatus = running
+    ? "running"
+    : errored
+      ? "pending"
+      : complete
+        ? (ready ? "done" : "failed")
+        : "pending";
+
+  const steps: ClientProcessStep[] = [
+    step(
+      "account_added",
+      label(lang, "Compte ajouté", "Account added"),
+      null,
+      accountStepStatus,
+    ),
+    step(
+      "configuration_checked",
+      label(lang, "Configuration vérifiée", "Configuration checked"),
+      null,
+      configStepStatus,
+    ),
+    step(
+      "preparation_checked",
+      label(lang, "Préparation vérifiée", "Readiness verified"),
+      null,
+      preparationStepStatus,
+    ),
+  ];
+
+  if (errored) {
+    return {
+      title: label(lang, "Vérification de la préparation", "Readiness check"),
+      subtitle: label(lang, "La vérification n'a pas pu aboutir.", "The readiness check could not complete."),
+      statusChip: label(lang, "À compléter", "Pending"),
+      statusTone: "error",
+      steps,
+      finalMessage: input.errorMessage
+        || label(lang, "Impossible de vérifier la préparation pour le moment.", "Could not verify readiness right now."),
+      showRefresh: false,
+      isComplete: true,
+      isAsyncPending: false,
+      outcome: "error",
+    };
+  }
+
+  if (complete && ready) {
+    return {
+      title: label(lang, "Vérification de la préparation", "Readiness check"),
+      subtitle: label(lang, "Votre compte est prêt à être connecté.", "Your account is ready to connect."),
+      statusChip: label(lang, "Prêt", "Ready"),
+      statusTone: "success",
+      steps,
+      finalMessage: label(lang, "Votre compte est prêt à être connecté.", "Your account is ready to connect."),
+      showRefresh: false,
+      isComplete: true,
+      isAsyncPending: false,
+      outcome: "success",
+    };
+  }
+
+  if (complete) {
+    const ui = input.account ? resolveClientAccountState(input.account, lang) : null;
+    return {
+      title: label(lang, "Vérification de la préparation", "Readiness check"),
+      subtitle: label(lang, "La préparation n'est pas encore complète.", "Setup is not complete yet."),
+      statusChip: label(lang, "À compléter", "Pending"),
+      statusTone: "warning",
+      steps,
+      finalMessage: ui?.subtext
+        || label(lang, "La préparation est en cours. Réessayez dans quelques instants.", "Setup is still in progress. Try again in a moment."),
+      showRefresh: false,
+      isComplete: true,
+      isAsyncPending: false,
+      outcome: "action_required",
+    };
+  }
+
   return {
-    ...base,
-    title: label(input.lang, "Vérification de la préparation", "Readiness check"),
-    subtitle: input.phase === "error"
-      ? label(input.lang, "La vérification n'a pas pu aboutir.", "The readiness check could not complete.")
-      : label(input.lang, "Nous vérifions que votre compte est prêt.", "We are checking that your account is ready."),
+    title: label(lang, "Vérification de la préparation", "Readiness check"),
+    subtitle: label(
+      lang,
+      "Nous vérifions la préparation de votre compte, sans lancer de connexion.",
+      "We are checking your account setup without starting a connection.",
+    ),
+    statusChip: label(lang, "En cours", "In progress"),
+    statusTone: "running",
+    steps,
+    finalMessage: null,
+    showRefresh: false,
+    isComplete: false,
+    isAsyncPending: false,
+    outcome: "running",
   };
 }
+
+export const PASSIVE_READINESS_FORBIDDEN_LABELS = [
+  "Connexion au compte",
+  "Lancement de la connexion automatique",
+  "Vérification de la session Instagram",
+  "Vérification de la session",
+  "Préparation du compte",
+  "Vérification finale",
+] as const;
 
 export const CLIENT_PROCESS_FORBIDDEN_LABELS = [
   "vault",

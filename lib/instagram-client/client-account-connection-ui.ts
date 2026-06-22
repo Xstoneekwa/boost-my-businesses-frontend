@@ -7,6 +7,7 @@ export type ClientAccountConnectionInput = {
   provisioningStatus?: string;
   assignmentStatus?: string;
   operationPending?: boolean;
+  clientReadinessStatus?: string | null;
 };
 
 export type ClientAccountConnectionUi = {
@@ -16,9 +17,12 @@ export type ClientAccountConnectionUi = {
   readinessLabel: string;
   readinessTone: "success" | "warning" | "neutral";
   readinessDisabled: boolean;
+  showRecheckReadiness: boolean;
+  recheckReadinessLabel: string;
   connectLabel: string;
   connectTone: "success" | "primary" | "neutral";
   connectDisabled: boolean;
+  connectPrimary: boolean;
   showRefresh: boolean;
   isAsyncPending: boolean;
   phase: ReturnType<typeof resolveClientAccountState>["phase"];
@@ -35,5 +39,6 @@ export function resolveClientAccountConnectionUi(
     assignmentStatus: account.assignmentStatus,
     connected: account.connected,
     operationPending: account.operationPending,
+    clientReadinessStatus: account.clientReadinessStatus,
   }, lang);
 }

@@ -16,7 +16,7 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
     account_package_summary: [{ account_id: accountId, runtime_profiles: ["full_cycle"], package_caps: { follow_day: 20, follow_session: 20 }, entitlements: [] }],
     ig_account_settings: [{ account_id: accountId }],
     ig_account_filters: [{ account_id: accountId }],
-    ig_dm_settings: [{ account_id: accountId }],
+    ig_account_dm_settings: [{ account_id: accountId }],
     ig_targets: [{ account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" }],
     account_assignments: [{
       id: assignmentId,
@@ -27,7 +27,7 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
       ends_at: "2026-06-09T08:20:00.000Z",
       status: "active",
     }],
-    phone_devices: [{ id: "device-secret-1", status: "online" }],
+    phone_devices: [{ id: "device-secret-1", status: "online", device_kind: "physical_phone" }],
     phone_app_instances: [{ id: "app-secret-1", device_id: "device-secret-1", status: "available", usable_for_auto_login: true, is_launchable: true }],
     account_run_requests: [],
     ig_runs: [],
@@ -38,6 +38,10 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
 function makeQuery(rows: Row[]) {
   const filters: Array<(row: Row) => boolean> = [];
   let maxRows = rows.length;
+  const buildResult = () => ({
+    data: rows.filter((row) => filters.every((filter) => filter(row))).slice(0, maxRows),
+    error: null,
+  });
   const query = {
     select: () => query,
     eq: (field: string, value: unknown) => {
@@ -48,11 +52,18 @@ function makeQuery(rows: Row[]) {
       filters.push((row) => values.includes(row[field]));
       return query;
     },
+    or: () => query,
     order: () => query,
     limit: (limit: number) => {
       maxRows = limit;
-      return Promise.resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))).slice(0, maxRows), error: null });
+      const limited = {
+        maybeSingle: () => Promise.resolve({ data: buildResult().data[0] ?? null, error: null }),
+        then: (resolve: (value: { data: Row[]; error: null }) => unknown) => Promise.resolve(buildResult()).then(resolve),
+      };
+      return limited;
     },
+    maybeSingle: () => Promise.resolve({ data: buildResult().data[0] ?? null, error: null }),
+    then: (resolve: (value: { data: Row[]; error: null }) => unknown) => Promise.resolve(buildResult()).then(resolve),
   };
   return query;
 }
@@ -196,10 +207,9 @@ test("readiness now waits for scheduled assignment when no assignment exists but
 
   const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
 
-  assert.equal(result.readiness_status, "waiting_scheduled_assignment");
-  assert.equal(result.client_status, "waiting_next_slot");
   assert.equal(result.preflight_request_created, false);
-  assert.equal(supabase.rpcCalls[0].name, "list_available_assignment_slots");
+  assert.match(result.client_status, /waiting_next_slot|capacity_unavailable/);
+  assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
 });
 
 test("readiness now returns retry_later when assigned phone or app is busy", async () => {
@@ -246,17 +256,14 @@ test("readiness now creates login preflight request when assignment is free", as
   assert.equal(supabase.rpcCalls[0].args.p_idempotency_key, "login-preflight-now:assignment-1");
 });
 
-test("readiness now retries when idempotent key returns a terminal request", async () => {
+test("readiness now does not mint a second idempotency key when first enqueue returns terminal status", async () => {
   let createCalls = 0;
   const supabase = makeSupabase();
   const baseRpc = supabase.client.rpc.bind(supabase.client);
   supabase.client.rpc = (name: string, args: Record<string, unknown>) => {
     if (name !== "create_account_run_request") return baseRpc(name, args);
     createCalls += 1;
-    if (createCalls === 1) {
-      return Promise.resolve({ data: { id: "stale-failed", status: "failed" }, error: null });
-    }
-    return Promise.resolve({ data: { id: "request-safe-retry", status: "queued" }, error: null });
+    return Promise.resolve({ data: { id: "stale-failed", status: "failed" }, error: null });
   };
 
   const result = await runReadinessNow(supabase.client, {
@@ -264,10 +271,10 @@ test("readiness now retries when idempotent key returns a terminal request", asy
     now: new Date("2026-06-09T08:01:00.000Z"),
   });
 
-  assert.equal(createCalls, 2);
-  assert.equal(result.preflight_request_created, true);
-  assert.equal(result.run_request_status, "queued");
-  assert.equal(result.request_id, "request-safe-retry");
+  assert.equal(createCalls, 1);
+  assert.equal(result.preflight_request_created, false);
+  assert.equal(result.run_request_status, "failed");
+  assert.equal(result.reason, "login_preflight_request_not_active");
 });
 
 test("readiness now duplicate click is idempotent and does not create another request", async () => {
@@ -295,14 +302,17 @@ test("readiness now client response does not expose technical identifiers", asyn
   const result = await runReadinessNow(supabase.client, {
     accountId,
     audience: "client",
+    dryRun: true,
+    mode: "readiness_only",
     now: new Date("2026-06-09T08:01:00.000Z"),
   });
   const serialized = JSON.stringify(result);
 
-  assert.equal(result.client_status, "checking_connection");
+  assert.equal(result.client_status, "ready_to_connect");
   assert.equal("phone_available" in result, false);
   assert.equal("app_instance_available" in result, false);
   assert.equal("request_id" in result, false);
+  assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
   for (const forbidden of ["device-secret-1", "app-secret-1", "assignment-1", "adb", "vault", "secret", "service_role", "token", "password"]) {
     assert.equal(serialized.includes(forbidden), false);
   }

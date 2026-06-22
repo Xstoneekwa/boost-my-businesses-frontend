@@ -8,6 +8,7 @@ const readinessSource = readFileSync(new URL("../../../../../lib/instagram-dashb
 const buttonsSource = readFileSync(new URL("../../../../instagram-dashboard/InstagramDashboardButtons.tsx", import.meta.url), "utf8");
 const bannerSource = readFileSync(new URL("../../../../instagram-dashboard/EmailVerificationActionBanner.tsx", import.meta.url), "utf8");
 const submitCodeRouteSource = readFileSync(new URL("../../dashboard-actions/submit-verification-code/route.ts", import.meta.url), "utf8");
+const submitCodeServiceSource = readFileSync(new URL("../../../../../lib/instagram-dashboard/submit-verification-code-service.ts", import.meta.url), "utf8");
 
 test("Connect route is admin-gated and uses login provisioning helper", () => {
   assert.match(routeSource, /requireInstagramAdmin\(\)/);
@@ -70,9 +71,10 @@ test("2FA popup uses dashboard action polling and secure submit route", () => {
   assert.match(bannerSource, /dashboard-actions\/email-verification/);
   assert.match(bannerSource, /setInterval/);
   assert.match(bannerSource, /autoOpen/);
-  assert.match(submitCodeRouteSource, /submit_account_verification_code/);
+  assert.match(submitCodeRouteSource, /submitAccountVerificationCode/);
   assert.match(submitCodeRouteSource, /client_can_manage_instagram_account/);
-  assert.match(submitCodeRouteSource, /createLoginEmailCodeResumeRunRequest/);
+  assert.match(submitCodeServiceSource, /submit_account_verification_code/);
+  assert.match(submitCodeServiceSource, /createLoginEmailCodeResumeRunRequest/);
 });
 
 test("Connect and code routes do not expose unsafe identifiers or secrets", () => {

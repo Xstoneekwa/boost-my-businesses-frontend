@@ -1,4 +1,4 @@
-import { projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
+import { projectCredentialBusinessStatus } from "./account-status-projection.ts";
 
 export type AdminReadinessStatus =
   | "ready"

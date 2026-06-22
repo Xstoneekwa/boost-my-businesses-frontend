@@ -1681,6 +1681,10 @@ const CSS = `
 .cd-connect-card{margin-bottom:4px}
 .cd-connect-copy{margin:0 0 14px;color:var(--ink-dim);font-size:.88rem;line-height:1.5}
 .cd-connect-actions{display:flex;gap:10px;flex-wrap:wrap}
+.cd-verification-label{display:block;color:#94A3B8;font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.cd-verification-input{width:100%;border:1px solid var(--line);border-radius:12px;background:#0B1020;color:#E5E7EB;padding:12px 14px;font-size:1rem}
+.cd-verification-hint{margin:0;color:#778299;font-size:.82rem;line-height:1.45}
+.cd-verification-error{margin:0;border:1px solid rgba(248,113,113,.35);border-radius:12px;background:rgba(127,29,29,.22);color:#FCA5A5;padding:10px 12px;font-size:.84rem;line-height:1.45}
 .cd-progress-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px;background:rgba(2,6,23,.74)}
 .cd-progress-modal{width:min(640px,96vw);max-height:90vh;overflow:auto;display:grid;gap:16px;border:1px solid var(--line);border-radius:18px;background:#0B1020;color:#E5E7EB;box-shadow:var(--shadow);padding:22px}
 .cd-progress-header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}

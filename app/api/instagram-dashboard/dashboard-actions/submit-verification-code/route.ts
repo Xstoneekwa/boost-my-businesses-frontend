@@ -1,9 +1,6 @@
 import { canAccessTenantPages, getInstagramUserContext } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
-import {
-  createLoginEmailCodeResumeRunRequest,
-  evaluateLoginChallengeRunEligibility,
-} from "@/lib/instagram-dashboard/run-control";
+import { submitAccountVerificationCode } from "@/lib/instagram-dashboard/submit-verification-code-service";
 import { jsonError, jsonOk, readJsonBody, readString } from "../../_utils";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +10,6 @@ type SubmitPayload = {
   account_id?: unknown;
   verification_code?: unknown;
 };
-
-const CODE_RE = /^[A-Za-z0-9-]{4,32}$/;
 
 export async function POST(request: Request) {
   const userContext = await getInstagramUserContext();
@@ -26,10 +21,6 @@ export async function POST(request: Request) {
   const actionId = readString(payload.action_id);
   const accountId = readString(payload.account_id);
   const verificationCode = readString(payload.verification_code);
-
-  if (!actionId || !accountId || !verificationCode || !CODE_RE.test(verificationCode)) {
-    return jsonError("Invalid verification payload.", 400);
-  }
 
   const supabase = createSupabaseClient();
   const isInstagramAdmin = canAccessTenantPages(userContext);
@@ -48,91 +39,30 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data, error } = await supabase.rpc("submit_account_verification_code", {
-    p_action_id: actionId,
-    p_account_id: accountId,
-    p_verification_code: verificationCode,
-    p_actor_type: isInstagramAdmin ? "admin" : "client",
-    p_actor_id: userContext.userId,
-    p_metadata: {
-      source: "frontend_credentials_actions",
-    },
+  const result = await submitAccountVerificationCode({
+    actionId,
+    accountId,
+    verificationCode,
+    actorId: userContext.userId,
+    actorType: isInstagramAdmin ? "admin" : "client",
+    metadataSource: isInstagramAdmin ? "frontend_credentials_actions" : "client_connect_verification",
+    resumeActorType: isInstagramAdmin ? "admin" : "system",
   });
 
-  if (error) {
-    const message = error.message.includes("verification_code_invalid")
-      ? "Invalid verification code."
-      : error.message.includes("dashboard_action_not_found")
-      ? "Dashboard action not found."
-      : error.message.includes("dashboard_action_type_invalid")
-      ? "This dashboard action does not accept a verification code."
-      : "Verification code submission failed.";
-    const status = message.includes("Invalid") ? 400
-      : message.includes("not found") ? 404
-      : message.includes("does not accept") ? 409
-      : 500;
-    return jsonError(message, status);
-  }
-
-  const submissionId = readString((data as Record<string, unknown> | null)?.submission_id, "");
-  const actionStatus = readString((data as Record<string, unknown> | null)?.status, "code_submitted");
-
-  let resumeQueued = false;
-  let resumeAlreadyQueued = false;
-  let resumeRequestId: string | null = null;
-  let resumeRequestStatus: string | null = null;
-  let resumeQueueReason: string | null = null;
-
-  if (submissionId) {
-    const eligibility = await evaluateLoginChallengeRunEligibility(accountId, "login_email_code_resume");
-    if (eligibility.ok) {
-      const resumeResult = await createLoginEmailCodeResumeRunRequest({
-        accountId,
-        actionId,
-        submissionId,
-        actorId: userContext.userId,
-        actorType: isInstagramAdmin ? "admin" : "system",
-      });
-      resumeQueued = resumeResult.queued;
-      resumeAlreadyQueued = resumeResult.idempotent;
-      resumeRequestId = resumeResult.requestId;
-      resumeRequestStatus = resumeResult.requestStatus;
-      resumeQueueReason = resumeResult.reason;
-
-      if (resumeResult.requestId) {
-        await supabase
-          .from("account_dashboard_actions")
-          .update({
-            metadata: {
-              resume_request_id: resumeResult.requestId,
-              resume_status: resumeResult.requestStatus === "running" ? "running" : "queued",
-              resume_submission_id: submissionId,
-              source: "dashboard_code_submit",
-            },
-          })
-          .eq("id", actionId)
-          .eq("account_id", accountId)
-          .eq("action_type", "enter_email_verification_code");
-      }
-    } else {
-      resumeQueueReason = eligibility.reason;
-    }
+  if (!result.ok) {
+    return jsonError(result.message, result.status, result.code ? { code: result.code } : undefined);
   }
 
   return jsonOk({
-    action_id: actionId,
-    account_id: accountId,
-    status: actionStatus,
-    submission_id: submissionId || null,
-    resume_queued: resumeQueued,
-    resume_already_queued: resumeAlreadyQueued,
-    resume_request_id: resumeRequestId,
-    resume_request_status: resumeRequestStatus,
-    resume_queue_reason: resumeQueueReason,
-    message: resumeQueued
-      ? "Verification code stored securely. Login resume queued for the worker."
-      : resumeAlreadyQueued
-      ? "Verification code stored securely. Login resume was already queued."
-      : "Verification code stored securely and ready for worker resume.",
+    action_id: result.action_id,
+    account_id: result.account_id,
+    status: result.status,
+    submission_id: result.submission_id,
+    resume_queued: result.resume_queued,
+    resume_already_queued: result.resume_already_queued,
+    resume_request_id: result.resume_request_id,
+    resume_request_status: result.resume_request_status,
+    resume_queue_reason: result.resume_queue_reason,
+    message: result.message,
   });
 }

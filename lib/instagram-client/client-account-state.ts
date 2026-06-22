@@ -1,3 +1,5 @@
+import { clientReadinessMessage, type ClientReadinessStatus } from "./client-readiness-projection.ts";
+
 export type ClientAccountPresentationPhase =
   | "added"
   | "preparing"
@@ -13,6 +15,7 @@ export type ClientAccountStateInput = {
   assignmentStatus?: string | null;
   connected?: boolean;
   operationPending?: boolean;
+  clientReadinessStatus?: string | null;
 };
 
 export type ClientAccountStateUi = {
@@ -23,9 +26,12 @@ export type ClientAccountStateUi = {
   readinessLabel: string;
   readinessTone: "success" | "warning" | "neutral";
   readinessDisabled: boolean;
+  showRecheckReadiness: boolean;
+  recheckReadinessLabel: string;
   connectLabel: string;
   connectTone: "success" | "primary" | "neutral";
   connectDisabled: boolean;
+  connectPrimary: boolean;
   showRefresh: boolean;
   isAsyncPending: boolean;
 };
@@ -36,6 +42,29 @@ function label(lang: "fr" | "en", fr: string, en: string) {
 
 function normalize(value: unknown) {
   return String(value || "").trim().toLowerCase();
+}
+
+function recheckDefaults(lang: "fr" | "en") {
+  return {
+    showRecheckReadiness: false,
+    recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
+    connectPrimary: false,
+  };
+}
+
+function clientReadinessSubtext(status: string | null | undefined, lang: "fr" | "en") {
+  const normalized = normalize(status);
+  if (!normalized || normalized === "ready_to_connect" || normalized === "already_connected") return null;
+  if (
+    normalized === "preparation_pending"
+    || normalized === "preparation_blocked"
+    || normalized === "credentials_need_attention"
+    || normalized === "device_temporarily_unavailable"
+    || normalized === "schedule_not_ready"
+  ) {
+    return clientReadinessMessage(normalized as ClientReadinessStatus, lang);
+  }
+  return null;
 }
 
 function loginNeedsAction(loginStatus: string) {
@@ -74,6 +103,8 @@ export function resolveClientAccountState(
   const onboardingStatus = normalize(input.onboardingStatus || "pending");
   const connected = input.connected === true || loginStatus === "connected";
   const onboardingReady = onboardingStatus === "ready";
+  const clientReadinessStatus = normalize(input.clientReadinessStatus);
+  const defaults = recheckDefaults(lang);
 
   if (loginNeedsAction(loginStatus)) {
     return {
@@ -89,6 +120,7 @@ export function resolveClientAccountState(
       connectDisabled: false,
       showRefresh: true,
       isAsyncPending: false,
+      ...defaults,
     };
   }
 
@@ -106,6 +138,7 @@ export function resolveClientAccountState(
       connectDisabled: true,
       showRefresh: false,
       isAsyncPending: false,
+      ...defaults,
     };
   }
 
@@ -123,6 +156,7 @@ export function resolveClientAccountState(
       connectDisabled: true,
       showRefresh: false,
       isAsyncPending: false,
+      ...defaults,
     };
   }
 
@@ -135,11 +169,36 @@ export function resolveClientAccountState(
       readinessLabel: label(lang, "Vérifier la préparation", "Check readiness"),
       readinessTone: "neutral",
       readinessDisabled: false,
-      connectLabel: label(lang, "Connecter", "Connect"),
+      connectLabel: label(lang, "Connecter le compte", "Connect account"),
       connectTone: "primary",
       connectDisabled: true,
       showRefresh: true,
       isAsyncPending: true,
+      ...defaults,
+    };
+  }
+
+  const readinessPrepared = clientReadinessStatus === "ready_to_connect";
+  const readinessChecked = Boolean(clientReadinessStatus) && clientReadinessStatus !== "preparation_pending";
+  const pendingSubtext = clientReadinessSubtext(input.clientReadinessStatus, lang);
+
+  if (readinessPrepared) {
+    return {
+      phase: "added",
+      badgeLabel: label(lang, "Prêt à connecter", "Ready to connect"),
+      badgeTone: "success",
+      subtext: label(lang, "Votre compte est prêt à être connecté.", "Your account is ready to connect."),
+      readinessLabel: label(lang, "Préparation vérifiée", "Readiness verified"),
+      readinessTone: "success",
+      readinessDisabled: true,
+      showRecheckReadiness: true,
+      recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
+      connectLabel: label(lang, "Connecter le compte", "Connect account"),
+      connectTone: "primary",
+      connectDisabled: false,
+      connectPrimary: true,
+      showRefresh: false,
+      isAsyncPending: false,
     };
   }
 
@@ -147,15 +206,18 @@ export function resolveClientAccountState(
     phase: "added",
     badgeLabel: label(lang, "Compte ajouté", "Account added"),
     badgeTone: "neutral",
-    subtext: null,
-    readinessLabel: label(lang, "Vérifier la préparation", "Check readiness"),
-    readinessTone: "neutral",
+    subtext: pendingSubtext,
+    readinessLabel: readinessChecked
+      ? label(lang, "Revérifier", "Check again")
+      : label(lang, "Vérifier la préparation", "Check readiness"),
+    readinessTone: readinessChecked ? "warning" : "neutral",
     readinessDisabled: false,
-    connectLabel: label(lang, "Connecter", "Connect"),
+    connectLabel: label(lang, "Connecter le compte", "Connect account"),
     connectTone: "primary",
-    connectDisabled: false,
+    connectDisabled: true,
     showRefresh: false,
     isAsyncPending: false,
+    ...defaults,
   };
 }
 
@@ -165,6 +227,12 @@ export const CLIENT_ACCOUNT_STATE_MATRIX = [
     clientLabel: "Action requise",
     color: "warning",
     actions: "Connexion à vérifier / Vérifier la préparation",
+  },
+  {
+    backend: "clientReadinessStatus=ready_to_connect",
+    clientLabel: "Prêt à connecter",
+    color: "success",
+    actions: "Connecter le compte / Préparation vérifiée / Revérifier",
   },
   {
     backend: "account exists, login not connected, no async prep",
@@ -195,11 +263,23 @@ export const CLIENT_ACCOUNT_STATE_MATRIX = [
 export function operationPendingFromConnectResult(data: {
   request_queued?: boolean;
   status?: string;
+  connectStatus?: string;
   connected?: boolean;
 }) {
+  const connectStatus = normalize(data.connectStatus || data.status);
   if (data.request_queued) return true;
-  const status = normalize(data.status);
-  return status === "connecting" || status === "checking_connection";
+  if ([
+    "queued",
+    "already_queued",
+    "running",
+    "connecting",
+    "checking_connection",
+    "verification_required",
+    "verification_code_submitted",
+  ].includes(connectStatus)) {
+    return true;
+  }
+  return false;
 }
 
 export function operationPendingFromReadinessResult(data: {
@@ -207,5 +287,5 @@ export function operationPendingFromReadinessResult(data: {
   connected?: boolean;
 }) {
   const status = normalize(data.status);
-  return status === "checking_connection" || status === "waiting_next_slot";
+  return status === "checking_connection";
 }

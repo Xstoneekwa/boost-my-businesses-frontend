@@ -1,5 +1,7 @@
 export type ReadinessNowAudience = "admin" | "client";
 
+export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
+
 export type ReadinessNowClientStatus =
   | "connected_ready"
   | "ready_to_connect"
@@ -98,13 +100,13 @@ function normalize(value: unknown) {
 function clientMessage(status: ReadinessNowClientStatus) {
   return {
     connected_ready: "Connecté",
-    ready_to_connect: "Identifiants enregistrés. Connexion Instagram à lancer.",
+    ready_to_connect: "Prêt à être connecté",
     checking_connection: "Connexion en cours",
     action_required_2fa: "Code 2FA requis",
     action_required_checkpoint: "Checkpoint requis",
     update_password: "Mot de passe à mettre à jour",
-    capacity_unavailable: "Aucun créneau disponible maintenant",
-    waiting_next_slot: "En attente du prochain créneau",
+    capacity_unavailable: "Préparation en cours",
+    waiting_next_slot: "Préparation en cours",
     try_again_later: "Réessaie plus tard",
   }[status];
 }
@@ -243,12 +245,16 @@ async function loadAssignment(supabase: ReadinessNowSupabase, accountId: string)
   return firstRow(result.data);
 }
 
-async function loadTargetAvailability(supabase: ReadinessNowSupabase, assignment: Row) {
+async function loadTargetAvailability(
+  supabase: ReadinessNowSupabase,
+  assignment: Row,
+  options: { requirePhysicalPhone?: boolean } = {},
+) {
   const deviceId = readString(assignment.device_id);
   const appInstanceId = readString(assignment.app_instance_id);
   if (!deviceId || !appInstanceId) return { phoneAvailable: false, appAvailable: false };
   const [phoneResult, appResult] = await Promise.all([
-    query(supabase, "phone_devices").select("id,status").eq("id", deviceId).limit(1) as Promise<QueryResult>,
+    query(supabase, "phone_devices").select("id,status,device_kind").eq("id", deviceId).limit(1) as Promise<QueryResult>,
     query(supabase, "phone_app_instances")
       .select("id,device_id,status,current_account_id,usable_for_auto_login,is_launchable")
       .eq("id", appInstanceId)
@@ -260,8 +266,13 @@ async function loadTargetAvailability(supabase: ReadinessNowSupabase, assignment
   const app = firstRow(appResult.data);
   const phoneStatus = normalize(phone?.status);
   const appStatus = normalize(app?.status);
+  const physicalPhone = readString(phone?.device_kind, "").toLowerCase() === "physical_phone";
   return {
-    phoneAvailable: Boolean(phone && ["available", "active", "online"].includes(phoneStatus)),
+    phoneAvailable: Boolean(
+      phone
+      && ["available", "active", "online"].includes(phoneStatus)
+      && (!options.requirePhysicalPhone || physicalPhone),
+    ),
     appAvailable: Boolean(
       app
       && ["available", "occupied"].includes(appStatus)
@@ -310,12 +321,19 @@ async function listPeerAccountIds(supabase: ReadinessNowSupabase, assignment: Ro
     .filter(Boolean))];
 }
 
+
 async function hasAvailableSlot(supabase: ReadinessNowSupabase, accountId: string) {
-  const { data, error } = await supabase.rpc("list_available_assignment_slots", { p_account_id: accountId });
+  const { data, error } = await supabase.rpc("list_available_assignment_slots", {
+    p_account_id: accountId,
+  });
   if (error) return false;
   const payload = data && typeof data === "object" && !Array.isArray(data) ? data as Row : {};
-  const slots = Array.isArray(payload.slots) ? payload.slots as Row[] : [];
-  return slots.some((slot) => slot.available === true);
+  const slots = Array.isArray(payload.slots) ? payload.slots : [];
+  return slots.some((row) => {
+    if (!row || typeof row !== "object") return false;
+    const slot = row as Row;
+    return slot.available === true || readString(slot.availability).toLowerCase() === "available";
+  });
 }
 
 function loginActionStatus(status: string): { admin: ReadinessNowAdminStatus; client: ReadinessNowClientStatus; reason: string; nextAction: string } | null {
@@ -342,10 +360,13 @@ export async function runReadinessNow(
     actorId?: string | null;
     now?: Date;
     dryRun?: boolean;
+    mode?: ReadinessNowMode;
   },
 ): Promise<ReadinessNowResult> {
   const audience = input.audience ?? "admin";
   const now = input.now ?? new Date();
+  const mode = input.mode ?? (input.dryRun === true ? "readiness_only" : "connect_enqueue");
+  const passiveOnly = mode === "readiness_only" || input.dryRun === true;
   const account = await loadAccount(supabase, input.accountId);
   if (!account) {
     return safeResult({
@@ -389,7 +410,7 @@ export async function runReadinessNow(
     selectOneOptional(supabase, "account_package_summary", input.accountId, "account_id,commercial_package_code,runtime_profiles,package_caps,entitlements"),
     selectOneOptional(supabase, "ig_account_settings", input.accountId, "account_id"),
     selectOneOptional(supabase, "ig_account_filters", input.accountId, "account_id"),
-    selectOneOptional(supabase, "ig_dm_settings", input.accountId, "account_id"),
+    selectOneOptional(supabase, "ig_account_dm_settings", input.accountId, "account_id"),
     countAccountTargets(supabase, input.accountId),
     countBlockingDashboardActions(supabase, input.accountId),
   ]);
@@ -405,8 +426,6 @@ export async function runReadinessNow(
     !packageSummary ? "missing_package" : null,
     !settingsRow ? "missing_settings" : null,
     !filtersRow ? "missing_filters" : null,
-    !dmSettingsRow ? "missing_dm_settings" : null,
-    targetBlocker,
     blockingDashboardActionCount > 0 ? "blocking_dashboard_action" : null,
   ].filter((item): item is string => Boolean(item));
   const checks = {
@@ -425,6 +444,8 @@ export async function runReadinessNow(
     ct_count_rejected: targetCounts.rejected,
     ct_count_archived: targetCounts.archived,
     ct_required: targetsRequired,
+    ct_advisory_blocker: targetBlocker,
+    dm_settings_advisory: !dmSettingsRow,
     blocking_dashboard_action_count: blockingDashboardActionCount,
     no_blocking_dashboard_action: blockingDashboardActionCount === 0,
     account_not_archived: !["archived", "trashed", "deleted"].includes(accountStatus),
@@ -518,7 +539,9 @@ export async function runReadinessNow(
     });
   }
 
-  const { phoneAvailable, appAvailable } = await loadTargetAvailability(supabase, assignment);
+  const { phoneAvailable, appAvailable } = await loadTargetAvailability(supabase, assignment, {
+    requirePhysicalPhone: audience === "client",
+  });
   if (!phoneAvailable || !appAvailable) {
     return safeResult({
       audience,
@@ -586,7 +609,7 @@ export async function runReadinessNow(
     });
   }
 
-  if (input.dryRun === true) {
+  if (passiveOnly) {
     return safeResult({
       audience,
       readiness_status: "ready_to_connect",
@@ -598,8 +621,8 @@ export async function runReadinessNow(
       idempotent: false,
       request_id: null,
       run_request_status: "not_created_dry_run",
-      next_action: "start_auto_login",
-      reason: credentialsSavedPendingVerification ? "credentials_saved_pending_verification" : "login_check_ready_to_connect",
+      next_action: "connect_when_ready",
+      reason: credentialsSavedPendingVerification ? "credentials_saved_pending_verification" : "readiness_passive_ready_to_connect",
       blockers,
       checks,
     });
@@ -611,7 +634,7 @@ export async function runReadinessNow(
     p_account_id: input.accountId,
     p_requested_by: input.actorId ?? null,
     p_actor_type: audience === "admin" ? "admin" : "client",
-    p_source_surface: audience === "admin" ? "instagram_dashboard_readiness_now" : "instagram_client_check_connect_now",
+    p_source_surface: audience === "admin" ? "instagram_dashboard_readiness_now" : "instagram_client_connect",
     p_requested_run_type: "login_provisioning",
     p_priority: 0,
     p_metadata_safe: {
@@ -622,20 +645,53 @@ export async function runReadinessNow(
     },
   };
 
-  let request = await createPreflightRunRequest(supabase, {
-    ...enqueueArgs,
-    p_idempotency_key: idempotencyKey,
-  });
-  let requestStatus = readString(request?.status, "queued");
-  if (!activeRequestStatuses.includes(requestStatus)) {
+  let request: Row | null = null;
+  let enqueueRejected = false;
+  let idempotentFromConflict = false;
+
+  try {
     request = await createPreflightRunRequest(supabase, {
       ...enqueueArgs,
-      p_idempotency_key: `${idempotencyKey}:retry:${now.getTime()}`,
+      p_idempotency_key: idempotencyKey,
     });
-    requestStatus = readString(request?.status, "queued");
+  } catch (error) {
+    const code = error instanceof PreflightEnqueueError ? error.code : "enqueue_rejected";
+    if (code === "account_run_already_requested") {
+      const existing = activeRequests.find((row) => readString(row.account_id) === input.accountId)
+        || (await listActiveRequests(supabase, [input.accountId]))[0];
+      if (existing) {
+        request = existing;
+        idempotentFromConflict = true;
+      } else {
+        enqueueRejected = true;
+      }
+    } else {
+      enqueueRejected = true;
+    }
   }
 
+  if (enqueueRejected || !request) {
+    return safeResult({
+      audience,
+      readiness_status: "retry_later",
+      client_status: "try_again_later",
+      assignment_status: "ready",
+      phone_available: true,
+      app_instance_available: true,
+      preflight_request_created: false,
+      idempotent: false,
+      request_id: null,
+      run_request_status: null,
+      next_action: "retry_connect",
+      reason: "login_preflight_request_not_active",
+      blockers: ["enqueue_rejected"],
+      checks,
+    });
+  }
+
+  const requestStatus = readString(request?.status, "queued");
   const requestActive = activeRequestStatuses.includes(requestStatus);
+  const idempotentHit = idempotentFromConflict;
   return safeResult({
     audience,
     readiness_status: requestActive ? "checking_connection" : "retry_later",
@@ -643,15 +699,29 @@ export async function runReadinessNow(
     assignment_status: "ready",
     phone_available: true,
     app_instance_available: true,
-    preflight_request_created: requestActive,
-    idempotent: false,
+    preflight_request_created: requestActive && !idempotentHit,
+    idempotent: idempotentHit,
     request_id: audience === "admin" ? readString(request?.id) || null : null,
     run_request_status: requestStatus,
     next_action: requestActive ? "monitor_preflight" : "retry_connect",
-    reason: requestActive ? "login_preflight_now_queued" : "login_preflight_request_not_active",
+    reason: idempotentHit
+      ? "already_requested"
+      : requestActive
+        ? "login_preflight_now_queued"
+        : "login_preflight_request_not_active",
     blockers: requestActive ? [] : ["login_preflight_request_not_active"],
     checks,
   });
+}
+
+export class PreflightEnqueueError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message?: string) {
+    super(message || code);
+    this.name = "PreflightEnqueueError";
+    this.code = code;
+  }
 }
 
 async function createPreflightRunRequest(
@@ -659,8 +729,17 @@ async function createPreflightRunRequest(
   args: Record<string, unknown>,
 ) {
   const { data, error } = await supabase.rpc("create_account_run_request", args);
-  if (error) throw new Error(error.message || "readiness_now_enqueue_failed");
+  if (error) {
+    const message = error.message || "readiness_now_enqueue_failed";
+    if (message.includes("account_run_already_requested")) {
+      throw new PreflightEnqueueError("account_run_already_requested", message);
+    }
+    if (message.includes("invalid_actor_type")) {
+      throw new PreflightEnqueueError("invalid_actor_type", message);
+    }
+    throw new PreflightEnqueueError("enqueue_rejected", message);
+  }
   const request = Array.isArray(data) ? data[0] as Row | undefined : data as Row | undefined;
-  if (!request) throw new Error("readiness_now_enqueue_failed");
+  if (!request) throw new PreflightEnqueueError("enqueue_rejected", "readiness_now_enqueue_failed");
   return request;
 }

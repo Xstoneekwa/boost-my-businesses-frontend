@@ -2,6 +2,7 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
 import { projectClientAccountRow, type ClientAccountRow } from "./account-projection";
 import { readString } from "./guards";
+import { projectPassiveReadinessByAccountId } from "./project-client-workspace-readiness";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -66,7 +67,7 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
     .map((row): [string, SupabaseRecord] => [readString(row.account_id), row])
     .filter(([id]) => Boolean(id)));
 
-  return (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
+  const accountRows = (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
     .map((row) => {
       const accountId = readString(row.id);
       const link = linkByAccount.get(accountId);
@@ -76,7 +77,7 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
       const assignmentStatus = assignmentMap.get(accountId)
         ?? (onboardingStatus === "ready" ? "assigned" : "pending_assignment");
 
-      return projectClientAccountRow({
+      return {
         accountId,
         username: readString(row.username, "Instagram account"),
         packageLabel: packageSummary?.commercialPackageLabel || packageLabelFromCode(readString(packageSummary?.commercialPackageCode, "growth")),
@@ -85,9 +86,30 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
         provisioningStatus: readString(link?.provisioning_status, "not_started"),
         loginStatus,
         assignmentStatus,
-      });
+        connected: loginStatus.toLowerCase() === "connected",
+      };
     })
-    .filter((row) => Boolean(row.accountId))
+    .filter((row) => Boolean(row.accountId));
+
+  const disconnectedAccountIds = accountRows
+    .filter((row) => !row.connected)
+    .map((row) => row.accountId);
+  const readinessByAccount = await projectPassiveReadinessByAccountId(disconnectedAccountIds);
+
+  return accountRows
+    .map((row) => projectClientAccountRow({
+      accountId: row.accountId,
+      username: row.username,
+      packageLabel: row.packageLabel,
+      accountStatus: row.accountStatus,
+      onboardingStatus: row.onboardingStatus,
+      provisioningStatus: row.provisioningStatus,
+      loginStatus: row.loginStatus,
+      assignmentStatus: row.assignmentStatus,
+      readinessStatus: row.connected
+        ? "already_connected"
+        : (readinessByAccount.get(row.accountId) ?? ""),
+    }))
     .sort((left, right) => left.username.localeCompare(right.username));
 }
 

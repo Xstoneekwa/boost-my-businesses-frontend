@@ -1,6 +1,7 @@
 # Client tenant onboarding — E2E (internal)
 
 Document interne pour le bootstrap ops → dashboard client → admin → BotApp relay.  
+Voir aussi [`client-connect-challenge.md`](./client-connect-challenge.md) pour Connect réel, challenge code et BotApp phone.
 Les termes techniques ci-dessous **ne doivent jamais** apparaître dans l’UI client.
 
 ---

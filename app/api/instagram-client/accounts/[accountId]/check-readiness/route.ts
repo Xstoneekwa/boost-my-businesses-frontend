@@ -1,10 +1,10 @@
-import { jsonError, jsonOk, readBoolean, readJsonBody, readString } from "@/app/api/instagram-dashboard/_utils";
+import { jsonError, jsonOk, readJsonBody, readString } from "@/app/api/instagram-dashboard/_utils";
 import { authorizeClientInstagramAccount, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
 import { checkClientAccountReadiness } from "@/lib/instagram-client/connect-account";
 
 export const dynamic = "force-dynamic";
 
-type Body = { dry_run?: unknown };
+type Body = { dry_run?: unknown; mode?: unknown };
 
 export async function POST(
   request: Request,
@@ -20,12 +20,12 @@ export async function POST(
   const authorized = await authorizeClientInstagramAccount(session.userId, normalizedAccountId);
   if (!authorized.ok) return jsonError(authorized.error, authorized.status);
 
-  const body = await readJsonBody<Body>(request);
+  await readJsonBody<Body>(request);
+
   const result = await checkClientAccountReadiness({
     accountId: normalizedAccountId,
     userId: session.userId,
     clientId: session.clientId,
-    dryRun: readBoolean(body?.dry_run, false),
   });
 
   return jsonOk(result);
