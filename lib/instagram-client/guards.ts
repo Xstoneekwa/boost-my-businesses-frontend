@@ -73,6 +73,8 @@ export type ClientAccountProjectionInput = {
   loginStatus?: string;
   assignmentStatus?: string;
   readinessStatus?: string;
+  activeConnectStatus?: string | null;
+  operationPending?: boolean;
 };
 
 export function projectClientAccountRow(input: ClientAccountProjectionInput) {
@@ -81,6 +83,9 @@ export function projectClientAccountRow(input: ClientAccountProjectionInput) {
   const provisioningStatus = readString(input.provisioningStatus, "not_started");
   const assignmentStatus = readString(input.assignmentStatus, onboardingStatus === "ready" ? "assigned" : "pending_assignment");
   const connected = loginStatus.toLowerCase() === "connected";
+
+  const clientReadinessStatus = readString(input.readinessStatus, "");
+  const activeConnectStatus = readString(input.activeConnectStatus, "") || null;
 
   return {
     accountId: input.accountId,
@@ -93,5 +98,8 @@ export function projectClientAccountRow(input: ClientAccountProjectionInput) {
     assignmentStatus,
     readinessLabel: "",
     connected,
+    ...(clientReadinessStatus ? { clientReadinessStatus } : {}),
+    ...(activeConnectStatus ? { activeConnectStatus } : {}),
+    ...(input.operationPending ? { operationPending: true } : {}),
   };
 }

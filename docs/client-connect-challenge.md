@@ -22,15 +22,15 @@ Complète [`client-tenant-onboarding-e2e.md`](./client-tenant-onboarding-e2e.md)
 | `queued` | Request `login_provisioning` créée / en file |
 | `already_queued` | Request active déjà présente (idempotence) |
 | `running` | Dispatcher / worker en cours |
-| `verification_required` | Action dashboard `enter_email_verification_code` active (runtime) |
+| `verification_required` | Challenge Instagram actif (`login_status=verification_pending` et/ou action runtime `enter_email_verification_code`) |
 | `verification_code_submitted` | Code consommé, reprise provisioning en cours |
 | `connected` | `login_status=connected` confirmé côté backend |
-| `failed` | Échec terminal client-safe |
+| `failed` | Échec terminal client-safe (hors challenge attendu) |
 | `blocked` | Connect refusé (readiness, droits, capacité) |
 | `not_created` | Aucune request créée |
 | `already_queued` | Doublon évité |
 
-`verification_required` provient de **`/api/instagram-client/accounts/:id/connect/progress`** (runtime), jamais d'une simulation React seule.
+`verification_required` provient de **`/api/instagram-client/accounts/:id/connect/progress`** (runtime canonique : request active + statuts compte + action challenge), jamais d'une simulation React seule.
 
 ---
 
@@ -46,21 +46,16 @@ Complète [`client-tenant-onboarding-e2e.md`](./client-tenant-onboarding-e2e.md)
 
 ## Challenge code — contrat canonique
 
-Réutilise le même pipeline que :
+Pipeline partagé worker / BotApp / dashboard client :
 
-- Auto Login BotApp ;
-- Dashboard admin (Credentials Actions / bannière email code) ;
-- RPC `submit_account_verification_code` + `createLoginEmailCodeResumeRunRequest`.
+- RPC `submit_account_verification_code` + `createLoginEmailCodeResumeRunRequest` ;
+- reprise sur la **même** request `login_provisioning` lorsque le worker détecte un challenge email (pause contrôlée, pas d'échec terminal).
 
 Route client autorisée (session client + ownership) :
 
 `POST /api/instagram-client/accounts/:id/connect/submit-verification-code`
 
-Délègue au service canonique partagé (`submitAccountVerificationCode`) utilisé aussi par Admin et BotApp.
-
-L'admin conserve :
-
-`POST /api/instagram-dashboard/dashboard-actions/submit-verification-code`
+Délègue au service canonique partagé (`submitAccountVerificationCode`).
 
 Garanties :
 
@@ -69,7 +64,7 @@ Garanties :
 - idempotence : reprise du **même** provisioning, pas de nouveau Connect ;
 - code invalide / expiré / déjà consommé → message JSON client-safe.
 
-Popup client : **`Vérification requise`** — champ « Code de vérification », bouton « Valider le code ». Fermeture sans annuler le provisioning.
+Popup client : **`Vérification requise`** — champ « Code de vérification », bouton « Valider le code ». Fermeture sans annuler le provisioning. CTA persistant **« Saisir le code de vérification »** après fermeture du modal.
 
 ---
 
@@ -95,32 +90,19 @@ Pas de fallback navigateur dangereux.
 ## Sécurité opérateur
 
 - Ne jamais copier/coller un code de vérification dans Slack, tickets, logs ou exports.
-- Utiliser BotApp (Profiles / Auto Login ou deep link) pour voir l'écran Instagram.
-- Admin : même source challenge via Credentials Actions — une seule action `enter_email_verification_code` par compte.
+- Utiliser BotApp (deep link client) pour voir l'écran Instagram pendant la vérification.
 
 ---
 
-## Fichiers clés
+## Parcours client attendu (Lucie)
 
-| Fichier | Rôle |
-|---------|------|
-| `lib/instagram-client/connect-client-contract.ts` | Statuts Connect |
-| `lib/instagram-client/connect-progress-projection.ts` | Mapping runtime → statuts client |
-| `lib/instagram-client/load-client-connect-progress.ts` | Loader `login_provisioning` + actions |
-| `app/api/instagram-client/accounts/[accountId]/connect/progress/route.ts` | API progression client |
-| `app/instagram-client/ClientVerificationModal.tsx` | Popup challenge |
-| `app/api/instagram-dashboard/dashboard-actions/submit-verification-code/route.ts` | Soumission canonique |
-| `app/api/instagram-dashboard/botapp/open-device-view/route.ts` | Redemption relay BotApp |
-| `BotApp/electron/main.cjs` | Handler `botapp://open-device-view` |
+1. Dashboard client → ajout compte → Check Readiness → Connect.
+2. Worker ouvre Instagram sur le téléphone assigné.
+3. Si Instagram affiche « Check your email / Enter the code » :
+   - request `login_provisioning` reste **active** (`running`) ;
+   - statuts compte publiés : `verification_pending` / `login_verification_pending` ;
+   - dashboard client : carte **Vérification requise**, popup code, CTA BotApp.
+4. Client saisit le code → reprise automatique sur la même request.
+5. `connected` → fin du flow.
 
----
-
-## Non-régression
-
-Auto Login BotApp et dashboard admin continuent d'utiliser :
-
-- `account_dashboard_actions.enter_email_verification_code` ;
-- `submit_account_verification_code` ;
-- `createLoginEmailCodeResumeRunRequest`.
-
-Le client Connect **ajoute une surface**, sans second système parallèle de challenge.
+Aucune étape ne demande au client d'ouvrir un autre dashboard ou d'attendre une action opérateur manuelle.

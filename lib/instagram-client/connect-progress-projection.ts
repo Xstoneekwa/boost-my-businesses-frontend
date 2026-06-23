@@ -2,6 +2,7 @@ import {
   type ClientConnectStatus,
   clientConnectMessage,
 } from "./connect-client-contract.ts";
+import { isCanonicalVerificationPending } from "./connect-operation-state.ts";
 import { readString } from "./guards.ts";
 
 export type ClientConnectProgressAction = {
@@ -52,6 +53,7 @@ type ProgressInput = {
   requestId?: string | null;
   reason?: string | null;
   loginStatus?: string | null;
+  provisioningStatus?: string | null;
   actionRequired?: {
     id?: string;
     action_type?: string;
@@ -76,7 +78,11 @@ function readMetadataResumeStatus(action: ProgressInput["actionRequired"]) {
 function mapVerificationState(action: ProgressInput["actionRequired"]) {
   const actionType = readString(action?.action_type);
   const actionStatus = readString(action?.status).toLowerCase();
-  if (actionType !== EMAIL_CODE_ACTION || !ACTIVE_ACTION_STATUSES.has(actionStatus)) {
+  const emailCodeAction = actionType === EMAIL_CODE_ACTION || !actionType;
+  if (!emailCodeAction || !action) {
+    return { required: false, code_submitted: false, challenge_status: null as string | null };
+  }
+  if (!ACTIVE_ACTION_STATUSES.has(actionStatus) && actionStatus !== "pending_verification") {
     return { required: false, code_submitted: false, challenge_status: null as string | null };
   }
   if (actionStatus === "code_submitted") {
@@ -91,10 +97,16 @@ export function mapProgressToClientConnectStatus(input: ProgressInput): ClientCo
   const runStatus = readString(input.runStatus).toLowerCase();
   const loginStatus = readString(input.loginStatus).toLowerCase();
   const verification = mapVerificationState(input.actionRequired);
+  const accountVerificationPending = isCanonicalVerificationPending({
+    loginStatus: input.loginStatus,
+    provisioningStatus: input.provisioningStatus,
+  });
 
   if (loginStatus === "connected" || overall === "connected") return "connected";
-  if (verification.required && verification.code_submitted) return "verification_code_submitted";
-  if (verification.required) return "verification_required";
+  if (accountVerificationPending || verification.required) {
+    if (verification.code_submitted) return "verification_code_submitted";
+    return "verification_required";
+  }
   if (overall === "failed" || runStatus === "failed" || requestStatus === "failed") return "failed";
   if (overall === "blocked" || requestStatus === "blocked") return "blocked";
   if (requestStatus === "queued" || overall === "queued") return "queued";
@@ -132,14 +144,19 @@ function clientSafeStepSubtitle(subtitle: string) {
 export function projectClientConnectProgress(input: ProgressInput): ClientConnectProgressSnapshot {
   const lang = input.lang ?? "fr";
   const connectStatus = mapProgressToClientConnectStatus(input);
+  const accountVerificationPending = isCanonicalVerificationPending({
+    loginStatus: input.loginStatus,
+    provisioningStatus: input.provisioningStatus,
+  });
   const verification = mapVerificationState(input.actionRequired);
   const actionStatus = readString(input.actionRequired?.status).toLowerCase();
   const resumeStatus = readMetadataResumeStatus(input.actionRequired) || null;
-  const canSubmitCode = verification.required
+  const canSubmitCode = (verification.required || accountVerificationPending)
     && !verification.code_submitted
-    && (SUBMITTABLE_ACTION_STATUSES.has(actionStatus) || resumeStatus === "needs_new_code");
+    && Boolean(readString(input.actionRequired?.id))
+    && (SUBMITTABLE_ACTION_STATUSES.has(actionStatus) || actionStatus === "pending_verification" || resumeStatus === "needs_new_code");
 
-  const actionRequired = input.actionRequired && verification.required ? {
+  const actionRequired = input.actionRequired && (verification.required || accountVerificationPending) ? {
     id: readString(input.actionRequired.id),
     action_type: readString(input.actionRequired.action_type),
     status: actionStatus,

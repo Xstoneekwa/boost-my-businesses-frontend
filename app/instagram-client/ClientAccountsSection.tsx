@@ -15,6 +15,7 @@ import {
   type ClientProcessMode,
 } from "@/lib/instagram-client/client-account-process-projection";
 import { parseClientApiResponse } from "@/lib/instagram-client/read-api-response";
+import { isActiveClientConnectStatus } from "@/lib/instagram-client/connect-operation-state";
 
 export type ClientInstagramAccountView = {
   accountId: string;
@@ -28,6 +29,8 @@ export type ClientInstagramAccountView = {
   readinessLabel: string;
   connected: boolean;
   clientReadinessStatus?: string | null;
+  activeConnectStatus?: string | null;
+  operationPending?: boolean;
 };
 
 type Props = {
@@ -104,9 +107,11 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const [entitlementReady, setEntitlementReady] = useState<boolean | null>(null);
   const pollAttemptsRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
+  const connectHydratedRef = useRef(false);
 
   useEffect(() => {
     setItems(accounts);
+    connectHydratedRef.current = false;
   }, [accounts]);
 
   useEffect(() => {
@@ -208,6 +213,58 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     return payload.data;
   }, [lang]);
 
+  const resumeActiveConnect = useCallback(async (account: ClientInstagramAccountView, openVerification = false) => {
+    const progress = await syncConnectProgress(account.accountId);
+    if (!isActiveClientConnectStatus(progress.connect_status)) {
+      return null;
+    }
+    setItems((current) => current.map((row) => (
+      row.accountId === account.accountId
+        ? {
+            ...row,
+            activeConnectStatus: progress.connect_status,
+            operationPending: true,
+            clientReadinessStatus: row.clientReadinessStatus === "ready_to_connect" ? null : row.clientReadinessStatus,
+          }
+        : row
+    )));
+    setProcessModal({
+      mode: "connect",
+      username: account.username,
+      accountId: account.accountId,
+      account: {
+        ...account,
+        activeConnectStatus: progress.connect_status,
+        operationPending: true,
+      },
+      connectPhase: "polling",
+      connectProgress: progress,
+      timedOut: false,
+    });
+    if (openVerification || progress.connect_status === "verification_required") {
+      setVerificationDismissed(false);
+    }
+    return progress;
+  }, [syncConnectProgress]);
+
+  useEffect(() => {
+    if (processModal || connectHydratedRef.current) return undefined;
+
+    const candidate = items.find((row) => isActiveClientConnectStatus(row.activeConnectStatus));
+    if (!candidate) return undefined;
+
+    connectHydratedRef.current = true;
+    let cancelled = false;
+
+    void resumeActiveConnect(candidate, true).catch(() => {
+      if (!cancelled) connectHydratedRef.current = false;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, processModal, resumeActiveConnect]);
+
   const handleOpenBotAppPhone = useCallback(async (accountId: string) => {
     const response = await fetch(
       `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/open-botapp-phone`,
@@ -251,7 +308,11 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
 
   useEffect(() => {
     const connectPollingActive = processModal?.mode === "connect"
-      && (processModal.connectPhase === "polling" || processModal.connectPhase === "submitting")
+      && (
+        processModal.connectPhase === "polling"
+        || processModal.connectPhase === "submitting"
+        || isActiveClientConnectStatus(processModal.connectProgress?.connect_status)
+      )
       && !isTerminalConnectProgress(processModal.connectProgress);
     if (!processModal || (!processProjection?.isAsyncPending && !connectPollingActive)) {
       stopProcessPolling();
@@ -278,11 +339,23 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
             ...current,
             account,
             connectProgress: mode === "connect" ? connectProgress : current.connectProgress,
-            connectPhase: "polling",
+            connectPhase: isActiveClientConnectStatus(connectProgress?.connect_status) ? "polling" : "polling",
             addPhase: current.addPhase === "refreshing" ? "complete" : current.addPhase,
           };
           if (mode === "connect" && connectProgress?.connect_status === "verification_required") {
             setVerificationDismissed(false);
+          }
+          if (mode === "connect" && connectProgress) {
+            const activeStatus = connectProgress.connect_status;
+            setItems((currentItems) => currentItems.map((row) => (
+              row.accountId === accountId
+                ? {
+                    ...row,
+                    activeConnectStatus: isActiveClientConnectStatus(activeStatus) ? activeStatus : row.activeConnectStatus,
+                    operationPending: isActiveClientConnectStatus(activeStatus),
+                  }
+                : row
+            )));
           }
           if (isTerminalProcessAccount(account, mode, lang, connectProgress)) {
             stopProcessPolling();
@@ -351,8 +424,26 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
 
   function closeProcessModal() {
     stopProcessPolling();
-    setVerificationDismissed(false);
+    if (processModal?.connectProgress?.connect_status === "verification_required") {
+      setVerificationDismissed(true);
+    } else {
+      setVerificationDismissed(false);
+    }
     setProcessModal(null);
+  }
+
+  async function handleReopenVerification(account: ClientInstagramAccountView) {
+    if (actionBusy) return;
+    setActionKind("connect");
+    setActionAccountId(account.accountId);
+    try {
+      await resumeActiveConnect(account, true);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible de rouvrir la vérification.", "Could not reopen verification."), "error");
+    } finally {
+      setActionKind(null);
+      setActionAccountId(null);
+    }
   }
 
   async function handleManualRefresh() {
@@ -637,6 +728,8 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
               const ui = resolveClientAccountConnectionUi({
                 ...account,
                 clientReadinessStatus: account.clientReadinessStatus,
+                activeConnectStatus: account.activeConnectStatus,
+                operationPending: account.operationPending,
               }, lang);
               return (
                 <article className="cd-account-row" key={account.accountId}>
@@ -657,6 +750,16 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                         {actionKind === "refresh"
                           ? labelFor(lang, "Actualisation…", "Refreshing…")
                           : labelFor(lang, "Actualiser", "Refresh")}
+                      </button>
+                    ) : null}
+                    {ui.showVerificationReopen ? (
+                      <button
+                        type="button"
+                        className="cd-btn cd-btn-primary cd-btn-compact"
+                        disabled={busy || Boolean(processModal)}
+                        onClick={() => void handleReopenVerification(account)}
+                      >
+                        {ui.verificationReopenLabel}
                       </button>
                     ) : null}
                     {ui.connectPrimary ? (

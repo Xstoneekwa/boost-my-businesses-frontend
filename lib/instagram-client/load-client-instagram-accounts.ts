@@ -2,6 +2,8 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
 import { projectClientAccountRow, type ClientAccountRow } from "./account-projection";
 import { readString } from "./guards";
+import { loadClientConnectProgress } from "./load-client-connect-progress";
+import { isActiveClientConnectStatus, shouldSuppressPassiveReadyToConnect } from "./connect-operation-state";
 import { projectPassiveReadinessByAccountId } from "./project-client-workspace-readiness";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -94,23 +96,56 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
   const disconnectedAccountIds = accountRows
     .filter((row) => !row.connected)
     .map((row) => row.accountId);
-  const readinessByAccount = await projectPassiveReadinessByAccountId(disconnectedAccountIds);
+  const [readinessByAccount, connectStatusByAccount] = await Promise.all([
+    projectPassiveReadinessByAccountId(disconnectedAccountIds),
+    loadActiveConnectStatusByAccount(disconnectedAccountIds),
+  ]);
 
   return accountRows
-    .map((row) => projectClientAccountRow({
-      accountId: row.accountId,
-      username: row.username,
-      packageLabel: row.packageLabel,
-      accountStatus: row.accountStatus,
-      onboardingStatus: row.onboardingStatus,
-      provisioningStatus: row.provisioningStatus,
-      loginStatus: row.loginStatus,
-      assignmentStatus: row.assignmentStatus,
-      readinessStatus: row.connected
+    .map((row) => {
+      const activeConnectStatus = connectStatusByAccount.get(row.accountId) ?? null;
+      const passiveReadiness = row.connected
         ? "already_connected"
-        : (readinessByAccount.get(row.accountId) ?? ""),
-    }))
+        : (readinessByAccount.get(row.accountId) ?? "");
+      const readinessStatus = row.connected
+        ? "already_connected"
+        : (activeConnectStatus && shouldSuppressPassiveReadyToConnect(activeConnectStatus)
+          ? ""
+          : passiveReadiness);
+
+      return projectClientAccountRow({
+        accountId: row.accountId,
+        username: row.username,
+        packageLabel: row.packageLabel,
+        accountStatus: row.accountStatus,
+        onboardingStatus: row.onboardingStatus,
+        provisioningStatus: row.provisioningStatus,
+        loginStatus: row.loginStatus,
+        assignmentStatus: row.assignmentStatus,
+        readinessStatus,
+        activeConnectStatus,
+        operationPending: isActiveClientConnectStatus(activeConnectStatus),
+      });
+    })
     .sort((left, right) => left.username.localeCompare(right.username));
+}
+
+async function loadActiveConnectStatusByAccount(accountIds: string[]) {
+  const map = new Map<string, string>();
+  if (!accountIds.length) return map;
+
+  await Promise.all(accountIds.map(async (accountId) => {
+    try {
+      const progress = await loadClientConnectProgress({ accountId });
+      if (isActiveClientConnectStatus(progress.connect_status)) {
+        map.set(accountId, progress.connect_status);
+      }
+    } catch {
+      // Passive readiness remains the fallback when runtime progress is unavailable.
+    }
+  }));
+
+  return map;
 }
 
 export async function loadClientInstagramAccount(

@@ -1,4 +1,9 @@
 import { clientReadinessMessage, type ClientReadinessStatus } from "./client-readiness-projection.ts";
+import {
+  isActiveClientConnectStatus,
+  labelForActiveConnectStatus,
+  type ClientConnectStatus,
+} from "./connect-operation-state.ts";
 
 export type ClientAccountPresentationPhase =
   | "added"
@@ -16,6 +21,7 @@ export type ClientAccountStateInput = {
   connected?: boolean;
   operationPending?: boolean;
   clientReadinessStatus?: string | null;
+  activeConnectStatus?: string | null;
 };
 
 export type ClientAccountStateUi = {
@@ -34,6 +40,8 @@ export type ClientAccountStateUi = {
   connectPrimary: boolean;
   showRefresh: boolean;
   isAsyncPending: boolean;
+  showVerificationReopen: boolean;
+  verificationReopenLabel: string;
 };
 
 function label(lang: "fr" | "en", fr: string, en: string) {
@@ -49,6 +57,88 @@ function recheckDefaults(lang: "fr" | "en") {
     showRecheckReadiness: false,
     recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
     connectPrimary: false,
+    showVerificationReopen: false,
+    verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
+  };
+}
+
+function activeConnectPresentation(status: ClientConnectStatus, lang: "fr" | "en"): ClientAccountStateUi {
+  const badgeLabel = labelForActiveConnectStatus(status, lang);
+
+  if (status === "verification_required") {
+    return {
+      phase: "action_required",
+      badgeLabel,
+      badgeTone: "warning",
+      subtext: label(
+        lang,
+        "Instagram demande une vérification avant de terminer la connexion de votre compte.",
+        "Instagram requires verification before your account connection can finish.",
+      ),
+      readinessLabel: label(lang, "Connexion en cours", "Connection in progress"),
+      readinessTone: "warning",
+      readinessDisabled: true,
+      connectLabel: label(lang, "Vérification requise", "Verification required"),
+      connectTone: "neutral",
+      connectDisabled: true,
+      showRefresh: true,
+      isAsyncPending: true,
+      showRecheckReadiness: false,
+      recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
+      connectPrimary: false,
+      showVerificationReopen: true,
+      verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
+    };
+  }
+
+  if (status === "verification_code_submitted") {
+    return {
+      phase: "connection_check",
+      badgeLabel,
+      badgeTone: "neutral",
+      subtext: label(
+        lang,
+        "Code reçu. Nous reprenons la connexion automatiquement.",
+        "Code received. We are resuming the connection automatically.",
+      ),
+      readinessLabel: label(lang, "Connexion en cours", "Connection in progress"),
+      readinessTone: "neutral",
+      readinessDisabled: true,
+      connectLabel: label(lang, "Connexion en cours", "Connection in progress"),
+      connectTone: "neutral",
+      connectDisabled: true,
+      connectPrimary: false,
+      showRefresh: true,
+      isAsyncPending: true,
+      showRecheckReadiness: false,
+      recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
+      showVerificationReopen: false,
+      verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
+    };
+  }
+
+  return {
+    phase: "connection_check",
+    badgeLabel,
+    badgeTone: "neutral",
+    subtext: label(
+      lang,
+      "La connexion Instagram est déjà en cours sur le téléphone préparé pour votre compte.",
+      "The Instagram connection is already in progress on the phone prepared for your account.",
+    ),
+    readinessLabel: label(lang, "Connexion en cours", "Connection in progress"),
+    readinessTone: "neutral",
+    readinessDisabled: true,
+    connectLabel: label(lang, "Connexion en cours", "Connection in progress"),
+    connectTone: "neutral",
+    connectDisabled: true,
+    connectPrimary: false,
+    showRefresh: true,
+    isAsyncPending: true,
+    showRecheckReadiness: false,
+    recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
+    showVerificationReopen: false,
+    verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
   };
 }
 
@@ -104,7 +194,12 @@ export function resolveClientAccountState(
   const connected = input.connected === true || loginStatus === "connected";
   const onboardingReady = onboardingStatus === "ready";
   const clientReadinessStatus = normalize(input.clientReadinessStatus);
+  const activeConnectStatus = normalize(input.activeConnectStatus);
   const defaults = recheckDefaults(lang);
+
+  if (isActiveClientConnectStatus(activeConnectStatus)) {
+    return activeConnectPresentation(activeConnectStatus, lang);
+  }
 
   if (loginNeedsAction(loginStatus)) {
     return {

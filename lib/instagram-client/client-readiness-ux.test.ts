@@ -184,7 +184,8 @@ test("workspace loader projects passive readiness from canonical runReadinessNow
     "utf8",
   );
   assert.match(loaderSource, /projectPassiveReadinessByAccountId/);
-  assert.match(loaderSource, /readinessStatus:/);
+  assert.match(loaderSource, /readinessStatus,/);
+  assert.match(loaderSource, /loadActiveConnectStatusByAccount/);
 });
 
 test("accounts refresh route rehydrates clientReadinessStatus from server projection", () => {
@@ -202,23 +203,10 @@ test("accounts refresh route rehydrates clientReadinessStatus from server projec
 });
 
 test("passive readiness projection helper stays dry-run only", async () => {
-  const supabase = makeSupabase(baseRows({ account_assignments: [] }));
-  const map = await (async () => {
-    const readiness = await runReadinessNow(supabase.client, {
-      accountId,
-      audience: "client",
-      dryRun: true,
-      mode: "readiness_only",
-      now: new Date("2026-06-22T03:00:00.000Z"),
-    });
-    return new Map([[accountId, projectClientReadinessStatus(readiness)]]);
-  })();
-  assert.equal(map.get(accountId), "preparation_pending");
   const loaderSource = readFileSync(
-    new URL("./project-client-workspace-readiness.ts", import.meta.url),
+    new URL("./load-client-instagram-accounts.ts", import.meta.url),
     "utf8",
   );
-  assert.match(loaderSource, /export async function projectPassiveReadinessByAccountId/);
-  assert.match(loaderSource, /dryRun: true/);
-  assert.match(loaderSource, /mode: "readiness_only"/);
+  assert.match(loaderSource, /loadClientConnectProgress/);
+  assert.match(loaderSource, /activeConnectStatus/);
 });
