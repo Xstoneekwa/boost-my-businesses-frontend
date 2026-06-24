@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { projectClientReadinessStatus } from "./client-readiness-projection.ts";
 import { runReadinessNow } from "../instagram-dashboard/readiness-now.ts";
+import { enqueueClientConnectRequest } from "./enqueue-client-connect.ts";
 
 type Row = Record<string, unknown>;
 
@@ -164,20 +165,53 @@ test("passive readiness with offline phone returns device_temporarily_unavailabl
   assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
 });
 
-test("connect enqueue only runs after passive readiness is ready", async () => {
+test("connect enqueue uses attempt-scoped idempotency and creates a new request", async () => {
   const supabase = makeSupabase();
-  const result = await runReadinessNow(supabase.client, {
+  const result = await enqueueClientConnectRequest(supabase.client, {
     accountId,
-    audience: "client",
-    dryRun: false,
-    mode: "connect_enqueue",
-    now: new Date("2026-06-22T03:00:00.000Z"),
+    actorId: "actor-1",
+    assignmentId,
+    deadlineAt: "2026-06-22T10:00:00.000Z",
   });
   assert.equal(result.preflight_request_created, true);
   assert.equal(supabase.rpcCalls.filter((call) => call.name === "create_account_run_request").length, 1);
   assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "login_provisioning");
   assert.equal(supabase.rpcCalls[0]?.args.p_actor_type, "client");
   assert.equal(supabase.rpcCalls[0]?.args.p_source_surface, "instagram_client_connect");
+  assert.match(String(supabase.rpcCalls[0]?.args.p_idempotency_key), /^login-preflight-now:assignment-1:/);
+});
+
+test("connect enqueue maps rpc invalid_actor_type to rejected enqueue", async () => {
+  const supabase = makeSupabase(baseRows(), false, "invalid_actor_type");
+  const result = await enqueueClientConnectRequest(supabase.client, {
+    accountId,
+    actorId: "actor-1",
+    assignmentId,
+    deadlineAt: "2026-06-22T10:00:00.000Z",
+  });
+  assert.equal(result.preflight_request_created, false);
+  assert.equal(result.blockers.includes("enqueue_rejected"), true);
+});
+
+test("connect duplicate active request returns already_requested without second rpc", async () => {
+  const supabase = makeSupabase(baseRows({
+    account_run_requests: [{
+      id: "request-existing",
+      account_id: accountId,
+      status: "queued",
+      requested_run_type: "login_provisioning",
+      idempotency_key: `login-preflight-now:${assignmentId}:attempt-old`,
+    }],
+  }));
+  const result = await enqueueClientConnectRequest(supabase.client, {
+    accountId,
+    actorId: "actor-1",
+    assignmentId,
+    deadlineAt: "2026-06-22T10:00:00.000Z",
+  });
+  assert.equal(result.idempotent, true);
+  assert.equal(result.reason, "already_requested");
+  assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
 });
 
 test("passive readiness stays ready_to_connect without dm settings or targets", async () => {
@@ -196,41 +230,6 @@ test("passive readiness stays ready_to_connect without dm settings or targets", 
   assert.equal(projectClientReadinessStatus(result), "ready_to_connect");
   assert.equal(result.blockers.includes("missing_dm_settings"), false);
   assert.equal(result.blockers.includes("missing_ct"), false);
-});
-
-test("connect enqueue maps rpc invalid_actor_type to not_created readiness", async () => {
-  const supabase = makeSupabase(baseRows(), false, "invalid_actor_type");
-  const result = await runReadinessNow(supabase.client, {
-    accountId,
-    audience: "client",
-    dryRun: false,
-    mode: "connect_enqueue",
-    now: new Date("2026-06-22T03:00:00.000Z"),
-  });
-  assert.equal(result.preflight_request_created, false);
-  assert.equal(result.blockers.includes("enqueue_rejected"), true);
-});
-
-test("connect duplicate idempotency returns already_requested without second rpc on precheck", async () => {
-  const supabase = makeSupabase(baseRows({
-    account_run_requests: [{
-      id: "request-existing",
-      account_id: accountId,
-      status: "queued",
-      requested_run_type: "login_provisioning",
-      idempotency_key: `login-preflight-now:${assignmentId}`,
-    }],
-  }));
-  const result = await runReadinessNow(supabase.client, {
-    accountId,
-    audience: "client",
-    dryRun: false,
-    mode: "connect_enqueue",
-    now: new Date("2026-06-22T03:00:00.000Z"),
-  });
-  assert.equal(result.idempotent, true);
-  assert.equal(result.reason, "already_requested");
-  assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
 });
 
 test("client UI sends explicit passive payload for readiness check", () => {

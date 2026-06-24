@@ -310,7 +310,6 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     const connectPollingActive = processModal?.mode === "connect"
       && (
         processModal.connectPhase === "polling"
-        || processModal.connectPhase === "submitting"
         || isActiveClientConnectStatus(processModal.connectProgress?.connect_status)
       )
       && !isTerminalConnectProgress(processModal.connectProgress);
@@ -599,6 +598,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
           ...current,
           connectPhase: "error",
           errorMessage: safeMessage,
+          connectProgress: null,
         } : current);
         if (mode === "connect" && payload.code === "connect_readiness_not_satisfied") {
           pushMessage(safeMessage, "error");

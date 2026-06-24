@@ -9,6 +9,7 @@ export const TECHNICAL_ACCOUNT_RUN_TYPES = [
   "login_check",
   "login_provisioning",
   "login_email_code_resume",
+  "login_orphan_challenge_recovery",
   "reconnect_instagram",
   "credential_verification",
   "provisioning_only",

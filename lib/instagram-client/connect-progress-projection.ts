@@ -179,7 +179,9 @@ export function projectClientConnectProgress(input: ProgressInput): ClientConnec
       ? (lang === "fr"
         ? "Code reçu. Nous reprenons la connexion automatiquement."
         : "Code received. We are resuming the connection automatically.")
-      : clientConnectMessage(connectStatus, lang);
+      : connectStatus === "blocked" && readString(input.reason)
+        ? readString(input.reason)
+        : clientConnectMessage(connectStatus, lang);
 
   const steps = (input.steps ?? []).slice(0, 7).map((step) => ({
     id: readString(step.id, "step"),

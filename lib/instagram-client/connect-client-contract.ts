@@ -87,7 +87,7 @@ export function clientConnectMessage(status: ClientConnectStatus, lang: "fr" | "
     verification_required: "Instagram demande une vérification avant de terminer la connexion de votre compte.",
     verification_code_submitted: "Code reçu. Nous reprenons la connexion automatiquement.",
     connected: "Compte connecté.",
-    blocked: "La connexion ne peut pas démarrer pour le moment.",
+    blocked: "La connexion nécessite une vérification de sécurité avant de pouvoir continuer.",
     not_created: "La connexion n'a pas pu être lancée pour le moment.",
     failed: "La connexion n'a pas pu démarrer. Réessayez plus tard.",
   };
@@ -98,7 +98,7 @@ export function clientConnectMessage(status: ClientConnectStatus, lang: "fr" | "
     verification_required: "Instagram requires verification before your account connection can finish.",
     verification_code_submitted: "Code received. We are resuming the connection automatically.",
     connected: "Account connected.",
-    blocked: "Connection cannot start right now.",
+    blocked: "Security verification is required before the connection can continue.",
     not_created: "Connection could not be started right now.",
     failed: "Connection could not start. Try again later.",
   };

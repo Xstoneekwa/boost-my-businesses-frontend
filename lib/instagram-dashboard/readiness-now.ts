@@ -1,4 +1,4 @@
-export type ReadinessNowAudience = "admin" | "client";
+import { resolveOrphanLoginRecoveryProjection, clientSecurePreparationMessage } from "@/lib/instagram-dashboard/orphan-login-recovery";
 
 export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
 
@@ -39,6 +39,13 @@ export type ReadinessNowResult = {
   run_request_status?: string | null;
   blockers?: string[];
   checks?: Record<string, unknown>;
+  orphan_recovery?: {
+    state: string;
+    blocking_client: boolean;
+    botapp_action_available: boolean;
+    detected_at: string | null;
+    has_active_login_provisioning: boolean;
+  };
 };
 
 type QueryResult = { data?: unknown; error?: { message?: string } | null };
@@ -610,6 +617,33 @@ export async function runReadinessNow(
   }
 
   if (passiveOnly) {
+    const orphanRecovery = await resolveOrphanLoginRecoveryProjection(input.accountId).catch(() => null);
+    if (audience === "client" && orphanRecovery?.blockingClient) {
+      return safeResult({
+        audience,
+        readiness_status: "retry_later",
+        client_status: "try_again_later",
+        client_message: clientSecurePreparationMessage("fr"),
+        assignment_status: "ready",
+        phone_available: true,
+        app_instance_available: true,
+        preflight_request_created: false,
+        idempotent: false,
+        request_id: null,
+        run_request_status: "not_created_dry_run",
+        next_action: "wait_for_secure_preparation",
+        reason: "orphan_login_challenge_pending",
+        blockers: [...blockers, "orphan_login_challenge_pending"],
+        checks,
+        orphan_recovery: {
+          state: orphanRecovery.state,
+          blocking_client: orphanRecovery.blockingClient,
+          botapp_action_available: orphanRecovery.botappActionAvailable,
+          detected_at: orphanRecovery.detectedAt,
+          has_active_login_provisioning: orphanRecovery.hasActiveLoginProvisioning,
+        },
+      });
+    }
     return safeResult({
       audience,
       readiness_status: "ready_to_connect",

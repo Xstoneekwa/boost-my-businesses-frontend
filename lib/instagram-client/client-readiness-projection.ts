@@ -4,6 +4,7 @@ export type ClientReadinessStatus =
   | "ready_to_connect"
   | "preparation_pending"
   | "preparation_blocked"
+  | "secure_preparation_in_progress"
   | "credentials_need_attention"
   | "device_temporarily_unavailable"
   | "schedule_not_ready"
@@ -21,6 +22,10 @@ const CLIENT_READINESS_MESSAGES: Record<ClientReadinessStatus, { fr: string; en:
   preparation_blocked: {
     fr: "La préparation est temporairement bloquée. Contactez le support si cela persiste.",
     en: "Setup is temporarily blocked. Contact support if this continues.",
+  },
+  secure_preparation_in_progress: {
+    fr: "La préparation sécurisée de votre compte est en cours.",
+    en: "Secure account preparation is in progress.",
   },
   credentials_need_attention: {
     fr: "Vos identifiants Instagram nécessitent une vérification.",
@@ -41,6 +46,9 @@ const CLIENT_READINESS_MESSAGES: Record<ClientReadinessStatus, { fr: string; en:
 };
 
 export function projectClientReadinessStatus(readiness: ReadinessNowResult): ClientReadinessStatus {
+  if (readiness.reason === "orphan_login_challenge_pending" || readiness.orphan_recovery?.blocking_client) {
+    return "secure_preparation_in_progress";
+  }
   if (readiness.client_status === "connected_ready") return "already_connected";
   if (readiness.readiness_status === "ready_to_connect" && readiness.client_status === "ready_to_connect") {
     return "ready_to_connect";

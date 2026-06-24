@@ -10,6 +10,7 @@ import {
   resolvedEmailFromRow,
 } from "@/lib/instagram-dashboard/resolve-account-email";
 import { getAccountPackageSummaries } from "./package-summary-data";
+import { resolveOrphanLoginRecoveryProjection } from "@/lib/instagram-dashboard/orphan-login-recovery";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -78,6 +79,8 @@ export type ManageAccount = {
   instagramVerificationStatus?: string | null;
   instagramCanonicalUsername?: string | null;
   usernameVerificationReason?: string | null;
+  orphanRecoveryState?: string | null;
+  orphanRecoveryBotappActionAvailable?: boolean;
   sourceLabel: string;
   archivedAt: string | null;
   trashedAt: string | null;
@@ -1146,12 +1149,39 @@ export async function getManageDataFromAdminDashboardApi(): Promise<ManageOvervi
   }
 }
 
+async function enrichWithOrphanRecovery(overview: ManageOverview): Promise<ManageOverview> {
+  const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
+  if (!accountIds.length) return overview;
+
+  const projections = await Promise.all(
+    accountIds.map(async (accountId) => {
+      try {
+        const projection = await resolveOrphanLoginRecoveryProjection(accountId);
+        return [accountId, projection] as const;
+      } catch {
+        return [accountId, null] as const;
+      }
+    }),
+  );
+  const byId = new Map(projections);
+  const enrich = (account: ManageAccount): ManageAccount => {
+    const projection = byId.get(account.accountId);
+    if (!projection) return account;
+    return {
+      ...account,
+      orphanRecoveryState: projection.state,
+      orphanRecoveryBotappActionAvailable: projection.botappActionAvailable,
+    };
+  };
+  return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
+}
+
 export async function getManageData() {
   let overview: ManageOverview;
   if (!adminDashboardConfig()) {
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
+    return await enrichWithOrphanRecovery(await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview))))));
   }
 
   try {
@@ -1163,5 +1193,5 @@ export async function getManageData() {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  return await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
+  return await enrichWithOrphanRecovery(await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview))))));
 }

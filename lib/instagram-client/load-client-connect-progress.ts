@@ -105,21 +105,9 @@ export async function loadClientConnectProgress(input: {
     .limit(1);
   if (input.requestId) requestQuery = requestQuery.eq("id", readString(input.requestId));
 
-  let { data: requestRows, error: requestError } = await requestQuery;
+  const { data: requestRows, error: requestError } = await requestQuery;
   if (requestError) throw new Error("connect_progress_unavailable");
-  let requestRow = ((requestRows ?? [])[0] ?? null) as Record<string, unknown> | null;
-
-  if (!requestRow && !input.requestId) {
-    const fallback = await supabase
-      .from("account_run_requests")
-      .select("id,account_id,status,run_id,created_at,updated_at,error_message_safe")
-      .eq("account_id", accountId)
-      .eq("requested_run_type", "login_provisioning")
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (fallback.error) throw new Error("connect_progress_unavailable");
-    requestRow = ((fallback.data ?? [])[0] ?? null) as Record<string, unknown> | null;
-  }
+  const requestRow = ((requestRows ?? [])[0] ?? null) as Record<string, unknown> | null;
   const linkedRunId = readString(requestRow?.run_id);
 
   let runRow: Record<string, unknown> | null = null;
@@ -128,15 +116,6 @@ export async function loadClientConnectProgress(input: {
       .from("ig_runs")
       .select("id,status,created_at,updated_at")
       .eq("id", linkedRunId)
-      .limit(1)
-      .maybeSingle();
-    runRow = (data ?? null) as Record<string, unknown> | null;
-  } else {
-    const { data } = await supabase
-      .from("ig_runs")
-      .select("id,status,created_at,updated_at")
-      .eq("account_id", accountId)
-      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     runRow = (data ?? null) as Record<string, unknown> | null;
@@ -181,18 +160,19 @@ export async function loadClientConnectProgress(input: {
     lang: input.lang,
   });
 
+  const hasActiveRequest = Boolean(requestRow);
   const progressSteps = [
     {
       id: "queue_request",
       label: "Queue request",
-      subtitle: requestRow ? "Demande de connexion reçue." : "En attente de la demande.",
-      status: requestRow ? "done" : "pending",
+      subtitle: hasActiveRequest ? "Demande de connexion reçue." : "En attente de la demande.",
+      status: hasActiveRequest ? "done" : "pending",
     },
     {
       id: "open_instagram",
       label: "Open Instagram",
       subtitle: runRow ? "Connexion en cours sur le téléphone assigné." : "Préparation du téléphone assigné.",
-      status: runRow ? "running" : requestRow ? "running" : "pending",
+      status: runRow ? "running" : hasActiveRequest ? "running" : "pending",
     },
     {
       id: "verify_identity",

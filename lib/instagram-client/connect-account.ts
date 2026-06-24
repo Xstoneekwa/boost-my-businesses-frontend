@@ -1,6 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { connectNowFromReadiness } from "@/lib/instagram-dashboard/connect-now";
-import { runReadinessNow } from "@/lib/instagram-dashboard/readiness-now";
+import { runReadinessNow, type ReadinessNowResult } from "@/lib/instagram-dashboard/readiness-now";
 import {
   clientConnectMessage,
   mapReadinessToClientConnectStatus,
@@ -13,9 +13,15 @@ import {
   type ClientReadinessStatus,
 } from "./client-readiness-projection";
 import { attachOperationPending, reloadClientAccountSnapshot } from "./client-account-refresh";
+import {
+  deadlineForClientConnectAssignment,
+  enqueueClientConnectRequest,
+  loadClientConnectAssignment,
+} from "./enqueue-client-connect";
+import { readString } from "./guards";
 
 const PASSIVE_READINESS_MODE = "readiness_only" as const;
-const CONNECT_ENQUEUE_MODE = "connect_enqueue" as const;
+const ACTIVE_CONNECT_REQUEST_STATUSES = new Set(["queued", "claimed", "starting", "running"]);
 
 export type ClientConnectAccountResult = {
   connectStatus: ClientConnectStatus;
@@ -151,13 +157,64 @@ export async function connectClientInstagramAccount(input: {
     return { ...result, message: clientReadinessMessage(clientReadinessStatus, "fr") };
   }
 
-  const readiness = await runReadinessNow(supabase, {
+  const assignment = await loadClientConnectAssignment(supabase, input.accountId);
+  if (!assignment) {
+    const snapshot = await reloadClientAccountSnapshot({
+      clientId: input.clientId,
+      accountId: input.accountId,
+    });
+    const blockedReadiness: ReadinessNowResult = {
+      audience: "client",
+      readiness_status: "retry_later",
+      client_status: "try_again_later",
+      client_message: clientReadinessMessage("preparation_pending", "fr"),
+      preflight_request_created: false,
+      idempotent: false,
+      next_action: "check_readiness_again",
+      reason: "missing_assignment",
+      blockers: ["missing_assignment"],
+    };
+    return buildConnectResult({
+      connectStatus: "blocked",
+      readiness: blockedReadiness,
+      connect: {
+        status: "try_again_later",
+        reason: "missing_assignment",
+        message: clientReadinessMessage("preparation_pending", "fr"),
+        request_queued: false,
+        idempotent: false,
+        next_action: "check_readiness_again",
+      },
+      passiveBlocked: true,
+      clientReadinessStatus: "preparation_pending",
+      account: snapshot ? { ...snapshot, clientReadinessStatus: "preparation_pending" } : null,
+    });
+  }
+
+  const deadline = deadlineForClientConnectAssignment(assignment);
+  const enqueue = await enqueueClientConnectRequest(supabase, {
     accountId: input.accountId,
     actorId: input.userId,
-    audience: "client",
-    dryRun: false,
-    mode: CONNECT_ENQUEUE_MODE,
+    assignmentId: readString(assignment.id),
+    deadlineAt: deadline.toISOString(),
   });
+  const requestStatus = readString(enqueue.run_request_status).toLowerCase();
+  const requestActive = ACTIVE_CONNECT_REQUEST_STATUSES.has(requestStatus);
+  const readiness: ReadinessNowResult = {
+    audience: "client",
+    readiness_status: requestActive ? "checking_connection" : "retry_later",
+    client_status: requestActive ? "checking_connection" : "try_again_later",
+    client_message: requestActive
+      ? "Connexion en cours"
+      : clientReadinessMessage("ready_to_connect", "fr"),
+    preflight_request_created: enqueue.preflight_request_created,
+    idempotent: enqueue.idempotent,
+    next_action: requestActive ? "monitor_preflight" : "retry_connect",
+    reason: enqueue.reason,
+    blockers: enqueue.blockers,
+    run_request_status: enqueue.run_request_status,
+    request_id: enqueue.request_id,
+  };
   const connect = connectNowFromReadiness(readiness);
   const connectStatus = mapReadinessToClientConnectStatus({
     readiness,
