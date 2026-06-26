@@ -19,3 +19,7 @@ Plan-change and initial-checkout harnesses live under `test-fixtures/`. They tar
 - Never apply migrations to main production without explicit GO and remote history comparison.
 - Never use the plan-change test database when reconciling main-production migration filenames.
 - Do not commit `.temp/`, credentials, or environment files from this directory.
+
+## Postmark provider (TASK 6A)
+
+See [`docs/client-email-postmark.md`](../docs/client-email-postmark.md) for provider setup, webhook route, and Vercel secret names.
