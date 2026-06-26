@@ -64,7 +64,16 @@ order by 1;
 
 4. Confirm RLS is enabled on the four client notification/email tables (no policies required for current server-side access model).
 
-## Before any future migration
+## Pending local migration (TASK 6C — not applied)
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260628120000` | `20260628120000_client_email_test_intents.sql` | Test-only send intents: `intent_kind`, nullable client/account refs for test rows, `manual_test` trigger, provider message id on intent |
+
+**Status on main production:** not applied. Do **not** apply without explicit GO.
+
+This migration is required before allowlisted Postmark test delivery can persist intents. Until applied, the API returns `test_schema_unavailable` and BotApp disables **Send test delivery**.
+
 
 1. Compare local `supabase/migrations/` with remote history (`supabase migration list` on the intended project, or read-only remote list).
 2. Never apply a migration whose version already exists remotely.

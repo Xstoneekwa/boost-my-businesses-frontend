@@ -71,3 +71,27 @@ export async function probeClientEmailInfrastructure(
   if (isClientEmailInfrastructureTableMissingError(error)) return { available: false };
   throw new Error(readErrorMessage(error));
 }
+
+export function isClientEmailTestIntentSchemaMissingError(error: unknown): boolean {
+  const message = readErrorMessage(error).toLowerCase();
+  if (!message.includes("intent_kind")) return false;
+  const code = readErrorCode(error);
+  return message.includes("schema cache")
+    || message.includes("does not exist")
+    || code === "PGRST204"
+    || code === "42703";
+}
+
+export async function probeClientEmailTestIntentSchema(
+  supabase: ClientEmailSupabase,
+): Promise<{ available: true } | { available: false }> {
+  const { error } = await supabase
+    .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
+    .select("intent_kind,provider_message_id,last_error_redacted")
+    .limit(1);
+
+  if (!error) return { available: true };
+  if (isClientEmailTestIntentSchemaMissingError(error)) return { available: false };
+  if (isClientEmailInfrastructureTableMissingError(error)) return { available: false };
+  throw new Error(readErrorMessage(error));
+}

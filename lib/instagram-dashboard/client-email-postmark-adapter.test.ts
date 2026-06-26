@@ -94,7 +94,7 @@ test("prepared Postmark request uses outbound stream and locked sender", () => {
   assert.equal(prepared.headers["X-Postmark-Server-Token"], "server-token");
 });
 
-test("even with gate enabled TASK 6A blocks actual send call", async () => {
+test("sending remains disabled for client lifecycle sends even when gate enabled", async () => {
   let fetchCalled = false;
   const adapter = createPostmarkClientEmailAdapter({
     CLIENT_EMAIL_PROVIDER: "postmark",
@@ -108,6 +108,6 @@ test("even with gate enabled TASK 6A blocks actual send call", async () => {
   const result = await adapter.send(basePayload);
   assert.equal(result.ok, false);
   if (result.ok) return;
-  assert.equal(result.reason, "send_not_enabled_in_task_scope");
+  assert.equal(result.reason, "sending_disabled");
   assert.equal(fetchCalled, false);
 });

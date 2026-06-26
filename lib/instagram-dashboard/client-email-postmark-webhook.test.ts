@@ -237,6 +237,36 @@ test("delivery with unknown intent metadata id does not create delivery events",
   assert.equal(supabase._events.length, 0);
 });
 
+test("delivery webhook attaches to test intent without client side effects", async () => {
+  const supabase = createMockSupabase({
+    intents: [{
+      id: "intent-test-1",
+      intent_kind: "test",
+      client_id: null,
+      account_id: null,
+      trigger: "manual_test",
+      status: "sent",
+    }],
+    events: [],
+  });
+
+  const result = await ingestPostmarkWebhookEvent(supabase as never, {
+    RecordType: "Delivery",
+    MessageStream: "outbound",
+    MessageID: "pm-test-delivery-1",
+    Recipient: "liam@example.com",
+    DeliveredAt: "2026-06-28T12:05:00.000Z",
+    Metadata: { intent_id: "intent-test-1", is_test: "true", trigger: "manual_test" },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.action, "stored");
+  assert.equal(supabase._events.length, 1);
+  assert.equal(supabase._events[0]?.intent_id, "intent-test-1");
+  assert.equal(supabase._events[0]?.status, "delivered");
+});
+
 test("invalid payload returns controlled error without writes", async () => {
   const supabase = createMockSupabase({ intents: [], events: [] });
   const result = await ingestPostmarkWebhookEvent(supabase as never, "not-json-object");

@@ -47,7 +47,7 @@ export type ClientEmailProviderSendFailure = {
     | "invalid_from_email"
     | "invalid_recipient_email"
     | "forbidden_metadata"
-    | "send_not_enabled_in_task_scope";
+    | "sending_disabled";
   message: string;
 };
 

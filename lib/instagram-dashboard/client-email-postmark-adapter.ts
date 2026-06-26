@@ -116,14 +116,14 @@ export function createPostmarkClientEmailAdapter(
         };
       }
 
-      // TASK 6A: adapter is prepared but outbound API calls remain disabled in this task.
+      // Client lifecycle sends remain disabled until CLIENT_EMAIL_SENDING_ENABLED is explicitly enabled.
       void preparePostmarkSendRequest(payload, token);
       void fetcher;
 
       return {
         ok: false,
-        reason: "send_not_enabled_in_task_scope",
-        message: "Postmark send API is intentionally disabled until a dedicated send task is approved.",
+        reason: "sending_disabled",
+        message: "Client email sending is disabled by CLIENT_EMAIL_SENDING_ENABLED.",
       };
     },
   };

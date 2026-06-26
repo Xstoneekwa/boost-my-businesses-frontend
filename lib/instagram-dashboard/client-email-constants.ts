@@ -28,8 +28,13 @@ export const CLIENT_EMAIL_CATEGORY_LABELS: Record<ClientEmailTemplateCategory, s
   needs_more_target_accounts: "Needs more target accounts",
 };
 
-export const CLIENT_EMAIL_SEND_TRIGGERS = ["manual", "automatic", "reminder"] as const;
+export const CLIENT_EMAIL_SEND_TRIGGERS = ["manual", "automatic", "reminder", "manual_test"] as const;
 export type ClientEmailSendTrigger = (typeof CLIENT_EMAIL_SEND_TRIGGERS)[number];
+
+export const CLIENT_EMAIL_INTENT_KINDS = ["client", "test"] as const;
+export type ClientEmailIntentKind = (typeof CLIENT_EMAIL_INTENT_KINDS)[number];
+
+export const CLIENT_EMAIL_TEST_DELIVERY_LABEL = "Test delivery" as const;
 
 export const CLIENT_EMAIL_INTENT_STATUSES = ["pending", "scheduled", "sent", "canceled", "failed"] as const;
 export type ClientEmailIntentStatus = (typeof CLIENT_EMAIL_INTENT_STATUSES)[number];
@@ -68,6 +73,16 @@ export const CLIENT_EMAIL_PREVIEW_SAMPLE_VALUES: Record<ClientEmailAllowedVariab
   support_email: "support@boostmybusinesses.com",
 };
 
+export const CLIENT_EMAIL_TEST_DEMO_VALUES: Record<ClientEmailAllowedVariable, string> = {
+  client_name: "Test Customer",
+  instagram_username: "test_account",
+  account_status: "test",
+  eligible_target_count: "5",
+  target_threshold: "5",
+  dashboard_url: "https://app.boostmybusinesses.com/instagram-client",
+  support_email: "support@boostmybusinesses.com",
+};
+
 export const CLIENT_EMAIL_FORBIDDEN_REQUEST_FIELDS = [
   "from_email",
   "provider",
@@ -76,4 +91,14 @@ export const CLIENT_EMAIL_FORBIDDEN_REQUEST_FIELDS = [
   "secret",
   "token",
   "webhook_secret",
+] as const;
+
+export const CLIENT_EMAIL_FORBIDDEN_TEST_RECIPIENT_FIELDS = [
+  "recipient",
+  "recipient_email",
+  "to",
+  "to_email",
+  "email",
+  "client_email",
+  "contact_email",
 ] as const;

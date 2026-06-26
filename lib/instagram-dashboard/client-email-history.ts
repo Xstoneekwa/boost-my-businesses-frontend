@@ -1,10 +1,13 @@
 import {
   CLIENT_EMAIL_CATEGORY_LABELS,
   CLIENT_EMAIL_DELIVERY_STATUSES,
+  CLIENT_EMAIL_INTENT_KINDS,
   CLIENT_EMAIL_LOCKED_FROM,
   CLIENT_EMAIL_SEND_TRIGGERS,
   CLIENT_EMAIL_TEMPLATE_CATEGORIES,
+  CLIENT_EMAIL_TEST_DELIVERY_LABEL,
   type ClientEmailDeliveryStatus,
+  type ClientEmailIntentKind,
   type ClientEmailIntentStatus,
   type ClientEmailSendTrigger,
   type ClientEmailTemplateCategory,
@@ -13,12 +16,14 @@ import {
   CLIENT_EMAIL_DELIVERY_EVENTS_TABLE,
   CLIENT_EMAIL_SEND_INTENTS_TABLE,
   probeClientEmailInfrastructure,
+  probeClientEmailTestIntentSchema,
 } from "./client-email-schema-guard.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
 import {
   normalizeClientEmailFilter,
   type NormalizedClientEmailFilter,
 } from "./client-email-filter.ts";
+import { maskEmailForDisplay } from "./client-email-test-config.ts";
 
 export { normalizeClientEmailFilter, type NormalizedClientEmailFilter } from "./client-email-filter.ts";
 
@@ -57,6 +62,9 @@ export type ClientEmailHistoryListItem = {
   intentStatus: ClientEmailIntentStatus;
   deliveryStatus: ClientEmailDeliveryStatus | null;
   templateVersion: number | null;
+  intentKind: ClientEmailIntentKind;
+  isTestDelivery: boolean;
+  deliveryBadgeLabel: string | null;
 };
 
 export type ClientEmailHistoryProjection = {
@@ -123,31 +131,49 @@ function resolvePeriodBounds(filters: ClientEmailHistoryFilters, now = new Date(
   return { from, to };
 }
 
-function formatRecipientEmailForRelay(email: string) {
+function readIntentKind(value: unknown): ClientEmailIntentKind {
+  const normalized = readString(value, "").trim();
+  return CLIENT_EMAIL_INTENT_KINDS.includes(normalized as ClientEmailIntentKind)
+    ? normalized as ClientEmailIntentKind
+    : "client";
+}
+
+function formatRecipientEmailForRelay(email: string, isTestDelivery: boolean) {
   const normalized = email.trim();
   if (!normalized) return "—";
+  if (isTestDelivery) return maskEmailForDisplay(normalized) ?? "—";
   return normalized;
 }
 
 function projectListItem(
   row: SupabaseRecord,
-  context: { clientName?: string | null; instagramUsername?: string | null; deliveryStatus?: ClientEmailDeliveryStatus | null },
+  context: {
+    clientName?: string | null;
+    instagramUsername?: string | null;
+    deliveryStatus?: ClientEmailDeliveryStatus | null;
+    testSchemaReady?: boolean;
+  },
 ): ClientEmailHistoryListItem {
   const category = readCategory(row.category) ?? "needs_assistance";
+  const intentKind = context.testSchemaReady ? readIntentKind(row.intent_kind) : "client";
+  const isTestDelivery = intentKind === "test";
   return {
     id: readString(row.id, ""),
     createdAt: readString(row.created_at, ""),
-    clientName: context.clientName ?? null,
-    instagramUsername: context.instagramUsername ?? null,
+    clientName: isTestDelivery ? null : (context.clientName ?? null),
+    instagramUsername: isTestDelivery ? null : (context.instagramUsername ?? null),
     category,
     categoryLabel: CLIENT_EMAIL_CATEGORY_LABELS[category],
-    recipientEmail: formatRecipientEmailForRelay(readString(row.recipient_email, "")),
+    recipientEmail: formatRecipientEmailForRelay(readString(row.recipient_email, ""), isTestDelivery),
     fromEmail: CLIENT_EMAIL_LOCKED_FROM,
     trigger: readTrigger(row.trigger) ?? "automatic",
     reminderIndex: typeof row.reminder_index === "number" ? row.reminder_index : null,
     intentStatus: readString(row.status, "pending") as ClientEmailIntentStatus,
     deliveryStatus: context.deliveryStatus ?? null,
     templateVersion: typeof row.template_version === "number" ? row.template_version : null,
+    intentKind,
+    isTestDelivery,
+    deliveryBadgeLabel: isTestDelivery ? CLIENT_EMAIL_TEST_DELIVERY_LABEL : null,
   };
 }
 
@@ -182,6 +208,8 @@ export async function loadClientEmailHistoryProjection(
     };
   }
 
+  const testSchema = await probeClientEmailTestIntentSchema(supabase);
+
   const { from, to } = resolvePeriodBounds(filters);
   const clientEmailFilter = filters.clientEmail
     ? normalizeClientEmailFilter(filters.clientEmail)
@@ -200,10 +228,7 @@ export async function loadClientEmailHistoryProjection(
 
   let query = supabase
     .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
-    .select(
-      "id,created_at,client_id,account_id,category,recipient_email,from_email,trigger,reminder_index,status,template_version",
-      { count: "exact" },
-    )
+    .select("*", { count: "exact" })
     .gte("created_at", from.toISOString())
     .lte("created_at", to.toISOString())
     .order("created_at", { ascending: false });
@@ -278,6 +303,7 @@ export async function loadClientEmailHistoryProjection(
       clientName: clientNames.get(readString(row.client_id, "")) ?? null,
       instagramUsername: accountNames.get(readString(row.account_id, "")) ?? null,
       deliveryStatus: latestDeliveryByIntent.get(readString(row.id, "")) ?? null,
+      testSchemaReady: testSchema.available,
     })),
   };
 }
@@ -288,6 +314,8 @@ export async function loadClientEmailHistoryDetail(
 ): Promise<{ ok: true; detail: ClientEmailHistoryDetail } | { ok: false; reason: "feature_unavailable" | "not_found" }> {
   const infrastructure = await probeClientEmailInfrastructure(supabase);
   if (!infrastructure.available) return { ok: false, reason: "feature_unavailable" };
+
+  const testSchema = await probeClientEmailTestIntentSchema(supabase);
 
   const normalizedId = intentId.trim();
   if (!normalizedId) return { ok: false, reason: "not_found" };
@@ -304,15 +332,17 @@ export async function loadClientEmailHistoryDetail(
   const row = data as SupabaseRecord;
   const accountId = readString(row.account_id, "");
   const clientId = readString(row.client_id, "");
+  const intentKind = testSchema.available ? readIntentKind(row.intent_kind) : "client";
+  const isTestDelivery = intentKind === "test";
 
   let instagramUsername: string | null = null;
   let clientName: string | null = null;
 
-  if (accountId) {
+  if (!isTestDelivery && accountId) {
     const { data: account } = await supabase.from("ig_accounts").select("username").eq("id", accountId).maybeSingle();
     instagramUsername = readString((account as SupabaseRecord | null)?.username, "") || null;
   }
-  if (clientId) {
+  if (!isTestDelivery && clientId) {
     const { data: client } = await supabase.from("clients").select("name").eq("id", clientId).maybeSingle();
     clientName = readString((client as SupabaseRecord | null)?.name, "") || null;
   }
@@ -338,7 +368,11 @@ export async function loadClientEmailHistoryDetail(
     clientName,
     instagramUsername,
     deliveryStatus: latestEvent?.status ?? null,
+    testSchemaReady: testSchema.available,
   });
+
+  const intentProviderMessageId = readString(row.provider_message_id, "") || null;
+  const intentLastError = readString(row.last_error_redacted, "") || null;
 
   return {
     ok: true,
@@ -350,10 +384,10 @@ export async function loadClientEmailHistoryDetail(
       snapshotSubject: readString(row.snapshot_subject, ""),
       snapshotBodyText: readString(row.snapshot_body_text, ""),
       snapshotBodyHtml: readString(row.snapshot_body_html, ""),
-      sourceNotificationId: readString(row.source_notification_id, "") || null,
-      sourceActionId: readString(row.source_action_id, "") || null,
-      providerMessageId: latestEvent?.providerMessageId ?? null,
-      lastErrorRedacted: latestEvent?.lastErrorRedacted ?? null,
+      sourceNotificationId: isTestDelivery ? null : (readString(row.source_notification_id, "") || null),
+      sourceActionId: isTestDelivery ? null : (readString(row.source_action_id, "") || null),
+      providerMessageId: intentProviderMessageId ?? latestEvent?.providerMessageId ?? null,
+      lastErrorRedacted: intentLastError ?? latestEvent?.lastErrorRedacted ?? null,
       timeline,
     },
   };
