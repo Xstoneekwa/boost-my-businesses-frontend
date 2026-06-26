@@ -3,6 +3,11 @@ import { getManageData, type ManageAccount, type ManageSourceStatus } from "./ma
 import { createSupabaseClient } from "@/lib/supabase";
 import { loadTargetEligibilityCountsByAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
 import { loadNeedsMoreTargetAccountsProjectionForAccounts } from "@/lib/instagram-dashboard/needs-more-target-accounts";
+import {
+  projectClientContactEmailDisplay,
+  resolveClientCommunicationEmail,
+  type ClientCommunicationEmailSource,
+} from "@/lib/instagram-dashboard/client-communication-email";
 
 export type ClientAccountPasswordStatus = "configured" | "missing" | "reauth_required" | "update_needed" | "unknown";
 export type ClientAccountOperationsStatus = "active" | "pending" | "cancelled" | "onboarding" | "paused" | "needs_assistance" | "archived" | "unknown";
@@ -46,6 +51,9 @@ export type ClientAccountOperationsItem = {
   emailDisplay: string;
   emailSource: string | null;
   emailAvailable: boolean;
+  clientContactEmail: string;
+  clientContactEmailSource: ClientCommunicationEmailSource;
+  clientContactEmailAvailable: boolean;
   packageLabel: string;
   profileImageUrl?: string | null;
   profileImageSource?: ClientAccountProfileImageSource;
@@ -359,11 +367,24 @@ function lifecycleActionAvailability(account: ManageAccount, status: ClientAccou
   ];
 }
 
+function resolveClientContactEmailForAccount(
+  account: ManageAccount,
+  clientById: Map<string, Record<string, unknown>>,
+) {
+  const clientId = account.clientId || "";
+  const clientRow = clientId ? clientById.get(clientId) ?? null : null;
+  return projectClientContactEmailDisplay(resolveClientCommunicationEmail({
+    client: clientRow,
+    workspaceAuthEmail: null,
+  }));
+}
+
 function mapAccount(
   account: ManageAccount,
   hasDashboardAction: boolean,
   passwordUpdateAlreadyRequested: boolean,
   needsMoreProjection: { needsMoreTargets: boolean; eligibleTargetCount: number },
+  clientById: Map<string, Record<string, unknown>>,
 ): ClientAccountOperationsItem {
   const needsAssistanceReason = assistanceReason(account, hasDashboardAction);
   const needsAssistance = needsAssistanceReason !== null;
@@ -371,6 +392,7 @@ function mapAccount(
   const profileImageUrl = safeProfileImageUrl(account);
   const readiness = account.readinessProjection;
   const assignmentParts = [account.assignmentStatus, account.scheduleLabel].filter(Boolean);
+  const clientContactEmail = resolveClientContactEmailForAccount(account, clientById);
 
   return {
     accountId: account.accountId,
@@ -379,6 +401,9 @@ function mapAccount(
     emailDisplay: account.emailDisplay,
     emailSource: account.emailSource ?? null,
     emailAvailable: account.emailAvailable ?? account.emailDisplay !== "unknown",
+    clientContactEmail: clientContactEmail.display,
+    clientContactEmailSource: clientContactEmail.source,
+    clientContactEmailAvailable: clientContactEmail.available,
     packageLabel: account.packageLabel,
     profileImageUrl,
     profileImageSource: profileImageSource(account, profileImageUrl),
@@ -429,6 +454,28 @@ function buildSummary(items: ClientAccountOperationsItem[]): ClientAccountsOpera
   };
 }
 
+async function loadClientRowsById(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  clientIds: string[],
+): Promise<Map<string, Record<string, unknown>>> {
+  if (!clientIds.length) return new Map();
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id,metadata")
+    .in("id", clientIds);
+  if (error) return new Map();
+  return new Map(
+    (data ?? [])
+      .map((row) => {
+        if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+        const record = row as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id.trim() : "";
+        return id ? [id, record] as const : null;
+      })
+      .filter((entry): entry is readonly [string, Record<string, unknown>] => Boolean(entry)),
+  );
+}
+
 export async function getClientAccountsOperationsData(): Promise<ClientAccountsOperationsOverview> {
   const [manageData, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
   const actionAccountIds = new Set(credentialsData.actionGroups.map((group) => group.accountId || group.username));
@@ -445,6 +492,12 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
     accountIds,
     eligibilityCounts,
   ).catch(() => new Map<string, { needsMoreTargets: boolean; eligibleTargetCount: number }>());
+  const clientIds = [...new Set(
+    manageData.allAccounts
+      .map((account) => account.clientId)
+      .filter((clientId): clientId is string => Boolean(clientId)),
+  )];
+  const clientById = await loadClientRowsById(supabase, clientIds);
   const items = manageData.allAccounts.map((account) => {
     const accountId = account.accountId || "";
     const needsMoreProjection = needsMoreByAccount.get(accountId) ?? {
@@ -456,6 +509,7 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
       actionAccountIds.has(account.accountId || account.username),
       passwordUpdateAccountIds.has(account.accountId || account.username),
       needsMoreProjection,
+      clientById,
     );
   });
 

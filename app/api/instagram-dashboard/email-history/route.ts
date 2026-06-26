@@ -38,8 +38,7 @@ export async function GET(request: Request) {
   const period = readString(url.searchParams.get("period"), "30d") as "7d" | "30d" | "90d" | "custom";
   const from = readString(url.searchParams.get("from"), "").trim() || undefined;
   const to = readString(url.searchParams.get("to"), "").trim() || undefined;
-  const clientId = readString(url.searchParams.get("client_id"), "").trim() || undefined;
-  const accountId = readString(url.searchParams.get("account_id"), "").trim() || undefined;
+  const clientEmail = readString(url.searchParams.get("client_email"), "").trim() || undefined;
   const category = readCategory(readString(url.searchParams.get("category"), "").trim());
   const trigger = readTrigger(readString(url.searchParams.get("trigger"), "").trim());
   const deliveryStatus = readStatus(readString(url.searchParams.get("status"), "").trim())
@@ -53,8 +52,7 @@ export async function GET(request: Request) {
       period,
       from,
       to,
-      clientId,
-      accountId,
+      clientEmail,
       category,
       trigger,
       deliveryStatus,

@@ -36,6 +36,14 @@ function createMockSupabase(input: {
       if (filter.op === "in") return Array.isArray(filter.value) && filter.value.includes(row[filter.column]);
       if (filter.op === "gte") return String(row[filter.column] ?? "") >= String(filter.value ?? "");
       if (filter.op === "lte") return String(row[filter.column] ?? "") <= String(filter.value ?? "");
+      if (filter.op === "ilike") {
+        const haystack = String(row[filter.column] ?? "").toLowerCase();
+        const pattern = String(filter.value ?? "").toLowerCase();
+        if (pattern.startsWith("%") && pattern.endsWith("%")) {
+          return haystack.includes(pattern.slice(1, -1));
+        }
+        return haystack === pattern;
+      }
       return true;
     }));
   }
@@ -56,6 +64,10 @@ function createMockSupabase(input: {
       },
       eq(column: string, value: unknown) {
         state.filters.push({ column, op: "eq", value });
+        return api;
+      },
+      ilike(column: string, value: unknown) {
+        state.filters.push({ column, op: "ilike", value });
         return api;
       },
       in(column: string, value: unknown[]) {
@@ -117,6 +129,61 @@ function createMockSupabase(input: {
   return { from: makeQuery };
 }
 
+const baseIntents = [
+  {
+    id: "intent-1",
+    created_at: "2026-06-20T12:00:00.000Z",
+    client_id: "client-a",
+    account_id: "acct-a",
+    category: "needs_more_target_accounts",
+    recipient_email: "owner@example.com",
+    from_email: "growth@boostmybusinesses.com",
+    trigger: "reminder",
+    reminder_index: 1,
+    status: "sent",
+    template_version: 2,
+  },
+  {
+    id: "intent-2",
+    created_at: "2026-06-19T12:00:00.000Z",
+    client_id: "client-a",
+    account_id: "acct-b",
+    category: "account_paused",
+    recipient_email: "owner@example.com",
+    from_email: "growth@boostmybusinesses.com",
+    trigger: "manual",
+    reminder_index: 0,
+    status: "pending",
+    template_version: 1,
+  },
+  {
+    id: "intent-3",
+    created_at: "2026-06-18T12:00:00.000Z",
+    client_id: "client-b",
+    account_id: "acct-c",
+    category: "account_paused",
+    recipient_email: "other@example.com",
+    from_email: "growth@boostmybusinesses.com",
+    trigger: "manual",
+    reminder_index: 0,
+    status: "pending",
+    template_version: 1,
+  },
+  {
+    id: "intent-legacy",
+    created_at: "2026-06-17T12:00:00.000Z",
+    client_id: "client-a",
+    account_id: "acct-a",
+    category: "needs_assistance",
+    recipient_email: "legacy.owner@example.com",
+    from_email: "growth@boostmybusinesses.com",
+    trigger: "automatic",
+    reminder_index: 0,
+    status: "sent",
+    template_version: 1,
+  },
+];
+
 test("email history unavailable before migration", async () => {
   const supabase = createMockSupabase({ tableMissing: true });
   const projection = await loadClientEmailHistoryProjection(supabase as never);
@@ -124,73 +191,132 @@ test("email history unavailable before migration", async () => {
   assert.equal(projection.items.length, 0);
 });
 
-test("email history supports filters and pagination", async () => {
+test("client email exact filter is case and whitespace insensitive", async () => {
   const supabase = createMockSupabase({
-    intents: [
-      {
-        id: "intent-1",
-        created_at: "2026-06-20T12:00:00.000Z",
-        client_id: "client-a",
-        account_id: "acct-a",
-        category: "needs_more_target_accounts",
-        recipient_email: "owner@example.com",
-        from_email: "growth@boostmybusinesses.com",
-        trigger: "reminder",
-        reminder_index: 1,
-        status: "sent",
-        template_version: 2,
-      },
-      {
-        id: "intent-2",
-        created_at: "2026-06-18T12:00:00.000Z",
-        client_id: "client-b",
-        account_id: "acct-b",
-        category: "account_paused",
-        recipient_email: "other@example.com",
-        from_email: "growth@boostmybusinesses.com",
-        trigger: "manual",
-        reminder_index: 0,
-        status: "pending",
-        template_version: 1,
-      },
-    ],
+    intents: baseIntents,
     accounts: [
       { id: "acct-a", username: "alpha_acc" },
       { id: "acct-b", username: "beta_acc" },
+      { id: "acct-c", username: "gamma_acc" },
     ],
     clients: [
       { id: "client-a", name: "Client A" },
       { id: "client-b", name: "Client B" },
     ],
-    events: [
-      { intent_id: "intent-1", status: "delivered", occurred_at: "2026-06-20T12:05:00.000Z" },
-    ],
   });
 
   const projection = await loadClientEmailHistoryProjection(supabase as never, {
-    clientId: "client-a",
-    category: "needs_more_target_accounts",
-    trigger: "reminder",
+    clientEmail: "  OWNER@Example.COM ",
     page: 1,
     pageSize: 10,
   });
 
-  assert.equal(projection.featureAvailable, true);
+  assert.equal(projection.items.length, 2);
+  assert.equal(projection.items.every((item) => item.recipientEmail === "owner@example.com"), true);
+});
+
+test("client email partial filter matches snapshot substrings", async () => {
+  const supabase = createMockSupabase({
+    intents: baseIntents,
+    accounts: [{ id: "acct-a", username: "alpha_acc" }],
+    clients: [{ id: "client-a", name: "Client A" }],
+  });
+
+  const projection = await loadClientEmailHistoryProjection(supabase as never, {
+    clientEmail: "legacy.owner",
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(projection.items.length, 1);
+  assert.equal(projection.items[0].recipientEmail, "legacy.owner@example.com");
+});
+
+test("client email filter combined with category trigger and status", async () => {
+  const supabase = createMockSupabase({
+    intents: baseIntents,
+    accounts: [
+      { id: "acct-a", username: "alpha_acc" },
+      { id: "acct-b", username: "beta_acc" },
+    ],
+    clients: [{ id: "client-a", name: "Client A" }],
+    events: [{ intent_id: "intent-1", status: "delivered", occurred_at: "2026-06-20T12:05:00.000Z" }],
+  });
+
+  const projection = await loadClientEmailHistoryProjection(supabase as never, {
+    clientEmail: "owner@example.com",
+    category: "needs_more_target_accounts",
+    trigger: "reminder",
+    deliveryStatus: "sent",
+    page: 1,
+    pageSize: 10,
+  });
+
   assert.equal(projection.items.length, 1);
   assert.equal(projection.items[0].instagramUsername, "alpha_acc");
   assert.equal(projection.items[0].deliveryStatus, "delivered");
-  assert.match(projection.items[0].recipientEmail, /\*\*\*@/);
 });
 
-test("email history detail returns redacted timeline", async () => {
+test("client with multiple accounts returns all matching intents for same email", async () => {
+  const supabase = createMockSupabase({
+    intents: baseIntents,
+    accounts: [
+      { id: "acct-a", username: "alpha_acc" },
+      { id: "acct-b", username: "beta_acc" },
+    ],
+    clients: [{ id: "client-a", name: "Client A" }],
+  });
+
+  const projection = await loadClientEmailHistoryProjection(supabase as never, {
+    clientEmail: "owner@example.com",
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(projection.items.length, 2);
+  assert.deepEqual(
+    projection.items.map((item) => item.instagramUsername).sort(),
+    ["alpha_acc", "beta_acc"],
+  );
+});
+
+test("client email filter isolates unrelated recipient snapshots", async () => {
+  const supabase = createMockSupabase({
+    intents: baseIntents,
+    accounts: [{ id: "acct-c", username: "gamma_acc" }],
+    clients: [{ id: "client-b", name: "Client B" }],
+  });
+
+  const projection = await loadClientEmailHistoryProjection(supabase as never, {
+    clientEmail: "other@example.com",
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(projection.items.length, 1);
+  assert.equal(projection.items[0].instagramUsername, "gamma_acc");
+});
+
+test("no results when client email filter matches nothing", async () => {
+  const supabase = createMockSupabase({ intents: baseIntents });
+  const projection = await loadClientEmailHistoryProjection(supabase as never, {
+    clientEmail: "missing@example.com",
+    page: 1,
+    pageSize: 10,
+  });
+  assert.equal(projection.totalCount, 0);
+  assert.equal(projection.items.length, 0);
+});
+
+test("email history detail returns immutable recipient snapshot", async () => {
   const supabase = createMockSupabase({
     intents: [{
-      id: "intent-1",
-      created_at: "2026-06-20T12:00:00.000Z",
+      id: "intent-legacy",
+      created_at: "2026-06-17T12:00:00.000Z",
       client_id: "client-a",
       account_id: "acct-a",
       category: "needs_assistance",
-      recipient_email: "owner@example.com",
+      recipient_email: "legacy.owner@example.com",
       from_email: "growth@boostmybusinesses.com",
       trigger: "automatic",
       reminder_index: 0,
@@ -201,27 +327,42 @@ test("email history detail returns redacted timeline", async () => {
       snapshot_body_html: "<p>Please assist</p>",
       source_notification_id: "notif-1",
       source_action_id: null,
-      scheduled_for: "2026-06-20T12:00:00.000Z",
-      sent_at: "2026-06-20T12:01:00.000Z",
+      scheduled_for: "2026-06-17T12:00:00.000Z",
+      sent_at: "2026-06-17T12:01:00.000Z",
       resolved_at: null,
     }],
     accounts: [{ id: "acct-a", username: "alpha_acc" }],
     clients: [{ id: "client-a", name: "Client A" }],
     events: [{
-      intent_id: "intent-1",
+      intent_id: "intent-legacy",
       status: "sent",
-      occurred_at: "2026-06-20T12:01:00.000Z",
+      occurred_at: "2026-06-17T12:01:00.000Z",
       provider: "postmark",
       provider_message_id: "pm-123",
       last_error_redacted: null,
     }],
   });
 
-  const result = await loadClientEmailHistoryDetail(supabase as never, "intent-1");
+  const result = await loadClientEmailHistoryDetail(supabase as never, "intent-legacy");
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.detail.sourceNotificationId, "notif-1");
-  assert.equal(result.detail.timeline.length, 1);
-  assert.equal(result.detail.providerMessageId, "pm-123");
-  assert.match(result.detail.recipientEmail, /\*\*\*@/);
+  assert.equal(result.detail.recipientEmail, "legacy.owner@example.com");
+  assert.equal(result.detail.instagramUsername, "alpha_acc");
+  assert.equal(result.detail.clientName, "Client A");
+});
+
+test("relay projection exposes recipient email without internal ids", async () => {
+  const supabase = createMockSupabase({
+    intents: [baseIntents[0]],
+    accounts: [{ id: "acct-a", username: "alpha_acc" }],
+    clients: [{ id: "client-a", name: "Client A" }],
+  });
+
+  const projection = await loadClientEmailHistoryProjection(supabase as never, { page: 1, pageSize: 10 });
+  const item = projection.items[0];
+  assert.equal(item.clientName, "Client A");
+  assert.equal(item.instagramUsername, "alpha_acc");
+  assert.equal(item.recipientEmail, "owner@example.com");
+  assert.equal("clientId" in item, false);
+  assert.equal("accountId" in item, false);
 });

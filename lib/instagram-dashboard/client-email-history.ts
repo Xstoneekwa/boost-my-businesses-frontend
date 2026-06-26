@@ -15,6 +15,12 @@ import {
   probeClientEmailInfrastructure,
 } from "./client-email-schema-guard.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
+import {
+  normalizeClientEmailFilter,
+  type NormalizedClientEmailFilter,
+} from "./client-email-filter.ts";
+
+export { normalizeClientEmailFilter, type NormalizedClientEmailFilter } from "./client-email-filter.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -29,8 +35,7 @@ export type ClientEmailHistoryFilters = {
   period?: "7d" | "30d" | "90d" | "custom";
   from?: string;
   to?: string;
-  clientId?: string;
-  accountId?: string;
+  clientEmail?: string;
   category?: ClientEmailTemplateCategory;
   trigger?: ClientEmailSendTrigger;
   deliveryStatus?: ClientEmailDeliveryStatus | ClientEmailIntentStatus;
@@ -41,9 +46,7 @@ export type ClientEmailHistoryFilters = {
 export type ClientEmailHistoryListItem = {
   id: string;
   createdAt: string;
-  clientId: string;
   clientName: string | null;
-  accountId: string;
   instagramUsername: string | null;
   category: ClientEmailTemplateCategory;
   categoryLabel: string;
@@ -120,12 +123,10 @@ function resolvePeriodBounds(filters: ClientEmailHistoryFilters, now = new Date(
   return { from, to };
 }
 
-function redactRecipientEmail(email: string): string {
-  const trimmed = email.trim();
-  const [local, domain] = trimmed.split("@");
-  if (!local || !domain) return "[redacted]";
-  const visible = local.slice(0, Math.min(2, local.length));
-  return `${visible}***@${domain}`;
+function formatRecipientEmailForRelay(email: string) {
+  const normalized = email.trim();
+  if (!normalized) return "—";
+  return normalized;
 }
 
 function projectListItem(
@@ -136,13 +137,11 @@ function projectListItem(
   return {
     id: readString(row.id, ""),
     createdAt: readString(row.created_at, ""),
-    clientId: readString(row.client_id, ""),
     clientName: context.clientName ?? null,
-    accountId: readString(row.account_id, ""),
     instagramUsername: context.instagramUsername ?? null,
     category,
     categoryLabel: CLIENT_EMAIL_CATEGORY_LABELS[category],
-    recipientEmail: redactRecipientEmail(readString(row.recipient_email, "")),
+    recipientEmail: formatRecipientEmailForRelay(readString(row.recipient_email, "")),
     fromEmail: CLIENT_EMAIL_LOCKED_FROM,
     trigger: readTrigger(row.trigger) ?? "automatic",
     reminderIndex: typeof row.reminder_index === "number" ? row.reminder_index : null,
@@ -150,6 +149,17 @@ function projectListItem(
     deliveryStatus: context.deliveryStatus ?? null,
     templateVersion: typeof row.template_version === "number" ? row.template_version : null,
   };
+}
+
+function applyClientEmailFilter<T extends { ilike: (column: string, value: string) => T }>(
+  query: T,
+  clientEmailFilter: NormalizedClientEmailFilter | null,
+): T {
+  if (!clientEmailFilter) return query;
+  if (clientEmailFilter.mode === "exact") {
+    return query.ilike("recipient_email", clientEmailFilter.value);
+  }
+  return query.ilike("recipient_email", `%${clientEmailFilter.value}%`);
 }
 
 export async function loadClientEmailHistoryProjection(
@@ -173,6 +183,21 @@ export async function loadClientEmailHistoryProjection(
   }
 
   const { from, to } = resolvePeriodBounds(filters);
+  const clientEmailFilter = filters.clientEmail
+    ? normalizeClientEmailFilter(filters.clientEmail)
+    : null;
+  if (filters.clientEmail && !clientEmailFilter) {
+    return {
+      featureAvailable: true,
+      fromEmail: CLIENT_EMAIL_LOCKED_FROM,
+      page,
+      pageSize,
+      totalCount: 0,
+      totalPages: 0,
+      items: [],
+    };
+  }
+
   let query = supabase
     .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
     .select(
@@ -183,8 +208,7 @@ export async function loadClientEmailHistoryProjection(
     .lte("created_at", to.toISOString())
     .order("created_at", { ascending: false });
 
-  if (filters.clientId) query = query.eq("client_id", filters.clientId);
-  if (filters.accountId) query = query.eq("account_id", filters.accountId);
+  query = applyClientEmailFilter(query, clientEmailFilter);
   if (filters.category) query = query.eq("category", filters.category);
   if (filters.trigger) query = query.eq("trigger", filters.trigger);
   if (filters.deliveryStatus) {

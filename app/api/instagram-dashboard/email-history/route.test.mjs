@@ -11,9 +11,12 @@ const detailRoute = readFileSync(
   "utf8",
 );
 
-test("email history list route is read-only relay", () => {
+test("email history list route is read-only relay with client email filter", () => {
   assert.match(listRoute, /requireRelayOrAdmin/);
   assert.match(listRoute, /loadClientEmailHistoryProjection/);
+  assert.match(listRoute, /client_email/);
+  assert.doesNotMatch(listRoute, /client_id/);
+  assert.doesNotMatch(listRoute, /account_id/);
   assert.doesNotMatch(listRoute, /POST|PATCH|PUT|DELETE/);
 });
 
