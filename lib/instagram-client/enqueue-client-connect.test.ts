@@ -161,16 +161,19 @@ test("account_run_already_requested race reloads active request", async () => {
 test("terminal failed request is not shown as active queue progress", () => {
   const projection = projectClientConnectProgress({
     accountId,
-    overallStatus: "unknown",
-    requestStatus: "",
-    runStatus: "",
+    overallStatus: "failed",
+    requestStatus: "failed",
+    runStatus: "failed",
+    requestId: "request-failed",
+    reason: "Worker subprocess exited with code 1.",
     steps: [
-      { id: "queue_request", label: "Queue request", subtitle: "Waiting", status: "pending" },
+      { id: "queue_request", label: "Queue request", subtitle: "Received", status: "done" },
     ],
     lang: "fr",
   });
-  assert.equal(projection.connect_status, "not_created");
-  assert.equal(projection.steps[0]?.status, "pending");
+  assert.equal(projection.connect_status, "failed");
+  assert.equal(projection.failed, true);
+  assert.notEqual(projection.connect_status, "not_created");
 });
 
 test("connect-account uses canonical client enqueue service", () => {
@@ -182,6 +185,8 @@ test("connect-account uses canonical client enqueue service", () => {
 test("progress loader excludes terminal request fallback", () => {
   const source = readFileSync(new URL("./load-client-connect-progress.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /if \(!requestRow && !input\.requestId\)/);
+  assert.match(source, /verifyConnectOperationToken/);
+  assert.match(source, /loadLoginProvisioningRequestByAttemptId/);
 });
 
 test("blocked connect request exposes client-safe security message", () => {

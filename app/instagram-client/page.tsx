@@ -6,6 +6,10 @@ import { loadClientAccountInsights, type ClientAccountInsights } from "@/lib/ins
 import { loadClientFollowerGrowthSeries } from "@/lib/instagram-client/load-client-follower-growth";
 import { getClientWorkspaceView, type ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 import ClientDashboard from "./ClientDashboard";
+import {
+  loadClientAccountNotificationsForClient,
+  reconcileClientAccountNotificationsForClient,
+} from "@/lib/instagram-client/client-account-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +34,7 @@ type ClientInstagramAccount = {
   assignmentStatus: string;
   readinessLabel: string;
   connected: boolean;
+  clientReadinessStatus?: string;
 };
 
 type SupabaseRecord = Record<string, unknown>;
@@ -56,7 +61,7 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
   const accountIds = [...new Set((links as SupabaseRecord[]).map((row) => readString(row.account_id)).filter(Boolean))];
   if (!accountIds.length) return [];
 
-  const [{ data: actions }, { data: accounts }] = await Promise.all([
+  const [{ data: passwordActions }, { data: verificationActions }, { data: accounts }, { data: clientAccounts }] = await Promise.all([
     supabase
       .from("account_dashboard_actions")
       .select("id,account_id,status,safe_client_message,action_deep_link,created_at")
@@ -67,16 +72,45 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
       .order("created_at", { ascending: false })
       .limit(20),
     supabase
+      .from("account_dashboard_actions")
+      .select("id,account_id,status,action_type")
+      .in("account_id", accountIds)
+      .eq("action_type", "enter_email_verification_code")
+      .in("status", ["pending", "acknowledged", "pending_verification", "code_submitted"])
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
       .from("ig_accounts")
       .select("id,username")
       .in("id", accountIds),
+    supabase
+      .from("client_instagram_accounts")
+      .select("account_id,login_status,provisioning_status")
+      .in("account_id", accountIds),
   ]);
+
+  const verificationBlockedAccountIds = new Set<string>();
+  for (const row of (Array.isArray(verificationActions) ? verificationActions as SupabaseRecord[] : [])) {
+    const accountId = readString(row.account_id);
+    if (accountId) verificationBlockedAccountIds.add(accountId);
+  }
+  for (const row of (Array.isArray(clientAccounts) ? clientAccounts as SupabaseRecord[] : [])) {
+    const accountId = readString(row.account_id);
+    const loginStatus = readString(row.login_status).toLowerCase();
+    const provisioningStatus = readString(row.provisioning_status).toLowerCase();
+    if (!accountId) continue;
+    if (loginStatus === "verification_pending" || provisioningStatus === "login_verification_pending") {
+      verificationBlockedAccountIds.add(accountId);
+    }
+  }
 
   const usernamesById = new Map((Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
     .map((row): [string, string] => [readString(row.id), readString(row.username, "Instagram account")])
     .filter(([id]) => Boolean(id)));
 
-  return (Array.isArray(actions) ? actions as SupabaseRecord[] : []).map((row) => {
+  return (Array.isArray(passwordActions) ? passwordActions as SupabaseRecord[] : [])
+    .filter((row) => !verificationBlockedAccountIds.has(readString(row.account_id)))
+    .map((row) => {
     const accountId = readString(row.account_id);
     const username = usernamesById.get(accountId) ?? "Instagram account";
     return {
@@ -120,10 +154,15 @@ export default async function InstagramClientPage() {
     }
   })();
 
-  const [notifications, accounts, workspace] = await Promise.all([
+  const [notifications, accounts, workspace, accountNotifications] = await Promise.all([
     getClientDashboardNotifications(userContext.tenantId),
     getClientDashboardAccounts(userContext.tenantId),
     getClientWorkspaceView(userContext.tenantId, loginEmail),
+    (async () => {
+      const supabase = createSupabaseClient();
+      await reconcileClientAccountNotificationsForClient(supabase, userContext.tenantId);
+      return loadClientAccountNotificationsForClient(supabase, userContext.tenantId);
+    })(),
   ]);
   const orderedAccounts = sortClientInstagramAccounts(accounts);
 
@@ -141,6 +180,7 @@ export default async function InstagramClientPage() {
       tenantId={userContext.tenantId}
       loginEmail={loginEmail}
       initialNotifications={notifications}
+      initialAccountNotifications={accountNotifications}
       initialAccounts={orderedAccounts}
       initialWorkspace={workspace}
       initialAccountInsights={accountInsights}

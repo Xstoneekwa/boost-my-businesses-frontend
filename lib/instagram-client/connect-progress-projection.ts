@@ -42,6 +42,12 @@ export type ClientConnectProgressSnapshot = {
 };
 
 const EMAIL_CODE_ACTION = "enter_email_verification_code";
+const VERIFICATION_ACTION_TYPES = new Set([
+  EMAIL_CODE_ACTION,
+  "complete_two_factor",
+  "resolve_checkpoint",
+  "review_login_challenge",
+]);
 const ACTIVE_ACTION_STATUSES = new Set(["pending", "acknowledged", "pending_verification", "code_submitted", "open"]);
 const SUBMITTABLE_ACTION_STATUSES = new Set(["pending", "acknowledged", "pending_verification"]);
 
@@ -51,9 +57,11 @@ type ProgressInput = {
   requestStatus?: string | null;
   runStatus?: string | null;
   requestId?: string | null;
+  resumeRequestStatus?: string | null;
   reason?: string | null;
   loginStatus?: string | null;
   provisioningStatus?: string | null;
+  challengeChainActive?: boolean;
   actionRequired?: {
     id?: string;
     action_type?: string;
@@ -71,6 +79,36 @@ type ProgressInput = {
   lang?: "fr" | "en";
 };
 
+function isResumeRequestActive(status: string) {
+  return ["queued", "claimed", "starting", "running"].includes(status);
+}
+
+function resolveEffectiveResumeStatus(input: ProgressInput): string {
+  const raw = readMetadataResumeStatus(input.actionRequired);
+  const resumeRequestStatus = readString(input.resumeRequestStatus).toLowerCase();
+  if (!raw) return "";
+  if (raw === "needs_new_code" && isResumeRequestActive(resumeRequestStatus)) {
+    return "running";
+  }
+  return raw;
+}
+
+function resolveVerificationResumeState(input: ProgressInput) {
+  const actionStatus = readString(input.actionRequired?.status).toLowerCase();
+  const rawResumeStatus = readMetadataResumeStatus(input.actionRequired).toLowerCase();
+  const resumeStatus = resolveEffectiveResumeStatus(input).toLowerCase();
+  const resumeRequestStatus = readString(input.resumeRequestStatus).toLowerCase();
+  const codeSubmitted = actionStatus === "code_submitted"
+    || rawResumeStatus === "queued"
+    || rawResumeStatus === "running"
+    || resumeStatus === "running"
+    || isResumeRequestActive(resumeRequestStatus);
+  const resumeActive = isResumeRequestActive(resumeRequestStatus)
+    || resumeStatus === "running"
+    || (resumeStatus === "queued" && codeSubmitted);
+  return { codeSubmitted, resumeActive };
+}
+
 function readMetadataResumeStatus(action: ProgressInput["actionRequired"]) {
   return readString(action?.resume_status, "");
 }
@@ -78,8 +116,8 @@ function readMetadataResumeStatus(action: ProgressInput["actionRequired"]) {
 function mapVerificationState(action: ProgressInput["actionRequired"]) {
   const actionType = readString(action?.action_type);
   const actionStatus = readString(action?.status).toLowerCase();
-  const emailCodeAction = actionType === EMAIL_CODE_ACTION || !actionType;
-  if (!emailCodeAction || !action) {
+  const verificationAction = VERIFICATION_ACTION_TYPES.has(actionType) || !actionType;
+  if (!verificationAction || !action) {
     return { required: false, code_submitted: false, challenge_status: null as string | null };
   }
   if (!ACTIVE_ACTION_STATUSES.has(actionStatus) && actionStatus !== "pending_verification") {
@@ -97,15 +135,34 @@ export function mapProgressToClientConnectStatus(input: ProgressInput): ClientCo
   const runStatus = readString(input.runStatus).toLowerCase();
   const loginStatus = readString(input.loginStatus).toLowerCase();
   const verification = mapVerificationState(input.actionRequired);
-  const accountVerificationPending = isCanonicalVerificationPending({
+  const chainActive = input.challengeChainActive !== false;
+  const accountVerificationPending = chainActive && isCanonicalVerificationPending({
     loginStatus: input.loginStatus,
     provisioningStatus: input.provisioningStatus,
   });
 
   if (loginStatus === "connected" || overall === "connected") return "connected";
   if (accountVerificationPending || verification.required) {
-    if (verification.code_submitted) return "verification_code_submitted";
+    const resumeState = resolveVerificationResumeState(input);
+    if (resumeState.resumeActive) return "verification_resume_active";
+    if (
+      resumeState.codeSubmitted
+      && (requestStatus === "failed" || runStatus === "failed" || overall === "failed")
+    ) {
+      return "failed";
+    }
+    if (resumeState.codeSubmitted || verification.code_submitted) return "verification_code_accepted";
     return "verification_required";
+  }
+  if (input.challengeChainActive === false) {
+    if (requestStatus === "failed" || runStatus === "failed" || overall === "failed") return "failed";
+    if (["canceled", "completed", "blocked"].includes(requestStatus) || overall === "blocked") {
+      return requestStatus === "blocked" || overall === "blocked" ? "blocked" : "not_created";
+    }
+    if (!input.requestId && !input.requestStatus) return "not_created";
+    if (!["queued", "claimed", "starting", "running"].includes(requestStatus) && !["running", "started", "in_progress"].includes(runStatus)) {
+      return "not_created";
+    }
   }
   if (overall === "failed" || runStatus === "failed" || requestStatus === "failed") return "failed";
   if (overall === "blocked" || requestStatus === "blocked") return "blocked";
@@ -113,8 +170,8 @@ export function mapProgressToClientConnectStatus(input: ProgressInput): ClientCo
   if (["running", "claimed", "starting"].includes(requestStatus) || ["running", "claimed", "starting"].includes(overall) || ["running", "started", "in_progress"].includes(runStatus)) {
     return "running";
   }
+  if (overall === "action_required" || verification.required) return "verification_required";
   if (!input.requestId && !input.requestStatus) return "not_created";
-  if (overall === "action_required") return "verification_required";
   return "running";
 }
 
@@ -144,17 +201,20 @@ function clientSafeStepSubtitle(subtitle: string) {
 export function projectClientConnectProgress(input: ProgressInput): ClientConnectProgressSnapshot {
   const lang = input.lang ?? "fr";
   const connectStatus = mapProgressToClientConnectStatus(input);
-  const accountVerificationPending = isCanonicalVerificationPending({
+  const chainActive = input.challengeChainActive !== false;
+  const accountVerificationPending = chainActive && isCanonicalVerificationPending({
     loginStatus: input.loginStatus,
     provisioningStatus: input.provisioningStatus,
   });
   const verification = mapVerificationState(input.actionRequired);
   const actionStatus = readString(input.actionRequired?.status).toLowerCase();
-  const resumeStatus = readMetadataResumeStatus(input.actionRequired) || null;
+  const resumeStatus = resolveEffectiveResumeStatus(input) || null;
+  const resumeState = resolveVerificationResumeState(input);
   const canSubmitCode = (verification.required || accountVerificationPending)
-    && !verification.code_submitted
+    && !resumeState.codeSubmitted
+    && !resumeState.resumeActive
     && Boolean(readString(input.actionRequired?.id))
-    && (SUBMITTABLE_ACTION_STATUSES.has(actionStatus) || actionStatus === "pending_verification" || resumeStatus === "needs_new_code");
+    && (SUBMITTABLE_ACTION_STATUSES.has(actionStatus) || actionStatus === "pending_verification");
 
   const actionRequired = input.actionRequired && (verification.required || accountVerificationPending) ? {
     id: readString(input.actionRequired.id),
@@ -175,11 +235,15 @@ export function projectClientConnectProgress(input: ProgressInput): ClientConnec
     ? (lang === "fr"
       ? "Instagram demande une vérification avant de terminer la connexion de votre compte."
       : "Instagram requires verification before your account connection can finish.")
-    : connectStatus === "verification_code_submitted"
+    : connectStatus === "verification_code_accepted"
       ? (lang === "fr"
-        ? "Code reçu. Nous reprenons la connexion automatiquement."
-        : "Code received. We are resuming the connection automatically.")
-      : connectStatus === "blocked" && readString(input.reason)
+        ? "Code enregistré. Nous préparons la reprise de la connexion."
+        : "Code saved. We are preparing to resume the connection.")
+      : connectStatus === "verification_resume_active" || connectStatus === "verification_code_submitted"
+        ? (lang === "fr"
+          ? "Vérification en cours. Nous reprenons la connexion automatiquement."
+          : "Verification in progress. We are resuming the connection automatically.")
+        : connectStatus === "blocked" && readString(input.reason)
         ? readString(input.reason)
         : clientConnectMessage(connectStatus, lang);
 

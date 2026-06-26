@@ -137,7 +137,11 @@ async function loadActiveConnectStatusByAccount(accountIds: string[]) {
   await Promise.all(accountIds.map(async (accountId) => {
     try {
       const progress = await loadClientConnectProgress({ accountId });
-      if (isActiveClientConnectStatus(progress.connect_status)) {
+      if (
+        isActiveClientConnectStatus(progress.connect_status)
+        || progress.connect_status === "failed"
+        || progress.connect_status === "blocked"
+      ) {
         map.set(accountId, progress.connect_status);
       }
     } catch {

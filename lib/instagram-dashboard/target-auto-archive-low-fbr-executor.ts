@@ -9,6 +9,7 @@ import {
   targetAutoArchiveLowFbrFlags,
   type AutoArchiveCandidateEvaluation,
 } from "./target-auto-archive-low-fbr-policy";
+import { reevaluateNeedsMoreTargetAccountsAfterTargetMutation } from "./needs-more-target-accounts.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -127,6 +128,7 @@ export async function runTargetAutoArchiveLowFbrPolicyBatch(input: {
 
   const rows = (data ?? []) as SupabaseRecord[];
   const result = emptyBatchResult(flags);
+  const reevaluateAccountIds = new Set<string>();
 
   for (const row of rows) {
     result.scanned += 1;
@@ -196,6 +198,7 @@ export async function runTargetAutoArchiveLowFbrPolicyBatch(input: {
 
     result.targets_archived += 1;
     result.targets_readd_blocked += 1;
+    reevaluateAccountIds.add(accountId);
     await tryRecordAutoArchiveAudit(supabase, {
       accountId,
       targetId,
@@ -219,6 +222,10 @@ export async function runTargetAutoArchiveLowFbrPolicyBatch(input: {
         followback_ratio: evaluation.followbackRatio,
       },
     });
+  }
+
+  for (const accountId of reevaluateAccountIds) {
+    await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(accountId, "target_auto_archive_low_fbr");
   }
 
   return result;

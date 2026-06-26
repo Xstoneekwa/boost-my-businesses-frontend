@@ -5,7 +5,7 @@ import {
   addPhoneValidationError,
   addPhysicalPhonePayload,
   forwardAddPhysicalPhoneToAdminDashboard,
-} from "./route";
+} from "./route.ts";
 
 const validPhone = {
   display_name: "Samsung A16-03",

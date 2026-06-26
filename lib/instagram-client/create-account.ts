@@ -22,6 +22,10 @@ import {
   parseLoginEmailInput,
   persistAccountLoginEmail,
 } from "@/lib/instagram-dashboard/persist-account-login-email";
+import {
+  profileVerificationPayloadForInsert,
+} from "@/lib/instagram-accounts/profile-verification-payload";
+import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
 import { clientMaxAccountsLimit, projectClientAccountRow, readBoolean, readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -42,33 +46,13 @@ export type ClientCreateAccountResult =
 
 const credentialsTimeoutMs = 9000;
 
-function credentialsConfig() {
-  const url = process.env.INSTAGRAM_CREDENTIALS_API_URL?.trim();
-  const token = process.env.INSTAGRAM_CREDENTIALS_API_TOKEN?.trim();
-  if (!url || !token) return null;
-  return { url, token };
-}
-
-function profileVerificationPayload(lookup: Awaited<ReturnType<typeof lookupInstagramPublicProfile>>) {
-  if (lookup.status !== "found") return {};
-  return {
-    instagram_verification_status: "verified",
-    instagram_verified_at: lookup.checked_at,
-    is_private: lookup.is_private,
-    is_verified: lookup.is_verified,
-    followers_count: lookup.followers_count,
-    avatar_url: lookup.avatar_url,
-    avatar_checked_at: lookup.avatar_url ? lookup.checked_at : null,
-  };
-}
-
 async function submitClientCredentials(input: {
   accountId: string;
   expectedUsername: string;
   password: string;
   externalRequestId: string;
 }) {
-  const config = credentialsConfig();
+  const config = resolveServerCredentialsConfig();
   if (!config) throw new Error("credentials_api_not_configured");
 
   const controller = new AbortController();
@@ -166,7 +150,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
   if (!dryRun && !password) {
     return { ok: false, status: 400, error: "Instagram password is required.", code: "password_required" };
   }
-  if (!dryRun && !credentialsConfig()) {
+  if (!dryRun && !resolveServerCredentialsConfig()) {
     return { ok: false, status: 503, error: "Credential setup is temporarily unavailable.", code: "credentials_unavailable" };
   }
 
@@ -259,7 +243,10 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     login_method: "credentials",
     internal_label: null,
     notes: notes || null,
-    ...profileVerificationPayload(profileLookup),
+    ...profileVerificationPayloadForInsert(profileLookup, {
+      operation: "client_add_account",
+      sourceSurface: "instagram_client",
+    }),
   };
 
   const { data: insertedAccount, error: accountError } = await supabase

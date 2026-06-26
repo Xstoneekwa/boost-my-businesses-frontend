@@ -2,8 +2,11 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { mapScheduleGateReasonToRunStart, type ScheduleBlockReason } from "@/lib/instagram-dashboard/schedule";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 
+import { ACTIVE_RUN_REQUEST_STATUSES } from "./run-request-statuses.ts";
+
+export { ACTIVE_RUN_REQUEST_STATUSES } from "./run-request-statuses.ts";
 export const ACTIVE_IG_RUN_STATUSES = ["running", "queued", "pending", "in_progress", "active", "starting"] as const;
-export const ACTIVE_RUN_REQUEST_STATUSES = ["queued", "claimed", "starting", "running"] as const;
+export const ACTIVE_RESUME_REQUEST_STATUSES = ["queued", "claimed", "starting", "running"] as const;
 export const TECHNICAL_ACCOUNT_RUN_TYPES = [
   "check_login",
   "login_check",
@@ -1160,6 +1163,7 @@ function mapLinkedIgRunTerminalStatus(outcome: LinkedIgRunTerminalOutcome) {
 export async function reconcileLinkedIgRunTerminal(
   runId: string,
   outcome: LinkedIgRunTerminalOutcome,
+  supabase = createSupabaseClient(),
 ): Promise<LinkedIgRunReconcileResult> {
   const normalizedRunId = readString(runId, "");
   if (!normalizedRunId) {
@@ -1172,7 +1176,6 @@ export async function reconcileLinkedIgRunTerminal(
     };
   }
 
-  const supabase = createSupabaseClient();
   const { data, error } = await supabase
     .from("ig_runs")
     .select("id,status")
@@ -1242,11 +1245,46 @@ export async function reconcileLinkedIgRunTerminal(
   };
 }
 
+export function isActiveResumeRequestStatus(status: unknown) {
+  return ACTIVE_RESUME_REQUEST_STATUSES.includes(
+    readString(status, "").toLowerCase() as (typeof ACTIVE_RESUME_REQUEST_STATUSES)[number],
+  );
+}
+
+export function buildLoginEmailCodeResumeMetadata(input: {
+  actionId: string;
+  accountId: string;
+  submissionId: string;
+  parentRequestId?: string | null;
+  connectAttemptId?: string | null;
+  source?: string;
+}) {
+  const metadata: SupabaseRecord = {
+    action_id: input.actionId,
+    account_id: input.accountId,
+    source: readString(input.source, "dashboard_code_submit"),
+    challenge_type: "email_code_challenge",
+    submission_id: input.submissionId,
+  };
+  const parentRequestId = readString(input.parentRequestId, "");
+  const connectAttemptId = readString(input.connectAttemptId, "");
+  if (parentRequestId) metadata.parent_request_id = parentRequestId;
+  if (connectAttemptId) metadata.connect_attempt_id = connectAttemptId;
+  return metadata;
+}
+
 export async function getActiveRunRequest(accountId: string) {
   const supabase = createSupabaseClient();
+  return getActiveRunRequestWithClient(supabase, accountId);
+}
+
+export async function getActiveRunRequestWithClient(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
   const { data, error } = await supabase
     .from("account_run_requests")
-    .select("id,status,requested_run_type,run_id,created_at")
+    .select("id,status,requested_run_type,run_id,created_at,metadata_safe")
     .eq("account_id", accountId)
     .in("status", [...ACTIVE_RUN_REQUEST_STATUSES])
     .order("created_at", { ascending: false })
@@ -1257,6 +1295,44 @@ export async function getActiveRunRequest(accountId: string) {
   }
 
   return ((data ?? []) as SupabaseRecord[])[0] ?? null;
+}
+
+export async function getActiveRunRequestSafe(accountId: string) {
+  const supabase = createSupabaseClient();
+  return getActiveRunRequestSafeWithClient(supabase, accountId);
+}
+
+export async function getActiveRunRequestSafeWithClient(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  try {
+    return await getActiveRunRequestWithClient(supabase, accountId);
+  } catch {
+    return null;
+  }
+}
+
+async function accountHasVerificationPausedLogin(accountId: string) {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase
+    .from("client_instagram_accounts")
+    .select("login_status,provisioning_status")
+    .eq("account_id", accountId)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+
+  if (error || !data) return false;
+
+  const loginStatus = readString(data.login_status, "").toLowerCase();
+  const provisioningStatus = readString(data.provisioning_status, "").toLowerCase();
+  if (["verification_pending", "needs_2fa", "checkpoint"].includes(loginStatus)) return true;
+  return provisioningStatus === "login_verification_pending";
+}
+
+function loginEmailCodeResumeAllowsActiveProvisioningConflict(activeRequest: SupabaseRecord | null) {
+  const activeType = readString(activeRequest?.requested_run_type, "").toLowerCase();
+  return activeType === "login_provisioning";
 }
 
 export async function evaluateLoginChallengeRunEligibility(
@@ -1363,13 +1439,25 @@ export async function evaluateLoginChallengeRunEligibility(
     return { ok: false as const, reason: "no_app_instance_available" as RunStartBlockReason, health };
   }
 
+  const isEmailCodeResume = normalizedRunType === "login_email_code_resume";
+  const verificationPausedLogin = isEmailCodeResume ? await accountHasVerificationPausedLogin(accountId) : false;
+
   if (await accountHasActiveIgRun(accountId)) {
-    return { ok: false as const, reason: "already_running" as RunStartBlockReason, health };
+    if (!(isEmailCodeResume && verificationPausedLogin)) {
+      return { ok: false as const, reason: "already_running" as RunStartBlockReason, health };
+    }
   }
 
   const activeRequest = await getActiveRunRequest(accountId);
   if (activeRequest) {
-    return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
+    const activeType = readString(activeRequest.requested_run_type, "").toLowerCase();
+    if (isEmailCodeResume && loginEmailCodeResumeAllowsActiveProvisioningConflict(activeRequest)) {
+      // login_provisioning stays active while verification is paused; resume is a sibling request.
+    } else if (isEmailCodeResume && activeType === "login_email_code_resume") {
+      return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
+    } else {
+      return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
+    }
   }
 
   return {
@@ -1383,13 +1471,143 @@ export async function evaluateLoginChallengeRunEligibility(
   };
 }
 
+async function forceCancelActiveRunRequest(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  requestId: string,
+  reason: string,
+) {
+  const normalizedRequestId = readString(requestId, "");
+  if (!normalizedRequestId) {
+    return { canceled: false as const, status: null as string | null };
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase.rpc("cancel_account_run_request", {
+    p_request_id: normalizedRequestId,
+    p_reason: reason,
+  });
+
+  const row = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
+  let status = readString(row?.status, "").toLowerCase();
+
+  if (error || !status || status !== "canceled") {
+    const { error: updateError } = await supabase
+      .from("account_run_requests")
+      .update({
+        status: "canceled",
+        canceled_at: now,
+        cancel_reason: reason,
+        cancel_requested_at: now,
+        updated_at: now,
+      })
+      .eq("id", normalizedRequestId)
+      .in("status", [...ACTIVE_RUN_REQUEST_STATUSES]);
+
+    if (updateError) {
+      return { canceled: false as const, status: status || null };
+    }
+  }
+
+  const { data: verifyRow } = await supabase
+    .from("account_run_requests")
+    .select("status")
+    .eq("id", normalizedRequestId)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+
+  status = readString(verifyRow?.status, status).toLowerCase();
+  return {
+    canceled: status === "canceled",
+    status: status || null,
+  };
+}
+
+export async function releaseActiveLoginProvisioningForEmailCodeResume(
+  accountId: string,
+  reason = "email_code_resume_handoff",
+  supabase = createSupabaseClient(),
+) {
+  const activeRequest = await getActiveRunRequestSafeWithClient(supabase, accountId);
+  if (!activeRequest) return { released: false as const, reason: "no_active_request" as const };
+
+  const activeType = readString(activeRequest.requested_run_type, "").toLowerCase();
+  if (activeType !== "login_provisioning") {
+    return { released: false as const, reason: "active_request_not_provisioning" as const };
+  }
+
+  const requestId = readString(activeRequest.id, "");
+  const runId = readString(activeRequest.run_id, "");
+  const metadata = activeRequest.metadata_safe && typeof activeRequest.metadata_safe === "object"
+    ? activeRequest.metadata_safe as SupabaseRecord
+    : {};
+  const connectAttemptId = readString(metadata.connect_attempt_id, "") || null;
+
+  if (runId) {
+    await reconcileLinkedIgRunTerminal(runId, "stopped", supabase);
+  }
+
+  const cancelResult = await forceCancelActiveRunRequest(supabase, requestId, reason);
+  if (!cancelResult.canceled) {
+    return {
+      released: false as const,
+      reason: "parent_cancel_failed" as const,
+      requestId,
+      runId: runId || null,
+      connectAttemptId,
+    };
+  }
+
+  const stillActive = await getActiveRunRequestSafeWithClient(supabase, accountId);
+  const stillProvisioning = stillActive
+    && readString(stillActive.requested_run_type, "").toLowerCase() === "login_provisioning";
+  if (stillProvisioning) {
+    return {
+      released: false as const,
+      reason: "parent_still_active" as const,
+      requestId,
+      runId: runId || null,
+      connectAttemptId,
+    };
+  }
+
+  return {
+    released: true as const,
+    reason: "released" as const,
+    requestId,
+    runId: runId || null,
+    connectAttemptId,
+  };
+}
+
 export type LoginEmailCodeResumeRunRequestResult = {
   queued: boolean;
   idempotent: boolean;
   requestId: string | null;
   requestStatus: string | null;
   reason: string | null;
+  parentRequestId?: string | null;
+  connectAttemptId?: string | null;
 };
+
+function mapResumeRequestResult(input: {
+  requestId: string;
+  requestStatus: string;
+  idempotent: boolean;
+  reason: string;
+  parentRequestId?: string | null;
+  connectAttemptId?: string | null;
+}): LoginEmailCodeResumeRunRequestResult {
+  const active = isActiveResumeRequestStatus(input.requestStatus);
+  return {
+    queued: active,
+    idempotent: input.idempotent,
+    requestId: input.requestId || null,
+    requestStatus: input.requestStatus || null,
+    reason: input.reason,
+    parentRequestId: input.parentRequestId ?? null,
+    connectAttemptId: input.connectAttemptId ?? null,
+  };
+}
 
 export async function createLoginEmailCodeResumeRunRequest({
   accountId,
@@ -1397,15 +1615,28 @@ export async function createLoginEmailCodeResumeRunRequest({
   submissionId,
   actorId,
   actorType = "system",
+  supabase = createSupabaseClient(),
 }: {
   accountId: string;
   actionId: string;
   submissionId: string;
   actorId?: string | null;
   actorType?: "admin" | "assistant" | "ops" | "system" | "internal";
+  supabase?: ReturnType<typeof createSupabaseClient>;
 }): Promise<LoginEmailCodeResumeRunRequestResult> {
-  const supabase = createSupabaseClient();
-  const idempotencyKey = `login_email_code_resume:${actionId}:${submissionId}`;
+  const normalizedActionId = readString(actionId, "");
+  const normalizedSubmissionId = readString(submissionId, "");
+  if (!normalizedActionId || !normalizedSubmissionId) {
+    return {
+      queued: false,
+      idempotent: false,
+      requestId: null,
+      requestStatus: null,
+      reason: "login_resume_action_id_required",
+    };
+  }
+
+  const idempotencyKey = `login_email_code_resume:${normalizedActionId}:${normalizedSubmissionId}`;
   const { data: existingRequest } = await supabase
     .from("account_run_requests")
     .select("id,status")
@@ -1414,16 +1645,53 @@ export async function createLoginEmailCodeResumeRunRequest({
     .maybeSingle();
 
   if (existingRequest) {
-    return {
-      queued: false,
+    const requestStatus = readString(existingRequest.status, "");
+    return mapResumeRequestResult({
+      requestId: readString(existingRequest.id, ""),
+      requestStatus,
       idempotent: true,
-      requestId: readString(existingRequest.id, "") || null,
-      requestStatus: readString(existingRequest.status, "") || null,
-      reason: "already_queued",
-    };
+      reason: isActiveResumeRequestStatus(requestStatus) ? "already_queued" : "already_requested",
+    });
   }
 
-  const { data, error } = await supabase.rpc("create_account_run_request", {
+  let parentRequestId: string | null = null;
+  let connectAttemptId: string | null = null;
+
+  const activeRequest = await getActiveRunRequestSafeWithClient(supabase, accountId);
+  if (
+    activeRequest
+    && readString(activeRequest.requested_run_type, "").toLowerCase() === "login_provisioning"
+  ) {
+    parentRequestId = readString(activeRequest.id, "") || null;
+    const release = await releaseActiveLoginProvisioningForEmailCodeResume(
+      accountId,
+      "email_code_resume_handoff",
+      supabase,
+    );
+    connectAttemptId = readString(release.connectAttemptId, "") || null;
+    if (!release.released) {
+      return {
+        queued: false,
+        idempotent: false,
+        requestId: null,
+        requestStatus: null,
+        reason: sanitizeRunControlReason(release.reason, "parent_handoff_failed"),
+        parentRequestId,
+        connectAttemptId,
+      };
+    }
+    parentRequestId = readString(release.requestId, parentRequestId ?? "") || parentRequestId;
+  }
+
+  const metadata = buildLoginEmailCodeResumeMetadata({
+    actionId: normalizedActionId,
+    accountId,
+    submissionId: normalizedSubmissionId,
+    parentRequestId,
+    connectAttemptId,
+  });
+
+  const enqueueResume = async () => supabase.rpc("create_account_run_request", {
     p_account_id: accountId,
     p_requested_by: actorId ?? null,
     p_actor_type: actorType,
@@ -1431,28 +1699,60 @@ export async function createLoginEmailCodeResumeRunRequest({
     p_requested_run_type: "login_email_code_resume",
     p_idempotency_key: idempotencyKey,
     p_priority: 1,
-    p_metadata_safe: {
-      action_id: actionId,
-      account_id: accountId,
-      source: "dashboard_code_submit",
-      challenge_type: "email_code_challenge",
-      submission_id: submissionId,
-    },
+    p_metadata_safe: metadata,
   });
+
+  const { data, error } = await enqueueResume();
 
   if (error) {
     if (/account_run_already_requested/i.test(error.message)) {
-      const activeRequest = await getActiveRunRequest(accountId);
-      const requestId = readString(activeRequest?.id, "");
-      const requestStatus = readString(activeRequest?.status, "");
-      if (requestId && readString(activeRequest?.requested_run_type, "") === "login_email_code_resume") {
-        return {
-          queued: false,
-          idempotent: true,
+      const activeRequestAfterError = await getActiveRunRequestSafeWithClient(supabase, accountId);
+      const requestId = readString(activeRequestAfterError?.id, "");
+      const requestStatus = readString(activeRequestAfterError?.status, "");
+      const activeType = readString(activeRequestAfterError?.requested_run_type, "");
+      if (requestId && activeType === "login_email_code_resume") {
+        return mapResumeRequestResult({
           requestId,
           requestStatus,
+          idempotent: true,
           reason: "already_requested",
-        };
+          parentRequestId,
+          connectAttemptId,
+        });
+      }
+      if (activeType === "login_provisioning") {
+        const release = await releaseActiveLoginProvisioningForEmailCodeResume(
+          accountId,
+          "email_code_resume_handoff_retry",
+          supabase,
+        );
+        connectAttemptId = readString(release.connectAttemptId, connectAttemptId ?? "") || connectAttemptId;
+        parentRequestId = readString(release.requestId, parentRequestId ?? "") || parentRequestId;
+        if (!release.released) {
+          return {
+            queued: false,
+            idempotent: false,
+            requestId: null,
+            requestStatus: null,
+            reason: sanitizeRunControlReason(release.reason, "parent_handoff_failed"),
+            parentRequestId,
+            connectAttemptId,
+          };
+        }
+        const retry = await enqueueResume();
+        if (!retry.error) {
+          const retryRow = (Array.isArray(retry.data) ? retry.data[0] : retry.data) as SupabaseRecord | null;
+          const retryRequestId = readString(retryRow?.id, "");
+          const retryRequestStatus = readString(retryRow?.status, "queued");
+          return mapResumeRequestResult({
+            requestId: retryRequestId,
+            requestStatus: retryRequestStatus,
+            idempotent: false,
+            reason: "queued",
+            parentRequestId,
+            connectAttemptId,
+          });
+        }
       }
     }
     return {
@@ -1461,6 +1761,8 @@ export async function createLoginEmailCodeResumeRunRequest({
       requestId: null,
       requestStatus: null,
       reason: sanitizeRunControlReason(error.message, "resume_queue_failed"),
+      parentRequestId,
+      connectAttemptId,
     };
   }
 
@@ -1468,13 +1770,14 @@ export async function createLoginEmailCodeResumeRunRequest({
   const requestId = readString(requestRow?.id, "");
   const requestStatus = readString(requestRow?.status, "queued");
 
-  return {
-    queued: Boolean(requestId),
+  return mapResumeRequestResult({
+    requestId,
+    requestStatus,
     idempotent: false,
-    requestId: requestId || null,
-    requestStatus: requestStatus || null,
     reason: "queued",
-  };
+    parentRequestId,
+    connectAttemptId,
+  });
 }
 
 export async function evaluateLoginConnectionStartGate(

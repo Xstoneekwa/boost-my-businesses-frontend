@@ -11,3 +11,12 @@ test("onboarding schedule helper reserves manual_only placement through dedicate
   assert.match(source, /manual_only_assigned/);
   assert.doesNotMatch(source, /tryAssignManualOnlyOnboardingSchedule[\s\S]*assign_account_slot/);
 });
+
+test("onboarding auto assign uses canonical live capacity resolver", () => {
+  assert.match(source, /resolveLiveAssignmentTarget/);
+  assert.match(source, /already_assigned/);
+  assert.match(source, /physical_phone_only/);
+  assert.match(source, /reservationMode: explicitWindowProvided \? "immediate" : "onboarding"/);
+  assert.match(source, /releaseIneligibleOnboardingAssignment/);
+  assert.doesNotMatch(source, /requireCurrentWindow: !explicitWindowProvided/);
+});

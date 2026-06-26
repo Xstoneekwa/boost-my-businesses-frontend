@@ -38,7 +38,7 @@ type Props = {
   accounts: ClientInstagramAccountView[];
 };
 
-type ActionKind = "readiness" | "connect" | "create" | "refresh" | null;
+type ActionKind = "readiness" | "connect" | "create" | "refresh" | "cancel" | null;
 
 type AddPhase = "submitting" | "creating" | "refreshing" | "complete" | "error";
 type ConnectPhase = "starting" | "submitting" | "polling" | "complete" | "error" | "long_running";
@@ -54,6 +54,7 @@ type ProcessModalState = {
   errorCode?: string | null;
   timedOut?: boolean;
   connectProgress?: ClientConnectProgressSnapshot | null;
+  connectOperationToken?: string | null;
 };
 
 const TERMINAL_CONNECT_STATUSES = new Set(["connected", "failed", "blocked", "not_created"]);
@@ -81,6 +82,8 @@ function isTerminalProcessAccount(
     if (connectProgress.failed) return true;
     if (connectProgress.connect_status === "verification_required") return false;
     if (connectProgress.connect_status === "verification_code_submitted") return false;
+    if (connectProgress.connect_status === "verification_code_accepted") return false;
+    if (connectProgress.connect_status === "verification_resume_active") return false;
   }
   const ui = resolveClientAccountConnectionUi(account, lang);
   if (ui.phase === "action_required" || ui.phase === "ready") return true;
@@ -105,6 +108,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const [processRefreshing, setProcessRefreshing] = useState(false);
   const [verificationDismissed, setVerificationDismissed] = useState(false);
   const [entitlementReady, setEntitlementReady] = useState<boolean | null>(null);
+  const [cancelConfirmAccount, setCancelConfirmAccount] = useState<ClientInstagramAccountView | null>(null);
   const pollAttemptsRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
   const connectHydratedRef = useRef(false);
@@ -172,6 +176,36 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     return payload.data.accounts;
   }, [lang, router]);
 
+  async function confirmCancelRestart() {
+    if (!cancelConfirmAccount) return;
+    setActionKind("cancel");
+    setActionAccountId(cancelConfirmAccount.accountId);
+    try {
+      const response = await fetch(
+        `/api/instagram-client/accounts/${encodeURIComponent(cancelConfirmAccount.accountId)}/connect/cancel-attempt`,
+        { method: "POST", headers: { Accept: "application/json" } },
+      );
+      const payload = await parseClientApiResponse<{ canceled?: boolean }>(response, lang);
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message || payload.error || labelFor(lang, "Impossible d'annuler la tentative.", "Could not cancel the attempt."));
+      }
+      stopProcessPolling();
+      setProcessModal(null);
+      setVerificationDismissed(true);
+      connectHydratedRef.current = false;
+      await refreshFromServer();
+      setMessage(labelFor(lang, "Tentative annulée. Vous pouvez vérifier la préparation.", "Attempt canceled. You can check readiness."));
+      setMessageTone("success");
+    } catch (cancelError) {
+      setMessage(cancelError instanceof Error ? cancelError.message : labelFor(lang, "Impossible d'annuler la tentative.", "Could not cancel the attempt."));
+      setMessageTone("error");
+    } finally {
+      setCancelConfirmAccount(null);
+      setActionKind(null);
+      setActionAccountId(null);
+    }
+  }
+
   const processProjection = useMemo(() => {
     if (!processModal) return null;
     if (processModal.mode === "add_account") {
@@ -201,9 +235,12 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     }
   }, []);
 
-  const syncConnectProgress = useCallback(async (accountId: string) => {
+  const syncConnectProgress = useCallback(async (accountId: string, connectOperationToken?: string | null) => {
+    const tokenQuery = (connectOperationToken || "").trim()
+      ? `&connect_operation_token=${encodeURIComponent((connectOperationToken || "").trim())}`
+      : "";
     const response = await fetch(
-      `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/connect/progress?lang=${lang}`,
+      `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/connect/progress?lang=${lang}${tokenQuery}`,
       { headers: { Accept: "application/json" }, cache: "no-store" },
     );
     const payload = await parseClientApiResponse<ClientConnectProgressSnapshot>(response, lang);
@@ -216,6 +253,17 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const resumeActiveConnect = useCallback(async (account: ClientInstagramAccountView, openVerification = false) => {
     const progress = await syncConnectProgress(account.accountId);
     if (!isActiveClientConnectStatus(progress.connect_status)) {
+      setItems((current) => current.map((row) => (
+        row.accountId === account.accountId
+          ? {
+              ...row,
+              activeConnectStatus: null,
+              operationPending: false,
+            }
+          : row
+      )));
+      setProcessModal((current) => (current?.accountId === account.accountId ? null : current));
+      setVerificationDismissed(true);
       return null;
     }
     setItems((current) => current.map((row) => (
@@ -265,35 +313,6 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     };
   }, [items, processModal, resumeActiveConnect]);
 
-  const handleOpenBotAppPhone = useCallback(async (accountId: string) => {
-    const response = await fetch(
-      `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/open-botapp-phone`,
-      { method: "POST", headers: { Accept: "application/json" } },
-    );
-    const payload = await parseClientApiResponse<{
-      open_url?: string;
-      botapp_available?: boolean;
-      message?: string;
-    }>(response, lang);
-    if (!response.ok || payload.ok === false || payload.data?.botapp_available === false) {
-      throw new Error(labelFor(
-        lang,
-        "La vérification nécessite l'assistance de l'équipe de gestion.",
-        "Verification requires assistance from the management team.",
-      ));
-    }
-    const openUrl = payload.data?.open_url;
-    if (openUrl) {
-      const anchor = document.createElement("a");
-      anchor.href = openUrl;
-      anchor.rel = "noopener noreferrer";
-      anchor.style.display = "none";
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-    }
-  }, [lang]);
-
   const syncProcessAccount = useCallback(async (accountId: string) => {
     const refreshed = await refreshFromServer();
     return refreshed.find((row) => row.accountId === accountId) ?? null;
@@ -301,7 +320,11 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
 
   const verificationModalOpen = Boolean(
     processModal?.mode === "connect"
-    && processModal.connectProgress?.connect_status === "verification_required"
+    && (
+      processModal.connectProgress?.connect_status === "verification_required"
+      || processModal.connectProgress?.connect_status === "verification_code_accepted"
+      || processModal.connectProgress?.connect_status === "verification_resume_active"
+    )
     && processModal.connectProgress.action_required
     && !verificationDismissed,
   );
@@ -310,6 +333,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     const connectPollingActive = processModal?.mode === "connect"
       && (
         processModal.connectPhase === "polling"
+        || processModal.connectPhase === "long_running"
         || isActiveClientConnectStatus(processModal.connectProgress?.connect_status)
       )
       && !isTerminalConnectProgress(processModal.connectProgress);
@@ -328,7 +352,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
       try {
         let connectProgress = processModal?.connectProgress ?? null;
         if (mode === "connect") {
-          connectProgress = await syncConnectProgress(accountId);
+          connectProgress = await syncConnectProgress(accountId, processModal?.connectOperationToken);
         }
         const account = await syncProcessAccount(accountId);
         if (!account) return;
@@ -341,6 +365,11 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
             connectPhase: isActiveClientConnectStatus(connectProgress?.connect_status) ? "polling" : "polling",
             addPhase: current.addPhase === "refreshing" ? "complete" : current.addPhase,
           };
+          if (mode === "connect" && connectProgress && !isActiveClientConnectStatus(connectProgress.connect_status)) {
+            stopProcessPolling();
+            setVerificationDismissed(true);
+            return null;
+          }
           if (mode === "connect" && connectProgress?.connect_status === "verification_required") {
             setVerificationDismissed(false);
           }
@@ -394,7 +423,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     try {
       const accountId = processModal.accountId;
       const connectProgress = processModal.mode === "connect"
-        ? await syncConnectProgress(accountId)
+        ? await syncConnectProgress(accountId, processModal.connectOperationToken)
         : processModal.connectProgress ?? null;
       const account = await syncProcessAccount(accountId);
       if (account) {
@@ -578,7 +607,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
             : { dry_run: false, mode: "connect_enqueue" },
         ),
       });
-      const payload = await parseClientApiResponse<{
+      type ConnectResponseData = {
         account?: ClientInstagramAccountView & { clientReadinessStatus?: string };
         request_queued?: boolean;
         connected?: boolean;
@@ -586,10 +615,13 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         connectStatus?: string;
         message?: string;
         client_readiness_status?: string;
-      }>(response, lang);
+        connect_operation_token?: string;
+      };
 
-      const responseData = payload.data ?? payload;
-      const connectStatus = typeof payload.status === "string" ? payload.status : responseData?.connectStatus;
+      const payload = await parseClientApiResponse<ConnectResponseData>(response, lang);
+
+      const responseData: ConnectResponseData = payload.data ?? {};
+      const connectStatus = typeof payload.status === "string" ? payload.status : responseData.connectStatus;
 
       if (!response.ok || payload.ok === false) {
         const safeMessage = responseData?.message
@@ -633,9 +665,12 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
             connected: responseData?.connected,
           });
         if (pending) nextAccount = { ...nextAccount, operationPending: true };
+        const connectOperationToken = typeof responseData?.connect_operation_token === "string"
+          ? responseData.connect_operation_token.trim()
+          : "";
         let connectProgress: ClientConnectProgressSnapshot | null = null;
         try {
-          connectProgress = await syncConnectProgress(account.accountId);
+          connectProgress = await syncConnectProgress(account.accountId, connectOperationToken || null);
         } catch {
           connectProgress = null;
         }
@@ -649,6 +684,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
           account: nextAccount,
           connectPhase: terminal ? "complete" : "polling",
           connectProgress,
+          connectOperationToken: connectOperationToken || null,
           timedOut: false,
         });
         return;
@@ -661,7 +697,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
       if (pending) nextAccount = { ...nextAccount, operationPending: true };
 
       const terminal = mode === "check_readiness"
-        ? (readinessStatus === "ready_to_connect" || readinessStatus === "already_connected" || isTerminalProcessAccount(nextAccount, mode, lang))
+        ? true
         : isTerminalProcessAccount(nextAccount, mode, lang);
       setProcessModal({
         mode,
@@ -808,6 +844,18 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                           : ui.connectLabel}
                       </button>
                     ) : null}
+                    {ui.showCancelRestart ? (
+                      <button
+                        type="button"
+                        className="cd-btn cd-btn-soft cd-btn-compact"
+                        disabled={busy || Boolean(processModal)}
+                        onClick={() => setCancelConfirmAccount(account)}
+                      >
+                        {busy && actionKind === "cancel"
+                          ? labelFor(lang, "Annulation…", "Canceling…")
+                          : ui.cancelRestartLabel}
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -878,7 +926,6 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         onRefresh={() => void handleProcessRefresh()}
         onClose={closeProcessModal}
         onOpenVerification={() => setVerificationDismissed(false)}
-        onOpenBotAppPhone={processModal?.accountId ? () => handleOpenBotAppPhone(processModal.accountId!) : undefined}
       />
 
       <ClientVerificationModal
@@ -891,13 +938,55 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         onClose={() => setVerificationDismissed(true)}
         onSubmitted={() => {
           if (!processModal?.accountId) return;
-          void syncConnectProgress(processModal.accountId).then((snapshot) => {
+          void syncConnectProgress(processModal.accountId, processModal.connectOperationToken).then((snapshot) => {
             setProcessModal((current) => current ? { ...current, connectProgress: snapshot } : current);
           });
           void syncProcessAccount(processModal.accountId);
         }}
-        onOpenBotAppPhone={processModal?.accountId ? () => handleOpenBotAppPhone(processModal.accountId!) : undefined}
       />
+
+      {cancelConfirmAccount ? (
+        <div className="cd-progress-overlay" role="presentation" onMouseDown={() => !actionBusy && setCancelConfirmAccount(null)}>
+          <section
+            className="cd-progress-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cd-cancel-restart-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h3 id="cd-cancel-restart-title">
+              {labelFor(lang, "Annuler et recommencer ?", "Cancel and start over?")}
+            </h3>
+            <p className="cd-connect-copy">
+              {labelFor(
+                lang,
+                "La tentative de connexion en cours sera annulée. Vous pourrez ensuite vérifier la préparation avant de reconnecter le compte.",
+                "The current connection attempt will be canceled. You can then check readiness before connecting the account again.",
+              )}
+            </p>
+            <div className="cd-connect-actions">
+              <button
+                type="button"
+                className="cd-btn cd-btn-primary"
+                disabled={actionBusy}
+                onClick={() => void confirmCancelRestart()}
+              >
+                {actionKind === "cancel"
+                  ? labelFor(lang, "Annulation…", "Canceling…")
+                  : labelFor(lang, "Annuler et recommencer", "Cancel and start over")}
+              </button>
+              <button
+                type="button"
+                className="cd-btn cd-btn-soft"
+                disabled={actionBusy}
+                onClick={() => setCancelConfirmAccount(null)}
+              >
+                {labelFor(lang, "Retour", "Back")}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }

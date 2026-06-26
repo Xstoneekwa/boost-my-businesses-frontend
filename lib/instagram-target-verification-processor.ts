@@ -8,6 +8,16 @@ import {
   type TargetActorType,
   type TargetVerificationDecision,
 } from "./instagram-targets.ts";
+import { reevaluateNeedsMoreTargetAccountsAfterTargetMutation } from "./instagram-dashboard/needs-more-target-accounts.ts";
+import {
+  buildPeriodicSchedulePatchAfterTerminal,
+  isPeriodicRevalidationBatchId,
+  shouldAdvancePeriodicSchedule,
+} from "./target-periodic-revalidation.ts";
+import {
+  resolveTargetVerificationHygiene,
+  type TargetHygieneExistingRow,
+} from "./target-verification-hygiene.ts";
 
 export type SupabaseRecord = Record<string, unknown>;
 
@@ -167,6 +177,47 @@ async function tryRecordTargetAudit(
   } catch {
     // CT verification audit is best-effort; processor responses carry safe summary counts.
   }
+}
+
+async function loadTargetForHygiene(
+  supabase: TargetVerificationSupabaseClient,
+  job: ClaimedJob,
+) {
+  const { data, error } = await supabase
+    .from("ig_targets")
+    .select("id,account_id,normalized_username,target_username,canonical_username,input_username,status,quality_status,verification_status,metadata_safe,archived_at,deleted_at")
+    .eq("id", job.target_id)
+    .eq("account_id", job.account_id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as TargetHygieneExistingRow;
+}
+
+async function loadActiveTargetUsernames(
+  supabase: TargetVerificationSupabaseClient,
+  accountId: string,
+  excludeTargetId: string,
+) {
+  const { data, error } = await supabase
+    .from("ig_targets")
+    .select("id,normalized_username,target_username,status,archived_at,deleted_at")
+    .eq("account_id", accountId)
+    .limit(500);
+
+  if (error) return [] as string[];
+
+  return (data ?? [])
+    .filter((row) => {
+      const record = row as SupabaseRecord;
+      if (readString(record.id, "") === excludeTargetId) return false;
+      const status = readString(record.status, "").toLowerCase();
+      if (status === "archived" || status === "deleted") return false;
+      if (readString(record.archived_at, "") || readString(record.deleted_at, "")) return false;
+      return true;
+    })
+    .map((row) => readString((row as SupabaseRecord).normalized_username, readString((row as SupabaseRecord).target_username, "")).toLowerCase())
+    .filter(Boolean);
 }
 
 async function isTargetStillVerifiable(
@@ -351,17 +402,49 @@ export async function processTargetVerificationBatch(
         now: currentNow,
       });
       const nowIso = currentNow.toISOString();
-
-      const { error: targetError } = await supabase
-        .from("ig_targets")
-        .update({
-          ...jobDecision.targetPatch,
-          updated_at: nowIso,
+      const existingTarget = await loadTargetForHygiene(supabase, job);
+      const activeUsernames = existingTarget
+        ? await loadActiveTargetUsernames(supabase, job.account_id, job.target_id)
+        : [];
+      const hygiene = existingTarget
+        ? resolveTargetVerificationHygiene({
+          existingTarget,
+          jobDecision,
+          decision,
+          now: currentNow,
+          activeUsernames,
         })
-        .eq("id", job.target_id)
-        .eq("account_id", job.account_id);
+        : {
+          shouldApplyTargetPatch: true,
+          targetPatch: jobDecision.targetPatch,
+          auditReason: jobDecision.auditReason,
+          hygieneAction: "apply_quality_decision" as const,
+          shouldReevaluateNeedsMoreTargets: jobDecision.jobStatus !== "retry_scheduled",
+        };
 
-      if (targetError) throw new Error(targetError.message || "target_update_failed");
+      const periodicPatch = shouldAdvancePeriodicSchedule({
+        batchId: job.batch_id,
+        jobStatus: jobDecision.jobStatus,
+        hygieneAction: hygiene.hygieneAction,
+      })
+        ? buildPeriodicSchedulePatchAfterTerminal(currentNow, hygiene.hygieneAction)
+        : isPeriodicRevalidationBatchId(job.batch_id) && jobDecision.jobStatus !== "retry_scheduled" && hygiene.hygieneAction === "none"
+          ? { periodic_revalidation_window_key: null }
+          : {};
+
+      if (hygiene.shouldApplyTargetPatch || Object.keys(periodicPatch).length > 0) {
+        const { error: targetError } = await supabase
+          .from("ig_targets")
+          .update({
+            ...(hygiene.shouldApplyTargetPatch ? hygiene.targetPatch : {}),
+            ...periodicPatch,
+            updated_at: nowIso,
+          })
+          .eq("id", job.target_id)
+          .eq("account_id", job.account_id);
+
+        if (targetError) throw new Error(targetError.message || "target_update_failed");
+      }
 
       const { error: jobError } = await supabase
         .from("ct_target_verification_jobs")
@@ -384,6 +467,8 @@ export async function processTargetVerificationBatch(
         summary.provider_error_count += 1;
       }
       if (jobDecision.jobStatus === "retry_scheduled") summary.retry_scheduled_count += 1;
+      else if (hygiene.hygieneAction === "rename_confirmed" || hygiene.targetPatch.status === "valid") summary.succeeded_count += 1;
+      else if (hygiene.hygieneAction === "archive_not_found" || hygiene.hygieneAction === "archive_verified") summary.rejected_count += 1;
       else if (jobDecision.targetPatch.status === "valid") summary.succeeded_count += 1;
       else if (jobDecision.targetPatch.status === "rejected") summary.rejected_count += 1;
       else if (jobDecision.targetPatch.status === "review") summary.review_count += 1;
@@ -393,9 +478,16 @@ export async function processTargetVerificationBatch(
         targetId: job.target_id,
         batchId: job.batch_id,
         result: jobDecision.auditResult,
-        reason: jobDecision.auditReason,
+        reason: hygiene.auditReason || jobDecision.auditReason,
         actorType: "system",
       });
+
+      if (jobDecision.jobStatus !== "retry_scheduled" && hygiene.shouldReevaluateNeedsMoreTargets) {
+        await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(
+          job.account_id,
+          `target_verification_${hygiene.hygieneAction}`,
+        );
+      }
 
       if (decision.verification_status === "rate_limited") {
         stoppedEarlyReason = "rate_limited";

@@ -1,6 +1,13 @@
-import { createSupabaseClient } from "@/lib/supabase";
-import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
-import { ACTIVE_RUN_REQUEST_STATUSES } from "@/lib/instagram-dashboard/run-control";
+import { createSupabaseClient } from "../supabase.ts";
+import { ACTIVE_RUN_REQUEST_STATUSES } from "./run-request-statuses.ts";
+
+type SupabaseRecord = Record<string, unknown>;
+
+function readString(value: unknown, fallback = "") {
+  if (typeof value === "string") return value.trim() || fallback;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return fallback;
+}
 
 export const ORPHAN_RECOVERY_RUN_TYPE = "login_orphan_challenge_recovery" as const;
 

@@ -45,6 +45,25 @@ The browser never calls BotApp directly. Saving a template does not enqueue send
 - **Welcome (Growth)** — `/instagram-client/change-plan?intention=welcome_dm&target=pro`
 - **Outreach** — `/instagram-client/activate-outreach?account_id=…&addon=outreach_standard` (price from `OUTREACH_ADDONS`; no frontend activation)
 
+## Canonical account relations
+
+| Role | Table | Fields used |
+|------|-------|-------------|
+| Client ↔ account link | `client_instagram_accounts` | `client_id`, `account_id`, `login_status`, `onboarding_status`, `provisioning_status` |
+| Instagram identity | `ig_accounts` | `id`, `username`, `status`, `admin_lifecycle_status` |
+| Commercial package per account | `account_commercial_packages` / `account_package_summary` | `package_code`, `commercial_package_code` |
+
+Username is always read from `ig_accounts`, never from the link table.
+
+## Client subscription label priority
+
+1. Entitlement `plan_key` when it is a known commercial plan (`growth` / `pro` / `premium`)
+2. Entitlement `commercial_package_code` when `plan_key` is a runtime code (`full_cycle`, etc.)
+3. Best active linked account package (Premium > Pro > Growth)
+4. Activated checkout session `plan_key`
+5. Active `client_subscriptions.metadata` plan hint
+6. « Formule en cours d'activation » only when none of the above apply
+
 ## Tests
 
 ```bash

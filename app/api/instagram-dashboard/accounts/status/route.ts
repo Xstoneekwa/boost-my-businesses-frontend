@@ -10,6 +10,7 @@ import {
   type SupabaseRecord,
 } from "../../_utils";
 import { verifyCompassRelayKey } from "../../compass/relay-auth";
+import { reconcileClientAccountNotificationsForAccount } from "@/lib/instagram-client/client-account-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -236,6 +237,8 @@ export async function PATCH(request: Request) {
       reason,
       metadata,
     }).catch(() => undefined);
+
+    await reconcileClientAccountNotificationsForAccount(supabase, accountId);
 
     return jsonOk({
       account_id: accountId,

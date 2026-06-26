@@ -81,6 +81,8 @@ export function targetDecisionFromLookup(lookup: InstagramPublicProfileLookupRes
     provider_status: lookup.status,
     normalized_username: lookup.input_username,
     canonical_username: lookup.canonical_username || lookup.input_username,
+    instagram_user_id: lookup.instagram_user_id,
+    external_profile_id: lookup.external_profile_id,
     avatar_url: safeInstagramPublicAvatarUrl(lookup.avatar_url),
     followers_count: lookup.followers_count,
     is_verified: lookup.is_verified,

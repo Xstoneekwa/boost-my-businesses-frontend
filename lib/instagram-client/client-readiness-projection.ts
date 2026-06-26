@@ -1,4 +1,4 @@
-import type { ReadinessNowResult } from "@/lib/instagram-dashboard/readiness-now";
+import type { ReadinessNowResult } from "../instagram-dashboard/readiness-now.ts";
 
 export type ClientReadinessStatus =
   | "ready_to_connect"

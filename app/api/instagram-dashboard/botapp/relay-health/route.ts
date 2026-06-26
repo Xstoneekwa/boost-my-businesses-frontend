@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { jsonOk } from "../../_utils";
 import {
+  compassRelayAuthFailureReason,
   configuredRelayKey,
   readRelayKey,
   relayAuthStatus,
@@ -20,6 +21,7 @@ const BOTAPP_ROUTES = {
   targets: "/api/instagram-dashboard/targets",
   runs_start: "/api/instagram-dashboard/runs/start",
   runs_progress: "/api/instagram-dashboard/runs/progress",
+  open_device_view: "/api/instagram-dashboard/botapp/open-device-view",
 } as const;
 
 function routeStatus(authenticated: boolean) {
@@ -61,7 +63,7 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json(
-    { ok: false, error: "BotApp relay authentication failed.", data: diagnostics, reason: relayAuth.reason },
-    { status: relayAuthStatus(relayAuth.reason) },
+    { ok: false, error: "BotApp relay authentication failed.", data: diagnostics, reason: compassRelayAuthFailureReason(relayAuth) },
+    { status: relayAuthStatus(compassRelayAuthFailureReason(relayAuth)) },
   );
 }

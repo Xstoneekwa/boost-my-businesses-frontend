@@ -43,3 +43,10 @@ test("client accounts lifecycle actions are real and expose disabled reasons", (
   assert.match(statusRouteSource, /Resolve credential reauth before reactivation/);
   assert.match(statusRouteSource, /Cannot cancel while a run or run request is active/);
 });
+
+test("client accounts relay projects needs more targets fields", () => {
+  assert.match(dataSource, /needsMoreTargets/);
+  assert.match(dataSource, /eligibleTargetCount/);
+  assert.match(dataSource, /loadNeedsMoreTargetAccountsProjectionForAccounts/);
+  assert.match(routeSource, /accounts: clientAccounts\.items/);
+});

@@ -2,6 +2,7 @@ import { createSupabaseClient } from "@/lib/supabase";
 import {
   createLoginEmailCodeResumeRunRequest,
   evaluateLoginChallengeRunEligibility,
+  isActiveResumeRequestStatus,
 } from "@/lib/instagram-dashboard/run-control";
 import { readString } from "@/app/api/instagram-dashboard/_utils";
 
@@ -32,8 +33,10 @@ export type SubmitVerificationCodeResult =
       account_id: string;
       status: string;
       submission_id: string | null;
+      code_persisted: boolean;
       resume_queued: boolean;
       resume_already_queued: boolean;
+      resume_active: boolean;
       resume_request_id: string | null;
       resume_request_status: string | null;
       resume_queue_reason: string | null;
@@ -44,6 +47,7 @@ export type SubmitVerificationCodeResult =
       status: number;
       message: string;
       code?: string;
+      code_persisted?: boolean;
     };
 
 function mapRpcError(errorMessage: string): { status: number; message: string; code?: string } {
@@ -70,7 +74,7 @@ export async function assertActiveEmailVerificationAction(input: {
 }) {
   const { data, error } = await input.supabase
     .from("account_dashboard_actions")
-    .select("id,account_id,action_type,status")
+    .select("id,account_id,action_type,status,metadata")
     .eq("id", input.actionId)
     .eq("account_id", input.accountId)
     .eq("action_type", EMAIL_CODE_ACTION)
@@ -87,7 +91,124 @@ export async function assertActiveEmailVerificationAction(input: {
   if (!ACTIVE_EMAIL_CODE_STATUSES.has(status)) {
     return { ok: false as const, status: 409, message: "Verification is no longer required for this account.", code: "verification_action_inactive" };
   }
-  return { ok: true as const };
+  return { ok: true as const, row: data as Record<string, unknown> };
+}
+
+async function readExistingSubmissionId(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  actionId: string,
+  accountId: string,
+  actionRow?: Record<string, unknown> | null,
+) {
+  const metadata = actionRow?.metadata && typeof actionRow.metadata === "object" && !Array.isArray(actionRow.metadata)
+    ? actionRow.metadata as Record<string, unknown>
+    : {};
+  const metadataSubmissionId = readString(metadata.verification_submission_id, "");
+  if (metadataSubmissionId) return metadataSubmissionId;
+
+  const { data } = await supabase
+    .from("account_verification_code_submissions")
+    .select("id")
+    .eq("action_id", actionId)
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return readString((data as Record<string, unknown> | null)?.id, "");
+}
+
+async function mergeActionResumeMetadata(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: {
+    actionId: string;
+    accountId: string;
+    submissionId: string;
+    resumeRequestId: string;
+    resumeRequestStatus: string;
+  },
+) {
+  const { data: actionRow } = await supabase
+    .from("account_dashboard_actions")
+    .select("metadata")
+    .eq("id", input.actionId)
+    .eq("account_id", input.accountId)
+    .eq("action_type", EMAIL_CODE_ACTION)
+    .limit(1)
+    .maybeSingle();
+
+  const existingMetadata = actionRow?.metadata && typeof actionRow.metadata === "object" && !Array.isArray(actionRow.metadata)
+    ? actionRow.metadata as Record<string, unknown>
+    : {};
+
+  await supabase
+    .from("account_dashboard_actions")
+    .update({
+      metadata: {
+        ...existingMetadata,
+        resume_request_id: input.resumeRequestId,
+        resume_status: isActiveResumeRequestStatus(input.resumeRequestStatus) ? input.resumeRequestStatus : "queued",
+        resume_submission_id: input.submissionId,
+        source: "dashboard_code_submit",
+      },
+    })
+    .eq("id", input.actionId)
+    .eq("account_id", input.accountId)
+    .eq("action_type", EMAIL_CODE_ACTION);
+}
+
+async function enqueueVerificationResume(input: {
+  accountId: string;
+  actionId: string;
+  submissionId: string;
+  actorId: string;
+  resumeActorType: "admin" | "system";
+}) {
+  try {
+    const eligibility = await evaluateLoginChallengeRunEligibility(input.accountId, "login_email_code_resume");
+    if (!eligibility.ok) {
+      return {
+        resumeQueued: false,
+        resumeAlreadyQueued: false,
+        resumeActive: false,
+        resumeRequestId: null as string | null,
+        resumeRequestStatus: null as string | null,
+        resumeQueueReason: eligibility.reason,
+      };
+    }
+
+    const resumeResult = await createLoginEmailCodeResumeRunRequest({
+      accountId: input.accountId,
+      actionId: input.actionId,
+      submissionId: input.submissionId,
+      actorId: input.actorId,
+      actorType: input.resumeActorType,
+    });
+
+    const resumeActive = Boolean(
+      resumeResult.requestId
+      && (resumeResult.queued || isActiveResumeRequestStatus(resumeResult.requestStatus)),
+    );
+
+    return {
+      resumeQueued: resumeResult.queued,
+      resumeAlreadyQueued: resumeResult.idempotent && resumeActive,
+      resumeActive,
+      resumeRequestId: resumeResult.requestId,
+      resumeRequestStatus: resumeResult.requestStatus,
+      resumeQueueReason: resumeResult.reason,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "resume_enqueue_failed";
+    return {
+      resumeQueued: false,
+      resumeAlreadyQueued: false,
+      resumeActive: false,
+      resumeRequestId: null as string | null,
+      resumeRequestStatus: null as string | null,
+      resumeQueueReason: message,
+    };
+  }
 }
 
 export async function submitAccountVerificationCode(input: SubmitVerificationCodeInput): Promise<SubmitVerificationCodeResult> {
@@ -105,81 +226,86 @@ export async function submitAccountVerificationCode(input: SubmitVerificationCod
     return { ok: false, status: actionCheck.status, message: actionCheck.message, code: actionCheck.code };
   }
 
-  const { data, error } = await supabase.rpc("submit_account_verification_code", {
-    p_action_id: actionId,
-    p_account_id: accountId,
-    p_verification_code: verificationCode,
-    p_actor_type: input.actorType,
-    p_actor_id: input.actorId,
-    p_metadata: {
-      source: input.metadataSource,
-    },
-  });
+  const actionStatus = readString(actionCheck.row.status, "").toLowerCase();
+  let submissionId = "";
+  let persistedStatus = actionStatus;
 
-  if (error) {
-    const mapped = mapRpcError(error.message);
-    return { ok: false, ...mapped };
+  if (actionStatus === "code_submitted") {
+    submissionId = await readExistingSubmissionId(supabase, actionId, accountId, actionCheck.row);
   }
 
-  const submissionId = readString((data as Record<string, unknown> | null)?.submission_id, "");
-  const actionStatus = readString((data as Record<string, unknown> | null)?.status, "code_submitted");
+  if (!submissionId) {
+    const { data, error } = await supabase.rpc("submit_account_verification_code", {
+      p_action_id: actionId,
+      p_account_id: accountId,
+      p_verification_code: verificationCode,
+      p_actor_type: input.actorType,
+      p_actor_id: input.actorId,
+      p_metadata: {
+        source: input.metadataSource,
+      },
+    });
 
-  let resumeQueued = false;
-  let resumeAlreadyQueued = false;
-  let resumeRequestId: string | null = null;
-  let resumeRequestStatus: string | null = null;
-  let resumeQueueReason: string | null = null;
-
-  if (submissionId) {
-    const eligibility = await evaluateLoginChallengeRunEligibility(accountId, "login_email_code_resume");
-    if (eligibility.ok) {
-      const resumeResult = await createLoginEmailCodeResumeRunRequest({
-        accountId,
-        actionId,
-        submissionId,
-        actorId: input.actorId,
-        actorType: input.resumeActorType,
-      });
-      resumeQueued = resumeResult.queued;
-      resumeAlreadyQueued = resumeResult.idempotent;
-      resumeRequestId = resumeResult.requestId;
-      resumeRequestStatus = resumeResult.requestStatus;
-      resumeQueueReason = resumeResult.reason;
-
-      if (resumeResult.requestId) {
-        await supabase
-          .from("account_dashboard_actions")
-          .update({
-            metadata: {
-              resume_request_id: resumeResult.requestId,
-              resume_status: resumeResult.requestStatus === "running" ? "running" : "queued",
-              resume_submission_id: submissionId,
-              source: "dashboard_code_submit",
-            },
-          })
-          .eq("id", actionId)
-          .eq("account_id", accountId)
-          .eq("action_type", EMAIL_CODE_ACTION);
+    if (error) {
+      const mapped = mapRpcError(error.message);
+      if (mapped.code === "verification_code_already_consumed") {
+        submissionId = await readExistingSubmissionId(supabase, actionId, accountId, actionCheck.row);
+        if (!submissionId) {
+          return { ok: false, ...mapped };
+        }
+        persistedStatus = "code_submitted";
+      } else {
+        return { ok: false, ...mapped };
       }
     } else {
-      resumeQueueReason = eligibility.reason;
+      submissionId = readString((data as Record<string, unknown> | null)?.submission_id, "");
+      persistedStatus = readString((data as Record<string, unknown> | null)?.status, "code_submitted");
     }
+  }
+
+  if (!submissionId) {
+    return {
+      ok: false,
+      status: 500,
+      message: "Verification code submission failed.",
+      code: "verification_code_submit_failed",
+    };
+  }
+
+  const resume = await enqueueVerificationResume({
+    accountId,
+    actionId,
+    submissionId,
+    actorId: input.actorId,
+    resumeActorType: input.resumeActorType,
+  });
+
+  if (resume.resumeActive && resume.resumeRequestId) {
+    await mergeActionResumeMetadata(supabase, {
+      actionId,
+      accountId,
+      submissionId,
+      resumeRequestId: resume.resumeRequestId,
+      resumeRequestStatus: resume.resumeRequestStatus || "queued",
+    });
   }
 
   return {
     ok: true,
     action_id: actionId,
     account_id: accountId,
-    status: actionStatus,
-    submission_id: submissionId || null,
-    resume_queued: resumeQueued,
-    resume_already_queued: resumeAlreadyQueued,
-    resume_request_id: resumeRequestId,
-    resume_request_status: resumeRequestStatus,
-    resume_queue_reason: resumeQueueReason,
-    message: resumeQueued
+    status: persistedStatus || "code_submitted",
+    submission_id: submissionId,
+    code_persisted: true,
+    resume_queued: resume.resumeQueued,
+    resume_already_queued: resume.resumeAlreadyQueued,
+    resume_active: resume.resumeActive,
+    resume_request_id: resume.resumeRequestId,
+    resume_request_status: resume.resumeRequestStatus,
+    resume_queue_reason: resume.resumeQueueReason,
+    message: resume.resumeActive
       ? "Verification code stored securely. Login resume queued for the worker."
-      : resumeAlreadyQueued
+      : resume.resumeAlreadyQueued
       ? "Verification code stored securely. Login resume was already queued."
       : "Verification code stored securely and ready for worker resume.",
   };
@@ -193,6 +319,7 @@ export function clientSafeVerificationSubmitMessage(lang: "fr" | "en", code?: st
     dashboard_action_not_found: "Action de vérification introuvable.",
     verification_payload_invalid: "Code de vérification invalide.",
     verification_code_submit_failed: "Impossible d'envoyer le code pour le moment.",
+    verification_resume_unavailable: "Code enregistré, mais la reprise automatique n'a pas pu démarrer.",
   };
   const en: Record<string, string> = {
     verification_code_invalid: "Invalid or expired code.",
@@ -201,6 +328,7 @@ export function clientSafeVerificationSubmitMessage(lang: "fr" | "en", code?: st
     dashboard_action_not_found: "Verification action not found.",
     verification_payload_invalid: "Invalid verification code.",
     verification_code_submit_failed: "Could not submit the code right now.",
+    verification_resume_unavailable: "Code saved, but automatic resume could not start.",
   };
   if (code && (fr[code] || en[code])) {
     return lang === "fr" ? fr[code] : en[code];

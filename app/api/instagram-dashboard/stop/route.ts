@@ -6,8 +6,9 @@ import {
   reconcileLinkedIgRunTerminal,
   sanitizeRunControlReason,
 } from "@/lib/instagram-dashboard/run-control";
+import { clearStaleClientConnectChallengeProjection } from "@/lib/instagram-client/clear-stale-client-connect-projection";
 import { getAccountId, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../_utils";
-import { relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
   if (!relayAuth.ok) {
-    return jsonError("Run stop relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+    return jsonError("Run stop relay authentication failed.", relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), { reason: compassRelayAuthFailureReason(relayAuth) });
   }
   return requireInstagramAdmin();
 }
@@ -156,11 +157,25 @@ export async function POST(request: Request) {
       return jsonError(logError.message, 500);
     }
 
+    const projectionCleanup = await clearStaleClientConnectChallengeProjection(
+      supabase,
+      accountId,
+      stopReason,
+    ).catch(() => ({
+      cleared: false,
+      reason: "projection_cleanup_failed",
+      login_status: null,
+      provisioning_status: null,
+    }));
+
     return jsonOk({
       stopped: runStopped || Boolean(runId),
       canceled_request: Boolean(canceledRequestId),
       request_status: canceledRequestStatus,
       orphan_reconciled: orphanReconciled,
+      client_connect_projection_cleared: projectionCleanup.cleared === true,
+      client_login_status: projectionCleanup.login_status ?? null,
+      client_provisioning_status: projectionCleanup.provisioning_status ?? null,
       message: runStopped
         ? "Run stop requested."
         : canceledRequestId

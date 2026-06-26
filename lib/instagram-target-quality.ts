@@ -35,6 +35,8 @@ export type TargetQualityEvaluationInput = {
   provider_status?: string | null;
   normalized_username?: string | null;
   canonical_username?: string | null;
+  instagram_user_id?: string | null;
+  external_profile_id?: string | null;
   followers_count?: number | null;
   is_verified?: boolean | null;
   is_private?: boolean | null;
@@ -50,6 +52,8 @@ export type TargetQualityDecision = {
   verification_reason: string;
   quality_status: TargetQualityStatus;
   canonical_username: string | null;
+  instagram_user_id: string | null;
+  external_profile_id: string | null;
   avatar_url: string | null;
   followers_count: number | null;
   is_verified: boolean | null;
@@ -71,19 +75,26 @@ function normalizedText(value: string | null | undefined) {
 }
 
 function baseDecision(input: TargetQualityEvaluationInput, reason: string): TargetQualityDecision {
+  const metadata = {
+    ...(input.metadata_safe ?? {}),
+    ...(input.instagram_user_id ? { instagram_user_id: input.instagram_user_id } : {}),
+    ...(input.external_profile_id ? { external_profile_id: input.external_profile_id } : {}),
+  };
   return {
     status: "pending_verification",
     verification_status: "pending",
     verification_reason: safeTargetQualityReason(reason),
     quality_status: "unknown",
     canonical_username: input.canonical_username || null,
+    instagram_user_id: input.instagram_user_id || null,
+    external_profile_id: input.external_profile_id || null,
     avatar_url: input.avatar_url || null,
     followers_count: typeof input.followers_count === "number" && Number.isFinite(input.followers_count) ? input.followers_count : null,
     is_verified: typeof input.is_verified === "boolean" ? input.is_verified : null,
     is_private: typeof input.is_private === "boolean" ? input.is_private : null,
     provider_checked_at: input.provider_checked_at || null,
     rejected_reason: null,
-    metadata_safe: input.metadata_safe ?? {},
+    metadata_safe: metadata,
     severity: "info",
     sync_visibility: "admin_client_botapp",
     warning: input.avatar_url ? null : "avatar_missing",

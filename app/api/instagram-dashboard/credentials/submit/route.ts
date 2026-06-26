@@ -4,6 +4,7 @@ import {
   parseLoginEmailInput,
   persistAccountLoginEmail,
 } from "@/lib/instagram-dashboard/persist-account-login-email";
+import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
 import {
   getInstagramAdminUserContext,
   jsonError,
@@ -65,13 +66,6 @@ async function requireRelayOrAdmin(request: Request) {
   return { mode: "admin_session" as const, userId: adminContext.userId ?? null };
 }
 
-function credentialsConfig() {
-  const url = process.env.INSTAGRAM_CREDENTIALS_API_URL?.trim();
-  const token = process.env.INSTAGRAM_CREDENTIALS_INTERNAL_API_TOKEN?.trim();
-  if (!url || !token) return null;
-  return { url, token };
-}
-
 function normalizeUsername(value: unknown) {
   return readString(value, "").trim().replace(/^@+/, "").toLowerCase();
 }
@@ -129,7 +123,7 @@ async function callCredentialsService(input: {
   actorMode: "relay_key" | "admin_session";
   actorId: string | null;
 }) {
-  const config = credentialsConfig();
+  const config = resolveServerCredentialsConfig();
   if (!config) throw new Error("credentials_api_not_configured");
 
   const controller = new AbortController();

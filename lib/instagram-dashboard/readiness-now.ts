@@ -1,6 +1,10 @@
-import { resolveOrphanLoginRecoveryProjection, clientSecurePreparationMessage } from "@/lib/instagram-dashboard/orphan-login-recovery";
+import { resolveOrphanLoginRecoveryProjection, clientSecurePreparationMessage } from "./orphan-login-recovery.ts";
+import { loadTargetEligibilityCountsForAccount } from "./account-target-eligibility.ts";
+import type { createSupabaseClient } from "../supabase.ts";
 
 export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
+
+export type ReadinessNowAudience = "client" | "admin";
 
 export type ReadinessNowClientStatus =
   | "connected_ready"
@@ -118,10 +122,10 @@ function clientMessage(status: ReadinessNowClientStatus) {
   }[status];
 }
 
-function safeResult(input: Omit<ReadinessNowResult, "client_message">): ReadinessNowResult {
+function safeResult(input: Omit<ReadinessNowResult, "client_message"> & { client_message?: string }): ReadinessNowResult {
   const result: ReadinessNowResult = {
     ...input,
-    client_message: clientMessage(input.client_status),
+    client_message: input.client_message ?? clientMessage(input.client_status),
   };
   if (input.audience === "client") {
     delete result.assignment_status;
@@ -168,37 +172,10 @@ async function selectOneOptional(supabase: ReadinessNowSupabase, table: string, 
 }
 
 async function countAccountTargets(supabase: ReadinessNowSupabase, accountId: string): Promise<TargetCounts> {
-  const empty = { total: 0, valid: 0, eligible: 0, pending: 0, rejected: 0, archived: 0 };
-  try {
-    const result = await query(supabase, "ig_targets")
-      .select("id,status,quality_status,verification_status,archived_at,deleted_at")
-      .eq("account_id", accountId)
-      .limit(500) as QueryResult;
-    if (result.error) return empty;
-    const rows = readRows(result.data);
-    const activeRows = rows.filter((row) => {
-      const status = normalize(row.status);
-      return status !== "archived" && status !== "deleted" && !readString(row.archived_at) && !readString(row.deleted_at);
-    });
-    const eligibleRows = activeRows.filter((row) => {
-      const status = normalize(row.status);
-      const quality = normalize(row.quality_status);
-      const verification = normalize(row.verification_status);
-      return ["valid", "active"].includes(status)
-        && (!quality || quality === "eligible")
-        && (!verification || verification === "found");
-    });
-    return {
-      total: activeRows.length,
-      valid: activeRows.filter((row) => ["valid", "active"].includes(normalize(row.status))).length,
-      eligible: eligibleRows.length,
-      pending: activeRows.filter((row) => ["pending", "pending_verification", "review"].includes(normalize(row.status)) || normalize(row.quality_status) === "unknown" || normalize(row.quality_status).startsWith("review_")).length,
-      rejected: activeRows.filter((row) => normalize(row.status) === "rejected" || normalize(row.quality_status).startsWith("rejected_")).length,
-      archived: rows.length - activeRows.length,
-    };
-  } catch {
-    return empty;
-  }
+  return loadTargetEligibilityCountsForAccount(
+    supabase as unknown as ReturnType<typeof createSupabaseClient>,
+    accountId,
+  );
 }
 
 const CREDENTIAL_VERIFICATION_ACTIONS = new Set(["submit_instagram_credentials", "review_credentials"]);

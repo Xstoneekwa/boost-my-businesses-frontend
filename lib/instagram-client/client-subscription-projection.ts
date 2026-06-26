@@ -15,16 +15,28 @@ export type ClientSubscriptionProjection = {
   subscriptionGrowthLabel: string;
   subscriptionPriceLabel: string;
   subscriptionSupportLabel: string;
+  resolvedPlanKey: PlanKey | null;
+  planResolutionSource: ClientPlanResolutionSource;
 };
 
 export type ClientCommercialSubscriptionRow = {
   planKey: string | null;
+  commercialPackageCode: string | null;
+  checkoutSessionPlanKey: string | null;
   billingIntervalMonths: number | null;
   periodStartAt: string | null;
   periodEndAt: string | null;
   growthEstimateLabel: string | null;
   monthlyPriceCents: number | null;
 };
+
+export type ClientPlanResolutionSource =
+  | "entitlement_plan_key"
+  | "entitlement_package_code"
+  | "checkout_session_plan_key"
+  | "linked_account_package"
+  | "client_subscription"
+  | "pending";
 
 const RUNTIME_PACKAGE_CODES = new Set([
   "full_cycle",
@@ -35,6 +47,12 @@ const RUNTIME_PACKAGE_CODES = new Set([
   "safe_setup",
   "follow_only_test",
 ]);
+
+const COMMERCIAL_PLAN_PRIORITY: Record<PlanKey, number> = {
+  premium: 100,
+  pro: 80,
+  growth: 40,
+};
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
@@ -52,8 +70,58 @@ function readMetadataString(metadata: unknown, key: string, fallback = "") {
   return readString((metadata as Row)[key], fallback);
 }
 
-function isKnownCommercialPlanKey(value: string): value is PlanKey {
+export function isKnownCommercialPlanKey(value: string): value is PlanKey {
   return value in COMMERCIAL_PLANS;
+}
+
+function pickBestLinkedAccountPlanKey(codes: string[]): PlanKey | null {
+  let best: PlanKey | null = null;
+  let bestScore = -1;
+  for (const rawCode of codes) {
+    const code = readString(rawCode).toLowerCase();
+    if (!isKnownCommercialPlanKey(code)) continue;
+    const score = COMMERCIAL_PLAN_PRIORITY[code] ?? 0;
+    if (score > bestScore) {
+      bestScore = score;
+      best = code;
+    }
+  }
+  return best;
+}
+
+export function resolveClientCommercialPlanKey(input: {
+  entitlementPlanKey?: string | null;
+  entitlementCommercialPackageCode?: string | null;
+  checkoutSessionPlanKey?: string | null;
+  linkedAccountPackageCodes?: string[];
+  subscriptionPlanKey?: string | null;
+}): { planKey: PlanKey | null; source: ClientPlanResolutionSource } {
+  const entitlementPlanKey = readString(input.entitlementPlanKey).toLowerCase();
+  if (entitlementPlanKey && isKnownCommercialPlanKey(entitlementPlanKey)) {
+    return { planKey: entitlementPlanKey, source: "entitlement_plan_key" };
+  }
+
+  const entitlementPackageCode = readString(input.entitlementCommercialPackageCode).toLowerCase();
+  if (entitlementPackageCode && isKnownCommercialPlanKey(entitlementPackageCode)) {
+    return { planKey: entitlementPackageCode, source: "entitlement_package_code" };
+  }
+
+  const linkedPlanKey = pickBestLinkedAccountPlanKey(input.linkedAccountPackageCodes ?? []);
+  if (linkedPlanKey) {
+    return { planKey: linkedPlanKey, source: "linked_account_package" };
+  }
+
+  const checkoutPlanKey = readString(input.checkoutSessionPlanKey).toLowerCase();
+  if (checkoutPlanKey && isKnownCommercialPlanKey(checkoutPlanKey)) {
+    return { planKey: checkoutPlanKey, source: "checkout_session_plan_key" };
+  }
+
+  const subscriptionPlanKey = readString(input.subscriptionPlanKey).toLowerCase();
+  if (subscriptionPlanKey && isKnownCommercialPlanKey(subscriptionPlanKey)) {
+    return { planKey: subscriptionPlanKey, source: "client_subscription" };
+  }
+
+  return { planKey: null, source: "pending" };
 }
 
 export function resolveClientPlanLabel(planKey: string | null | undefined, lang: "fr" | "en") {
@@ -111,6 +179,8 @@ export function projectClientSubscriptionDisplay(input: {
   clientCreatedAt: string | null;
   clientMetadata: Row | null;
   preferredLanguage: "fr" | "en";
+  linkedAccountPackageCodes?: string[];
+  subscriptionPlanKey?: string | null;
 }): ClientSubscriptionProjection {
   const lang = input.preferredLanguage;
   const billingPaymentMethod = readMetadataString(input.clientMetadata, "payment_method_label");
@@ -118,7 +188,14 @@ export function projectClientSubscriptionDisplay(input: {
   const nextBillingAt = readMetadataString(input.clientMetadata, "next_billing_at");
   const hasRealPaymentMethod = Boolean(billingPaymentMethod || billingProvider);
 
-  const planKey = input.commercial?.planKey ?? null;
+  const resolved = resolveClientCommercialPlanKey({
+    entitlementPlanKey: input.commercial?.planKey ?? null,
+    entitlementCommercialPackageCode: input.commercial?.commercialPackageCode ?? null,
+    checkoutSessionPlanKey: input.commercial?.checkoutSessionPlanKey ?? null,
+    linkedAccountPackageCodes: input.linkedAccountPackageCodes ?? [],
+    subscriptionPlanKey: input.subscriptionPlanKey ?? null,
+  });
+  const planKey = resolved.planKey;
   const periodEndAt = resolveSubscriptionPeriodEnd({
     periodStartAt: input.commercial?.periodStartAt ?? null,
     billingIntervalMonths: input.commercial?.billingIntervalMonths ?? null,
@@ -149,6 +226,8 @@ export function projectClientSubscriptionDisplay(input: {
     subscriptionGrowthLabel: readString(input.commercial?.growthEstimateLabel),
     subscriptionPriceLabel: formatClientMonthlyPrice(planKey, input.commercial?.monthlyPriceCents ?? null, lang),
     subscriptionSupportLabel: readMetadataString(input.clientMetadata, "support_label"),
+    resolvedPlanKey: planKey,
+    planResolutionSource: resolved.source,
   };
 }
 
@@ -180,9 +259,9 @@ export async function loadClientCommercialSubscriptionRow(
   const session = Array.isArray(sessionRows) ? sessionRows[0] as Row | undefined : undefined;
   if (!entitlement && !session) return null;
 
-  const planKey = readString(entitlement?.plan_key || session?.plan_key).toLowerCase() || null;
-  const commercialPackageCode = readString(entitlement?.commercial_package_code).toLowerCase();
-  const resolvedPlanKey = planKey || (isKnownCommercialPlanKey(commercialPackageCode) ? commercialPackageCode : null);
+  const entitlementPlanKey = readString(entitlement?.plan_key).toLowerCase() || null;
+  const commercialPackageCode = readString(entitlement?.commercial_package_code).toLowerCase() || null;
+  const checkoutSessionPlanKey = readString(session?.plan_key).toLowerCase() || null;
 
   const billingIntervalMonths = readNumber(
     entitlement?.billing_interval_months ?? session?.billing_interval_months,
@@ -199,7 +278,9 @@ export async function loadClientCommercialSubscriptionRow(
     : null;
 
   return {
-    planKey: resolvedPlanKey,
+    planKey: entitlementPlanKey,
+    commercialPackageCode,
+    checkoutSessionPlanKey,
     billingIntervalMonths,
     periodStartAt,
     periodEndAt: null,

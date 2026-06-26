@@ -18,6 +18,7 @@ import {
   enqueueClientConnectRequest,
   loadClientConnectAssignment,
 } from "./enqueue-client-connect";
+import { createConnectOperationToken } from "./connect-operation-token";
 import { readString } from "./guards";
 
 const PASSIVE_READINESS_MODE = "readiness_only" as const;
@@ -33,6 +34,8 @@ export type ClientConnectAccountResult = {
   connected: boolean;
   passive_blocked: boolean;
   client_readiness_status?: ClientReadinessStatus;
+  connect_operation_token?: string | null;
+  connect_operation_expires_at?: string | null;
   account: Awaited<ReturnType<typeof reloadClientAccountSnapshot>> | null;
 };
 
@@ -237,5 +240,17 @@ export async function connectClientInstagramAccount(input: {
       connectStatus,
     }),
   });
-  return result;
+  const operationToken = readString(enqueue.connect_attempt_id)
+    ? createConnectOperationToken({
+      accountId: input.accountId,
+      actorUserId: input.userId,
+      connectAttemptId: readString(enqueue.connect_attempt_id),
+      requestId: enqueue.request_id,
+    })
+    : null;
+  return {
+    ...result,
+    connect_operation_token: operationToken?.connect_operation_token ?? null,
+    connect_operation_expires_at: operationToken?.expires_at ?? null,
+  };
 }

@@ -29,6 +29,8 @@ export type ClientAccountConnectionUi = {
   phase: ReturnType<typeof resolveClientAccountState>["phase"];
   showVerificationReopen: boolean;
   verificationReopenLabel: string;
+  showCancelRestart: boolean;
+  cancelRestartLabel: string;
 };
 
 export function resolveClientAccountConnectionUi(

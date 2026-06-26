@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
+import ClientNotificationsPanel from "./ClientNotificationsPanel";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
+import type { ClientAccountNotificationsProjection } from "@/lib/instagram-client/client-account-notifications";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
 import ClientActivityPanel from "./ClientActivityPanel";
 import ClientDmTemplatesSection from "./ClientDmTemplatesSection";
@@ -59,6 +61,7 @@ interface Props {
   tenantId: string;
   loginEmail?: string;
   initialNotifications?: ClientDashboardActionNotification[];
+  initialAccountNotifications?: ClientAccountNotificationsProjection;
   initialAccounts?: ClientInstagramAccount[];
   initialWorkspace?: ClientWorkspaceView | null;
   initialAccountInsights?: ClientAccountInsights | null;
@@ -514,6 +517,7 @@ export default function ClientDashboard({
   tenantId: _tenantId,
   loginEmail = "",
   initialNotifications = [],
+  initialAccountNotifications = { featureAvailable: true, active: [], recentResolved: [], activeCount: 0, unreadActiveCount: 0 },
   initialAccounts = [],
   initialWorkspace = null,
   initialAccountInsights = null,
@@ -555,6 +559,8 @@ export default function ClientDashboard({
   const [targetingLoading, setTargetingLoading] = useState(false);
   const [targetingMessage, setTargetingMessage] = useState<string | null>(null);
   const [targetSearchQuery, setTargetSearchQuery] = useState("");
+  const [accountNotifications, setAccountNotifications] = useState(initialAccountNotifications);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const t = T[lang];
   const linkedAccountsForAccountTab: ClientLinkedInstagramAccount[] = workspace?.linkedInstagramAccounts?.length
@@ -749,10 +755,59 @@ export default function ClientDashboard({
 
   const handleNavigate = useCallback((view: View) => setActiveView(view), []);
 
+  const handleNotificationNavigate = useCallback((href: string) => {
+    try {
+      const url = new URL(href, window.location.origin);
+      const view = url.searchParams.get("view");
+      if (view === "overview" || view === "activity" || view === "targeting" || view === "dm-templates" || view === "account") {
+        setActiveView(view);
+      }
+    } catch {
+      // Ignore malformed deep links.
+    }
+    setNotificationsOpen(false);
+  }, []);
+
+  const handleMarkNotificationRead = useCallback(async (notificationId: string) => {
+    const response = await fetch("/api/instagram-client/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ notification_id: notificationId, action: "mark_read" }),
+    });
+    const payload = await response.json() as { ok?: boolean; data?: ClientAccountNotificationsProjection["active"][number] };
+    if (!response.ok || !payload.ok || !payload.data) return;
+    setAccountNotifications((current) => {
+      const active = current.active.map((row) => (
+        row.id === notificationId ? { ...row, readAt: payload.data?.readAt ?? new Date().toISOString() } : row
+      ));
+      return {
+        ...current,
+        active,
+        activeCount: active.length,
+        unreadActiveCount: active.filter((row) => !row.readAt).length,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    try {
+      const view = new URLSearchParams(window.location.search).get("view");
+      if (view === "overview" || view === "activity" || view === "targeting" || view === "dm-templates" || view === "account") {
+        setActiveView(view);
+      }
+    } catch {
+      // Ignore malformed query strings.
+    }
+  }, []);
+
   const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
   const sidebarPlan = workspace?.clientPlanLabel || accountInsights?.packageLabel || "—";
   const activityBadge = hasOverviewInsights && accountInsights?.recentFeed.length
     ? accountInsights.recentFeed.reduce((sum, item) => sum + item.count, 0)
+    : undefined;
+  const notificationsFeatureAvailable = accountNotifications.featureAvailable !== false;
+  const notificationBadge = notificationsFeatureAvailable && accountNotifications.activeCount > 0
+    ? accountNotifications.activeCount
     : undefined;
   const overviewRecentFeed = hasOverviewInsights ? (accountInsights?.recentFeed ?? []) : [];
   const overviewStats = buildOverviewStats(accountInsights, lang);
@@ -956,6 +1011,21 @@ export default function ClientDashboard({
       <header className="cd-topbar">
         <h1 className="cd-tb-title">{t.views[activeView]}</h1>
         <div className="cd-tb-right">
+          {notificationsFeatureAvailable ? (
+            <button
+              type="button"
+              className={`cd-ic-btn cd-notif-btn${notificationsOpen ? " on" : ""}`}
+              onClick={() => setNotificationsOpen((open) => !open)}
+              aria-label={lang === "fr" ? "Notifications" : "Notifications"}
+              title={lang === "fr" ? "Notifications" : "Notifications"}
+            >
+              <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              {notificationBadge ? <span className="cd-notif-count">{notificationBadge}</span> : null}
+            </button>
+          ) : null}
           <div className="cd-stat-pill"><span className="cd-dot"/><span>{workspace?.campaignActive || accountInsights?.campaignActive ? t.topbar.active : (lang === "fr" ? "Espace client" : "Client workspace")}</span></div>
           <button className="cd-ic-btn" onClick={() => setTheme(th => th === "dark" ? "light" : "dark")} title="Toggle theme">
             <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -970,6 +1040,15 @@ export default function ClientDashboard({
 
       {/* ── MAIN ── */}
       <main className="cd-main">
+        {notificationsFeatureAvailable && notificationsOpen ? (
+          <ClientNotificationsPanel
+            lang={lang}
+            projection={accountNotifications}
+            onMarkRead={handleMarkNotificationRead}
+            onNavigate={handleNotificationNavigate}
+          />
+        ) : null}
+
         {initialNotifications.length > 0 && (
           <section className="cd-action-alerts" aria-label="Required account actions">
             {initialNotifications.map((notification) => (
@@ -1463,6 +1542,29 @@ const CSS = `
 .cd-action-alert span{display:block;font-family:var(--font-d);font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#fbbf24;margin-bottom:4px}
 .cd-action-alert strong{display:block;color:var(--ink);font-family:var(--font-d);font-size:.95rem}
 .cd-action-alert p{margin:4px 0 0;color:var(--muted);font-size:.82rem;line-height:1.45}
+
+.cd-notif-btn{position:relative}
+.cd-notif-btn.on{border-color:var(--a-ring);color:var(--accent)}
+.cd-notif-count{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-size:.62rem;font-weight:800;display:grid;place-items:center}
+.cd-client-notifs{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:grid;gap:14px}
+.cd-client-notifs-hd{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cd-client-notifs-hd h2{margin:0;font-family:var(--font-d);font-size:1rem}
+.cd-client-notifs-badge{min-width:22px;height:22px;padding:0 7px;border-radius:999px;background:rgba(245,158,11,.14);color:#fbbf24;font-size:.72rem;font-weight:800;display:grid;place-items:center}
+.cd-client-notifs-section{display:grid;gap:10px}
+.cd-client-notifs-section h3{margin:0;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-mute)}
+.cd-client-notifs-list{display:grid;gap:10px}
+.cd-client-notifs-empty{margin:0;color:var(--ink-mute);font-size:.84rem}
+.cd-client-notif{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:8px}
+.cd-client-notif.is-read{opacity:.82}
+.cd-client-notif.is-resolved{opacity:.72}
+.cd-client-notif-hd{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cd-client-notif-cat{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)}
+.cd-client-notif-date{font-size:.72rem;color:var(--ink-mute)}
+.cd-client-notif-account{font-family:var(--font-d);font-size:.9rem;color:var(--ink)}
+.cd-client-notif h3{margin:0;font-size:.92rem;color:var(--ink)}
+.cd-client-notif p{margin:0;color:var(--muted);font-size:.82rem;line-height:1.45}
+.cd-client-notif-actions{display:flex;flex-wrap:wrap;gap:8px}
+.cd-btn-ghost{background:transparent;border:1px solid var(--line);color:var(--ink-dim)}
 
 /* Stat cards */
 .cd-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}

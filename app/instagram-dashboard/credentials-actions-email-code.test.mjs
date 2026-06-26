@@ -42,15 +42,15 @@ test("verification modal accepts six digits and refreshes after safe submit", ()
 
 test("submit route queues login resume without leaking code", () => {
   const routeSource = source("../api/instagram-dashboard/dashboard-actions/submit-verification-code/route.ts");
+  const serviceSource = source("../../lib/instagram-dashboard/submit-verification-code-service.ts");
 
-  assert.match(routeSource, /submit_account_verification_code/);
-  assert.match(routeSource, /createLoginEmailCodeResumeRunRequest/);
-  assert.match(routeSource, /login_email_code_resume/);
+  assert.match(routeSource, /submitAccountVerificationCode/);
+  assert.match(serviceSource, /login_email_code_resume/);
   assert.match(routeSource, /resume_queued/);
   assert.match(routeSource, /resume_already_queued/);
   assert.match(routeSource, /canAccessTenantPages/);
   assert.match(routeSource, /isInstagramAdmin/);
-  assert.match(routeSource, /p_actor_type:\s*isInstagramAdmin \? "admin" : "client"/);
+  assert.match(routeSource, /actorType: isInstagramAdmin \? "admin" : "client"/);
   assert.equal(routeSource.includes("console.log"), false);
   assert.equal(
     routeSource.split("\n").some((line) => /^\s*verification_code:\s*verificationCode/.test(line)),
@@ -80,7 +80,7 @@ test("verification modal shows resume queued and running states", () => {
 test("submit route does not return or log the verification code", () => {
   const routeSource = source("../api/instagram-dashboard/dashboard-actions/submit-verification-code/route.ts");
 
-  assert.match(routeSource, /code_submitted/);
+  assert.match(routeSource, /status: result.status/);
 });
 
 test("dashboard email verification banner polls and exposes Enter code modal", () => {

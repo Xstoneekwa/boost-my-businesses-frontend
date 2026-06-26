@@ -1,8 +1,8 @@
 import { clientReadinessMessage, type ClientReadinessStatus } from "./client-readiness-projection.ts";
+import { clientConnectMessage, type ClientConnectStatus } from "./connect-client-contract.ts";
 import {
   isActiveClientConnectStatus,
   labelForActiveConnectStatus,
-  type ClientConnectStatus,
 } from "./connect-operation-state.ts";
 
 export type ClientAccountPresentationPhase =
@@ -42,6 +42,8 @@ export type ClientAccountStateUi = {
   isAsyncPending: boolean;
   showVerificationReopen: boolean;
   verificationReopenLabel: string;
+  showCancelRestart: boolean;
+  cancelRestartLabel: string;
 };
 
 function label(lang: "fr" | "en", fr: string, en: string) {
@@ -59,7 +61,15 @@ function recheckDefaults(lang: "fr" | "en") {
     connectPrimary: false,
     showVerificationReopen: false,
     verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
+    showCancelRestart: false,
+    cancelRestartLabel: label(lang, "Annuler et recommencer", "Cancel and start over"),
   };
+}
+
+function shouldOfferCancelRestart(input: ClientAccountStateInput) {
+  const status = normalize(input.activeConnectStatus);
+  if (isActiveClientConnectStatus(status)) return true;
+  return status === "failed" || status === "blocked";
 }
 
 function activeConnectPresentation(status: ClientConnectStatus, lang: "fr" | "en"): ClientAccountStateUi {
@@ -83,23 +93,21 @@ function activeConnectPresentation(status: ClientConnectStatus, lang: "fr" | "en
       connectDisabled: true,
       showRefresh: true,
       isAsyncPending: true,
-      showRecheckReadiness: false,
-      recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
-      connectPrimary: false,
+      ...recheckDefaults(lang),
       showVerificationReopen: true,
       verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
     };
   }
 
-  if (status === "verification_code_submitted") {
+  if (status === "verification_code_accepted") {
     return {
       phase: "connection_check",
       badgeLabel,
       badgeTone: "neutral",
       subtext: label(
         lang,
-        "Code reçu. Nous reprenons la connexion automatiquement.",
-        "Code received. We are resuming the connection automatically.",
+        "Code enregistré. Nous préparons la reprise de la connexion.",
+        "Code saved. We are preparing to resume the connection.",
       ),
       readinessLabel: label(lang, "Connexion en cours", "Connection in progress"),
       readinessTone: "neutral",
@@ -107,13 +115,31 @@ function activeConnectPresentation(status: ClientConnectStatus, lang: "fr" | "en
       connectLabel: label(lang, "Connexion en cours", "Connection in progress"),
       connectTone: "neutral",
       connectDisabled: true,
-      connectPrimary: false,
       showRefresh: true,
       isAsyncPending: true,
-      showRecheckReadiness: false,
-      recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
-      showVerificationReopen: false,
-      verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
+      ...recheckDefaults(lang),
+    };
+  }
+
+  if (status === "verification_resume_active" || status === "verification_code_submitted") {
+    return {
+      phase: "connection_check",
+      badgeLabel,
+      badgeTone: "neutral",
+      subtext: label(
+        lang,
+        "Vérification en cours. Nous reprenons la connexion automatiquement.",
+        "Verification in progress. We are resuming the connection automatically.",
+      ),
+      readinessLabel: label(lang, "Connexion en cours", "Connection in progress"),
+      readinessTone: "neutral",
+      readinessDisabled: true,
+      connectLabel: label(lang, "Connexion en cours", "Connection in progress"),
+      connectTone: "neutral",
+      connectDisabled: true,
+      showRefresh: true,
+      isAsyncPending: true,
+      ...recheckDefaults(lang),
     };
   }
 
@@ -132,13 +158,9 @@ function activeConnectPresentation(status: ClientConnectStatus, lang: "fr" | "en
     connectLabel: label(lang, "Connexion en cours", "Connection in progress"),
     connectTone: "neutral",
     connectDisabled: true,
-    connectPrimary: false,
     showRefresh: true,
     isAsyncPending: true,
-    showRecheckReadiness: false,
-    recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
-    showVerificationReopen: false,
-    verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
+    ...recheckDefaults(lang),
   };
 }
 
@@ -175,11 +197,17 @@ function isBackendPreparing(input: ClientAccountStateInput) {
   const loginStatus = normalize(input.loginStatus);
   const provisioningStatus = normalize(input.provisioningStatus);
   const assignmentStatus = normalize(input.assignmentStatus);
+  const activeConnectStatus = normalize(input.activeConnectStatus);
 
-  if (input.operationPending) return true;
+  if (isActiveClientConnectStatus(activeConnectStatus)) return true;
+  if (input.operationPending && isActiveClientConnectStatus(activeConnectStatus)) return true;
   if (["connecting", "queued", "running", "in_progress", "checking_connection"].includes(loginStatus)) return true;
-  if (["in_progress", "running", "pending", "provisioning"].includes(provisioningStatus)) return true;
-  if (assignmentStatus.includes("pending") && provisioningStatus !== "not_started" && loginStatus !== "unknown") {
+  if (["in_progress", "running", "provisioning"].includes(provisioningStatus)) return true;
+  if (
+    assignmentStatus.includes("pending")
+    && provisioningStatus === "pending"
+    && loginStatus !== "unknown"
+  ) {
     return true;
   }
   return false;
@@ -196,9 +224,14 @@ export function resolveClientAccountState(
   const clientReadinessStatus = normalize(input.clientReadinessStatus);
   const activeConnectStatus = normalize(input.activeConnectStatus);
   const defaults = recheckDefaults(lang);
+  const offerCancelRestart = shouldOfferCancelRestart(input);
 
   if (isActiveClientConnectStatus(activeConnectStatus)) {
-    return activeConnectPresentation(activeConnectStatus, lang);
+    return {
+      ...activeConnectPresentation(activeConnectStatus, lang),
+      showCancelRestart: offerCancelRestart,
+      cancelRestartLabel: defaults.cancelRestartLabel,
+    };
   }
 
   if (loginNeedsAction(loginStatus)) {
@@ -255,6 +288,30 @@ export function resolveClientAccountState(
     };
   }
 
+  if (activeConnectStatus === "failed" || activeConnectStatus === "blocked") {
+    return {
+      phase: "added",
+      badgeLabel: label(lang, "Compte ajouté", "Account added"),
+      badgeTone: "neutral",
+      subtext: clientConnectMessage(activeConnectStatus, lang),
+      readinessLabel: label(lang, "Vérifier la préparation", "Check readiness"),
+      readinessTone: "neutral",
+      readinessDisabled: false,
+      connectLabel: label(lang, "Connecter le compte", "Connect account"),
+      connectTone: "primary",
+      connectDisabled: true,
+      showRefresh: false,
+      isAsyncPending: false,
+      showCancelRestart: true,
+      cancelRestartLabel: defaults.cancelRestartLabel,
+      showRecheckReadiness: false,
+      recheckReadinessLabel: defaults.recheckReadinessLabel,
+      connectPrimary: false,
+      showVerificationReopen: false,
+      verificationReopenLabel: defaults.verificationReopenLabel,
+    };
+  }
+
   if (isBackendPreparing(input)) {
     return {
       phase: "preparing",
@@ -279,6 +336,7 @@ export function resolveClientAccountState(
 
   if (readinessPrepared) {
     return {
+      ...defaults,
       phase: "added",
       badgeLabel: label(lang, "Prêt à connecter", "Ready to connect"),
       badgeTone: "success",
@@ -370,6 +428,8 @@ export function operationPendingFromConnectResult(data: {
     "connecting",
     "checking_connection",
     "verification_required",
+    "verification_code_accepted",
+    "verification_resume_active",
     "verification_code_submitted",
   ].includes(connectStatus)) {
     return true;

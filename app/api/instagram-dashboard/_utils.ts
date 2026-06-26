@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { canAccessTenantPages, getInstagramUserContext } from "@/lib/restaurant-analytics/session";
-import { relayAuthStatus, verifyCompassRelayKey } from "./compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "./compass/relay-auth";
 
 export type SupabaseRecord = Record<string, unknown>;
 
@@ -46,8 +46,8 @@ export async function requireRelayOrAdmin(request: Request, context = "Instagram
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
   if (!relayAuth.ok) {
-    return jsonError(`${context} relay authentication failed.`, relayAuthStatus(relayAuth.reason), {
-      reason: relayAuth.reason,
+    return jsonError(`${context} relay authentication failed.`, relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), {
+      reason: compassRelayAuthFailureReason(relayAuth),
     });
   }
   return requireInstagramAdmin();

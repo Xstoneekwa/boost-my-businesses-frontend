@@ -6,6 +6,10 @@ import {
 import { dmTemplateLengthError, normalizeDmTemplateMessage } from "@/lib/instagram-dashboard/dm-formatting";
 import { dmTemplateHasBody, dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 import { readBoolean, readNumber, readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
+import {
+  resolveAccountWelcomeServiceActive,
+  welcomeCapacityStatusLabel,
+} from "@/lib/instagram-client/account-dm-capacity";
 import type { createSupabaseClient } from "@/lib/supabase";
 
 export type DmDomainValidationInput = {
@@ -247,10 +251,11 @@ export type DmDomainProjection = Awaited<ReturnType<typeof buildDmProjection>>;
 
 export async function buildDmProjection(supabase: SupabaseClient, accountId: string) {
   const settings = await getDmSettings(supabase, accountId);
-  const [welcomeEntitlement, outreachEntitlement] = await Promise.all([
-    hasWelcomeEntitlement(supabase, accountId),
+  const [welcomeCapacity, outreachEntitlement] = await Promise.all([
+    resolveAccountWelcomeServiceActive(supabase, accountId),
     hasOutreachEntitlement(supabase, accountId),
   ]);
+  const welcomeEntitlement = welcomeCapacity.active;
   const [welcomeTemplate, outreachTemplate] = await Promise.all([
     getTemplate(supabase, accountId, "welcome", settings?.welcome_template_id),
     getTemplate(supabase, accountId, "outreach", settings?.default_outreach_template_id),
@@ -276,7 +281,7 @@ export async function buildDmProjection(supabase: SupabaseClient, accountId: str
     account_id: accountId,
     welcome_service_active: domainInput.welcomeServiceActive,
     outreach_service_active: domainInput.outreachServiceActive,
-    welcome_entitlement_status: statusLabel(welcomeEntitlement),
+    welcome_entitlement_status: welcomeCapacityStatusLabel(welcomeCapacity),
     outreach_entitlement_status: statusLabel(outreachEntitlement),
     welcome_enabled: domainInput.welcomeEnabled,
     outreach_enabled: domainInput.outreachEnabled,

@@ -176,6 +176,30 @@ function fakeDb(jobs) {
   return new FakeSupabase(jobs, targets);
 }
 
+function fakePeriodicDb(jobs, targetPatch = {}) {
+  const targets = jobs.map((job) => ({
+    id: job.target_id,
+    account_id: job.account_id,
+    normalized_username: job.normalized_username,
+    target_username: job.normalized_username,
+    canonical_username: job.normalized_username,
+    input_username: job.normalized_username,
+    status: "valid",
+    quality_status: "eligible",
+    verification_status: "found",
+    metadata_safe: {
+      instagram_user_id: "ig-100",
+      external_profile_id: "ext-100",
+    },
+    archived_at: null,
+    deleted_at: null,
+    periodic_revalidation_next_due_at: "2026-05-29T02:00:00.000Z",
+    periodic_revalidation_window_key: null,
+    ...targetPatch[job.target_id],
+  }));
+  return new FakeSupabase(jobs, targets);
+}
+
 test("bounds claim limit to the processor maximum", () => {
   assert.equal(boundedTargetVerificationLimit(25), 10);
   assert.equal(boundedTargetVerificationLimit(0), 1);
@@ -243,6 +267,10 @@ test("processor maps low followers, verified, private and not_found safely", asy
     "rejected_private",
     "rejected_not_found",
   ]);
+  assert.equal(db.targets[1].status, "archived");
+  assert.equal(db.targets[1].archive_reason, "verified_became_ineligible");
+  assert.equal(db.targets[3].status, "archived");
+  assert.equal(db.targets[3].archive_reason, "account_not_found");
   assert.equal(db.jobs.every((job) => job.status === "succeeded"), true);
 });
 
@@ -297,7 +325,9 @@ test("provider_error retries and max attempts moves to review", async () => {
   assert.equal(result.summary.review_count, 1);
   assert.equal(db.jobs[0].status, "retry_scheduled");
   assert.equal(db.jobs[1].status, "succeeded");
-  assert.equal(db.targets[1].quality_status, "review_provider_unavailable");
+  assert.equal(db.targets[0].status, "pending_verification");
+  assert.equal(db.targets[1].status, "pending_verification");
+  assert.equal(db.targets[1].quality_status, undefined);
 });
 
 test("claim skips future retry jobs and recovers expired processing locks", async () => {
@@ -333,4 +363,57 @@ test("summary stays safe and excludes raw provider payloads", async () => {
   assert.equal(serialized.includes("authorization"), false);
   assert.equal(serialized.includes("token"), false);
   assert.equal(typeof result.summary.duration_ms, "number");
+});
+
+test("periodic weekly terminal success advances next due by exactly seven days", async () => {
+  const db = fakePeriodicDb([pendingJob("1", "eligible_one", { batch_id: "periodic_weekly:482148" })]);
+  const result = await processTargetVerificationBatch(db, {
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+  });
+
+  assert.equal(result.summary.succeeded_count, 1);
+  assert.equal(db.targets[0].periodic_revalidation_last_terminal_at, fixedNow.toISOString());
+  assert.equal(
+    Date.parse(db.targets[0].periodic_revalidation_next_due_at) - fixedNow.getTime(),
+    7 * 24 * 60 * 60 * 1000,
+  );
+  assert.equal(db.targets[0].periodic_revalidation_window_key, null);
+});
+
+test("periodic weekly rate limit does not advance schedule or archive target", async () => {
+  const db = fakePeriodicDb([pendingJob("1", "rate_one", { batch_id: "periodic_weekly:482148" })]);
+  const before = { ...db.targets[0] };
+  await processTargetVerificationBatch(db, {
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({
+      ok: false,
+      status: "rate_limited",
+      reason: "rate_limited",
+      metadata: { rate_limited: true },
+    }),
+  });
+
+  assert.equal(db.jobs[0].status, "retry_scheduled");
+  assert.equal(db.targets[0].status, before.status);
+  assert.equal(db.targets[0].periodic_revalidation_next_due_at, before.periodic_revalidation_next_due_at);
+  assert.equal(db.targets[0].archived_at, before.archived_at);
+});
+
+test("periodic weekly not_found archives target and clears periodic schedule", async () => {
+  const db = fakePeriodicDb([pendingJob("1", "missing_user", { batch_id: "periodic_weekly:482148" })]);
+  await processTargetVerificationBatch(db, {
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({
+      ok: false,
+      status: "not_found",
+      reason: "not_found",
+      followers_count: null,
+    }),
+  });
+
+  assert.equal(db.targets[0].status, "archived");
+  assert.equal(db.targets[0].archive_reason, "account_not_found");
+  assert.equal(db.targets[0].periodic_revalidation_next_due_at, null);
+  assert.equal(db.targets[0].periodic_revalidation_window_key, null);
 });

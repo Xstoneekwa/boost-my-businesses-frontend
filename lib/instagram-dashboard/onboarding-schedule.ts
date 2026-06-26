@@ -1,6 +1,9 @@
+import {
+  isAssignmentOnPhysicalPhone,
+  resolveLiveAssignmentTarget,
+} from "@/lib/instagram-dashboard/assignment-live-capacity";
 import { createSupabaseClient } from "@/lib/supabase";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
-import { readScheduleSlot } from "@/lib/instagram-dashboard/schedule";
 
 function readRpcObject(value: unknown): SupabaseRecord {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -9,11 +12,41 @@ function readRpcObject(value: unknown): SupabaseRecord {
   return {};
 }
 
+async function releaseIneligibleOnboardingAssignment(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const { data: existing } = await supabase
+    .from("account_assignments")
+    .select("id,device_id,status")
+    .eq("account_id", accountId)
+    .in("status", ["pending", "reserved", "active"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (!existing?.id) return { released: false };
+
+  const onPhysicalPhone = await isAssignmentOnPhysicalPhone(supabase, existing);
+  if (onPhysicalPhone) return { released: false };
+
+  const { data, error } = await supabase.rpc("release_account_schedule_capacity", {
+    p_account_id: accountId,
+    p_reason: "onboarding_physical_reassignment",
+    p_source: "onboarding_auto",
+    p_actor_id: null,
+  });
+  if (error) return { released: false, reason: readString(error.message, "release_failed") };
+  const payload = readRpcObject(data);
+  return { released: payload.ok === true, reason: readString(payload.reason, "") };
+}
+
 export async function tryAutoAssignOnboardingSchedule(
   accountId: string,
   target: { deviceId?: string; appInstanceId?: string; startsAt?: string; endsAt?: string } = {},
 ) {
   const supabase = createSupabaseClient();
+  await releaseIneligibleOnboardingAssignment(supabase, accountId);
+
   const { data: subscriptionAccount, error: subscriptionError } = await supabase
     .from("client_subscription_accounts")
     .select("id,account_id,status,subscription_id")
@@ -27,37 +60,32 @@ export async function tryAutoAssignOnboardingSchedule(
     return { assigned: false, reason: "subscription_account_missing" };
   }
 
-  let deviceId = target.deviceId || "";
-  let startsAt = target.startsAt || "";
-  let endsAt = target.endsAt || "";
-  if (!deviceId || !startsAt || !endsAt) {
-    const { data: slotCatalog, error: slotError } = await supabase.rpc("list_available_assignment_slots", {
-      p_account_id: accountId,
-      p_device_id: target.deviceId || null,
-    });
-    if (slotError) {
-      return { assigned: false, reason: "slot_catalog_unavailable" };
-    }
+  const explicitWindowProvided = Boolean(target.startsAt && target.endsAt);
+  const resolution = await resolveLiveAssignmentTarget(supabase, accountId, {
+    explicitDeviceId: target.deviceId,
+    explicitAppInstanceId: target.appInstanceId,
+    explicitStartsAt: target.startsAt,
+    explicitEndsAt: target.endsAt,
+    reservationMode: explicitWindowProvided ? "immediate" : "onboarding",
+    requireCurrentWindow: explicitWindowProvided,
+    deviceKindPolicy: target.deviceId ? "any_eligible" : "physical_phone_only",
+    skipIfAssigned: true,
+  });
 
-    const slotPayload = readRpcObject(slotCatalog);
-    deviceId = readString(slotPayload.device_id, "");
-    const slots = Array.isArray(slotPayload.slots)
-      ? slotPayload.slots.map((row) => readScheduleSlot(row as SupabaseRecord))
-      : [];
-    const firstAvailable = slots.find((slot) => slot.available);
-    if (!deviceId || !firstAvailable) {
-      return { assigned: false, reason: "no_available_slot" };
-    }
-    startsAt = firstAvailable.starts_at;
-    endsAt = firstAvailable.ends_at;
+  if (resolution.reason === "already_assigned") {
+    return { assigned: true, reason: "already_assigned", assignment: {} };
+  }
+  if (!resolution.ok) {
+    return { assigned: false, reason: resolution.reason };
   }
 
+  const liveTarget = resolution.target;
   const { data: assignResult, error: assignError } = await supabase.rpc("assign_account_slot", {
     p_account_id: accountId,
-    p_device_id: deviceId,
-    p_starts_at: startsAt,
-    p_ends_at: endsAt,
-    p_clone_id: target.appInstanceId || null,
+    p_device_id: liveTarget.deviceId,
+    p_starts_at: liveTarget.startsAt,
+    p_ends_at: liveTarget.endsAt,
+    p_clone_id: liveTarget.appInstanceId,
     p_assignment_source: "onboarding_auto",
   });
 
@@ -81,6 +109,20 @@ export async function tryAssignManualOnlyOnboardingSchedule(
   }
 
   const supabase = createSupabaseClient();
+  const resolution = await resolveLiveAssignmentTarget(supabase, accountId, {
+    explicitDeviceId: target.deviceId,
+    explicitAppInstanceId: target.appInstanceId,
+    requireScheduleSlot: false,
+    deviceKindPolicy: "any_eligible",
+    skipIfAssigned: true,
+  });
+  if (resolution.reason === "already_assigned") {
+    return { assigned: true, reason: "already_assigned", assignment: {} };
+  }
+  if (!resolution.ok) {
+    return { assigned: false, reason: resolution.reason, assignment: {} };
+  }
+
   const { data: assignResult, error: assignError } = await supabase.rpc("assign_account_manual_only", {
     p_account_id: accountId,
     p_device_id: target.deviceId,

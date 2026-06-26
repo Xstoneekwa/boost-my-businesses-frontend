@@ -1,7 +1,7 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { normalizeBusinessTimezone, normalizeLegacyScheduleTimezone } from "@/lib/instagram-dashboard/business-timezone";
 import { jsonError, jsonOk, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
-import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -149,7 +149,7 @@ async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
   if (!relayAuth.ok) {
-    return jsonError("Schedule slots relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+    return jsonError("Schedule slots relay authentication failed.", relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), { reason: compassRelayAuthFailureReason(relayAuth) });
   }
   return requireInstagramAdmin();
 }

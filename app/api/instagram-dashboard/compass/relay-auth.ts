@@ -34,6 +34,12 @@ export function relayAuthStatus(reason: "relay_auth_required" | "relay_auth_inva
   return 403;
 }
 
+export function compassRelayAuthFailureReason(
+  relayAuth: CompassRelayAuthResult,
+): "relay_auth_required" | "relay_auth_invalid" | "relay_auth_unconfigured" {
+  return relayAuth.ok ? "relay_auth_required" : relayAuth.reason;
+}
+
 export function verifyCompassRelayKey(headers: Headers): CompassRelayAuthResult {
   const expected = configuredRelayKey();
   const provided = readRelayKey(headers);

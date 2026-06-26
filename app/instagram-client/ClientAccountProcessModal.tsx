@@ -2,6 +2,10 @@
 
 import type { ClientProcessProjection } from "@/lib/instagram-client/client-account-process-projection";
 import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
+import {
+  isActiveClientConnectStatus,
+  labelForActiveConnectStatus,
+} from "@/lib/instagram-client/connect-operation-state";
 
 type Props = {
   open: boolean;
@@ -13,7 +17,6 @@ type Props = {
   onRefresh?: () => void;
   onClose: () => void;
   onOpenVerification?: () => void;
-  onOpenBotAppPhone?: () => Promise<void> | void;
 };
 
 function labelFor(lang: "fr" | "en", fr: string, en: string) {
@@ -37,7 +40,6 @@ export default function ClientAccountProcessModal({
   onRefresh,
   onClose,
   onOpenVerification,
-  onOpenBotAppPhone,
 }: Props) {
   if (!open || !projection) return null;
 
@@ -50,22 +52,43 @@ export default function ClientAccountProcessModal({
         status: step.status,
       }))
     : projection.steps;
-  const statusChip = connectProgress?.connect_status === "verification_required"
+  const runtimeStatus = connectProgress?.connect_status;
+  const isTerminalConnectError = Boolean(
+    connectProgress?.failed
+    || runtimeStatus === "failed"
+    || runtimeStatus === "blocked"
+    || runtimeStatus === "not_created",
+  );
+  const statusChip = runtimeStatus === "verification_required"
     ? labelFor(lang, "Vérification requise", "Verification required")
-    : connectProgress?.connect_status === "connected"
-      ? labelFor(lang, "Connecté", "Connected")
-      : projection.statusChip;
-  const statusToneClass = connectProgress?.connect_status === "verification_required"
+    : runtimeStatus === "verification_resume_active" || runtimeStatus === "verification_code_submitted"
+      ? labelFor(lang, "Vérification en cours", "Verification in progress")
+      : runtimeStatus === "verification_code_accepted"
+        ? labelFor(lang, "Code enregistré", "Code saved")
+      : runtimeStatus === "connected"
+        ? labelFor(lang, "Connecté", "Connected")
+        : isTerminalConnectError
+          ? labelFor(lang, "Erreur", "Error")
+          : isActiveClientConnectStatus(runtimeStatus)
+            ? labelForActiveConnectStatus(runtimeStatus, lang)
+            : projection.statusChip;
+  const statusToneClass = runtimeStatus === "verification_required"
     ? "action_required"
-    : connectProgress?.connect_status === "connected"
-      ? "connected"
-      : projection.statusTone === "success"
+    : runtimeStatus === "verification_resume_active" || runtimeStatus === "verification_code_submitted" || runtimeStatus === "verification_code_accepted"
+      ? "action_required"
+      : runtimeStatus === "connected"
         ? "connected"
-        : projection.statusTone === "warning"
-          ? "action_required"
-          : projection.statusTone === "error"
-            ? "failed"
-            : "running";
+        : isTerminalConnectError
+          ? "failed"
+          : isActiveClientConnectStatus(runtimeStatus)
+            ? "running"
+            : projection.statusTone === "success"
+              ? "connected"
+              : projection.statusTone === "warning"
+                ? "action_required"
+                : projection.statusTone === "error"
+                  ? "failed"
+                  : "running";
   const finalMessage = connectProgress?.message || projection.finalMessage;
 
   return (
@@ -110,11 +133,6 @@ export default function ClientAccountProcessModal({
           {connectProgress?.connect_status === "verification_required" && onOpenVerification ? (
             <button type="button" className="cd-btn cd-btn-primary" onClick={onOpenVerification}>
               {labelFor(lang, "Saisir le code", "Enter code")}
-            </button>
-          ) : null}
-          {connectProgress?.connect_status === "verification_required" && onOpenBotAppPhone ? (
-            <button type="button" className="cd-btn cd-btn-soft" onClick={() => void onOpenBotAppPhone()}>
-              {labelFor(lang, "Ouvrir le téléphone dans BotApp", "Open phone in BotApp")}
             </button>
           ) : null}
           {projection.showRefresh && onRefresh ? (

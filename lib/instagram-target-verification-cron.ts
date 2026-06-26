@@ -9,12 +9,21 @@ import {
   type TargetVerificationProcessorResult,
   type TargetVerificationSupabaseClient,
 } from "./instagram-target-verification-processor.ts";
+import {
+  emptyPeriodicRevalidationSchedulerSummary,
+} from "./target-periodic-revalidation.ts";
+import {
+  runPeriodicTargetRevalidationScheduler,
+  type PeriodicRevalidationSchedulerSummary,
+  type PeriodicRevalidationSchedulerSupabase,
+} from "./target-periodic-revalidation-scheduler.ts";
 
 export type TargetVerificationCronSkipReason =
   | "cron_disabled"
   | "cron_token_not_configured"
   | "scheduler_lock_busy"
-  | "no_jobs";
+  | "no_jobs"
+  | "method_not_allowed_use_post";
 
 export type TargetVerificationCronAuthReason =
   | "missing_caller_token"
@@ -31,6 +40,7 @@ export type TargetVerificationCronResult = {
   reason: TargetVerificationCronSkipReason | TargetVerificationCronAuthReason | null;
   stopped_early_reason: string | null;
   summary: TargetVerificationBatchSummary;
+  periodic_revalidation: PeriodicRevalidationSchedulerSummary;
 };
 
 export type TargetVerificationCronEnv = {
@@ -50,10 +60,14 @@ export type TargetVerificationCronOptions = {
     supabase: TargetVerificationSupabaseClient,
     options: Parameters<typeof processTargetVerificationBatch>[1],
   ) => Promise<TargetVerificationProcessorResult>;
+  enqueuePeriodicRevalidation?: (
+    supabase: TargetVerificationSupabaseClient,
+    options: { env?: NodeJS.ProcessEnv; dryRun?: boolean; enqueueLimit?: number },
+  ) => Promise<PeriodicRevalidationSchedulerSummary>;
 };
 
 export type TargetVerificationCronRun =
-  | { status: 401 | 403 | 503; result: TargetVerificationCronResult }
+  | { status: 401 | 403 | 405 | 503; result: TargetVerificationCronResult }
   | { status: 200; result: TargetVerificationCronResult };
 
 const CRON_TOKEN_HEADER = "x-ct-target-verification-cron-token";
@@ -147,6 +161,7 @@ function buildSkippedCronResult(
     reason: input.reason,
     stopped_early_reason: null,
     summary: emptyTargetVerificationBatchSummary(),
+    periodic_revalidation: emptyPeriodicRevalidationSchedulerSummary(),
   };
 }
 
@@ -184,6 +199,37 @@ async function releaseSchedulerLock(
   }
 }
 
+export function evaluateTargetVerificationCronHttpMethod(method: string) {
+  const normalized = method.trim().toUpperCase();
+  if (normalized === "POST") return { ok: true as const };
+  return {
+    ok: false as const,
+    status: 405 as const,
+    reason: "method_not_allowed_use_post" as const,
+  };
+}
+
+export async function handleTargetVerificationCronRequest(
+  request: Request,
+  supabase: TargetVerificationSupabaseClient,
+  options: Omit<TargetVerificationCronOptions, "callerToken"> = {},
+) {
+  const methodCheck = evaluateTargetVerificationCronHttpMethod(request.method);
+  if (methodCheck.ok) {
+    return runTargetVerificationCron(supabase, {
+      ...options,
+      callerToken: extractTargetVerificationCronToken(request),
+    });
+  }
+
+  return {
+    status: 405,
+    result: buildSkippedCronResult(readTargetVerificationCronEnv(options.env), {
+      reason: "method_not_allowed_use_post",
+    }),
+  } satisfies TargetVerificationCronRun;
+}
+
 export async function runTargetVerificationCron(
   supabase: TargetVerificationSupabaseClient,
   options: TargetVerificationCronOptions = {},
@@ -206,6 +252,13 @@ export async function runTargetVerificationCron(
   }
 
   const processBatch = options.processBatch ?? processTargetVerificationBatch;
+  const enqueuePeriodic = options.enqueuePeriodicRevalidation ?? ((
+    supabaseClient: TargetVerificationSupabaseClient,
+    schedulerOptions: { env?: NodeJS.ProcessEnv; dryRun?: boolean; enqueueLimit?: number },
+  ) => runPeriodicTargetRevalidationScheduler(
+    supabaseClient as unknown as PeriodicRevalidationSchedulerSupabase,
+    schedulerOptions,
+  ));
   let lockAcquired = false;
 
   try {
@@ -219,6 +272,12 @@ export async function runTargetVerificationCron(
         }),
       };
     }
+
+    const periodicRevalidation = await enqueuePeriodic(supabase, {
+      env: options.env,
+      dryRun: cronEnv.dryRun,
+      enqueueLimit: cronEnv.limit * 5,
+    });
 
     const batchResult = await processBatch(supabase, {
       limit: cronEnv.limit,
@@ -241,6 +300,7 @@ export async function runTargetVerificationCron(
           reason: "no_jobs",
           stopped_early_reason: batchResult.stopped_early_reason,
           summary: batchResult.summary,
+          periodic_revalidation: periodicRevalidation,
         },
       };
     }
@@ -258,6 +318,7 @@ export async function runTargetVerificationCron(
         reason: null,
         stopped_early_reason: batchResult.stopped_early_reason,
         summary: batchResult.summary,
+        periodic_revalidation: periodicRevalidation,
       },
     };
   } finally {

@@ -7,6 +7,8 @@ export const ACTIVE_CLIENT_CONNECT_STATUSES = new Set<ClientConnectStatus>([
   "already_queued",
   "running",
   "verification_required",
+  "verification_code_accepted",
+  "verification_resume_active",
   "verification_code_submitted",
 ]);
 
@@ -42,7 +44,9 @@ export function labelForActiveConnectStatus(status: ClientConnectStatus, lang: "
     already_queued: { fr: "Connexion en file", en: "Connection queued" },
     running: { fr: "Connexion en cours", en: "Connection in progress" },
     verification_required: { fr: "Vérification requise", en: "Verification required" },
-    verification_code_submitted: { fr: "Code envoyé", en: "Code submitted" },
+    verification_code_accepted: { fr: "Code enregistré", en: "Code saved" },
+    verification_resume_active: { fr: "Vérification en cours", en: "Verification in progress" },
+    verification_code_submitted: { fr: "Vérification en cours", en: "Verification in progress" },
   };
   return labels[status]?.[lang] ?? (lang === "fr" ? "Connexion en cours" : "Connection in progress");
 }

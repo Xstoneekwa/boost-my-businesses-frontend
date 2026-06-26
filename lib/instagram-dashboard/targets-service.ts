@@ -16,6 +16,10 @@ import {
   isDeletedTargetLifecycle,
 } from "@/lib/instagram-target-lifecycle";
 import {
+  buildRestorePeriodicSchedulePatch,
+  clearPeriodicSchedulePatch,
+} from "@/lib/target-periodic-revalidation";
+import {
   classifyBulkTargetLines,
   isValidTargetUsername,
   normalizeTargetUsername,
@@ -38,6 +42,7 @@ import {
   TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON,
   TARGET_AUTO_ARCHIVE_READD_BLOCKED_AUDIT_REASON,
 } from "@/lib/instagram-dashboard/target-auto-archive-low-fbr-policy";
+import { reevaluateNeedsMoreTargetAccountsAfterTargetMutation } from "@/lib/instagram-dashboard/needs-more-target-accounts";
 
 export type { TargetSafeRow };
 
@@ -531,6 +536,7 @@ export async function addAccountTargetSingle(
     sourceSurface: ctx.sourceSurface,
     targetId: safeRow.id,
   });
+  await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(accountId, "target_add_single");
   return {
     ok: true,
     data: {
@@ -651,6 +657,7 @@ export async function addAccountTargetsBulk(
     batchId,
     counts: summary,
   });
+  await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(accountId, "target_add_bulk");
 
   return {
     ok: true,
@@ -704,6 +711,7 @@ export async function archiveAccountTargets(
       status: "archived",
       archived_at: now,
       archive_reason: archiveReason,
+      ...clearPeriodicSchedulePatch(),
       updated_at: now,
     })
     .eq("account_id", accountId)
@@ -722,6 +730,7 @@ export async function archiveAccountTargets(
     previousStatus: readString(((owned ?? []) as SupabaseRecord[]).find((candidate) => readString(candidate.id, "") === readString(row.id, ""))?.status, "unknown"),
     nextStatus: "archived",
   })));
+  await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(accountId, "target_archive");
   return { ok: true, data: { archived: ids.length } };
 }
 
@@ -785,7 +794,10 @@ export async function restoreAccountTarget(
 
   const { data: restoredRow, error: updateError } = await supabase
     .from("ig_targets")
-    .update(decision.targetPatch)
+    .update({
+      ...decision.targetPatch,
+      ...buildRestorePeriodicSchedulePatch(targetId, new Date()),
+    })
     .eq("account_id", accountId)
     .eq("id", targetId)
     .select("*")
@@ -806,5 +818,6 @@ export async function restoreAccountTarget(
     nextStatus: safeRow.status,
   });
 
+  await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(accountId, "target_restore");
   return { ok: true, data: { row: safeRow, restored: 1, jobs_queued: jobsQueued, reason: decision.auditReason } };
 }

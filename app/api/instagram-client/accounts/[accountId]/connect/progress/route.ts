@@ -28,10 +28,13 @@ export async function GET(
 
     const url = new URL(request.url);
     const requestId = readString(url.searchParams.get("request_id"));
+    const connectOperationToken = readString(url.searchParams.get("connect_operation_token"));
     const lang = url.searchParams.get("lang") === "en" ? "en" : "fr";
     const snapshot = await loadClientConnectProgress({
       accountId: normalizedAccountId,
       requestId: requestId || undefined,
+      connectOperationToken: connectOperationToken || undefined,
+      actorUserId: session.userId,
       lang,
     });
 

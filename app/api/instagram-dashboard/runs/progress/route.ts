@@ -1,7 +1,7 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { canAccessTenantPages, getInstagramUserContext } from "@/lib/restaurant-analytics/session";
 import { getAccountId, jsonError, jsonOk, readString, validateAccountId, type SupabaseRecord } from "../../_utils";
-import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -137,7 +137,7 @@ async function authorizeProgress(request: Request, accountId: string) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return { ok: true, audience: "admin" as const };
   if (!relayAuth.ok) {
-    return { ok: false, response: jsonError("Run progress relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason }) };
+    return { ok: false, response: jsonError("Run progress relay authentication failed.", relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), { reason: compassRelayAuthFailureReason(relayAuth) }) };
   }
 
   const userContext = await getInstagramUserContext();

@@ -1,5 +1,8 @@
 import { getCredentialsActionsData } from "./credentials-actions-data";
 import { getManageData, type ManageAccount, type ManageSourceStatus } from "./manage-data";
+import { createSupabaseClient } from "@/lib/supabase";
+import { loadTargetEligibilityCountsByAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
+import { loadNeedsMoreTargetAccountsProjectionForAccounts } from "@/lib/instagram-dashboard/needs-more-target-accounts";
 
 export type ClientAccountPasswordStatus = "configured" | "missing" | "reauth_required" | "update_needed" | "unknown";
 export type ClientAccountOperationsStatus = "active" | "pending" | "cancelled" | "onboarding" | "paused" | "needs_assistance" | "archived" | "unknown";
@@ -75,6 +78,8 @@ export type ClientAccountOperationsItem = {
   lastSafeUpdate: string | null;
   needsAssistance: boolean;
   reauthRequired: boolean;
+  needsMoreTargets: boolean;
+  eligibleTargetCount: number;
 };
 
 export type ClientAccountsOperationsSummary = {
@@ -354,7 +359,12 @@ function lifecycleActionAvailability(account: ManageAccount, status: ClientAccou
   ];
 }
 
-function mapAccount(account: ManageAccount, hasDashboardAction: boolean, passwordUpdateAlreadyRequested: boolean): ClientAccountOperationsItem {
+function mapAccount(
+  account: ManageAccount,
+  hasDashboardAction: boolean,
+  passwordUpdateAlreadyRequested: boolean,
+  needsMoreProjection: { needsMoreTargets: boolean; eligibleTargetCount: number },
+): ClientAccountOperationsItem {
   const needsAssistanceReason = assistanceReason(account, hasDashboardAction);
   const needsAssistance = needsAssistanceReason !== null;
   const { status, reason: statusReason } = operationsStatus(account, needsAssistance);
@@ -401,6 +411,8 @@ function mapAccount(account: ManageAccount, hasDashboardAction: boolean, passwor
     lastSafeUpdate: account.lastSafeUpdate,
     needsAssistance,
     reauthRequired: account.reauthRequired,
+    needsMoreTargets: needsMoreProjection.needsMoreTargets,
+    eligibleTargetCount: needsMoreProjection.eligibleTargetCount,
   };
 }
 
@@ -423,11 +435,29 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
   const passwordUpdateAccountIds = new Set(credentialsData.actions
     .filter((action) => action.actionType === "update_instagram_password" && action.sourceLabel === "account_dashboard_actions")
     .map((action) => action.accountId || action.username));
-  const items = manageData.allAccounts.map((account) => mapAccount(
-    account,
-    actionAccountIds.has(account.accountId || account.username),
-    passwordUpdateAccountIds.has(account.accountId || account.username),
-  ));
+  const accountIds = manageData.allAccounts
+    .map((account) => account.accountId)
+    .filter((accountId): accountId is string => Boolean(accountId));
+  const supabase = createSupabaseClient();
+  const eligibilityCounts = await loadTargetEligibilityCountsByAccount(supabase, accountIds);
+  const needsMoreByAccount = await loadNeedsMoreTargetAccountsProjectionForAccounts(
+    supabase,
+    accountIds,
+    eligibilityCounts,
+  ).catch(() => new Map<string, { needsMoreTargets: boolean; eligibleTargetCount: number }>());
+  const items = manageData.allAccounts.map((account) => {
+    const accountId = account.accountId || "";
+    const needsMoreProjection = needsMoreByAccount.get(accountId) ?? {
+      needsMoreTargets: false,
+      eligibleTargetCount: eligibilityCounts.get(accountId)?.eligible ?? 0,
+    };
+    return mapAccount(
+      account,
+      actionAccountIds.has(account.accountId || account.username),
+      passwordUpdateAccountIds.has(account.accountId || account.username),
+      needsMoreProjection,
+    );
+  });
 
   return {
     items,

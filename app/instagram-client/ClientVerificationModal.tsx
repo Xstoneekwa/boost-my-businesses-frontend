@@ -13,8 +13,6 @@ type Props = {
   connectStatus?: string | null;
   onClose: () => void;
   onSubmitted?: () => void;
-  onOpenBotAppPhone?: () => Promise<void> | void;
-  botappUnavailableMessage?: string | null;
 };
 
 function labelFor(lang: "fr" | "en", fr: string, en: string) {
@@ -23,10 +21,10 @@ function labelFor(lang: "fr" | "en", fr: string, en: string) {
 
 function challengeStatusMessage(lang: "fr" | "en", status: string | null | undefined, resumeStatus?: string | null) {
   if (resumeStatus === "running") {
-    return labelFor(lang, "Reprise de la connexion en cours.", "Connection resume is in progress.");
+    return labelFor(lang, "Vérification en cours.", "Verification in progress.");
   }
-  if (resumeStatus === "queued" || status === "code_submitted") {
-    return labelFor(lang, "Code reçu. Reprise automatique en cours.", "Code received. Automatic resume in progress.");
+  if (resumeStatus === "queued") {
+    return labelFor(lang, "Vérification en cours. Reprise automatique en cours.", "Verification in progress. Automatic resume in progress.");
   }
   if (resumeStatus === "needs_new_code") {
     return labelFor(lang, "Instagram demande un nouveau code.", "Instagram still needs a new verification code.");
@@ -46,19 +44,17 @@ export default function ClientVerificationModal({
   connectStatus,
   onClose,
   onSubmitted,
-  onOpenBotAppPhone,
-  botappUnavailableMessage,
 }: Props) {
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [openingBotApp, setOpeningBotApp] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [botappMessage, setBotappMessage] = useState<string | null>(null);
 
   const canSubmitCode = Boolean(
     action?.can_submit_code
-    && connectStatus !== "verification_code_submitted",
+    && connectStatus !== "verification_resume_active"
+    && connectStatus !== "verification_code_submitted"
+    && connectStatus !== "verification_code_accepted",
   );
   const resumeInProgress = Boolean(
     action
@@ -66,7 +62,9 @@ export default function ClientVerificationModal({
     && (action.status === "code_submitted"
       || action.resume_status === "queued"
       || action.resume_status === "running"
-      || connectStatus === "verification_code_submitted"),
+      || connectStatus === "verification_resume_active"
+      || connectStatus === "verification_code_submitted"
+      || connectStatus === "verification_code_accepted"),
   );
 
   const statusMessage = useMemo(
@@ -79,7 +77,6 @@ export default function ClientVerificationModal({
       setCode("");
       setMessage(null);
       setError(null);
-      setBotappMessage(null);
     }
   }, [open]);
 
@@ -106,6 +103,8 @@ export default function ClientVerificationModal({
         status?: string;
         resume_queued?: boolean;
         resume_already_queued?: boolean;
+        resume_request_status?: string | null;
+        message?: string;
       }>(response, lang);
       if (!response.ok || payload.ok === false) {
         const safeError = payload.message || payload.error;
@@ -115,29 +114,19 @@ export default function ClientVerificationModal({
         throw new Error(safeError || labelFor(lang, "Impossible d'envoyer le code.", "Could not submit the code."));
       }
       setCode("");
-      setMessage(labelFor(lang, "Code envoyé. Nous reprenons la connexion.", "Code submitted. We are resuming the connection."));
+      const resumeStarted = payload.data?.resume_queued === true
+        || payload.data?.resume_already_queued === true
+        || ["queued", "claimed", "starting", "running"].includes(String(payload.data?.resume_request_status || "").toLowerCase());
+      setMessage(
+        resumeStarted
+          ? labelFor(lang, "Vérification en cours. Nous reprenons la connexion automatiquement.", "Verification in progress. We are resuming the connection automatically.")
+          : labelFor(lang, "Code enregistré. Nous préparons la reprise de la connexion.", "Code saved. We are preparing to resume the connection."),
+      );
       onSubmitted?.();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : labelFor(lang, "Impossible d'envoyer le code.", "Could not submit the code."));
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function openBotAppPhone() {
-    if (!onOpenBotAppPhone) return;
-    setOpeningBotApp(true);
-    setBotappMessage(null);
-    try {
-      await onOpenBotAppPhone();
-    } catch {
-      setBotappMessage(botappUnavailableMessage || labelFor(
-        lang,
-        "La vérification nécessite l'assistance de l'équipe de gestion.",
-        "Verification requires assistance from the management team.",
-      ));
-    } finally {
-      setOpeningBotApp(false);
     }
   }
 
@@ -201,21 +190,8 @@ export default function ClientVerificationModal({
         {statusMessage && !message ? <p className="cd-verification-hint">{statusMessage}</p> : null}
         {message ? <p className="cd-progress-action cd-progress-action-success">{message}</p> : null}
         {error ? <p className="cd-verification-error">{error}</p> : null}
-        {botappMessage ? <p className="cd-verification-error">{botappMessage}</p> : null}
 
         <div className="cd-connect-actions">
-          {onOpenBotAppPhone ? (
-            <button
-              type="button"
-              className="cd-btn cd-btn-soft"
-              disabled={openingBotApp}
-              onClick={() => void openBotAppPhone()}
-            >
-              {openingBotApp
-                ? labelFor(lang, "Ouverture…", "Opening…")
-                : labelFor(lang, "Ouvrir le téléphone dans BotApp", "Open phone in BotApp")}
-            </button>
-          ) : null}
           {canSubmitCode ? (
             <button
               type="button"

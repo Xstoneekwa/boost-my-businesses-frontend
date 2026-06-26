@@ -26,6 +26,8 @@ import {
   parseLoginEmailInput,
   persistAccountLoginEmail,
 } from "@/lib/instagram-dashboard/persist-account-login-email";
+import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
+import { profileVerificationPayloadForInsert } from "@/lib/instagram-accounts/profile-verification-payload";
 import {
   getInstagramAdminUserContext,
   jsonError,
@@ -35,7 +37,7 @@ import {
   requireInstagramAdmin,
   type SupabaseRecord,
 } from "../../_utils";
-import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +130,7 @@ async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return { mode: "relay_key" as const, userId: null };
   if (!relayAuth.ok) {
-    const response = jsonError("Add profile relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+    const response = jsonError("Add profile relay authentication failed.", relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), { reason: compassRelayAuthFailureReason(relayAuth) });
     return { mode: "unauthorized" as const, response };
   }
   const unauthorizedResponse = await requireInstagramAdmin();
@@ -201,13 +203,6 @@ function redactTemplatePayload(payload: Record<string, string | number | boolean
   ) as Record<string, string | number | boolean>;
 }
 
-function credentialsConfig() {
-  const url = process.env.INSTAGRAM_CREDENTIALS_API_URL?.trim();
-  const token = process.env.INSTAGRAM_CREDENTIALS_INTERNAL_API_TOKEN?.trim();
-  if (!url || !token) return null;
-  return { url, token };
-}
-
 function safeCredentialString(value: unknown, fallback = "") {
   return readString(value, fallback).trim();
 }
@@ -244,54 +239,8 @@ function isDuplicateAccountError(error: { code?: string; message?: string; detai
   return combined.includes("23505") || combined.includes("ig_accounts_username_lower_unique");
 }
 
-function verificationStatusForLookup(lookup: InstagramPublicProfileLookupResult) {
-  if (lookup.status === "found") return "verified";
-  if (lookup.status === "username_invalid") return "invalid_format";
-  if (lookup.status === "provider_error" || lookup.status === "rate_limited") return "provider_error";
-  return "verification_unavailable";
-}
-
-function verificationReasonForLookup(lookup: InstagramPublicProfileLookupResult) {
-  if (lookup.status === "found") return "found";
-  if (lookup.status === "provider_not_configured") return "provider_not_configured";
-  if (lookup.status === "rate_limited") return "rate_limited";
-  return lookup.reason || lookup.status;
-}
-
-function publicProfileMetadataForLookup(lookup: InstagramPublicProfileLookupResult) {
-  const metadata: Record<string, string | number | boolean | null> = {
-    source: addProfileOperation,
-    source_surface: addProfileSourceSurface,
-    provider_status: lookup.status,
-    reason: verificationReasonForLookup(lookup),
-    input_username: lookup.input_username,
-  };
-  if (lookup.canonical_username) metadata.canonical_username = lookup.canonical_username;
-  for (const [key, value] of Object.entries(lookup.metadata)) {
-    metadata[`provider_${key}`] = value;
-  }
-  return metadata;
-}
-
-function profileVerificationPayload(lookup: InstagramPublicProfileLookupResult) {
-  const verified = lookup.status === "found";
-  return {
-    username_verification_status: verificationStatusForLookup(lookup),
-    username_verified_at: verified ? lookup.checked_at : null,
-    username_verification_reason: verificationReasonForLookup(lookup),
-    instagram_user_id: lookup.instagram_user_id,
-    external_profile_id: lookup.external_profile_id,
-    is_private: lookup.is_private,
-    is_verified: lookup.is_verified,
-    followers_count: lookup.followers_count,
-    avatar_url: lookup.avatar_url,
-    avatar_checked_at: lookup.avatar_url ? lookup.checked_at : null,
-    public_profile_metadata: publicProfileMetadataForLookup(lookup),
-  };
-}
-
 async function callSubmitAddProfileCredentials(input: AddProfileCredentialsInput) {
-  const config = credentialsConfig();
+  const config = resolveServerCredentialsConfig();
   if (!config) {
     throw new Error("credentials_api_not_configured");
   }
@@ -908,10 +857,10 @@ export async function POST(request: Request) {
     if (!dryRun && loginMethod === "credentials" && !password && !repairCredentialsAlreadySaved) {
       return jsonError("Instagram password is required for secure credential setup.", 400);
     }
-    if (!dryRun && loginMethod === "credentials" && password && !credentialsConfig()) {
+    if (!dryRun && loginMethod === "credentials" && password && !resolveServerCredentialsConfig()) {
       return jsonError("credentials_api_not_configured", 500);
     }
-    if (!dryRun && loginMethod === "credentials" && !password && repairCredentialsAlreadySaved && !credentialsConfig()) {
+    if (!dryRun && loginMethod === "credentials" && !password && repairCredentialsAlreadySaved && !resolveServerCredentialsConfig()) {
       return jsonError("credentials_api_not_configured", 500);
     }
 
@@ -1018,7 +967,10 @@ export async function POST(request: Request) {
       login_method: loginMethod,
       internal_label: readString(body.internal_label, "").trim() || null,
       notes: readString(body.notes, "").trim() || null,
-      ...profileVerificationPayload(profileLookup),
+      ...profileVerificationPayloadForInsert(profileLookup, {
+        operation: addProfileOperation,
+        sourceSurface: addProfileSourceSurface,
+      }),
     };
 
     const repairState = earlyRepairState;

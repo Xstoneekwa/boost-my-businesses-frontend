@@ -99,6 +99,43 @@ function makeSupabase(rows = baseRows()) {
   };
 }
 
+test("post-cancel neutral account statuses show Compte ajouté without refresh CTA", () => {
+  const ui = resolveClientAccountState({
+    loginStatus: "unknown",
+    onboardingStatus: "credentials_submitted",
+    provisioningStatus: "not_started",
+    assignmentStatus: "pending_assignment",
+    connected: false,
+    operationPending: false,
+    clientReadinessStatus: "preparation_blocked",
+    activeConnectStatus: null,
+  }, "fr");
+
+  assert.equal(ui.phase, "added");
+  assert.equal(ui.badgeLabel, "Compte ajouté");
+  assert.equal(ui.showRefresh, false);
+  assert.match(ui.readinessLabel, /Revérifier|Vérifier la préparation/i);
+  assert.equal(ui.connectDisabled, true);
+  assert.equal(ui.showVerificationReopen, false);
+});
+
+test("logged_out login_pending after cleanup must not invent Préparation en cours", () => {
+  const ui = resolveClientAccountState({
+    loginStatus: "logged_out",
+    onboardingStatus: "credentials_submitted",
+    provisioningStatus: "login_pending",
+    assignmentStatus: "pending_assignment",
+    connected: false,
+    operationPending: false,
+    clientReadinessStatus: null,
+    activeConnectStatus: null,
+  }, "fr");
+
+  assert.equal(ui.phase, "added");
+  assert.equal(ui.badgeLabel, "Compte ajouté");
+  assert.equal(ui.showRefresh, false);
+});
+
 test("ready_to_connect dashboard card exposes durable UX labels", () => {
   const ui = resolveClientAccountState({
     loginStatus: "unknown",

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { createSupabaseClient } from "@/lib/supabase";
 import { buildDmProjection, saveDmDomainPatch } from "@/lib/instagram-dashboard/dm-domain-service";
+import { sanitizeClientApiError } from "@/lib/instagram-client/client-account-canonical";
 import {
   assertClientCanConfigureOutreach,
-  projectClientDmTemplates,
+  loadClientDmTemplatesProjection,
 } from "@/lib/instagram-client/client-dm-templates";
-import { resolveAccountPackageCode } from "@/lib/instagram-client/resolve-account-package-code";
-import { authorizeClientInstagramAccount, readString, rejectTechnicalClientFields, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
+import { authorizeClientInstagramAccount, rejectTechnicalClientFields, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
+
+const SAVE_ERROR = "Could not save outreach DM template.";
 
 async function authorizeAccountRoute(accountId: string) {
   const session = await requireClientInstagramSession();
@@ -24,17 +26,6 @@ async function authorizeAccountRoute(accountId: string) {
     return { error: NextResponse.json({ ok: false, error: ownership.error }, { status: ownership.status }) };
   }
   return { accountId: normalizedAccountId, userId: session.userId };
-}
-
-async function loadAccountUsername(accountId: string) {
-  const supabase = createSupabaseClient();
-  const { data, error } = await supabase
-    .from("client_instagram_accounts")
-    .select("username")
-    .eq("account_id", accountId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return readString(data?.username, "");
 }
 
 type OutreachPatchBody = {
@@ -82,20 +73,19 @@ export async function PATCH(
       allowedFields: ["outreach_enabled", "outreach_message"],
     });
     if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
+      return NextResponse.json({
+        ok: false,
+        error: sanitizeClientApiError(result.error, SAVE_ERROR),
+      }, { status: result.status });
     }
 
-    const username = await loadAccountUsername(auth.accountId);
-    const packageCode = await resolveAccountPackageCode(auth.accountId);
-    const data = projectClientDmTemplates({
-      accountId: auth.accountId,
-      username,
-      packageCode,
-      domain: result.projection,
-    });
+    const data = await loadClientDmTemplatesProjection(auth.accountId);
     return NextResponse.json({ ok: true, data, changed_fields: result.changedFields });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not save outreach DM template.";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const message = error instanceof Error ? error.message : SAVE_ERROR;
+    return NextResponse.json({
+      ok: false,
+      error: sanitizeClientApiError(message, SAVE_ERROR),
+    }, { status: 500 });
   }
 }

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { createSupabaseClient } from "@/lib/supabase";
 import { loadClientDmTemplatesProjection } from "@/lib/instagram-client/client-dm-templates";
-import { authorizeClientInstagramAccount, readString, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
+import { sanitizeClientApiError } from "@/lib/instagram-client/client-account-canonical";
+import { authorizeClientInstagramAccount, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
+
+const LOAD_ERROR_FR = "Impossible de charger les modèles DM.";
+const LOAD_ERROR_EN = "Could not load DM templates.";
 
 async function authorizeAccountRoute(accountId: string) {
   const session = await requireClientInstagramSession();
@@ -21,17 +24,6 @@ async function authorizeAccountRoute(accountId: string) {
   return { accountId: normalizedAccountId };
 }
 
-async function loadAccountUsername(accountId: string) {
-  const supabase = createSupabaseClient();
-  const { data, error } = await supabase
-    .from("client_instagram_accounts")
-    .select("username")
-    .eq("account_id", accountId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return readString(data?.username, "");
-}
-
 export async function GET(
   _request: Request,
   context: { params: Promise<{ accountId: string }> },
@@ -41,11 +33,13 @@ export async function GET(
   if ("error" in auth) return auth.error;
 
   try {
-    const username = await loadAccountUsername(auth.accountId);
-    const data = await loadClientDmTemplatesProjection(auth.accountId, username);
+    const data = await loadClientDmTemplatesProjection(auth.accountId);
     return NextResponse.json({ ok: true, data });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not load DM templates.";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const message = error instanceof Error ? error.message : LOAD_ERROR_EN;
+    return NextResponse.json({
+      ok: false,
+      error: sanitizeClientApiError(message, LOAD_ERROR_EN),
+    }, { status: 500 });
   }
 }

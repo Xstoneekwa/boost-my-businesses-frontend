@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   PreflightEnqueueError,
   type ReadinessNowSupabase,
-} from "@/lib/instagram-dashboard/readiness-now";
+} from "../instagram-dashboard/readiness-now.ts";
 
 type Row = Record<string, unknown>;
 
@@ -34,8 +34,14 @@ export type EnqueueClientConnectResult = {
   reason: string;
   run_request_status: string | null;
   request_id: string | null;
+  connect_attempt_id: string | null;
   blockers: string[];
 };
+
+function readConnectAttemptIdFromIdempotency(idempotencyKey: string) {
+  const parts = readString(idempotencyKey).split(":");
+  return parts.length >= 3 ? readString(parts[parts.length - 1]) : "";
+}
 
 async function listActiveLoginProvisioningRequests(supabase: ReadinessNowSupabase, accountId: string) {
   const result = await (supabase.from("account_run_requests") as {
@@ -83,6 +89,9 @@ async function createLoginProvisioningRequest(
 
 function resultFromActiveRequest(request: Row, idempotent: boolean): EnqueueClientConnectResult {
   const status = readString(request.status, "queued");
+  const metadata = isRecord(request.metadata_safe) ? request.metadata_safe as Record<string, unknown> : {};
+  const connectAttemptId = readString(metadata.connect_attempt_id)
+    || readConnectAttemptIdFromIdempotency(readString(request.idempotency_key));
   return {
     request,
     preflight_request_created: false,
@@ -90,8 +99,13 @@ function resultFromActiveRequest(request: Row, idempotent: boolean): EnqueueClie
     reason: idempotent ? "already_requested" : "login_preflight_now_queued",
     run_request_status: status,
     request_id: readString(request.id) || null,
+    connect_attempt_id: connectAttemptId || null,
     blockers: [],
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function enqueueClientConnectRequest(
@@ -113,6 +127,7 @@ export async function enqueueClientConnectRequest(
       reason: "login_preflight_request_not_active",
       run_request_status: null,
       request_id: null,
+      connect_attempt_id: null,
       blockers: ["enqueue_rejected"],
     };
   }
@@ -154,6 +169,7 @@ export async function enqueueClientConnectRequest(
         reason: "login_preflight_request_not_active",
         run_request_status: status,
         request_id: readString(request.id) || null,
+        connect_attempt_id: attemptId,
         blockers: ["login_preflight_request_not_active"],
       };
     }
@@ -164,6 +180,7 @@ export async function enqueueClientConnectRequest(
       reason: "login_preflight_now_queued",
       run_request_status: status,
       request_id: readString(request.id) || null,
+      connect_attempt_id: attemptId,
       blockers: [],
     };
   } catch (error) {
@@ -181,6 +198,7 @@ export async function enqueueClientConnectRequest(
       reason: "login_preflight_request_not_active",
       run_request_status: null,
       request_id: null,
+      connect_attempt_id: null,
       blockers: ["enqueue_rejected"],
     };
   }

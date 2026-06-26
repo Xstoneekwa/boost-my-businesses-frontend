@@ -203,6 +203,16 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     : null;
   const subscriptionStartsAt = readString(subscription?.starts_at) || null;
 
+  const linkedInstagramAccountsRaw = await loadLinkedInstagramAccounts(clientId);
+  const packageSummaries = linkedInstagramAccountsRaw.length
+    ? await getAccountPackageSummaries(linkedInstagramAccountsRaw.map((row) => row.accountId))
+    : new Map();
+  const linkedAccountPackageCodes = linkedInstagramAccountsRaw
+    .map((row) => readString(packageSummaries.get(row.accountId)?.commercialPackageCode, row.packageLabel))
+    .filter(Boolean);
+  const subscriptionPlanKey = readMetadataString(subscriptionMetadata, "plan_key")
+    || readMetadataString(subscriptionMetadata, "commercial_package_code");
+
   const commercial = await loadClientCommercialSubscriptionRow(supabase, clientId);
   const subscriptionProjection = projectClientSubscriptionDisplay({
     commercial,
@@ -210,7 +220,15 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     clientCreatedAt: readString(client.created_at) || null,
     clientMetadata: metadata,
     preferredLanguage,
+    linkedAccountPackageCodes,
+    subscriptionPlanKey,
   });
+  const linkedInstagramAccounts = linkedInstagramAccountsRaw.map((row) => ({
+    ...row,
+    packageLabel: packageSummaries.get(row.accountId)?.commercialPackageLabel || row.packageLabel,
+  }));
+  const campaignActive = linkedInstagramAccounts.some((row) => row.connected)
+    || [...packageSummaries.values()].some((summary) => summary.commercialPackageLabel && summary.commercialPackageLabel !== "Package pending");
 
   const subscriptionGrowthLabel = subscriptionProjection.subscriptionGrowthLabel
     || readMetadataString(subscriptionMetadata, "growth_estimate_label");
@@ -225,17 +243,6 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     bookingUrl: readMetadataString(metadata, "account_manager_booking_url"),
     bio: readMetadataString(metadata, "account_manager_bio"),
   };
-
-  const linkedInstagramAccountsRaw = await loadLinkedInstagramAccounts(clientId);
-  const packageSummaries = linkedInstagramAccountsRaw.length
-    ? await getAccountPackageSummaries(linkedInstagramAccountsRaw.map((row) => row.accountId))
-    : new Map();
-  const linkedInstagramAccounts = linkedInstagramAccountsRaw.map((row) => ({
-    ...row,
-    packageLabel: packageSummaries.get(row.accountId)?.commercialPackageLabel || row.packageLabel,
-  }));
-  const campaignActive = linkedInstagramAccounts.some((row) => row.connected)
-    || [...packageSummaries.values()].some((summary) => summary.commercialPackageLabel && summary.commercialPackageLabel !== "Package pending");
 
   const billing = billingSummary(metadata, subscriptionProjection);
 

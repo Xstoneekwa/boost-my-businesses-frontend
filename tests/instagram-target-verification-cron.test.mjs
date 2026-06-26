@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateTargetVerificationCronAuth,
+  evaluateTargetVerificationCronHttpMethod,
   extractTargetVerificationCronToken,
+  handleTargetVerificationCronRequest,
   readTargetVerificationCronEnv,
   runTargetVerificationCron,
   tokensMatchConstantTime,
@@ -204,6 +206,100 @@ test("runTargetVerificationCron returns no_jobs when the processor claims nothin
   assert.equal(run.result.reason, "no_jobs");
   assert.equal(run.result.dry_run, false);
   assert.equal(run.result.summary.claimed_count, 0);
+});
+
+test("runTargetVerificationCron exposes periodic revalidation summary from enqueue hook", async () => {
+  const run = await runTargetVerificationCron(makeSupabase(true), {
+    env: baseEnv,
+    callerToken: "cron-secret-token",
+    processBatch: async () => ({
+      ...emptyBatchResult,
+      summary: { ...emptyBatchResult.summary, claimed_count: 1, processed_count: 1 },
+    }),
+    enqueuePeriodicRevalidation: async () => ({
+      enabled: true,
+      dry_run: true,
+      due_count: 3,
+      initialized_count: 1,
+      selected_count: 2,
+      enqueued_count: 2,
+      skipped_active_job_count: 0,
+      skipped_window_claim_count: 0,
+      deferred_not_due_count: 4,
+      provider_deferred_count: 0,
+      errors_count: 0,
+    }),
+  });
+
+  assert.equal(run.result.periodic_revalidation.due_count, 3);
+  assert.equal(run.result.periodic_revalidation.enqueued_count, 2);
+});
+
+test("evaluateTargetVerificationCronHttpMethod allows POST only", () => {
+  assert.deepEqual(evaluateTargetVerificationCronHttpMethod("POST"), { ok: true });
+  assert.equal(evaluateTargetVerificationCronHttpMethod("GET").ok, false);
+  assert.equal(evaluateTargetVerificationCronHttpMethod("GET").reason, "method_not_allowed_use_post");
+  assert.equal(evaluateTargetVerificationCronHttpMethod("GET").status, 405);
+});
+
+test("handleTargetVerificationCronRequest rejects unauthenticated POST before mutation", async () => {
+  let processorCalled = false;
+  const request = new Request("https://example.test/api/instagram-dashboard/targets/verify-cron", {
+    method: "POST",
+  });
+  const run = await handleTargetVerificationCronRequest(request, makeSupabase(true), {
+    env: baseEnv,
+    processBatch: async () => {
+      processorCalled = true;
+      return emptyBatchResult;
+    },
+  });
+
+  assert.equal(processorCalled, false);
+  assert.equal(run.status, 401);
+  assert.equal(run.result.reason, "missing_caller_token");
+});
+
+test("handleTargetVerificationCronRequest rejects GET without enqueue or processing", async () => {
+  let processorCalled = false;
+  const request = new Request("https://example.test/api/instagram-dashboard/targets/verify-cron", {
+    method: "GET",
+    headers: { Authorization: "Bearer cron-secret-token" },
+  });
+  const run = await handleTargetVerificationCronRequest(request, makeSupabase(true), {
+    env: baseEnv,
+    processBatch: async () => {
+      processorCalled = true;
+      return emptyBatchResult;
+    },
+  });
+
+  assert.equal(processorCalled, false);
+  assert.equal(run.status, 405);
+  assert.equal(run.result.reason, "method_not_allowed_use_post");
+});
+
+test("handleTargetVerificationCronRequest keeps authenticated POST execution", async () => {
+  let processorCalled = false;
+  const request = new Request("https://example.test/api/instagram-dashboard/targets/verify-cron", {
+    method: "POST",
+    headers: { Authorization: "Bearer cron-secret-token" },
+  });
+  const run = await handleTargetVerificationCronRequest(request, makeSupabase(true), {
+    env: baseEnv,
+    processBatch: async () => {
+      processorCalled = true;
+      return {
+        ...emptyBatchResult,
+        summary: { ...emptyBatchResult.summary, claimed_count: 1, processed_count: 1 },
+      };
+    },
+  });
+
+  assert.equal(processorCalled, true);
+  assert.equal(run.status, 200);
+  assert.equal(run.result.skipped, false);
+  assert.equal(run.result.summary.claimed_count, 1);
 });
 
 test("runTargetVerificationCron serialized response excludes forbidden strings", async () => {

@@ -1,5 +1,5 @@
 import { jsonError, jsonOk, readJsonBody, readString } from "../../_utils";
-import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 import { loadAssignedDeviceForAccount } from "@/lib/instagram-client/load-assigned-device-for-account";
 import { verifyOpenDeviceViewIntent } from "@/lib/instagram-client/open-botapp-phone-intent";
 
@@ -12,7 +12,7 @@ type Body = {
 export async function POST(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (!relayAuth.ok || relayAuth.mode !== "relay_key") {
-    return jsonError("BotApp relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+    return jsonError("BotApp relay authentication failed.", relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), { reason: compassRelayAuthFailureReason(relayAuth) });
   }
 
   const payload = (await readJsonBody<Body>(request)) ?? {};

@@ -1,5 +1,6 @@
+import { resolveLiveAssignmentTarget } from "@/lib/instagram-dashboard/assignment-live-capacity";
 import { getActiveRunRequest, accountHasActiveIgRun, evaluateRunStartEligibility, runStartBlockMessage } from "@/lib/instagram-dashboard/run-control";
-import { assignmentWindowContainsNow, mapScheduleGateReasonToRunStart, scheduleBlockMessage, type ScheduleBlockReason } from "@/lib/instagram-dashboard/schedule";
+import { mapScheduleGateReasonToRunStart, scheduleBlockMessage, type ScheduleBlockReason } from "@/lib/instagram-dashboard/schedule";
 import { createSupabaseClient } from "@/lib/supabase";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 
@@ -31,10 +32,6 @@ const ASSIGN_NOW_RPC_SOURCE = "manual_dashboard";
 
 function readObject(value: unknown): SupabaseRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as SupabaseRecord : {};
-}
-
-function readArray(value: unknown): SupabaseRecord[] {
-  return Array.isArray(value) ? value.filter((row): row is SupabaseRecord => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : [];
 }
 
 function safeNotReady(reason: string, message = runStartBlockMessage(reason as never)): AssignNowResult {
@@ -168,16 +165,6 @@ async function evaluateScheduleGate(supabase: ReturnType<typeof createSupabaseCl
   };
 }
 
-function chooseCurrentAvailableSlot(slotPayload: SupabaseRecord, now = new Date()) {
-  const slots = readArray(slotPayload.slots);
-  return slots.find((slot) => {
-    if (slot.available !== true) return false;
-    const startsAt = readString(slot.starts_at, "");
-    const endsAt = readString(slot.ends_at, "");
-    return assignmentWindowContainsNow(startsAt, endsAt, now);
-  }) ?? null;
-}
-
 function readPreferredCloneId(currentAssignment: SupabaseRecord) {
   return readString(currentAssignment.clone_id, "") || readString(currentAssignment.app_instance_id, "") || null;
 }
@@ -286,25 +273,38 @@ export async function assignNowForAccount(
     return capacityUnavailable("rpc_error_safe", "Could not load available assignment slots.");
   }
 
+  const liveResolution = await resolveLiveAssignmentTarget(supabase, accountId, {
+    requireCurrentWindow: true,
+    deviceKindPolicy: "physical_phone_only",
+    now,
+    skipIfAssigned: false,
+  });
+  if (!liveResolution.ok) {
+    if (liveResolution.reason === "live_device_unavailable") {
+      return capacityUnavailable("phone_capacity_unavailable", "No connected phone is available right now.");
+    }
+    if (liveResolution.reason === "no_available_clone") {
+      return capacityUnavailable("app_instance_capacity_unavailable", "No Instagram app instance is available on a connected phone.");
+    }
+    return capacityUnavailable(
+      liveResolution.reason === "no_available_slot" ? "no_available_slot_now" : "phone_capacity_unavailable",
+      liveResolution.reason === "no_available_slot"
+        ? "No assignment slot is available for the current time window."
+        : "No connected phone is available right now.",
+    );
+  }
+
   const slotPayload = readObject(slotData);
   const deviceTimezone = readString(slotPayload.device_timezone, "");
   if (!deviceTimezone) {
     return capacityUnavailable("business_timezone_missing", "Phone business timezone is missing for assignment.");
   }
 
-  const deviceId = readString(slotPayload.device_id, "");
-  if (!deviceId) {
-    return capacityUnavailable("phone_capacity_unavailable", "No phone is available right now.");
-  }
-
-  const selectedSlot = chooseCurrentAvailableSlot(slotPayload, now);
-  if (!selectedSlot) {
-    return capacityUnavailable(
-      "no_available_slot_now",
-      "No assignment slot is available for the current time window.",
-    );
-  }
-
+  const deviceId = liveResolution.target.deviceId;
+  const selectedSlot = {
+    starts_at: liveResolution.target.startsAt,
+    ends_at: liveResolution.target.endsAt,
+  };
   const startsAt = readString(selectedSlot.starts_at, "");
   const endsAt = readString(selectedSlot.ends_at, "");
   if (!startsAt || !endsAt) {
@@ -318,7 +318,7 @@ export async function assignNowForAccount(
     p_device_id: deviceId,
     p_starts_at: startsAt,
     p_ends_at: endsAt,
-    p_clone_id: readPreferredCloneId(currentAssignment),
+    p_clone_id: readPreferredCloneId(currentAssignment) || liveResolution.target.appInstanceId,
     p_assignment_source: ASSIGN_NOW_RPC_SOURCE,
     p_actor_id: actorId,
   });

@@ -23,7 +23,7 @@ import {
   validateAccountId,
   type SupabaseRecord,
 } from "../../_utils";
-import { relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
+import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -322,15 +322,25 @@ async function buildScheduleProjection(
   }
 
   const slotPayload = readRpcObject(slotData);
-  const deviceId = readString(slotPayload.device_id, "") || null;
-  const deviceTimezone = normalizeLegacyScheduleTimezone(readString(slotPayload.device_timezone, ""));
-  const deviceLabel = await fetchDeviceLabel(supabase, deviceId);
-  const restWindows = await fetchRestWindows(supabase, deviceId);
+  const currentAssignmentRaw = readCurrentAssignment(
+    slotPayload.current_assignment,
+    await fetchDeviceLabel(
+      supabase,
+      readString(readRpcObject(slotPayload.current_assignment).device_id, "") || null,
+    ),
+  );
+  const projectionDeviceId = currentAssignmentRaw
+    ? readString(currentAssignmentRaw.device_id, "") || readString(slotPayload.device_id, "") || null
+    : null;
+  const deviceTimezone = normalizeLegacyScheduleTimezone(
+    projectionDeviceId ? readString(slotPayload.device_timezone, "") : "",
+  );
+  const deviceLabel = projectionDeviceId ? await fetchDeviceLabel(supabase, projectionDeviceId) : null;
+  const restWindows = await fetchRestWindows(supabase, projectionDeviceId);
   const availableSlots = readSlotArray(slotPayload.slots).map((slot) => ({
     ...slot,
     local_label: formatScheduleLocalLabel(slot.starts_at, slot.ends_at, deviceTimezone) ?? slot.local_label,
   }));
-  const currentAssignmentRaw = readCurrentAssignment(slotPayload.current_assignment, deviceLabel);
   const currentAssignment = currentAssignmentRaw
     ? {
         ...currentAssignmentRaw,
@@ -342,7 +352,7 @@ async function buildScheduleProjection(
       }
     : null;
   const gates = buildGateProjection(readRpcObject(gateData));
-  const scheduledAssignments = await fetchScheduledAssignmentsForDevice(supabase, deviceId);
+  const scheduledAssignments = await fetchScheduledAssignmentsForDevice(supabase, projectionDeviceId);
   const editAvailableSlots = applyEditSlotAvailability({
     slots: availableSlots,
     assignments: scheduledAssignments,
@@ -379,7 +389,7 @@ async function buildScheduleProjection(
     account_id: accountId,
     assignment_type: readString(slotPayload.assignment_type, "") || null,
     slot_kind: readString(slotPayload.slot_kind, "") || editAvailableSlots.find((slot) => slot.slot_kind)?.slot_kind || null,
-    device_id: deviceId,
+    device_id: projectionDeviceId,
     device_label: deviceLabel,
     device_timezone: deviceTimezone,
     slot_date: readString(slotPayload.slot_date, "") || null,
@@ -427,7 +437,7 @@ async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
   if (!relayAuth.ok) {
-    return jsonError("Schedule relay authentication failed.", relayAuthStatus(relayAuth.reason), { reason: relayAuth.reason });
+    return jsonError("Schedule relay authentication failed.", relayAuthStatus(compassRelayAuthFailureReason(relayAuth)), { reason: compassRelayAuthFailureReason(relayAuth) });
   }
   return requireInstagramAdmin();
 }
