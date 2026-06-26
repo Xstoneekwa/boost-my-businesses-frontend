@@ -175,3 +175,73 @@ test("webhook event id is stable for duplicate detection", () => {
     buildPostmarkWebhookEventId(payload),
   );
 });
+
+test("delivery test with unknown MessageID and no intent metadata returns ignored without writes", async () => {
+  const supabase = createMockSupabase({ intents: [], events: [] });
+  const payload = {
+    RecordType: "Delivery",
+    MessageStream: "outbound",
+    MessageID: "postmark-test-unknown-message-id",
+    Recipient: "test@example.com",
+    DeliveredAt: "2026-06-26T15:00:00.000Z",
+    Details: "Test delivery webhook details",
+  };
+
+  const result = await ingestPostmarkWebhookEvent(supabase as never, payload);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.action, "ignored");
+  assert.equal(result.reason, "missing_intent_metadata");
+  assert.equal(supabase._events.length, 0);
+});
+
+test("bounce test with unknown MessageID and no intent metadata returns ignored without writes", async () => {
+  const supabase = createMockSupabase({ intents: [], events: [] });
+  const payload = {
+    RecordType: "Bounce",
+    MessageStream: "outbound",
+    MessageID: "postmark-test-unknown-bounce-id",
+    ID: 4242,
+    Type: "HardBounce",
+    Email: "test@example.com",
+    BouncedAt: "2026-06-26T15:01:00.000Z",
+    Description: "Test bounce webhook",
+  };
+
+  const result = await ingestPostmarkWebhookEvent(supabase as never, payload);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.action, "ignored");
+  assert.equal(result.reason, "missing_intent_metadata");
+  assert.equal(supabase._events.length, 0);
+});
+
+test("delivery with unknown intent metadata id does not create delivery events", async () => {
+  const supabase = createMockSupabase({
+    intents: [],
+    events: [],
+  });
+
+  const result = await ingestPostmarkWebhookEvent(supabase as never, {
+    RecordType: "Delivery",
+    MessageStream: "outbound",
+    MessageID: "postmark-unknown-intent-message",
+    Recipient: "owner@example.com",
+    DeliveredAt: "2026-06-26T15:02:00.000Z",
+    Metadata: { intent_id: "00000000-0000-0000-0000-000000000000" },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.reason, "intent_not_found");
+  assert.equal(supabase._events.length, 0);
+});
+
+test("invalid payload returns controlled error without writes", async () => {
+  const supabase = createMockSupabase({ intents: [], events: [] });
+  const result = await ingestPostmarkWebhookEvent(supabase as never, "not-json-object");
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.reason, "invalid_payload");
+  assert.equal(supabase._events.length, 0);
+});
