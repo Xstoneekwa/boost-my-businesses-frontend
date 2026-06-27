@@ -67,7 +67,35 @@ Until the migration is applied, the resolver falls back to `growth@boostmybusine
 | Delivery settings resolver | `lib/instagram-dashboard/client-email-delivery-settings.ts` |
 | Postmark sender identity sync | `lib/instagram-dashboard/client-email-postmark-sender-sync.ts` |
 | Delivery settings HTTP routes | `app/api/instagram-dashboard/email-delivery-settings/*` |
+| Outbox lifecycle planner (read-only) | `lib/instagram-dashboard/client-email-lifecycle-outbox-plan.ts` |
+| Lifecycle readiness projection | `lib/instagram-dashboard/client-email-lifecycle-readiness.ts` |
+| Intent parent contract | `lib/instagram-dashboard/client-email-intent-parent-contract.ts` |
+| Lifecycle readiness HTTP route | `app/api/instagram-dashboard/email-lifecycle/readiness/route.ts` |
 | Webhook HTTP route | `app/api/webhooks/postmark/route.ts` |
+
+## Outbox lifecycle contract (TASK 10A)
+
+Central read-only planner: `buildClientEmailLifecycleOutboxPlan()` — no episodes, sequences, intents, provider calls, or webhooks.
+
+| Gate | Production expectation |
+|------|------------------------|
+| `CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED` | `false` until explicit GO |
+| `CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED_AT` | unset until explicit GO (anti-backfill watermark) |
+| `CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT` | unset until explicit GO |
+
+### Intent parent linkage (local migration, not applied)
+
+`20260702120000_client_email_intent_episode_links.sql`:
+
+| Intent kind | Parent |
+|-------------|--------|
+| `test` | none (`sequence_id` and `lifecycle_episode_id` null) |
+| `client` + `needs_more_target_accounts` | `sequence_id` only |
+| `client` + lifecycle categories | `lifecycle_episode_id` only |
+
+Future client intents must snapshot at creation time: recipient canonical email, template id/version, rendered subject/body, `from_email_snapshot`, `support_email_snapshot`, category, trigger, reminder index, parent ref, config version, idempotency key — resolved via `resolveTransactionalDeliverySettings()`, never read back from live settings after send.
+
+Readiness (relay/admin): `GET /api/instagram-dashboard/email-lifecycle/readiness` — booleans and blocking reasons only; no secrets or full client emails.
 
 ## Webhook setup
 

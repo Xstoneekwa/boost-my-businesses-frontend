@@ -88,11 +88,19 @@ order by 1;
 
 **Status on main production:** applied as remote version `20260627093518` / `client_email_lifecycle_episodes`.
 
-## Pending local migration (TASK 9A — not applied)
+## Applied migration (TASK 9A)
 
 | Local version | Filename | Role |
 |---------------|----------|------|
 | `20260701120000` | `20260701120000_transactional_email_delivery_settings.sql` | Singleton transactional delivery settings (`active_from_email`, `support_email`), audit trail, intent sender/support snapshots |
+
+**Status on main production:** applied as remote version `20260627100108` / `transactional_email_delivery_settings`.
+
+## Pending local migration (TASK 10A — not applied)
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260702120000` | `20260702120000_client_email_intent_episode_links.sql` | Explicit parent linkage on `client_email_send_intents`: `lifecycle_episode_id` FK, sequence FK, mutual exclusivity, test/needs-more/lifecycle parent constraints |
 
 **Status on main production:** not applied. Do **not** apply without explicit GO.
 

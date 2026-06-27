@@ -99,6 +99,16 @@ export function buildLifecycleEpisodeKey(
   return `${category}:${accountId}:${startedAtIso}`;
 }
 
+export function buildLifecycleIntentIdempotencyKey(input: {
+  category: ClientEmailLifecycleEpisodeCategory;
+  accountId: string;
+  episodeId: string;
+  reminderIndex?: number;
+}) {
+  const reminderIndex = input.reminderIndex ?? 0;
+  return `lifecycle:${input.category}:${input.accountId}:episode:${input.episodeId}:index:${reminderIndex}`;
+}
+
 export function planClientEmailLifecyclePreview(input: {
   category: ClientEmailLifecycleEpisodeCategory;
   adminLifecycleStatus: string;

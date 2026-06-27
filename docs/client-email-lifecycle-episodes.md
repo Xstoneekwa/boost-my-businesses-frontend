@@ -35,8 +35,13 @@ Client communication email uses `resolveClientCommunicationEmail` only (client m
 |-------|------|
 | Contract + anti-backfill planner | `lib/instagram-dashboard/client-email-lifecycle-contract.ts` |
 | Read-only preview loader | `lib/instagram-dashboard/client-email-lifecycle-preview.ts` |
+| Outbox planner (TASK 10A) | `lib/instagram-dashboard/client-email-lifecycle-outbox-plan.ts` |
+| Readiness loader | `lib/instagram-dashboard/client-email-lifecycle-readiness.ts` |
 | API route | `app/api/instagram-dashboard/email-lifecycle/preview/route.ts` |
+| Readiness API route | `app/api/instagram-dashboard/email-lifecycle/readiness/route.ts` |
+| Intent parent contract | `lib/instagram-dashboard/client-email-intent-parent-contract.ts` |
 | Migration (local, not applied) | `supabase/migrations/20260630120000_client_email_lifecycle_episodes.sql` |
+| Intent parent migration (local, not applied) | `supabase/migrations/20260702120000_client_email_intent_episode_links.sql` |
 
 ## Blockers noted
 

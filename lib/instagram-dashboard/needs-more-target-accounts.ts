@@ -66,7 +66,7 @@ export async function loadActiveNeedsMoreTargetAccountsAction(
 ) {
   const { data, error } = await supabase
     .from("account_dashboard_actions")
-    .select("id,status,metadata,updated_at")
+    .select("id,status,metadata,created_at,updated_at")
     .eq("account_id", accountId)
     .eq("action_type", NEEDS_MORE_TARGET_ACCOUNTS_ACTION_TYPE)
     .in("status", [...ACTIVE_ACTION_STATUSES])
