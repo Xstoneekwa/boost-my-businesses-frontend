@@ -20,6 +20,16 @@ const outboxRoute = readFileSync(
   "utf8",
 );
 
+const materializeReadyEnv = {
+  CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED: "true",
+  CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED_AT: "2026-07-01T00:00:00.000Z",
+  CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "true",
+  CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT: "2026-07-01T00:00:00.000Z",
+  CLIENT_EMAIL_SENDING_ENABLED: "false",
+  CLIENT_EMAIL_PROVIDER: "postmark",
+  POSTMARK_SERVER_TOKEN: "token",
+};
+
 const closedEnv = {
   CLIENT_EMAIL_SENDING_ENABLED: "false",
   CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED: "false",
@@ -73,10 +83,29 @@ const baseRow = (overrides: Partial<ClientEmailOutboxPlanRow> = {}): ClientEmail
 function effectiveRow(overrides: Partial<OutboxEffectiveCandidateRow> = {}): OutboxEffectiveCandidateRow {
   return {
     ...baseRow(overrides),
+    materializationEligible: overrides.materializationEligible ?? false,
+    materializationGateState: overrides.materializationGateState ?? "not_applicable",
+    materializationBlockingReasons: overrides.materializationBlockingReasons ?? [],
     dispatchEligible: overrides.dispatchEligible ?? false,
+    dispatchGateState: overrides.dispatchGateState ?? "not_applicable",
+    dispatchBlockingReasons: overrides.dispatchBlockingReasons ?? [],
     suppressedByCategory: null,
     suppressionReason: null,
     isEffectiveCandidate: true,
+  };
+}
+
+function previewInput(overrides: Partial<Parameters<typeof projectClientEmailLifecycleOutboxPreview>[0]> = {}) {
+  return {
+    plan: basePlan(),
+    readinessStatus: "partial" as const,
+    readinessBlockingReasons: [],
+    materializationReadinessStatus: "partial" as const,
+    dispatchReadinessStatus: "blocked" as const,
+    materializationBlockingReasons: [],
+    dispatchBlockingReasons: ["Client email sending is disabled by CLIENT_EMAIL_SENDING_ENABLED."],
+    env: materializeReadyEnv,
+    ...overrides,
   };
 }
 
@@ -108,18 +137,20 @@ test("historical lifecycle maps to blocked_legacy_pre_watermark", () => {
 });
 
 test("precedence collapses canceled account to one effective row and suppresses needs-more", () => {
-  const preview = projectClientEmailLifecycleOutboxPreview({
+  const preview = projectClientEmailLifecycleOutboxPreview(previewInput({
     plan: {
       ...basePlan(),
       accountsAnalyzed: 1,
+      lifecycleWatermarkConfigured: true,
+      needsMoreWatermarkConfigured: true,
+      lifecycleAutomationEnabled: true,
+      needsMoreAutomationEnabled: true,
       rows: [
         baseRow({ accountId: "a1", category: "account_canceled", decision: "blocked_legacy_pre_watermark" }),
         baseRow({ accountId: "a1", category: "needs_more_target_accounts", decision: "no_action", reason: "signal active" }),
       ],
     },
-    readinessStatus: "partial",
-    readinessBlockingReasons: [],
-  });
+  }));
   assert.equal(preview.summary.rawObservations, 2);
   assert.equal(preview.summary.effectiveCandidates, 1);
   assert.equal(preview.summary.suppressedByLifecyclePriority, 1);
@@ -128,9 +159,14 @@ test("precedence collapses canceled account to one effective row and suppresses 
   assert.equal(preview.items[0]?.precedenceNote, "Other lifecycle communication suppressed by account status");
 });
 
-test("closed gate maps to blocked_delivery_gate on effective candidate", () => {
+test("legacy blocked_delivery_gate decision still projects dispatch gate closed", () => {
   const projected = projectOutboxPreviewItem(
-    effectiveRow({ decision: "blocked_delivery_gate", reason: "Automation gates remain closed." }),
+    effectiveRow({
+      decision: "blocked_delivery_gate",
+      reason: "Automation gates remain closed.",
+      dispatchGateState: "closed",
+      dispatchBlockingReasons: ["Automation gates remain closed."],
+    }),
     basePlan(),
     { suppressedSiblingCount: 0 },
   );
@@ -139,7 +175,7 @@ test("closed gate maps to blocked_delivery_gate on effective candidate", () => {
 });
 
 test("summary counts raw vs effective and suppressed", () => {
-  const preview = projectClientEmailLifecycleOutboxPreview({
+  const preview = projectClientEmailLifecycleOutboxPreview(previewInput({
     plan: {
       ...basePlan(),
       accountsAnalyzed: 2,
@@ -150,9 +186,7 @@ test("summary counts raw vs effective and suppressed", () => {
         baseRow({ accountId: "a2", category: "needs_more_target_accounts", decision: "no_action", reason: "eligible=4" }),
       ],
     },
-    readinessStatus: "partial",
-    readinessBlockingReasons: [],
-  });
+  }));
   assert.equal(preview.summary.rawObservations, 4);
   assert.equal(preview.summary.effectiveCandidates, 2);
   assert.equal(preview.summary.suppressedByLifecyclePriority, 2);
@@ -163,13 +197,14 @@ test("readyToDispatchTheoretical counts only dispatchEligible effective rows", (
   const summary = summarizeOutboxPreviewRows({
     rawObservations: [baseRow(), baseRow({ accountId: "a2" })],
     effectiveCandidates: [
-      effectiveRow({ decision: "would_create_initial_intent", dispatchEligible: true }),
+      effectiveRow({ decision: "would_create_initial_intent", materializationEligible: true, dispatchEligible: true }),
       effectiveRow({ accountId: "a2", decision: "blocked_legacy_pre_watermark", dispatchEligible: false }),
     ],
     suppressedCount: 0,
     accountsAnalyzed: 2,
   });
   assert.equal(summary.readyToDispatchTheoretical, 1);
+  assert.equal(summary.wouldMaterializeTheoretical, 1);
 });
 
 test("no_action waiting rows can be excluded from raw observations", () => {
@@ -218,7 +253,7 @@ test("loadClientEmailLifecycleOutboxPreview performs read-only selects without w
   assert.equal(fetchCalled, 0);
 });
 
-test("watermark state for needs-more uses needs-more watermark flag when dispatch eligible", () => {
+test("watermark state for needs-more uses needs-more watermark flag when materialization eligible", () => {
   const withWatermark = deriveOutboxPreviewWatermarkState(
     "would_create_initial_intent",
     "needs_more_target_accounts",
@@ -228,9 +263,13 @@ test("watermark state for needs-more uses needs-more watermark flag when dispatc
   assert.equal(withWatermark, "watermark_satisfied");
 });
 
-test("gate state is not applicable for non-dispatch-eligible intent decisions", () => {
+test("gate state is not applicable for legacy pre-watermark rows", () => {
   assert.equal(
-    deriveOutboxPreviewGateState("blocked_legacy_pre_watermark", false, basePlan()),
+    deriveOutboxPreviewGateState({
+      decision: "blocked_legacy_pre_watermark",
+      dispatchEligible: false,
+      dispatchGateState: "not_applicable",
+    }),
     "not_applicable",
   );
 });

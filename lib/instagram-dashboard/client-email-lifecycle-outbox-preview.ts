@@ -6,6 +6,11 @@ import {
 import type { ClientEmailLifecycleReadinessStatus } from "./client-email-lifecycle-readiness.ts";
 import { loadClientEmailLifecycleReadiness } from "./client-email-lifecycle-readiness.ts";
 import {
+  enrichEffectiveCandidateWithGateProjections,
+  type OutboxLayerGateState,
+  type OutboxLayerReadinessStatus,
+} from "./client-email-lifecycle-outbox-gates.ts";
+import {
   buildClientEmailLifecycleOutboxPlan,
   type ClientEmailLifecycleOutboxPlan,
   type ClientEmailOutboxDecision,
@@ -62,7 +67,12 @@ export type ClientEmailOutboxPreviewItem = {
   templateVersion: number | null;
   senderConfigured: boolean;
   supportEmailConfigured: boolean;
+  materializationEligible: boolean;
+  materializationGateState: OutboxLayerGateState;
+  materializationBlockingReasons: string[];
   dispatchEligible: boolean;
+  dispatchGateState: OutboxLayerGateState;
+  dispatchBlockingReasons: string[];
   suppressedSiblingCount: number;
   precedenceNote: string | null;
   reason: string;
@@ -84,6 +94,7 @@ export type ClientEmailOutboxPreviewSummary = {
   blockedTemplateUnavailable: number;
   blockedDeliveryGate: number;
   noAction: number;
+  wouldMaterializeTheoretical: number;
   readyToDispatchTheoretical: number;
 };
 
@@ -94,6 +105,10 @@ export type ClientEmailLifecycleOutboxPreview = {
   accountsAnalyzed: number;
   readinessStatus: ClientEmailLifecycleReadinessStatus;
   readinessBlockingReasons: string[];
+  materializationReadinessStatus: OutboxLayerReadinessStatus;
+  dispatchReadinessStatus: OutboxLayerReadinessStatus;
+  materializationBlockingReasons: string[];
+  dispatchBlockingReasons: string[];
   summary: ClientEmailOutboxPreviewSummary;
   items: ClientEmailOutboxPreviewItem[];
 };
@@ -135,8 +150,8 @@ export function deriveOutboxPreviewDeliveryState(
   decision: ClientEmailOutboxDecision,
   dispatchEligible: boolean,
 ): ClientEmailOutboxPreviewDeliveryState {
-  if (!dispatchEligible && (decision === "would_create_initial_intent" || decision === "would_create_reminder_intent")) {
-    return "suppressed_by_precedence";
+  if (decision === "blocked_delivery_gate") {
+    return "blocked_delivery_gate";
   }
   switch (decision) {
     case "would_create_initial_intent":
@@ -151,8 +166,6 @@ export function deriveOutboxPreviewDeliveryState(
       return "blocked_missing_client_email";
     case "blocked_template_unavailable":
       return "blocked_template_unavailable";
-    case "blocked_delivery_gate":
-      return "blocked_delivery_gate";
     case "would_cancel_episode":
       return "blocked_account_canceled";
     default:
@@ -161,39 +174,34 @@ export function deriveOutboxPreviewDeliveryState(
 }
 
 export function deriveOutboxPreviewGateState(
-  decision: ClientEmailOutboxDecision,
-  dispatchEligible: boolean,
-  plan: Pick<
-    ClientEmailLifecycleOutboxPlan,
-    "globalSendingEnabled" | "lifecycleAutomationEnabled" | "needsMoreAutomationEnabled" | "providerDispatchAllowed"
-  >,
+  row: Pick<OutboxEffectiveCandidateRow, "decision" | "dispatchEligible" | "dispatchGateState">,
 ) {
-  if (decision === "blocked_delivery_gate") return "gates_closed" as const;
-  if (!dispatchEligible) return "not_applicable" as const;
-  if (
-    decision === "would_create_initial_intent"
-    || decision === "would_create_reminder_intent"
-  ) {
-    return plan.providerDispatchAllowed ? "gates_open" as const : "gates_closed" as const;
-  }
-  if (
-    !plan.globalSendingEnabled
-    && !plan.lifecycleAutomationEnabled
-    && !plan.needsMoreAutomationEnabled
-  ) {
-    return "gates_closed" as const;
-  }
+  if (row.decision === "blocked_delivery_gate") return "gates_closed" as const;
+  if (row.dispatchGateState === "open") return "gates_open" as const;
+  if (row.dispatchGateState === "closed") return "gates_closed" as const;
   return "not_applicable" as const;
+}
+
+export function deriveOutboxPreviewMaterializationGateState(
+  row: Pick<OutboxEffectiveCandidateRow, "materializationGateState">,
+): ClientEmailOutboxPreviewGateState {
+  if (row.materializationGateState === "open") return "gates_open";
+  if (row.materializationGateState === "closed") return "gates_closed";
+  return "not_applicable";
+}
+
+export function formatOutboxPreviewMaterializationGateState(state: ClientEmailOutboxPreviewGateState) {
+  return formatOutboxPreviewGateState(state);
 }
 
 export function deriveOutboxPreviewWatermarkState(
   decision: ClientEmailOutboxDecision,
   category: ClientEmailTemplateCategory,
-  dispatchEligible: boolean,
+  materializationEligible: boolean,
   plan: Pick<ClientEmailLifecycleOutboxPlan, "lifecycleWatermarkConfigured" | "needsMoreWatermarkConfigured">,
 ): ClientEmailOutboxPreviewWatermarkState {
   if (decision === "blocked_legacy_pre_watermark") return "watermark_missing";
-  if (!dispatchEligible) return "not_applicable";
+  if (!materializationEligible && decision !== "would_open_episode") return "not_applicable";
   if (decision === "no_action" || decision === "would_open_episode") return "not_applicable";
   if (category === "needs_more_target_accounts") {
     return plan.needsMoreWatermarkConfigured ? "watermark_satisfied" : "watermark_missing";
@@ -262,8 +270,9 @@ export function summarizeOutboxPreviewRows(input: {
     blockedLegacyPreWatermark: count("blocked_legacy_pre_watermark", effective),
     blockedMissingClientEmail: count("blocked_missing_client_email", effective),
     blockedTemplateUnavailable: count("blocked_template_unavailable", effective),
-    blockedDeliveryGate: count("blocked_delivery_gate", effective),
+    blockedDeliveryGate: effective.filter((row) => row.dispatchGateState === "closed" && row.dispatchBlockingReasons.length > 0).length,
     noAction: count("no_action", effective),
+    wouldMaterializeTheoretical: effective.filter((row) => row.materializationEligible).length,
     readyToDispatchTheoretical: effective.filter((row) => row.dispatchEligible).length,
   };
 }
@@ -274,11 +283,11 @@ export function projectOutboxPreviewItem(
   input: { suppressedSiblingCount: number },
 ): ClientEmailOutboxPreviewItem {
   const deliveryState = deriveOutboxPreviewDeliveryState(row.decision, row.dispatchEligible);
-  const gateState = deriveOutboxPreviewGateState(row.decision, row.dispatchEligible, plan);
+  const gateState = deriveOutboxPreviewGateState(row);
   const watermarkState = deriveOutboxPreviewWatermarkState(
     row.decision,
     row.category,
-    row.dispatchEligible,
+    row.materializationEligible,
     plan,
   );
 
@@ -305,7 +314,12 @@ export function projectOutboxPreviewItem(
     templateVersion: row.activeTemplateVersion,
     senderConfigured: Boolean(row.fromEmailSnapshot),
     supportEmailConfigured: Boolean(row.supportEmailSnapshot),
+    materializationEligible: row.materializationEligible,
+    materializationGateState: row.materializationGateState,
+    materializationBlockingReasons: row.materializationBlockingReasons,
     dispatchEligible: row.dispatchEligible,
+    dispatchGateState: row.dispatchGateState,
+    dispatchBlockingReasons: row.dispatchBlockingReasons,
     suppressedSiblingCount: input.suppressedSiblingCount,
     precedenceNote: input.suppressedSiblingCount > 0
       ? "Other lifecycle communication suppressed by account status"
@@ -318,12 +332,21 @@ export function projectClientEmailLifecycleOutboxPreview(input: {
   plan: ClientEmailLifecycleOutboxPlan;
   readinessStatus: ClientEmailLifecycleReadinessStatus;
   readinessBlockingReasons: string[];
+  materializationReadinessStatus: OutboxLayerReadinessStatus;
+  dispatchReadinessStatus: OutboxLayerReadinessStatus;
+  materializationBlockingReasons: string[];
+  dispatchBlockingReasons: string[];
+  env: Record<string, string | undefined>;
 }): ClientEmailLifecycleOutboxPreview {
   const rawObservations = input.plan.rows.filter(shouldIncludeOutboxPreviewRow);
   const selection = selectEffectiveOutboxCandidates(rawObservations);
   const suppressedByAccount = countSuppressedCategoriesByAccount(selection);
 
-  const items = selection.effectiveCandidates.map((row) => projectOutboxPreviewItem(row, input.plan, {
+  const effectiveCandidates = selection.effectiveCandidates.map((row) =>
+    enrichEffectiveCandidateWithGateProjections(row, input.plan, input.env),
+  );
+
+  const items = effectiveCandidates.map((row) => projectOutboxPreviewItem(row, input.plan, {
     suppressedSiblingCount: suppressedByAccount.get(row.accountId) ?? 0,
   }));
 
@@ -334,9 +357,13 @@ export function projectClientEmailLifecycleOutboxPreview(input: {
     accountsAnalyzed: input.plan.accountsAnalyzed,
     readinessStatus: input.readinessStatus,
     readinessBlockingReasons: input.readinessBlockingReasons,
+    materializationReadinessStatus: input.materializationReadinessStatus,
+    dispatchReadinessStatus: input.dispatchReadinessStatus,
+    materializationBlockingReasons: input.materializationBlockingReasons,
+    dispatchBlockingReasons: input.dispatchBlockingReasons,
     summary: summarizeOutboxPreviewRows({
       rawObservations,
-      effectiveCandidates: selection.effectiveCandidates,
+      effectiveCandidates,
       suppressedCount: selection.suppressedCandidates.length,
       accountsAnalyzed: input.plan.accountsAnalyzed,
     }),
@@ -358,5 +385,10 @@ export async function loadClientEmailLifecycleOutboxPreview(
     plan,
     readinessStatus: readiness.finalReadinessStatus,
     readinessBlockingReasons: readiness.blockingReasons,
+    materializationReadinessStatus: readiness.materializationReadinessStatus,
+    dispatchReadinessStatus: readiness.dispatchReadinessStatus,
+    materializationBlockingReasons: readiness.materializationBlockingReasons,
+    dispatchBlockingReasons: readiness.dispatchBlockingReasons,
+    env,
   });
 }

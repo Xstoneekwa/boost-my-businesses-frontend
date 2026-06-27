@@ -1,8 +1,5 @@
 import { evaluateClientEmailSendingGate, readClientEmailProviderEnv } from "./client-email-provider-config.ts";
-import {
-  evaluateNeedsMoreTargetsEmailAutomationGate,
-  readClientEmailNeedsMoreTargetsAutomationEnabled,
-} from "./client-email-needs-more-targets-automation-config.ts";
+import { readClientEmailNeedsMoreTargetsAutomationEnabled } from "./client-email-needs-more-targets-automation-config.ts";
 import { readClientEmailLifecycleAutomationEnabledAt } from "./client-email-lifecycle-contract.ts";
 
 function readBoolean(value: string | undefined, fallback = false) {
@@ -28,6 +25,14 @@ export function readClientEmailNeedsMoreTargetsAutomationEnabledAt(
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+export type ClientEmailMaterializeAutomationGateResult =
+  | { allowed: true }
+  | {
+    allowed: false;
+    reason: "automation_disabled" | "watermark_not_configured";
+    message: string;
+  };
+
 export type ClientEmailLifecycleAutomationGateResult =
   | { allowed: true }
   | {
@@ -41,9 +46,9 @@ export type ClientEmailLifecycleAutomationGateResult =
     message: string;
   };
 
-export function evaluateClientEmailLifecycleAutomationGate(
+export function evaluateMaterializeLifecycleAutomationGate(
   env: Record<string, string | undefined> = process.env,
-): ClientEmailLifecycleAutomationGateResult {
+): ClientEmailMaterializeAutomationGateResult {
   if (!readClientEmailLifecycleAutomationEnabled(env)) {
     return {
       allowed: false,
@@ -57,6 +62,36 @@ export function evaluateClientEmailLifecycleAutomationGate(
       reason: "watermark_not_configured",
       message: "Lifecycle email automation watermark CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED_AT is not configured.",
     };
+  }
+  return { allowed: true };
+}
+
+export function evaluateMaterializeNeedsMoreAutomationGate(
+  env: Record<string, string | undefined> = process.env,
+) {
+  if (!readClientEmailNeedsMoreTargetsAutomationEnabled(env)) {
+    return {
+      allowed: false as const,
+      reason: "automation_disabled" as const,
+      message: "Needs-more-targets email automation is disabled by CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED.",
+    };
+  }
+  if (!readClientEmailNeedsMoreTargetsAutomationEnabledAt(env)) {
+    return {
+      allowed: false as const,
+      reason: "watermark_not_configured" as const,
+      message: "Needs-more email automation watermark CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT is not configured.",
+    };
+  }
+  return { allowed: true as const };
+}
+
+export function evaluateClientEmailLifecycleAutomationGate(
+  env: Record<string, string | undefined> = process.env,
+): ClientEmailLifecycleAutomationGateResult {
+  const materializeGate = evaluateMaterializeLifecycleAutomationGate(env);
+  if (!materializeGate.allowed) {
+    return materializeGate;
   }
   const clientGate = evaluateClientEmailSendingGate(env);
   if (!clientGate.allowed) {
@@ -87,13 +122,30 @@ export function evaluateClientEmailLifecycleAutomationGate(
 export function evaluateNeedsMoreTargetsOutboxGate(
   env: Record<string, string | undefined> = process.env,
 ) {
-  const automationGate = evaluateNeedsMoreTargetsEmailAutomationGate(env);
-  if (!automationGate.allowed) return automationGate;
-  if (!readClientEmailNeedsMoreTargetsAutomationEnabledAt(env)) {
+  const materializeGate = evaluateMaterializeNeedsMoreAutomationGate(env);
+  if (!materializeGate.allowed) return materializeGate;
+
+  const clientGate = evaluateClientEmailSendingGate(env);
+  if (!clientGate.allowed) {
     return {
       allowed: false as const,
-      reason: "watermark_not_configured" as const,
-      message: "Needs-more email automation watermark CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT is not configured.",
+      reason: "client_sending_disabled" as const,
+      message: clientGate.message,
+    };
+  }
+  const provider = readClientEmailProviderEnv(env);
+  if (provider.provider !== "postmark") {
+    return {
+      allowed: false as const,
+      reason: "provider_not_configured" as const,
+      message: "CLIENT_EMAIL_PROVIDER must be postmark before lifecycle dispatch.",
+    };
+  }
+  if (!provider.postmarkServerTokenConfigured) {
+    return {
+      allowed: false as const,
+      reason: "postmark_token_missing" as const,
+      message: "POSTMARK_SERVER_TOKEN is not configured.",
     };
   }
   return { allowed: true as const };

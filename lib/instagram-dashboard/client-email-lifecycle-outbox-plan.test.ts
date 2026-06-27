@@ -152,14 +152,14 @@ test("needs assistance post-watermark parents lifecycle episode", () => {
   assert.equal(intentRow?.parentType, "lifecycle_episode");
 });
 
-test("closed delivery gates block intent creation without writes", () => {
+test("closed automation env still plans business intent; dispatch blocked separately", () => {
   const rows = mapLifecyclePreviewToOutboxDecisions({
     ...baseLifecycleInput,
     env: closedEnv,
   });
   assert.equal(rows.some((row) => row.decision === "would_open_episode"), true);
-  assert.equal(rows.some((row) => row.decision === "blocked_delivery_gate"), true);
-  assert.equal(rows.some((row) => row.decision === "would_create_initial_intent"), false);
+  assert.equal(rows.some((row) => row.decision === "blocked_delivery_gate"), false);
+  assert.equal(rows.some((row) => row.decision === "would_create_initial_intent"), true);
 });
 
 test("missing client email blocks intent but keeps business state", () => {

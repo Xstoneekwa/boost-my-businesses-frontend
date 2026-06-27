@@ -16,8 +16,6 @@ import {
 } from "./client-email-delivery-settings.ts";
 import type { ClientEmailIntentParentType } from "./client-email-intent-parent-contract.ts";
 import {
-  evaluateClientEmailLifecycleAutomationGate,
-  evaluateNeedsMoreTargetsOutboxGate,
   isNeedsMoreSignalEligibleAfterWatermark,
   readClientEmailLifecycleAutomationEnabled,
   readClientEmailNeedsMoreTargetsAutomationEnabledAt,
@@ -239,24 +237,6 @@ function buildFutureIntentSnapshot(input: {
   };
 }
 
-function resolveDeliveryGateDecision(
-  category: ClientEmailTemplateCategory,
-  env: Record<string, string | undefined>,
-): ClientEmailOutboxDecision | null {
-  const sendingGate = evaluateClientEmailSendingGate(env);
-  if (!sendingGate.allowed) return "blocked_delivery_gate";
-
-  if (category === "needs_more_target_accounts") {
-    const gate = evaluateNeedsMoreTargetsOutboxGate(env);
-    if (!gate.allowed) return "blocked_delivery_gate";
-    return null;
-  }
-
-  const gate = evaluateClientEmailLifecycleAutomationGate(env);
-  if (!gate.allowed) return "blocked_delivery_gate";
-  return null;
-}
-
 export function mapLifecyclePreviewToOutboxDecisions(input: {
   category: ClientEmailLifecycleEpisodeCategory;
   accountId: string;
@@ -361,29 +341,6 @@ export function mapLifecyclePreviewToOutboxDecisions(input: {
       activeTemplateVersion: input.template?.version ?? null,
       futureIntentSnapshot: null,
     });
-
-    const deliveryGate = resolveDeliveryGateDecision(input.category, input.env);
-    if (deliveryGate) {
-      pushRow({
-        parentType: "lifecycle_episode",
-        parentKey: episodeKey,
-        parentId: input.activeEpisode?.id ?? null,
-        trigger: "automatic_initial",
-        reminderIndex: 0,
-        businessState: input.adminLifecycleStatus,
-        decision: deliveryGate,
-        reason: "Automation or provider dispatch gates remain closed.",
-        idempotencyKey: buildLifecycleIntentIdempotencyKey({
-          category: input.category,
-          accountId: input.accountId,
-          episodeId,
-        }),
-        activeTemplateId: input.template?.id ?? null,
-        activeTemplateVersion: input.template?.version ?? null,
-        futureIntentSnapshot: null,
-      });
-      return rows;
-    }
 
     if (!input.clientEmailAvailable) {
       pushRow({
@@ -654,25 +611,6 @@ export function mapNeedsMorePlanToOutboxRows(input: {
     const decision = send.reminderIndex === 0
       ? "would_create_initial_intent"
       : "would_create_reminder_intent";
-
-    const deliveryGate = resolveDeliveryGateDecision("needs_more_target_accounts", input.env);
-    if (deliveryGate) {
-      pushRow({
-        parentType: "sequence",
-        parentKey: episodeKey,
-        parentId: input.activeEpisode?.id ?? null,
-        trigger: send.trigger,
-        reminderIndex: send.reminderIndex,
-        businessState: `eligible_targets=${input.eligibleTargetCount};signal_active=${input.needsMoreSignalActive}`,
-        decision: deliveryGate,
-        reason: "Needs-more automation or provider dispatch gates remain closed.",
-        idempotencyKey: send.idempotencyKey,
-        activeTemplateId: input.template?.id ?? null,
-        activeTemplateVersion: input.template?.version ?? null,
-        futureIntentSnapshot: null,
-      });
-      continue;
-    }
 
     if (!input.clientEmailAvailable) {
       pushRow({

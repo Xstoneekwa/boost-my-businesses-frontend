@@ -14,15 +14,27 @@ export type OutboxPrecedenceSelection = {
   suppressedCandidates: OutboxSuppressedCandidateRow[];
 };
 
+import type { OutboxLayerGateState } from "./client-email-lifecycle-outbox-gates.ts";
+
 export type OutboxEffectiveCandidateRow = ClientEmailOutboxPlanRow & {
+  materializationEligible: boolean;
+  materializationGateState: OutboxLayerGateState;
+  materializationBlockingReasons: string[];
   dispatchEligible: boolean;
+  dispatchGateState: OutboxLayerGateState;
+  dispatchBlockingReasons: string[];
   suppressedByCategory: null;
   suppressionReason: null;
   isEffectiveCandidate: true;
 };
 
 export type OutboxSuppressedCandidateRow = ClientEmailOutboxPlanRow & {
+  materializationEligible: false;
+  materializationGateState: "not_applicable";
+  materializationBlockingReasons: string[];
   dispatchEligible: false;
+  dispatchGateState: "not_applicable";
+  dispatchBlockingReasons: string[];
   suppressedByCategory: ClientEmailTemplateCategory;
   suppressionReason: string;
   isEffectiveCandidate: false;
@@ -125,7 +137,12 @@ export function selectEffectiveOutboxCandidates(
         ...row,
         idempotencyKey: null,
         futureIntentSnapshot: null,
+        materializationEligible: false,
+        materializationGateState: "not_applicable",
+        materializationBlockingReasons: [],
         dispatchEligible: false,
+        dispatchGateState: "not_applicable",
+        dispatchBlockingReasons: [],
         suppressedByCategory: winningCategory,
         suppressionReason: formatSuppressionReason(row.category, winningCategory),
         isEffectiveCandidate: false,
@@ -137,7 +154,12 @@ export function selectEffectiveOutboxCandidates(
 
     effectiveCandidates.push({
       ...effectiveRow,
-      dispatchEligible: isDispatchEligibleDecision(effectiveRow.decision),
+      materializationEligible: false,
+      materializationGateState: "not_applicable",
+      materializationBlockingReasons: [],
+      dispatchEligible: false,
+      dispatchGateState: "not_applicable",
+      dispatchBlockingReasons: [],
       suppressedByCategory: null,
       suppressionReason: null,
       isEffectiveCandidate: true,

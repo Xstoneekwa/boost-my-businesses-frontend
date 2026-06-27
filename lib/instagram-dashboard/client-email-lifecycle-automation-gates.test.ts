@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateClientEmailLifecycleAutomationGate,
+  evaluateMaterializeLifecycleAutomationGate,
   isNeedsMoreSignalEligibleAfterWatermark,
   readClientEmailLifecycleAutomationEnabled,
   readClientEmailNeedsMoreTargetsAutomationEnabledAt,
@@ -50,6 +51,15 @@ test("needs-more signal eligibility requires watermark and post-watermark action
     updatedAt: "2026-06-01T00:00:00.000Z",
     watermark: null,
   }), false);
+});
+
+test("lifecycle materialize gate requires watermark when automation enabled", () => {
+  const gate = evaluateMaterializeLifecycleAutomationGate({
+    CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED: "true",
+  });
+  assert.equal(gate.allowed, false);
+  if (gate.allowed) return;
+  assert.equal(gate.reason, "watermark_not_configured");
 });
 
 test("lifecycle gate requires watermark when automation enabled", () => {

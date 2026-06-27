@@ -23,6 +23,7 @@ import {
 } from "./client-email-schema-guard.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
 import { readClientEmailTestEnv } from "./client-email-test-config.ts";
+import { deriveOutboxLayerReadinessStatus, type OutboxLayerReadinessStatus } from "./client-email-lifecycle-outbox-gates.ts";
 
 export type ClientEmailLifecycleReadinessStatus =
   | "blocked"
@@ -46,6 +47,10 @@ export type ClientEmailLifecycleReadiness = {
   needsMoreWatermarkConfigured: boolean;
   schedulerConnected: boolean;
   providerDispatchAllowed: boolean;
+  materializationReadinessStatus: OutboxLayerReadinessStatus;
+  dispatchReadinessStatus: OutboxLayerReadinessStatus;
+  materializationBlockingReasons: string[];
+  dispatchBlockingReasons: string[];
   finalReadinessStatus: ClientEmailLifecycleReadinessStatus;
   blockingReasons: string[];
 };
@@ -90,50 +95,78 @@ export async function loadClientEmailLifecycleReadiness(
   const senderConfigured = Boolean(deliverySettings.activeFromEmail);
   const supportEmailConfigured = Boolean(deliverySettings.supportEmail);
 
-  const blockingReasons: string[] = [];
+  const materializationBlockingReasons: string[] = [];
+  const dispatchBlockingReasons: string[] = [];
 
   if (!intentLinksSchema.available) {
-    blockingReasons.push("Intent parent linkage migration is not applied yet.");
+    materializationBlockingReasons.push("Intent parent linkage migration is not applied yet.");
   }
   if (!needsMoreSchema.available) {
-    blockingReasons.push("Needs-more sequence schema is not ready.");
+    materializationBlockingReasons.push("Needs-more sequence schema is not ready.");
   }
   if (!lifecycleSchema.available) {
-    blockingReasons.push("Lifecycle episode schema is not ready.");
+    materializationBlockingReasons.push("Lifecycle episode schema is not ready.");
   }
   if (!templatesReady) {
-    blockingReasons.push("Active transactional templates are incomplete.");
+    materializationBlockingReasons.push("Active transactional templates are incomplete.");
   }
   if (!deliverySettingsSchema.available) {
-    blockingReasons.push("Transactional delivery settings migration is not applied yet.");
-  }
-  if (!senderConfigured) {
-    blockingReasons.push("Active sender email is not configured.");
-  }
-  if (!supportEmailConfigured) {
-    blockingReasons.push("Support email is not configured.");
-  }
-  if (!providerEnv.postmarkServerTokenConfigured) {
-    blockingReasons.push("Postmark server token is not configured.");
-  }
-  if (providerEnv.sendingEnabled) {
-    blockingReasons.push("Global client sending gate is open; production expects it closed until explicit GO.");
-  }
-  if (testSendingEnabled) {
-    blockingReasons.push("Test sending gate is open; production expects it closed.");
-  }
-  if (lifecycleAutomationEnabled) {
-    blockingReasons.push("Lifecycle automation gate is open; scheduler is not connected yet.");
-  }
-  if (needsMoreAutomationEnabled) {
-    blockingReasons.push("Needs-more automation gate is open; scheduler is not connected yet.");
+    materializationBlockingReasons.push("Transactional delivery settings migration is not applied yet.");
   }
   if (!lifecycleWatermarkConfigured) {
-    blockingReasons.push("Lifecycle anti-backfill watermark is not configured.");
+    materializationBlockingReasons.push("Lifecycle anti-backfill watermark is not configured.");
   }
   if (!needsMoreWatermarkConfigured) {
-    blockingReasons.push("Needs-more anti-backfill watermark is not configured.");
+    materializationBlockingReasons.push("Needs-more anti-backfill watermark is not configured.");
   }
+  if (!lifecycleAutomationEnabled) {
+    materializationBlockingReasons.push("Lifecycle email automation is disabled by CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED.");
+  }
+  if (!needsMoreAutomationEnabled) {
+    materializationBlockingReasons.push("Needs-more-targets email automation is disabled by CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED.");
+  }
+  if (lifecycleAutomationEnabled) {
+    materializationBlockingReasons.push("Lifecycle automation gate is open; materialize writer is not connected yet.");
+  }
+  if (needsMoreAutomationEnabled) {
+    materializationBlockingReasons.push("Needs-more automation gate is open; materialize writer is not connected yet.");
+  }
+
+  if (!senderConfigured) {
+    dispatchBlockingReasons.push("Active sender email is not configured.");
+  }
+  if (!supportEmailConfigured) {
+    dispatchBlockingReasons.push("Support email is not configured.");
+  }
+  if (!providerEnv.postmarkServerTokenConfigured) {
+    dispatchBlockingReasons.push("Postmark server token is not configured.");
+  }
+  if (!sendingGate.allowed) {
+    dispatchBlockingReasons.push(sendingGate.message);
+  }
+  if (providerEnv.sendingEnabled) {
+    dispatchBlockingReasons.push("Global client sending gate is open; production expects it closed until explicit GO.");
+  }
+  if (testSendingEnabled) {
+    dispatchBlockingReasons.push("Test sending gate is open; production expects it closed.");
+  }
+  if (lifecycleAutomationEnabled) {
+    dispatchBlockingReasons.push("Lifecycle automation gate is open; scheduler is not connected yet.");
+  }
+  if (needsMoreAutomationEnabled) {
+    dispatchBlockingReasons.push("Needs-more automation gate is open; scheduler is not connected yet.");
+  }
+  if (!lifecycleWatermarkConfigured) {
+    dispatchBlockingReasons.push("Lifecycle anti-backfill watermark is not configured.");
+  }
+  if (!needsMoreWatermarkConfigured) {
+    dispatchBlockingReasons.push("Needs-more anti-backfill watermark is not configured.");
+  }
+
+  const blockingReasons = [...new Set([
+    ...materializationBlockingReasons,
+    ...dispatchBlockingReasons,
+  ])];
 
   const schemaReady = intentLinksSchema.available
     && needsMoreSchema.available
@@ -147,6 +180,17 @@ export async function loadClientEmailLifecycleReadiness(
   } else if (schemaReady && templatesReady) {
     finalReadinessStatus = "partial";
   }
+
+  const materializationReadinessStatus = deriveOutboxLayerReadinessStatus({
+    schemaReady,
+    templatesReady,
+    blockingReasons: materializationBlockingReasons,
+  });
+  const dispatchReadinessStatus = deriveOutboxLayerReadinessStatus({
+    schemaReady,
+    templatesReady,
+    blockingReasons: dispatchBlockingReasons,
+  });
 
   return {
     readOnly: true,
@@ -165,6 +209,10 @@ export async function loadClientEmailLifecycleReadiness(
     needsMoreWatermarkConfigured,
     schedulerConnected: false,
     providerDispatchAllowed: sendingGate.allowed,
+    materializationReadinessStatus,
+    dispatchReadinessStatus,
+    materializationBlockingReasons,
+    dispatchBlockingReasons,
     finalReadinessStatus,
     blockingReasons,
   };
