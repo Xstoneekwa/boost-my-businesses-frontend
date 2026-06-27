@@ -102,7 +102,29 @@ order by 1;
 |---------------|----------|------|
 | `20260702120000` | `20260702120000_client_email_intent_episode_links.sql` | Explicit parent linkage on `client_email_send_intents`: `lifecycle_episode_id` FK, sequence FK, mutual exclusivity, test/needs-more/lifecycle parent constraints |
 
-**Status on main production:** not applied. Do **not** apply without explicit GO.
+**Status on main production:** applied as remote version `20260627111956` / `client_email_intent_episode_links`.
+
+## Applied migration (TASK 12A / 12B — dispatch claim state)
+
+```text
+Local migration file:
+20260703120000_client_email_dispatch_claim_state.sql
+
+Applied remote version:
+20260627132254
+
+Database:
+zgafnshkjywfltxgbtzg
+
+Note:
+Remote timestamp was assigned by Supabase MCP; SQL content matches the local migration.
+```
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260703120000` | `20260703120000_client_email_dispatch_claim_state.sql` | Dispatch claim/lease/uncertain columns and CHECK constraints on `client_email_send_intents`; partial indexes for pending, claimed, uncertain, parent correlation, and unique `provider_message_id` |
+
+**Status on main production:** applied as remote version `20260627132254` / `client_email_dispatch_claim_state`. Do **not** re-apply on production.
 
 ## Before any future migration
 

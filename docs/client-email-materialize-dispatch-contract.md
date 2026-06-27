@@ -234,15 +234,70 @@ Constraints: `client_email_send_intents_parent_exclusivity`, `client_email_send_
 
 ---
 
-## 5. Dispatch claim and final revalidation
+## 5. Dispatch claim, lease, and state machine (TASK 12A draft)
 
-### 5.1 Claim (proposed schema — not applied)
+**Local migration (not applied):** `supabase/migrations/20260703120000_client_email_dispatch_claim_state.sql`
 
-Future columns on `client_email_send_intents`:
+### 5.1 Schema additions on `client_email_send_intents`
 
-- `claimed_at`, `claim_token`, `claim_expires_at`, `dispatch_attempt_count`
+| Column | Purpose |
+|--------|---------|
+| `status` extended | adds `claimed`, `dispatch_uncertain` to existing `pending`, `scheduled`, `sent`, `canceled`, `failed` |
+| `claimed_at` | claim timestamp |
+| `claim_token` | opaque UUID lease (never provider secret) |
+| `claim_expires_at` | lease expiry |
+| `dispatch_attempt_count` | bounded 0–8 |
+| `dispatch_last_attempt_at` | last attempt timestamp |
+| `dispatch_last_error_code` | stable redacted error code |
+| `dispatch_uncertain_at` | ambiguous provider outcome timestamp |
+| `provider_accepted_at` | provider acceptance recorded (distinct from `sent_at` when needed) |
+| `provider_message_id` | **already exists** — unique partial index added |
 
-Claim pattern:
+`client_email_delivery_events` unchanged. Webhook dedupe remains `webhook_event_id` partial unique.
+
+### 5.2 State transition matrix
+
+| From | To | Condition | Auto? |
+|------|-----|-----------|-------|
+| `pending` / `scheduled` | `claimed` | atomic claim wins lease; `provider_message_id` null | worker |
+| `claimed` | `sent` | HTTP success with MessageID or webhook reconciliation | worker / webhook |
+| `claimed` | `pending` / `scheduled` | deterministic failure before acceptance; retry allowed; clear lease; increment attempt count | worker |
+| `claimed` | `failed` | deterministic failure; max attempts exceeded | worker |
+| `claimed` | `dispatch_uncertain` | timeout / ambiguous network / no reliable MessageID | worker |
+| `dispatch_uncertain` | `sent` | correlated webhook Delivery with `Metadata.intent_id` + MessageID | webhook |
+| `dispatch_uncertain` | `canceled` | human reconciliation or safe cancel decision | ops |
+| `pending` / `scheduled` / `claimed` | `canceled` | final revalidation failure | worker |
+| `dispatch_uncertain` | `pending` | **never** | forbidden |
+| any with known `provider_message_id` | resend | **never** | forbidden |
+| any with provider delivery event | auto retry | **never** | forbidden |
+
+### 5.3 Claim / lease strategy
+
+```text
+1. SELECT candidate intent (pending/scheduled, client kind, no provider_message_id).
+2. UPDATE … SET status=claimed, claim_token=:uuid, claimed_at=now(),
+   claim_expires_at=now()+lease, dispatch_attempt_count+=1
+   WHERE id=:id AND status IN ('pending','scheduled')
+     AND provider_message_id IS NULL
+     AND (claim_token IS NULL OR claim_expires_at < now())
+   RETURNING *;
+3. Only holder of claim_token may finalize send or release lease.
+4. Reclaim after lease expiry requires full final revalidation — never blind retry.
+5. Worker crash: lease expires; another worker may reclaim ONLY if still pending-eligible
+   and outcome was NOT dispatch_uncertain.
+6. dispatch_uncertain: no automatic reclaim as pending; wait webhook or human ops.
+```
+
+### 5.4 Historical test intent compatibility
+
+Production rows (`intent_kind=test`, `status=sent`, `provider_message_id` set):
+
+- satisfy new CHECK constraints with null claim fields;
+- `dispatch_attempt_count` defaults to 0;
+- unique `provider_message_id` index allows both historical MessageIDs;
+- no data migration UPDATE required.
+
+### 5.5 Claim (future worker SQL reference)
 
 ```sql
 UPDATE client_email_send_intents
@@ -259,7 +314,7 @@ RETURNING *;
 
 Only one worker wins. Expired claims may be taken by another worker after revalidation.
 
-### 5.2 Final revalidation (post-claim, pre-Postmark)
+### 5.6 Final revalidation (post-claim, pre-Postmark)
 
 Re-read live state:
 
@@ -272,7 +327,7 @@ Re-read live state:
 
 Failure → `status=canceled`, `resolved_at=now()`, structured reason — **no Postmark call**.
 
-### 5.3 Immutable snapshots at dispatch
+### 5.7 Immutable snapshots at dispatch
 
 Dispatch MUST send using **intent row snapshots only**:
 
@@ -425,19 +480,15 @@ No secrets, template bodies, or full emails in logs.
 
 ## 10. Proposed future migrations / code (not in this task)
 
-| Item | Type |
-|------|------|
-| Claim columns + index on dispatchable intents | migration |
-| `dispatch_uncertain` intent status or boolean flag | migration |
-| `evaluateMaterializeLifecycleAutomationGate()` without sending gate | code |
-| `evaluateMaterializeNeedsMoreAutomationGate()` without sending gate | code |
-| `evaluateDispatchGate()` wrapping sending + provider | code |
-| Preview refactor: `materializeEligible` vs `dispatchEligible` | code |
-| `client-email-outbox-materialize.ts` | code |
-| `client-email-outbox-dispatch.ts` | code |
-| Wire `createPostmarkClientEmailAdapter().send()` | code |
-| Webhook intent status reconciliation | code |
-| Scheduler worker | code |
+| Item | Type | Status |
+|------|------|--------|
+| Claim columns + dispatch statuses (`20260703120000_client_email_dispatch_claim_state.sql`) | migration | **draft local TASK 12A — not applied** |
+| Split gate helpers — materialize vs dispatch | code | done TASK 11C |
+| `client-email-outbox-materialize.ts` | code | pending |
+| `client-email-outbox-dispatch.ts` | code | pending |
+| Wire `createPostmarkClientEmailAdapter().send()` | code | pending |
+| Webhook intent status reconciliation | code | pending |
+| Scheduler worker | code | pending |
 
 ---
 
