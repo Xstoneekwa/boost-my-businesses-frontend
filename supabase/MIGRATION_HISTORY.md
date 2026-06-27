@@ -126,6 +126,53 @@ Remote timestamp was assigned by Supabase MCP; SQL content matches the local mig
 
 **Status on main production:** applied as remote version `20260627132254` / `client_email_dispatch_claim_state`. Do **not** re-apply on production.
 
+## Applied migration (TASK 13A / 13B / 13C — materialize RPC)
+
+```text
+Local migration file:
+20260704120000_client_email_materialize_outbox_rpc.sql
+
+Applied remote version:
+20260627135913
+
+Database:
+zgafnshkjywfltxgbtzg
+
+Note:
+Remote timestamp was assigned by Supabase MCP.
+The RPC is deployed but has never been invoked by runtime code.
+```
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260704120000` | `20260704120000_client_email_materialize_outbox_rpc.sql` | Private `materialize_client_email_outbox_candidate_v1` RPC: transactional parent + pending intent materialization, advisory lock, ownership, idempotency identity, strict lifecycle/needs-more operations |
+
+**Status on main production:** applied as remote version `20260627135913` / `client_email_materialize_outbox_rpc`. Do **not** re-apply on production.
+
+## Applied migration (TASK 13E — from_email / snapshot consistency)
+
+```text
+Local migration file:
+20260705120000_client_email_materialize_from_email_consistency.sql
+
+Applied remote version:
+20260627160044
+
+Database:
+zgafnshkjywfltxgbtzg
+
+Note:
+Remote timestamp was assigned by Supabase MCP.
+This migration hardens the deployed RPC by rejecting missing or mismatched
+from_email and from_email_snapshot values before any parent or intent insert.
+```
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260705120000` | `20260705120000_client_email_materialize_from_email_consistency.sql` | `CREATE OR REPLACE` on materialize RPC: `client_email_from_email_snapshot_missing` / `client_email_from_email_snapshot_mismatch` before parent/intent writes |
+
+**Status on main production:** applied as remote version `20260627160044` / `client_email_materialize_from_email_consistency`. Do **not** re-apply on production.
+
 ## Before any future migration
 
 1. Compare local `supabase/migrations/` with remote history (`supabase migration list` on the intended project, or read-only remote list).

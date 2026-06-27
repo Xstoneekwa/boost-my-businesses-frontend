@@ -182,6 +182,80 @@ CLIENT_EMAIL_SENDING_ENABLED=false
 
 ## 4. Materialize transaction contract
 
+### 4.0 Materialize RPC (TASK 13A / hardened 13B — applied main prod; sender fix 13E)
+
+**Local migrations:**
+
+- `supabase/migrations/20260704120000_client_email_materialize_outbox_rpc.sql` — applied remote `20260627135913`
+- `supabase/migrations/20260705120000_client_email_materialize_from_email_consistency.sql` — applied remote `20260627160044`
+
+**Function:** `materialize_client_email_outbox_candidate_v1(...)`
+
+**Server module (no route):** `lib/instagram-dashboard/client-email-outbox-materializer.ts`
+
+| Concern | Contract |
+|---------|----------|
+| **Purpose** | Atomically open parent episode/sequence and/or insert one `pending` client intent with immutable snapshots |
+| **Strict operations** | Lifecycle: `open_lifecycle_episode`, `create_lifecycle_initial_intent` · Needs-more: `open_needs_more_sequence`, `create_needs_more_initial_intent`, `create_needs_more_reminder_intent` |
+| **Lock** | `pg_advisory_xact_lock(hashtext('client_email_materialize'), hashtext(account_id))` before ownership/parent/intent decisions |
+| **Ownership** | `public.client_instagram_accounts` canonical link (`account_id` UNIQUE, `(client_id, account_id)` UNIQUE) — mismatch → `client_email_account_client_ownership_mismatch` |
+| **Initial status** | Always `pending` for new intents |
+| **Idempotency key** | `INSERT … ON CONFLICT (idempotency_key) DO NOTHING` then business-identity assertion |
+| **Business identity** | Compare on conflict: `account_id`, `client_id`, `intent_kind='client'`, `category`, `trigger`, `reminder_index`, parent FK (`sequence_id` or `lifecycle_episode_id`) |
+| **Identity vs snapshots** | Snapshots are **not** compared on conflict — existing intent keeps historical rendered subject/body/sender/support even if templates changed |
+| **Identity conflict** | Same key + different business identity → `RAISE EXCEPTION 'client_email_idempotency_identity_conflict'` → full transaction rollback |
+| **Lifecycle V1** | Initial only (`reminder_index=0`); no lifecycle reminders materialized |
+| **Needs-more V1** | Index `0` initial · indexes `1..5` reminders · reminder requires active sequence · reminder never opens a new sequence |
+| **Parent reopen** | Closed/resolved/canceled episode or sequence never reopened — `parent_episode_not_reopenable` |
+| **Snapshots** | Written once at first insert only |
+| **Sender consistency (13E)** | On create-intent operations: `p_from_email` and `p_from_email_snapshot` must be non-null/non-empty after `btrim` and strictly equal after `btrim` — missing → `RAISE EXCEPTION` `client_email_from_email_snapshot_missing`; mismatch → `client_email_from_email_snapshot_mismatch` (`ERRCODE P0001`) before any parent/intent INSERT |
+| **Excluded** | claim/lease, dispatch, `provider_message_id`, Postmark, webhooks, cron, triggers |
+| **Security** | `SECURITY DEFINER`, `SET search_path = public, pg_temp`, fully qualified `public.*` tables, `REVOKE ALL` from `PUBLIC`/`anon`/`authenticated`, `GRANT EXECUTE` to `service_role` only |
+| **Output** | Minimal ids/status only — no recipient, body, credentials, or template HTML |
+
+#### Idempotency identity (immutable business key)
+
+| Field | Included in identity assert? |
+|-------|------------------------------|
+| `account_id` | yes |
+| `client_id` | yes |
+| `intent_kind` | yes (`client`) |
+| `category` | yes |
+| `trigger` | yes |
+| `reminder_index` | yes |
+| `sequence_id` / `lifecycle_episode_id` | yes |
+| `snapshot_subject/body/from/support/recipient` | **no** |
+
+#### Strict operation matrix
+
+| Category | Allowed `p_operation` | Reminder index |
+|----------|----------------------|----------------|
+| lifecycle | `open_lifecycle_episode`, `create_lifecycle_initial_intent` | `0` only |
+| needs-more | `open_needs_more_sequence`, `create_needs_more_initial_intent`, `create_needs_more_reminder_intent` | `0` initial · `1..5` reminder |
+
+#### Transaction / rollback rules
+
+1. Advisory lock first.
+2. Ownership check before parent/intent writes.
+3. If idempotency key already exists: identity assert **before** parent creation when possible; on mismatch → exception rollback.
+4. Parent + intent in one transaction; no internal `COMMIT`.
+5. No `EXCEPTION WHEN OTHERS` swallowing business failures.
+
+#### TypeScript layers
+
+| Function | Role |
+|----------|------|
+| `buildMaterializeCandidateCommand(...)` | Pure preparation — separates `businessIdentity` from frozen `intentSnapshot` |
+| `buildMaterializeIntentBusinessIdentity(...)` | Explicit immutable identity payload for SQL assert |
+| `validateMaterializeEffectiveCandidate(...)` | Gates, precedence, strict operation/index rules |
+| `materializeClientEmailOutboxCandidateInternal(...)` | **Internal-only** RPC caller |
+
+`CLIENT_EMAIL_SENDING_ENABLED=false` does **not** block Materialize.
+
+**Blocking precondition before apply:** migration draft assumes `public.client_instagram_accounts` exists on main prod (verified). Without it, do not apply.
+
+**Restriction:** no POST route, no scheduler, no provider call.
+
 ### 4.1 Preconditions (re-checked inside transaction)
 
 1. Advisory lock or `SELECT … FOR UPDATE` on account (or active episode row).
@@ -482,9 +556,12 @@ No secrets, template bodies, or full emails in logs.
 
 | Item | Type | Status |
 |------|------|--------|
-| Claim columns + dispatch statuses (`20260703120000_client_email_dispatch_claim_state.sql`) | migration | **draft local TASK 12A — not applied** |
+| Claim columns + dispatch statuses (`20260703120000_client_email_dispatch_claim_state.sql`) | migration | **applied main prod `20260627132254`** |
+| Materialize RPC (`20260704120000_client_email_materialize_outbox_rpc.sql`) | migration | **applied main prod `20260627135913`** |
+| Sender consistency (`20260705120000_client_email_materialize_from_email_consistency.sql`) | migration | **applied main prod `20260627160044`** |
+| `client-email-outbox-materializer.ts` | code | **recorded TASK 13D — no route, not invoked** |
 | Split gate helpers — materialize vs dispatch | code | done TASK 11C |
-| `client-email-outbox-materialize.ts` | code | pending |
+| `client-email-outbox-materialize.ts` | code | pending (RPC wiring + activation) |
 | `client-email-outbox-dispatch.ts` | code | pending |
 | Wire `createPostmarkClientEmailAdapter().send()` | code | pending |
 | Webhook intent status reconciliation | code | pending |
