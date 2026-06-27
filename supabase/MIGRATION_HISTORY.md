@@ -72,11 +72,19 @@ order by 1;
 
 **Status on main production:** applied as remote version `20260627000908` / `client_email_test_intents`.
 
-## Pending local migration (TASK 7A — not applied)
+## Pending local migration (TASK 7A)
 
 | Local version | Filename | Role |
 |---------------|----------|------|
 | `20260629120000` | `20260629120000_client_email_needs_more_targets_sequences.sql` | Lifecycle sequence episodes for `needs_more_target_accounts`, intent triggers `automatic_initial` / `automatic_reminder`, optional `sequence_id` on intents |
+
+**Status on main production:** applied as remote version `20260627005729` / `client_email_needs_more_targets_sequences`.
+
+## Pending local migration (TASK 8A — not applied)
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260630120000` | `20260630120000_client_email_lifecycle_episodes.sql` | Generic lifecycle email episodes for `account_paused`, `account_canceled`, `needs_assistance` |
 
 **Status on main production:** not applied. Do **not** apply without explicit GO.
 
