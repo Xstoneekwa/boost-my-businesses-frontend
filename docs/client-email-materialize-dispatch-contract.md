@@ -433,6 +433,48 @@ Idempotent replay (same key + same business identity) still returns early **befo
 
 `pg_advisory_xact_lock(hashtext('client_email_materialize'), hashtext(account_id))` serializes materialize work per account within one transaction.
 
+### 4.9 Materialize execution gate and dormant executor (TASK 15A)
+
+**Modules:**
+
+| Module | Role |
+|--------|------|
+| `client-email-materialization-execution-gate.ts` | Pure projection of `CLIENT_EMAIL_MATERIALIZE_ENABLED` |
+| `client-email-materialization-executor.ts` | Internal single-candidate executor (not wired) |
+
+#### Execution gate: `CLIENT_EMAIL_MATERIALIZE_ENABLED`
+
+| Env value | Gate | Projection `reason` |
+|-----------|------|------------------------|
+| absent / empty | **closed** | `unset` |
+| exact `"true"` | **open** | `enabled` |
+| any other (`"false"`, `"TRUE"`, `"1"`, …) | **closed** | `not_true` |
+
+**Independence:**
+
+| Gate | Controls |
+|------|----------|
+| `CLIENT_EMAIL_MATERIALIZE_ENABLED` | future **write** executor only |
+| `CLIENT_EMAIL_*_AUTOMATION_ENABLED` (+ watermarks) | category automation eligibility |
+| `CLIENT_EMAIL_SENDING_ENABLED` | dispatch / Postmark only |
+| `CLIENT_EMAIL_TEST_SENDING_ENABLED` | test delivery route only |
+
+Preview, readiness, and shadow preview **do not** read `CLIENT_EMAIL_MATERIALIZE_ENABLED`. No Vercel env change in TASK 15A.
+
+#### Dormant executor contract
+
+`executeSingleClientEmailMaterializationInternal(...)`:
+
+1. Accepts **one** `OutboxEffectiveCandidateRow` command input — never batch, never raw observations, never precedence-suppressed rows.
+2. If execution gate closed → `{ status: "execution_disabled" }` — **no** `materializeClientEmailOutboxCandidateInternal`, **no** `supabase.rpc`.
+3. Revalidates immediately before any future RPC: precedence winner, materialization eligible, automation/watermark, canonical email, template snapshot, sender/support settings, parent coherence, `create_*_intent` only (never `open_*`).
+4. Revalidation failure → `{ status: "revalidation_failed" }` — no writes.
+5. Gate open + revalidation OK → single call to `materializeClientEmailOutboxCandidateInternal` (future activation only).
+
+**Not in TASK 15A:** HTTP routes, cron, queue, webhook, BotApp imports, scheduler, dispatch, Postmark.
+
+**Next step (separate task + explicit GO):** wire executor behind internal caller only after `CLIENT_EMAIL_MATERIALIZE_ENABLED=true` is deliberately set in Vercel and prod validation completes.
+
 ---
 
 ## 5. Dispatch claim, lease, and state machine (TASK 12A draft)
@@ -689,6 +731,8 @@ No secrets, template bodies, or full emails in logs.
 | Atomic pre-parent validation (`20260706120000_client_email_materialize_atomic_preparent_validation.sql`) | migration | **applied main prod `20260627165132`** |
 | `client-email-outbox-materializer.ts` | code | **recorded TASK 13D — no route, not invoked** |
 | `client-email-materialization-runner.ts` | code | **shadow-only TASK 14B — RPC wiring internal only, no route invoke** |
+| `client-email-materialization-execution-gate.ts` | code | **dormant execution gate TASK 15A — not wired** |
+| `client-email-materialization-executor.ts` | code | **dormant single-candidate executor TASK 15A — not wired** |
 | Materialization shadow preview route | code | **GET read-only TASK 14C — `materialization-shadow-preview`** |
 | Split gate helpers — materialize vs dispatch | code | done TASK 11C |
 | `client-email-outbox-materialize.ts` | code | pending (RPC wiring + activation) |
