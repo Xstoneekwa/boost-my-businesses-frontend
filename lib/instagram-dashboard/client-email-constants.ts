@@ -28,8 +28,36 @@ export const CLIENT_EMAIL_CATEGORY_LABELS: Record<ClientEmailTemplateCategory, s
   needs_more_target_accounts: "Needs more target accounts",
 };
 
-export const CLIENT_EMAIL_SEND_TRIGGERS = ["manual", "automatic", "reminder", "manual_test"] as const;
+export const CLIENT_EMAIL_SEND_TRIGGERS = [
+  "manual",
+  "automatic",
+  "reminder",
+  "manual_test",
+  "automatic_initial",
+  "automatic_reminder",
+] as const;
 export type ClientEmailSendTrigger = (typeof CLIENT_EMAIL_SEND_TRIGGERS)[number];
+
+export const CLIENT_EMAIL_SEND_TRIGGER_LABELS: Record<ClientEmailSendTrigger, string> = {
+  manual: "Manual",
+  automatic: "Automatic",
+  reminder: "Reminder",
+  manual_test: "Test delivery",
+  automatic_initial: "Automatic initial",
+  automatic_reminder: "Automatic reminder",
+};
+
+export const CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCE_STATUSES = ["active", "resolved", "canceled"] as const;
+export type ClientEmailNeedsMoreTargetsSequenceStatus =
+  (typeof CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCE_STATUSES)[number];
+
+export const CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCE_CLOSE_REASONS = [
+  "eligible_targets_above_threshold",
+  "needs_more_signal_resolved",
+  "account_canceled",
+] as const;
+export type ClientEmailNeedsMoreTargetsSequenceCloseReason =
+  (typeof CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCE_CLOSE_REASONS)[number];
 
 export const CLIENT_EMAIL_INTENT_KINDS = ["client", "test"] as const;
 export type ClientEmailIntentKind = (typeof CLIENT_EMAIL_INTENT_KINDS)[number];

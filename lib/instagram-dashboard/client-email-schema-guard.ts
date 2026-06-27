@@ -15,7 +15,7 @@ type PostgrestLikeError = {
   code?: string;
 };
 
-function readErrorMessage(error: unknown): string {
+export function readErrorMessage(error: unknown): string {
   if (!error) return "";
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
@@ -26,7 +26,7 @@ function readErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function readErrorCode(error: unknown): string {
+export function readErrorCode(error: unknown): string {
   if (typeof error !== "object" || error === null) return "";
   const code = (error as PostgrestLikeError).code;
   return typeof code === "string" ? code.toUpperCase() : "";

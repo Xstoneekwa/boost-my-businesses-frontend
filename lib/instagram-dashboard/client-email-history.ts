@@ -3,6 +3,7 @@ import {
   CLIENT_EMAIL_DELIVERY_STATUSES,
   CLIENT_EMAIL_INTENT_KINDS,
   CLIENT_EMAIL_LOCKED_FROM,
+  CLIENT_EMAIL_SEND_TRIGGER_LABELS,
   CLIENT_EMAIL_SEND_TRIGGERS,
   CLIENT_EMAIL_TEMPLATE_CATEGORIES,
   CLIENT_EMAIL_TEST_DELIVERY_LABEL,
@@ -58,6 +59,7 @@ export type ClientEmailHistoryListItem = {
   recipientEmail: string;
   fromEmail: typeof CLIENT_EMAIL_LOCKED_FROM;
   trigger: ClientEmailSendTrigger;
+  triggerLabel: string;
   reminderIndex: number | null;
   intentStatus: ClientEmailIntentStatus;
   deliveryStatus: ClientEmailDeliveryStatus | null;
@@ -157,6 +159,7 @@ function projectListItem(
   const category = readCategory(row.category) ?? "needs_assistance";
   const intentKind = context.testSchemaReady ? readIntentKind(row.intent_kind) : "client";
   const isTestDelivery = intentKind === "test";
+  const trigger = readTrigger(row.trigger) ?? "automatic";
   return {
     id: readString(row.id, ""),
     createdAt: readString(row.created_at, ""),
@@ -166,7 +169,8 @@ function projectListItem(
     categoryLabel: CLIENT_EMAIL_CATEGORY_LABELS[category],
     recipientEmail: formatRecipientEmailForRelay(readString(row.recipient_email, ""), isTestDelivery),
     fromEmail: CLIENT_EMAIL_LOCKED_FROM,
-    trigger: readTrigger(row.trigger) ?? "automatic",
+    trigger,
+    triggerLabel: CLIENT_EMAIL_SEND_TRIGGER_LABELS[trigger] ?? trigger,
     reminderIndex: typeof row.reminder_index === "number" ? row.reminder_index : null,
     intentStatus: readString(row.status, "pending") as ClientEmailIntentStatus,
     deliveryStatus: context.deliveryStatus ?? null,
