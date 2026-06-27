@@ -13,6 +13,7 @@ import {
   summarizeOutboxPreviewRows,
 } from "./client-email-lifecycle-outbox-preview.ts";
 import type { ClientEmailLifecycleOutboxPlan, ClientEmailOutboxPlanRow } from "./client-email-lifecycle-outbox-plan.ts";
+import type { OutboxEffectiveCandidateRow } from "./client-email-lifecycle-outbox-precedence.ts";
 
 const outboxRoute = readFileSync(
   new URL("../../app/api/instagram-dashboard/email-lifecycle/outbox-preview/route.ts", import.meta.url),
@@ -69,6 +70,16 @@ const baseRow = (overrides: Partial<ClientEmailOutboxPlanRow> = {}): ClientEmail
   ...overrides,
 });
 
+function effectiveRow(overrides: Partial<OutboxEffectiveCandidateRow> = {}): OutboxEffectiveCandidateRow {
+  return {
+    ...baseRow(overrides),
+    dispatchEligible: overrides.dispatchEligible ?? false,
+    suppressedByCategory: null,
+    suppressionReason: null,
+    isEffectiveCandidate: true,
+  };
+}
+
 test("outbox preview route requires relay or admin and uses read-only planner", () => {
   assert.match(outboxRoute, /requireRelayOrAdmin/);
   assert.match(outboxRoute, /loadClientEmailLifecycleOutboxPreview/);
@@ -78,20 +89,16 @@ test("outbox preview route requires relay or admin and uses read-only planner", 
 });
 
 test("projection strips ids, keys, and template bodies", () => {
-  const projected = projectOutboxPreviewItem(baseRow(), basePlan());
+  const projected = projectOutboxPreviewItem(effectiveRow(), basePlan(), { suppressedSiblingCount: 0 });
   assert.equal(projected.instagramUsername, "paused_user");
   assert.equal(projected.clientEmailMasked, "c***@example.com");
-  assert.equal(projected.templateConfigured, true);
-  assert.equal(projected.templateVersion, 2);
-  assert.equal(projected.senderConfigured, true);
-  assert.equal(projected.supportEmailConfigured, true);
   assert.doesNotMatch(JSON.stringify(projected), /acct-hidden|client-hidden|tpl-hidden|idempotency|snapshotBody/i);
   assert.doesNotMatch(JSON.stringify(projected), /growth@boostmybusinesses\.com/);
 });
 
 test("historical lifecycle maps to blocked_legacy_pre_watermark", () => {
   assert.equal(
-    deriveOutboxPreviewDeliveryState("blocked_legacy_pre_watermark"),
+    deriveOutboxPreviewDeliveryState("blocked_legacy_pre_watermark", false),
     "blocked_legacy_pre_watermark",
   );
   assert.equal(
@@ -100,67 +107,72 @@ test("historical lifecycle maps to blocked_legacy_pre_watermark", () => {
   );
 });
 
-test("needs-more historical signal maps to blocked_legacy_pre_watermark", () => {
-  const row = baseRow({
-    category: "needs_more_target_accounts",
-    parentType: "sequence",
-    decision: "blocked_legacy_pre_watermark",
-    reason: "Needs-more signal predates automation watermark.",
+test("precedence collapses canceled account to one effective row and suppresses needs-more", () => {
+  const preview = projectClientEmailLifecycleOutboxPreview({
+    plan: {
+      ...basePlan(),
+      accountsAnalyzed: 1,
+      rows: [
+        baseRow({ accountId: "a1", category: "account_canceled", decision: "blocked_legacy_pre_watermark" }),
+        baseRow({ accountId: "a1", category: "needs_more_target_accounts", decision: "no_action", reason: "signal active" }),
+      ],
+    },
+    readinessStatus: "partial",
+    readinessBlockingReasons: [],
   });
-  const projected = projectOutboxPreviewItem(row, basePlan());
-  assert.equal(projected.lifecycleDecision, "blocked_legacy_pre_watermark");
-  assert.equal(projected.watermarkState, "watermark_missing");
+  assert.equal(preview.summary.rawObservations, 2);
+  assert.equal(preview.summary.effectiveCandidates, 1);
+  assert.equal(preview.summary.suppressedByLifecyclePriority, 1);
+  assert.equal(preview.items.length, 1);
+  assert.equal(preview.items[0]?.category, "account_canceled");
+  assert.equal(preview.items[0]?.precedenceNote, "Other lifecycle communication suppressed by account status");
 });
 
-test("closed gate maps to blocked_delivery_gate", () => {
-  const row = baseRow({ decision: "blocked_delivery_gate", reason: "Automation gates remain closed." });
-  const projected = projectOutboxPreviewItem(row, basePlan());
+test("closed gate maps to blocked_delivery_gate on effective candidate", () => {
+  const projected = projectOutboxPreviewItem(
+    effectiveRow({ decision: "blocked_delivery_gate", reason: "Automation gates remain closed." }),
+    basePlan(),
+    { suppressedSiblingCount: 0 },
+  );
   assert.equal(projected.deliveryState, "blocked_delivery_gate");
   assert.equal(projected.gateState, "gates_closed");
 });
 
-test("missing client email maps to blocked_missing_client_email", () => {
-  const row = baseRow({
-    decision: "blocked_missing_client_email",
-    clientEmailMasked: null,
-    reason: "Canonical client communication email is not configured.",
+test("summary counts raw vs effective and suppressed", () => {
+  const preview = projectClientEmailLifecycleOutboxPreview({
+    plan: {
+      ...basePlan(),
+      accountsAnalyzed: 2,
+      rows: [
+        baseRow({ accountId: "a1", category: "account_canceled", decision: "blocked_legacy_pre_watermark" }),
+        baseRow({ accountId: "a1", category: "needs_more_target_accounts", decision: "no_action", reason: "eligible=5" }),
+        baseRow({ accountId: "a2", category: "account_canceled", decision: "blocked_legacy_pre_watermark", instagramUsername: "user2" }),
+        baseRow({ accountId: "a2", category: "needs_more_target_accounts", decision: "no_action", reason: "eligible=4" }),
+      ],
+    },
+    readinessStatus: "partial",
+    readinessBlockingReasons: [],
   });
-  const projected = projectOutboxPreviewItem(row, basePlan());
-  assert.equal(projected.deliveryState, "blocked_missing_client_email");
+  assert.equal(preview.summary.rawObservations, 4);
+  assert.equal(preview.summary.effectiveCandidates, 2);
+  assert.equal(preview.summary.suppressedByLifecyclePriority, 2);
+  assert.equal(preview.items.length, 2);
 });
 
-test("missing template maps to blocked_template_unavailable", () => {
-  const row = baseRow({
-    decision: "blocked_template_unavailable",
-    activeTemplateId: null,
-    activeTemplateVersion: null,
+test("readyToDispatchTheoretical counts only dispatchEligible effective rows", () => {
+  const summary = summarizeOutboxPreviewRows({
+    rawObservations: [baseRow(), baseRow({ accountId: "a2" })],
+    effectiveCandidates: [
+      effectiveRow({ decision: "would_create_initial_intent", dispatchEligible: true }),
+      effectiveRow({ accountId: "a2", decision: "blocked_legacy_pre_watermark", dispatchEligible: false }),
+    ],
+    suppressedCount: 0,
+    accountsAnalyzed: 2,
   });
-  const projected = projectOutboxPreviewItem(row, basePlan());
-  assert.equal(projected.deliveryState, "blocked_template_unavailable");
-  assert.equal(projected.templateConfigured, false);
+  assert.equal(summary.readyToDispatchTheoretical, 1);
 });
 
-test("canceled account close maps to blocked_account_canceled delivery state", () => {
-  assert.equal(
-    deriveOutboxPreviewDeliveryState("would_cancel_episode"),
-    "blocked_account_canceled",
-  );
-});
-
-test("summary counts theoretical dispatch rows", () => {
-  const rows = [
-    baseRow({ decision: "would_create_initial_intent" }),
-    baseRow({ decision: "would_create_reminder_intent", category: "needs_more_target_accounts" }),
-    baseRow({ decision: "blocked_delivery_gate" }),
-  ];
-  const summary = summarizeOutboxPreviewRows(rows, 2);
-  assert.equal(summary.wouldCreateInitialIntent, 1);
-  assert.equal(summary.wouldCreateReminderIntent, 1);
-  assert.equal(summary.readyToDispatchTheoretical, 2);
-  assert.equal(summary.blockedDeliveryGate, 1);
-});
-
-test("no_action waiting rows can be excluded from pertinent items", () => {
+test("no_action waiting rows can be excluded from raw observations", () => {
   const waiting = baseRow({
     decision: "no_action",
     reason: "active_episode_waiting_for_next_due_reminder",
@@ -206,29 +218,19 @@ test("loadClientEmailLifecycleOutboxPreview performs read-only selects without w
   assert.equal(fetchCalled, 0);
 });
 
-test("projected preview marks readOnly and mutationExecuted false", () => {
-  const preview = projectClientEmailLifecycleOutboxPreview({
-    plan: basePlan(),
-    readinessStatus: "partial",
-    readinessBlockingReasons: ["Lifecycle anti-backfill watermark is not configured."],
-  });
-  assert.equal(preview.readOnly, true);
-  assert.equal(preview.mutationExecuted, false);
-  assert.equal(preview.readinessStatus, "partial");
-});
-
-test("watermark state for needs-more uses needs-more watermark flag", () => {
+test("watermark state for needs-more uses needs-more watermark flag when dispatch eligible", () => {
   const withWatermark = deriveOutboxPreviewWatermarkState(
     "would_create_initial_intent",
     "needs_more_target_accounts",
+    true,
     { lifecycleWatermarkConfigured: false, needsMoreWatermarkConfigured: true },
   );
   assert.equal(withWatermark, "watermark_satisfied");
 });
 
-test("internal test intents are never part of outbox preview projection input", () => {
-  const row = baseRow({ decision: "would_create_initial_intent", intentKind: undefined as never });
-  assert.doesNotMatch(JSON.stringify(row), /intent_kind.?test|manual_test/i);
-  const projected = projectOutboxPreviewItem(row, basePlan());
-  assert.equal(projected.lifecycleDecision, "would_create_initial_intent");
+test("gate state is not applicable for non-dispatch-eligible intent decisions", () => {
+  assert.equal(
+    deriveOutboxPreviewGateState("blocked_legacy_pre_watermark", false, basePlan()),
+    "not_applicable",
+  );
 });

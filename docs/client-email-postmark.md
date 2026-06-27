@@ -97,7 +97,7 @@ Future client intents must snapshot at creation time: recipient canonical email,
 
 Readiness (relay/admin): `GET /api/instagram-dashboard/email-lifecycle/readiness` — booleans and blocking reasons only; no secrets or full client emails.
 
-Outbox preview (relay/admin): `GET /api/instagram-dashboard/email-lifecycle/outbox-preview` — read-only combined planner output from `buildClientEmailLifecycleOutboxPlan()`; no writes, sends, or intents.
+Outbox preview (relay/admin): `GET /api/instagram-dashboard/email-lifecycle/outbox-preview` — read-only combined planner output from `buildClientEmailLifecycleOutboxPlan()` with lifecycle precedence (one effective candidate per account); no writes, sends, or intents.
 
 ## Webhook setup
 
