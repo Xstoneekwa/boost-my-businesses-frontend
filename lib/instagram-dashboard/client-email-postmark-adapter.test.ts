@@ -58,14 +58,22 @@ test("missing token returns explicit redacted failure without network", async ()
   assert.equal(fetchCalled, false);
 });
 
-test("from email is forced to growth@boostmybusinesses.com", async () => {
+test("invalid from email is rejected", async () => {
   const validation = validateClientEmailProviderSendPayload({
     ...basePayload,
-    fromEmail: "other@example.com" as typeof CLIENT_EMAIL_LOCKED_FROM,
+    fromEmail: "not-an-email",
   });
   assert.equal(validation?.ok, false);
   if (!validation || validation.ok) return;
   assert.equal(validation.reason, "invalid_from_email");
+});
+
+test("valid configured from email is accepted", async () => {
+  const validation = validateClientEmailProviderSendPayload({
+    ...basePayload,
+    fromEmail: "other@example.com",
+  });
+  assert.equal(validation, null);
 });
 
 test("recipient must be canonical communication email shape", async () => {

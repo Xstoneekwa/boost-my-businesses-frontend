@@ -19,7 +19,7 @@ export type ClientEmailPostmarkMetadataKey = (typeof CLIENT_EMAIL_POSTMARK_METAD
 
 export type ClientEmailProviderSendPayload = {
   intentId: string;
-  fromEmail: typeof CLIENT_EMAIL_LOCKED_FROM;
+  fromEmail: string;
   recipientEmail: string;
   subject: string;
   bodyText: string;

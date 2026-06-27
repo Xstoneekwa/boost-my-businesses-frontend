@@ -86,6 +86,14 @@ order by 1;
 |---------------|----------|------|
 | `20260630120000` | `20260630120000_client_email_lifecycle_episodes.sql` | Generic lifecycle email episodes for `account_paused`, `account_canceled`, `needs_assistance` |
 
+**Status on main production:** applied as remote version `20260627093518` / `client_email_lifecycle_episodes`.
+
+## Pending local migration (TASK 9A — not applied)
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260701120000` | `20260701120000_transactional_email_delivery_settings.sql` | Singleton transactional delivery settings (`active_from_email`, `support_email`), audit trail, intent sender/support snapshots |
+
 **Status on main production:** not applied. Do **not** apply without explicit GO.
 
 ## Before any future migration

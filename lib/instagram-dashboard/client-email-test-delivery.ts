@@ -1,9 +1,8 @@
 import {
-  CLIENT_EMAIL_LOCKED_FROM,
   CLIENT_EMAIL_TEMPLATE_CATEGORIES,
-  CLIENT_EMAIL_TEST_DEMO_VALUES,
   type ClientEmailTemplateCategory,
 } from "./client-email-constants.ts";
+import { buildClientEmailDemoValues, buildIntentDeliverySnapshotFields, resolveTransactionalDeliverySettings } from "./client-email-delivery-settings.ts";
 import { buildTemplatePreview } from "./client-email-template-render.ts";
 import {
   CLIENT_EMAIL_SEND_INTENTS_TABLE,
@@ -57,10 +56,12 @@ export async function loadClientEmailTestDeliveryStatus(
   const testSchema = infrastructure.available
     ? await probeClientEmailTestIntentSchema(supabase)
     : { available: false as const };
+  const settings = await resolveTransactionalDeliverySettings(supabase);
 
   return projectClientEmailTestDeliveryStatus({
     env,
     testSchemaReady: testSchema.available,
+    settings,
   });
 }
 
@@ -182,12 +183,14 @@ export async function executeClientEmailTestDelivery(
     };
   }
 
+  const settings = await resolveTransactionalDeliverySettings(supabase);
   const preview = buildTemplatePreview(
     readString(template.subject, ""),
     readString(template.body_text, ""),
-    CLIENT_EMAIL_TEST_DEMO_VALUES,
+    buildClientEmailDemoValues(settings, "test"),
   );
 
+  const deliverySnapshots = buildIntentDeliverySnapshotFields(settings);
   const now = new Date().toISOString();
   const insertResult = await intentsTable(supabase)
     .insert({
@@ -196,7 +199,7 @@ export async function executeClientEmailTestDelivery(
       client_id: null,
       account_id: null,
       recipient_email: gate.recipientEmail,
-      from_email: CLIENT_EMAIL_LOCKED_FROM,
+      ...deliverySnapshots,
       trigger: "manual_test",
       reminder_index: null,
       template_id: templateId,
@@ -238,6 +241,7 @@ export async function executeClientEmailTestDelivery(
   const sendResult = await executePostmarkTestDeliverySend({
     intentId,
     recipientEmail: gate.recipientEmail,
+    fromEmail: settings.activeFromEmail,
     subject: preview.subject,
     bodyText: preview.bodyText,
     bodyHtml: preview.bodyHtml,

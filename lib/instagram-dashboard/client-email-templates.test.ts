@@ -14,6 +14,11 @@ const MISSING_TABLE_ERROR = {
 
 type Row = Record<string, unknown>;
 
+const SETTINGS_MISSING_TABLE_ERROR = {
+  message: "Could not find the table 'public.transactional_email_delivery_settings' in the schema cache",
+  code: "PGRST205",
+};
+
 function createMockSupabase(input: { templates?: Row[]; tableMissing?: boolean }) {
   const templates = [...(input.templates ?? [])];
   const tableMissing = input.tableMissing === true;
@@ -38,6 +43,9 @@ function createMockSupabase(input: { templates?: Row[]; tableMissing?: boolean }
       },
       limit(count: number) {
         state.limitValue = count;
+        if (table === "transactional_email_delivery_settings") {
+          return Promise.resolve({ error: SETTINGS_MISSING_TABLE_ERROR });
+        }
         return api;
       },
       maybeSingle: async () => {

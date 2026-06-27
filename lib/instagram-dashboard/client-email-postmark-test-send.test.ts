@@ -17,6 +17,7 @@ const openTestEnv = {
 const payload = {
   intentId: "intent-test-1",
   recipientEmail: "liam@example.com",
+  fromEmail: CLIENT_EMAIL_LOCKED_FROM,
   subject: "Test subject",
   bodyText: "Hello Test Customer",
   bodyHtml: "<p>Hello Test Customer</p>",
@@ -48,9 +49,9 @@ test("recipient not allowlisted is rejected without fetch", async () => {
   assert.equal(fetchCalled, false);
 });
 
-test("prepared Postmark test request uses locked sender and test metadata", () => {
+test("prepared Postmark test request uses configured sender and test metadata", () => {
   const prepared = preparePostmarkTestSendRequest(payload, "server-token");
-  assert.equal(prepared.body.From, CLIENT_EMAIL_LOCKED_FROM);
+  assert.equal(prepared.body.From, payload.fromEmail);
   assert.equal(prepared.body.MessageStream, "outbound");
   assert.equal(prepared.body.TrackOpens, false);
   assert.equal(prepared.body.TrackLinks, "None");
@@ -78,7 +79,7 @@ test("open test gates call Postmark once with demo-safe content", async () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.providerMessageId, "pm-test-123");
-  assert.equal(requestBody?.From, CLIENT_EMAIL_LOCKED_FROM);
+  assert.equal(requestBody?.From, payload.fromEmail);
   assert.equal(requestBody?.To, "liam@example.com");
 });
 

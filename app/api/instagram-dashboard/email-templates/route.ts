@@ -14,6 +14,7 @@ import {
   rejectForbiddenEmailTemplateFields,
   saveClientEmailTemplateVersion,
 } from "@/lib/instagram-dashboard/client-email-templates";
+import { resolveTransactionalDeliverySettings } from "@/lib/instagram-dashboard/client-email-delivery-settings";
 import { CLIENT_EMAIL_TEMPLATE_CATEGORIES } from "@/lib/instagram-dashboard/client-email-constants";
 
 export const dynamic = "force-dynamic";
@@ -59,7 +60,9 @@ export async function POST(request: Request) {
   const category = readString(body.category, "").trim();
 
   if (action === "preview") {
-    const preview = previewClientEmailTemplate({ subject, bodyText });
+    const supabase = createSupabaseClient();
+    const settings = await resolveTransactionalDeliverySettings(supabase);
+    const preview = previewClientEmailTemplate({ subject, bodyText, settings });
     if (!preview.ok) {
       return jsonError("Unknown template variables are not allowed.", 400, {
         unknown_variables: preview.unknownVariables,

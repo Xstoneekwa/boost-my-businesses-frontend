@@ -1,5 +1,6 @@
 import { normalizeCommunicationEmail } from "./client-communication-email.ts";
 import { readClientEmailProviderEnv } from "./client-email-provider-config.ts";
+import type { ResolvedTransactionalDeliverySettings } from "./client-email-delivery-settings.ts";
 
 function readBoolean(value: string | undefined, fallback = false) {
   if (value == null || value.trim() === "") return fallback;
@@ -121,6 +122,7 @@ export function rejectForbiddenTestDeliveryRecipientFields(body: Record<string, 
 export function projectClientEmailTestDeliveryStatus(input: {
   env?: Record<string, string | undefined>;
   testSchemaReady: boolean;
+  settings?: Pick<ResolvedTransactionalDeliverySettings, "activeFromEmail" | "supportEmail">;
 }) {
   const env = input.env ?? process.env;
   const config = readClientEmailTestEnv(env);
@@ -130,6 +132,8 @@ export function projectClientEmailTestDeliveryStatus(input: {
     : gate.allowed
       ? null
       : gate.message;
+  const activeFromEmail = input.settings?.activeFromEmail ?? "growth@boostmybusinesses.com";
+  const supportEmail = input.settings?.supportEmail ?? "growth@boostmybusinesses.com";
 
   return {
     clientSendingEnabled: config.clientSendingEnabled,
@@ -143,6 +147,7 @@ export function projectClientEmailTestDeliveryStatus(input: {
     readinessLabel: gate.allowed && input.testSchemaReady
       ? "Ready for one controlled test"
       : disabledReason ?? "Test delivery prerequisites are not ready yet.",
-    lockedFromEmail: "growth@boostmybusinesses.com" as const,
+    lockedFromEmail: activeFromEmail,
+    supportEmail,
   };
 }

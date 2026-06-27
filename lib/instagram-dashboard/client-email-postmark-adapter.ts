@@ -1,4 +1,3 @@
-import { CLIENT_EMAIL_LOCKED_FROM } from "./client-email-constants.ts";
 import { normalizeCommunicationEmail } from "./client-communication-email.ts";
 import {
   evaluateClientEmailSendingGate,
@@ -29,11 +28,11 @@ function buildPostmarkMetadata(payload: ClientEmailProviderSendPayload) {
 export function validateClientEmailProviderSendPayload(
   payload: ClientEmailProviderSendPayload,
 ): ClientEmailProviderSendResult | null {
-  if (payload.fromEmail !== CLIENT_EMAIL_LOCKED_FROM) {
+  if (!normalizeCommunicationEmail(payload.fromEmail)) {
     return {
       ok: false,
       reason: "invalid_from_email",
-      message: "Only growth@boostmybusinesses.com is allowed as the transactional sender.",
+      message: "Active sender must be a valid transactional From address.",
     };
   }
   if (!normalizeCommunicationEmail(payload.recipientEmail)) {

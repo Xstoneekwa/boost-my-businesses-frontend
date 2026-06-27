@@ -5,6 +5,11 @@ import {
   type ClientEmailTemplateCategory,
 } from "./client-email-constants.ts";
 import {
+  buildClientEmailDemoValues,
+  resolveTransactionalDeliverySettings,
+  type ResolvedTransactionalDeliverySettings,
+} from "./client-email-delivery-settings.ts";
+import {
   CLIENT_EMAIL_TEMPLATES_TABLE,
   probeClientEmailInfrastructure,
 } from "./client-email-schema-guard.ts";
@@ -36,7 +41,7 @@ export type ClientEmailTemplateView = {
   bodyHtml: string;
   allowedVariables: string[];
   configured: boolean;
-  fromEmail: typeof CLIENT_EMAIL_LOCKED_FROM;
+  fromEmail: string;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -45,7 +50,8 @@ export type ClientEmailTemplateView = {
 
 export type ClientEmailTemplatesProjection = {
   featureAvailable: boolean;
-  fromEmail: typeof CLIENT_EMAIL_LOCKED_FROM;
+  fromEmail: string;
+  supportEmail: string;
   categories: ClientEmailTemplateCategory[];
   templates: ClientEmailTemplateView[];
 };
@@ -57,7 +63,11 @@ function readCategory(value: unknown): ClientEmailTemplateCategory | null {
     : null;
 }
 
-function projectTemplateRow(row: SupabaseRecord, configured: boolean): ClientEmailTemplateView {
+function projectTemplateRow(
+  row: SupabaseRecord,
+  configured: boolean,
+  settings: ResolvedTransactionalDeliverySettings,
+): ClientEmailTemplateView {
   const category = readCategory(row.category) ?? "needs_assistance";
   return {
     id: readString(row.id, ""),
@@ -70,7 +80,7 @@ function projectTemplateRow(row: SupabaseRecord, configured: boolean): ClientEma
     bodyHtml: readString(row.body_html, ""),
     allowedVariables: listAllowedVariablesForCategory(),
     configured,
-    fromEmail: CLIENT_EMAIL_LOCKED_FROM,
+    fromEmail: settings.activeFromEmail,
     createdAt: readString(row.created_at, ""),
     updatedAt: readString(row.updated_at, ""),
     createdBy: readString(row.created_by, ""),
@@ -78,7 +88,7 @@ function projectTemplateRow(row: SupabaseRecord, configured: boolean): ClientEma
   };
 }
 
-function buildCategoryPlaceholders(): ClientEmailTemplateView[] {
+function buildCategoryPlaceholders(settings: ResolvedTransactionalDeliverySettings): ClientEmailTemplateView[] {
   return CLIENT_EMAIL_TEMPLATE_CATEGORIES.map((category) => ({
     id: "",
     category,
@@ -90,7 +100,7 @@ function buildCategoryPlaceholders(): ClientEmailTemplateView[] {
     bodyHtml: "",
     allowedVariables: listAllowedVariablesForCategory(),
     configured: false,
-    fromEmail: CLIENT_EMAIL_LOCKED_FROM,
+    fromEmail: settings.activeFromEmail,
     createdAt: "",
     updatedAt: "",
     createdBy: "",
@@ -101,13 +111,15 @@ function buildCategoryPlaceholders(): ClientEmailTemplateView[] {
 export async function loadClientEmailTemplatesProjection(
   supabase: ClientEmailSupabase,
 ): Promise<ClientEmailTemplatesProjection> {
+  const settings = await resolveTransactionalDeliverySettings(supabase);
   const infrastructure = await probeClientEmailInfrastructure(supabase);
   if (!infrastructure.available) {
     return {
       featureAvailable: false,
-      fromEmail: CLIENT_EMAIL_LOCKED_FROM,
+      fromEmail: settings.activeFromEmail,
+      supportEmail: settings.supportEmail,
       categories: [...CLIENT_EMAIL_TEMPLATE_CATEGORIES],
-      templates: buildCategoryPlaceholders(),
+      templates: buildCategoryPlaceholders(settings),
     };
   }
 
@@ -123,16 +135,17 @@ export async function loadClientEmailTemplatesProjection(
   for (const row of (data as SupabaseRecord[] | null) ?? []) {
     const category = readCategory(row.category);
     if (!category) continue;
-    activeByCategory.set(category, projectTemplateRow(row, true));
+    activeByCategory.set(category, projectTemplateRow(row, true, settings));
   }
 
   const templates = CLIENT_EMAIL_TEMPLATE_CATEGORIES.map((category) => (
-    activeByCategory.get(category) ?? buildCategoryPlaceholders().find((row) => row.category === category)!
+    activeByCategory.get(category) ?? buildCategoryPlaceholders(settings).find((row) => row.category === category)!
   ));
 
   return {
     featureAvailable: true,
-    fromEmail: CLIENT_EMAIL_LOCKED_FROM,
+    fromEmail: settings.activeFromEmail,
+    supportEmail: settings.supportEmail,
     categories: [...CLIENT_EMAIL_TEMPLATE_CATEGORIES],
     templates,
   };
@@ -186,9 +199,10 @@ export async function saveClientEmailTemplateVersion(
     && readString(active.subject, "") === subject
     && readString(active.body_text, "") === bodyText
   ) {
+    const settings = await resolveTransactionalDeliverySettings(supabase);
     return {
       ok: true,
-      template: projectTemplateRow(active, true),
+      template: projectTemplateRow(active, true, settings),
       createdNewVersion: false,
     };
   }
@@ -236,9 +250,10 @@ export async function saveClientEmailTemplateVersion(
   if (insertError) throw new Error(insertError.message);
   if (!inserted) throw new Error("Template version could not be created.");
 
+  const settings = await resolveTransactionalDeliverySettings(supabase);
   return {
     ok: true,
-    template: projectTemplateRow(inserted as SupabaseRecord, true),
+    template: projectTemplateRow(inserted as SupabaseRecord, true, settings),
     createdNewVersion: true,
   };
 }
@@ -246,15 +261,29 @@ export async function saveClientEmailTemplateVersion(
 export function previewClientEmailTemplate(input: {
   subject: string;
   bodyText: string;
+  settings?: ResolvedTransactionalDeliverySettings;
 }) {
+  const settings = input.settings ?? {
+    activeFromEmail: CLIENT_EMAIL_LOCKED_FROM,
+    supportEmail: CLIENT_EMAIL_LOCKED_FROM,
+    configVersion: 1,
+    source: "legacy_default" as const,
+    schemaReady: false,
+    updatedAt: null,
+  };
   const unknownVariables = validateTemplateVariableUsage(input.subject, input.bodyText);
   if (unknownVariables.length > 0) {
     return { ok: false as const, reason: "unknown_variables" as const, unknownVariables };
   }
   return {
     ok: true as const,
-    fromEmail: CLIENT_EMAIL_LOCKED_FROM,
-    preview: buildTemplatePreview(input.subject, input.bodyText),
+    fromEmail: settings.activeFromEmail,
+    supportEmail: settings.supportEmail,
+    preview: buildTemplatePreview(
+      input.subject,
+      input.bodyText,
+      buildClientEmailDemoValues(settings, "preview"),
+    ),
     allowedVariables: listAllowedVariablesForCategory(),
   };
 }

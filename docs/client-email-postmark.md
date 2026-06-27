@@ -15,6 +15,7 @@ Transactional email V1 uses **Postmark** with a single locked sender:
 | `CLIENT_EMAIL_TEST_SENDING_ENABLED` | `false` (allowlisted internal test sends) |
 | `CLIENT_EMAIL_TEST_RECIPIENT` | unset until an explicit test-send GO |
 | `POSTMARK_SERVER_TOKEN` | configured in Vercel Production only |
+| `POSTMARK_ACCOUNT_TOKEN` | optional; server-side only for sender identity sync (TASK 9A) |
 | `POSTMARK_WEBHOOK_USERNAME` | configured in Vercel Production only |
 | `POSTMARK_WEBHOOK_PASSWORD` | configured in Vercel Production only |
 
@@ -35,6 +36,22 @@ Internal test sends are a **separate path** from client lifecycle email:
 
 Requires local migration `20260628120000_client_email_test_intents.sql` (not applied in TASK 6C deploy).
 
+## Transactional delivery settings (TASK 9A)
+
+BotApp can manage two separate settings once migration `20260701120000_transactional_email_delivery_settings.sql` is applied:
+
+- **Active sender address** — selectable only from confirmed Postmark sender identities after an explicit refresh (`POSTMARK_ACCOUNT_TOKEN`, server-side only)
+- **`{{support_email}}`** — central support email used in previews and future sends
+
+Routes (relay/admin only, `Cache-Control: no-store`):
+
+- `GET /api/instagram-dashboard/email-delivery-settings`
+- `POST /api/instagram-dashboard/email-delivery-settings/refresh-senders`
+- `PATCH /api/instagram-dashboard/email-delivery-settings`
+- `GET /api/instagram-dashboard/email-delivery-settings/audit`
+
+Until the migration is applied, the resolver falls back to `growth@boostmybusinesses.com` for both values (`source=legacy_default`) with zero writes.
+
 ## Code map
 
 | Piece | Path |
@@ -47,6 +64,9 @@ Requires local migration `20260628120000_client_email_test_intents.sql` (not app
 | Webhook auth | `lib/instagram-dashboard/client-email-postmark-webhook-auth.ts` |
 | Webhook ingestion | `lib/instagram-dashboard/client-email-postmark-webhook.ts` |
 | Test delivery HTTP route | `app/api/instagram-dashboard/email-test-delivery/route.ts` |
+| Delivery settings resolver | `lib/instagram-dashboard/client-email-delivery-settings.ts` |
+| Postmark sender identity sync | `lib/instagram-dashboard/client-email-postmark-sender-sync.ts` |
+| Delivery settings HTTP routes | `app/api/instagram-dashboard/email-delivery-settings/*` |
 | Webhook HTTP route | `app/api/webhooks/postmark/route.ts` |
 
 ## Webhook setup

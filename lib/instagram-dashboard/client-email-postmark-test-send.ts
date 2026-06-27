@@ -1,4 +1,4 @@
-import { CLIENT_EMAIL_LOCKED_FROM, type ClientEmailTemplateCategory } from "./client-email-constants.ts";
+import { type ClientEmailTemplateCategory } from "./client-email-constants.ts";
 import { evaluateClientEmailTestSendingGate } from "./client-email-test-config.ts";
 import {
   CLIENT_EMAIL_POSTMARK_PROVIDER,
@@ -11,6 +11,7 @@ const POSTMARK_EMAIL_API_URL = "https://api.postmarkapp.com/email";
 export type PostmarkTestSendPayload = {
   intentId: string;
   recipientEmail: string;
+  fromEmail: string;
   subject: string;
   bodyText: string;
   bodyHtml: string;
@@ -61,7 +62,7 @@ export function preparePostmarkTestSendRequest(
       "X-Postmark-Server-Token": serverToken,
     },
     body: {
-      From: CLIENT_EMAIL_LOCKED_FROM,
+      From: payload.fromEmail,
       To: payload.recipientEmail,
       Subject: payload.subject,
       TextBody: payload.bodyText,
