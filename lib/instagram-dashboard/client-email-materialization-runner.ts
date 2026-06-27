@@ -68,6 +68,14 @@ export type MaterializationRunPlan = {
   summary: MaterializationRunPlanSummary;
 };
 
+export type MaterializationShadowOperationSummary = {
+  open_lifecycle_episode: number;
+  create_lifecycle_initial_intent: number;
+  open_needs_more_sequence: number;
+  create_needs_more_initial_intent: number;
+  create_needs_more_reminder_intent: number;
+};
+
 export type ClientEmailMaterializationShadowRun = {
   plannedAt: string;
   executionMode: "shadow";
@@ -82,8 +90,12 @@ export type ClientEmailMaterializationShadowRun = {
   skipped: number;
   readinessStatus: ClientEmailLifecycleReadinessStatus;
   materializationReadinessStatus: OutboxLayerReadinessStatus;
+  dispatchReadinessStatus: OutboxLayerReadinessStatus;
+  materializationBlockingReasons: string[];
+  dispatchBlockingReasons: string[];
   summary: MaterializationRunPlanSummary;
   skippedByCategory: Partial<Record<ClientEmailTemplateCategory, number>>;
+  operationSummary: MaterializationShadowOperationSummary;
   items: MaterializationRunPlanItem[];
 };
 
@@ -255,6 +267,23 @@ function buildShadowContext(plan: ClientEmailLifecycleOutboxPlan, env: Record<st
   };
 }
 
+function summarizeShadowOperations(items: MaterializationRunPlanItem[]): MaterializationShadowOperationSummary {
+  const summary: MaterializationShadowOperationSummary = {
+    open_lifecycle_episode: 0,
+    create_lifecycle_initial_intent: 0,
+    open_needs_more_sequence: 0,
+    create_needs_more_initial_intent: 0,
+    create_needs_more_reminder_intent: 0,
+  };
+
+  for (const item of items) {
+    if (item.status !== "would_materialize" || !item.operation) continue;
+    summary[item.operation] += 1;
+  }
+
+  return summary;
+}
+
 /** Read-only shadow orchestrator — never invokes RPC or mutates Supabase. */
 export async function planClientEmailMaterializationShadowRun(
   supabase: ClientEmailSupabase,
@@ -287,8 +316,12 @@ export async function planClientEmailMaterializationShadowRun(
     skipped: runPlan.summary.skipped,
     readinessStatus: readiness.finalReadinessStatus,
     materializationReadinessStatus: readiness.materializationReadinessStatus,
+    dispatchReadinessStatus: readiness.dispatchReadinessStatus,
+    materializationBlockingReasons: readiness.materializationBlockingReasons,
+    dispatchBlockingReasons: readiness.dispatchBlockingReasons,
     summary: runPlan.summary,
     skippedByCategory: runPlan.summary.skippedByCategory,
+    operationSummary: summarizeShadowOperations(runPlan.items),
     items: runPlan.items,
   };
 }

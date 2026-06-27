@@ -354,6 +354,20 @@ Shadow → execute requires **all** of:
 
 **14B restriction:** no route, no scheduler, no RPC call, no Vercel env changes, no BotApp.
 
+### 4.7 Materialization shadow preview HTTP route (TASK 14C — read-only)
+
+**Route:** `GET /api/instagram-dashboard/email-lifecycle/materialization-shadow-preview`
+
+| Concern | Contract |
+|---------|----------|
+| Auth | `requireRelayOrAdmin` — `401` without key, `403` invalid key |
+| Cache | `Cache-Control: no-store` |
+| Loader | `planClientEmailMaterializationShadowRun(...)` only |
+| RPC / writes | **never** |
+| Output | Same shadow envelope as §4.6 plus `dispatchReadinessStatus`, `operationSummary`, blocking reason arrays |
+
+No BotApp UI, no POST, no execute mode in 14C.
+
 ---
 
 ## 5. Dispatch claim, lease, and state machine (TASK 12A draft)
@@ -608,7 +622,8 @@ No secrets, template bodies, or full emails in logs.
 | Materialize RPC (`20260704120000_client_email_materialize_outbox_rpc.sql`) | migration | **applied main prod `20260627135913`** |
 | Sender consistency (`20260705120000_client_email_materialize_from_email_consistency.sql`) | migration | **applied main prod `20260627160044`** |
 | `client-email-outbox-materializer.ts` | code | **recorded TASK 13D — no route, not invoked** |
-| `client-email-materialization-runner.ts` | code | **shadow-only TASK 14B — no route, no RPC, no writes** |
+| `client-email-materialization-runner.ts` | code | **shadow-only TASK 14B — RPC wiring internal only, no route invoke** |
+| Materialization shadow preview route | code | **GET read-only TASK 14C — `materialization-shadow-preview`** |
 | Split gate helpers — materialize vs dispatch | code | done TASK 11C |
 | `client-email-outbox-materialize.ts` | code | pending (RPC wiring + activation) |
 | `client-email-outbox-dispatch.ts` | code | pending |

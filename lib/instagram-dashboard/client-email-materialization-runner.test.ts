@@ -332,7 +332,7 @@ test("shadow loader returns shadow envelope without rpc", async () => {
   assert.equal(typeof run.effectiveCandidates, "number");
 });
 
-test("no app route or api imports materialization runner", () => {
+test("only materialization shadow preview route imports materialization runner", () => {
   const appRoot = new URL("../../app", import.meta.url);
   const stack = [appRoot.pathname];
   const hits: string[] = [];
@@ -347,5 +347,6 @@ test("no app route or api imports materialization runner", () => {
       }
     }
   }
-  assert.deepEqual(hits, []);
+  assert.equal(hits.length, 1);
+  assert.match(hits[0] ?? "", /materialization-shadow-preview\/route\.ts$/);
 });
