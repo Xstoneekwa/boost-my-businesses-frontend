@@ -171,7 +171,7 @@ export function revalidateSingleMaterializationCandidate(input: {
 
 /**
  * Internal-only single-candidate materialize executor.
- * Must not be imported by HTTP routes, cron, queue, inbound handlers, or BotApp until a future controlled activation task.
+ * Imported only by `client-email-materialize-single.ts` until a future controlled activation task.
  */
 export async function executeSingleClientEmailMaterializationInternal(
   input: SingleClientEmailMaterializationExecutorInput,

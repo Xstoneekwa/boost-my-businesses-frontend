@@ -302,7 +302,7 @@ test("executor source excludes dispatch postmark and claim integrations", () => 
   assert.doesNotMatch(executorSource, /supabase\.rpc\(/);
 });
 
-test("executor module is not imported by app routes cron queue webhook or BotApp", () => {
+test("executor module is imported only by materialize-single orchestrator outside tests", () => {
   const roots = [
     join(process.cwd(), "app"),
     join(process.cwd(), "lib"),
@@ -319,6 +319,7 @@ test("executor module is not imported by app routes cron queue webhook or BotApp
       if (!/\.(ts|tsx|js|mjs)$/.test(entry.name)) continue;
       if (full.includes("client-email-materialization-executor")) continue;
       if (full.includes("client-email-materialization-executor.test")) continue;
+      if (full.includes("client-email-materialize-single")) continue;
       const source = readFileSync(full, "utf8");
       if (/client-email-materialization-executor/.test(source)) {
         offenders.push(full.replace(`${process.cwd()}/`, ""));

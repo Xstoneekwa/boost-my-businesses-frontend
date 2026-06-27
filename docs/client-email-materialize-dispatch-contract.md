@@ -471,9 +471,27 @@ Preview, readiness, and shadow preview **do not** read `CLIENT_EMAIL_MATERIALIZE
 4. Revalidation failure → `{ status: "revalidation_failed" }` — no writes.
 5. Gate open + revalidation OK → single call to `materializeClientEmailOutboxCandidateInternal` (future activation only).
 
-**Not in TASK 15A:** HTTP routes, cron, queue, webhook, BotApp imports, scheduler, dispatch, Postmark.
+**Not in TASK 15A:** cron, queue, webhook, BotApp imports, scheduler, dispatch, Postmark.
 
-**Next step (separate task + explicit GO):** wire executor behind internal caller only after `CLIENT_EMAIL_MATERIALIZE_ENABLED=true` is deliberately set in Vercel and prod validation completes.
+**TASK 16C — manual materialize route (gate closed by default):**
+
+| Piece | Path |
+|-------|------|
+| HTTP route | `POST /api/instagram-dashboard/email-lifecycle/materialize-single` |
+| Orchestrator | `client-email-materialize-single.ts` |
+
+Route order: `requireRelayOrAdmin` → `CLIENT_EMAIL_MATERIALIZE_ENABLED` → if closed: **409** with `{ reason: "materialize_execution_disabled", mutationExecuted: false, rpcInvoked: false }` and **no** body parse / planner / executor / RPC.
+
+When gate is `"true"` (future GO only):
+
+1. Body: `{ instagramUsername, category, confirmation: "MATERIALIZE_SINGLE_PENDING_INTENT" }` only — server rebuilds candidate from canonical planner.
+2. Exactly one effective candidate match required.
+3. Single call to `executeSingleClientEmailMaterializationInternal` → one RPC max → intent `pending` only.
+4. No dispatch, no Postmark, no batch.
+
+Production expectation after TASK 16C deploy: gate remains **unset**; POST returns **409**; zero DB writes.
+
+**Next step (separate task + explicit GO):** set `CLIENT_EMAIL_MATERIALIZE_ENABLED=true` in Vercel only after post-watermark candidate validation and runbook §13 checklist.
 
 ---
 

@@ -425,7 +425,7 @@ Contrat détaillé : [client-email-materialize-dispatch-contract.md §4](./clien
 
 - **Materialize ne dépend pas** de `CLIENT_EMAIL_SENDING_ENABLED`.
 - **Dispatch** est la **seule** couche qui dépendra de sending enabled (futur worker).
-- La gate Materialize applicative est **absente/fermée** ; même avec automation ouverte, l’executor n’est pas branché.
+- La gate Materialize applicative est **absente/fermée** ; la route `materialize-single` est déployée mais répond **409** tant que la gate reste fermée.
 
 ---
 
@@ -448,12 +448,38 @@ https://www.boostmybusinesses.com
 | GET | `/api/instagram-dashboard/email-lifecycle/materialization-shadow-preview` | Shadow runner ; `wouldMaterialize`, skip reasons |
 | GET | `/api/instagram-dashboard/email-lifecycle/preview` | Preview lifecycle episodes (legacy complément) |
 
+### Endpoint Materialize manuel (relay/admin, gate fermée par défaut)
+
+| Méthode | Chemin | Rôle |
+|---------|--------|------|
+| POST | `/api/instagram-dashboard/email-lifecycle/materialize-single` | Materialize **un seul** candidat effectif → intent `pending` ; **aucun dispatch** |
+
+**Ordre serveur obligatoire :** auth → `CLIENT_EMAIL_MATERIALIZE_ENABLED` → (si ouvert) body minimal → planner → revalidation → executor → RPC.
+
+**Production actuelle (gate `unset`) :** réponse **409** `materialize_execution_disabled` — **sans** parse body, planner, shadow runner, executor ni RPC.
+
+Body futur autorisé (gate ouverte uniquement) :
+
+```json
+{
+  "instagramUsername": "public_username",
+  "category": "account_paused | account_canceled | needs_assistance | needs_more_target_accounts",
+  "confirmation": "MATERIALIZE_SINGLE_PENDING_INTENT"
+}
+```
+
+Le serveur reconstruit le candidat depuis le planner ; champs interdits : IDs, email, template, sender, snapshots, opération SQL, reminder index client-side.
+
+Réponse redacted : pas d’email complet, UUID, idempotency key, template body.
+
+**Distinction :** endpoint **déployé** ≠ pilote **autorisé** — le pilote réel exige gate ouverte + candidat post-watermark + automation catégorie (voir §13).
+
 ### Auth
 
 - Middleware : `requireRelayOrAdmin`
 - Sans auth valide : **401**
 - Relay invalide : **403**
-- Relay ou admin valide : **200**
+- Relay ou admin valide : **200** (GET) / **409 gate fermée** ou **200 futur execute** (POST materialize-single)
 - En-tête : **`Cache-Control: no-store`**
 - Réponses : **redacted** (emails masqués, pas de secrets)
 
@@ -467,7 +493,7 @@ https://www.boostmybusinesses.com
 | `/api/instagram-dashboard/email-delivery-settings/*` | Sender/support BotApp |
 | `/api/webhooks/postmark` | Ingestion webhook (Basic Auth Postmark) |
 
-**Absent :** route `execute` materialization, route dispatch worker, cron scheduler.
+**Absent :** worker dispatch, cron scheduler.
 
 ---
 
@@ -531,7 +557,7 @@ Aucun ID, email client complet, MessageID provider ou secret n’est consigné d
 | 2 | Définir watermarks ISO explicites (`*_AUTOMATION_ENABLED_AT`) | **Manuel Vercel** — non fait |
 | 3 | Ouvrir automation **d’une seule** catégorie | **Manuel Vercel** — non fait |
 | 4 | Garder `CLIENT_EMAIL_SENDING_ENABLED=false` | **Recommandé** jusqu’à preuve dispatch |
-| 5 | Ouvrir `CLIENT_EMAIL_MATERIALIZE_ENABLED=true` + execute **un** candidat manuel | **Executor dormant** — route execute **absente** |
+| 5 | Ouvrir `CLIENT_EMAIL_MATERIALIZE_ENABLED=true` + POST `materialize-single` pour **un** candidat | **Route déployée** ; gate **fermée** en prod |
 | 6 | Vérifier episode/sequence + intent `pending` en DB | **Futur** (après execute) |
 | 7 | Vérifier Email History (pas d’envoi client tant que sending fermé) | **Disponible** (lecture) |
 | 8 | Arrêter / rollback si anomalie (fermer Materialize + automation) | **Manuel** |
@@ -689,9 +715,9 @@ Vérifier aussi : `outbox-preview`, `materialization-shadow-preview`.
 |------------|--------|
 | Aucun intent lifecycle client | 0 row `intent_kind=client` en prod |
 | RPC Materialize jamais invoquée | Déployée SQL uniquement |
-| Executor dormant | Non importé par routes/cron |
-| Gate Materialize fermée | `CLIENT_EMAIL_MATERIALIZE_ENABLED` unset |
-| Pas de route execute | Shadow preview only |
+| Executor branché via route `materialize-single` | Gate fermée → 409 sans écriture |
+| Gate Materialize fermée | `CLIENT_EMAIL_MATERIALIZE_ENABLED` unset → POST retourne 409 |
+| Route execute manuelle | **Déployée** (POST materialize-single) — inactive tant que gate fermée |
 | Pas de scheduler | Reminders needs-more non déclenchés |
 | Pas de claim runtime | Colonnes DB prêtes, worker absent |
 | Pas de dispatch runtime | Adapter lifecycle bloque si sending disabled |
