@@ -12,7 +12,12 @@ const correctiveMigrationSql = readFileSync(
   "utf8",
 );
 
-const migrationSql = correctiveMigrationSql;
+const atomicMigrationSql = readFileSync(
+  new URL("../../supabase/migrations/20260706120000_client_email_materialize_atomic_preparent_validation.sql", import.meta.url),
+  "utf8",
+);
+
+const migrationSql = atomicMigrationSql;
 
 const contractDoc = readFileSync(
   new URL("../../docs/client-email-materialize-dispatch-contract.md", import.meta.url),
@@ -121,6 +126,13 @@ test("corrective migration is create or replace function only with no table DDL"
   assert.doesNotMatch(correctiveMigrationSql, /create\s+table/i);
   assert.doesNotMatch(correctiveMigrationSql, /alter\s+table/i);
   assert.doesNotMatch(correctiveMigrationSql, /select\s+public\.materialize_client_email_outbox_candidate_v1/i);
+});
+
+test("atomic preparent migration is create or replace function only with no table DDL", () => {
+  assert.match(atomicMigrationSql, /create or replace function public\.materialize_client_email_outbox_candidate_v1/i);
+  assert.doesNotMatch(atomicMigrationSql, /create\s+table/i);
+  assert.doesNotMatch(atomicMigrationSql, /alter\s+table/i);
+  assert.doesNotMatch(atomicMigrationSql, /select\s+public\.materialize_client_email_outbox_candidate_v1/i);
 });
 
 test("from_email validation runs before first parent or intent insert on create-intent paths", () => {

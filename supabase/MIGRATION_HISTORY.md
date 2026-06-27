@@ -173,6 +173,32 @@ from_email and from_email_snapshot values before any parent or intent insert.
 
 **Status on main production:** applied as remote version `20260627160044` / `client_email_materialize_from_email_consistency`. Do **not** re-apply on production.
 
+## Applied migration (TASK 14E — atomic pre-parent validation)
+
+```text
+Local migration file:
+20260706120000_client_email_materialize_atomic_preparent_validation.sql
+
+Applied remote version:
+20260627165132
+
+Database:
+zgafnshkjywfltxgbtzg
+
+Note:
+Remote timestamp was assigned by Supabase MCP.
+This migration hardens the private Materialize RPC so create-intent validation
+errors raise before any parent lifecycle episode or needs-more sequence can be
+created, preventing orphan parent records.
+The RPC remains deployed but has never been invoked by runtime code.
+```
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260706120000` | `20260706120000_client_email_materialize_atomic_preparent_validation.sql` | `CREATE OR REPLACE` on materialize RPC: pre-parent validation + no `ok:false` after parent create-or-get on `create_*_intent` |
+
+**Status on main production:** applied as remote version `20260627165132` / `client_email_materialize_atomic_preparent_validation`. Do **not** re-apply on production.
+
 ## Before any future migration
 
 1. Compare local `supabase/migrations/` with remote history (`supabase migration list` on the intended project, or read-only remote list).

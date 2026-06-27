@@ -188,6 +188,7 @@ CLIENT_EMAIL_SENDING_ENABLED=false
 
 - `supabase/migrations/20260704120000_client_email_materialize_outbox_rpc.sql` — applied remote `20260627135913`
 - `supabase/migrations/20260705120000_client_email_materialize_from_email_consistency.sql` — applied remote `20260627160044`
+- `supabase/migrations/20260706120000_client_email_materialize_atomic_preparent_validation.sql` — TASK 14E pre-parent validation (see §4.8) — **applied main prod `20260627165132`**
 
 **Function:** `materialize_client_email_outbox_candidate_v1(...)`
 
@@ -367,6 +368,70 @@ Shadow → execute requires **all** of:
 | Output | Same shadow envelope as §4.6 plus `dispatchReadinessStatus`, `operationSummary`, blocking reason arrays |
 
 No BotApp UI, no POST, no execute mode in 14C.
+
+### 4.8 Atomic materialization invariant (TASK 14D audit)
+
+**Verdict:** initial parent + initial intent are **one business unit** materialized by **one RPC invocation** — never a mandatory two-call split.
+
+#### Execute contract (future)
+
+| Planner decision | Required RPC operation | RPC calls | Parent | Intent |
+|------------------|------------------------|-----------|--------|--------|
+| `would_create_initial_intent` (lifecycle) | `create_lifecycle_initial_intent` | **1** | create-or-get in same tx | create-or-get in same tx |
+| `would_create_initial_intent` (needs-more) | `create_needs_more_initial_intent` | **1** | create-or-get in same tx | create-or-get in same tx |
+| `would_create_reminder_intent` | `create_needs_more_reminder_intent` | **1** | active sequence required (lookup only) | create-or-get in same tx |
+| `would_open_episode` (observation only) | **not used for execute initial path** | — | — | — |
+
+Precedence ranks `would_create_initial_intent` above `would_open_episode`; the execute runner must map the **effective candidate** only and must **never** chain `open_*` then `create_*_initial_intent` for the same initial send.
+
+#### Single-RPC SQL order (`create_*_initial_intent` / `create_*_reminder_intent`) — hardened TASK 14E
+
+```text
+pg_advisory_xact_lock(account)
+→ ownership check
+→ idempotency early return (existing intent + parent ids, no writes)
+→ from_email/snapshot validation (RAISE on mismatch/missing)
+→ recipient + template + snapshot validation (RAISE before any parent write)
+→ needs-more reminder: active sequence required (RAISE before parent INSERT)
+→ parent resolve/create (INSERT … ON CONFLICT DO NOTHING / active lookup)
+→ parent failures on create_* paths → RAISE (full rollback)
+→ early return ONLY for open_* operations (parent-only; not used on execute initial path)
+→ INSERT client_email_send_intents … ON CONFLICT (idempotency_key) DO NOTHING
+→ return parent + intent ids
+-- implicit COMMIT on success; implicit ROLLBACK on uncaught exception
+```
+
+#### Pre-parent validations (`create_*_intent` only)
+
+| Check | Failure code (RAISE P0001) |
+|-------|---------------------------|
+| Idempotency key present | `client_email_missing_idempotency_key` |
+| `from_email` / `from_email_snapshot` present and equal | `client_email_from_email_snapshot_missing` / `_mismatch` |
+| Recipient non-empty after `btrim` | `client_email_missing_recipient_email` |
+| Trigger, template id/version, subject/body snapshots, support email | `client_email_missing_intent_snapshot_fields` |
+| Reminder index rules | `client_email_needs_more_*_index_required` / `_out_of_range` |
+| Reminder: active sequence by `p_parent_id` | `client_email_needs_more_active_sequence_required` |
+
+Idempotent replay (same key + same business identity) still returns early **before** these validations rewrite anything.
+
+#### Invariants
+
+1. **No mandatory two-call initial path** — `open_lifecycle_episode` / `open_needs_more_sequence` exist for parent-only preview semantics but are **not** the execute unit for an initial send.
+2. **No orphan parent on create-intent failure (14E)** — all `create_*_intent` business failures after a potential parent write use `RAISE EXCEPTION`; PostgreSQL rolls back parent + intent together even if TypeScript validation is bypassed.
+3. **Idempotency covers the business send** — key stable per account/episode/index; replay returns existing parent + intent without duplicate INSERT.
+4. **Crash replay** — same idempotency key → same intent row; parent resolved from intent FK or active lookup.
+5. **`dispatch_uncertain` / claim / Postmark** — out of scope for Materialize RPC.
+
+#### Parent-only `open_*` vs execute `create_*_initial_intent`
+
+| Operation | Intent in response | Execute initial path |
+|-----------|-------------------|----------------------|
+| `open_lifecycle_episode` / `open_needs_more_sequence` | `null` | **never** for initial send |
+| `create_*_initial_intent` | created or idempotent hit | **required** single RPC |
+
+#### Two-worker safety
+
+`pg_advisory_xact_lock(hashtext('client_email_materialize'), hashtext(account_id))` serializes materialize work per account within one transaction.
 
 ---
 
@@ -621,6 +686,7 @@ No secrets, template bodies, or full emails in logs.
 | Claim columns + dispatch statuses (`20260703120000_client_email_dispatch_claim_state.sql`) | migration | **applied main prod `20260627132254`** |
 | Materialize RPC (`20260704120000_client_email_materialize_outbox_rpc.sql`) | migration | **applied main prod `20260627135913`** |
 | Sender consistency (`20260705120000_client_email_materialize_from_email_consistency.sql`) | migration | **applied main prod `20260627160044`** |
+| Atomic pre-parent validation (`20260706120000_client_email_materialize_atomic_preparent_validation.sql`) | migration | **applied main prod `20260627165132`** |
 | `client-email-outbox-materializer.ts` | code | **recorded TASK 13D — no route, not invoked** |
 | `client-email-materialization-runner.ts` | code | **shadow-only TASK 14B — RPC wiring internal only, no route invoke** |
 | Materialization shadow preview route | code | **GET read-only TASK 14C — `materialization-shadow-preview`** |
