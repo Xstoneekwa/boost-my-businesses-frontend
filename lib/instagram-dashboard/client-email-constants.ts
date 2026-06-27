@@ -70,7 +70,7 @@ export const CLIENT_EMAIL_PREVIEW_SAMPLE_VALUES: Record<ClientEmailAllowedVariab
   eligible_target_count: "4",
   target_threshold: "5",
   dashboard_url: "https://app.boostmybusinesses.com/instagram-client",
-  support_email: "support@boostmybusinesses.com",
+  support_email: CLIENT_EMAIL_LOCKED_FROM,
 };
 
 export const CLIENT_EMAIL_TEST_DEMO_VALUES: Record<ClientEmailAllowedVariable, string> = {
@@ -80,7 +80,7 @@ export const CLIENT_EMAIL_TEST_DEMO_VALUES: Record<ClientEmailAllowedVariable, s
   eligible_target_count: "5",
   target_threshold: "5",
   dashboard_url: "https://app.boostmybusinesses.com/instagram-client",
-  support_email: "support@boostmybusinesses.com",
+  support_email: CLIENT_EMAIL_LOCKED_FROM,
 };
 
 export const CLIENT_EMAIL_FORBIDDEN_REQUEST_FIELDS = [

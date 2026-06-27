@@ -134,11 +134,15 @@ export function projectClientEmailTestDeliveryStatus(input: {
   return {
     clientSendingEnabled: config.clientSendingEnabled,
     testSendingEnabled: config.testSendingEnabled,
+    testRecipientConfigured: Boolean(config.testRecipient),
     testRecipientMasked: config.testRecipientMasked,
     providerReady: config.providerReady,
     testSchemaReady: input.testSchemaReady,
     canSendTest: gate.allowed && input.testSchemaReady,
     disabledReason,
+    readinessLabel: gate.allowed && input.testSchemaReady
+      ? "Ready for one controlled test"
+      : disabledReason ?? "Test delivery prerequisites are not ready yet.",
     lockedFromEmail: "growth@boostmybusinesses.com" as const,
   };
 }

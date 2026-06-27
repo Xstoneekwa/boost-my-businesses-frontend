@@ -59,6 +59,17 @@ test("projectClientEmailTestDeliveryStatus disables send when schema not ready",
     testSchemaReady: false,
   });
   assert.equal(status.canSendTest, false);
+  assert.equal(status.testRecipientConfigured, true);
   assert.equal(status.testRecipientMasked, "l***@example.com");
   assert.match(status.disabledReason ?? "", /schema migration/i);
+  assert.match(status.readinessLabel ?? "", /schema migration/i);
+});
+
+test("projectClientEmailTestDeliveryStatus marks ready when gates and schema open", () => {
+  const status = projectClientEmailTestDeliveryStatus({
+    env: openTestEnv,
+    testSchemaReady: true,
+  });
+  assert.equal(status.canSendTest, true);
+  assert.equal(status.readinessLabel, "Ready for one controlled test");
 });

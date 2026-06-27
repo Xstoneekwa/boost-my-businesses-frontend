@@ -24,11 +24,13 @@ test("unknown variables are rejected clearly", () => {
 test("preview uses safe demonstration values", () => {
   const preview = buildTemplatePreview(
     "Targets for {{instagram_username}}",
-    "Hello {{client_name}}, you have {{eligible_target_count}} targets.",
+    "Hello {{client_name}}, you have {{eligible_target_count}} targets. Email {{support_email}}.",
   );
   assert.match(preview.subject, /xstonekwa_backup_acc/);
   assert.match(preview.bodyText, /Acme Growth Co/);
+  assert.match(preview.bodyText, /growth@boostmybusinesses.com/);
   assert.doesNotMatch(preview.bodyHtml, /<script/i);
+  assert.doesNotMatch(preview.bodyText, /support@boostmybusinesses.com/);
 });
 
 test("text to safe html escapes dangerous markup", () => {
