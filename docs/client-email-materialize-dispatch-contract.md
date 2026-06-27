@@ -306,6 +306,54 @@ Constraints: `client_email_send_intents_parent_exclusivity`, `client_email_send_
 | Blocked | none | none |
 | Superseded by precedence | none | none |
 
+### 4.6 Shadow Materialization Runner (TASK 14B — shadow only)
+
+**Module:** `lib/instagram-dashboard/client-email-materialization-runner.ts`
+
+| Layer | Function | Role |
+|-------|----------|------|
+| Pure plan | `buildClientEmailMaterializationRunPlan(...)` | Maps **effective candidates only** to would-materialize vs skipped items with strict operation, parent type, category, trigger, reminder index, skip codes — **no I/O** |
+| Shadow loader | `planClientEmailMaterializationShadowRun(...)` | Reuses canonical planner + precedence + gate enrichment; returns safe summary envelope |
+
+#### Shadow vs RPC execute
+
+| Concern | Shadow runner | RPC `materialize_client_email_outbox_candidate_v1` |
+|---------|---------------|-----------------------------------------------------|
+| Writes DB | **never** | transactional parent + intent insert |
+| Invokes RPC | **never** (`rpcInvoked: false`) | yes (internal caller only) |
+| Postmark / dispatch | **never** | still excluded at materialize layer |
+| Output | redacted plan items + counts | minimal ids/status jsonb |
+| HTTP route | **none** (dormant) | **none** today |
+
+#### Shadow envelope (always)
+
+- `executionMode: "shadow"`
+- `readOnly: true`
+- `mutationExecuted: false`
+- `rpcInvoked: false`
+- Counts: `rawObservations`, `effectiveCandidates`, `suppressedByPrecedence`, `wouldMaterialize`, `skipped`, `skippedByCategory`
+- Items: masked email only, no UUID/account/client ids, no template body/HTML, no sender/support full values
+
+#### Exclusions (same as production planner)
+
+- Raw observations not listed as plan items
+- Precedence-suppressed candidates never in effective input
+- Non-`materializationEligible` rows → skipped with gate/watermark/automation reason
+- `CLIENT_EMAIL_SENDING_ENABLED=false` does **not** block shadow would-materialize
+- Legacy pre-watermark replay never planned
+
+#### Future activation (separate task + explicit GO)
+
+Shadow → execute requires **all** of:
+
+1. `CLIENT_EMAIL_MATERIALIZE_ENABLED=true` (future gate, not in 14B)
+2. Watermarks configured per category
+3. Category automation enabled
+4. Explicit GO on a dedicated write task
+5. Internal caller wiring — **not** a public POST route
+
+**14B restriction:** no route, no scheduler, no RPC call, no Vercel env changes, no BotApp.
+
 ---
 
 ## 5. Dispatch claim, lease, and state machine (TASK 12A draft)
@@ -543,7 +591,7 @@ No secrets, template bodies, or full emails in logs.
 4. Deploy materialize writer with `CLIENT_EMAIL_MATERIALIZE_ENABLED=false`.
 5. Preview confirms effective candidates.
 6. Configure watermarks explicitly.
-7. Shadow / dry-run materialize logging.
+7. Shadow / dry-run materialize logging — **`client-email-materialization-runner.ts` deployed shadow-only (TASK 14B)**.
 8. `CLIENT_EMAIL_MATERIALIZE_ENABLED=true`, `CLIENT_EMAIL_SENDING_ENABLED=false` — persist intents only.
 9. Internal isolated dispatch test (single account, sending true briefly).
 10. Enable one category end-to-end.
@@ -560,6 +608,7 @@ No secrets, template bodies, or full emails in logs.
 | Materialize RPC (`20260704120000_client_email_materialize_outbox_rpc.sql`) | migration | **applied main prod `20260627135913`** |
 | Sender consistency (`20260705120000_client_email_materialize_from_email_consistency.sql`) | migration | **applied main prod `20260627160044`** |
 | `client-email-outbox-materializer.ts` | code | **recorded TASK 13D — no route, not invoked** |
+| `client-email-materialization-runner.ts` | code | **shadow-only TASK 14B — no route, no RPC, no writes** |
 | Split gate helpers — materialize vs dispatch | code | done TASK 11C |
 | `client-email-outbox-materialize.ts` | code | pending (RPC wiring + activation) |
 | `client-email-outbox-dispatch.ts` | code | pending |
