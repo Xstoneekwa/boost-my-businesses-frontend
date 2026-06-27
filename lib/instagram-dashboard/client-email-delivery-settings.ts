@@ -45,12 +45,17 @@ export type TransactionalDeliverySettingsProjection = {
   senderSync: ReturnType<typeof projectPostmarkSenderSyncStatus>;
   uxState:
     | "schema_migration_pending"
-    | "sender_sync_unavailable"
+    | "not_configured"
+    | "not_refreshed"
+    | "invalid_credentials"
+    | "provider_unavailable"
     | "no_confirmed_senders"
-    | "ready";
+    | "ready"
+    | "stale";
   supportEmailEditable: boolean;
   senderChangeAllowed: boolean;
   accountTokenConfigured: boolean;
+  senderRefreshAllowed: boolean;
 };
 
 export type TransactionalDeliverySettingsAuditRow = {
@@ -65,6 +70,15 @@ export type TransactionalDeliverySettingsAuditRow = {
 };
 
 type SupabaseRecord = Record<string, unknown>;
+
+let lastSenderRefreshError: {
+  reason: "invalid_credentials" | "provider_unavailable";
+  message: string;
+} | null = null;
+
+export function clearSenderRefreshErrorForTests() {
+  lastSenderRefreshError = null;
+}
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
@@ -168,10 +182,7 @@ export function resolveTransactionalUxState(input: {
   senderSync: ReturnType<typeof projectPostmarkSenderSyncStatus>;
 }): TransactionalDeliverySettingsProjection["uxState"] {
   if (!input.schemaReady) return "schema_migration_pending";
-  if (input.senderSync.status === "not_configured") return "sender_sync_unavailable";
-  if (input.senderSync.status === "no_confirmed_senders") return "no_confirmed_senders";
-  if (input.senderSync.status === "ready") return "ready";
-  return "sender_sync_unavailable";
+  return input.senderSync.status;
 }
 
 export async function loadTransactionalDeliverySettingsProjection(
@@ -186,6 +197,7 @@ export async function loadTransactionalDeliverySettingsProjection(
   const senderSync = projectPostmarkSenderSyncStatus({
     accountTokenConfigured,
     cache: getCachedPostmarkSenderSync(),
+    lastRefreshError: lastSenderRefreshError,
   });
   const uxState = resolveTransactionalUxState({ schemaReady: schema.available, senderSync });
 
@@ -201,6 +213,7 @@ export async function loadTransactionalDeliverySettingsProjection(
     senderSync,
     uxState,
     supportEmailEditable: schema.available,
+    senderRefreshAllowed: schema.available && accountTokenConfigured,
     senderChangeAllowed: schema.available
       && accountTokenConfigured
       && senderSync.status === "ready",
@@ -214,13 +227,32 @@ export async function executePostmarkSenderIdentityRefresh(
   fetcher?: typeof fetch,
 ): Promise<
   | { ok: true; projection: TransactionalDeliverySettingsProjection; sync: PostmarkSenderSyncResult & { ok: true } }
-  | { ok: false; reason: "account_token_missing" | "provider_error"; message: string }
+  | {
+    ok: false;
+    reason: "account_token_missing" | "invalid_credentials" | "provider_unavailable";
+    message: string;
+    projection: TransactionalDeliverySettingsProjection;
+  }
 > {
   const sync = await refreshPostmarkSenderIdentities(env, fetcher);
   if (!sync.ok) {
-    return { ok: false, reason: sync.reason, message: sync.message };
+    if (sync.reason === "account_token_missing") {
+      lastSenderRefreshError = null;
+    } else {
+      lastSenderRefreshError = {
+        reason: sync.reason,
+        message: sync.message,
+      };
+    }
+    return {
+      ok: false,
+      reason: sync.reason === "account_token_missing" ? "account_token_missing" : sync.reason,
+      message: sync.message,
+      projection: await loadTransactionalDeliverySettingsProjection(supabase, env),
+    };
   }
 
+  lastSenderRefreshError = null;
   return {
     ok: true,
     sync,

@@ -2,6 +2,16 @@ import { normalizeCommunicationEmail } from "./client-communication-email.ts";
 
 const POSTMARK_SENDERS_API_URL = "https://api.postmarkapp.com/senders";
 export const POSTMARK_SENDER_REFRESH_MAX_AGE_MS = 15 * 60 * 1000;
+export const POSTMARK_SENDER_SYNC_FETCH_TIMEOUT_MS = 15_000;
+
+export type PostmarkSenderSyncStatus =
+  | "not_configured"
+  | "not_refreshed"
+  | "invalid_credentials"
+  | "provider_unavailable"
+  | "no_confirmed_senders"
+  | "ready"
+  | "stale";
 
 export type PostmarkSenderIdentity = {
   email: string;
@@ -18,8 +28,9 @@ export type PostmarkSenderSyncResult =
   }
   | {
     ok: false;
-    reason: "account_token_missing" | "provider_error";
+    reason: "account_token_missing" | "invalid_credentials" | "provider_unavailable";
     message: string;
+    httpStatus?: number;
   };
 
 type SenderSyncCache = {
@@ -32,7 +43,13 @@ let senderSyncCache: SenderSyncCache | null = null;
 export function readPostmarkAccountTokenConfigured(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  return Boolean(env.POSTMARK_ACCOUNT_TOKEN?.trim());
+  return Boolean(readPostmarkAccountToken(env));
+}
+
+export function readPostmarkAccountToken(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  return env.POSTMARK_ACCOUNT_TOKEN?.trim() ?? "";
 }
 
 export function getCachedPostmarkSenderSync(): SenderSyncCache | null {
@@ -68,11 +85,35 @@ function projectSenderIdentity(row: Record<string, unknown>): PostmarkSenderIden
   return { email, name, confirmed };
 }
 
+function readSenderSignatureRows(payload: Record<string, unknown> | null): Record<string, unknown>[] {
+  if (!payload) return [];
+  if (Array.isArray(payload.SenderSignatures)) {
+    return payload.SenderSignatures as Record<string, unknown>[];
+  }
+  if (Array.isArray(payload.Senders)) {
+    return payload.Senders as Record<string, unknown>[];
+  }
+  return [];
+}
+
+function classifyPostmarkProviderFailure(httpStatus: number): "invalid_credentials" | "provider_unavailable" {
+  if (httpStatus === 401 || httpStatus === 403) return "invalid_credentials";
+  return "provider_unavailable";
+}
+
+function buildPostmarkSendersRequestUrl() {
+  const params = new URLSearchParams({
+    count: "500",
+    offset: "0",
+  });
+  return `${POSTMARK_SENDERS_API_URL}?${params.toString()}`;
+}
+
 export async function refreshPostmarkSenderIdentities(
   env: Record<string, string | undefined> = process.env,
   fetcher: typeof fetch = fetch,
 ): Promise<PostmarkSenderSyncResult> {
-  const accountToken = env.POSTMARK_ACCOUNT_TOKEN?.trim() ?? "";
+  const accountToken = readPostmarkAccountToken(env);
   if (!accountToken) {
     return {
       ok: false,
@@ -81,22 +122,47 @@ export async function refreshPostmarkSenderIdentities(
     };
   }
 
-  const response = await fetcher(POSTMARK_SENDERS_API_URL, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      "X-Postmark-Account-Token": accountToken,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), POSTMARK_SENDER_SYNC_FETCH_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetcher(buildPostmarkSendersRequestUrl(), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "X-Postmark-Account-Token": accountToken,
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === "AbortError";
+    return {
+      ok: false,
+      reason: "provider_unavailable",
+      message: aborted
+        ? "Postmark sender sync timed out. Try again."
+        : "Postmark sender sync is temporarily unavailable.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
   if (!response.ok) {
-    const message = readString(payload?.Message, "") || "Postmark sender sync failed.";
-    return { ok: false, reason: "provider_error", message };
+    const providerMessage = readString(payload?.Message, "");
+    const reason = classifyPostmarkProviderFailure(response.status);
+    return {
+      ok: false,
+      reason,
+      httpStatus: response.status,
+      message: reason === "invalid_credentials"
+        ? "Postmark Account Token was rejected. Check the Production POSTMARK_ACCOUNT_TOKEN value."
+        : providerMessage || "Postmark sender sync is temporarily unavailable.",
+    };
   }
 
-  const senders = Array.isArray(payload?.Senders) ? payload!.Senders as Record<string, unknown>[] : [];
-  const identities = senders
+  const identities = readSenderSignatureRows(payload)
     .map((row) => projectSenderIdentity(row))
     .filter((row): row is PostmarkSenderIdentity => Boolean(row));
 
@@ -124,8 +190,11 @@ export function projectPostmarkSenderSyncStatus(input: {
   accountTokenConfigured: boolean;
   cache?: SenderSyncCache | null;
   nowMs?: number;
+  lastRefreshError?: {
+    reason: "invalid_credentials" | "provider_unavailable";
+    message: string;
+  } | null;
 }) {
-  const cache = input.cache ?? senderSyncCache;
   if (!input.accountTokenConfigured) {
     return {
       status: "not_configured" as const,
@@ -135,10 +204,21 @@ export function projectPostmarkSenderSyncStatus(input: {
     };
   }
 
+  if (input.lastRefreshError?.reason === "invalid_credentials") {
+    return {
+      status: "invalid_credentials" as const,
+      message: input.lastRefreshError.message,
+      lastRefreshedAt: input.cache?.refreshedAt ?? null,
+      confirmedSenders: [] as Array<{ email: string; name: string | null }>,
+    };
+  }
+
+  const cache = input.cache ?? senderSyncCache;
   if (!cache) {
     return {
       status: "not_refreshed" as const,
-      message: "Refresh sender identities to load confirmed Postmark senders.",
+      message: input.lastRefreshError?.message
+        ?? "Refresh sender identities to load confirmed Postmark senders.",
       lastRefreshedAt: null as string | null,
       confirmedSenders: [] as Array<{ email: string; name: string | null }>,
     };

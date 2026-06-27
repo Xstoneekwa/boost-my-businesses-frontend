@@ -15,6 +15,7 @@ import {
 } from "../_utils";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 

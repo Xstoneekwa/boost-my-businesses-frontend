@@ -7,9 +7,11 @@ import {
   buildClientEmailDemoValues,
   buildIntentDeliverySnapshotFields,
   buildLegacyTransactionalDeliverySettings,
+  clearSenderRefreshErrorForTests,
   patchTransactionalDeliverySettings,
   probeTransactionalDeliverySettingsSchema,
   resolveTransactionalDeliverySettings,
+  resolveTransactionalUxState,
 } from "./client-email-delivery-settings.ts";
 import {
   clearPostmarkSenderSyncCacheForTests,
@@ -189,7 +191,7 @@ test("sender changes require confirmed provider identity and reject arbitrary ad
   if (!missingToken.ok) assert.equal(missingToken.reason, "sender_sync_unavailable");
 
   await refreshPostmarkSenderIdentities(env, async () => new Response(JSON.stringify({
-    Senders: [
+    SenderSignatures: [
       { EmailAddress: "growth@boostmybusinesses.com", Name: "Growth", Confirmed: true },
       { EmailAddress: "pending@boostmybusinesses.com", Name: "Pending", Confirmed: false },
     ],
@@ -273,10 +275,18 @@ test("schema probe detects missing delivery settings table", async () => {
   assert.equal(probe.available, false);
 });
 
+test("ux state mirrors sender sync status without collapsing not_refreshed", () => {
+  clearPostmarkSenderSyncCacheForTests();
+  const senderSync = projectPostmarkSenderSyncStatus({ accountTokenConfigured: true });
+  assert.equal(senderSync.status, "not_refreshed");
+  assert.equal(resolveTransactionalUxState({ schemaReady: true, senderSync }), "not_refreshed");
+});
+
 test("confirmed sender lookup uses provider refresh cache only", async () => {
   clearPostmarkSenderSyncCacheForTests();
+  clearSenderRefreshErrorForTests();
   await refreshPostmarkSenderIdentities({ POSTMARK_ACCOUNT_TOKEN: "token" }, async () => new Response(JSON.stringify({
-    Senders: [{ EmailAddress: "growth@boostmybusinesses.com", Confirmed: true }],
+    SenderSignatures: [{ EmailAddress: "growth@boostmybusinesses.com", Confirmed: true }],
   }), { status: 200 }));
   assert.ok(findConfirmedPostmarkSenderIdentity("growth@boostmybusinesses.com"));
   assert.equal(findConfirmedPostmarkSenderIdentity("other@example.com"), null);

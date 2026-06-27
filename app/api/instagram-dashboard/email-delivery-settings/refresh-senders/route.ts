@@ -4,6 +4,7 @@ import { jsonError, jsonOk, requireRelayOrAdmin } from "../../_utils";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
@@ -22,8 +23,15 @@ export async function POST(request: Request) {
     const supabase = createSupabaseClient();
     const result = await executePostmarkSenderIdentityRefresh(supabase);
     if (!result.ok) {
-      const status = result.reason === "account_token_missing" ? 503 : 502;
-      return withNoStore(jsonError(result.message, status, { reason: result.reason }));
+      const status = result.reason === "account_token_missing"
+        ? 503
+        : result.reason === "invalid_credentials"
+          ? 502
+          : 502;
+      return withNoStore(jsonError(result.message, status, {
+        reason: result.reason,
+        projection: result.projection,
+      }));
     }
 
     return withNoStore(jsonOk({
