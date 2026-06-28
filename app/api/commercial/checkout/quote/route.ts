@@ -5,7 +5,11 @@ import { QUOTE_UNAVAILABLE_EN, QUOTE_UNAVAILABLE_FR } from "@/lib/commercial/che
 import { buildCommercialQuote } from "@/lib/commercial/pricing";
 import { deriveAgencyModeSnapshot } from "@/lib/commercial/agency";
 import { projectSimulatedCheckoutAvailability } from "@/lib/commercial/simulated-checkout-guard";
-import { projectInitialCheckoutSimulationAvailability } from "@/lib/commercial/initial-checkout-simulation-guard";
+import {
+  initialCheckoutSimulationClientMessages,
+  projectInitialCheckoutSimulationAvailability,
+  type InitialCheckoutSimulationDenyReason,
+} from "@/lib/commercial/initial-checkout-simulation-guard";
 import { requireClientInstagramSession, readString } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
@@ -74,11 +78,18 @@ export async function POST(request: Request) {
       : null;
 
     if (flowType === "first_purchase") {
+      const simulationMessages = availability?.simulationUnavailableReason
+        ? initialCheckoutSimulationClientMessages(
+          availability.simulationUnavailableReason as InitialCheckoutSimulationDenyReason,
+        )
+        : null;
       return jsonOk({
         quote,
         agency: agencySnapshot,
         simulationAvailable: availability?.simulationAvailable ?? false,
         simulationUnavailableReason: availability?.simulationUnavailableReason ?? null,
+        activationMessageFr: simulationMessages?.messageFr ?? null,
+        activationMessageEn: simulationMessages?.messageEn ?? null,
       });
     }
 

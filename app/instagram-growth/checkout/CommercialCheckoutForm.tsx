@@ -7,6 +7,7 @@ import {
   QUOTE_UNAVAILABLE_EN,
   QUOTE_UNAVAILABLE_FR,
 } from "@/lib/commercial/checkout-api-messages";
+import { resolveCommercialCheckoutActivationState } from "@/lib/commercial/commercial-checkout-form-state";
 import {
   CHECKOUT_PASSWORD_MIN_LENGTH,
   publicCheckoutPasswordRulesEn,
@@ -91,10 +92,11 @@ export default function CommercialCheckoutForm(props: {
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [passwordInlineError, setPasswordInlineError] = useState("");
   const [quote, setQuote] = useState<QuotePayload | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(true);
   const [activationAvailable, setActivationAvailable] = useState(false);
-  const [activationNotice, setActivationNotice] = useState("");
+  const [activationMessageFr, setActivationMessageFr] = useState<string | null>(null);
+  const [activationMessageEn, setActivationMessageEn] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -103,29 +105,39 @@ export default function CommercialCheckoutForm(props: {
   const [conflictRedirectPath, setConflictRedirectPath] = useState<string | null>(null);
   const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
 
-  const passwordReady = useMemo(() => {
-    if (!isPublicCheckout) return true;
-    return validatePublicCheckoutPassword({ password, passwordConfirmation }).ok;
-  }, [isPublicCheckout, password, passwordConfirmation]);
-
-  useEffect(() => {
-    if (!isPublicCheckout) {
-      setPasswordInlineError("");
-      return;
-    }
-    if (!password && !passwordConfirmation) {
-      setPasswordInlineError("");
-      return;
-    }
-    const validation = validatePublicCheckoutPassword({ password, passwordConfirmation });
-    setPasswordInlineError(validation.ok ? "" : (lang === "fr" ? validation.messageFr : validation.messageEn));
-  }, [isPublicCheckout, password, passwordConfirmation, lang]);
+  const activationState = useMemo(() => resolveCommercialCheckoutActivationState({
+    isPublicCheckout,
+    lang,
+    loading,
+    quoteLoading,
+    hasQuote: Boolean(quote),
+    activationAvailable,
+    activationMessageFr,
+    activationMessageEn,
+    email,
+    password,
+    passwordConfirmation,
+  }), [
+    isPublicCheckout,
+    lang,
+    loading,
+    quoteLoading,
+    quote,
+    activationAvailable,
+    activationMessageFr,
+    activationMessageEn,
+    email,
+    password,
+    passwordConfirmation,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadQuote() {
+      setQuoteLoading(true);
       setError("");
-      setActivationNotice("");
+      setActivationMessageFr(null);
+      setActivationMessageEn(null);
       const response = await fetch("/api/commercial/checkout/quote", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -152,7 +164,8 @@ export default function CommercialCheckoutForm(props: {
       if (!parsed.ok || !parsed.data?.quote) {
         setQuote(null);
         setActivationAvailable(false);
-        setActivationNotice("");
+        setActivationMessageFr(null);
+        setActivationMessageEn(null);
         setError(lang === "fr" ? parsed.clientMessageFr : parsed.clientMessageEn);
         return;
       }
@@ -161,14 +174,12 @@ export default function CommercialCheckoutForm(props: {
         ? Boolean(parsed.data.simulationAvailable)
         : Boolean(parsed.data.simulatedActivationAvailable);
       setActivationAvailable(simulationAllowed);
-      const notice = isPublicCheckout
-        ? null
-        : (lang === "fr"
-          ? parsed.data.activationMessageFr
-          : parsed.data.activationMessageEn);
-      setActivationNotice(notice?.trim() || "");
+      setActivationMessageFr(parsed.data.activationMessageFr ?? null);
+      setActivationMessageEn(parsed.data.activationMessageEn ?? null);
     }
-    void loadQuote();
+    void loadQuote().finally(() => {
+      if (!cancelled) setQuoteLoading(false);
+    });
     return () => { cancelled = true; };
   }, [planKey, months, outreach, email, lang, props.flowType, isPublicCheckout]);
 
@@ -176,7 +187,6 @@ export default function CommercialCheckoutForm(props: {
     if (isPublicCheckout) {
       const validation = validatePublicCheckoutPassword({ password, passwordConfirmation });
       if (!validation.ok) {
-        setPasswordInlineError(lang === "fr" ? validation.messageFr : validation.messageEn);
         return;
       }
     }
@@ -314,6 +324,8 @@ export default function CommercialCheckoutForm(props: {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="vous@exemple.com"
+                aria-invalid={Boolean(activationState.emailInlineError)}
+                aria-describedby={activationState.emailInlineError ? "checkout-email-error" : undefined}
               />
             </label>
 
@@ -385,8 +397,21 @@ export default function CommercialCheckoutForm(props: {
       )}
 
       {error ? <p className="commercial-checkout-error">{error}</p> : null}
-      {passwordInlineError ? <p className="commercial-checkout-error">{passwordInlineError}</p> : null}
-      {activationNotice ? <p className="commercial-checkout-notice">{activationNotice}</p> : null}
+      {activationState.emailInlineError ? (
+        <p className="commercial-checkout-error" id="checkout-email-error">{activationState.emailInlineError}</p>
+      ) : null}
+      {activationState.passwordInlineError ? (
+        <p className="commercial-checkout-error" id="checkout-password-error">{activationState.passwordInlineError}</p>
+      ) : null}
+      {activationState.ctaDisabled && activationState.blockers.length > 0 ? (
+        <ul className="commercial-checkout-blockers" aria-live="polite">
+          {activationState.blockers.map((blocker) => (
+            <li key={blocker.code}>
+              {lang === "fr" ? blocker.messageFr : blocker.messageEn}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {conflictRedirectPath ? (
         <p className="commercial-checkout-handoff">
           <a href={conflictRedirectPath}>
@@ -399,13 +424,7 @@ export default function CommercialCheckoutForm(props: {
 
       <button
         type="button"
-        disabled={
-          loading
-          || !quote
-          || !activationAvailable
-          || (isPublicCheckout && !email.trim())
-          || (isPublicCheckout && !passwordReady)
-        }
+        disabled={activationState.ctaDisabled}
         onClick={() => void onActivate()}
       >
         {loading
@@ -429,6 +448,7 @@ export default function CommercialCheckoutForm(props: {
         button:disabled { opacity: .55; cursor: not-allowed; }
         .commercial-checkout-error { color: #fca5a5; }
         .commercial-checkout-notice { color: #fcd34d; }
+        .commercial-checkout-blockers { margin: 12px 0 0; padding-left: 18px; color: #fcd34d; line-height: 1.45; }
         .commercial-checkout-handoff { margin-top: 12px; }
         .commercial-checkout-handoff a { color: #93c5fd; font-weight: 600; }
       `}</style>
