@@ -1631,6 +1631,10 @@ const CSS = `
 .cd-add-account-modal{max-width:520px;width:min(520px,calc(100vw - 32px))}
 .cd-add-account-form{display:grid;gap:12px;margin-top:8px}
 .cd-add-account-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.cd-password-field{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.cd-password-toggle{padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font-family:var(--font-b);font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.cd-password-toggle:hover{border-color:var(--a-ring)}
+.cd-password-toggle:focus-visible{outline:2px solid var(--a-ring);outline-offset:2px}
 .cd-card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .cd-card-hd h3{font-family:var(--font-d);font-weight:800;font-size:.95rem;color:var(--ink)}
 .cd-card-hd a{font-size:.78rem;font-weight:700;color:var(--accent);opacity:.85;transition:opacity var(--tr)}

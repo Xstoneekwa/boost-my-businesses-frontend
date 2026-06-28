@@ -167,7 +167,49 @@ test("preparation_pending keeps connect disabled with client-safe subtext", () =
 
   assert.equal(ui.connectDisabled, true);
   assert.match(ui.readinessLabel, /Vérifier la préparation/i);
-  assert.match(ui.subtext || "", /préparation est en cours/i);
+  assert.match(ui.subtext || "", /préparons votre compte automatiquement/i);
+  assert.equal(ui.showRefresh, true);
+  assert.equal(ui.isAsyncPending, true);
+});
+
+test("preparation_pending readiness modal shows running preparation step and refresh", () => {
+  const projection = projectReadinessProcess({
+    lang: "fr",
+    phase: "complete",
+    account: {
+      loginStatus: "unknown",
+      onboardingStatus: "pending",
+      provisioningStatus: "not_started",
+      assignmentStatus: "pending_assignment",
+      connected: false,
+      clientReadinessStatus: "preparation_pending",
+    },
+  });
+
+  assert.equal(projection.outcome, "action_required");
+  assert.equal(projection.steps[2].status, "running");
+  assert.equal(projection.showRefresh, true);
+  assert.equal(projection.isAsyncPending, true);
+  assert.match(projection.finalMessage || "", /préparons votre compte automatiquement/i);
+});
+
+test("preparation blocked readiness modal marks failed step with explicit message", () => {
+  const projection = projectReadinessProcess({
+    lang: "fr",
+    phase: "complete",
+    account: {
+      loginStatus: "unknown",
+      onboardingStatus: "pending",
+      provisioningStatus: "not_started",
+      assignmentStatus: "pending_assignment",
+      connected: false,
+      clientReadinessStatus: "preparation_blocked",
+    },
+  });
+
+  assert.equal(projection.steps[2].status, "failed");
+  assert.equal(projection.showRefresh, false);
+  assert.match(projection.finalMessage || "", /bloquée/i);
 });
 
 test("passive readiness modal uses honest steps only", () => {

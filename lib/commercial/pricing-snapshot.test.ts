@@ -280,6 +280,13 @@ test("client cannot force tier via buildCommercialQuote without override from tr
   assert.equal(quote.pricingSnapshot.volumeDiscountPercent, 0);
 });
 
+test("agency mode stays active at three linked accounts", () => {
+  const snapshot = buildDashboardAgencyPricingSnapshot({ linkedAccountCount: 3, reservedEntitlementCount: 0 });
+  assert.equal(snapshot.agencyModeActive, true);
+  assert.equal(snapshot.volumeDiscountPercent, 0);
+  assert.equal(snapshot.billableAccountCount, 3);
+});
+
 test("tenant isolation: counts are computed from caller-supplied server counts only in API contract", () => {
   const a = buildDashboardAgencyPricingSnapshot({ linkedAccountCount: 2, reservedEntitlementCount: 0 });
   const b = buildDashboardAgencyPricingSnapshot({ linkedAccountCount: 9, reservedEntitlementCount: 0 });

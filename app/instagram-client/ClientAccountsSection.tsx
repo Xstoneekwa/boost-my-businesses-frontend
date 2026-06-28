@@ -99,6 +99,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showInstagramPassword, setShowInstagramPassword] = useState(false);
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
@@ -545,6 +546,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
       setUsername("");
       setEmail("");
       setPassword("");
+      setShowInstagramPassword(false);
       setNotes("");
       setProcessModal({
         mode: "add_account",
@@ -895,7 +897,31 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
               </label>
               <label className="cd-fg">
                 <span className="cd-fl">{labelFor(lang, "Mot de passe Instagram", "Instagram password")}</span>
-                <input className="cd-fi-in" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required />
+                <div className="cd-password-field">
+                  <input
+                    className="cd-fi-in"
+                    type={showInstagramPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="cd-password-toggle"
+                    aria-pressed={showInstagramPassword}
+                    aria-label={
+                      showInstagramPassword
+                        ? labelFor(lang, "Masquer le mot de passe Instagram", "Hide Instagram password")
+                        : labelFor(lang, "Afficher le mot de passe Instagram", "Show Instagram password")
+                    }
+                    onClick={() => setShowInstagramPassword((current) => !current)}
+                  >
+                    {showInstagramPassword
+                      ? labelFor(lang, "Masquer", "Hide")
+                      : labelFor(lang, "Afficher", "Show")}
+                  </button>
+                </div>
               </label>
               <label className="cd-fg">
                 <span className="cd-fl">{labelFor(lang, "Notes (optionnel)", "Notes (optional)")}</span>

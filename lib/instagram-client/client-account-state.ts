@@ -1,4 +1,8 @@
-import { clientReadinessMessage, type ClientReadinessStatus } from "./client-readiness-projection.ts";
+import {
+  clientReadinessIsAutomaticPreparationInProgress,
+  clientReadinessMessage,
+  type ClientReadinessStatus,
+} from "./client-readiness-projection.ts";
 import { clientConnectMessage, type ClientConnectStatus } from "./connect-client-contract.ts";
 import {
   isActiveClientConnectStatus,
@@ -170,6 +174,7 @@ function clientReadinessSubtext(status: string | null | undefined, lang: "fr" | 
   if (
     normalized === "preparation_pending"
     || normalized === "preparation_blocked"
+    || normalized === "secure_preparation_in_progress"
     || normalized === "credentials_need_attention"
     || normalized === "device_temporarily_unavailable"
     || normalized === "schedule_not_ready"
@@ -331,7 +336,9 @@ export function resolveClientAccountState(
   }
 
   const readinessPrepared = clientReadinessStatus === "ready_to_connect";
-  const readinessChecked = Boolean(clientReadinessStatus) && clientReadinessStatus !== "preparation_pending";
+  const automaticPreparationInProgress = clientReadinessIsAutomaticPreparationInProgress(clientReadinessStatus);
+  const readinessChecked = Boolean(clientReadinessStatus)
+    && !automaticPreparationInProgress;
   const pendingSubtext = clientReadinessSubtext(input.clientReadinessStatus, lang);
 
   if (readinessPrepared) {
@@ -357,7 +364,9 @@ export function resolveClientAccountState(
 
   return {
     phase: "added",
-    badgeLabel: label(lang, "Compte ajouté", "Account added"),
+    badgeLabel: automaticPreparationInProgress
+      ? label(lang, "Préparation en cours", "Setup in progress")
+      : label(lang, "Compte ajouté", "Account added"),
     badgeTone: "neutral",
     subtext: pendingSubtext,
     readinessLabel: readinessChecked
@@ -368,8 +377,8 @@ export function resolveClientAccountState(
     connectLabel: label(lang, "Connecter le compte", "Connect account"),
     connectTone: "primary",
     connectDisabled: true,
-    showRefresh: false,
-    isAsyncPending: false,
+    showRefresh: automaticPreparationInProgress,
+    isAsyncPending: automaticPreparationInProgress,
     ...defaults,
   };
 }

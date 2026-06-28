@@ -1,4 +1,10 @@
 import { resolveClientAccountState, type ClientAccountStateInput } from "./client-account-state.ts";
+import {
+  clientReadinessIsAutomaticPreparationInProgress,
+  clientReadinessIsBlocked,
+  clientReadinessMessage,
+  type ClientReadinessStatus,
+} from "./client-readiness-projection.ts";
 
 export type ProcessStepStatus = "pending" | "running" | "done" | "failed" | "action_required";
 
@@ -445,6 +451,22 @@ export function projectConnectProcess(input: ConnectProcessInput): ClientProcess
   };
 }
 
+function resolveReadinessPreparationStepStatus(input: {
+  complete: boolean;
+  running: boolean;
+  errored: boolean;
+  ready: boolean;
+  readinessStatus: string;
+}): ProcessStepStatus {
+  if (input.running) return "running";
+  if (input.errored) return "pending";
+  if (!input.complete) return "pending";
+  if (input.ready) return "done";
+  if (clientReadinessIsAutomaticPreparationInProgress(input.readinessStatus)) return "running";
+  if (clientReadinessIsBlocked(input.readinessStatus)) return "failed";
+  return "pending";
+}
+
 export function projectReadinessProcess(input: ConnectProcessInput): ClientProcessProjection {
   const lang = input.lang;
   const phase = input.phase;
@@ -453,6 +475,8 @@ export function projectReadinessProcess(input: ConnectProcessInput): ClientProce
   const complete = phase === "complete";
   const running = phase === "starting" || phase === "submitting";
   const errored = phase === "error";
+  const automaticPreparationInProgress = clientReadinessIsAutomaticPreparationInProgress(readinessStatus);
+  const preparationBlocked = clientReadinessIsBlocked(readinessStatus);
 
   const accountStepStatus: ProcessStepStatus = "done";
   const configStepStatus: ProcessStepStatus = running
@@ -462,13 +486,13 @@ export function projectReadinessProcess(input: ConnectProcessInput): ClientProce
       : complete
         ? "done"
         : "pending";
-  const preparationStepStatus: ProcessStepStatus = running
-    ? "running"
-    : errored
-      ? "pending"
-      : complete
-        ? (ready ? "done" : "failed")
-        : "pending";
+  const preparationStepStatus = resolveReadinessPreparationStepStatus({
+    complete,
+    running,
+    errored,
+    ready,
+    readinessStatus,
+  });
 
   const steps: ClientProcessStep[] = [
     step(
@@ -523,18 +547,24 @@ export function projectReadinessProcess(input: ConnectProcessInput): ClientProce
   }
 
   if (complete) {
-    const ui = input.account ? resolveClientAccountState(input.account, lang) : null;
+    const clientStatus = (readinessStatus || "preparation_pending") as ClientReadinessStatus;
+    const finalMessage = clientReadinessMessage(clientStatus, lang);
     return {
       title: label(lang, "Vérification de la préparation", "Readiness check"),
-      subtitle: label(lang, "La préparation n'est pas encore complète.", "Setup is not complete yet."),
-      statusChip: label(lang, "À compléter", "Pending"),
-      statusTone: "warning",
+      subtitle: automaticPreparationInProgress
+        ? label(lang, "La préparation automatique est en cours.", "Automatic setup is in progress.")
+        : preparationBlocked
+          ? label(lang, "Une action est nécessaire avant la connexion.", "An action is required before connection.")
+          : label(lang, "La préparation n'est pas encore complète.", "Setup is not complete yet."),
+      statusChip: automaticPreparationInProgress
+        ? label(lang, "En cours", "In progress")
+        : label(lang, "À compléter", "Pending"),
+      statusTone: automaticPreparationInProgress ? "running" : "warning",
       steps,
-      finalMessage: ui?.subtext
-        || label(lang, "La préparation est en cours. Réessayez dans quelques instants.", "Setup is still in progress. Try again in a moment."),
-      showRefresh: false,
+      finalMessage,
+      showRefresh: automaticPreparationInProgress,
       isComplete: true,
-      isAsyncPending: false,
+      isAsyncPending: automaticPreparationInProgress,
       outcome: "action_required",
     };
   }

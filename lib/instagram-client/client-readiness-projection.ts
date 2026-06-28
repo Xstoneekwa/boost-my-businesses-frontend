@@ -16,28 +16,28 @@ const CLIENT_READINESS_MESSAGES: Record<ClientReadinessStatus, { fr: string; en:
     en: "Your account is ready to connect.",
   },
   preparation_pending: {
-    fr: "La préparation est en cours. Réessayez dans quelques instants.",
-    en: "Setup is still in progress. Try again in a moment.",
+    fr: "Nous préparons votre compte automatiquement. Actualisez cette vérification dans quelques instants.",
+    en: "We're preparing your account automatically. Refresh this check in a moment.",
   },
   preparation_blocked: {
     fr: "La préparation est temporairement bloquée. Contactez le support si cela persiste.",
     en: "Setup is temporarily blocked. Contact support if this continues.",
   },
   secure_preparation_in_progress: {
-    fr: "La préparation sécurisée de votre compte est en cours.",
-    en: "Secure account preparation is in progress.",
+    fr: "Nous finalisons une étape sécurisée de préparation. Actualisez dans quelques instants.",
+    en: "We're completing a secure preparation step. Refresh in a moment.",
   },
   credentials_need_attention: {
-    fr: "Vos identifiants Instagram nécessitent une vérification.",
-    en: "Your Instagram credentials need attention.",
+    fr: "Vérifiez votre nom d'utilisateur et votre mot de passe Instagram, puis relancez la vérification.",
+    en: "Check your Instagram username and password, then run the readiness check again.",
   },
   device_temporarily_unavailable: {
-    fr: "Le téléphone préparé pour votre compte est temporairement indisponible.",
-    en: "The phone prepared for your account is temporarily unavailable.",
+    fr: "Nous finalisons la préparation de votre compte. Actualisez dans quelques instants.",
+    en: "We're finishing your account setup. Refresh in a moment.",
   },
   schedule_not_ready: {
-    fr: "La fenêtre de connexion n'est pas encore ouverte.",
-    en: "The connection window is not open yet.",
+    fr: "La connexion sera disponible pendant la prochaine fenêtre horaire prévue.",
+    en: "Connection will be available during the next scheduled window.",
   },
   already_connected: {
     fr: "Votre compte Instagram est déjà connecté.",
@@ -93,4 +93,17 @@ export function clientReadinessMessage(status: ClientReadinessStatus, lang: "fr"
 
 export function clientReadinessAllowsConnect(status: ClientReadinessStatus) {
   return status === "ready_to_connect";
+}
+
+export function clientReadinessIsAutomaticPreparationInProgress(status: ClientReadinessStatus | string | null | undefined) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "preparation_pending" || normalized === "secure_preparation_in_progress";
+}
+
+export function clientReadinessIsBlocked(status: ClientReadinessStatus | string | null | undefined) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "preparation_blocked"
+    || normalized === "credentials_need_attention"
+    || normalized === "device_temporarily_unavailable"
+    || normalized === "schedule_not_ready";
 }
