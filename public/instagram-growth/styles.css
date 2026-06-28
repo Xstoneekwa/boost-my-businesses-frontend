@@ -284,15 +284,6 @@ section { position: relative; }
 .stp h3 { font-size: 1.18rem; margin-bottom: 6px; }
 .stp p { font-size: 1rem; color: var(--ink-dim); line-height: 1.45; }
 
-/* action chips */
-.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; justify-content: center; }
-.chip {
-  font-family: var(--font-display); font-weight: 700; font-size: .92rem;
-  padding: 10px 18px; border-radius: 100px; background: var(--surface);
-  border: 1px solid var(--line); color: var(--ink-dim); box-shadow: var(--card-shadow-sm);
-}
-.chip.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-color: transparent; }
-
 /* ---------- results section ---------- */
 .results-grid { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 52px; align-items: center; }
 .results-stats { display: flex; flex-direction: column; gap: 0; }
