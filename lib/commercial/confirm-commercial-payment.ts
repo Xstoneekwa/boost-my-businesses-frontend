@@ -15,6 +15,8 @@ export type ConfirmCommercialPaymentInput = {
   idempotencyKey: string;
   checkoutContext: CheckoutContext;
   env?: NodeJS.ProcessEnv;
+  /** When set, bypasses isolated fictional-email guard for an admin-authorized prod test checkout. */
+  simulationAccessSource?: "prod_test_authorization" | null;
 };
 
 export type ConfirmCommercialPaymentSuccess = {
@@ -69,6 +71,16 @@ export function confirmCommercialPayment(
       reason: "unsupported_checkout_context",
       messageFr: "Cette confirmation de paiement ne s'applique qu'au premier checkout public.",
       messageEn: "This payment confirmation only applies to public first checkout.",
+    };
+  }
+
+  if (input.simulationAccessSource === "prod_test_authorization") {
+    return {
+      ok: true,
+      paymentProvider: "simulated",
+      paymentStatus: "simulated_confirmed",
+      confirmedAt: new Date().toISOString(),
+      idempotencyKey,
     };
   }
 

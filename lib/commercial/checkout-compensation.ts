@@ -9,6 +9,8 @@ export type ActivationAttemptTracker = {
   clientId: string | null;
   tenantLinkedThisAttempt: boolean;
   resumedIncompleteCheckout: boolean;
+  prodTestAuthorizationId?: string | null;
+  simulationAccessSource?: "prod_test_authorization" | "isolated_first_purchase" | "legacy_allowlist" | null;
 };
 
 export async function compensateFailedActivationAttempt(

@@ -4,12 +4,7 @@ import { countLinkedInstagramAccountsForClient, countReservedEntitlementsForClie
 import { QUOTE_UNAVAILABLE_EN, QUOTE_UNAVAILABLE_FR } from "@/lib/commercial/checkout-api-messages";
 import { buildCommercialQuote } from "@/lib/commercial/pricing";
 import { deriveAgencyModeSnapshot } from "@/lib/commercial/agency";
-import { projectSimulatedCheckoutAvailability } from "@/lib/commercial/simulated-checkout-guard";
-import {
-  initialCheckoutSimulationClientMessages,
-  projectInitialCheckoutSimulationAvailability,
-  type InitialCheckoutSimulationDenyReason,
-} from "@/lib/commercial/initial-checkout-simulation-guard";
+import { projectCheckoutSimulationAvailability } from "@/lib/commercial/checkout-simulation-access";
 import { requireClientInstagramSession, readString } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
@@ -70,37 +65,35 @@ export async function POST(request: Request) {
       });
     }
 
-    const availability = flowType === "first_purchase"
-      ? projectInitialCheckoutSimulationAvailability(purchaserEmail || null)
-      : null;
-    const legacyAvailability = flowType === "additional_account"
-      ? projectSimulatedCheckoutAvailability(purchaserEmail || null)
-      : null;
+    const simulationAvailability = await projectCheckoutSimulationAvailability({
+      supabase,
+      email: purchaserEmail || null,
+      flowType,
+      clientId: clientId || null,
+      planKey,
+      billingIntervalMonths,
+    });
 
     if (flowType === "first_purchase") {
-      const simulationMessages = availability?.simulationUnavailableReason
-        ? initialCheckoutSimulationClientMessages(
-          availability.simulationUnavailableReason as InitialCheckoutSimulationDenyReason,
-        )
-        : null;
       return jsonOk({
         quote,
         agency: agencySnapshot,
-        simulationAvailable: availability?.simulationAvailable ?? false,
-        simulationUnavailableReason: availability?.simulationUnavailableReason ?? null,
-        activationMessageFr: simulationMessages?.messageFr ?? null,
-        activationMessageEn: simulationMessages?.messageEn ?? null,
+        simulationAvailable: simulationAvailability.simulationAvailable,
+        simulationUnavailableReason: simulationAvailability.simulationUnavailableReason,
+        activationMessageFr: simulationAvailability.activationMessageFr,
+        activationMessageEn: simulationAvailability.activationMessageEn,
       });
     }
 
     return jsonOk({
       quote,
       agency: agencySnapshot,
-      simulatedCheckoutEnabled: legacyAvailability?.simulatedCheckoutEnabled ?? false,
-      simulatedActivationAvailable: legacyAvailability?.simulatedActivationAvailable ?? false,
-      requiresEmail: legacyAvailability?.requiresEmail ?? false,
-      activationMessageFr: legacyAvailability?.messageFr,
-      activationMessageEn: legacyAvailability?.messageEn,
+      simulatedCheckoutEnabled: simulationAvailability.simulationAvailable
+        || simulationAvailability.simulationUnavailableReason != null,
+      simulatedActivationAvailable: simulationAvailability.simulationAvailable,
+      requiresEmail: !purchaserEmail,
+      activationMessageFr: simulationAvailability.activationMessageFr,
+      activationMessageEn: simulationAvailability.activationMessageEn,
     });
   } catch (error) {
     console.error("[commercial/checkout/quote] unexpected failure", error);

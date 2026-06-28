@@ -20,14 +20,25 @@ export function buildClientUserInsertPayload(input: { clientId: string; authUser
   };
 }
 
-export function buildSimulatedCheckoutSubscriptionPayload(clientId: string) {
+export function buildSimulatedCheckoutSubscriptionPayload(
+  clientId: string,
+  options?: { internalTestClient?: boolean },
+) {
   return {
     client_id: clientId,
     subscription_type: "full_cycle",
     status: "active",
-    metadata: {
-      source: "simulated_checkout",
-      billing_mode: "per_account_entitlement",
-    },
+    metadata: options?.internalTestClient
+      ? {
+        source: "simulated_checkout",
+        billing_mode: "per_account_entitlement",
+        internal_test_client: true,
+        billing_excluded: true,
+        non_billable: true,
+      }
+      : {
+        source: "simulated_checkout",
+        billing_mode: "per_account_entitlement",
+      },
   };
 }

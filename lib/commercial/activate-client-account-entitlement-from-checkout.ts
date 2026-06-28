@@ -37,7 +37,12 @@ import { buildCommercialQuote } from "./pricing";
 import { pricingSnapshotAuditPayload } from "./pricing-snapshot";
 import { validatePublicCheckoutPassword } from "./checkout-password";
 import { confirmCommercialPayment } from "./confirm-commercial-payment.ts";
-import { canUseSimulatedCheckoutForEmail, simulatedCheckoutClientMessages } from "./simulated-checkout-guard.ts";
+import { evaluateCheckoutSimulationAccess } from "./checkout-simulation-access.ts";
+import {
+  buildInternalTestClientMetadata,
+  recordProdTestCheckoutAuthorizationUsage,
+} from "./prod-test-checkout-authorization.ts";
+import { simulatedCheckoutClientMessages } from "./simulated-checkout-guard.ts";
 import { CHECKOUT_UNAVAILABLE_EN, CHECKOUT_UNAVAILABLE_FR } from "./checkout-api-messages.ts";
 
 type Row = Record<string, unknown>;
@@ -218,6 +223,7 @@ async function ensureClientWorkspace(
     displayName: string;
     idempotencyKey: string;
     tracker?: ActivationAttemptTracker;
+    internalTestClient?: boolean;
   },
 ) {
   let clientId = input.resumeClientId?.trim()
@@ -230,13 +236,15 @@ async function ensureClientWorkspace(
       .insert({
         name: input.displayName,
         status: "active",
-        metadata: {
-          contact_email: input.email,
-          display_name: input.displayName,
-          service_page_url: "/instagram-growth",
-          preferred_language: "fr",
-          checkout_source: "simulated_checkout",
-        },
+        metadata: input.internalTestClient
+          ? buildInternalTestClientMetadata({ email: input.email, displayName: input.displayName })
+          : {
+            contact_email: input.email,
+            display_name: input.displayName,
+            service_page_url: "/instagram-growth",
+            preferred_language: "fr",
+            checkout_source: "simulated_checkout",
+          },
       })
       .select("id")
       .single<Row>();
@@ -361,7 +369,9 @@ async function ensureClientWorkspace(
   if (!existingSubscription?.id) {
     const { error: subscriptionError } = await supabase
       .from("client_subscriptions")
-      .insert(buildSimulatedCheckoutSubscriptionPayload(clientId));
+      .insert(buildSimulatedCheckoutSubscriptionPayload(clientId, {
+        internalTestClient: input.internalTestClient,
+      }));
     if (subscriptionError) {
       throw new CheckoutActivationStageError(
         "client_subscription_create",
@@ -447,21 +457,30 @@ export async function activateClientAccountEntitlementFromCheckout(
       return activationFailure(503, "checkout_storage_unavailable");
     }
 
-    if (existing.kind !== "found") {
-      if (checkoutContext !== "public_new_workspace") {
-        const guard = canUseSimulatedCheckoutForEmail(email);
-        if (!guard.ok) {
-          const messages = simulatedCheckoutClientMessages(guard.reason);
-          return {
-            ok: false,
-            status: 403,
-            error: messages.messageFr,
-            messageFr: messages.messageFr,
-            messageEn: messages.messageEn,
-            code: guard.reason,
-          };
-        }
+    if (existing.kind !== "found" && input.flowType !== "plan_change") {
+      const simulationAccess = await evaluateCheckoutSimulationAccess({
+        supabase,
+        email,
+        flowType: input.flowType,
+        clientId: input.clientId?.trim() || null,
+        planKey: input.planKey,
+        billingIntervalMonths: input.billingIntervalMonths,
+      });
+      if (!simulationAccess.allowed) {
+        const messages = simulationAccess.messageFr && simulationAccess.messageEn
+          ? { messageFr: simulationAccess.messageFr, messageEn: simulationAccess.messageEn }
+          : simulatedCheckoutClientMessages("invalid_email");
+        return {
+          ok: false,
+          status: 403,
+          error: messages.messageFr,
+          messageFr: messages.messageFr,
+          messageEn: messages.messageEn,
+          code: readString(simulationAccess.reason, "simulation_unavailable"),
+        };
       }
+      tracker.prodTestAuthorizationId = simulationAccess.prodTestAuthorizationId;
+      tracker.simulationAccessSource = simulationAccess.source;
     }
 
     if (checkoutContext === "public_new_workspace" && existing.kind === "missing") {
@@ -499,6 +518,9 @@ export async function activateClientAccountEntitlementFromCheckout(
         amountDueCents: quoteResult.totalPeriodCents,
         idempotencyKey: tracker.idempotencyKey,
         checkoutContext,
+        simulationAccessSource: tracker.simulationAccessSource === "prod_test_authorization"
+          ? "prod_test_authorization"
+          : null,
       });
       if (!payment.ok) {
         return {
@@ -684,6 +706,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         displayName: plan.displayName,
         idempotencyKey: tracker.idempotencyKey,
         tracker,
+        internalTestClient: tracker.simulationAccessSource === "prod_test_authorization",
       });
       clientId = workspace.clientId;
       tracker.clientId = clientId;
@@ -754,6 +777,8 @@ export async function activateClientAccountEntitlementFromCheckout(
             payment_provider: "simulated",
             payment_status: "simulated_confirmed",
             checkout_context: checkoutContext,
+            internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
+            billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",
           },
           activated_at: now,
           updated_at: now,
@@ -801,6 +826,8 @@ export async function activateClientAccountEntitlementFromCheckout(
           growth_estimate_label: plan.growthEstimateLabelFr,
           checkout_mode: "simulated",
           checkout_context: checkoutContext,
+          internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
+          billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",
         },
         updated_at: now,
       })
@@ -888,6 +915,25 @@ export async function activateClientAccountEntitlementFromCheckout(
         });
       }
       throw error;
+    }
+
+    if (tracker.prodTestAuthorizationId && input.flowType !== "plan_change") {
+      try {
+        await recordProdTestCheckoutAuthorizationUsage({
+          supabase,
+          authorizationId: tracker.prodTestAuthorizationId,
+          flowType: input.flowType,
+          clientId,
+        });
+      } catch (usageError) {
+        console.error("[commercial/checkout/activate] prod test authorization usage update failed", usageError);
+        return failWithCompensation(supabase, tracker, {
+          status: 500,
+          code: "prod_test_authorization_update_failed",
+          stage: "prod_test_authorization_usage",
+          reason: "prod_test_authorization_update_failed",
+        });
+      }
     }
 
     return {

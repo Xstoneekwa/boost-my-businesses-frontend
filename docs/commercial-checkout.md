@@ -90,6 +90,18 @@ billable = linked + reserved + projectedPurchaseSlots
 projectedPurchaseSlots = 0 si reserved représente déjà l'achat quoté, sinon 1 (first/new account)
 ```
 
+## Autorisation checkout test production (email réel)
+
+Parcours admin-only pour un tenant interne non facturable sur la DB prod (`zgafnshkjywfltxgbtzg`).
+
+- Table : `commercial_prod_test_checkout_authorizations` (email stocké en hash + hint redacted)
+- Admin : `/instagram-dashboard/commercial-prod-test`
+- Garde unifiée : `lib/commercial/checkout-simulation-access.ts`
+- Le checkout public reste fermé aux emails réels sans autorisation active
+- Le client créé porte `clients.metadata.internal_test_client=true` (Admin seulement — jamais affiché côté dashboard client)
+- Limite par défaut : 2 entitlements (first_purchase + add-account) pour le scénario Agence
+- Aucun paiement, provider Stripe/Paddle, email ou Postmark dans ce flow
+
 ## Post-add-account (inchangé ce patch)
 
 Ajout CT → Check Readiness → Connect → compte prêt. Package/outreach appliqués via `account_commercial_packages` + addons depuis l’entitlement consommé.

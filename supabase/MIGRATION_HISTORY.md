@@ -236,3 +236,12 @@ Structures verified on main production before filename reconciliation:
 - Table `client_account_notifications` with category/status checks and three partial indexes
 - Tables `client_email_templates`, `client_email_send_intents`, `client_email_delivery_events` with constraints, foreign keys, and indexes as defined in the canonical SQL files
 - RLS enabled on notification/email tables; no RLS policies (service-role server access only today)
+
+## TASK 17F — prod test checkout authorizations (pending apply on production)
+
+| Local filename | Role |
+|----------------|------|
+| `20260708120000_commercial_prod_test_checkout_authorizations.sql` | Admin-created temporary real-email simulated checkout authorizations (production only, service-role) |
+
+**Status:** authored in repo; apply on main production (`zgafnshkjywfltxgbtzg`) when ready. Do **not** apply on test DB `nxntngkhkoynljcagmkq`.
+
