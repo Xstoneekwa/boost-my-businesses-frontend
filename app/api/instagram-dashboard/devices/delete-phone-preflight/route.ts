@@ -1,5 +1,5 @@
 import { adminDashboardConfig } from "../add-phone/route";
-import { jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin } from "../../_utils";
+import { jsonError, jsonOk, readJsonBody, readString, requireRelayOrAdmin } from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +22,12 @@ function adminDashboardErrorMessage(error: unknown, status: number) {
   return raw || "Could not load delete preflight.";
 }
 
-export async function forwardDeletePhonePreflight(deviceId: string, config: NonNullable<ReturnType<typeof adminDashboardConfig>>) {
-  const response = await fetch(config.url, {
+export async function forwardDeletePhonePreflight(
+  deviceId: string,
+  config: NonNullable<ReturnType<typeof adminDashboardConfig>>,
+  fetcher: typeof fetch = fetch,
+) {
+  const response = await fetcher(config.url, {
     method: "POST",
     headers: {
       apikey: config.token,
@@ -47,7 +51,7 @@ export async function forwardDeletePhonePreflight(deviceId: string, config: NonN
 
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request, "Delete phone preflight");
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = await readJsonBody<Record<string, unknown>>(request);

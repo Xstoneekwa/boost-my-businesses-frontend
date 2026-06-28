@@ -1,5 +1,5 @@
 import { adminDashboardConfig } from "../add-phone/route";
-import { jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin } from "../../_utils";
+import { jsonError, jsonOk, readJsonBody, readString, requireRelayOrAdmin } from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +66,7 @@ export async function forwardDeletePhysicalPhone(
 
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
+    const unauthorizedResponse = await requireRelayOrAdmin(request, "Delete phone");
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = await readJsonBody<Record<string, unknown>>(request);
