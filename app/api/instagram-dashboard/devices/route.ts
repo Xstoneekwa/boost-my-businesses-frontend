@@ -199,6 +199,7 @@ export async function getDashboardDevices() {
       supabase
         .from("phone_devices")
         .select("id,device_kind,name,device_name,adb_serial,host_machine,pool_type,max_clones,status,timezone,updated_at")
+        .neq("status", "retired")
         .order("name", { ascending: true }),
       supabase
         .from("phone_app_instances")
