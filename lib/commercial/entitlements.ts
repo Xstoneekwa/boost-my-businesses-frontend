@@ -105,7 +105,36 @@ export async function getReservedEntitlementForClient(supabase: SupabaseClient, 
     .limit(1)
     .maybeSingle<Row>();
   if (error) throw new Error("entitlement_lookup_failed");
-  return data?.id ? mapEntitlementRow(data) : null;
+  if (data?.id) return mapEntitlementRow(data);
+
+  const { data: reclaimable, error: reclaimableError } = await supabase
+    .from("client_account_entitlements")
+    .select("*")
+    .eq("client_id", clientId)
+    .eq("status", "entitlement_consumed")
+    .is("account_id", null)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle<Row>();
+  if (reclaimableError) throw new Error("entitlement_lookup_failed");
+  if (!reclaimable?.id) return null;
+
+  const now = new Date().toISOString();
+  const { data: promoted, error: promoteError } = await supabase
+    .from("client_account_entitlements")
+    .update({
+      status: "entitlement_reserved",
+      consumed_at: null,
+      updated_at: now,
+    })
+    .eq("id", readString(reclaimable.id))
+    .eq("client_id", clientId)
+    .eq("status", "entitlement_consumed")
+    .is("account_id", null)
+    .select("*")
+    .maybeSingle<Row>();
+  if (promoteError) throw new Error("entitlement_reclaim_failed");
+  return promoted?.id ? mapEntitlementRow(promoted) : null;
 }
 
 export async function getEntitlementById(supabase: SupabaseClient, entitlementId: string) {
