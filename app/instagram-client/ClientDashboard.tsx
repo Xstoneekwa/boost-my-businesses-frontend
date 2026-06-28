@@ -7,6 +7,8 @@ import { LogOut } from "lucide-react";
 import ClientNotificationsPanel from "./ClientNotificationsPanel";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import ClientAgencyModeBanner from "./ClientAgencyModeBanner";
+import ClientAgencyOverviewPanel from "./ClientAgencyOverviewPanel";
+import ClientAgencyScopeSelector, { type OverviewScope } from "./ClientAgencyScopeSelector";
 import type { ClientAccountNotificationsProjection } from "@/lib/instagram-client/client-account-notifications";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
 import ClientActivityPanel from "./ClientActivityPanel";
@@ -67,6 +69,7 @@ interface Props {
   initialWorkspace?: ClientWorkspaceView | null;
   initialAccountInsights?: ClientAccountInsights | null;
   initialFollowerGrowth?: LoadClientFollowerGrowthResult | null;
+  initialAgencyModeActive?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -523,6 +526,7 @@ export default function ClientDashboard({
   initialWorkspace = null,
   initialAccountInsights = null,
   initialFollowerGrowth = null,
+  initialAgencyModeActive = false,
 }: Props) {
   const [activeView, setActiveView]     = useState<View>("overview");
   const [lang,       setLang]           = useState<Lang>("fr");
@@ -533,7 +537,12 @@ export default function ClientDashboard({
   const [loggingOut, setLoggingOut]     = useState(false);
   const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
   const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
-  const [accountInsights] = useState<ClientAccountInsights | null>(initialAccountInsights);
+  const agencyModeActive = initialAgencyModeActive;
+  const [overviewScope, setOverviewScope] = useState<OverviewScope>(agencyModeActive ? "agency" : "");
+  const [accountInsights, setAccountInsights] = useState<ClientAccountInsights | null>(initialAccountInsights);
+  const [followerGrowth, setFollowerGrowth] = useState<LoadClientFollowerGrowthResult | null>(initialFollowerGrowth);
+  const [accountScopeLoading, setAccountScopeLoading] = useState(false);
+  const [accountScopeError, setAccountScopeError] = useState<string | null>(null);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
@@ -550,7 +559,7 @@ export default function ClientDashboard({
     || initialNotifications.length > 0
     || (initialWorkspace?.linkedInstagramAccounts?.length ?? 0) > 0
     || (workspace?.linkedInstagramAccounts?.length ?? 0) > 0;
-  const hasOverviewInsights = Boolean(accountInsights);
+  const hasOverviewInsights = Boolean(accountInsights) && (!agencyModeActive || overviewScope !== "agency");
   const demoMode = !hasLinkedInstagramAccount;
 
   const [targetingOverview, setTargetingOverview] = useState<TargetsOverview | null>(null);
@@ -591,8 +600,16 @@ export default function ClientDashboard({
       username: initialNotifications[0].username,
     } as ClientInstagramAccount : null);
 
-  const targetingAccountId = primaryAccount?.accountId || accountInsights?.accountId || "";
-  const targetingUsername = primaryAccount?.username || accountInsights?.username || "";
+  const targetingAccountId = agencyModeActive
+    ? (overviewScope === "agency" ? "" : overviewScope)
+    : (primaryAccount?.accountId || accountInsights?.accountId || "");
+  const targetingUsername = agencyModeActive
+    ? (overviewScope === "agency"
+      ? ""
+      : (initialAccounts.find((row) => row.accountId === overviewScope)?.username
+        || accountInsights?.username
+        || ""))
+    : (primaryAccount?.username || accountInsights?.username || "");
   const targetingPackageCode = accountInsights?.packageCode || primaryAccount?.packageLabel?.toLowerCase() || "growth";
   const useLiveTargeting = hasLinkedInstagramAccount && Boolean(targetingAccountId);
   const useLiveData = useLiveTargeting;
@@ -645,6 +662,55 @@ export default function ClientDashboard({
       void reloadTargeting();
     }
   }, [useLiveData, targetingAccountId, reloadTargeting]);
+
+  useEffect(() => {
+    if (!agencyModeActive || overviewScope === "agency") {
+      if (agencyModeActive) {
+        setAccountInsights(null);
+        setFollowerGrowth(null);
+        setAccountScopeError(null);
+        setAccountScopeLoading(false);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setAccountScopeLoading(true);
+    setAccountScopeError(null);
+
+    void Promise.all([
+      fetch(`/api/instagram-client/accounts/${encodeURIComponent(overviewScope)}/insights`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      }),
+      fetch(`/api/instagram-client/accounts/${encodeURIComponent(overviewScope)}/follower-growth`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      }),
+    ]).then(async ([insightsResponse, growthResponse]) => {
+      const insightsPayload = await insightsResponse.json() as { ok?: boolean; data?: ClientAccountInsights; error?: string };
+      const growthPayload = await growthResponse.json() as { ok?: boolean; data?: LoadClientFollowerGrowthResult; error?: string };
+      if (cancelled) return;
+      if (!insightsResponse.ok || !insightsPayload.ok || !insightsPayload.data) {
+        throw new Error(insightsPayload.error || "Could not load account overview.");
+      }
+      setAccountInsights(insightsPayload.data);
+      setWhitelist(insightsPayload.data.whitelist ?? []);
+      setBlacklist(insightsPayload.data.blacklist ?? []);
+      setFollowerGrowth(growthResponse.ok && growthPayload.ok ? (growthPayload.data ?? null) : null);
+      setAccountScopeLoading(false);
+    }).catch((error) => {
+      if (cancelled) return;
+      setAccountInsights(null);
+      setFollowerGrowth(null);
+      setAccountScopeError(error instanceof Error ? error.message : "Could not load account overview.");
+      setAccountScopeLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agencyModeActive, overviewScope]);
 
   async function persistFilterLists(nextWhitelist: string[], nextBlacklist: string[]) {
     if (!targetingAccountId || !useLiveData) return;
@@ -812,10 +878,15 @@ export default function ClientDashboard({
     : undefined;
   const overviewRecentFeed = hasOverviewInsights ? (accountInsights?.recentFeed ?? []) : [];
   const overviewStats = buildOverviewStats(accountInsights, lang);
-  const followerChartUsername = primaryAccount?.username || accountInsights?.username || initialFollowerGrowth?.username || null;
+  const followerChartUsername = agencyModeActive
+    ? (overviewScope === "agency"
+      ? null
+      : (targetingUsername || accountInsights?.username || followerGrowth?.username || null))
+    : (primaryAccount?.username || accountInsights?.username || initialFollowerGrowth?.username || null);
   const followerChartTitle = buildFollowerChartTitle(followerChartUsername, lang);
   const followerChartViews = useMemo(() => {
-    if (!initialFollowerGrowth?.bundle) {
+    const growth = followerGrowth ?? initialFollowerGrowth;
+    if (!growth?.bundle) {
       const emptySeries = {
         period: "all" as const,
         businessTimezone: "Africa/Johannesburg",
@@ -833,8 +904,8 @@ export default function ClientDashboard({
       const emptyBundle = { all: emptySeries, d30: { ...emptySeries, period: "30d" as const }, daily: { ...emptySeries, period: "daily" as const } };
       return buildFollowerChartViews(emptyBundle, lang);
     }
-    return buildFollowerChartViews(initialFollowerGrowth.bundle, lang);
-  }, [initialFollowerGrowth, lang]);
+    return buildFollowerChartViews(growth.bundle, lang);
+  }, [followerGrowth, initialFollowerGrowth, lang]);
   const subscriptionPlanValue = workspace?.clientPlanLabel || accountInsights?.packageLabel || "";
   const subscriptionCard = buildSubscriptionOverviewCard(workspace, subscriptionPlanValue, lang);
   const accountManagerCard = buildAccountManagerOverview(workspace, lang, {
@@ -1075,100 +1146,146 @@ export default function ClientDashboard({
           </section>
         )}
 
+        {agencyModeActive && (activeView === "overview" || activeView === "activity" || activeView === "targeting") ? (
+          <ClientAgencyScopeSelector
+            lang={lang}
+            accounts={initialAccounts}
+            scope={overviewScope}
+            onScopeChange={setOverviewScope}
+          />
+        ) : null}
+
         {activeView === "overview" && (
           <div className="cd-view">
             <ClientAgencyModeBanner lang={lang} />
-            <ClientAccountsSection lang={lang} accounts={hasLinkedInstagramAccount ? initialAccounts : []} />
+            {!agencyModeActive ? (
+              <ClientAccountsSection lang={lang} accounts={hasLinkedInstagramAccount ? initialAccounts : []} />
+            ) : null}
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
-            {/* Stats */}
-            <div className="cd-stats-row">
-              {overviewStats.map((s, i) => (
-                <div key={i} className="cd-sc">
-                  <div className="cd-sc-lbl">{s.lbl}</div>
-                  <div className={`cd-sc-val${s.highlight ? " cd-grad" : ""}`}>{s.val}</div>
-                  <div className="cd-sc-sub"><span className={s.highlight ? "cd-up" : ""}>{s.sub}</span></div>
-                </div>
-              ))}
-            </div>
+            {agencyModeActive && overviewScope === "agency" ? (
+              <ClientAgencyOverviewPanel
+                lang={lang}
+                onSelectAccount={(accountId) => setOverviewScope(accountId)}
+              />
+            ) : null}
+            {(!agencyModeActive || overviewScope !== "agency") ? (
+              <>
+                {agencyModeActive && accountScopeLoading ? (
+                  <p className="cd-setup-note">{lang === "fr" ? "Chargement du compte sélectionné…" : "Loading selected account…"}</p>
+                ) : null}
+                {agencyModeActive && accountScopeError ? (
+                  <p className="cd-setup-note">{accountScopeError}</p>
+                ) : null}
+                {!agencyModeActive || (!accountScopeLoading && !accountScopeError && hasOverviewInsights) ? (
+                  <>
+                    <div className="cd-stats-row">
+                      {overviewStats.map((s, i) => (
+                        <div key={i} className="cd-sc">
+                          <div className="cd-sc-lbl">{s.lbl}</div>
+                          <div className={`cd-sc-val${s.highlight ? " cd-grad" : ""}`}>{s.val}</div>
+                          <div className="cd-sc-sub"><span className={s.highlight ? "cd-up" : ""}>{s.sub}</span></div>
+                        </div>
+                      ))}
+                    </div>
 
-            {/* Chart */}
-            <FollowerChart
-              period={chartPeriod}
-              lang={lang}
-              onPeriodChange={setChartPeriod}
-              title={followerChartTitle}
-              views={followerChartViews}
-            />
+                    <FollowerChart
+                      period={chartPeriod}
+                      lang={lang}
+                      onPeriodChange={setChartPeriod}
+                      title={followerChartTitle}
+                      views={followerChartViews}
+                    />
 
-            {/* Two-col */}
-            <div className="cd-two-col">
-              <div className="cd-card">
-                <div className="cd-card-hd">
-                  <h3>{t.feed.title}</h3>
-                  <a href="#" onClick={e => { e.preventDefault(); handleNavigate("activity"); }}>{t.feed.seeAll}</a>
+                    <div className="cd-two-col">
+                      <div className="cd-card">
+                        <div className="cd-card-hd">
+                          <h3>{t.feed.title}</h3>
+                          <a href="#" onClick={e => { e.preventDefault(); handleNavigate("activity"); }}>{t.feed.seeAll}</a>
+                        </div>
+                        <ClientOverviewRecentFeed
+                          items={overviewRecentFeed}
+                          lang={lang}
+                          emptyLabel={lang === "fr"
+                            ? "Les premières activités de votre campagne apparaîtront ici."
+                            : "Your campaign activity will appear here once it starts."}
+                        />
+                      </div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                        <div className="cd-card cd-plan-wrap">
+                          <div className="cd-plan-top">
+                            <div className="cd-plan-name">{subscriptionCard.planName}</div>
+                            <span className="cd-plan-tag">{subscriptionCard.statusLabel}</span>
+                          </div>
+                          <div className="cd-plan-price">{subscriptionCard.price}<small>{subscriptionCard.period}</small></div>
+                          <div className="cd-plan-rows">
+                            <div className="cd-pr"><span className="cd-pr-l">{t.plan.growth}</span><span className="cd-pr-v cd-a">{subscriptionCard.growthEstimate}</span></div>
+                            <div className="cd-pr"><span className="cd-pr-l">{subscriptionCard.billingDateLabel}</span><span className="cd-pr-v">{subscriptionCard.nextBilling}</span></div>
+                            <div className="cd-pr"><span className="cd-pr-l">{t.plan.support}</span><span className="cd-pr-v cd-g">{subscriptionCard.support}</span></div>
+                          </div>
+                          <button className="cd-btn cd-btn-primary cd-btn-full" onClick={() => handleNavigate("account")}>
+                            <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                            {t.plan.manage}
+                          </button>
+                        </div>
+                        <div className="cd-manager-card">
+                          <div className="cd-mgr-hd">
+                            <div className="cd-mgr-av">{accountManagerCard.initial}</div>
+                            <div><div className="cd-mgr-name">{accountManagerCard.name}</div><div className="cd-mgr-sub">{accountManagerCard.subtitle}</div></div>
+                          </div>
+                          <p className="cd-mgr-text">{accountManagerCard.text}</p>
+                          <div className="cd-mgr-btns">
+                            {accountManagerCard.emailHref ? (
+                              <a className="cd-btn cd-btn-soft" style={{fontSize:".78rem",padding:"7px 13px"}} href={accountManagerCard.emailHref}>
+                                <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                {accountManagerCard.emailLabel}
+                              </a>
+                            ) : (
+                              <button className="cd-btn cd-btn-soft" style={{fontSize:".78rem",padding:"7px 13px"}} disabled>
+                                <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                {accountManagerCard.emailLabel}
+                              </button>
+                            )}
+                            {accountManagerCard.bookingHref ? (
+                              <a className="cd-btn cd-btn-primary" style={{fontSize:".78rem",padding:"7px 13px"}} href={accountManagerCard.bookingHref} target="_blank" rel="noreferrer">
+                                <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                {accountManagerCard.bookingLabel}
+                              </a>
+                            ) : (
+                              <button className="cd-btn cd-btn-primary" style={{fontSize:".78rem",padding:"7px 13px"}} disabled>
+                                <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                {accountManagerCard.bookingLabel}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <div className="cd-manager-card">
+                <div className="cd-mgr-hd">
+                  <div className="cd-mgr-av">{accountManagerCard.initial}</div>
+                  <div><div className="cd-mgr-name">{accountManagerCard.name}</div><div className="cd-mgr-sub">{accountManagerCard.subtitle}</div></div>
                 </div>
-                <ClientOverviewRecentFeed
-                  items={overviewRecentFeed}
-                  lang={lang}
-                  emptyLabel={lang === "fr"
-                    ? "Les premières activités de votre campagne apparaîtront ici."
-                    : "Your campaign activity will appear here once it starts."}
-                />
+                <p className="cd-mgr-text">{accountManagerCard.text}</p>
+                <div className="cd-mgr-btns">
+                  {accountManagerCard.emailHref ? (
+                    <a className="cd-btn cd-btn-soft" style={{fontSize:".78rem",padding:"7px 13px"}} href={accountManagerCard.emailHref}>
+                      {accountManagerCard.emailLabel}
+                    </a>
+                  ) : null}
+                  {accountManagerCard.bookingHref ? (
+                    <a className="cd-btn cd-btn-primary" style={{fontSize:".78rem",padding:"7px 13px"}} href={accountManagerCard.bookingHref} target="_blank" rel="noreferrer">
+                      {accountManagerCard.bookingLabel}
+                    </a>
+                  ) : null}
+                </div>
               </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                {/* Plan card */}
-                <div className="cd-card cd-plan-wrap">
-                  <div className="cd-plan-top">
-                    <div className="cd-plan-name">{subscriptionCard.planName}</div>
-                    <span className="cd-plan-tag">{subscriptionCard.statusLabel}</span>
-                  </div>
-                  <div className="cd-plan-price">{subscriptionCard.price}<small>{subscriptionCard.period}</small></div>
-                  <div className="cd-plan-rows">
-                    <div className="cd-pr"><span className="cd-pr-l">{t.plan.growth}</span><span className="cd-pr-v cd-a">{subscriptionCard.growthEstimate}</span></div>
-                    <div className="cd-pr"><span className="cd-pr-l">{subscriptionCard.billingDateLabel}</span><span className="cd-pr-v">{subscriptionCard.nextBilling}</span></div>
-                    <div className="cd-pr"><span className="cd-pr-l">{t.plan.support}</span><span className="cd-pr-v cd-g">{subscriptionCard.support}</span></div>
-                  </div>
-                  <button className="cd-btn cd-btn-primary cd-btn-full" onClick={() => handleNavigate("account")}>
-                    <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                    {t.plan.manage}
-                  </button>
-                </div>
-                {/* Manager card */}
-                <div className="cd-manager-card">
-                  <div className="cd-mgr-hd">
-                    <div className="cd-mgr-av">{accountManagerCard.initial}</div>
-                    <div><div className="cd-mgr-name">{accountManagerCard.name}</div><div className="cd-mgr-sub">{accountManagerCard.subtitle}</div></div>
-                  </div>
-                  <p className="cd-mgr-text">{accountManagerCard.text}</p>
-                  <div className="cd-mgr-btns">
-                    {accountManagerCard.emailHref ? (
-                      <a className="cd-btn cd-btn-soft" style={{fontSize:".78rem",padding:"7px 13px"}} href={accountManagerCard.emailHref}>
-                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                        {accountManagerCard.emailLabel}
-                      </a>
-                    ) : (
-                      <button className="cd-btn cd-btn-soft" style={{fontSize:".78rem",padding:"7px 13px"}} disabled>
-                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                        {accountManagerCard.emailLabel}
-                      </button>
-                    )}
-                    {accountManagerCard.bookingHref ? (
-                      <a className="cd-btn cd-btn-primary" style={{fontSize:".78rem",padding:"7px 13px"}} href={accountManagerCard.bookingHref} target="_blank" rel="noreferrer">
-                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        {accountManagerCard.bookingLabel}
-                      </a>
-                    ) : (
-                      <button className="cd-btn cd-btn-primary" style={{fontSize:".78rem",padding:"7px 13px"}} disabled>
-                        <svg viewBox="0 0 24 24" width={13} height={13} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        {accountManagerCard.bookingLabel}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -1178,11 +1295,19 @@ export default function ClientDashboard({
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
-            <ClientActivityPanel
-              accountId={useLiveTargeting ? targetingAccountId : null}
-              lang={lang}
-              enabled={useLiveTargeting && Boolean(targetingAccountId)}
-            />
+            {agencyModeActive && overviewScope === "agency" ? (
+              <p className="cd-setup-note">
+                {lang === "fr"
+                  ? "Sélectionnez un compte Instagram pour consulter son activité détaillée."
+                  : "Select an Instagram account to view its detailed activity."}
+              </p>
+            ) : (
+              <ClientActivityPanel
+                accountId={useLiveTargeting ? targetingAccountId : null}
+                lang={lang}
+                enabled={useLiveTargeting && Boolean(targetingAccountId)}
+              />
+            )}
           </>
         )}
 
@@ -1192,6 +1317,14 @@ export default function ClientDashboard({
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
+            {agencyModeActive && overviewScope === "agency" ? (
+              <p className="cd-setup-note">
+                {lang === "fr"
+                  ? "Sélectionnez un compte Instagram pour gérer son ciblage."
+                  : "Select an Instagram account to manage its targeting."}
+              </p>
+            ) : (
+              <>
             <div className="cd-tg2-topbar">
               <p className="cd-tg2-intro">
                 {useLiveData && targetingUsername
@@ -1298,6 +1431,8 @@ export default function ClientDashboard({
                 </div>
               </div>
             </div>
+              </>
+            )}
           </div>
         )}
 
@@ -1577,6 +1712,32 @@ const CSS = `
 .cd-sc-val.cd-grad{background:linear-gradient(125deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .cd-sc-sub{font-size:.75rem;color:var(--ink-mute);margin-top:5px}
 .cd-up{color:var(--good);font-weight:700}
+
+/* Agency overview */
+.cd-agency-scope{display:flex;align-items:center;gap:10px;margin:0 0 16px;position:relative;z-index:20}
+.cd-agency-scope-label{font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute)}
+.cd-agency-scope-trigger{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;color:var(--ink);font-weight:700;cursor:pointer}
+.cd-agency-scope-panel{position:absolute;top:calc(100% + 8px);left:0;min-width:min(420px,92vw);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 18px 40px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:8px}
+.cd-agency-scope-search,.cd-agency-scope-filter,.cd-agency-table-search{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px;color:var(--ink)}
+.cd-agency-scope-list{max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.cd-agency-scope-option{background:transparent;border:0;border-radius:10px;padding:9px 11px;text-align:left;color:var(--ink);cursor:pointer}
+.cd-agency-scope-option.active,.cd-agency-scope-option:hover{background:rgba(90,108,245,.12)}
+.cd-agency-scope-empty{margin:0;padding:8px 11px;color:var(--ink-mute);font-size:.85rem}
+.cd-agency-overview{display:flex;flex-direction:column;gap:16px}
+.cd-agency-summary{grid-template-columns:repeat(5,minmax(0,1fr))}
+.cd-agency-packages .cd-agency-package-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.cd-agency-packages .cd-agency-package-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.cd-agency-followers-note{margin:0;color:var(--ink-mute);font-size:.85rem}
+.cd-agency-table-wrap{overflow:auto}
+.cd-agency-table{width:100%;border-collapse:collapse;font-size:.84rem}
+.cd-agency-table th,.cd-agency-table td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.cd-agency-table th{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-mute)}
+.cd-agency-table tr.needs-action td{background:rgba(244,80,107,.06)}
+.cd-agency-table-user{display:flex;align-items:center;gap:8px;background:transparent;border:0;color:var(--ink);cursor:pointer;font-weight:700}
+.cd-agency-table-av{width:28px;height:28px;border-radius:999px;display:grid;place-items:center;color:#fff;font-size:.78rem;font-weight:800}
+.cd-agency-table-tools{display:flex;gap:8px;align-items:center}
+.cd-agency-table-pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px}
+.cd-agency-table-empty,.cd-agency-loading,.cd-agency-error{padding:12px 0;color:var(--ink-mute)}
 
 /* Chart */
 .cd-chart-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:22px 22px 14px}

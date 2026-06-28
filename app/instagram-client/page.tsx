@@ -166,7 +166,8 @@ export default async function InstagramClientPage() {
   ]);
   const orderedAccounts = sortClientInstagramAccounts(accounts);
 
-  const primaryAccountId = orderedAccounts[0]?.accountId ?? "";
+  const agencyModeActive = orderedAccounts.length >= 2;
+  const primaryAccountId = agencyModeActive ? "" : (orderedAccounts[0]?.accountId ?? "");
   const [accountInsights, followerGrowth] = primaryAccountId
     ? await Promise.all([
       loadClientAccountInsights(primaryAccountId),
@@ -185,6 +186,7 @@ export default async function InstagramClientPage() {
       initialWorkspace={workspace}
       initialAccountInsights={accountInsights}
       initialFollowerGrowth={followerGrowth}
+      initialAgencyModeActive={agencyModeActive}
     />
   );
 }
