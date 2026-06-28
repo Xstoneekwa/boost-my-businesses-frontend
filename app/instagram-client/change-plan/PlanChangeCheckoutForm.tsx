@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { parseCheckoutApiResponse } from "@/lib/commercial/parse-checkout-api-response";
 import { COMMERCIAL_PLANS, isPlanKey, type PlanKey } from "@/lib/commercial/catalog";
+import type { CommercialPricingSnapshot } from "@/lib/commercial/pricing-snapshot";
+import CommercialDiscountBreakdown from "@/app/instagram-client/CommercialDiscountBreakdown";
 
 type PlanChangeQuote = {
   quoteId: string;
@@ -26,6 +28,7 @@ type PlanChangeQuote = {
   simulatedActivationAvailable?: boolean;
   activationMessageFr?: string | null;
   activationMessageEn?: string | null;
+  pricingSnapshot?: CommercialPricingSnapshot | null;
 };
 
 type CurrentPlan = {
@@ -205,6 +208,10 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
             <div>{quote.targetPlanLabel}</div>
             <div>{lang === "fr" ? "Coût jusqu'à l'échéance actuelle" : "Cost until current end date"} : {euros(quote.targetRemainingCostCents, lang)}</div>
           </div>
+
+          {quote.pricingSnapshot ? (
+            <CommercialDiscountBreakdown lang={lang} snapshot={quote.pricingSnapshot} showAgencyBanner />
+          ) : null}
 
           {quote.existingCustomerCreditCents > 0 ? (
             <div className="line">

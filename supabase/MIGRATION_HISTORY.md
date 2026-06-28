@@ -199,6 +199,23 @@ The RPC remains deployed but has never been invoked by runtime code.
 
 **Status on main production:** applied as remote version `20260627165132` / `client_email_materialize_atomic_preparent_validation`. Do **not** re-apply on production.
 
+## Pending local migration (TASK 17C)
+
+| Local version | Filename | Role |
+|---------------|----------|------|
+| `20260707120000` | `20260707120000_commercial_pricing_snapshot.sql` | `pricing_snapshot` JSONB on checkout sessions, entitlements, plan-change quotes; updates `activate_commercial_plan_change` to copy snapshot |
+
+**Status on main production:** apply during TASK 17C deployment (`commercial_pricing_snapshot`).
+
+**Note:** `commercial_plan_change_quotes` is not deployed on main production yet. When plan-change migrations land, also run:
+
+```sql
+alter table public.commercial_plan_change_quotes
+  add column if not exists pricing_snapshot jsonb null;
+```
+
+and redeploy the updated `activate_commercial_plan_change` RPC from repo history (TASK 17C branch) so activation copies `v_quote.pricing_snapshot`.
+
 ## Before any future migration
 
 1. Compare local `supabase/migrations/` with remote history (`supabase migration list` on the intended project, or read-only remote list).

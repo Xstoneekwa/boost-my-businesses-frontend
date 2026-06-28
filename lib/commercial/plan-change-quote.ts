@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildCommercialQuote } from "./pricing.ts";
+import type { CommercialPricingSnapshot } from "./pricing-snapshot.ts";
 import { buildPlanChangeProrationQuote } from "./plan-change-proration.ts";
 import { evaluatePlanChangeCapacity } from "./plan-change-capacity.ts";
 import { loadPlanChangeSource, clientVisiblePlanLabel } from "./plan-change-source.ts";
@@ -35,6 +36,7 @@ export type PlanChangeQuoteView = {
   simulatedActivationAvailable: boolean;
   activationMessageFr: string | null;
   activationMessageEn: string | null;
+  pricingSnapshot: CommercialPricingSnapshot | null;
 };
 
 function readNumber(value: unknown, fallback = 0) {
@@ -167,7 +169,8 @@ export async function createPlanChangeQuote(
     planKey: input.targetPlanKey,
     billingIntervalMonths: source.billingIntervalMonths,
     outreachAddonKey: null,
-    billableAccountCount: source.billableAccountCount,
+    pricingContext: "plan_change",
+    billableAccountCountOverride: source.billableAccountCount,
   });
   if ("error" in catalogQuote) {
     return {
@@ -228,6 +231,7 @@ export async function createPlanChangeQuote(
       metadata: {
         checkout_context: "existing_workspace_plan_change",
       },
+      pricing_snapshot: catalogQuote.pricingSnapshot,
     })
     .select("id,quote_expires_at")
     .maybeSingle<Row>();
@@ -269,6 +273,7 @@ export async function createPlanChangeQuote(
       proration,
       activationEval,
       expiresAt,
+      catalogQuote.pricingSnapshot,
     ),
   };
 }
@@ -280,6 +285,7 @@ function buildQuoteView(
   proration: ReturnType<typeof buildPlanChangeProrationQuote>,
   activationEval: ReturnType<typeof evaluatePlanChangeActivation>,
   expiresAt: string,
+  pricingSnapshot: CommercialPricingSnapshot | null,
 ): PlanChangeQuoteView {
   const activationMessages = !activationEval.ok
     ? planChangeActivationClientMessages(activationEval.reason)
@@ -309,6 +315,7 @@ function buildQuoteView(
     simulatedActivationAvailable: activationEval.ok && activationEval.mode === "simulated_test",
     activationMessageFr: activationMessages?.messageFr ?? null,
     activationMessageEn: activationMessages?.messageEn ?? null,
+    pricingSnapshot,
   };
 }
 
@@ -346,6 +353,9 @@ function mapQuoteRow(
     simulatedActivationAvailable: activationEval.ok && activationEval.mode === "simulated_test",
     activationMessageFr: activationMessages?.messageFr ?? null,
     activationMessageEn: activationMessages?.messageEn ?? null,
+    pricingSnapshot: (row.pricing_snapshot && typeof row.pricing_snapshot === "object")
+      ? row.pricing_snapshot as CommercialPricingSnapshot
+      : null,
   };
 }
 

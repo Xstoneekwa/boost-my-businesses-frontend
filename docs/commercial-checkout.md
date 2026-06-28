@@ -65,10 +65,23 @@ Stripe remplacera uniquement la gate `mode: simulated` par `payment_succeeded` v
 
 ## Mode Agence
 
-- **Affiché** : ≥ 2 comptes Instagram liés actifs/en onboarding
-- **Remise** : comptes facturables = comptes liés + entitlements réservés
+- **Affiché** : ≥ 2 comptes Instagram liés actifs/en onboarding (`agencyDisplayCount`)
+- **Remise volume** : comptes facturables = comptes liés + entitlements réservés (+1 uniquement pour un quote add-account)
+- **Entre 2 et 5 comptes liés** : Mode Agence actif, remise volume 0 % — message client :
+  `Mode Agence actif — remise volume disponible à partir de 6 comptes.`
+- **À partir de 6 comptes facturables** : tiers volume catalog (14 % / 22 % / …)
+- **Snapshot immuable** : `pricing_snapshot` JSONB sur checkout sessions, entitlements et plan-change quotes (`CommercialPricingSnapshot`, version `2026-06-25.1`)
+- **Règle remise** : `max(remise durée, remise volume)` — jamais de cumul ; égalité → durée prioritaire
+- **Prix accepté** : figé par snapshot ; aucun recalcul rétroactif si le nombre de comptes change
 
-Dérivation : `lib/commercial/agency.ts` — pas de vérité autonome dans `clients.metadata.agency_mode`.
+Compteurs canoniques : `lib/commercial/commercial-account-counts.ts`  
+Calcul central : `lib/commercial/pricing-snapshot.ts` + `lib/commercial/pricing.ts`
+
+Dérivation affichage : `lib/commercial/agency.ts` — pas de vérité autonome dans `clients.metadata.agency_mode`.
+
+### Risque checkout parallèle (documenté)
+
+Un seul entitlement `reserved` est autorisé par client (index unique). Les quotes non activées se recalculent à la demande ; seul le checkout activé fige le snapshot.
 
 ## Post-add-account (inchangé ce patch)
 

@@ -14,6 +14,8 @@ import {
   validatePublicCheckoutPassword,
 } from "@/lib/commercial/checkout-password";
 import { parseCheckoutApiResponse } from "@/lib/commercial/parse-checkout-api-response";
+import type { CommercialPricingSnapshot } from "@/lib/commercial/pricing-snapshot";
+import CommercialDiscountBreakdown from "@/app/instagram-client/CommercialDiscountBreakdown";
 import {
   COMMERCIAL_PLANS,
   OUTREACH_ADDONS,
@@ -42,6 +44,7 @@ type QuotePayload = {
   packLine: QuoteLine;
   outreachLine: QuoteLine | null;
   totalPeriodCents: number;
+  pricingSnapshot?: CommercialPricingSnapshot;
 };
 
 function euros(cents: number) {
@@ -355,6 +358,9 @@ export default function CommercialCheckoutForm(props: {
             {quote.appliedDiscountPercent > 0 && (
               <div>{lang === "fr" ? "Remise appliquée" : "Discount applied"} : -{Math.round(quote.appliedDiscountPercent * 100)} % ({quote.appliedDiscountType})</div>
             )}
+            {quote.pricingSnapshot ? (
+              <CommercialDiscountBreakdown lang={lang} snapshot={quote.pricingSnapshot} showAgencyBanner />
+            ) : null}
             <div>{euros(quote.packLine.monthlyDiscountedPriceCents)} € / {lang === "fr" ? "mois" : "mo"}</div>
             <div>{euros(quote.packLine.billingPeriodTotalCents)} € {renewalLabel(quote.billingIntervalMonths, lang)}</div>
           </div>

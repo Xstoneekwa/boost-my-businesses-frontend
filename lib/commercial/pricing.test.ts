@@ -10,7 +10,9 @@ test("Growth / Pro / Premium base monthly prices", () => {
     const quote = buildCommercialQuote({
       planKey,
       billingIntervalMonths: 1,
-      billableAccountCount: 1,
+      linkedAccountCount: 0,
+      reservedEntitlementCount: 0,
+      pricingContext: "first_purchase",
     });
     assert.ok(!("error" in quote));
     assert.equal(quote.packLine.baseMonthlyPriceCents, cents);
@@ -19,9 +21,10 @@ test("Growth / Pro / Premium base monthly prices", () => {
 });
 
 test("term discounts 3 / 6 / 12 months", () => {
-  const q3 = buildCommercialQuote({ planKey: "growth", billingIntervalMonths: 3, billableAccountCount: 1 });
-  const q6 = buildCommercialQuote({ planKey: "growth", billingIntervalMonths: 6, billableAccountCount: 1 });
-  const q12 = buildCommercialQuote({ planKey: "growth", billingIntervalMonths: 12, billableAccountCount: 1 });
+  const base = { planKey: "growth", linkedAccountCount: 0, reservedEntitlementCount: 0, pricingContext: "first_purchase" as const };
+  const q3 = buildCommercialQuote({ ...base, billingIntervalMonths: 3 });
+  const q6 = buildCommercialQuote({ ...base, billingIntervalMonths: 6 });
+  const q12 = buildCommercialQuote({ ...base, billingIntervalMonths: 12 });
   assert.equal(q3.packLine.monthlyDiscountedPriceCents, 13230);
   assert.equal(q6.packLine.monthlyDiscountedPriceCents, 11760);
   assert.equal(q12.packLine.monthlyDiscountedPriceCents, 11025);
@@ -32,7 +35,9 @@ test("Pro 3-month example with Outreach IA matches cent math", () => {
     planKey: "pro",
     billingIntervalMonths: 3,
     outreachAddonKey: "outreach_ai",
-    billableAccountCount: 1,
+    linkedAccountCount: 0,
+    reservedEntitlementCount: 0,
+    pricingContext: "first_purchase",
   });
   assert.equal(quote.packLine.monthlyDiscountedPriceCents, 17730);
   assert.equal(quote.packLine.billingPeriodTotalCents, 53190);
@@ -43,33 +48,45 @@ test("Pro 3-month example with Outreach IA matches cent math", () => {
 });
 
 test("Outreach Standard and Outreach IA are mutually exclusive at quote level", () => {
-  const standard = buildCommercialQuote({
+  const base = {
     planKey: "pro",
     billingIntervalMonths: 1,
-    outreachAddonKey: "outreach_standard",
-    billableAccountCount: 1,
-  });
-  const ai = buildCommercialQuote({
-    planKey: "pro",
-    billingIntervalMonths: 1,
-    outreachAddonKey: "outreach_ai",
-    billableAccountCount: 1,
-  });
+    linkedAccountCount: 0,
+    reservedEntitlementCount: 0,
+    pricingContext: "first_purchase" as const,
+  };
+  const standard = buildCommercialQuote({ ...base, outreachAddonKey: "outreach_standard" });
+  const ai = buildCommercialQuote({ ...base, outreachAddonKey: "outreach_ai" });
   assert.equal(standard.outreachLine?.label, "Outreach Standard");
   assert.equal(ai.outreachLine?.label, "Outreach IA");
   assert.notEqual(standard.outreachLine?.monthlyDiscountedPriceCents, ai.outreachLine?.monthlyDiscountedPriceCents);
 });
 
 test("best discount wins without stacking term and agency", () => {
-  const termOnly = buildCommercialQuote({ planKey: "pro", billingIntervalMonths: 3, billableAccountCount: 3 });
+  const termOnly = buildCommercialQuote({
+    planKey: "pro",
+    billingIntervalMonths: 3,
+    billableAccountCountOverride: 3,
+    pricingContext: "plan_change",
+  });
   assert.equal(termOnly.appliedDiscountPercent, 0.1);
   assert.equal(termOnly.appliedDiscountType, "term");
 
-  const agencyOnly = buildCommercialQuote({ planKey: "pro", billingIntervalMonths: 1, billableAccountCount: 6 });
+  const agencyOnly = buildCommercialQuote({
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    billableAccountCountOverride: 6,
+    pricingContext: "plan_change",
+  });
   assert.equal(agencyOnly.appliedDiscountPercent, 0.14);
   assert.equal(agencyOnly.appliedDiscountType, "agency");
 
-  const agencyWins = buildCommercialQuote({ planKey: "pro", billingIntervalMonths: 3, billableAccountCount: 6 });
+  const agencyWins = buildCommercialQuote({
+    planKey: "pro",
+    billingIntervalMonths: 3,
+    billableAccountCountOverride: 6,
+    pricingContext: "plan_change",
+  });
   assert.equal(agencyWins.appliedDiscountPercent, 0.14);
   assert.equal(agencyWins.appliedDiscountType, "agency");
   assert.equal(agencyWins.packLine.monthlyDiscountedPriceCents, 16942);
@@ -170,7 +187,9 @@ test("invalid outreach addon rejected", () => {
     planKey: "growth",
     billingIntervalMonths: 1,
     outreachAddonKey: "both",
-    billableAccountCount: 1,
+    linkedAccountCount: 0,
+    reservedEntitlementCount: 0,
+    pricingContext: "first_purchase",
   });
   assert.equal("error" in quote, true);
 });

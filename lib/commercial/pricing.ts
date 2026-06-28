@@ -1,17 +1,18 @@
 import {
   COMMERCIAL_PLANS,
   OUTREACH_ADDONS,
-  TERM_DISCOUNT_PERCENT,
   type BillingIntervalMonths,
   type DiscountType,
   type OutreachAddonKey,
   type PlanKey,
-  catalogSnapshot,
-  isBillingIntervalMonths,
-  isOutreachAddonKey,
-  isPlanKey,
 } from "./catalog.ts";
-import { agencyDiscountPercentForBillableCount } from "./agency.ts";
+import type { CommercialPricingContext } from "./commercial-account-counts.ts";
+import {
+  appliedDiscountKindToDbType,
+  buildCommercialPricingSnapshot,
+  snapshotCatalogEnvelope,
+  type CommercialPricingSnapshot,
+} from "./pricing-snapshot.ts";
 
 export type QuoteLine = {
   lineKey: "pack" | "outreach";
@@ -36,42 +37,29 @@ export type CommercialQuote = {
   packLine: QuoteLine;
   outreachLine: QuoteLine | null;
   totalPeriodCents: number;
-  catalogSnapshot: ReturnType<typeof catalogSnapshot>;
+  catalogSnapshot: ReturnType<typeof snapshotCatalogEnvelope>;
+  pricingSnapshot: CommercialPricingSnapshot;
 };
 
-function roundCents(value: number) {
-  return Math.round(value);
-}
-
-function resolveDiscount(termPercent: number, agencyPercent: number) {
-  if (agencyPercent > termPercent) {
-    return { percent: agencyPercent, type: "agency" as const };
-  }
-  if (termPercent > 0) {
-    return { percent: termPercent, type: "term" as const };
-  }
-  return { percent: 0, type: "none" as const };
-}
-
-function buildQuoteLine(input: {
+function buildQuoteLineFromSnapshot(input: {
   lineKey: "pack" | "outreach";
   label: string;
   baseMonthlyPriceCents: number;
   billingIntervalMonths: BillingIntervalMonths;
   discountPercent: number;
   discountType: DiscountType;
+  monthlyDiscountedPriceCents: number;
+  billingPeriodTotalCents: number;
 }): QuoteLine {
-  const monthlyDiscountedPriceCents = roundCents(input.baseMonthlyPriceCents * (1 - input.discountPercent));
-  const billingPeriodTotalCents = monthlyDiscountedPriceCents * input.billingIntervalMonths;
   return {
     lineKey: input.lineKey,
     label: input.label,
     baseMonthlyPriceCents: input.baseMonthlyPriceCents,
     discountPercent: input.discountPercent,
     discountType: input.discountType,
-    monthlyDiscountedPriceCents,
+    monthlyDiscountedPriceCents: input.monthlyDiscountedPriceCents,
     billingIntervalMonths: input.billingIntervalMonths,
-    billingPeriodTotalCents,
+    billingPeriodTotalCents: input.billingPeriodTotalCents,
   };
 }
 
@@ -79,62 +67,77 @@ export function buildCommercialQuote(input: {
   planKey: string;
   billingIntervalMonths: number;
   outreachAddonKey?: string | null;
-  billableAccountCount: number;
+  billableAccountCount?: number;
+  linkedAccountCount?: number;
+  reservedEntitlementCount?: number;
+  pricingContext?: CommercialPricingContext;
+  billableAccountCountOverride?: number | null;
 }): CommercialQuote | { ok: false; error: string } {
-  if (!isPlanKey(input.planKey)) {
-    return { ok: false, error: "invalid_plan_key" };
-  }
-  if (!isBillingIntervalMonths(input.billingIntervalMonths)) {
-    return { ok: false, error: "invalid_billing_interval" };
-  }
+  const pricingContext = input.pricingContext
+    ?? (input.billableAccountCount != null && input.linkedAccountCount == null
+      ? "plan_change"
+      : "first_purchase");
 
-  const outreachAddonKey: OutreachAddonKey | null = input.outreachAddonKey?.trim()
-    ? (isOutreachAddonKey(input.outreachAddonKey.trim()) ? input.outreachAddonKey.trim() as OutreachAddonKey : null)
-    : null;
-  if (input.outreachAddonKey?.trim() && !outreachAddonKey) {
-    return { ok: false, error: "invalid_outreach_addon" };
-  }
+  const linkedAccountCount = input.linkedAccountCount ?? 0;
+  const reservedEntitlementCount = input.reservedEntitlementCount ?? 0;
 
-  const plan = COMMERCIAL_PLANS[input.planKey];
-  const termDiscountPercent = TERM_DISCOUNT_PERCENT[input.billingIntervalMonths];
-  const agencyDiscountPercent = agencyDiscountPercentForBillableCount(input.billableAccountCount);
-  const discount = resolveDiscount(termDiscountPercent, agencyDiscountPercent);
-
-  const packLine = buildQuoteLine({
-    lineKey: "pack",
-    label: plan.displayName,
-    baseMonthlyPriceCents: plan.baseMonthlyPriceCents,
+  const snapshotResult = buildCommercialPricingSnapshot({
+    planKey: input.planKey,
     billingIntervalMonths: input.billingIntervalMonths,
-    discountPercent: discount.percent,
-    discountType: discount.type,
+    outreachAddonKey: input.outreachAddonKey,
+    linkedAccountCount,
+    reservedEntitlementCount,
+    pricingContext,
+    billableAccountCountOverride: input.billableAccountCountOverride ?? input.billableAccountCount ?? null,
   });
 
-  const outreachLine = outreachAddonKey
-    ? buildQuoteLine({
+  if ("error" in snapshotResult) {
+    return snapshotResult;
+  }
+
+  const snapshot = snapshotResult;
+  const appliedDiscountType = appliedDiscountKindToDbType(snapshot.appliedDiscountKind);
+  const plan = COMMERCIAL_PLANS[snapshot.planKey];
+  const outreachAddon = snapshot.outreachAddonKey ? OUTREACH_ADDONS[snapshot.outreachAddonKey] : null;
+
+  const packLine = buildQuoteLineFromSnapshot({
+    lineKey: "pack",
+    label: plan.displayName,
+    baseMonthlyPriceCents: snapshot.packBaseMonthlyCents,
+    billingIntervalMonths: snapshot.billingIntervalMonths,
+    discountPercent: snapshot.appliedDiscountPercent,
+    discountType: appliedDiscountType,
+    monthlyDiscountedPriceCents: snapshot.packFinalMonthlyCents,
+    billingPeriodTotalCents: snapshot.packPeriodTotalCents,
+  });
+
+  const outreachLine = outreachAddon
+    ? buildQuoteLineFromSnapshot({
       lineKey: "outreach",
-      label: OUTREACH_ADDONS[outreachAddonKey as OutreachAddonKey].displayNameFr,
-      baseMonthlyPriceCents: OUTREACH_ADDONS[outreachAddonKey as OutreachAddonKey].baseMonthlyPriceCents,
-      billingIntervalMonths: input.billingIntervalMonths,
-      discountPercent: discount.percent,
-      discountType: discount.type,
+      label: outreachAddon.displayNameFr,
+      baseMonthlyPriceCents: snapshot.outreachBaseMonthlyCents ?? outreachAddon.baseMonthlyPriceCents,
+      billingIntervalMonths: snapshot.billingIntervalMonths,
+      discountPercent: snapshot.appliedDiscountPercent,
+      discountType: appliedDiscountType,
+      monthlyDiscountedPriceCents: snapshot.outreachFinalMonthlyCents ?? outreachAddon.baseMonthlyPriceCents,
+      billingPeriodTotalCents: snapshot.outreachPeriodTotalCents ?? 0,
     })
     : null;
 
-  const totalPeriodCents = packLine.billingPeriodTotalCents + (outreachLine?.billingPeriodTotalCents ?? 0);
-
   return {
-    planKey: input.planKey,
-    billingIntervalMonths: input.billingIntervalMonths,
-    outreachAddonKey,
-    billableAccountCount: Math.max(1, input.billableAccountCount),
-    termDiscountPercent,
-    agencyDiscountPercent,
-    appliedDiscountPercent: discount.percent,
-    appliedDiscountType: discount.type,
+    planKey: snapshot.planKey,
+    billingIntervalMonths: snapshot.billingIntervalMonths,
+    outreachAddonKey: snapshot.outreachAddonKey,
+    billableAccountCount: snapshot.billableAccountCount,
+    termDiscountPercent: snapshot.durationDiscountPercent,
+    agencyDiscountPercent: snapshot.volumeDiscountPercent,
+    appliedDiscountPercent: snapshot.appliedDiscountPercent,
+    appliedDiscountType,
     packLine,
     outreachLine,
-    totalPeriodCents,
-    catalogSnapshot: catalogSnapshot(),
+    totalPeriodCents: snapshot.totalPeriodCents,
+    catalogSnapshot: snapshotCatalogEnvelope(),
+    pricingSnapshot: snapshot,
   };
 }
 
@@ -152,3 +155,5 @@ export function renewalLabelFr(months: BillingIntervalMonths) {
   if (months === 6) return "tous les 6 mois";
   return "tous les 12 mois";
 }
+
+export type { CommercialPricingSnapshot } from "./pricing-snapshot.ts";

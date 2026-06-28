@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { deriveAgencyModeSnapshot } from "./agency";
 import {
   COMMERCIAL_PLANS,
   OUTREACH_ADDONS,
@@ -35,6 +34,7 @@ import {
   insertCheckoutAuditEvent,
 } from "./entitlements";
 import { buildCommercialQuote } from "./pricing";
+import { pricingSnapshotAuditPayload } from "./pricing-snapshot";
 import { validatePublicCheckoutPassword } from "./checkout-password";
 import { confirmCommercialPayment } from "./confirm-commercial-payment.ts";
 import { canUseSimulatedCheckoutForEmail, simulatedCheckoutClientMessages } from "./simulated-checkout-guard.ts";
@@ -481,7 +481,9 @@ export async function activateClientAccountEntitlementFromCheckout(
       planKey: input.planKey,
       billingIntervalMonths: input.billingIntervalMonths,
       outreachAddonKey: input.outreachAddonKey,
-      billableAccountCount: 1,
+      linkedAccountCount: 0,
+      reservedEntitlementCount: 0,
+      pricingContext: "first_purchase",
     });
     if ("error" in quoteResult) {
       return activationFailure(400, quoteResult.error, {
@@ -583,15 +585,13 @@ export async function activateClientAccountEntitlementFromCheckout(
     } else {
       const linkedCount = clientId ? await countLinkedInstagramAccountsForClient(supabase, clientId) : 0;
       const reservedCount = clientId ? await countReservedEntitlementsForClient(supabase, clientId) : 0;
-      const agencySnapshot = deriveAgencyModeSnapshot({
-        linkedAccountCount: linkedCount,
-        reservedEntitlementCount: reservedCount,
-      });
       const pricedQuote = buildCommercialQuote({
         planKey: input.planKey,
         billingIntervalMonths: input.billingIntervalMonths,
         outreachAddonKey: input.outreachAddonKey,
-        billableAccountCount: agencySnapshot.billableAccountCount + 1,
+        linkedAccountCount: linkedCount,
+        reservedEntitlementCount: reservedCount,
+        pricingContext: checkoutContext === "public_new_workspace" ? "first_purchase" : "new_account",
       });
       if ("error" in pricedQuote) {
         return activationFailure(400, pricedQuote.error, {
@@ -747,6 +747,7 @@ export async function activateClientAccountEntitlementFromCheckout(
           outreach_period_total_cents: finalQuote.outreachLine?.billingPeriodTotalCents ?? null,
           total_period_cents: finalQuote.totalPeriodCents,
           catalog_snapshot: finalQuote.catalogSnapshot,
+          pricing_snapshot: finalQuote.pricingSnapshot,
           metadata: {
             mode: "simulated",
             payment_provider: "simulated",
@@ -793,6 +794,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         outreach_period_total_cents: finalQuote.outreachLine?.billingPeriodTotalCents ?? null,
         total_period_cents: finalQuote.totalPeriodCents,
         catalog_snapshot: finalQuote.catalogSnapshot,
+        pricing_snapshot: finalQuote.pricingSnapshot,
         status: "entitlement_reserved",
         metadata: {
           growth_estimate_label: plan.growthEstimateLabelFr,
@@ -817,10 +819,10 @@ export async function activateClientAccountEntitlementFromCheckout(
       entitlementId = readString(entitlement.id);
     }
     const auditPayload = {
+      ...pricingSnapshotAuditPayload(finalQuote.pricingSnapshot),
       plan_key: finalQuote.planKey,
       billing_interval_months: finalQuote.billingIntervalMonths,
       outreach_addon_key: finalQuote.outreachAddonKey,
-      total_period_cents: finalQuote.totalPeriodCents,
       idempotency_key: tracker.idempotencyKey,
       flow_type: input.flowType,
       checkout_context: checkoutContext,

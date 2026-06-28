@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientNotificationsPanel from "./ClientNotificationsPanel";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
+import ClientAgencyModeBanner from "./ClientAgencyModeBanner";
 import type { ClientAccountNotificationsProjection } from "@/lib/instagram-client/client-account-notifications";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
 import ClientActivityPanel from "./ClientActivityPanel";
@@ -1076,6 +1077,7 @@ export default function ClientDashboard({
 
         {activeView === "overview" && (
           <div className="cd-view">
+            <ClientAgencyModeBanner lang={lang} />
             <ClientAccountsSection lang={lang} accounts={hasLinkedInstagramAccount ? initialAccounts : []} />
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>

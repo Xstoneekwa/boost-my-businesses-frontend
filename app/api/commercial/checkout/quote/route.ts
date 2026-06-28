@@ -47,13 +47,15 @@ export async function POST(request: Request) {
     const linkedCount = clientId ? await countLinkedInstagramAccountsForClient(supabase, clientId) : 0;
     const reservedCount = clientId ? await countReservedEntitlementsForClient(supabase, clientId) : 0;
     const agencySnapshot = deriveAgencyModeSnapshot({ linkedAccountCount: linkedCount, reservedEntitlementCount: reservedCount });
-    const billableAccountCount = agencySnapshot.billableAccountCount + 1;
+    const pricingContext = flowType === "additional_account" ? "new_account" as const : "first_purchase" as const;
 
     const quote = buildCommercialQuote({
       planKey,
       billingIntervalMonths,
       outreachAddonKey,
-      billableAccountCount,
+      linkedAccountCount: linkedCount,
+      reservedEntitlementCount: reservedCount,
+      pricingContext,
     });
     if ("error" in quote) {
       return jsonError("Invalid checkout selection.", 400, {
