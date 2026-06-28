@@ -592,6 +592,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         linkedAccountCount: linkedCount,
         reservedEntitlementCount: reservedCount,
         pricingContext: checkoutContext === "public_new_workspace" ? "first_purchase" : "new_account",
+        reservedRepresentsQuotedPurchase: reservedCount > 0,
       });
       if ("error" in pricedQuote) {
         return activationFailure(400, pricedQuote.error, {

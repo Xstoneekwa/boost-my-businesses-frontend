@@ -72,6 +72,7 @@ export function buildCommercialQuote(input: {
   reservedEntitlementCount?: number;
   pricingContext?: CommercialPricingContext;
   billableAccountCountOverride?: number | null;
+  reservedRepresentsQuotedPurchase?: boolean;
 }): CommercialQuote | { ok: false; error: string } {
   const pricingContext = input.pricingContext
     ?? (input.billableAccountCount != null && input.linkedAccountCount == null
@@ -89,6 +90,7 @@ export function buildCommercialQuote(input: {
     reservedEntitlementCount,
     pricingContext,
     billableAccountCountOverride: input.billableAccountCountOverride ?? input.billableAccountCount ?? null,
+    reservedRepresentsQuotedPurchase: input.reservedRepresentsQuotedPurchase,
   });
 
   if ("error" in snapshotResult) {

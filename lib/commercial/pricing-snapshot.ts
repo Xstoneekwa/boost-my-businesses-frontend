@@ -137,6 +137,7 @@ export function buildCommercialPricingSnapshot(input: {
   reservedEntitlementCount: number;
   pricingContext: CommercialPricingContext;
   billableAccountCountOverride?: number | null;
+  reservedRepresentsQuotedPurchase?: boolean;
   calculatedAt?: string;
 }): CommercialPricingSnapshot | { ok: false; error: string } {
   if (!isPlanKey(input.planKey)) {
@@ -160,6 +161,7 @@ export function buildCommercialPricingSnapshot(input: {
     reservedEntitlementCount: input.reservedEntitlementCount,
     pricingContext: input.pricingContext,
     billableAccountCountOverride: input.billableAccountCountOverride,
+    reservedRepresentsQuotedPurchase: input.reservedRepresentsQuotedPurchase,
   });
 
   const plan = COMMERCIAL_PLANS[input.planKey];

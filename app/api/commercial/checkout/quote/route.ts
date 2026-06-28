@@ -56,6 +56,7 @@ export async function POST(request: Request) {
       linkedAccountCount: linkedCount,
       reservedEntitlementCount: reservedCount,
       pricingContext,
+      reservedRepresentsQuotedPurchase: flowType === "additional_account" && reservedCount > 0,
     });
     if ("error" in quote) {
       return jsonError("Invalid checkout selection.", 400, {

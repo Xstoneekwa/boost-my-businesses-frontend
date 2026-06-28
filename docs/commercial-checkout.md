@@ -66,7 +66,7 @@ Stripe remplacera uniquement la gate `mode: simulated` par `payment_succeeded` v
 ## Mode Agence
 
 - **Affiché** : ≥ 2 comptes Instagram liés actifs/en onboarding (`agencyDisplayCount`)
-- **Remise volume** : comptes facturables = comptes liés + entitlements réservés (+1 uniquement pour un quote add-account)
+- **Comptes facturables** : comptes liés + entitlements réservés (+1 uniquement pour un quote add-account **si** la réservation ne représente pas déjà l'achat en cours)
 - **Entre 2 et 5 comptes liés** : Mode Agence actif, remise volume 0 % — message client :
   `Mode Agence actif — remise volume disponible à partir de 6 comptes.`
 - **À partir de 6 comptes facturables** : tiers volume catalog (14 % / 22 % / …)
@@ -82,6 +82,13 @@ Dérivation affichage : `lib/commercial/agency.ts` — pas de vérité autonome 
 ### Risque checkout parallèle (documenté)
 
 Un seul entitlement `reserved` est autorisé par client (index unique). Les quotes non activées se recalculent à la demande ; seul le checkout activé fige le snapshot.
+
+Formule anti double-compte :
+
+```text
+billable = linked + reserved + projectedPurchaseSlots
+projectedPurchaseSlots = 0 si reserved représente déjà l'achat quoté, sinon 1 (first/new account)
+```
 
 ## Post-add-account (inchangé ce patch)
 

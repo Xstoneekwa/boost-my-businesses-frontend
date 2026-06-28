@@ -176,13 +176,95 @@ test("dashboard 6+ shows tier and volume message", () => {
   assert.match(snapshot.clientMessageFr, /palier volume 6-10/i);
 });
 
-test("parallel checkout risk: reserved entitlement included in billable count", () => {
+test("parallel checkout risk: disjoint reserved + projected purchase counts as separate slots", () => {
   const counts = resolveCommercialAccountCounts({
-    linkedAccountCount: 1,
+    linkedAccountCount: 5,
     reservedEntitlementCount: 1,
     pricingContext: "new_account",
+    reservedRepresentsQuotedPurchase: false,
   });
-  assert.equal(counts.billableAccountCount, 3);
+  assert.equal(counts.billableAccountCount, 7);
+});
+
+test("5 linked, zero reserved, add-account projected purchase reaches tier -14%", () => {
+  const snapshot = buildCommercialPricingSnapshot({
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    linkedAccountCount: 5,
+    reservedEntitlementCount: 0,
+    pricingContext: "new_account",
+  });
+  assert.ok(!("error" in snapshot));
+  assert.equal(snapshot.billableAccountCount, 6);
+  assert.equal(snapshot.volumeDiscountPercent, 0.14);
+  assert.equal(snapshot.volumeDiscountTierLabel, "6-10");
+});
+
+test("5 linked, reserved from another checkout, add-account quote prices a new disjoint slot", () => {
+  const snapshot = buildCommercialPricingSnapshot({
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    linkedAccountCount: 5,
+    reservedEntitlementCount: 1,
+    pricingContext: "new_account",
+    reservedRepresentsQuotedPurchase: false,
+  });
+  assert.equal(snapshot.billableAccountCount, 7);
+});
+
+test("5 linked, reserved from current checkout, projected purchase is not double-counted", () => {
+  const snapshot = buildCommercialPricingSnapshot({
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    linkedAccountCount: 5,
+    reservedEntitlementCount: 1,
+    pricingContext: "new_account",
+    reservedRepresentsQuotedPurchase: true,
+  });
+  assert.equal(snapshot.billableAccountCount, 6);
+  assert.equal(snapshot.volumeDiscountPercent, 0.14);
+});
+
+test("linked and reserved are disjoint commercial slots; reserved covers quoted purchase without +1", () => {
+  const engagedOnly = resolveCommercialAccountCounts({
+    linkedAccountCount: 4,
+    reservedEntitlementCount: 1,
+    pricingContext: "dashboard_readonly",
+  });
+  assert.equal(engagedOnly.billableAccountCount, 5);
+  assert.equal(engagedOnly.projectedPurchaseSlots, 0);
+
+  const quotedWithReserved = resolveCommercialAccountCounts({
+    linkedAccountCount: 4,
+    reservedEntitlementCount: 1,
+    pricingContext: "new_account",
+    reservedRepresentsQuotedPurchase: true,
+  });
+  assert.equal(quotedWithReserved.billableAccountCount, 5);
+});
+
+test("two open checkouts: only one reserved entitlement is allowed per client", () => {
+  const firstQuote = buildCommercialQuote({
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    linkedAccountCount: 5,
+    reservedEntitlementCount: 0,
+    pricingContext: "new_account",
+  });
+  assert.ok(!("error" in firstQuote));
+  assert.equal(firstQuote.pricingSnapshot.billableAccountCount, 6);
+
+  const blockedSecondQuote = buildCommercialQuote({
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    linkedAccountCount: 5,
+    reservedEntitlementCount: 1,
+    pricingContext: "new_account",
+    reservedRepresentsQuotedPurchase: true,
+  });
+  assert.ok(!("error" in blockedSecondQuote));
+  assert.equal(blockedSecondQuote.pricingSnapshot.billableAccountCount, 6);
+  assert.equal(blockedSecondQuote.pricingSnapshot.volumeDiscountPercent, 0.14);
 });
 
 test("client cannot force tier via buildCommercialQuote without override from trusted source", () => {
