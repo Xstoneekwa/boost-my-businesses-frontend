@@ -40,6 +40,35 @@ async function releaseIneligibleOnboardingAssignment(
   return { released: payload.ok === true, reason: readString(payload.reason, "") };
 }
 
+async function hasOpenOnboardingAssignment(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  accountId: string,
+) {
+  const { data: existing } = await supabase
+    .from("account_assignments")
+    .select("id,device_id,status")
+    .eq("account_id", accountId)
+    .in("status", ["pending", "reserved", "active"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (!existing?.id) return false;
+  return await isAssignmentOnPhysicalPhone(supabase, existing);
+}
+
+export async function retryOnboardingAutoAssignmentIfPending(accountId: string) {
+  const supabase = createSupabaseClient();
+  if (await hasOpenOnboardingAssignment(supabase, accountId)) {
+    return { retried: false, assigned: true, reason: "already_assigned" };
+  }
+  const assignment = await tryAutoAssignOnboardingSchedule(accountId);
+  return {
+    retried: true,
+    assigned: assignment.assigned,
+    reason: readString(assignment.reason, assignment.assigned ? "onboarding_auto_assigned" : "pending_setup"),
+  };
+}
+
 export async function tryAutoAssignOnboardingSchedule(
   accountId: string,
   target: { deviceId?: string; appInstanceId?: string; startsAt?: string; endsAt?: string } = {},

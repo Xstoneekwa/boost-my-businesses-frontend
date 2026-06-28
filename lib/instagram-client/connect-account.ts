@@ -12,6 +12,7 @@ import {
   projectClientReadinessStatus,
   type ClientReadinessStatus,
 } from "./client-readiness-projection";
+import { retryOnboardingAutoAssignmentIfPending } from "@/lib/instagram-dashboard/onboarding-schedule";
 import { attachOperationPending, reloadClientAccountSnapshot } from "./client-account-refresh";
 import {
   deadlineForClientConnectAssignment,
@@ -71,6 +72,7 @@ export async function checkClientAccountReadiness(input: {
   clientId: string;
 }) {
   const supabase = createSupabaseClient();
+  await retryOnboardingAutoAssignmentIfPending(input.accountId);
   const readiness = await runReadinessNow(supabase, {
     accountId: input.accountId,
     actorId: input.userId,
