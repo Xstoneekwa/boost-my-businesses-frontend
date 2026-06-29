@@ -1,6 +1,8 @@
 import {
   CLIENT_EMAIL_CATEGORY_LABELS,
   CLIENT_EMAIL_LOCKED_FROM,
+  CLIENT_EMAIL_NEEDS_MORE_DEFAULT_BODY_TEXT,
+  CLIENT_EMAIL_NEEDS_MORE_DEFAULT_SUBJECT,
   CLIENT_EMAIL_TEMPLATE_CATEGORIES,
   type ClientEmailTemplateCategory,
 } from "./client-email-constants.ts";
@@ -95,9 +97,9 @@ function buildCategoryPlaceholders(settings: ResolvedTransactionalDeliverySettin
     categoryLabel: CLIENT_EMAIL_CATEGORY_LABELS[category],
     version: 0,
     status: "retired" as const,
-    subject: "",
-    bodyText: "",
-    bodyHtml: "",
+    subject: category === "needs_more_target_accounts" ? CLIENT_EMAIL_NEEDS_MORE_DEFAULT_SUBJECT : "",
+    bodyText: category === "needs_more_target_accounts" ? CLIENT_EMAIL_NEEDS_MORE_DEFAULT_BODY_TEXT : "",
+    bodyHtml: category === "needs_more_target_accounts" ? textToSafeHtml(CLIENT_EMAIL_NEEDS_MORE_DEFAULT_BODY_TEXT) : "",
     allowedVariables: listAllowedVariablesForCategory(),
     configured: false,
     fromEmail: settings.activeFromEmail,

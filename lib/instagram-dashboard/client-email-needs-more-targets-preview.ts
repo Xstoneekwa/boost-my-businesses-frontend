@@ -5,6 +5,11 @@ import {
   resolveClientCommunicationEmail,
 } from "./client-communication-email.ts";
 import {
+  computeNeedsMoreFirstReminderDueAt,
+  evaluateNeedsMoreReminderDue,
+  type NeedsMoreReminderDueReason,
+} from "./client-email-needs-more-24h-due.ts";
+import {
   CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCES_TABLE,
   listDueReminderIndexes,
   planNeedsMoreTargetsEpisodeReconciliation,
@@ -19,6 +24,7 @@ import {
   NEEDS_MORE_TARGET_ACCOUNTS_ACTION_TYPE,
   NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
   loadActiveNeedsMoreTargetAccountsAction,
+  resolveNeedsMoreActiveSince,
 } from "./needs-more-target-accounts.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
 
@@ -58,6 +64,7 @@ export type NeedsMoreTargetsPreviewAccountRow = {
   deliveryState: NeedsMoreTargetsDeliveryState;
   nextDueAt: string | null;
   nextReminderIndex: number | null;
+  dueReason: NeedsMoreReminderDueReason | null;
   reason: string;
 };
 
@@ -125,26 +132,36 @@ function deriveDeliveryState(input: {
 }
 
 function computeNextTheoreticalDue(
-  episode: NeedsMoreTargetsSequenceRecord,
-  now: Date,
+  input: {
+    activeEpisode: NeedsMoreTargetsSequenceRecord | null;
+    needsMoreActiveSince: string | null;
+    now: Date;
+  },
 ) {
-  const startedAt = new Date(episode.startedAt);
-  const lastDone = episode.lastCompletedReminderIndex ?? -1;
-  for (let index = 0; index <= 5; index += 1) {
+  const startedAtIso = input.activeEpisode?.startedAt ?? input.needsMoreActiveSince;
+  if (!startedAtIso) {
+    return { reminderIndex: null, dueAt: null };
+  }
+  const startedAt = new Date(startedAtIso);
+  const lastDone = input.activeEpisode?.lastCompletedReminderIndex ?? -1;
+  for (const index of [0]) {
     if (index <= lastDone) continue;
     const scheduledFor = scheduledForAfterEpisodeStart(startedAt, index);
     if (!scheduledFor) continue;
-    if (scheduledFor.getTime() > now.getTime()) {
+    if (scheduledFor.getTime() > input.now.getTime()) {
       return { reminderIndex: index, dueAt: scheduledFor.toISOString() };
     }
   }
   const dueNow = listDueReminderIndexes({
     startedAt,
-    now,
+    now: input.now,
     lastCompletedReminderIndex: lastDone,
   });
   const nextIndex = dueNow.find((index) => index > lastDone) ?? null;
-  if (nextIndex == null) return { reminderIndex: null, dueAt: null };
+  if (nextIndex == null) {
+    const fallbackDueAt = computeNeedsMoreFirstReminderDueAt(startedAtIso);
+    return { reminderIndex: 0, dueAt: fallbackDueAt };
+  }
   const scheduledFor = scheduledForAfterEpisodeStart(startedAt, nextIndex);
   return {
     reminderIndex: nextIndex,
@@ -405,6 +422,8 @@ export async function loadNeedsMoreTargetsEmailLifecyclePreview(
       ? maskEmailForDisplay(projectedEmail.display)
       : null;
 
+    const needsMoreActiveSince = resolveNeedsMoreActiveSince(activeAction);
+
     const plan = planNeedsMoreTargetsEpisodeReconciliation({
       accountId,
       clientId: context.clientId,
@@ -412,6 +431,7 @@ export async function loadNeedsMoreTargetsEmailLifecyclePreview(
       eligibleTargetCount,
       needsMoreSignalActive,
       sourceActionId: readString(activeAction?.id, "") || null,
+      needsMoreActiveSince,
       activeEpisode,
       now,
     });
@@ -424,8 +444,21 @@ export async function loadNeedsMoreTargetsEmailLifecyclePreview(
       clientEmailAvailable: projectedEmail.available,
     });
 
+    const dueEvaluation = evaluateNeedsMoreReminderDue({
+      needsMoreActiveSince,
+      now,
+      eligibleTargetCount,
+      needsMoreSignalActive,
+      accountCanceled,
+      clientEmailAvailable: projectedEmail.available,
+    });
+
     const closeAction = plan.actions.find((action) => action.type === "close_episode");
-    const nextDue = activeEpisode ? computeNextTheoreticalDue(activeEpisode, now) : { reminderIndex: null, dueAt: null };
+    const nextDue = computeNextTheoreticalDue({
+      activeEpisode,
+      needsMoreActiveSince,
+      now,
+    });
 
     items.push({
       instagramUsername: context.instagramUsername,
@@ -440,6 +473,7 @@ export async function loadNeedsMoreTargetsEmailLifecyclePreview(
       deliveryState,
       nextDueAt: nextDue.dueAt,
       nextReminderIndex: nextDue.reminderIndex,
+      dueReason: dueEvaluation.reason,
       reason: buildPreviewReason({
         lifecycleDecision,
         deliveryState,

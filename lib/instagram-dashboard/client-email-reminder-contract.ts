@@ -1,6 +1,7 @@
 import {
   CLIENT_EMAIL_MAX_REMINDER_INDEX,
   CLIENT_EMAIL_MAX_SENDS_PER_NEED,
+  CLIENT_EMAIL_PRODUCT_ACTIVE_NEEDS_MORE_REMINDER_INDEXES,
   CLIENT_EMAIL_REMINDER_OFFSETS_HOURS,
 } from "./client-email-constants.ts";
 import { NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD } from "./needs-more-target-accounts.ts";
@@ -53,6 +54,16 @@ export function canScheduleNeedsMoreTargetsReminder(input: {
 
 export function maxNeedsMoreTargetsEmailSends(): number {
   return CLIENT_EMAIL_MAX_SENDS_PER_NEED;
+}
+
+export function maxProductActiveNeedsMoreEmailSends(): number {
+  return CLIENT_EMAIL_PRODUCT_ACTIVE_NEEDS_MORE_REMINDER_INDEXES.length;
+}
+
+export function isProductActiveNeedsMoreReminderIndex(reminderIndex: number): boolean {
+  return CLIENT_EMAIL_PRODUCT_ACTIVE_NEEDS_MORE_REMINDER_INDEXES.includes(
+    reminderIndex as (typeof CLIENT_EMAIL_PRODUCT_ACTIVE_NEEDS_MORE_REMINDER_INDEXES)[number],
+  );
 }
 
 export const NEEDS_MORE_TARGETS_REMINDER_SCHEDULE = CLIENT_EMAIL_REMINDER_OFFSETS_HOURS;

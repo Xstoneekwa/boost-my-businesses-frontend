@@ -381,10 +381,11 @@ test("active episode keeps would_keep_active when stop conditions are not met", 
       resolvedAt: null,
       canceledAt: null,
       closeReason: null,
-      nextReminderIndex: 1,
-      lastCompletedReminderIndex: 0,
+      nextReminderIndex: 0,
+      lastCompletedReminderIndex: null,
       episodeKey: "episode-key",
     },
+    needsMoreActiveSince: "2026-06-01T12:00:00.000Z",
     now: new Date("2026-06-03T12:00:00.000Z"),
   });
   assert.equal(plan.actions.some((action) => action.type === "close_episode"), false);

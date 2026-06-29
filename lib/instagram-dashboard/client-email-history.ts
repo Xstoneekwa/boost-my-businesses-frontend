@@ -25,6 +25,7 @@ import {
   type NormalizedClientEmailFilter,
 } from "./client-email-filter.ts";
 import { maskEmailForDisplay } from "./client-email-test-config.ts";
+import { buildNeedsMoreTargetingDashboardUrl } from "./client-email-needs-more-targeting-url.ts";
 
 export { normalizeClientEmailFilter, type NormalizedClientEmailFilter } from "./client-email-filter.ts";
 
@@ -97,6 +98,12 @@ export type ClientEmailHistoryDetail = ClientEmailHistoryListItem & {
     providerMessageId: string | null;
     lastErrorRedacted: string | null;
   }>;
+  needsMoreLifecycle?: {
+    dueAt: string | null;
+    lifecycleLabel: string;
+    resolutionReasonRedacted: string | null;
+    targetingDeepLink: string | null;
+  };
 };
 
 function readCategory(value: unknown): ClientEmailTemplateCategory | null {
@@ -178,6 +185,40 @@ function projectListItem(
     intentKind,
     isTestDelivery,
     deliveryBadgeLabel: isTestDelivery ? CLIENT_EMAIL_TEST_DELIVERY_LABEL : null,
+  };
+}
+
+function projectNeedsMoreLifecycleDetail(input: {
+  category: ClientEmailTemplateCategory;
+  accountId: string;
+  intentStatus: ClientEmailIntentStatus;
+  scheduledFor: string | null;
+  resolvedAt: string | null;
+}): ClientEmailHistoryDetail["needsMoreLifecycle"] | undefined {
+  if (input.category !== "needs_more_target_accounts") return undefined;
+  const lifecycleLabel = (() => {
+    if (input.intentStatus === "canceled") return "canceled";
+    if (input.intentStatus === "failed") return "failed";
+    if (input.intentStatus === "sent") return "sent";
+    if (input.intentStatus === "scheduled") return "scheduled";
+    if (input.intentStatus === "pending") {
+      if (input.scheduledFor) {
+        const dueAt = new Date(input.scheduledFor);
+        if (!Number.isNaN(dueAt.getTime()) && dueAt.getTime() > Date.now()) {
+          return "not_due";
+        }
+      }
+      return "ready_to_materialize";
+    }
+    return "not_due";
+  })();
+  return {
+    dueAt: input.scheduledFor,
+    lifecycleLabel,
+    resolutionReasonRedacted: input.intentStatus === "canceled"
+      ? (input.resolvedAt ? "sequence_resolved_or_canceled" : "canceled_before_dispatch")
+      : null,
+    targetingDeepLink: input.accountId ? buildNeedsMoreTargetingDashboardUrl(input.accountId) : null,
   };
 }
 
@@ -378,13 +419,17 @@ export async function loadClientEmailHistoryDetail(
   const intentProviderMessageId = readString(row.provider_message_id, "") || null;
   const intentLastError = readString(row.last_error_redacted, "") || null;
 
+  const intentStatus = readString(row.status, "pending") as ClientEmailIntentStatus;
+  const scheduledFor = readString(row.scheduled_for, "") || null;
+  const resolvedAt = readString(row.resolved_at, "") || null;
+
   return {
     ok: true,
     detail: {
       ...base,
-      scheduledFor: readString(row.scheduled_for, "") || null,
+      scheduledFor,
       sentAt: readString(row.sent_at, "") || null,
-      resolvedAt: readString(row.resolved_at, "") || null,
+      resolvedAt,
       snapshotSubject: readString(row.snapshot_subject, ""),
       snapshotBodyText: readString(row.snapshot_body_text, ""),
       snapshotBodyHtml: readString(row.snapshot_body_html, ""),
@@ -393,6 +438,13 @@ export async function loadClientEmailHistoryDetail(
       providerMessageId: intentProviderMessageId ?? latestEvent?.providerMessageId ?? null,
       lastErrorRedacted: intentLastError ?? latestEvent?.lastErrorRedacted ?? null,
       timeline,
+      needsMoreLifecycle: projectNeedsMoreLifecycleDetail({
+        category: base.category,
+        accountId,
+        intentStatus,
+        scheduledFor,
+        resolvedAt,
+      }),
     },
   };
 }

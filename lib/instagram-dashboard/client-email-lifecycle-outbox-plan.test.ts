@@ -219,9 +219,10 @@ test("needs-more pre-watermark signal is blocked_legacy_pre_watermark", () => {
   assert.equal(rows[0]?.decision, "blocked_legacy_pre_watermark");
 });
 
-test("needs-more post-watermark with CT=5 plans initial then reminders up to max 6", () => {
+test("needs-more post-watermark with CT=5 opens episode; first send only after 24h", () => {
   const startedAt = new Date("2026-07-01T00:00:00.000Z");
-  const farFuture = new Date("2026-12-01T00:00:00.000Z");
+  const beforeDue = new Date(startedAt.getTime() + 23 * 60 * 60 * 1000);
+  const atDue = new Date(startedAt.getTime() + 24 * 60 * 60 * 1000);
   const episode = {
     id: "episode-1",
     accountId: "acct-1",
@@ -238,12 +239,17 @@ test("needs-more post-watermark with CT=5 plans initial then reminders up to max
     lastCompletedReminderIndex: null,
     episodeKey: "needs_more_targets:acct-1:2026-07-01T00:00:00.000Z",
   };
+  assert.deepEqual(listDueReminderIndexes({
+    startedAt,
+    now: beforeDue,
+    lastCompletedReminderIndex: null,
+  }), []);
   const dueIndexes = listDueReminderIndexes({
     startedAt,
-    now: farFuture,
+    now: atDue,
     lastCompletedReminderIndex: null,
   });
-  assert.equal(dueIndexes.length, 6);
+  assert.deepEqual(dueIndexes, [0]);
   const plan = planNeedsMoreTargetsEpisodeReconciliation({
     accountId: "acct-1",
     clientId: "client-1",
@@ -251,11 +257,13 @@ test("needs-more post-watermark with CT=5 plans initial then reminders up to max
     eligibleTargetCount: 5,
     needsMoreSignalActive: true,
     sourceActionId: "action-1",
+    needsMoreActiveSince: startedAt.toISOString(),
     activeEpisode: episode,
-    now: farFuture,
+    now: atDue,
   });
   const sendActions = plan.actions.filter((action) => action.type === "plan_send");
-  assert.equal(sendActions.length, 6);
+  assert.equal(sendActions.length, 1);
+  assert.equal(sendActions[0]?.type === "plan_send" ? sendActions[0].send.reminderIndex : null, 0);
 });
 
 test("needs-more stops when CT above threshold", () => {
@@ -318,10 +326,33 @@ test("future intent snapshot uses growth sender and never support@ alias", () =>
 });
 
 test("needs-more idempotency key stable across identical replan", () => {
-  const first = mapNeedsMorePlanToOutboxRows(baseNeedsMoreInput);
-  const second = mapNeedsMorePlanToOutboxRows(baseNeedsMoreInput);
+  const startedAt = "2026-07-02T00:00:00.000Z";
+  const input = {
+    ...baseNeedsMoreInput,
+    sourceActionCreatedAt: startedAt,
+    activeEpisode: {
+      id: "episode-1",
+      accountId: "acct-1",
+      clientId: "client-1",
+      sourceActionId: "action-1",
+      status: "active" as const,
+      eligibleTargetCountAtStart: 5,
+      thresholdAtStart: 5,
+      startedAt,
+      resolvedAt: null,
+      canceledAt: null,
+      closeReason: null,
+      nextReminderIndex: 0,
+      lastCompletedReminderIndex: null,
+      episodeKey: `needs_more_targets:acct-1:${startedAt}`,
+    },
+    now: new Date("2026-07-03T01:00:00.000Z"),
+  };
+  const first = mapNeedsMorePlanToOutboxRows(input);
+  const second = mapNeedsMorePlanToOutboxRows(input);
   const firstKey = first.find((row) => row.idempotencyKey)?.idempotencyKey;
   const secondKey = second.find((row) => row.idempotencyKey)?.idempotencyKey;
+  assert.ok(firstKey);
   assert.equal(firstKey, secondKey);
 });
 

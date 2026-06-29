@@ -14,7 +14,7 @@ import {
   readErrorMessage,
 } from "./client-email-schema-guard.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
-import { loadActiveNeedsMoreTargetAccountsAction } from "./needs-more-target-accounts.ts";
+import { loadActiveNeedsMoreTargetAccountsAction, resolveNeedsMoreActiveSince } from "./needs-more-target-accounts.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -104,7 +104,7 @@ export class NeedsMoreTargetsSequenceMemoryStore {
           status: "active",
           eligibleTargetCountAtStart: action.eligibleTargetCount,
           thresholdAtStart: 5,
-          startedAt: input.now.toISOString(),
+          startedAt: action.startedAtIso,
           resolvedAt: null,
           canceledAt: null,
           closeReason: null,
@@ -133,6 +133,7 @@ export type NeedsMoreTargetsAccountSnapshot = {
   eligibleTargetCount: number;
   needsMoreSignalActive: boolean;
   sourceActionId: string | null;
+  needsMoreActiveSince: string | null;
 };
 
 export type ReconcileNeedsMoreTargetsEmailSequencesResult = {
@@ -174,6 +175,7 @@ export async function loadNeedsMoreTargetsAccountSnapshot(
     eligibleTargetCount: input.eligibleTargetCount,
     needsMoreSignalActive: Boolean(activeAction?.id),
     sourceActionId: readString(activeAction?.id, "") || null,
+    needsMoreActiveSince: resolveNeedsMoreActiveSince(activeAction),
   };
 }
 

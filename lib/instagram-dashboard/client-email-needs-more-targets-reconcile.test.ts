@@ -29,12 +29,15 @@ const openEnv = {
   POSTMARK_SERVER_TOKEN: "token",
 };
 
+const activeSince = "2026-06-01T12:00:00.000Z";
+
 const baseSnapshot = {
   accountId: "acct-1",
   clientId: "client-1",
   accountCanceled: false,
   needsMoreSignalActive: true,
   sourceActionId: "action-1",
+  needsMoreActiveSince: activeSince,
 };
 
 function createMockSupabase(input: { sequenceSchemaReady?: boolean } = {}) {
@@ -74,7 +77,7 @@ test("automation gate defaults closed and requires client sending when category 
   assert.equal(onlyCategory.reason, "client_sending_disabled");
 });
 
-test("eligible=5 with active signal plans initial episode without email side effects", async () => {
+test("eligible=5 with active signal opens episode without immediate send", async () => {
   let fetchCalled = 0;
   const result = await reconcileNeedsMoreTargetAccountEmailSequences(createMockSupabase() as never, {
     snapshots: [{ ...baseSnapshot, eligibleTargetCount: 5 }],
@@ -84,12 +87,12 @@ test("eligible=5 with active signal plans initial episode without email side eff
       return new Response("{}", { status: 200 });
     },
   });
-  assert.equal(result.plannedSends, 1);
+  assert.equal(result.plannedSends, 0);
   assert.equal(result.episodesOpened, 1);
   assert.equal(result.postmarkFetchCount, 0);
   assert.equal(result.intentsCreated, 0);
   assert.equal(fetchCalled, 0);
-  assert.equal(result.plans[0]?.actions.some((action) => action.type === "plan_send"), true);
+  assert.equal(result.plans[0]?.actions.some((action) => action.type === "plan_send"), false);
 });
 
 test("eligible=6 does not open an episode", async () => {
@@ -121,23 +124,26 @@ test("duplicate reconciliation does not open two episodes", async () => {
   assert.equal(store.listActive().length, 1);
 });
 
-test("six reminder offsets match locked schedule from episode start", () => {
+test("first reminder offset is 24h from episode start", () => {
   assert.equal(reminderOffsetHoursScheduleMatchesSpec(), true);
-  const startedAt = new Date("2026-06-01T12:00:00.000Z");
-  const now = new Date(startedAt.getTime() + (21 * 24 + 1) * 60 * 60 * 1000);
-  assert.deepEqual(listDueReminderIndexes({ startedAt, now, lastCompletedReminderIndex: null }), [0, 1, 2, 3, 4, 5]);
+  const startedAt = new Date(activeSince);
+  const beforeDue = new Date(startedAt.getTime() + (24 * 60 * 60 * 1000) - 60 * 1000);
+  const atDue = new Date(startedAt.getTime() + 24 * 60 * 60 * 1000);
+  assert.deepEqual(listDueReminderIndexes({ startedAt, now: beforeDue, lastCompletedReminderIndex: null }), []);
+  assert.deepEqual(listDueReminderIndexes({ startedAt, now: atDue, lastCompletedReminderIndex: null }), [0]);
 });
 
-test("maximum six planned sends per episode", () => {
-  const startedAt = new Date("2026-06-01T12:00:00.000Z");
+test("only one product-active planned send after 24h", () => {
+  const startedAt = new Date(activeSince);
   const now = new Date(startedAt.getTime() + (30 * 24) * 60 * 60 * 1000);
   const due = listDueReminderIndexes({ startedAt, now, lastCompletedReminderIndex: null });
-  assert.equal(due.length, 6);
+  assert.equal(due.length, 1);
+  assert.equal(due[0], 0);
 });
 
 test("eligible rises above threshold before reminder closes episode", () => {
   const store = new NeedsMoreTargetsSequenceMemoryStore();
-  const startedAt = new Date("2026-06-01T12:00:00.000Z");
+  const startedAt = new Date(activeSince);
   store.applyPlan(planNeedsMoreTargetsEpisodeReconciliation({
     ...baseSnapshot,
     eligibleTargetCount: 5,
@@ -164,13 +170,13 @@ test("resolved signal closes episode with no further sends", () => {
     status: "active" as const,
     eligibleTargetCountAtStart: 4,
     thresholdAtStart: 5,
-    startedAt: "2026-06-01T12:00:00.000Z",
+    startedAt: activeSince,
     resolvedAt: null,
     canceledAt: null,
     closeReason: null,
     nextReminderIndex: 1,
     lastCompletedReminderIndex: 0,
-    episodeKey: "needs_more_targets:acct-1:2026-06-01T12:00:00.000Z",
+    episodeKey: `needs_more_targets:acct-1:${activeSince}`,
   };
   const plan = planNeedsMoreTargetsEpisodeReconciliation({
     ...baseSnapshot,
@@ -195,7 +201,7 @@ test("canceled account closes episode", () => {
       status: "active",
       eligibleTargetCountAtStart: 3,
       thresholdAtStart: 5,
-      startedAt: "2026-06-01T12:00:00.000Z",
+      startedAt: activeSince,
       resolvedAt: null,
       canceledAt: null,
       closeReason: null,
@@ -212,7 +218,7 @@ test("canceled account closes episode", () => {
 
 test("new episode allowed after prior episode resolved and signal returns", () => {
   const store = new NeedsMoreTargetsSequenceMemoryStore();
-  const startedAt = new Date("2026-06-01T12:00:00.000Z");
+  const startedAt = new Date(activeSince);
   store.applyPlan(planNeedsMoreTargetsEpisodeReconciliation({
     ...baseSnapshot,
     eligibleTargetCount: 4,
@@ -249,27 +255,11 @@ test("global gate false keeps zero Postmark fetch even when automation env parti
   assert.equal(fetchCalled, 0);
 });
 
-test("category gate false with global sending true still blocks automation", async () => {
+test("open automation env still does not persist when materialize gate closed", async () => {
   const result = await reconcileNeedsMoreTargetAccountEmailSequences(createMockSupabase() as never, {
     snapshots: [{ ...baseSnapshot, eligibleTargetCount: 5 }],
-    env: {
-      ...openEnv,
-      CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
-    },
+    env: openEnv,
   });
-  assert.equal(result.automationGateOpen, false);
   assert.equal(result.persistAllowed, false);
   assert.equal(result.intentsCreated, 0);
-});
-
-test("planned sends use lifecycle triggers distinct from manual_test", async () => {
-  const result = await reconcileNeedsMoreTargetAccountEmailSequences(createMockSupabase() as never, {
-    snapshots: [{ ...baseSnapshot, eligibleTargetCount: 5 }],
-    env: closedEnv,
-  });
-  const send = result.plans[0]?.actions.find((action) => action.type === "plan_send");
-  assert.equal(send?.type, "plan_send");
-  if (send?.type !== "plan_send") return;
-  assert.equal(send.send.trigger, "automatic_initial");
-  assert.equal(send.send.reminderIndex, 0);
 });

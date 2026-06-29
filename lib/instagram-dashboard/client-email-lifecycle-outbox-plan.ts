@@ -1,4 +1,5 @@
 import {
+  CLIENT_EMAIL_NEEDS_MORE_CAMPAIGN_READY_THRESHOLD,
   CLIENT_EMAIL_TEMPLATE_CATEGORIES,
   type ClientEmailSendTrigger,
   type ClientEmailTemplateCategory,
@@ -48,6 +49,7 @@ import {
   planNeedsMoreTargetsEpisodeReconciliation,
   type NeedsMoreTargetsSequenceRecord,
 } from "./client-email-needs-more-targets-sequence.ts";
+import { buildNeedsMoreTargetingDashboardUrl } from "./client-email-needs-more-targeting-url.ts";
 import {
   probeNeedsMoreTargetsSequenceSchema,
   projectSequenceRecord,
@@ -545,6 +547,7 @@ export function mapNeedsMorePlanToOutboxRows(input: {
     eligibleTargetCount: input.eligibleTargetCount,
     needsMoreSignalActive: input.needsMoreSignalActive,
     sourceActionId: input.sourceActionId,
+    needsMoreActiveSince: input.sourceActionCreatedAt,
     activeEpisode: input.activeEpisode,
     now: input.now,
   });
@@ -605,7 +608,10 @@ export function mapNeedsMorePlanToOutboxRows(input: {
     }
 
     const episodeKey = input.activeEpisode?.episodeKey
-      ?? buildNeedsMoreTargetsEpisodeKey(input.accountId, input.now.toISOString());
+      ?? buildNeedsMoreTargetsEpisodeKey(
+        input.accountId,
+        input.sourceActionCreatedAt ?? input.now.toISOString(),
+      );
     const episodeId = input.activeEpisode?.id ?? episodeKey;
     const { send } = action;
     const decision = send.reminderIndex === 0
@@ -667,6 +673,13 @@ export function mapNeedsMorePlanToOutboxRows(input: {
     }
 
     const demoValues = buildClientEmailDemoValues(input.deliverySettings);
+    const templateValues = {
+      ...demoValues,
+      eligible_target_count: String(input.eligibleTargetCount),
+      target_threshold: String(CLIENT_EMAIL_NEEDS_MORE_CAMPAIGN_READY_THRESHOLD),
+      dashboard_url: buildNeedsMoreTargetingDashboardUrl(input.accountId),
+      instagram_username: input.instagramUsername ?? demoValues.instagram_username,
+    };
     pushRow({
       parentType: "sequence",
       parentKey: episodeKey,
@@ -690,10 +703,7 @@ export function mapNeedsMorePlanToOutboxRows(input: {
         idempotencyKey: send.idempotencyKey,
         template: input.template,
         deliverySettings: input.deliverySettings,
-        demoValues: {
-          ...demoValues,
-          eligible_target_count: String(input.eligibleTargetCount),
-        },
+        demoValues: templateValues,
       }),
     });
   }

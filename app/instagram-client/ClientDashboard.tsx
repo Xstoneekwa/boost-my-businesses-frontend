@@ -128,6 +128,11 @@ const T = {
       emptyTitle:"Ciblage",
       emptyBody:"Ajoutez ou connectez un compte Instagram pour configurer le ciblage",
       emptyNote:"Rendez-vous dans Vue d'ensemble pour lier votre compte, puis revenez ici pour organiser vos listes.",
+      statusNeedsCompletion:"Ciblage à compléter",
+      statusReady:"Ciblage prêt",
+      statusCounts:"{{eligible}} comptes prêts pour la campagne sur {{total}} ajoutés",
+      statusCampaignNote:"La campagne démarre dès que 6 comptes sont prêts.",
+      addTargetsCta:"Ajouter des comptes cibles",
     },
     account: {
       profile:"Mon profil", subscription:"Abonnement",
@@ -202,6 +207,11 @@ const T = {
       emptyTitle:"Targeting",
       emptyBody:"Add or connect an Instagram account to configure targeting",
       emptyNote:"Go to Overview to link your account, then return here to manage your lists.",
+      statusNeedsCompletion:"Targeting needs completion",
+      statusReady:"Targeting ready",
+      statusCounts:"{{eligible}} campaign-ready targets out of {{total}} added",
+      statusCampaignNote:"Your campaign starts as soon as 6 targets are ready.",
+      addTargetsCta:"Add target accounts",
     },
     account: {
       profile:"My profile", subscription:"Subscription",
@@ -1370,11 +1380,33 @@ export default function ClientDashboard({
                   : t.targeting.intro}
               </p>
               {useLiveData && targetingOverview ? (
-                <p className="cd-setup-note">
-                  {lang === "fr"
-                    ? `${targetingOverview.summary.validEligible} compte(s) prêt(s) pour la campagne · ${targetingOverview.summary.total} ajouté(s) au total`
-                    : `${targetingOverview.summary.validEligible} campaign-ready target(s) · ${targetingOverview.summary.total} added in total`}
-                </p>
+                <div
+                  className={`cd-tg2-status ${targetingOverview.summary.validEligible > 5 ? "is-ready" : "needs-completion"}`}
+                  role="status"
+                >
+                  <p className="cd-tg2-status-title">
+                    {targetingOverview.summary.validEligible > 5
+                      ? t.targeting.statusReady
+                      : t.targeting.statusNeedsCompletion}
+                  </p>
+                  <p className="cd-setup-note">
+                    {t.targeting.statusCounts
+                      .replace("{{eligible}}", String(targetingOverview.summary.validEligible))
+                      .replace("{{total}}", String(targetingOverview.summary.total))}
+                  </p>
+                  {targetingOverview.summary.validEligible <= 5 ? (
+                    <>
+                      <p className="cd-setup-note">{t.targeting.statusCampaignNote}</p>
+                      <button
+                        type="button"
+                        className="cd-btn cd-btn-primary cd-tg2-status-cta"
+                        onClick={() => setDrawerOpen(true)}
+                      >
+                        {t.targeting.addTargetsCta}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               ) : null}
               <div className="cd-tg2-topbar-actions">
                 <input

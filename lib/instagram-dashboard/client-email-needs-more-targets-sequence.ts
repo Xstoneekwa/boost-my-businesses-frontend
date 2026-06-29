@@ -1,5 +1,5 @@
 import {
-  CLIENT_EMAIL_MAX_REMINDER_INDEX,
+  CLIENT_EMAIL_PRODUCT_ACTIVE_NEEDS_MORE_REMINDER_INDEXES,
   type ClientEmailNeedsMoreTargetsSequenceCloseReason,
   type ClientEmailNeedsMoreTargetsSequenceStatus,
 } from "./client-email-constants.ts";
@@ -40,7 +40,13 @@ export type PlannedNeedsMoreTargetsSend = {
 };
 
 export type NeedsMoreTargetsEpisodePlanAction =
-  | { type: "open_episode"; episodeKey: string; eligibleTargetCount: number; sourceActionId: string | null }
+  | {
+    type: "open_episode";
+    episodeKey: string;
+    startedAtIso: string;
+    eligibleTargetCount: number;
+    sourceActionId: string | null;
+  }
   | { type: "close_episode"; closeReason: ClientEmailNeedsMoreTargetsSequenceCloseReason }
   | { type: "plan_send"; send: PlannedNeedsMoreTargetsSend }
   | { type: "noop"; reason: string };
@@ -87,11 +93,11 @@ export function listDueReminderIndexes(input: {
 }) {
   const lastDone = input.lastCompletedReminderIndex ?? -1;
   const due: number[] = [];
-  for (let index = 0; index <= CLIENT_EMAIL_MAX_REMINDER_INDEX; index += 1) {
+  for (const index of CLIENT_EMAIL_PRODUCT_ACTIVE_NEEDS_MORE_REMINDER_INDEXES) {
     if (index <= lastDone) continue;
     const scheduledFor = scheduledForAfterEpisodeStart(input.startedAt, index);
-    if (!scheduledFor) break;
-    if (scheduledFor.getTime() > input.now.getTime()) break;
+    if (!scheduledFor) continue;
+    if (scheduledFor.getTime() > input.now.getTime()) continue;
     due.push(index);
   }
   return due;
@@ -115,6 +121,7 @@ export function planNeedsMoreTargetsEpisodeReconciliation(input: {
   eligibleTargetCount: number;
   needsMoreSignalActive: boolean;
   sourceActionId: string | null;
+  needsMoreActiveSince: string | null;
   activeEpisode: NeedsMoreTargetsSequenceRecord | null;
   now?: Date;
 }): NeedsMoreTargetsEpisodePlan {
@@ -180,33 +187,20 @@ export function planNeedsMoreTargetsEpisodeReconciliation(input: {
     return { accountId: input.accountId, clientId: input.clientId, actions };
   }
 
-  const startedAtIso = now.toISOString();
+  const startedAtIso = input.needsMoreActiveSince ?? now.toISOString();
   const episodeKey = buildNeedsMoreTargetsEpisodeKey(input.accountId, startedAtIso);
   actions.push({
     type: "open_episode",
     episodeKey,
+    startedAtIso,
     eligibleTargetCount: input.eligibleTargetCount,
     sourceActionId: input.sourceActionId,
   });
-  actions.push({
-    type: "plan_send",
-    send: {
-      reminderIndex: 0,
-      trigger: "automatic_initial",
-      scheduledFor: startedAtIso,
-      idempotencyKey: buildNeedsMoreTargetsIntentIdempotencyKey({
-        accountId: input.accountId,
-        episodeId: episodeKey,
-        reminderIndex: 0,
-      }),
-    },
-  });
+  actions.push({ type: "noop", reason: "episode_opened_waiting_for_first_reminder_due" });
   return { accountId: input.accountId, clientId: input.clientId, actions };
 }
 
 export function reminderOffsetHoursScheduleMatchesSpec() {
-  return [0, 1, 2, 3, 4, 5].every((index) => {
-    const expected = [0, 48, 5 * 24, 9 * 24, 14 * 24, 21 * 24][index];
-    return reminderOffsetHoursForIndex(index) === expected;
-  });
+  const expected = [24, 48, 5 * 24, 9 * 24, 14 * 24, 21 * 24];
+  return [0, 1, 2, 3, 4, 5].every((index) => reminderOffsetHoursForIndex(index) === expected[index]);
 }

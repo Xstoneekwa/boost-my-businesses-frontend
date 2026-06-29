@@ -77,6 +77,14 @@ export async function loadActiveNeedsMoreTargetAccountsAction(
   return data;
 }
 
+/** Canonical UTC timestamp when the needs-more signal became (or re-became) active. */
+export function resolveNeedsMoreActiveSince(
+  action: { created_at?: unknown } | null | undefined,
+): string | null {
+  const createdAt = readString(action?.created_at, "");
+  return createdAt || null;
+}
+
 async function dismissActiveNeedsMoreTargetAccountsAction(
   supabase: NeedsMoreTargetAccountsSupabase,
   accountId: string,
