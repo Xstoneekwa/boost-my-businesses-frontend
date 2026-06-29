@@ -23,7 +23,8 @@ function createMockSupabase(input: {
     const state = {
       filters: [] as Array<{ column: string; value: string }>,
       insertValues: null as Row | null,
-      mode: "select" as "select" | "insert",
+      updateValues: null as Row | null,
+      mode: "select" as "select" | "insert" | "update",
     };
 
     const builder = {
@@ -48,6 +49,18 @@ function createMockSupabase(input: {
         }
         events.push(values);
         return Promise.resolve({ error: null });
+      },
+      update(values: Row) {
+        state.mode = "update";
+        state.updateValues = values;
+        return builder;
+      },
+      then(onFulfilled?: (value: { error: null }) => unknown, onRejected?: (reason: unknown) => unknown) {
+        if (state.mode === "update" && table === "client_email_send_intents" && state.updateValues) {
+          const target = intents.find((entry) => state.filters.every((filter) => match(entry, filter.column, filter.value)));
+          if (target) Object.assign(target, state.updateValues);
+        }
+        return Promise.resolve({ error: null }).then(onFulfilled, onRejected);
       },
     };
 

@@ -14,6 +14,31 @@ import {
 } from "./client-email-provider.ts";
 
 const POSTMARK_EMAIL_API_URL = "https://api.postmarkapp.com/email";
+const POSTMARK_SEND_TIMEOUT_MS = 30_000;
+
+function redactProviderError(value: unknown) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "Postmark rejected the lifecycle delivery request.";
+  return raw
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
+    .replace(/\b\d{8,}\b/g, "[redacted-token]")
+    .slice(0, 500);
+}
+
+async function fetchWithTimeout(
+  fetcher: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetcher(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function buildPostmarkMetadata(payload: ClientEmailProviderSendPayload) {
   return {
@@ -115,14 +140,56 @@ export function createPostmarkClientEmailAdapter(
         };
       }
 
-      // Client lifecycle sends remain disabled until CLIENT_EMAIL_SENDING_ENABLED is explicitly enabled.
-      void preparePostmarkSendRequest(payload, token);
-      void fetcher;
+      const prepared = preparePostmarkSendRequest(payload, token);
+      const fetchImpl = fetcher ?? fetch;
+
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(fetchImpl, prepared.url, {
+          method: prepared.method,
+          headers: prepared.headers,
+          body: JSON.stringify(prepared.body),
+        }, POSTMARK_SEND_TIMEOUT_MS);
+      } catch (error) {
+        const message = error instanceof Error && error.name === "AbortError"
+          ? "Postmark request timed out before a reliable response."
+          : "Postmark request failed before a reliable response.";
+        return {
+          ok: false,
+          reason: "provider_timeout",
+          message,
+        };
+      }
+
+      let body: Record<string, unknown> = {};
+      try {
+        body = await response.json() as Record<string, unknown>;
+      } catch {
+        body = {};
+      }
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          reason: "provider_error",
+          message: redactProviderError(body.Message || body.ErrorCode || response.statusText),
+        };
+      }
+
+      const providerMessageId = typeof body.MessageID === "string" ? body.MessageID.trim() : "";
+      if (!providerMessageId) {
+        return {
+          ok: false,
+          reason: "provider_timeout",
+          message: "Postmark accepted the request but did not return a message id.",
+        };
+      }
 
       return {
-        ok: false,
-        reason: "sending_disabled",
-        message: "Client email sending is disabled by CLIENT_EMAIL_SENDING_ENABLED.",
+        ok: true,
+        provider: CLIENT_EMAIL_POSTMARK_PROVIDER,
+        providerMessageId,
+        deliveryStatus: "sent",
       };
     },
   };

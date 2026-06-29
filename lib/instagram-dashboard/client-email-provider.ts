@@ -47,7 +47,8 @@ export type ClientEmailProviderSendFailure = {
     | "invalid_from_email"
     | "invalid_recipient_email"
     | "forbidden_metadata"
-    | "sending_disabled";
+    | "provider_error"
+    | "provider_timeout";
   message: string;
 };
 

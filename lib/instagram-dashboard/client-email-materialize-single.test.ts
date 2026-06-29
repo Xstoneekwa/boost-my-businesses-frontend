@@ -425,7 +425,7 @@ test("sending disabled does not block materialize-single lookup eligibility when
   assert.equal(candidate.dispatchEligible, false);
 });
 
-test("materialize-single module is the only lib importer of executor besides tests", () => {
+test("materialize-single and lifecycle cron are the only lib importers of executor besides tests", () => {
   const roots = [join(process.cwd(), "lib")];
   const offenders: string[] = [];
   const walk = (dir: string) => {
@@ -439,6 +439,7 @@ test("materialize-single module is the only lib importer of executor besides tes
       if (!/\.(ts|tsx)$/.test(entry.name)) continue;
       if (full.includes("client-email-materialization-executor")) continue;
       if (full.includes("client-email-materialize-single")) continue;
+      if (full.includes("client-email-lifecycle-cron")) continue;
       const source = readFileSync(full, "utf8");
       if (/client-email-materialization-executor/.test(source)) {
         offenders.push(full.replace(`${process.cwd()}/`, ""));

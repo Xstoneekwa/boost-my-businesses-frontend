@@ -25,6 +25,7 @@ const closedEnv = {
 const openEnv = {
   CLIENT_EMAIL_SENDING_ENABLED: "true",
   CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "true",
+  CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT: "2026-06-29T13:00:00Z",
   CLIENT_EMAIL_PROVIDER: "postmark",
   POSTMARK_SERVER_TOKEN: "token",
 };
@@ -50,13 +51,20 @@ function createMockSupabase(input: { sequenceSchemaReady?: boolean } = {}) {
     from(table: string) {
       return {
         select: () => ({
-          limit: () => ({
-            maybeSingle: async () => {
-              if (table === "client_email_needs_more_targets_sequences" && !sequenceSchemaReady) {
-                return { data: null, error: missing };
-              }
-              return { data: null, error: null };
-            },
+          limit: () => {
+            const result = sequenceSchemaReady
+              ? { data: null, error: null }
+              : { data: null, error: missing };
+            return {
+              maybeSingle: async () => result,
+              then: (onFulfilled?: (value: typeof result) => unknown) => Promise.resolve(result).then(onFulfilled),
+            };
+          },
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: null, error: null }),
+            }),
+            maybeSingle: async () => ({ data: null, error: null }),
           }),
         }),
       };
@@ -64,10 +72,11 @@ function createMockSupabase(input: { sequenceSchemaReady?: boolean } = {}) {
   };
 }
 
-test("automation gate defaults closed and requires client sending when category gate open", () => {
+test("dispatch automation gate requires client sending when category gate open", () => {
   assert.equal(readClientEmailNeedsMoreTargetsAutomationEnabled({}), false);
   const onlyCategory = evaluateNeedsMoreTargetsEmailAutomationGate({
     CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "true",
+    CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT: "2026-06-29T13:00:00Z",
     CLIENT_EMAIL_SENDING_ENABLED: "false",
     CLIENT_EMAIL_PROVIDER: "postmark",
     POSTMARK_SERVER_TOKEN: "token",
@@ -255,11 +264,53 @@ test("global gate false keeps zero Postmark fetch even when automation env parti
   assert.equal(fetchCalled, 0);
 });
 
-test("open automation env still does not persist when materialize gate closed", async () => {
-  const result = await reconcileNeedsMoreTargetAccountEmailSequences(createMockSupabase() as never, {
+test("open automation env still does not persist when sequence schema missing", async () => {
+  const result = await reconcileNeedsMoreTargetAccountEmailSequences(createMockSupabase({ sequenceSchemaReady: false }) as never, {
     snapshots: [{ ...baseSnapshot, eligibleTargetCount: 5 }],
     env: openEnv,
   });
   assert.equal(result.persistAllowed, false);
   assert.equal(result.intentsCreated, 0);
+});
+
+test("open automation env with watermark persists when not using memory store", async () => {
+  let insertCount = 0;
+  const supabase = {
+    from(table: string) {
+      if (table === "client_email_needs_more_targets_sequences") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+              limit: () => ({
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+            limit: () => ({
+              maybeSingle: async () => ({ data: null, error: null }),
+            }),
+          }),
+          insert: () => ({
+            select: () => ({
+              maybeSingle: async () => {
+                insertCount += 1;
+                return { data: { id: "episode-1", status: "active" }, error: null };
+              },
+            }),
+          }),
+        };
+      }
+      return createMockSupabase().from(table);
+    },
+  };
+
+  const result = await reconcileNeedsMoreTargetAccountEmailSequences(supabase as never, {
+    snapshots: [{ ...baseSnapshot, eligibleTargetCount: 5 }],
+    env: openEnv,
+  });
+  assert.equal(result.persistAllowed, true);
+  assert.equal(result.persistedOpens, 1);
+  assert.equal(insertCount, 1);
 });

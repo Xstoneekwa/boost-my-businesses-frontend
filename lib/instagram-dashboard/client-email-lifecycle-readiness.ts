@@ -207,7 +207,7 @@ export async function loadClientEmailLifecycleReadiness(
     lifecycleAutomationEnabled,
     lifecycleWatermarkConfigured,
     needsMoreWatermarkConfigured,
-    schedulerConnected: false,
+    schedulerConnected: Boolean(env.CRON_SECRET?.trim()),
     providerDispatchAllowed: sendingGate.allowed,
     materializationReadinessStatus,
     dispatchReadinessStatus,

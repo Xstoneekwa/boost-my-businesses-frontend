@@ -1,7 +1,13 @@
 import {
   canPersistNeedsMoreTargetsEmailAutomation,
-  evaluateNeedsMoreTargetsEmailAutomationGate,
+  evaluateNeedsMoreMaterializePersistGate,
 } from "./client-email-needs-more-targets-automation-config.ts";
+import {
+  cancelPendingNeedsMoreIntentsForAccount,
+  loadActiveNeedsMoreEpisodeForAccount,
+  persistNeedsMoreCloseEpisode,
+  persistNeedsMoreOpenEpisode,
+} from "./client-email-needs-more-sequence-persist.ts";
 import {
   CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCES_TABLE,
   type NeedsMoreTargetsEpisodePlan,
@@ -14,7 +20,12 @@ import {
   readErrorMessage,
 } from "./client-email-schema-guard.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
-import { loadActiveNeedsMoreTargetAccountsAction, resolveNeedsMoreActiveSince } from "./needs-more-target-accounts.ts";
+import { loadTargetEligibilityCountsByAccount } from "./account-target-eligibility.ts";
+import {
+  NEEDS_MORE_TARGET_ACCOUNTS_ACTION_TYPE,
+  loadActiveNeedsMoreTargetAccountsAction,
+  resolveNeedsMoreActiveSince,
+} from "./needs-more-target-accounts.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -145,6 +156,9 @@ export type ReconcileNeedsMoreTargetsEmailSequencesResult = {
   episodesOpened: number;
   episodesClosed: number;
   plannedSends: number;
+  persistedOpens: number;
+  persistedCloses: number;
+  intentsCanceled: number;
   plans: NeedsMoreTargetsEpisodePlan[];
   gateReason: string | null;
 };
@@ -179,6 +193,89 @@ export async function loadNeedsMoreTargetsAccountSnapshot(
   };
 }
 
+const ACTIVE_NEEDS_MORE_ACTION_STATUSES = ["pending", "acknowledged", "pending_verification"] as const;
+
+async function loadPertinentNeedsMoreAccountIds(
+  supabase: ClientEmailSupabase,
+  sequenceSchemaReady: boolean,
+) {
+  const accountIds = new Set<string>();
+  const { data: signalRows, error: signalError } = await supabase
+    .from("account_dashboard_actions")
+    .select("account_id")
+    .eq("action_type", NEEDS_MORE_TARGET_ACCOUNTS_ACTION_TYPE)
+    .in("status", [...ACTIVE_NEEDS_MORE_ACTION_STATUSES]);
+  if (signalError) throw new Error(signalError.message);
+  for (const row of signalRows ?? []) {
+    const accountId = readString((row as SupabaseRecord).account_id, "");
+    if (accountId) accountIds.add(accountId);
+  }
+
+  if (sequenceSchemaReady) {
+    const { data: episodeRows, error: episodeError } = await supabase
+      .from(CLIENT_EMAIL_NEEDS_MORE_TARGETS_SEQUENCES_TABLE)
+      .select("account_id")
+      .eq("status", "active");
+    if (episodeError) throw new Error(episodeError.message);
+    for (const row of episodeRows ?? []) {
+      const accountId = readString((row as SupabaseRecord).account_id, "");
+      if (accountId) accountIds.add(accountId);
+    }
+  }
+
+  return [...accountIds];
+}
+
+export async function loadAllNeedsMoreTargetsReconcileSnapshots(
+  supabase: ClientEmailSupabase,
+): Promise<NeedsMoreTargetsAccountSnapshot[]> {
+  const schema = await probeNeedsMoreTargetsSequenceSchema(supabase);
+  const accountIds = await loadPertinentNeedsMoreAccountIds(supabase, schema.available);
+  if (accountIds.length === 0) return [];
+
+  const [{ data: links, error: linkError }, eligibilityByAccount] = await Promise.all([
+    supabase
+      .from("client_instagram_accounts")
+      .select("account_id,client_id")
+      .in("account_id", accountIds),
+    loadTargetEligibilityCountsByAccount(supabase, accountIds),
+  ]);
+  if (linkError) throw new Error(linkError.message);
+
+  const { data: accounts, error: accountError } = await supabase
+    .from("ig_accounts")
+    .select("id,admin_lifecycle_status")
+    .in("id", accountIds);
+  if (accountError) throw new Error(accountError.message);
+
+  const accountStatusById = new Map(
+    (accounts ?? []).map((row) => [
+      readString((row as SupabaseRecord).id, ""),
+      readString((row as SupabaseRecord).admin_lifecycle_status, ""),
+    ]),
+  );
+
+  const snapshots: NeedsMoreTargetsAccountSnapshot[] = [];
+  for (const row of links ?? []) {
+    const record = row as SupabaseRecord;
+    const accountId = readString(record.account_id, "");
+    const clientId = readString(record.client_id, "");
+    if (!accountId || !clientId) continue;
+
+    const adminStatus = accountStatusById.get(accountId) ?? "";
+    const normalizedStatus = adminStatus.trim().toLowerCase();
+    const accountCanceled = normalizedStatus === "cancelled" || normalizedStatus === "canceled";
+    const eligibleTargetCount = eligibilityByAccount.get(accountId)?.eligible ?? 0;
+    const snapshot = await loadNeedsMoreTargetsAccountSnapshot(supabase, accountId, {
+      eligibleTargetCount,
+      accountCanceled,
+    });
+    if (snapshot) snapshots.push(snapshot);
+  }
+
+  return snapshots;
+}
+
 export async function reconcileNeedsMoreTargetAccountEmailSequences(
   supabase: ClientEmailSupabase,
   input: {
@@ -191,19 +288,25 @@ export async function reconcileNeedsMoreTargetAccountEmailSequences(
 ): Promise<ReconcileNeedsMoreTargetsEmailSequencesResult> {
   const env = input.env ?? process.env;
   const now = input.now ?? new Date();
-  const gate = evaluateNeedsMoreTargetsEmailAutomationGate(env);
+  const gate = evaluateNeedsMoreMaterializePersistGate(env);
   const schema = await probeNeedsMoreTargetsSequenceSchema(supabase);
   const persistAllowed = gate.allowed && schema.available && canPersistNeedsMoreTargetsEmailAutomation(env);
   const store = input.memoryStore;
-  void persistAllowed;
 
   const plans: NeedsMoreTargetsEpisodePlan[] = [];
   let episodesOpened = 0;
   let episodesClosed = 0;
   let plannedSends = 0;
+  let persistedOpens = 0;
+  let persistedCloses = 0;
+  let intentsCanceled = 0;
 
   for (const snapshot of input.snapshots) {
-    const activeEpisode = store?.getActiveForAccount(snapshot.accountId) ?? null;
+    const activeEpisode = store
+      ? store.getActiveForAccount(snapshot.accountId)
+      : persistAllowed
+        ? await loadActiveNeedsMoreEpisodeForAccount(supabase, snapshot.accountId)
+        : null;
     const plan = planNeedsMoreTargetsEpisodeReconciliation({
       ...snapshot,
       activeEpisode,
@@ -223,13 +326,43 @@ export async function reconcileNeedsMoreTargetAccountEmailSequences(
         clientId: snapshot.clientId,
         now,
       });
+    } else if (persistAllowed) {
+      for (const action of plan.actions) {
+        if (action.type === "open_episode") {
+          const persisted = await persistNeedsMoreOpenEpisode(supabase, {
+            accountId: snapshot.accountId,
+            clientId: snapshot.clientId,
+            episodeKey: action.episodeKey,
+            startedAtIso: action.startedAtIso,
+            eligibleTargetCount: action.eligibleTargetCount,
+            sourceActionId: action.sourceActionId,
+            now,
+          });
+          if (persisted.created) persistedOpens += 1;
+        }
+        if (action.type === "close_episode") {
+          const closed = await persistNeedsMoreCloseEpisode(supabase, {
+            accountId: snapshot.accountId,
+            closeReason: action.closeReason,
+            now,
+          });
+          if (closed) {
+            persistedCloses += 1;
+            intentsCanceled += await cancelPendingNeedsMoreIntentsForAccount(supabase, {
+              accountId: snapshot.accountId,
+              reason: action.closeReason,
+              now,
+            });
+          }
+        }
+      }
     }
   }
 
   return {
     automationGateOpen: gate.allowed,
     sequenceSchemaReady: schema.available,
-    persistAllowed: false,
+    persistAllowed,
     postmarkFetchCount: 0,
     intentsCreated: 0,
     episodesOpened,
@@ -237,5 +370,8 @@ export async function reconcileNeedsMoreTargetAccountEmailSequences(
     plannedSends,
     plans,
     gateReason: gate.allowed ? null : gate.message,
+    persistedOpens,
+    persistedCloses,
+    intentsCanceled,
   };
 }

@@ -64,7 +64,15 @@ export type ClientEmailIntentKind = (typeof CLIENT_EMAIL_INTENT_KINDS)[number];
 
 export const CLIENT_EMAIL_TEST_DELIVERY_LABEL = "Test delivery" as const;
 
-export const CLIENT_EMAIL_INTENT_STATUSES = ["pending", "scheduled", "sent", "canceled", "failed"] as const;
+export const CLIENT_EMAIL_INTENT_STATUSES = [
+  "pending",
+  "scheduled",
+  "claimed",
+  "dispatch_uncertain",
+  "sent",
+  "canceled",
+  "failed",
+] as const;
 export type ClientEmailIntentStatus = (typeof CLIENT_EMAIL_INTENT_STATUSES)[number];
 
 export const CLIENT_EMAIL_DELIVERY_STATUSES = [

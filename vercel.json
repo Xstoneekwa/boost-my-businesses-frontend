@@ -3,6 +3,10 @@
     {
       "path": "/api/instagram-dashboard/targets/auto-archive-low-fbr-cron",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/client-email-lifecycle",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

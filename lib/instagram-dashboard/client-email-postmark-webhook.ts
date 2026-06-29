@@ -240,5 +240,37 @@ export async function ingestPostmarkWebhookEvent(
     return { ok: false, reason: "invalid_payload", message: "Could not store Postmark delivery event." };
   }
 
+  await syncIntentStatusFromWebhookEvent(supabase, parsed);
+
   return { ok: true, action: "stored" };
+}
+
+async function syncIntentStatusFromWebhookEvent(
+  supabase: ClientEmailSupabase,
+  event: ParsedPostmarkWebhookEvent,
+) {
+  if (!event.intentId) return;
+  const nowIso = new Date().toISOString();
+
+  if (event.deliveryStatus === "delivered") {
+    await supabase
+      .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
+      .update({
+        status: "sent",
+        sent_at: event.occurredAt,
+      })
+      .eq("id", event.intentId);
+    return;
+  }
+
+  if (["bounced", "complained", "suppressed"].includes(event.deliveryStatus)) {
+    await supabase
+      .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
+      .update({
+        status: "canceled",
+        resolved_at: nowIso,
+        dispatch_last_error_code: event.deliveryStatus,
+      })
+      .eq("id", event.intentId);
+  }
 }

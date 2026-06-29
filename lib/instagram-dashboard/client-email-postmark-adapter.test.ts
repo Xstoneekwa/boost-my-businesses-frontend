@@ -102,7 +102,7 @@ test("prepared Postmark request uses outbound stream and locked sender", () => {
   assert.equal(prepared.headers["X-Postmark-Server-Token"], "server-token");
 });
 
-test("sending remains disabled for client lifecycle sends even when gate enabled", async () => {
+test("lifecycle send calls Postmark when sending gate enabled", async () => {
   let fetchCalled = false;
   const adapter = createPostmarkClientEmailAdapter({
     CLIENT_EMAIL_PROVIDER: "postmark",
@@ -110,12 +110,12 @@ test("sending remains disabled for client lifecycle sends even when gate enabled
     POSTMARK_SERVER_TOKEN: "server-token",
   }, async () => {
     fetchCalled = true;
-    return new Response("{}", { status: 200 });
+    return new Response(JSON.stringify({ MessageID: "pm-123" }), { status: 200 });
   });
 
   const result = await adapter.send(basePayload);
-  assert.equal(result.ok, false);
-  if (result.ok) return;
-  assert.equal(result.reason, "sending_disabled");
-  assert.equal(fetchCalled, false);
+  assert.equal(result.ok, true);
+  assert.equal(fetchCalled, true);
+  if (!result.ok) return;
+  assert.equal(result.providerMessageId, "pm-123");
 });
