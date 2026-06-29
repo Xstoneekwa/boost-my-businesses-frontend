@@ -21,8 +21,10 @@ import { normalizeTargetUsername } from "@/lib/instagram-targets";
 import type { ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
 import type { LoadClientFollowerGrowthResult } from "@/lib/instagram-client/load-client-follower-growth";
 import type { ClientLinkedInstagramAccount, ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
+import type { AccountCommercialSubscriptionDisplay } from "@/lib/instagram-client/load-account-commercial-subscription";
 import {
   buildAccountManagerOverview,
+  buildAgencyAccountSubscriptionCard,
   buildOverviewStats,
   buildSubscriptionOverviewCard,
 } from "@/lib/instagram-client/client-overview-projection";
@@ -545,6 +547,7 @@ export default function ClientDashboard({
   const [followerGrowth, setFollowerGrowth] = useState<LoadClientFollowerGrowthResult | null>(initialFollowerGrowth);
   const [accountScopeLoading, setAccountScopeLoading] = useState(false);
   const [accountScopeError, setAccountScopeError] = useState<string | null>(null);
+  const [accountSubscriptionDisplay, setAccountSubscriptionDisplay] = useState<AccountCommercialSubscriptionDisplay | null>(null);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
@@ -670,6 +673,7 @@ export default function ClientDashboard({
       if (agencyModeActive) {
         setAccountInsights(null);
         setFollowerGrowth(null);
+        setAccountSubscriptionDisplay(null);
         setAccountScopeError(null);
         setAccountScopeLoading(false);
       }
@@ -679,6 +683,7 @@ export default function ClientDashboard({
     let cancelled = false;
     setAccountScopeLoading(true);
     setAccountScopeError(null);
+    setAccountSubscriptionDisplay(null);
 
     void Promise.all([
       fetch(`/api/instagram-client/accounts/${encodeURIComponent(overviewScope)}/insights`, {
@@ -689,9 +694,14 @@ export default function ClientDashboard({
         headers: { Accept: "application/json" },
         cache: "no-store",
       }),
-    ]).then(async ([insightsResponse, growthResponse]) => {
+      fetch(`/api/instagram-client/accounts/${encodeURIComponent(overviewScope)}/subscription?lang=${lang}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      }),
+    ]).then(async ([insightsResponse, growthResponse, subscriptionResponse]) => {
       const insightsPayload = await insightsResponse.json() as { ok?: boolean; data?: ClientAccountInsights; error?: string };
       const growthPayload = await growthResponse.json() as { ok?: boolean; data?: LoadClientFollowerGrowthResult; error?: string };
+      const subscriptionPayload = await subscriptionResponse.json() as { ok?: boolean; data?: AccountCommercialSubscriptionDisplay; error?: string };
       if (cancelled) return;
       if (!insightsResponse.ok || !insightsPayload.ok || !insightsPayload.data) {
         throw new Error(insightsPayload.error || "Could not load account overview.");
@@ -700,11 +710,17 @@ export default function ClientDashboard({
       setWhitelist(insightsPayload.data.whitelist ?? []);
       setBlacklist(insightsPayload.data.blacklist ?? []);
       setFollowerGrowth(growthResponse.ok && growthPayload.ok ? (growthPayload.data ?? null) : null);
+      setAccountSubscriptionDisplay(
+        subscriptionResponse.ok && subscriptionPayload.ok && subscriptionPayload.data
+          ? subscriptionPayload.data
+          : null,
+      );
       setAccountScopeLoading(false);
     }).catch((error) => {
       if (cancelled) return;
       setAccountInsights(null);
       setFollowerGrowth(null);
+      setAccountSubscriptionDisplay(null);
       setAccountScopeError(error instanceof Error ? error.message : "Could not load account overview.");
       setAccountScopeLoading(false);
     });
@@ -712,7 +728,7 @@ export default function ClientDashboard({
     return () => {
       cancelled = true;
     };
-  }, [agencyModeActive, overviewScope]);
+  }, [agencyModeActive, overviewScope, lang]);
 
   async function persistFilterLists(nextWhitelist: string[], nextBlacklist: string[]) {
     if (!targetingAccountId || !useLiveData) return;
@@ -918,13 +934,21 @@ export default function ClientDashboard({
     return buildFollowerChartViews(growth.bundle, lang);
   }, [followerGrowth, initialFollowerGrowth, lang]);
   const subscriptionPlanValue = workspace?.clientPlanLabel || accountInsights?.packageLabel || "";
-  const subscriptionCard = buildSubscriptionOverviewCard(workspace, subscriptionPlanValue, lang);
+  const useAccountScopedSubscription = agencyModeActive && overviewScope !== "agency";
+  const subscriptionCard = useAccountScopedSubscription
+    ? buildAgencyAccountSubscriptionCard(
+      accountSubscriptionDisplay,
+      accountInsights,
+      overviewScope,
+      lang,
+    )
+    : buildSubscriptionOverviewCard(workspace, subscriptionPlanValue, lang);
   const accountManagerCard = buildAccountManagerOverview(workspace, lang, {
     subtitle: t.mgr.sub,
     text: t.mgr.text,
     emailLabel: t.mgr.email,
     bookingLabel: t.mgr.call,
-  });
+  }, { agencyContact: agencyModeActive && overviewScope === "agency" });
   const memberSinceValue = workspace?.memberSince
     ? new Date(workspace.memberSince).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
     : "";
@@ -1226,6 +1250,9 @@ export default function ClientDashboard({
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                         <div className="cd-card cd-plan-wrap">
+                          {subscriptionCard.title ? (
+                            <div className="cd-plan-scope-title">{subscriptionCard.title}</div>
+                          ) : null}
                           <div className="cd-plan-top">
                             <div className="cd-plan-name">{subscriptionCard.planName}</div>
                             <span className="cd-plan-tag">{subscriptionCard.statusLabel}</span>
@@ -1909,6 +1936,7 @@ const CSS = `
 
 /* Plan + manager */
 .cd-plan-wrap{display:flex;flex-direction:column;gap:14px}
+.cd-plan-scope-title{margin:0;font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-mute)}
 .cd-plan-top{display:flex;align-items:center;justify-content:space-between}
 .cd-plan-name{font-family:var(--font-d);font-weight:900;font-size:1.3rem;color:var(--ink)}
 .cd-plan-tag{font-family:var(--font-d);font-weight:700;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:100px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff}
