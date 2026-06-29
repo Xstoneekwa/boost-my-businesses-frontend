@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ClientInstagramAccountView } from "./ClientAccountsSection";
 import type { AgencyAccountFilter } from "@/lib/instagram-client/client-agency-overview-helpers";
 import { matchesAgencyAccountSearch } from "@/lib/instagram-client/client-agency-overview-helpers";
@@ -54,13 +54,38 @@ function scopeDisplayLabel(scope: OverviewScope, accounts: ClientInstagramAccoun
   return `${t.accountPrefix} — @${handle}`;
 }
 
+function ScopeChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`cd-agency-scope-chevron${open ? " open" : ""}`}
+      viewBox="0 0 20 20"
+      width={18}
+      height={18}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M5.5 7.5 10 12l4.5-4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function ClientAgencyScopeSelector(props: Props) {
   const { lang, accounts, scope, onScopeChange, storageKey } = props;
   const t = COPY[lang];
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<AgencyAccountFilter>("all");
+  const [highlightIndex, setHighlightIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const listId = useMemo(() => `agency-scope-list-${Math.random().toString(36).slice(2)}`, []);
 
   useEffect(() => {
@@ -106,29 +131,85 @@ export default function ClientAgencyScopeSelector(props: Props) {
     });
   }, [accounts, filter, search]);
 
+  const optionScopes = useMemo<OverviewScope[]>(
+    () => ["agency", ...filteredAccounts.map((account) => account.accountId)],
+    [filteredAccounts],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const selectedIndex = optionScopes.indexOf(scope);
+    setHighlightIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    searchRef.current?.focus();
+    function onEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [open, optionScopes, scope]);
+
   function selectScope(next: OverviewScope) {
     onScopeChange(next);
     setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setOpen(true);
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+    }
+  }
+
+  function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightIndex((index) => Math.min(index + 1, optionScopes.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightIndex((index) => Math.max(index - 1, 0));
+    } else if (event.key === "Enter" && optionScopes[highlightIndex]) {
+      event.preventDefault();
+      selectScope(optionScopes[highlightIndex]);
+    }
   }
 
   return (
-    <div className="cd-agency-scope-bar" ref={rootRef}>
+    <div className="cd-agency-scope-bar">
       <label className="cd-agency-scope-label" htmlFor="cd-agency-scope-trigger">{t.scopeLabel}</label>
-      <button
-        id="cd-agency-scope-trigger"
-        type="button"
-        className="cd-agency-scope-combobox"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="cd-agency-scope-value">{scopeDisplayLabel(scope, accounts, lang)}</span>
-        <span className="cd-agency-scope-chevron" aria-hidden="true">▾</span>
-      </button>
+      <div className="cd-agency-scope-control" ref={rootRef}>
+        <button
+          id="cd-agency-scope-trigger"
+          ref={triggerRef}
+          type="button"
+          className="cd-agency-scope-combobox"
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpen((value) => !value)}
+          onKeyDown={handleTriggerKeyDown}
+        >
+          <span className="cd-agency-scope-value">{scopeDisplayLabel(scope, accounts, lang)}</span>
+          <ScopeChevron open={open} />
+        </button>
       {open ? (
-        <div className="cd-agency-scope-panel" id={listId} role="listbox" aria-label={t.open}>
+        <div
+          className="cd-agency-scope-panel"
+          id={listId}
+          role="listbox"
+          aria-label={t.open}
+          onKeyDown={handlePanelKeyDown}
+          tabIndex={-1}
+        >
           <input
+            ref={searchRef}
             className="cd-agency-scope-search"
             value={search}
             placeholder={t.search}
@@ -148,7 +229,7 @@ export default function ClientAgencyScopeSelector(props: Props) {
           </select>
           <button
             type="button"
-            className={`cd-agency-scope-option${scope === "agency" ? " active" : ""}`}
+            className={`cd-agency-scope-option${scope === "agency" ? " active" : ""}${highlightIndex === 0 ? " highlighted" : ""}`}
             role="option"
             aria-selected={scope === "agency"}
             onClick={() => selectScope("agency")}
@@ -156,11 +237,11 @@ export default function ClientAgencyScopeSelector(props: Props) {
             {t.agencyView} — {t.agency} ({accounts.length})
           </button>
           <div className="cd-agency-scope-list">
-            {filteredAccounts.map((account) => (
+            {filteredAccounts.map((account, index) => (
               <button
                 key={account.accountId}
                 type="button"
-                className={`cd-agency-scope-option${scope === account.accountId ? " active" : ""}`}
+                className={`cd-agency-scope-option${scope === account.accountId ? " active" : ""}${highlightIndex === index + 1 ? " highlighted" : ""}`}
                 role="option"
                 aria-selected={scope === account.accountId}
                 onClick={() => selectScope(account.accountId)}
@@ -174,6 +255,7 @@ export default function ClientAgencyScopeSelector(props: Props) {
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }
