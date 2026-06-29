@@ -14,12 +14,14 @@ type Props = {
   accounts: ClientInstagramAccountView[];
   scope: OverviewScope;
   onScopeChange: (scope: OverviewScope) => void;
+  storageKey?: string;
 };
 
 const COPY = {
   fr: {
-    scopeLabel: "Contexte",
+    scopeLabel: "Afficher les données de",
     agency: "Tous les comptes",
+    agencyView: "Vue Agence",
     accountPrefix: "Compte",
     search: "Rechercher @username…",
     filterAll: "Tous les statuts",
@@ -27,10 +29,12 @@ const COPY = {
     filterPreparing: "Préparation en cours",
     filterAction: "Action requise",
     noMatch: "Aucun compte ne correspond à votre recherche.",
+    open: "Changer de contexte",
   },
   en: {
-    scopeLabel: "Context",
+    scopeLabel: "Show data for",
     agency: "All accounts",
+    agencyView: "Agency view",
     accountPrefix: "Account",
     search: "Search @username…",
     filterAll: "All statuses",
@@ -38,24 +42,48 @@ const COPY = {
     filterPreparing: "Setup in progress",
     filterAction: "Action required",
     noMatch: "No account matches your search.",
+    open: "Change context",
   },
 } as const;
 
-function scopeLabel(scope: OverviewScope, accounts: ClientInstagramAccountView[], lang: Lang) {
+function scopeDisplayLabel(scope: OverviewScope, accounts: ClientInstagramAccountView[], lang: Lang) {
   const t = COPY[lang];
-  if (scope === "agency") return `${lang === "fr" ? "Vue Agence" : "Agency view"} — ${t.agency}`;
+  if (scope === "agency") return `${t.agencyView} — ${t.agency}`;
   const account = accounts.find((row) => row.accountId === scope);
   const handle = account?.username?.replace(/^@+/, "") ?? (lang === "fr" ? "compte" : "account");
   return `${t.accountPrefix} — @${handle}`;
 }
 
 export default function ClientAgencyScopeSelector(props: Props) {
-  const { lang, accounts, scope, onScopeChange } = props;
+  const { lang, accounts, scope, onScopeChange, storageKey } = props;
   const t = COPY[lang];
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<AgencyAccountFilter>("all");
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const listId = useMemo(() => `agency-scope-list-${Math.random().toString(36).slice(2)}`, []);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const saved = window.sessionStorage.getItem(storageKey);
+      if (!saved) return;
+      if (saved === "agency" || accounts.some((row) => row.accountId === saved)) {
+        onScopeChange(saved);
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [accounts, onScopeChange, storageKey]);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      window.sessionStorage.setItem(storageKey, scope);
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [scope, storageKey]);
 
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
@@ -78,20 +106,28 @@ export default function ClientAgencyScopeSelector(props: Props) {
     });
   }, [accounts, filter, search]);
 
+  function selectScope(next: OverviewScope) {
+    onScopeChange(next);
+    setOpen(false);
+  }
+
   return (
-    <div className="cd-agency-scope" ref={rootRef}>
-      <span className="cd-agency-scope-label">{t.scopeLabel}</span>
+    <div className="cd-agency-scope-bar" ref={rootRef}>
+      <label className="cd-agency-scope-label" htmlFor="cd-agency-scope-trigger">{t.scopeLabel}</label>
       <button
+        id="cd-agency-scope-trigger"
         type="button"
-        className="cd-agency-scope-trigger"
+        className="cd-agency-scope-combobox"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={listId}
         onClick={() => setOpen((value) => !value)}
       >
-        {scopeLabel(scope, accounts, lang)}
+        <span className="cd-agency-scope-value">{scopeDisplayLabel(scope, accounts, lang)}</span>
+        <span className="cd-agency-scope-chevron" aria-hidden="true">▾</span>
       </button>
       {open ? (
-        <div className="cd-agency-scope-panel" role="listbox">
+        <div className="cd-agency-scope-panel" id={listId} role="listbox" aria-label={t.open}>
           <input
             className="cd-agency-scope-search"
             value={search}
@@ -113,9 +149,11 @@ export default function ClientAgencyScopeSelector(props: Props) {
           <button
             type="button"
             className={`cd-agency-scope-option${scope === "agency" ? " active" : ""}`}
-            onClick={() => { onScopeChange("agency"); setOpen(false); }}
+            role="option"
+            aria-selected={scope === "agency"}
+            onClick={() => selectScope("agency")}
           >
-            {t.agency} ({accounts.length})
+            {t.agencyView} — {t.agency} ({accounts.length})
           </button>
           <div className="cd-agency-scope-list">
             {filteredAccounts.map((account) => (
@@ -123,9 +161,11 @@ export default function ClientAgencyScopeSelector(props: Props) {
                 key={account.accountId}
                 type="button"
                 className={`cd-agency-scope-option${scope === account.accountId ? " active" : ""}`}
-                onClick={() => { onScopeChange(account.accountId); setOpen(false); }}
+                role="option"
+                aria-selected={scope === account.accountId}
+                onClick={() => selectScope(account.accountId)}
               >
-                @{account.username.replace(/^@+/, "")}
+                {t.accountPrefix} — @{account.username.replace(/^@+/, "")}
               </button>
             ))}
             {!filteredAccounts.length ? (

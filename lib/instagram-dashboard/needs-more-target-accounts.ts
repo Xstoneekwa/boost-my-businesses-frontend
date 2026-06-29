@@ -366,6 +366,77 @@ export async function reevaluateNeedsMoreTargetAccountsAfterTargetMutation(
   }
 }
 
+export async function syncNeedsMoreTargetAccountsDashboardAction(
+  supabase: NeedsMoreTargetAccountsSupabase,
+  input: {
+    accountId: string;
+    evaluationReason: string;
+    actorType?: NeedsMoreTargetAccountsActorType;
+  },
+): Promise<NeedsMoreTargetAccountsReevaluationResult> {
+  const accountId = input.accountId.trim();
+  const counts = await loadTargetEligibilityCountsForAccount(supabase, accountId);
+  const eligibleCount = counts.eligible;
+  const needsMoreTargets = shouldSignalAutomatically(eligibleCount);
+  const active = await loadActiveNeedsMoreTargetAccountsAction(supabase, accountId);
+  const metadata = buildMetadata({
+    eligibleCount,
+    triggerSource: "automatic",
+    evaluationReason: input.evaluationReason,
+  });
+  const actorType = input.actorType ?? "system";
+
+  if (!needsMoreTargets) {
+    if (!active) {
+      return {
+        account_id: accountId,
+        eligible_target_count: eligibleCount,
+        threshold: NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
+        needs_more_targets: false,
+        changed: "unchanged",
+        action_id: null,
+      };
+    }
+    const dismissedId = await dismissActiveNeedsMoreTargetAccountsAction(supabase, accountId);
+    await auditNeedsMoreTargetAccountsEvent(supabase, {
+      accountId,
+      actionType: "needs_more_target_accounts_signal_dismissed",
+      actorType,
+      metadata,
+      actionId: dismissedId,
+    });
+    return {
+      account_id: accountId,
+      eligible_target_count: eligibleCount,
+      threshold: NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
+      needs_more_targets: false,
+      changed: "dismissed",
+      action_id: dismissedId,
+    };
+  }
+
+  const actionId = await upsertNeedsMoreTargetAccountsAction(supabase, {
+    accountId,
+    clientId: await loadClientId(supabase, accountId),
+    metadata,
+  });
+  await auditNeedsMoreTargetAccountsEvent(supabase, {
+    accountId,
+    actionType: active ? "needs_more_target_accounts_signal_updated" : "needs_more_target_accounts_signal_created",
+    actorType,
+    metadata,
+    actionId,
+  });
+  return {
+    account_id: accountId,
+    eligible_target_count: eligibleCount,
+    threshold: NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
+    needs_more_targets: true,
+    changed: active ? "updated" : "created",
+    action_id: actionId,
+  };
+}
+
 export async function loadNeedsMoreTargetAccountsProjectionForAccounts(
   supabase: NeedsMoreTargetAccountsSupabase,
   accountIds: string[],

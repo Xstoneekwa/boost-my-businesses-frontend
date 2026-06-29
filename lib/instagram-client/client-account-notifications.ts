@@ -3,6 +3,7 @@ import { loadTargetEligibilityCountsForAccount } from "../instagram-dashboard/ac
 import {
   NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
   loadActiveNeedsMoreTargetAccountsAction,
+  syncNeedsMoreTargetAccountsDashboardAction,
 } from "../instagram-dashboard/needs-more-target-accounts.ts";
 import {
   emptyClientAccountNotificationsProjection,
@@ -33,6 +34,7 @@ export type ClientNotificationStatus = "active" | "resolved";
 export type ClientAccountNotificationMetadata = {
   username: string;
   eligible_target_count?: number;
+  added_target_count?: number;
   threshold?: number;
   lifecycle_status?: string;
   reason?: string;
@@ -95,16 +97,32 @@ export function buildClientNotificationCopy(
   category: ClientNotificationCategory,
   metadata: ClientAccountNotificationMetadata,
   lang: "fr" | "en" = "fr",
+  accountId?: string,
 ) {
   const username = metadata.username.startsWith("@") ? metadata.username : `@${metadata.username}`;
+  const eligible = typeof metadata.eligible_target_count === "number" ? metadata.eligible_target_count : null;
+  const added = typeof metadata.added_target_count === "number" ? metadata.added_target_count : null;
+  const targetingHref = accountId
+    ? `/instagram-client?view=targeting&account=${encodeURIComponent(accountId)}`
+    : "/instagram-client?view=targeting";
   if (category === "needs_more_target_accounts") {
+    const readyLabel = eligible === null
+      ? ""
+      : (lang === "fr"
+        ? ` ${eligible} compte${eligible > 1 ? "s" : ""} prêt${eligible > 1 ? "s" : ""} pour la campagne`
+        : ` ${eligible} campaign-ready target account${eligible === 1 ? "" : "s"}`);
+    const addedLabel = added !== null && eligible !== null && added > eligible
+      ? (lang === "fr"
+        ? ` (${added} ajouté${added > 1 ? "s" : ""} au total)`
+        : ` (${added} added in total)`)
+      : "";
     return {
       title: lang === "fr" ? "Comptes cibles à compléter" : "More target accounts needed",
       message: lang === "fr"
-        ? `${username} a besoin de nouveaux comptes cibles. Ajoutez des comptes cibles pour relancer la campagne.`
-        : `${username} needs more target accounts. Add target accounts to keep the campaign running.`,
+        ? `${username} a${readyLabel || " besoin de nouveaux comptes cibles"}${addedLabel}. Ajoutez des comptes cibles prêts pour la campagne afin de relancer la prospection.`
+        : `${username} has${readyLabel || " too few campaign-ready target accounts"}${addedLabel}. Add campaign-ready target accounts to keep outreach running.`,
       ctaLabel: lang === "fr" ? "Ajouter des comptes cibles" : "Add target accounts",
-      ctaHref: "/instagram-client?view=targeting",
+      ctaHref: targetingHref,
     };
   }
   if (category === "needs_assistance") {
@@ -143,7 +161,7 @@ function projectNotificationRow(
 ): ClientAccountNotificationView {
   const category = readString(row.category, "") as ClientNotificationCategory;
   const metadata = readMetadata(row.metadata_safe);
-  const copy = buildClientNotificationCopy(category, metadata, lang);
+  const copy = buildClientNotificationCopy(category, metadata, lang, readString(row.account_id, "") || undefined);
   const status = readString(row.status, "active") as ClientNotificationStatus;
   return {
     id: readString(row.id, ""),
@@ -295,6 +313,7 @@ export async function deriveClientNotificationDesiredStates(
   const baseMetadata: ClientAccountNotificationMetadata = {
     username: input.username,
     eligible_target_count: eligibleCount,
+    added_target_count: counts.total,
     threshold: NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
     lifecycle_status: input.lifecycleStatus,
   };
@@ -338,6 +357,12 @@ export async function reconcileClientAccountNotificationsForAccount(
 
   const account = await loadAccountContext(supabase, accountId);
   if (!account) return { account_id: accountId, changed: [] as string[] };
+
+  await syncNeedsMoreTargetAccountsDashboardAction(supabase, {
+    accountId,
+    evaluationReason: "client_notification_reconcile",
+    actorType: "system",
+  });
 
   const desiredStates = await deriveClientNotificationDesiredStates(supabase, {
     accountId,

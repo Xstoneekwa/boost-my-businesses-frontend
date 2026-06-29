@@ -165,12 +165,42 @@ function createMockSupabase(input: {
     return api;
   }
 
+  function rpc(name: string, params: Record<string, unknown>) {
+    if (name === "upsert_account_dashboard_action") {
+      const accountId = String(params.p_account_id ?? "");
+      const existing = actions.find(
+        (row) => row.account_id === accountId && row.action_type === params.p_action_type,
+      );
+      if (existing) {
+        Object.assign(existing, {
+          status: params.p_status,
+          metadata: params.p_metadata,
+          updated_at: new Date().toISOString(),
+        });
+        return Promise.resolve({ data: { id: existing.id }, error: null });
+      }
+      const next = {
+        id: `action-${actions.length + 1}`,
+        account_id: accountId,
+        client_id: params.p_client_id ?? null,
+        action_type: params.p_action_type,
+        status: params.p_status,
+        metadata: params.p_metadata,
+      };
+      actions.push(next);
+      return Promise.resolve({ data: { id: next.id }, error: null });
+    }
+    return Promise.resolve({ data: null, error: { message: `unknown rpc: ${name}` } });
+  }
+
   return {
     clientId,
     notifications,
     accounts,
     links,
+    actions,
     from: makeQuery,
+    rpc,
   };
 }
 
@@ -192,7 +222,7 @@ test("needs_more_target_accounts creates one active client notification with use
   assert.equal(projection.active.length, 1);
   assert.equal(projection.active[0].category, "needs_more_target_accounts");
   assert.match(projection.active[0].message, /xstonekwa_backup_acc/);
-  assert.equal(projection.active[0].ctaHref, "/instagram-client?view=targeting");
+  assert.equal(projection.active[0].ctaHref, "/instagram-client?view=targeting&account=acct-1");
 });
 
 test("marking needs_more_target_accounts notification as read does not resolve it", async () => {

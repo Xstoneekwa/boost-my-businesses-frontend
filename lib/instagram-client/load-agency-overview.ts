@@ -14,6 +14,7 @@ import {
   buildClientOverviewRecentFeed,
 } from "./client-overview-recent-feed-projection";
 import type { ClientAgencyRecentFeedItem } from "./client-agency-overview-projection";
+import { loadTargetEligibilityCountsByAccount } from "../instagram-dashboard/account-target-eligibility";
 import { readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -118,10 +119,11 @@ export async function loadClientAgencyOverview(input: {
   const usernamesByAccountId = new Map(accounts.map((row) => [row.accountId, row.username]));
 
   const supabase = createSupabaseClient();
-  const [notifications, passwordActionAccountIds, recentEvents] = await Promise.all([
+  const [notifications, passwordActionAccountIds, recentEvents, eligibilityByAccount] = await Promise.all([
     loadClientAccountNotificationsForClient(supabase, clientId),
     loadPasswordActionAccountIds(clientId, accountIds),
     loadRecentInteractionEvents(accountIds),
+    loadTargetEligibilityCountsByAccount(supabase, accountIds),
   ]);
 
   const notificationsByAccount = new Map<string, typeof notifications.active>();
@@ -133,12 +135,18 @@ export async function loadClientAgencyOverview(input: {
 
   const lastActivityByAccount = buildLastActivityByAccount(recentEvents);
 
-  let projected = accounts.map((account) => projectAgencyOverviewAccountRow({
-    account,
-    notificationsByAccount,
-    passwordActionAccountIds,
-    lastActivityAt: lastActivityByAccount.get(account.accountId) ?? null,
-  }));
+  let projected = accounts.map((account) => {
+    const counts = eligibilityByAccount.get(account.accountId);
+    const eligibleCount = counts?.eligible ?? 0;
+    const row = projectAgencyOverviewAccountRow({
+      account,
+      notificationsByAccount,
+      passwordActionAccountIds,
+      lastActivityAt: lastActivityByAccount.get(account.accountId) ?? null,
+      eligibleTargetCount: eligibleCount,
+    });
+    return row;
+  });
 
   const search = readString(input.search).toLowerCase().replace(/^@+/, "");
   if (search) {
@@ -152,6 +160,7 @@ export async function loadClientAgencyOverview(input: {
     notificationsByAccount,
     passwordActionAccountIds,
     lastActivityAt: lastActivityByAccount.get(account.accountId) ?? null,
+    eligibleTargetCount: eligibilityByAccount.get(account.accountId)?.eligible ?? 0,
   }));
 
   const paginated = paginateAgencyOverviewAccounts(

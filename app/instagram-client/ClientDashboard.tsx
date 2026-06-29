@@ -9,6 +9,7 @@ import ClientAccountsSection, { type ClientInstagramAccountView } from "./Client
 import ClientAgencyModeBanner from "./ClientAgencyModeBanner";
 import ClientAgencyOverviewPanel from "./ClientAgencyOverviewPanel";
 import ClientAgencyScopeSelector, { type OverviewScope } from "./ClientAgencyScopeSelector";
+import ClientAgencyTargetingPanel from "./ClientAgencyTargetingPanel";
 import type { ClientAccountNotificationsProjection } from "@/lib/instagram-client/client-account-notifications";
 import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountTargetsDrawer";
 import ClientActivityPanel from "./ClientActivityPanel";
@@ -538,6 +539,7 @@ export default function ClientDashboard({
   const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
   const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
   const agencyModeActive = initialAgencyModeActive;
+  const agencyScopeStorageKey = `bmb_agency_scope_${_tenantId}`;
   const [overviewScope, setOverviewScope] = useState<OverviewScope>(agencyModeActive ? "agency" : "");
   const [accountInsights, setAccountInsights] = useState<ClientAccountInsights | null>(initialAccountInsights);
   const [followerGrowth, setFollowerGrowth] = useState<LoadClientFollowerGrowthResult | null>(initialFollowerGrowth);
@@ -826,14 +828,18 @@ export default function ClientDashboard({
     try {
       const url = new URL(href, window.location.origin);
       const view = url.searchParams.get("view");
+      const account = url.searchParams.get("account");
       if (view === "overview" || view === "activity" || view === "targeting" || view === "dm-templates" || view === "account") {
         setActiveView(view);
+      }
+      if (agencyModeActive && account && initialAccounts.some((row) => row.accountId === account)) {
+        setOverviewScope(account);
       }
     } catch {
       // Ignore malformed deep links.
     }
     setNotificationsOpen(false);
-  }, []);
+  }, [agencyModeActive, initialAccounts]);
 
   const handleMarkNotificationRead = useCallback(async (notificationId: string) => {
     const response = await fetch("/api/instagram-client/notifications", {
@@ -858,14 +864,19 @@ export default function ClientDashboard({
 
   useEffect(() => {
     try {
-      const view = new URLSearchParams(window.location.search).get("view");
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view");
+      const account = params.get("account");
       if (view === "overview" || view === "activity" || view === "targeting" || view === "dm-templates" || view === "account") {
         setActiveView(view);
+      }
+      if (agencyModeActive && account && initialAccounts.some((row) => row.accountId === account)) {
+        setOverviewScope(account);
       }
     } catch {
       // Ignore malformed query strings.
     }
-  }, []);
+  }, [agencyModeActive, initialAccounts]);
 
   const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
   const sidebarPlan = workspace?.clientPlanLabel || accountInsights?.packageLabel || "—";
@@ -1152,6 +1163,7 @@ export default function ClientDashboard({
             accounts={initialAccounts}
             scope={overviewScope}
             onScopeChange={setOverviewScope}
+            storageKey={agencyScopeStorageKey}
           />
         ) : null}
 
@@ -1318,11 +1330,10 @@ export default function ClientDashboard({
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
             {agencyModeActive && overviewScope === "agency" ? (
-              <p className="cd-setup-note">
-                {lang === "fr"
-                  ? "Sélectionnez un compte Instagram pour gérer son ciblage."
-                  : "Select an Instagram account to manage its targeting."}
-              </p>
+              <ClientAgencyTargetingPanel
+                lang={lang}
+                onManageAccount={(accountId) => setOverviewScope(accountId)}
+              />
             ) : (
               <>
             <div className="cd-tg2-topbar">
@@ -1331,6 +1342,13 @@ export default function ClientDashboard({
                   ? `${t.targeting.intro} · @${targetingUsername.replace(/^@+/, "")}`
                   : t.targeting.intro}
               </p>
+              {useLiveData && targetingOverview ? (
+                <p className="cd-setup-note">
+                  {lang === "fr"
+                    ? `${targetingOverview.summary.validEligible} compte(s) prêt(s) pour la campagne · ${targetingOverview.summary.total} ajouté(s) au total`
+                    : `${targetingOverview.summary.validEligible} campaign-ready target(s) · ${targetingOverview.summary.total} added in total`}
+                </p>
+              ) : null}
               <div className="cd-tg2-topbar-actions">
                 <input
                   type="search"
@@ -1714,17 +1732,21 @@ const CSS = `
 .cd-up{color:var(--good);font-weight:700}
 
 /* Agency overview */
-.cd-agency-scope{display:flex;align-items:center;gap:10px;margin:0 0 16px;position:relative;z-index:20}
-.cd-agency-scope-label{font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute)}
-.cd-agency-scope-trigger{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;color:var(--ink);font-weight:700;cursor:pointer}
-.cd-agency-scope-panel{position:absolute;top:calc(100% + 8px);left:0;min-width:min(420px,92vw);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 18px 40px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:8px}
+.cd-agency-scope-bar{display:flex;align-items:center;gap:12px;margin:0 0 18px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;position:relative;z-index:20}
+.cd-agency-scope-label{font-size:.82rem;font-weight:700;color:var(--ink);white-space:nowrap}
+.cd-agency-scope-combobox{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:min(520px,100%);background:var(--bg);border:1px solid var(--a-ring);border-radius:12px;padding:11px 14px;color:var(--ink);font-weight:700;cursor:pointer;box-shadow:0 0 0 1px rgba(90,108,245,.08)}
+.cd-agency-scope-value{text-align:left}
+.cd-agency-scope-chevron{color:var(--ink-mute);font-size:1rem;line-height:1}
+.cd-agency-scope-panel{position:absolute;top:calc(100% + 8px);left:16px;right:16px;min-width:min(420px,92vw);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 18px 40px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:8px}
 .cd-agency-scope-search,.cd-agency-scope-filter,.cd-agency-table-search{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px;color:var(--ink)}
 .cd-agency-scope-list{max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:4px}
 .cd-agency-scope-option{background:transparent;border:0;border-radius:10px;padding:9px 11px;text-align:left;color:var(--ink);cursor:pointer}
 .cd-agency-scope-option.active,.cd-agency-scope-option:hover{background:rgba(90,108,245,.12)}
 .cd-agency-scope-empty{margin:0;padding:8px 11px;color:var(--ink-mute);font-size:.85rem}
-.cd-agency-overview{display:flex;flex-direction:column;gap:16px}
+.cd-agency-overview,.cd-agency-targeting{display:flex;flex-direction:column;gap:16px}
+.cd-agency-targeting-title{margin:0;font-family:var(--font-d);font-size:1.15rem}
 .cd-agency-summary{grid-template-columns:repeat(5,minmax(0,1fr))}
+.cd-agency-targeting .cd-agency-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
 .cd-agency-packages .cd-agency-package-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .cd-agency-packages .cd-agency-package-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
 .cd-agency-followers-note{margin:0;color:var(--ink-mute);font-size:.85rem}

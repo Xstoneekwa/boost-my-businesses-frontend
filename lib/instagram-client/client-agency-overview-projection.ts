@@ -1,6 +1,7 @@
 import type { ClientAccountRow } from "./account-projection";
 import { resolveClientAccountConnectionUi } from "./client-account-connection-ui";
 import type { ClientAccountNotificationView } from "./client-account-notifications";
+import { NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD } from "../instagram-dashboard/needs-more-target-accounts";
 import type { ClientOverviewRecentFeedItem } from "./client-overview-recent-feed-projection";
 import {
   buildAgencyOverviewSummary,
@@ -68,11 +69,13 @@ export function projectAgencyOverviewAccountRow(input: {
   notificationsByAccount: Map<string, ClientAccountNotificationView[]>;
   passwordActionAccountIds: Set<string>;
   lastActivityAt: string | null;
+  eligibleTargetCount?: number;
 }): ClientAgencyOverviewAccountRow {
   const ui = resolveClientAccountConnectionUi(input.account, "fr");
   const uiEn = resolveClientAccountConnectionUi(input.account, "en");
   const activeNotifications = input.notificationsByAccount.get(input.account.accountId) ?? [];
-  const needsTargets = activeNotifications.some((row) => row.category === "needs_more_target_accounts");
+  const eligibleCount = input.eligibleTargetCount ?? 0;
+  const needsTargets = eligibleCount <= NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD;
   const hasNotificationAction = activeNotifications.some((row) => (
     row.category === "needs_more_target_accounts"
     || row.category === "needs_assistance"
