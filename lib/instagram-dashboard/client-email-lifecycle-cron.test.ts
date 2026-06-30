@@ -44,6 +44,38 @@ test("extractClientEmailLifecycleCronSecret reads bearer and header", () => {
   assert.equal(extractClientEmailLifecycleCronSecret(header), "header-secret");
 });
 
+test("invalid auth with native User-Agent is rejected without heartbeat writes", async () => {
+  let writes = 0;
+  const supabase = {
+    from(table: string) {
+      if (table === "worker_heartbeats") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { metadata: null }, error: null }),
+            }),
+          }),
+          upsert: async () => {
+            writes += 1;
+            return { error: null };
+          },
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+
+  const run = await runClientEmailLifecycleCron({
+    supabase: supabase as never,
+    callerSecret: "wrong-secret",
+    invoker: "native_vercel_tick",
+    env: watermarkEnv,
+  });
+
+  assert.equal(run.status, 403);
+  assert.equal(writes, 0);
+});
+
 test("manual cron tick stays awaiting_first_native_tick in scheduler projection", async () => {
   let metadata: Record<string, unknown> | null = null;
   const supabase = {
@@ -77,7 +109,7 @@ test("manual cron tick stays awaiting_first_native_tick in scheduler projection"
   const run = await runClientEmailLifecycleCron({
     supabase: supabase as never,
     callerSecret: "cron-secret",
-    invoker: "manual",
+    invoker: "authenticated_manual_tick",
     env: {
       ...watermarkEnv,
       CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
@@ -86,7 +118,7 @@ test("manual cron tick stays awaiting_first_native_tick in scheduler projection"
 
   assert.equal(run.status, 200);
   if (run.status !== 200) return;
-  assert.equal(run.result.invoker, "manual");
+  assert.equal(run.result.invoker, "authenticated_manual_tick");
   assert.equal(run.result.schedulerStatus, "awaiting_first_native_tick");
   assert.equal(metadata?.native_tick_count ?? 0, 0);
 });
@@ -124,7 +156,7 @@ test("native cron tick records scheduler heartbeat metadata", async () => {
   const run = await runClientEmailLifecycleCron({
     supabase: supabase as never,
     callerSecret: "cron-secret",
-    invoker: "vercel_native",
+    invoker: "native_vercel_tick",
     env: {
       ...watermarkEnv,
       CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
@@ -133,14 +165,19 @@ test("native cron tick records scheduler heartbeat metadata", async () => {
 
   assert.equal(run.status, 200);
   if (run.status !== 200) return;
-  assert.equal(run.result.invoker, "vercel_native");
+  assert.equal(run.result.invoker, "native_vercel_tick");
   assert.equal(run.result.schedulerStatus, "healthy");
   assert.equal(metadata?.native_tick_count, 1);
 });
 
-test("detectClientEmailLifecycleCronInvoker is exported for route wiring", () => {
-  const headers = new Headers({ "x-vercel-cron": "1" });
-  assert.equal(detectClientEmailLifecycleCronInvoker(headers), "vercel_native");
+test("detectClientEmailLifecycleCronInvoker uses User-Agent not x-vercel-cron", () => {
+  const headers = new Headers({
+    "user-agent": "vercel-cron/1.0",
+  });
+  assert.equal(detectClientEmailLifecycleCronInvoker(headers), "native_vercel_tick");
+
+  const headerOnly = new Headers({ "x-vercel-cron": "1" });
+  assert.equal(detectClientEmailLifecycleCronInvoker(headerOnly), "authenticated_manual_tick");
 });
 
 test("cron with automation closed records scheduler heartbeat only", async () => {
@@ -176,7 +213,7 @@ test("cron with automation closed records scheduler heartbeat only", async () =>
   const run = await runClientEmailLifecycleCron({
     supabase: supabase as never,
     callerSecret: "cron-secret",
-    invoker: "manual",
+    invoker: "authenticated_manual_tick",
     env: {
       ...watermarkEnv,
       CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",

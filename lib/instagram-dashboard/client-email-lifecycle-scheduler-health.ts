@@ -3,7 +3,9 @@ import type { ClientEmailSupabase } from "./client-email-supabase.ts";
 
 export const CLIENT_EMAIL_LIFECYCLE_CRON_PATH = "/api/cron/client-email-lifecycle" as const;
 export const CLIENT_EMAIL_LIFECYCLE_CRON_SCHEDULE = "*/15 * * * *" as const;
-export const CLIENT_EMAIL_LIFECYCLE_NATIVE_CRON_STALE_MS = 30 * 60 * 1000;
+export const CLIENT_EMAIL_LIFECYCLE_VERCEL_CRON_USER_AGENT = "vercel-cron/1.0" as const;
+/** Three consecutive 15-minute windows before marking native scheduler stale. */
+export const CLIENT_EMAIL_LIFECYCLE_NATIVE_CRON_STALE_MS = 45 * 60 * 1000;
 
 export type ClientEmailLifecycleSchedulerStatus =
   | "awaiting_first_native_tick"
@@ -11,7 +13,9 @@ export type ClientEmailLifecycleSchedulerStatus =
   | "stale"
   | "misconfigured";
 
-export type ClientEmailLifecycleCronInvoker = "vercel_native" | "manual";
+export type ClientEmailLifecycleCronInvoker =
+  | "native_vercel_tick"
+  | "authenticated_manual_tick";
 
 export type ClientEmailLifecycleSchedulerHealth = {
   status: ClientEmailLifecycleSchedulerStatus;
@@ -34,10 +38,29 @@ function readNumber(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : fallback;
 }
 
+function normalizeStoredInvoker(value: string): ClientEmailLifecycleCronInvoker | null {
+  if (value === "native_vercel_tick" || value === "vercel_native") return "native_vercel_tick";
+  if (value === "authenticated_manual_tick" || value === "manual") return "authenticated_manual_tick";
+  return null;
+}
+
+export function isVercelCronUserAgent(userAgent: string | null | undefined) {
+  const normalized = (userAgent ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes(CLIENT_EMAIL_LIFECYCLE_VERCEL_CRON_USER_AGENT);
+}
+
+export function readVercelCronTelemetry(headers: Headers) {
+  return {
+    xVercelCronPresent: headers.get("x-vercel-cron")?.trim() === "1",
+  };
+}
+
 export function detectClientEmailLifecycleCronInvoker(headers: Headers): ClientEmailLifecycleCronInvoker {
-  const vercelCron = headers.get("x-vercel-cron")?.trim() ?? "";
-  if (vercelCron === "1") return "vercel_native";
-  return "manual";
+  if (isVercelCronUserAgent(headers.get("user-agent"))) {
+    return "native_vercel_tick";
+  }
+  return "authenticated_manual_tick";
 }
 
 export function projectClientEmailLifecycleSchedulerHealth(input: {
@@ -50,10 +73,7 @@ export function projectClientEmailLifecycleSchedulerHealth(input: {
   const metadata = input.heartbeatMetadata ?? null;
   const lastNativeSuccessAt = readString(metadata?.last_native_success_at, "") || null;
   const nativeTickCount = readNumber(metadata?.native_tick_count, 0);
-  const lastInvokerRaw = readString(metadata?.last_invoker, "");
-  const lastInvoker = lastInvokerRaw === "vercel_native" || lastInvokerRaw === "manual"
-    ? lastInvokerRaw
-    : null;
+  const lastInvoker = normalizeStoredInvoker(readString(metadata?.last_invoker, ""));
 
   if (!cronSecretConfigured) {
     return {
@@ -101,7 +121,7 @@ export function projectClientEmailLifecycleSchedulerHealth(input: {
       lastNativeSuccessAt,
       nativeTickCount,
       lastInvoker,
-      reason: "No successful native Vercel lifecycle cron tick in the last 30 minutes.",
+      reason: "No successful native Vercel lifecycle cron tick in the last 45 minutes.",
     };
   }
 
@@ -144,15 +164,17 @@ export function buildClientEmailLifecycleCronHeartbeatMetadata(input: {
   now: Date;
   consecutiveFailures: number;
   incidentSignals: string[];
+  telemetry?: { xVercelCronPresent?: boolean };
 }) {
   const existing = input.existingMetadata ?? {};
   const nowIso = input.now.toISOString();
   const previousNativeSuccessAt = readString(existing.last_native_success_at, "") || null;
   const previousNativeTickCount = readNumber(existing.native_tick_count, 0);
-  const nativeTickCount = input.invoker === "vercel_native" && input.ok
+  const isNativeTick = input.invoker === "native_vercel_tick";
+  const nativeTickCount = isNativeTick && input.ok
     ? previousNativeTickCount + 1
     : previousNativeTickCount;
-  const lastNativeSuccessAt = input.invoker === "vercel_native" && input.ok
+  const lastNativeSuccessAt = isNativeTick && input.ok
     ? nowIso
     : previousNativeSuccessAt;
 
@@ -164,6 +186,9 @@ export function buildClientEmailLifecycleCronHeartbeatMetadata(input: {
     last_tick_at: nowIso,
     last_native_success_at: lastNativeSuccessAt,
     native_tick_count: nativeTickCount,
-    last_manual_tick_at: input.invoker === "manual" ? nowIso : readString(existing.last_manual_tick_at, "") || null,
+    last_manual_tick_at: input.invoker === "authenticated_manual_tick"
+      ? nowIso
+      : readString(existing.last_manual_tick_at, "") || null,
+    x_vercel_cron_header_present: input.telemetry?.xVercelCronPresent ?? null,
   };
 }

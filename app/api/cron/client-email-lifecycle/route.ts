@@ -4,7 +4,7 @@ import {
   extractClientEmailLifecycleCronSecret,
   runClientEmailLifecycleCron,
 } from "@/lib/instagram-dashboard/client-email-lifecycle-cron";
-import { detectClientEmailLifecycleCronInvoker } from "@/lib/instagram-dashboard/client-email-lifecycle-scheduler-health";
+import { detectClientEmailLifecycleCronInvoker, readVercelCronTelemetry } from "@/lib/instagram-dashboard/client-email-lifecycle-scheduler-health";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,7 @@ async function handleCronRequest(request: Request) {
       supabase,
       callerSecret: extractClientEmailLifecycleCronSecret(request),
       invoker: detectClientEmailLifecycleCronInvoker(request.headers),
+      cronTelemetry: readVercelCronTelemetry(request.headers),
     });
 
     if (run.status === 401 || run.status === 403 || run.status === 503) {

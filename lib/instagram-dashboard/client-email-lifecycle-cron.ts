@@ -217,6 +217,7 @@ async function recordCronHeartbeat(
     consecutiveFailures: number;
     now: Date;
     incidentSignals: string[];
+    telemetry?: { xVercelCronPresent?: boolean };
   },
 ) {
   const existingMetadata = await readCronHeartbeatMetadata(supabase);
@@ -227,6 +228,7 @@ async function recordCronHeartbeat(
     now: input.now,
     consecutiveFailures: input.consecutiveFailures,
     incidentSignals: input.incidentSignals,
+    telemetry: input.telemetry,
   });
   await supabase.from("worker_heartbeats").upsert({
     worker_id: CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID,
@@ -258,6 +260,7 @@ export async function runClientEmailLifecycleCron(input: {
   supabase: ClientEmailSupabase;
   callerSecret?: string | null;
   invoker?: ClientEmailLifecycleCronInvoker;
+  cronTelemetry?: { xVercelCronPresent?: boolean };
   env?: Record<string, string | undefined>;
   now?: Date;
   fetcher?: typeof fetch;
@@ -268,7 +271,7 @@ export async function runClientEmailLifecycleCron(input: {
   const env = input.env ?? process.env;
   const now = input.now ?? new Date();
   const startedAt = now.toISOString();
-  const invoker = input.invoker ?? "manual";
+  const invoker = input.invoker ?? "authenticated_manual_tick";
   const auth = evaluateClientEmailLifecycleCronAuth(env, input.callerSecret);
   if (!auth.ok) {
     return { status: auth.status, result: { reason: auth.reason } };
@@ -296,6 +299,7 @@ export async function runClientEmailLifecycleCron(input: {
       consecutiveFailures: 0,
       now,
       incidentSignals,
+      telemetry: input.cronTelemetry,
     });
     const heartbeatMetadata = await readCronHeartbeatMetadata(input.supabase);
     const finishedAt = new Date().toISOString();
@@ -361,6 +365,7 @@ export async function runClientEmailLifecycleCron(input: {
       consecutiveFailures: 0,
       now: new Date(),
       incidentSignals,
+      telemetry: input.cronTelemetry,
     });
     const heartbeatMetadata = await readCronHeartbeatMetadata(input.supabase);
     const schedulerStatus = projectSchedulerStatusAfterTick(env, heartbeatMetadata, new Date());
@@ -414,6 +419,7 @@ export async function runClientEmailLifecycleCron(input: {
       consecutiveFailures,
       now: new Date(),
       incidentSignals,
+      telemetry: input.cronTelemetry,
     });
     throw error;
   } finally {
