@@ -19,6 +19,12 @@ import {
   loadAllNeedsMoreTargetsReconcileSnapshots,
   reconcileNeedsMoreTargetAccountEmailSequences,
 } from "./client-email-needs-more-targets-reconcile.ts";
+import {
+  buildClientEmailLifecycleCronHeartbeatMetadata,
+  type ClientEmailLifecycleCronInvoker,
+  type ClientEmailLifecycleSchedulerStatus,
+  projectClientEmailLifecycleSchedulerHealth,
+} from "./client-email-lifecycle-scheduler-health.ts";
 import type { ClientEmailSupabase } from "./client-email-supabase.ts";
 
 export const CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID = "client_email_lifecycle_cron" as const;
@@ -33,6 +39,8 @@ export type ClientEmailLifecycleCronResult = {
   workerId: string;
   startedAt: string;
   finishedAt: string;
+  invoker: ClientEmailLifecycleCronInvoker;
+  schedulerStatus: ClientEmailLifecycleSchedulerStatus;
   skipped: boolean;
   skipReason: string | null;
   automationGateOpen: boolean;
@@ -192,20 +200,34 @@ async function materializeNeedsMoreBatch(
   };
 }
 
+async function readCronHeartbeatMetadata(supabase: ClientEmailSupabase) {
+  const { data } = await supabase
+    .from("worker_heartbeats")
+    .select("metadata")
+    .eq("worker_id", CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID)
+    .maybeSingle();
+  return (data as { metadata?: Record<string, unknown> } | null)?.metadata ?? null;
+}
+
 async function recordCronHeartbeat(
   supabase: ClientEmailSupabase,
   input: {
     ok: boolean;
+    invoker: ClientEmailLifecycleCronInvoker;
     consecutiveFailures: number;
     now: Date;
     incidentSignals: string[];
   },
 ) {
-  const metadata = {
-    consecutive_failures: input.consecutiveFailures,
-    incident_signals: input.incidentSignals,
-    last_ok: input.ok,
-  };
+  const existingMetadata = await readCronHeartbeatMetadata(supabase);
+  const metadata = buildClientEmailLifecycleCronHeartbeatMetadata({
+    existingMetadata,
+    ok: input.ok,
+    invoker: input.invoker,
+    now: input.now,
+    consecutiveFailures: input.consecutiveFailures,
+    incidentSignals: input.incidentSignals,
+  });
   await supabase.from("worker_heartbeats").upsert({
     worker_id: CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID,
     status: input.ok ? "idle" : "degraded",
@@ -215,19 +237,27 @@ async function recordCronHeartbeat(
 }
 
 async function readConsecutiveCronFailures(supabase: ClientEmailSupabase) {
-  const { data } = await supabase
-    .from("worker_heartbeats")
-    .select("metadata")
-    .eq("worker_id", CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID)
-    .maybeSingle();
-  const metadata = (data as { metadata?: Record<string, unknown> } | null)?.metadata;
+  const metadata = await readCronHeartbeatMetadata(supabase);
   const raw = metadata?.consecutive_failures;
   return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+}
+
+function projectSchedulerStatusAfterTick(
+  env: Record<string, string | undefined>,
+  metadata: Record<string, unknown> | null,
+  now: Date,
+) {
+  return projectClientEmailLifecycleSchedulerHealth({
+    env,
+    heartbeatMetadata: metadata,
+    now,
+  }).status;
 }
 
 export async function runClientEmailLifecycleCron(input: {
   supabase: ClientEmailSupabase;
   callerSecret?: string | null;
+  invoker?: ClientEmailLifecycleCronInvoker;
   env?: Record<string, string | undefined>;
   now?: Date;
   fetcher?: typeof fetch;
@@ -238,6 +268,7 @@ export async function runClientEmailLifecycleCron(input: {
   const env = input.env ?? process.env;
   const now = input.now ?? new Date();
   const startedAt = now.toISOString();
+  const invoker = input.invoker ?? "manual";
   const auth = evaluateClientEmailLifecycleCronAuth(env, input.callerSecret);
   if (!auth.ok) {
     return { status: auth.status, result: { reason: auth.reason } };
@@ -259,13 +290,24 @@ export async function runClientEmailLifecycleCron(input: {
   };
 
   if (!automationGate.allowed) {
+    await recordCronHeartbeat(input.supabase, {
+      ok: true,
+      invoker,
+      consecutiveFailures: 0,
+      now,
+      incidentSignals,
+    });
+    const heartbeatMetadata = await readCronHeartbeatMetadata(input.supabase);
     const finishedAt = new Date().toISOString();
+    const schedulerStatus = projectSchedulerStatusAfterTick(env, heartbeatMetadata, now);
     return {
       status: 200,
       result: {
         workerId: CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID,
         startedAt,
         finishedAt,
+        invoker,
+        schedulerStatus,
         skipped: true,
         skipReason: automationGate.reason,
         automationGateOpen: false,
@@ -315,10 +357,13 @@ export async function runClientEmailLifecycleCron(input: {
     const previousFailures = await readConsecutiveCronFailures(input.supabase);
     await recordCronHeartbeat(input.supabase, {
       ok: true,
+      invoker,
       consecutiveFailures: 0,
       now: new Date(),
       incidentSignals,
     });
+    const heartbeatMetadata = await readCronHeartbeatMetadata(input.supabase);
+    const schedulerStatus = projectSchedulerStatusAfterTick(env, heartbeatMetadata, new Date());
 
     void previousFailures;
     const finishedAt = new Date().toISOString();
@@ -328,6 +373,8 @@ export async function runClientEmailLifecycleCron(input: {
         workerId: CLIENT_EMAIL_LIFECYCLE_CRON_WORKER_ID,
         startedAt,
         finishedAt,
+        invoker,
+        schedulerStatus,
         skipped: false,
         skipReason: null,
         automationGateOpen: true,
@@ -363,6 +410,7 @@ export async function runClientEmailLifecycleCron(input: {
     }
     await recordCronHeartbeat(input.supabase, {
       ok: false,
+      invoker,
       consecutiveFailures,
       now: new Date(),
       incidentSignals,

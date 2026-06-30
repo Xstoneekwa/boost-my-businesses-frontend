@@ -5,6 +5,7 @@ import {
   extractClientEmailLifecycleCronSecret,
   runClientEmailLifecycleCron,
 } from "./client-email-lifecycle-cron.ts";
+import { detectClientEmailLifecycleCronInvoker } from "./client-email-lifecycle-scheduler-health.ts";
 import {
   cancelDispatchIntent,
   claimNeedsMoreDispatchIntent,
@@ -43,10 +44,23 @@ test("extractClientEmailLifecycleCronSecret reads bearer and header", () => {
   assert.equal(extractClientEmailLifecycleCronSecret(header), "header-secret");
 });
 
-test("cron with automation closed performs zero writes", async () => {
-  let writes = 0;
+test("manual cron tick stays awaiting_first_native_tick in scheduler projection", async () => {
+  let metadata: Record<string, unknown> | null = null;
   const supabase = {
     from(table: string) {
+      if (table === "worker_heartbeats") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { metadata }, error: null }),
+            }),
+          }),
+          upsert: (values: Record<string, unknown>) => {
+            metadata = values.metadata as Record<string, unknown>;
+            return Promise.resolve({ error: null });
+          },
+        };
+      }
       return {
         select: () => ({
           eq: () => ({
@@ -56,10 +70,6 @@ test("cron with automation closed performs zero writes", async () => {
             limit: async () => ({ data: [], error: null }),
           }),
         }),
-        upsert: async () => {
-          writes += 1;
-          return { error: null };
-        },
       };
     },
   };
@@ -67,6 +77,106 @@ test("cron with automation closed performs zero writes", async () => {
   const run = await runClientEmailLifecycleCron({
     supabase: supabase as never,
     callerSecret: "cron-secret",
+    invoker: "manual",
+    env: {
+      ...watermarkEnv,
+      CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
+    },
+  });
+
+  assert.equal(run.status, 200);
+  if (run.status !== 200) return;
+  assert.equal(run.result.invoker, "manual");
+  assert.equal(run.result.schedulerStatus, "awaiting_first_native_tick");
+  assert.equal(metadata?.native_tick_count ?? 0, 0);
+});
+
+test("native cron tick records scheduler heartbeat metadata", async () => {
+  let metadata: Record<string, unknown> | null = null;
+  const supabase = {
+    from(table: string) {
+      if (table === "worker_heartbeats") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { metadata }, error: null }),
+            }),
+          }),
+          upsert: (values: Record<string, unknown>) => {
+            metadata = values.metadata as Record<string, unknown>;
+            return Promise.resolve({ error: null });
+          },
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+          in: () => ({
+            limit: async () => ({ data: [], error: null }),
+          }),
+        }),
+      };
+    },
+  };
+
+  const run = await runClientEmailLifecycleCron({
+    supabase: supabase as never,
+    callerSecret: "cron-secret",
+    invoker: "vercel_native",
+    env: {
+      ...watermarkEnv,
+      CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
+    },
+  });
+
+  assert.equal(run.status, 200);
+  if (run.status !== 200) return;
+  assert.equal(run.result.invoker, "vercel_native");
+  assert.equal(run.result.schedulerStatus, "healthy");
+  assert.equal(metadata?.native_tick_count, 1);
+});
+
+test("detectClientEmailLifecycleCronInvoker is exported for route wiring", () => {
+  const headers = new Headers({ "x-vercel-cron": "1" });
+  assert.equal(detectClientEmailLifecycleCronInvoker(headers), "vercel_native");
+});
+
+test("cron with automation closed records scheduler heartbeat only", async () => {
+  let writes = 0;
+  const supabase = {
+    from(table: string) {
+      if (table === "worker_heartbeats") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { metadata: null }, error: null }),
+            }),
+          }),
+          upsert: async () => {
+            writes += 1;
+            return { error: null };
+          },
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+          in: () => ({
+            limit: async () => ({ data: [], error: null }),
+          }),
+        }),
+      };
+    },
+  };
+
+  const run = await runClientEmailLifecycleCron({
+    supabase: supabase as never,
+    callerSecret: "cron-secret",
+    invoker: "manual",
     env: {
       ...watermarkEnv,
       CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
@@ -78,7 +188,7 @@ test("cron with automation closed performs zero writes", async () => {
   assert.equal(run.result.skipped, true);
   assert.equal(run.result.materialize.materialized, 0);
   assert.equal(run.result.dispatch.submitted, 0);
-  assert.equal(writes, 0);
+  assert.equal(writes, 1);
 });
 
 test("claim is idempotent for already claimed live lease", async () => {
