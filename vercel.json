@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/client-email-lifecycle",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/instagram-dashboard/schedule-session/cron",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
