@@ -21,6 +21,7 @@ const windowEnd = "2026-06-30T10:00:00.000Z";
 const inWindowNow = new Date("2026-06-30T06:00:00.000Z");
 const beforeWindowNow = new Date("2026-06-30T03:00:00.000Z");
 const afterWindowNow = new Date("2026-06-30T11:00:00.000Z");
+const activeRuntimeHealth = async () => ({ schedulerConnected: true, status: "active" });
 
 const defaultAssignment = {
   id: "assignment-1",
@@ -136,6 +137,7 @@ test("account in active window queues one scheduled run", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: async () => ({ schedulerConnected: true, status: "active" }),
   });
 
   assert.equal(run.status, 200);
@@ -180,6 +182,7 @@ test("two ticks in same window do not double enqueue", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
   });
 
   assert.equal(run.result.summary.skipped_duplicate_slot_count, 1);
@@ -196,6 +199,7 @@ test("active run blocks second scheduled launch", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
   });
 
   assert.equal(run.result.summary.skipped_active_run_count, 1);
@@ -216,6 +220,7 @@ test("phone busy blocks scheduled launch for peer account", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
   });
 
   assert.equal(run.result.summary.skipped_phone_busy_count, 1);
@@ -236,6 +241,7 @@ test("stale device heartbeat blocks launch", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
   });
 
   assert.equal(run.result.summary.skipped_stale_device_count, 1);
@@ -256,9 +262,26 @@ test("emulator device blocks launch", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
   });
 
   assert.equal(run.result.summary.skipped_emulator_device_count, 1);
+});
+
+test("BotApp runtime unavailable blocks enqueue despite active window", async () => {
+  const supabase = makeSupabase();
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: baseEnv,
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: async () => ({ schedulerConnected: false, status: "unavailable" }),
+  });
+
+  assert.equal(run.result.reason, "botapp_runtime_unavailable");
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(run.result.summary.skipped_botapp_runtime_unavailable_count, 1);
+  assert.equal(supabase.rpcCalls.length, 0);
 });
 
 test("login required blocks scheduled launch", async () => {
@@ -268,6 +291,7 @@ test("login required blocks scheduled launch", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: false, reason: "login_not_connected" }),
+    loadRuntimeHealth: activeRuntimeHealth,
   });
 
   assert.equal(run.result.summary.skipped_eligibility_count, 1);
