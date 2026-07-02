@@ -4,8 +4,8 @@
 create table if not exists public.auto_restart_settings (
   id text primary key default 'global',
   auto_restart_enabled boolean not null default false,
-  mode text not null default 'disabled',
-  check_every_minutes integer not null default 15,
+  mode text not null default 'production',
+  check_every_minutes integer not null default 20,
   restart_delay_minutes integer not null default 20,
   max_attempts_per_session integer not null default 2,
   max_restarts_per_day_per_account integer not null default 3,
@@ -28,7 +28,7 @@ create table if not exists public.auto_restart_settings (
   updated_by uuid null,
   constraint auto_restart_settings_id_check check (id = 'global'),
   constraint auto_restart_settings_mode_check
-    check (mode in ('disabled', 'dry_run', 'active')),
+    check (mode in ('production', 'disabled', 'active', 'dry_run')),
   constraint auto_restart_settings_check_every_minutes_check
     check (check_every_minutes between 1 and 1440),
   constraint auto_restart_settings_restart_delay_minutes_check

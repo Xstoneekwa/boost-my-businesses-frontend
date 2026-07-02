@@ -1,5 +1,11 @@
 export type AutoRestartOperationalState = "disabled" | "blocked" | "ready" | "active";
 
+function isProductionExecutable(enabled: boolean, mode: string) {
+  if (!enabled) return false;
+  const normalized = String(mode || "").trim().toLowerCase();
+  return normalized === "production" || normalized === "active";
+}
+
 export function computeAutoRestartOperationalState(input: {
   enabled: boolean;
   mode: string;
@@ -9,21 +15,35 @@ export function computeAutoRestartOperationalState(input: {
 }): { state: AutoRestartOperationalState; blockReasons: string[] } {
   const blockReasons = [...(input.activationBlockReasons || [])];
 
-  if (!input.foundationReady) blockReasons.push("auto_restart_foundation_not_deployed");
-  if (input.enabled && input.mode === "active" && !input.tickTokenConfigured) {
-    blockReasons.push("active_mode_tick_token_not_configured");
+  if (!input.foundationReady) {
+    blockReasons.push("auto_restart_foundation_not_deployed");
+  }
+  if (
+    input.enabled
+    && isProductionExecutable(true, input.mode)
+    && !input.tickTokenConfigured
+  ) {
+    blockReasons.push("production_mode_tick_token_not_configured");
   }
 
   const unique = [...new Set(blockReasons.filter(Boolean))];
-  if (!input.enabled || input.mode === "disabled") {
+
+  if (!input.foundationReady) {
+    return { state: "blocked", blockReasons: unique };
+  }
+
+  if (!input.enabled) {
     return { state: "disabled", blockReasons: unique };
   }
-  if (input.mode === "active" && unique.length === 0) {
-    return { state: "active", blockReasons: [] };
-  }
+
   if (unique.length > 0) {
     return { state: "blocked", blockReasons: unique };
   }
+
+  if (isProductionExecutable(input.enabled, input.mode)) {
+    return { state: "active", blockReasons: [] };
+  }
+
   return { state: "ready", blockReasons: [] };
 }
 

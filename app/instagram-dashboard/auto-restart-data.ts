@@ -7,7 +7,7 @@ import { getRadarData } from "./radar-data";
 
 type SupabaseRecord = Record<string, unknown>;
 
-export type AutoRestartMode = "disabled" | "dry_run" | "active";
+export type AutoRestartMode = "production";
 export type AutoRestartStatus = "connected" | "pending" | "unknown";
 
 export type AutoRestartRulePreview = {
@@ -179,8 +179,8 @@ function defaultRules(): AutoRestartRulePreview {
 export function defaultAutoRestartRules(): AutoRestartRulePreview {
   return {
     enabled: false,
-    mode: "disabled",
-    checkEveryMinutes: 15,
+    mode: "production",
+    checkEveryMinutes: 20,
     restartDelayMinutes: 20,
     maxAttemptsPerSession: 2,
     maxRestartsPerDayPerAccount: 3,
@@ -213,11 +213,10 @@ function rulesFromSettings(row: SupabaseRecord | null | undefined): AutoRestartR
 export function rulesFromSettingsRow(row: SupabaseRecord | null | undefined): AutoRestartRulePreview {
   const fallback = defaultAutoRestartRules();
   if (!row) return fallback;
-  const mode = readString(row.mode, "disabled") as AutoRestartMode;
   return {
     ...fallback,
     enabled: readBoolean(row.auto_restart_enabled, fallback.enabled),
-    mode: mode === "active" || mode === "disabled" || mode === "dry_run" ? mode : "disabled",
+    mode: "production",
     checkEveryMinutes: Math.max(1, readNumber(row.check_every_minutes, fallback.checkEveryMinutes)),
     restartDelayMinutes: Math.max(1, readNumber(row.restart_delay_minutes, fallback.restartDelayMinutes)),
     maxAttemptsPerSession: Math.max(0, readNumber(row.max_attempts_per_session, fallback.maxAttemptsPerSession)),
@@ -595,7 +594,6 @@ function planCandidate({
   const scheduleMode = readString(assignment?.schedule_mode, "").toLowerCase();
   if (hasOpenIncident) blockingReasons.push("open_incident_blocked");
   if (!rules.enabled) blockingReasons.push("scheduler_disabled");
-  if (rules.mode === "disabled") blockingReasons.push("mode_disabled");
   if (scheduleMode === "manual_only") blockingReasons.push("manual_only_requires_manual_trigger");
   if (activeRun) blockingReasons.push("active_run_exists");
   if (activeRequest) blockingReasons.push("active_run_request_exists");
@@ -674,7 +672,7 @@ function mapRuntimeEventDecision(row: SupabaseRecord): AutoRestartDecision {
     plannedQuotas: readString(metadata.planned_quotas, "not available"),
     requestId: readString(row.job_id) || null,
     actor: readString(row.source, "system"),
-    mode: "dry_run",
+    mode: "production",
   };
 }
 
@@ -682,7 +680,6 @@ function mapCanonicalDecision(row: SupabaseRecord): AutoRestartDecision {
   const metadata = typeof row.metadata_safe === "object" && row.metadata_safe && !Array.isArray(row.metadata_safe)
     ? row.metadata_safe as SupabaseRecord
     : {};
-  const mode = readString(row.mode, "disabled") as AutoRestartMode;
   return {
     id: readString(row.id, "unknown"),
     account: readString(row.account_id, "system"),
@@ -692,7 +689,7 @@ function mapCanonicalDecision(row: SupabaseRecord): AutoRestartDecision {
     plannedQuotas: readString(metadata.planned_quotas, "not available"),
     requestId: readString(row.new_request_id) || readString(row.request_id) || null,
     actor: readString(row.actor, "system"),
-    mode: mode === "active" || mode === "disabled" || mode === "dry_run" ? mode : "disabled",
+    mode: "production",
   };
 }
 

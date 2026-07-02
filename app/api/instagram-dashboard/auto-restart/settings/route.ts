@@ -6,9 +6,9 @@ import {
 import {
   defaultAutoRestartRules,
   rulesFromSettingsRow,
-  type AutoRestartMode,
   type AutoRestartRulePreview,
 } from "@/app/instagram-dashboard/auto-restart-data";
+import { normalizeAutoRestartStoredMode } from "@/lib/instagram-dashboard/auto-restart-mode";
 import {
   getInstagramAdminUserContext,
   jsonError,
@@ -47,9 +47,8 @@ export type AutoRestartSettingsPatch = {
   phone_rest_min_rest_minutes?: unknown;
 };
 
-function readMode(value: unknown): AutoRestartMode {
-  const mode = readString(value, "disabled");
-  return mode === "active" || mode === "disabled" || mode === "dry_run" ? mode : "disabled";
+function readMode(value: unknown): "production" {
+  return normalizeAutoRestartStoredMode(value);
 }
 
 function readPositiveInt(value: unknown, fallback: number, min: number, max: number) {
@@ -63,9 +62,10 @@ export function normalizeAutoRestartPatch(
   existingRow?: SupabaseRecord | null,
 ) {
   const current = rulesFromSettingsRow(existingRow ?? undefined);
+  const enabled = readBoolean(body.auto_restart_enabled, current.enabled);
   return {
-    auto_restart_enabled: readBoolean(body.auto_restart_enabled, current.enabled),
-    mode: readMode(body.mode ?? current.mode),
+    auto_restart_enabled: enabled,
+    mode: "production" as const,
     check_every_minutes: readPositiveInt(body.check_every_minutes, current.checkEveryMinutes, 1, 1440),
     restart_delay_minutes: readPositiveInt(body.restart_delay_minutes, current.restartDelayMinutes, 1, 1440),
     max_attempts_per_session: readPositiveInt(body.max_attempts_per_session, current.maxAttemptsPerSession, 0, 20),

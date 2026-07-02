@@ -341,7 +341,9 @@ export async function runAutoRestartTick(
     restartDelayMinutes: Math.max(1, readNumber(settingsRow?.restart_delay_minutes, rules.restartDelayMinutes || 20)),
   };
 
-  const forceDryRun = Boolean(options.dryRun) || extendedRules.mode !== "active" || !extendedRules.enabled;
+  const forceDryRun = Boolean(options.dryRun)
+    || !extendedRules.enabled
+    || (extendedRules.mode !== "production" && extendedRules.mode !== "active");
   const tickBucket = tickBucketStart(now, checkEveryMinutes);
   const tickId = autoRestartTickIdempotencyKey(options.workerId, tickBucket);
   const requestId = `auto-restart-tick-${Date.now().toString(36)}`;
@@ -364,7 +366,7 @@ export async function runAutoRestartTick(
     }
   }
 
-  if (!extendedRules.enabled || extendedRules.mode === "disabled") {
+  if (!extendedRules.enabled) {
     const summary = emptySummary(options.workerId, forceDryRun, "scheduler_disabled");
     summary.tick_id = tickId;
     summary.dry_run = forceDryRun;

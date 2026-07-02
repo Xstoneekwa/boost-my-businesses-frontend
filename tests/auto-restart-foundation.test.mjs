@@ -6,7 +6,7 @@ import {
   validateActiveModePrerequisites,
 } from "../lib/instagram-dashboard/auto-restart-foundation.ts";
 
-test("active mode requires foundation and tick token", () => {
+test("production enable requires foundation and tick token", () => {
   const missingFoundation = {
     ready: false,
     missing: ["auto_restart_settings"],
@@ -14,7 +14,7 @@ test("active mode requires foundation and tick token", () => {
   };
   assert.equal(
     validateActiveModePrerequisites({
-      patch: { mode: "active", auto_restart_enabled: true },
+      patch: { mode: "production", auto_restart_enabled: true },
       foundation: missingFoundation,
       tickTokenConfigured: true,
     }),
@@ -22,15 +22,15 @@ test("active mode requires foundation and tick token", () => {
   );
   assert.equal(
     validateActiveModePrerequisites({
-      patch: { mode: "active", auto_restart_enabled: true },
+      patch: { mode: "production", auto_restart_enabled: true },
       foundation: { ready: true, missing: [], settingsWritable: true },
       tickTokenConfigured: false,
     }),
-    "active_mode_tick_token_not_configured",
+    "production_mode_tick_token_not_configured",
   );
   assert.equal(
     validateActiveModePrerequisites({
-      patch: { mode: "active", auto_restart_enabled: true },
+      patch: { mode: "production", auto_restart_enabled: true },
       foundation: { ready: true, missing: [], settingsWritable: true },
       tickTokenConfigured: true,
     }),

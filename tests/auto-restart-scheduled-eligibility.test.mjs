@@ -17,10 +17,15 @@ const NOW = new Date("2026-07-02T12:00:00.000Z");
 const ACTIVE_START = "2026-07-02T08:00:00.000Z";
 const ACTIVE_END = "2026-07-02T16:00:00.000Z";
 
-test("Auto Restart defaults remain OFF", () => {
+test("Auto Restart defaults remain OFF in production mode", () => {
   const source = readFileSync(new URL("../app/instagram-dashboard/auto-restart-data.ts", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../supabase/migrations/20260710120000_auto_restart_settings.sql", import.meta.url), "utf8");
   assert.match(source, /enabled: false,/);
-  assert.match(source, /mode: "disabled"/);
+  assert.match(source, /mode: "production"/);
+  assert.match(source, /checkEveryMinutes: 20/);
+  assert.match(source, /maxAttemptsPerSession: 2/);
+  assert.match(migration, /default 'production'/);
+  assert.match(migration, /default 20/);
 });
 
 test("manual_only is always excluded from schedule eligibility", () => {
@@ -162,7 +167,7 @@ test("operational state distinguishes disabled, blocked, ready, and active witho
   assert.equal(
     computeAutoRestartOperationalState({
       enabled: true,
-      mode: "active",
+      mode: "production",
       foundationReady: true,
       tickTokenConfigured: false,
     }).state,
@@ -171,7 +176,7 @@ test("operational state distinguishes disabled, blocked, ready, and active witho
   assert.equal(
     computeAutoRestartOperationalState({
       enabled: true,
-      mode: "active",
+      mode: "production",
       foundationReady: true,
       tickTokenConfigured: true,
     }).state,

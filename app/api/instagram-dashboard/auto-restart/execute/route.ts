@@ -90,7 +90,7 @@ export async function POST(request: Request) {
         .eq("id", "global")
         .maybeSingle<SupabaseRecord>();
       const mergedPatch = normalizeAutoRestartPatch(
-        { auto_restart_enabled: true, mode: "active" },
+        { auto_restart_enabled: true, mode: "production" },
         existingRow,
       );
       const validationError = validateActiveModePrerequisites({
@@ -119,7 +119,6 @@ export async function POST(request: Request) {
       const saved = await persistSettingsPatch(
         normalizeAutoRestartPatch({
           auto_restart_enabled: false,
-          mode: "disabled",
         }),
         userContext?.userId ?? null,
       );
@@ -193,7 +192,7 @@ export async function POST(request: Request) {
           action: "auto_restart_phone_rest_paused",
           decision: "paused",
           reason: "operator_pause",
-          mode: "active",
+          mode: "production",
           metadata_safe: { device_id: deviceId },
         });
         return jsonOk({
@@ -223,7 +222,7 @@ export async function POST(request: Request) {
         action: "auto_restart_phone_rest_resumed",
         decision: "resumed",
         reason: "operator_resume",
-        mode: "active",
+        mode: "production",
         metadata_safe: { device_id: deviceId },
       });
       return jsonOk({

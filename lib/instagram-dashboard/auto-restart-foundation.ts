@@ -41,14 +41,13 @@ export function validateActiveModePrerequisites(input: {
   foundation: AutoRestartFoundationStatus;
   tickTokenConfigured: boolean;
 }) {
-  const wantsActive = input.patch.auto_restart_enabled && input.patch.mode === "active";
-  if (!wantsActive) return null;
+  if (!input.patch.auto_restart_enabled) return null;
 
   const foundationReason = autoRestartFoundationBlockReason(input.foundation);
   if (foundationReason) return foundationReason;
 
   if (!input.tickTokenConfigured) {
-    return "active_mode_tick_token_not_configured";
+    return "production_mode_tick_token_not_configured";
   }
 
   return null;
