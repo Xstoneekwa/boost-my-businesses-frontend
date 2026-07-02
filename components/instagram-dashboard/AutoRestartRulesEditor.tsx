@@ -8,7 +8,6 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type Props = {
   initialRules: AutoRestartRulePreview;
   backendPending: boolean;
-  accountOptions?: Array<{ accountId: string; username: string }>;
 };
 
 type PatchBody = {
@@ -30,10 +29,9 @@ type PatchBody = {
   block_on_account_mismatch: boolean;
   block_on_device_offline: boolean;
   notify_on_blocked_restart: boolean;
-  pilot_account_id: string | null;
 };
 
-export default function AutoRestartRulesEditor({ initialRules, backendPending, accountOptions = [] }: Props) {
+export default function AutoRestartRulesEditor({ initialRules, backendPending }: Props) {
   const [rules, setRules] = useState(initialRules);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -65,7 +63,6 @@ export default function AutoRestartRulesEditor({ initialRules, backendPending, a
       block_on_account_mismatch: rules.blockOnAccountMismatch,
       block_on_device_offline: rules.blockOnDeviceOffline,
       notify_on_blocked_restart: rules.notifyOnBlockedRestart,
-      pilot_account_id: rules.pilotAccountId,
     };
 
     try {
@@ -122,27 +119,9 @@ export default function AutoRestartRulesEditor({ initialRules, backendPending, a
             <option value="dry_run">Dry-run</option>
             <option value="active">Active</option>
           </select>
-          <small>Active mode requires pilot account, foundation deploy, and tick token.</small>
+          <small>Active mode requires foundation deploy and tick token.</small>
         </label>
-        <label className="ig-ar-field">
-          <span>Pilot account</span>
-          <select
-            value={rules.pilotAccountId || ""}
-            onChange={(event) => setRules((current) => ({
-              ...current,
-              pilotAccountId: event.target.value || null,
-              pilotUsername: accountOptions.find((row) => row.accountId === event.target.value)?.username || null,
-            }))}
-          >
-            <option value="">Select pilot account</option>
-            {accountOptions.map((account) => (
-              <option key={account.accountId} value={account.accountId}>
-                @{account.username}
-              </option>
-            ))}
-          </select>
-          <small>Exactly one account may be allowlisted for V1 pilot execution.</small>
-        </label>
+        <p className="ig-ar-field-note">Eligible accounts are determined by active schedules.</p>
         <NumberField
           label="Check every"
           value={rules.checkEveryMinutes}

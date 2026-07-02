@@ -1,8 +1,11 @@
 type SupabaseRecord = Record<string, unknown>;
 
-type SupabaseLike = {
+type SupabaseFromLike = {
   from: (table: string) => unknown;
-  rpc: (name: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }>;
+};
+
+type SupabaseLike = SupabaseFromLike & {
+  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data?: unknown; error?: { message?: string } | null }>;
 };
 
 type QueryBuilder = {
@@ -38,12 +41,12 @@ function readBoolean(value: unknown, fallback = false) {
   return fallback;
 }
 
-function query(supabase: SupabaseLike, table: string): QueryBuilder {
+function query(supabase: SupabaseFromLike, table: string): QueryBuilder {
   return supabase.from(table) as QueryBuilder;
 }
 
 export async function resolveAccountDeviceContext(
-  supabase: SupabaseLike,
+  supabase: SupabaseFromLike,
   accountId: string,
 ): Promise<{ deviceId: string; appInstanceId: string | null } | null> {
   const result = await query(supabase, "account_assignments")
@@ -61,7 +64,7 @@ export async function resolveAccountDeviceContext(
 }
 
 export async function getActiveDeviceSessionLock(
-  supabase: SupabaseLike,
+  supabase: SupabaseFromLike,
   deviceId: string,
 ): Promise<ActiveDeviceSessionLock | null> {
   const nowIso = new Date().toISOString();

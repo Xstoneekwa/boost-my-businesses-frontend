@@ -16,12 +16,9 @@ import {
   type SupabaseRecord,
 } from "../../_utils";
 import {
-  validatePilotAccountForSettings,
-} from "@/lib/instagram-dashboard/auto-restart-pilot";
-import {
   normalizeAutoRestartPatch,
-  patchToRulePreview,
 } from "../settings/route";
+import { rulesFromSettingsRow } from "@/app/instagram-dashboard/auto-restart-data";
 
 export const dynamic = "force-dynamic";
 
@@ -96,12 +93,6 @@ export async function POST(request: Request) {
         { auto_restart_enabled: true, mode: "active" },
         existingRow,
       );
-      const pilotReason = mergedPatch.pilot_account_id
-        ? await validatePilotAccountForSettings(supabase, mergedPatch.pilot_account_id)
-        : "pilot_allowlist_missing";
-      if (pilotReason) {
-        return jsonError("Auto Restart activation refused.", 400, { reason: pilotReason, foundation });
-      }
       const validationError = validateActiveModePrerequisites({
         patch: mergedPatch,
         foundation,

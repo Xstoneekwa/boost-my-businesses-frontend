@@ -2,12 +2,14 @@ type SupabaseLike = {
   from: (table: string) => unknown;
 };
 
+type QueryResult = { data?: unknown; error?: { message?: string } | null };
+
 type QueryBuilder = {
   select: (...args: unknown[]) => QueryBuilder;
   eq: (...args: unknown[]) => QueryBuilder;
   in: (...args: unknown[]) => QueryBuilder;
-  limit: (...args: unknown[]) => Promise<{ data?: unknown; error?: { message?: string } | null }>;
-  maybeSingle: () => Promise<{ data?: unknown; error?: { message?: string } | null }>;
+  limit: (...args: unknown[]) => Promise<QueryResult>;
+  maybeSingle: () => Promise<QueryResult>;
 };
 
 export const DISPATCHER_TRUST_FAILURE = "untrusted_or_stale_dispatcher";
@@ -113,7 +115,6 @@ export async function assertTrustedDispatcherIdentity(
   const heartbeatResult = await query(supabase, "worker_heartbeats")
     .select("worker_id,status,last_seen_at,host_machine,metadata")
     .eq("worker_id", workerId)
-    .limit(1)
     .maybeSingle();
   if (heartbeatResult.error || !heartbeatResult.data) {
     return { ok: false as const, reason: DISPATCHER_TRUST_FAILURE };

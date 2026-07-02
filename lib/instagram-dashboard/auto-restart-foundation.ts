@@ -37,7 +37,7 @@ export function autoRestartFoundationBlockReason(status: AutoRestartFoundationSt
 }
 
 export function validateActiveModePrerequisites(input: {
-  patch: { mode: string; auto_restart_enabled: boolean; pilot_account_id?: string | null };
+  patch: { mode: string; auto_restart_enabled: boolean };
   foundation: AutoRestartFoundationStatus;
   tickTokenConfigured: boolean;
 }) {
@@ -49,10 +49,6 @@ export function validateActiveModePrerequisites(input: {
 
   if (!input.tickTokenConfigured) {
     return "active_mode_tick_token_not_configured";
-  }
-
-  if (!input.patch.pilot_account_id) {
-    return "pilot_allowlist_missing";
   }
 
   return null;

@@ -1,6 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
-import { computeAutoRestartOperationalState, loadPilotValidationContext, validatePilotForActivation } from "@/lib/instagram-dashboard/auto-restart-pilot";
+import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
@@ -13,8 +13,6 @@ export type AutoRestartStatus = "connected" | "pending" | "unknown";
 export type AutoRestartRulePreview = {
   enabled: boolean;
   mode: AutoRestartMode;
-  pilotAccountId: string | null;
-  pilotUsername: string | null;
   checkEveryMinutes: number;
   restartDelayMinutes: number;
   maxAttemptsPerSession: number;
@@ -182,8 +180,6 @@ export function defaultAutoRestartRules(): AutoRestartRulePreview {
   return {
     enabled: false,
     mode: "disabled",
-    pilotAccountId: null,
-    pilotUsername: null,
     checkEveryMinutes: 15,
     restartDelayMinutes: 20,
     maxAttemptsPerSession: 2,
@@ -238,8 +234,6 @@ export function rulesFromSettingsRow(row: SupabaseRecord | null | undefined): Au
     blockOnAccountMismatch: readBoolean(row.block_on_account_mismatch, fallback.blockOnAccountMismatch),
     blockOnDeviceOffline: readBoolean(row.block_on_device_offline, fallback.blockOnDeviceOffline),
     notifyOnBlockedRestart: readBoolean(row.notify_on_blocked_restart, fallback.notifyOnBlockedRestart),
-    pilotAccountId: readString(row.pilot_account_id) || null,
-    pilotUsername: null,
     sourceLabel: "auto_restart_settings",
   };
 }
@@ -768,10 +762,6 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       : Promise.resolve({ data: [], error: null }),
   ]);
   const rules = rulesFromSettings(autoRestartSettingsResult.data as SupabaseRecord | null | undefined);
-  if (rules.pilotAccountId) {
-    const pilotAccount = manageData.activeAccounts.find((account) => account.accountId === rules.pilotAccountId);
-    rules.pilotUsername = pilotAccount?.username || null;
-  }
 
   const errors = [
     autoRestartSettingsResult.error,
@@ -882,28 +872,11 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const runtimeDecisions = ((runtimeEventsResult.data ?? []) as SupabaseRecord[]).map(mapRuntimeEventDecision);
   const decisions = canonicalDecisions.length ? canonicalDecisions : runtimeDecisions;
 
-  const pilotContext = rules.pilotAccountId
-    ? await loadPilotValidationContext(supabase, rules.pilotAccountId)
-    : { accountId: null };
-  const pilotCandidate = rules.pilotAccountId
-    ? candidates.find((candidate) => candidate.accountId === rules.pilotAccountId)
-    : undefined;
-  const pilotValidationReason = rules.pilotAccountId
-    ? validatePilotForActivation({
-      ...pilotContext,
-      restartEligible: pilotCandidate?.restartEligible,
-      blockReason: pilotCandidate?.blockReason,
-    })
-    : rules.enabled && rules.mode === "active"
-      ? "pilot_allowlist_missing"
-      : null;
   const operational = computeAutoRestartOperationalState({
     enabled: rules.enabled,
     mode: rules.mode,
     foundationReady: !autoRestartSettingsResult.error,
     tickTokenConfigured: Boolean(process.env.INSTAGRAM_AUTO_RESTART_TICK_TOKEN),
-    pilotAccountId: rules.pilotAccountId,
-    pilotValidationReason,
   });
 
   const statusLabel = operational.state === "active"

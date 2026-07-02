@@ -30,11 +30,11 @@ test("active mode requires foundation and tick token", () => {
   );
   assert.equal(
     validateActiveModePrerequisites({
-      patch: { mode: "active", auto_restart_enabled: true, pilot_account_id: null },
+      patch: { mode: "active", auto_restart_enabled: true },
       foundation: { ready: true, missing: [], settingsWritable: true },
       tickTokenConfigured: true,
     }),
-    "pilot_allowlist_missing",
+    null,
   );
 });
 

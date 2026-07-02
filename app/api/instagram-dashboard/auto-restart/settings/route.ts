@@ -4,10 +4,6 @@ import {
   validateActiveModePrerequisites,
 } from "@/lib/instagram-dashboard/auto-restart-foundation";
 import {
-  normalizePilotAccountId,
-  validatePilotAccountForSettings,
-} from "@/lib/instagram-dashboard/auto-restart-pilot";
-import {
   defaultAutoRestartRules,
   rulesFromSettingsRow,
   type AutoRestartMode,
@@ -49,7 +45,6 @@ export type AutoRestartSettingsPatch = {
   phone_rest_enabled?: unknown;
   phone_rest_max_session_minutes?: unknown;
   phone_rest_min_rest_minutes?: unknown;
-  pilot_account_id?: unknown;
 };
 
 function readMode(value: unknown): AutoRestartMode {
@@ -68,7 +63,6 @@ export function normalizeAutoRestartPatch(
   existingRow?: SupabaseRecord | null,
 ) {
   const current = rulesFromSettingsRow(existingRow ?? undefined);
-  const existingPilot = readString(existingRow?.pilot_account_id) || current.pilotAccountId || null;
   return {
     auto_restart_enabled: readBoolean(body.auto_restart_enabled, current.enabled),
     mode: readMode(body.mode ?? current.mode),
@@ -95,9 +89,6 @@ export function normalizeAutoRestartPatch(
     phone_rest_min_rest_minutes: body.phone_rest_min_rest_minutes == null
       ? null
       : readPositiveInt(body.phone_rest_min_rest_minutes, 0, 0, 1440),
-    pilot_account_id: "pilot_account_id" in body
-      ? normalizePilotAccountId(body.pilot_account_id)
-      : existingPilot,
   };
 }
 
@@ -132,7 +123,6 @@ async function auditSettingsMutation(
     metadata_safe: {
       auto_restart_enabled: input.patch.auto_restart_enabled,
       check_every_minutes: input.patch.check_every_minutes,
-      pilot_account_id: input.patch.pilot_account_id,
     },
   });
 }
@@ -191,12 +181,6 @@ export async function PATCH(request: Request) {
       .eq("id", "global")
       .maybeSingle<SupabaseRecord>();
     const patch = normalizeAutoRestartPatch(body, existingRow);
-    if (patch.pilot_account_id) {
-      const pilotReason = await validatePilotAccountForSettings(supabase, patch.pilot_account_id);
-      if (pilotReason) {
-        return jsonError("Pilot account validation failed.", 400, { reason: pilotReason, foundation });
-      }
-    }
     const validationError = validateAutoRestartPatch(patch, foundation);
     if (validationError) {
       return jsonError("Auto Restart settings validation failed.", 400, { reason: validationError, foundation });

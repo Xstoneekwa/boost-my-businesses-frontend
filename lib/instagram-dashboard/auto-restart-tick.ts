@@ -31,9 +31,8 @@ export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
 import { buildAutoRestartResumePlanMetadata } from "./auto-restart-resume-metadata";
 import {
   maxAttemptsBlockReason,
-  pilotAllowlistMismatchReason,
   restartDelayBlockReason,
-} from "./auto-restart-pilot";
+} from "./auto-restart-operational";
 
 export async function getAutoRestartTickStatus(supabase: SupabaseLike) {
   const settingsRow = await loadSettingsRow(supabase);
@@ -340,7 +339,6 @@ export async function runAutoRestartTick(
     maxRestartsPerWindow: Math.max(0, readNumber(settingsRow?.max_restarts_per_window_per_account, 2)),
     maxAttemptsPerSession: Math.max(0, readNumber(settingsRow?.max_attempts_per_session, rules.maxAttemptsPerSession || 2)),
     restartDelayMinutes: Math.max(1, readNumber(settingsRow?.restart_delay_minutes, rules.restartDelayMinutes || 20)),
-    pilotAccountId: readString(settingsRow?.pilot_account_id, "") || null,
   };
 
   const forceDryRun = Boolean(options.dryRun) || extendedRules.mode !== "active" || !extendedRules.enabled;
@@ -375,13 +373,6 @@ export async function runAutoRestartTick(
     return { status: 200, result: summary };
   }
 
-  if (!forceDryRun && !extendedRules.pilotAccountId) {
-    const summary = emptySummary(options.workerId, false, "pilot_allowlist_missing");
-    summary.tick_id = tickId;
-    if (!options.manual) await completeTickLock(supabase, tickId, "completed");
-    return { status: 200, result: summary };
-  }
-
   const overview = options.overview
     ? { candidates: options.overview.candidates as never[], enabled: true, mode: extendedRules.mode } as unknown as Awaited<ReturnType<typeof getAutoRestartData>>
     : await getAutoRestartData();
@@ -392,21 +383,6 @@ export async function runAutoRestartTick(
 
   const since = todayStartIso(now);
   for (const candidate of overview.candidates) {
-    const pilotMismatch = !forceDryRun
-      ? pilotAllowlistMismatchReason(candidate.accountId, extendedRules.pilotAccountId)
-      : extendedRules.pilotAccountId
-        ? pilotAllowlistMismatchReason(candidate.accountId, extendedRules.pilotAccountId)
-        : null;
-    if (pilotMismatch) {
-      summary.blocked_count += 1;
-      summary.blocked.push({
-        account_id: candidate.accountId,
-        username: candidate.username,
-        reason: pilotMismatch,
-      });
-      continue;
-    }
-
     if (!candidate.restartEligible) {
       summary.blocked_count += 1;
       summary.blocked.push({
