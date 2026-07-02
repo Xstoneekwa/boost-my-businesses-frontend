@@ -50,21 +50,5 @@ begin
 end
 $policy$;
 
-do $trigger$
-begin
-  if not exists (
-    select 1
-    from pg_trigger
-    where tgname = 'incident_notification_channel_settings_set_updated_at'
-      and tgrelid = 'public.incident_notification_channel_settings'::regclass
-  ) then
-    create trigger incident_notification_channel_settings_set_updated_at
-      before update on public.incident_notification_channel_settings
-      for each row
-      execute function public.set_updated_at();
-  end if;
-end
-$trigger$;
-
 revoke all on table public.incident_notification_channel_settings from public, anon, authenticated;
 grant all on table public.incident_notification_channel_settings to service_role;
