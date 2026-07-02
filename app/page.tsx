@@ -399,7 +399,7 @@ export default function LandingPage() {
       <header className="nav" style={{ background: scrolled ? "color-mix(in srgb,var(--page-bg) 92%,transparent)" : "color-mix(in srgb,var(--page-bg) 82%,transparent)" }}>
         <div className="wrap nav-inner">
           <a className="brand" href="#top">
-            <span className="logo-mark">B</span>
+            <Image className="logo-mark" src="/instagram-growth/assets/icon-square-256.png" alt="" width={36} height={36} aria-hidden="true" />
             <span>Boost<span className="brand-my">My</span>Businesses</span>
           </a>
           <nav className="nav-links">
@@ -804,7 +804,7 @@ export default function LandingPage() {
           <div className="footer-top">
             <div>
               <div className="footer-brand">
-                <span className="logo-mark">B</span>
+                <Image className="logo-mark" src="/instagram-growth/assets/icon-square-256.png" alt="" width={30} height={30} aria-hidden="true" />
                 Boost<span className="brand-my">My</span>Businesses
               </div>
               <p className="footer-tagline">{t.footer.tagline}</p>
