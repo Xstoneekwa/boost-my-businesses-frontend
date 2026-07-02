@@ -44,11 +44,13 @@ const COPY = {
     cta: "Commencer",
     tagline: "Des agents IA pour de vrais workflows business. Aucune compétence en prompting requise.",
     agents: "Agents",
+    company: "Entreprise",
     legal: "Légal",
     privacy: "Politique de confidentialité",
     terms: "Conditions d'utilisation",
-    refund: "Refund policy",
-    copy: "© 2025 BoostMyBusinesses. Tous droits réservés.",
+    refund: "Politique de remboursement",
+    copy: "© 2026 Boost My Businesses Ltd. Tous droits réservés.",
+    registration: "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles, société n° 17313018. Siège social : 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, Royaume-Uni.",
     pricing: "Tarifs",
     about: "À propos",
     contact: "Contact",
@@ -57,11 +59,13 @@ const COPY = {
     cta: "Get started",
     tagline: "AI agents built for real business workflows. No prompting skills required.",
     agents: "Agents",
+    company: "Company",
     legal: "Legal",
     privacy: "Privacy policy",
     terms: "Terms of service",
     refund: "Refund policy",
-    copy: "© 2025 BoostMyBusinesses. All rights reserved.",
+    copy: "© 2026 Boost My Businesses Ltd. All rights reserved.",
+    registration: "Boost My Businesses Ltd — Registered in England & Wales, Company No. 17313018. Registered office: 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, United Kingdom.",
     pricing: "Pricing",
     about: "About",
     contact: "Contact",
@@ -416,7 +420,7 @@ export default function NavbarFooter({
             {/* Company */}
             <div>
               <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.26)", marginBottom: "14px" }}>
-                Company
+                {t.company}
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
@@ -477,7 +481,7 @@ export default function NavbarFooter({
               {t.copy}
             </p>
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "rgba(255,255,255,0.22)", textAlign: "right" }}>
-              Dibu Business Trading t/a BoostMyBusinesses · 13E Nola Avenue, Buccluech, Sandton, Gauteng 2196, South Africa
+              {t.registration}
             </p>
           </div>
         </div>

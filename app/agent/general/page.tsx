@@ -128,8 +128,8 @@ const copy = {
     footerPrivacy: "Politique de confidentialité",
     footerTerms: "Conditions d'utilisation",
     footerRefund: "Refund policy",
-    footerCopy: "© 2025 BoostMyBusinesses. Tous droits réservés.",
-    footerMade: "Fait avec IA — conçu pour les humains.",
+    footerCopy: "© 2026 Boost My Businesses Ltd. Tous droits réservés.",
+    footerMade: "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles, société n° 17313018. Siège social : 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, Royaume-Uni.",
   },
   en: {
     brand: "Boost My Businesses AI",
@@ -212,8 +212,8 @@ const copy = {
     footerPrivacy: "Privacy policy",
     footerTerms: "Terms of service",
     footerRefund: "Refund policy",
-    footerCopy: "© 2025 BoostMyBusinesses. All rights reserved.",
-    footerMade: "Made with AI — built for humans.",
+    footerCopy: "© 2026 Boost My Businesses Ltd. All rights reserved.",
+    footerMade: "Boost My Businesses Ltd — Registered in England & Wales, Company No. 17313018. Registered office: 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, United Kingdom.",
   },
 };
 

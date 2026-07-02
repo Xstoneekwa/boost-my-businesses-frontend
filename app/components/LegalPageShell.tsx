@@ -15,11 +15,15 @@ export interface LegalSection {
   contactPlacement?: "beforeList" | "afterList";
 }
 
-interface LegalPageShellProps {
+export interface LegalPageContent {
   eyebrow?: string;
   title: string;
   intro: string;
   sections: LegalSection[];
+}
+
+interface LegalPageShellProps {
+  content: Record<Lang, LegalPageContent>;
 }
 
 const LANG_KEY = "boost_ai_landing_lang_v1";
@@ -100,12 +104,13 @@ const styles = {
   } as React.CSSProperties,
 };
 
-export default function LegalPageShell({ eyebrow = "Legal", title, intro, sections }: LegalPageShellProps) {
+export default function LegalPageShell({ content }: LegalPageShellProps) {
   const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === "undefined") return "en";
     const saved = window.localStorage.getItem(LANG_KEY) as Lang | null;
     return saved === "fr" || saved === "en" ? saved : "en";
   });
+  const { eyebrow = lang === "fr" ? "Mentions légales" : "Legal", title, intro, sections } = content[lang];
 
   useEffect(() => {
     localStorage.setItem(LANG_KEY, lang);

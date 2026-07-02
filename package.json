@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",
+    "@twemoji/svg": "^15.0.0",
     "bullmq": "^5.76.1",
+    "emoji-regex": "^10.6.0",
     "ioredis": "^5.10.1",
     "lucide-react": "^1.14.0",
     "next": "16.2.1",

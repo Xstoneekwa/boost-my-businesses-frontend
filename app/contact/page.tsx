@@ -1,28 +1,60 @@
 import type { Metadata } from "next";
-import LegalPageShell, { type LegalSection } from "../components/LegalPageShell";
+import LegalPageShell, {
+  type LegalPageContent,
+  type LegalSection,
+} from "../components/LegalPageShell";
 
 export const metadata: Metadata = {
-  title: "Contact BoostMyBusinesses | BoostMyBusinesses",
+  title: "Contact Boost My Businesses Ltd | BoostMyBusinesses",
 };
 
-const sections: LegalSection[] = [
+const sectionsEn: LegalSection[] = [
   {
-    title: "Primary contact",
-    body: ["For business inquiries, product questions, or support requests, contact:"],
+    title: "Email",
+    body: ["For sales, product, support, billing, privacy or legal enquiries, contact:"],
     contact: "growth@boostmybusinesses.com",
-    contactPlacement: "beforeList",
-    bodyAfterContact: ["We use this inbox for:"],
-    list: ["Business inquiries", "Product questions", "Support requests"],
+  },
+  {
+    title: "Legal and registered office",
+    body: [
+      "Boost My Businesses Ltd",
+      "Registered in England & Wales, Company No. 17313018",
+      "167-169 Great Portland Street, 5th Floor, London, W1W 5PF, United Kingdom",
+    ],
   },
 ];
 
+const sectionsFr: LegalSection[] = [
+  {
+    title: "Email",
+    body: ["Pour toute demande commerciale, produit, assistance, facturation, confidentialité ou juridique :"],
+    contact: "growth@boostmybusinesses.com",
+  },
+  {
+    title: "Identité et adresse légale",
+    body: [
+      "Boost My Businesses Ltd",
+      "Immatriculée en Angleterre et au Pays de Galles, société n° 17313018",
+      "167-169 Great Portland Street, 5th Floor, London, W1W 5PF, Royaume-Uni",
+    ],
+  },
+];
+
+const content: Record<"fr" | "en", LegalPageContent> = {
+  en: {
+    eyebrow: "Contact",
+    title: "Contact Boost My Businesses Ltd",
+    intro: "Contact our team about our AI automation services or your account.",
+    sections: sectionsEn,
+  },
+  fr: {
+    eyebrow: "Contact",
+    title: "Contacter Boost My Businesses Ltd",
+    intro: "Contactez notre équipe au sujet de nos services d'automatisation IA ou de votre compte.",
+    sections: sectionsFr,
+  },
+};
+
 export default function ContactPage() {
-  return (
-    <LegalPageShell
-      eyebrow="Contact"
-      title="Contact BoostMyBusinesses"
-      intro="Have a question about our AI automation services? Contact us and we'll get back to you."
-      sections={sections}
-    />
-  );
+  return <LegalPageShell content={content} />;
 }

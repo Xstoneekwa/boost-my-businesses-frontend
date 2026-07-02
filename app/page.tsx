@@ -35,7 +35,7 @@ const copy = {
       h2a: "Développez votre Instagram.", h2b: "Automatiquement.",
       lead: "Des abonnés réels, géolocalisés et qualifiés, attirés 24h/24 par des agents IA depuis de vrais téléphones. Zéro bot, zéro faux compte — une croissance authentique et mesurable chaque mois.",
       f1t: "Abonnés réels et ciblés", f1d: "Des comptes qui correspondent à votre niche, votre ville ou votre client cible — pas des chiffres gonflés au hasard.",
-      f2t: "Vrais téléphones, zéro risque", f2d: "Chaque action est réalisée depuis de vrais appareils mobiles. Instagram voit un comportement naturel et organique. Votre compte reste protégé.",
+      f2t: "Activité naturelle, zéro risque", f2d: "Chaque action est générée de manière organique. Instagram voit un comportement authentique. Votre compte reste protégé.",
       f3t: "Actif 24h/24, entièrement géré", f3d: "Vous ne touchez à rien. Le système tourne, se surveille et s'optimise pendant que vous gérez votre activité.",
       stats: [{ n: "200–800", l: "vrais abonnés / mois" }, { n: "0%", l: "bots ou faux comptes" }, { n: "24/7", l: "agents IA actifs" }],
       cta1: "Voir le service complet", cta2: "Réserver une démo",
@@ -118,7 +118,8 @@ const copy = {
       agents: [{ l: "UGC Ads Engine", h: "https://www.boostmybusinesses.com/agent/ugc-ads-engine" }, { l: "AI Assistant", h: "https://www.boostmybusinesses.com/agent/general" }, { l: "WhatsApp Leads", h: "https://www.boostmybusinesses.com/agent/whatsapp-lead-system" }, { l: "Restaurant Call", h: "https://www.boostmybusinesses.com/agent/restaurant-call-assistant" }, { l: "Support Agent", h: "https://www.boostmybusinesses.com/agent/support" }, { l: "Instagram Growth", h: "/instagram-growth" }],
       company: [{ l: "Tarifs", h: "#pricing" }, { l: "À propos", h: "https://www.boostmybusinesses.com/about" }, { l: "Contact", h: "https://www.boostmybusinesses.com/contact" }],
       legal: [{ l: "Politique de confidentialité", h: "https://www.boostmybusinesses.com/privacy-policy" }, { l: "Conditions d'utilisation", h: "https://www.boostmybusinesses.com/terms-and-conditions" }, { l: "Remboursement", h: "https://www.boostmybusinesses.com/refund-policy" }],
-      copy: "© 2025 BoostMyBusinesses. Tous droits réservés.",
+      copy: "© 2026 Boost My Businesses Ltd. Tous droits réservés.",
+      registration: "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles, société n° 17313018. Siège social : 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, Royaume-Uni.",
     },
     calendly: { title: "Réserve une démo en 30 secondes", sub: "Découvre comment l'automatisation IA peut faire gagner du temps et récupérer des opportunités perdues." },
   },
@@ -144,7 +145,7 @@ const copy = {
       h2a: "Grow your Instagram.", h2b: "Automatically.",
       lead: "Real, geo-targeted, qualified followers attracted 24/7 by AI agents operating from real phones. No bots, no fake accounts — just measurable, authentic growth every single month.",
       f1t: "Real, targeted followers", f1d: "Accounts that match your niche, city or target customer — not random inflated numbers.",
-      f2t: "Real phones, zero account risk", f2d: "Every action is performed from real mobile devices. Instagram sees natural, organic behavior — your account stays safe.",
+      f2t: "Natural activity, zero account risk", f2d: "Every action is generated organically. Instagram sees authentic behaviour. Your account stays protected.",
       f3t: "Active 24/7, fully managed", f3d: "You don't touch anything. The system runs, monitors and optimises itself while you focus on your business.",
       stats: [{ n: "200–800", l: "real followers / month" }, { n: "0%", l: "bots or fake accounts" }, { n: "24/7", l: "active AI agents" }],
       cta1: "See the full service", cta2: "Book a demo",
@@ -227,7 +228,8 @@ const copy = {
       agents: [{ l: "UGC Ads Engine", h: "https://www.boostmybusinesses.com/agent/ugc-ads-engine" }, { l: "AI Assistant", h: "https://www.boostmybusinesses.com/agent/general" }, { l: "WhatsApp Leads", h: "https://www.boostmybusinesses.com/agent/whatsapp-lead-system" }, { l: "Restaurant Call", h: "https://www.boostmybusinesses.com/agent/restaurant-call-assistant" }, { l: "Support Agent", h: "https://www.boostmybusinesses.com/agent/support" }, { l: "Instagram Growth", h: "/instagram-growth" }],
       company: [{ l: "Pricing", h: "#pricing" }, { l: "About", h: "https://www.boostmybusinesses.com/about" }, { l: "Contact", h: "https://www.boostmybusinesses.com/contact" }],
       legal: [{ l: "Privacy policy", h: "https://www.boostmybusinesses.com/privacy-policy" }, { l: "Terms of service", h: "https://www.boostmybusinesses.com/terms-and-conditions" }, { l: "Refund policy", h: "https://www.boostmybusinesses.com/refund-policy" }],
-      copy: "© 2025 BoostMyBusinesses. All rights reserved.",
+      copy: "© 2026 Boost My Businesses Ltd. All rights reserved.",
+      registration: "Boost My Businesses Ltd — Registered in England & Wales, Company No. 17313018. Registered office: 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, United Kingdom.",
     },
     calendly: { title: "Book a demo in 30 seconds", sub: "See how AI automation can save time and recover missed opportunities." },
   },
@@ -822,6 +824,7 @@ export default function LandingPage() {
           </div>
           <div className="footer-bottom">
             <p>{t.footer.copy}</p>
+            <p>{t.footer.registration}</p>
           </div>
         </div>
       </footer>
