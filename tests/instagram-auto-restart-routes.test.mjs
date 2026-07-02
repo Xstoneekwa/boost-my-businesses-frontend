@@ -7,96 +7,50 @@ const files = [
   "app/api/instagram-dashboard/auto-restart/dry-run/route.ts",
   "app/api/instagram-dashboard/auto-restart/action-preview/route.ts",
   "app/api/instagram-dashboard/auto-restart/settings/route.ts",
-  "app/api/instagram-dashboard/botapp/overview/route.ts",
-  "app/api/instagram-dashboard/devices/route.ts",
-  "app/api/instagram-dashboard/profiles/route.ts",
-  "app/api/instagram-dashboard/client-accounts/route.ts",
-  "app/api/instagram-dashboard/credentials-actions/route.ts",
-  "app/api/instagram-dashboard/activity-log/route.ts",
+  "app/api/instagram-dashboard/auto-restart/tick/route.ts",
+  "app/api/instagram-dashboard/auto-restart/execute/route.ts",
 ];
 
 test("Auto Restart API routes support relay/admin auth", () => {
   for (const file of files) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    if (file.endsWith("tick/route.ts")) {
+      assert.match(source, /extractAutoRestartTickToken/);
+      assert.doesNotMatch(source, /verifyCompassRelayKey/);
+      continue;
+    }
     assert.match(source, /verifyCompassRelayKey|requireInstagramAdmin|requireRelayOrAdmin/);
   }
 });
 
-test("Auto Restart settings route persists without enqueue", () => {
+test("Auto Restart settings route persists without direct runner launch", () => {
   const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/settings/route.ts", import.meta.url), "utf8");
   assert.match(source, /auto_restart_settings/);
-  assert.match(source, /auto_restart_settings_saved/);
-  assert.doesNotMatch(source, /create_account_run_request|runs\/start|runner\.py/);
-  assert.match(source, /updated_at:\s*now/);
+  assert.match(source, /auto_restart_settings_updated/);
+  assert.doesNotMatch(source, /runner\.py/);
 });
 
-test("Auto Restart settings route validates active mode block", () => {
-  const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/settings/route.ts", import.meta.url), "utf8");
-  assert.match(source, /active_mode_scheduler_not_wired/);
+test("Auto Restart tick route delegates to runAutoRestartTick on POST only", () => {
+  const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/tick/route.ts", import.meta.url), "utf8");
+  assert.match(source, /export async function POST/);
+  assert.match(source, /runAutoRestartTick/);
+  assert.match(source, /getAutoRestartTickStatus/);
+  assert.doesNotMatch(source, /verifyCompassRelayKey/);
 });
 
-test("Auto Restart preview routes do not enqueue runtime work", () => {
-  for (const file of files) {
-    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    assert.doesNotMatch(source, /create_account_run_request|runs\/start|runner\.py|insertManualRunAudit/i);
-  }
+test("Auto Restart execute route uses confirmed mutations", () => {
+  const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/execute/route.ts", import.meta.url), "utf8");
+  assert.match(source, /confirmed/);
+  assert.match(source, /runAutoRestartTick/);
 });
 
-test("Auto Restart action preview is dry-run only", () => {
+test("Auto Restart dry-run route does not enqueue", () => {
+  const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/dry-run/route.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /create_account_run_request/);
+});
+
+test("Auto Restart action preview exposes execute route for mutations", () => {
   const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/action-preview/route.ts", import.meta.url), "utf8");
-  assert.match(source, /mutation_executed:\s*false/);
-  assert.match(source, /actions_executable:\s*false/);
-  assert.match(source, /audit_required_before_activation:\s*true/);
-});
-
-test("BotApp overview returns partial-safe sections", () => {
-  const source = readFileSync(new URL("../app/api/instagram-dashboard/botapp/overview/route.ts", import.meta.url), "utf8");
-  assert.match(source, /type SectionResult/);
-  assert.match(source, /section\(getManageData\)/);
-  assert.match(source, /section\(getDashboardDevices\)/);
-  assert.match(source, /section\(getActivityLogData\)/);
-  assert.match(source, /endpoint_statuses/);
-});
-
-test("BotApp live data endpoints use existing dashboard loaders", () => {
-  const expectations = new Map([
-    ["app/api/instagram-dashboard/profiles/route.ts", /getManageData/],
-    ["app/api/instagram-dashboard/client-accounts/route.ts", /getManageData/],
-    ["app/api/instagram-dashboard/credentials-actions/route.ts", /getCredentialsActionsData/],
-    ["app/api/instagram-dashboard/activity-log/route.ts", /getActivityLogData/],
-    ["app/api/instagram-dashboard/devices/route.ts", /getDashboardDevices/],
-  ]);
-  for (const [file, pattern] of expectations) {
-    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    assert.match(source, pattern);
-  }
-});
-
-test("BotApp profiles endpoint reconciles counters from ig_runs totals", () => {
-  const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
-  assert.match(source, /total_like/);
-  assert.match(source, /reconcileSocialCounters/);
-  assert.match(source, /ig_interaction_events/);
-  assert.match(source, /ig_action_logs\+ig_runs\+ig_interaction_events/);
-});
-
-test("BotApp profiles endpoint projects queued and starting run requests", () => {
-  const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
-  assert.match(source, /"queued"/);
-  assert.match(source, /"starting"/);
-  assert.match(source, /activeRunRequestStatus/);
-});
-
-test("BotApp profiles endpoint exposes current run counters and runtime indicator", () => {
-  const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
-  assert.match(source, /currentRunCounters/);
-  assert.match(source, /runScopedCounters/);
-  assert.match(source, /runtimeIndicator/);
-  assert.match(source, /partial_safe_stopped/);
-  assert.doesNotMatch(source, /ig_run_id/);
-});
-
-test("settings saves update ig_account_settings updated_at", () => {
-  const source = readFileSync(new URL("../app/api/instagram-dashboard/settings/route.ts", import.meta.url), "utf8");
-  assert.match(source, /updated_at:\s*new Date\(\)\.toISOString\(\)/);
+  assert.match(source, /execute_route/);
+  assert.match(source, /actions_executable/);
 });

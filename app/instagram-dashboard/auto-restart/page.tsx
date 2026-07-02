@@ -57,7 +57,7 @@ export default async function InstagramAutoRestartPage() {
       <DashboardPageHeader
         eyebrow="Admin scheduler"
         title="Auto Restart"
-        description="Persisted restart settings, quota resume preview, reliability snapshot, and safety gates. Scheduler enqueue remains disabled."
+        description="Persisted restart settings, pilot allowlist, safety gates, and canonical scheduler controls."
       />
 
       {data.errors.length > 0 ? (
@@ -68,21 +68,31 @@ export default async function InstagramAutoRestartPage() {
       ) : null}
 
       <section className="ig-ar-status-grid" aria-label="Auto Restart status">
-        <StatusCard label="Auto Restart" value={status.enabled ? "On" : "Off"} detail={status.statusLabel} tone={status.enabled ? "ready" : "muted"} />
-        <StatusCard label="Runtime mode" value={status.mode === "dry_run" ? "Dry-run planning" : status.mode} detail="No automatic enqueue from BotApp." tone="watch" />
-        <StatusCard label="Restart delay" value={`${rules.restartDelayMinutes} min`} detail="Used for next-restart preview and worker resume plan." tone="muted" />
-        <StatusCard label="Next preview check" value={formatDateTime(status.nextSchedulerCheck)} detail="Preview-only cadence; scheduler heartbeat not wired." tone="muted" />
-        <StatusCard label="Eligible candidates" value={formatInteger(status.activeRestartCandidates)} detail="Preview eligible only; no request is created." tone={status.activeRestartCandidates ? "ready" : "muted"} />
-        <StatusCard label="Blocked candidates" value={formatInteger(status.blockedCandidates)} detail="Blocked by quotas, account gates, active requests, or missing sources." tone={status.blockedCandidates ? "watch" : "ready"} />
+        <StatusCard label="Operational state" value={status.operationalState} detail={status.statusLabel} tone={status.operationalState === "active" ? "ready" : status.operationalState === "blocked" ? "watch" : "muted"} />
+        <StatusCard label="Auto Restart" value={status.enabled ? "On" : "Off"} detail={status.mode} tone={status.enabled ? "ready" : "muted"} />
+        <StatusCard label="Pilot account" value={rules.pilotUsername ? `@${rules.pilotUsername}` : "Not set"} detail={rules.pilotAccountId || "Required before activation"} tone={rules.pilotAccountId ? "ready" : "watch"} />
+        <StatusCard label="Check interval" value={`${rules.checkEveryMinutes} min`} detail="Scheduler tick cadence" tone="muted" />
+        <StatusCard label="Restart delay" value={`${rules.restartDelayMinutes} min`} detail="Minimum delay between restart attempts" tone="muted" />
+        <StatusCard label="Eligible candidates" value={formatInteger(status.activeRestartCandidates)} detail="Pilot-filtered when allowlist is set" tone={status.activeRestartCandidates ? "ready" : "muted"} />
+        {status.blockReasons.length ? (
+          <StatusCard label="Block reasons" value={formatInteger(status.blockReasons.length)} detail={status.blockReasons.join(", ")} tone="watch" />
+        ) : null}
       </section>
 
       <section className="ig-ar-two-col">
         <AnalyticsSectionCard
           eyebrow="Rules"
           title="Restart Rules"
-          description="Persisted in auto_restart_settings. Save updates Supabase; scheduler enqueue remains disabled."
+          description="Persisted in auto_restart_settings. Save updates Supabase through the canonical API."
         >
-          <AutoRestartRulesEditor initialRules={rules} backendPending={settingsBackendPending} />
+          <AutoRestartRulesEditor
+            initialRules={rules}
+            backendPending={settingsBackendPending}
+            accountOptions={data.candidates.map((candidate) => ({
+              accountId: candidate.accountId,
+              username: candidate.username,
+            }))}
+          />
         </AnalyticsSectionCard>
 
         <AnalyticsSectionCard

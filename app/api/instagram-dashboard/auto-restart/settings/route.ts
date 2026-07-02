@@ -1,5 +1,13 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import {
+  probeAutoRestartFoundation,
+  validateActiveModePrerequisites,
+} from "@/lib/instagram-dashboard/auto-restart-foundation";
+import {
+  normalizePilotAccountId,
+  validatePilotAccountForSettings,
+} from "@/lib/instagram-dashboard/auto-restart-pilot";
+import {
   defaultAutoRestartRules,
   rulesFromSettingsRow,
   type AutoRestartMode,
@@ -22,8 +30,15 @@ export const dynamic = "force-dynamic";
 export type AutoRestartSettingsPatch = {
   auto_restart_enabled?: unknown;
   mode?: unknown;
+  check_every_minutes?: unknown;
   restart_delay_minutes?: unknown;
   max_attempts_per_session?: unknown;
+  max_restarts_per_day_per_account?: unknown;
+  max_restarts_per_window_per_account?: unknown;
+  restart_yellow_accounts?: unknown;
+  restart_red_accounts?: unknown;
+  respect_blackout_windows?: unknown;
+  respect_six_hour_window?: unknown;
   resume_follow_if_quota_remaining?: unknown;
   resume_unfollow_if_quota_remaining?: unknown;
   block_on_challenge?: unknown;
@@ -31,11 +46,15 @@ export type AutoRestartSettingsPatch = {
   block_on_account_mismatch?: unknown;
   block_on_device_offline?: unknown;
   notify_on_blocked_restart?: unknown;
+  phone_rest_enabled?: unknown;
+  phone_rest_max_session_minutes?: unknown;
+  phone_rest_min_rest_minutes?: unknown;
+  pilot_account_id?: unknown;
 };
 
 function readMode(value: unknown): AutoRestartMode {
-  const mode = readString(value, "dry_run");
-  return mode === "active" || mode === "disabled" || mode === "dry_run" ? mode : "dry_run";
+  const mode = readString(value, "disabled");
+  return mode === "active" || mode === "disabled" || mode === "dry_run" ? mode : "disabled";
 }
 
 function readPositiveInt(value: unknown, fallback: number, min: number, max: number) {
@@ -44,13 +63,24 @@ function readPositiveInt(value: unknown, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed));
 }
 
-export function normalizeAutoRestartPatch(body: AutoRestartSettingsPatch) {
-  const current = defaultAutoRestartRules();
+export function normalizeAutoRestartPatch(
+  body: AutoRestartSettingsPatch,
+  existingRow?: SupabaseRecord | null,
+) {
+  const current = rulesFromSettingsRow(existingRow ?? undefined);
+  const existingPilot = readString(existingRow?.pilot_account_id) || current.pilotAccountId || null;
   return {
     auto_restart_enabled: readBoolean(body.auto_restart_enabled, current.enabled),
     mode: readMode(body.mode ?? current.mode),
+    check_every_minutes: readPositiveInt(body.check_every_minutes, current.checkEveryMinutes, 1, 1440),
     restart_delay_minutes: readPositiveInt(body.restart_delay_minutes, current.restartDelayMinutes, 1, 1440),
     max_attempts_per_session: readPositiveInt(body.max_attempts_per_session, current.maxAttemptsPerSession, 0, 20),
+    max_restarts_per_day_per_account: readPositiveInt(body.max_restarts_per_day_per_account, 3, 0, 50),
+    max_restarts_per_window_per_account: readPositiveInt(body.max_restarts_per_window_per_account, 2, 0, 50),
+    restart_yellow_accounts: readBoolean(body.restart_yellow_accounts, false),
+    restart_red_accounts: readBoolean(body.restart_red_accounts, false),
+    respect_blackout_windows: readBoolean(body.respect_blackout_windows, current.respectPhoneRest),
+    respect_six_hour_window: readBoolean(body.respect_six_hour_window, current.respectSixHourWindow),
     resume_follow_if_quota_remaining: readBoolean(body.resume_follow_if_quota_remaining, current.resumeFollowIfQuotaRemaining),
     resume_unfollow_if_quota_remaining: readBoolean(body.resume_unfollow_if_quota_remaining, current.resumeUnfollowIfQuotaRemaining),
     block_on_challenge: readBoolean(body.block_on_challenge, current.blockOnChallenge),
@@ -58,14 +88,53 @@ export function normalizeAutoRestartPatch(body: AutoRestartSettingsPatch) {
     block_on_account_mismatch: readBoolean(body.block_on_account_mismatch, current.blockOnAccountMismatch),
     block_on_device_offline: readBoolean(body.block_on_device_offline, current.blockOnDeviceOffline),
     notify_on_blocked_restart: readBoolean(body.notify_on_blocked_restart, current.notifyOnBlockedRestart),
+    phone_rest_enabled: readBoolean(body.phone_rest_enabled, false),
+    phone_rest_max_session_minutes: body.phone_rest_max_session_minutes == null
+      ? null
+      : readPositiveInt(body.phone_rest_max_session_minutes, 0, 0, 1440),
+    phone_rest_min_rest_minutes: body.phone_rest_min_rest_minutes == null
+      ? null
+      : readPositiveInt(body.phone_rest_min_rest_minutes, 0, 0, 1440),
+    pilot_account_id: "pilot_account_id" in body
+      ? normalizePilotAccountId(body.pilot_account_id)
+      : existingPilot,
   };
 }
 
-export function validateAutoRestartPatch(patch: ReturnType<typeof normalizeAutoRestartPatch>) {
-  if (patch.mode === "active") {
-    return "active_mode_scheduler_not_wired";
-  }
-  return null;
+export function validateAutoRestartPatch(
+  patch: ReturnType<typeof normalizeAutoRestartPatch>,
+  foundation: Awaited<ReturnType<typeof probeAutoRestartFoundation>>,
+) {
+  return validateActiveModePrerequisites({
+    patch,
+    foundation,
+    tickTokenConfigured: Boolean(process.env.INSTAGRAM_AUTO_RESTART_TICK_TOKEN),
+  });
+}
+
+async function auditSettingsMutation(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  input: {
+    actorId: string | null;
+    patch: ReturnType<typeof normalizeAutoRestartPatch>;
+    requestId: string;
+  },
+) {
+  const now = new Date().toISOString();
+  await supabase.from("auto_restart_decisions").insert({
+    request_id: input.requestId,
+    idempotency_key: `settings:${now}:${input.patch.mode}:${input.patch.auto_restart_enabled}`,
+    actor: input.actorId ? `admin:${input.actorId}` : "admin",
+    action: "auto_restart_settings_updated",
+    decision: input.patch.auto_restart_enabled ? input.patch.mode : "disabled",
+    reason: "settings_patch",
+    mode: input.patch.mode,
+    metadata_safe: {
+      auto_restart_enabled: input.patch.auto_restart_enabled,
+      check_every_minutes: input.patch.check_every_minutes,
+      pilot_account_id: input.patch.pilot_account_id,
+    },
+  });
 }
 
 export function patchToRulePreview(row: SupabaseRecord): AutoRestartRulePreview {
@@ -78,6 +147,7 @@ export async function GET(request: Request) {
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const supabase = createSupabaseClient();
+    const foundation = await probeAutoRestartFoundation(supabase);
     const { data, error } = await supabase
       .from("auto_restart_settings")
       .select("*")
@@ -88,13 +158,17 @@ export async function GET(request: Request) {
       return jsonOk({
         rules: defaultAutoRestartRules(),
         backend_pending: true,
+        writable: false,
+        foundation,
         error: error.message,
       });
     }
 
     return jsonOk({
       rules: rulesFromSettingsRow(data ?? undefined),
-      backend_pending: false,
+      backend_pending: !foundation.settingsWritable,
+      writable: foundation.settingsWritable,
+      foundation,
       updated_at: readString(data?.updated_at) || null,
     });
   } catch {
@@ -108,14 +182,32 @@ export async function PATCH(request: Request) {
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const body = (await readJsonBody<AutoRestartSettingsPatch>(request)) ?? {};
-    const patch = normalizeAutoRestartPatch(body);
-    const validationError = validateAutoRestartPatch(patch);
-    if (validationError) {
-      return jsonError("Auto Restart mode active is not wired yet.", 400, { reason: validationError });
-    }
-
     const userContext = await getInstagramAdminUserContext();
     const supabase = createSupabaseClient();
+    const foundation = await probeAutoRestartFoundation(supabase);
+    const { data: existingRow } = await supabase
+      .from("auto_restart_settings")
+      .select("*")
+      .eq("id", "global")
+      .maybeSingle<SupabaseRecord>();
+    const patch = normalizeAutoRestartPatch(body, existingRow);
+    if (patch.pilot_account_id) {
+      const pilotReason = await validatePilotAccountForSettings(supabase, patch.pilot_account_id);
+      if (pilotReason) {
+        return jsonError("Pilot account validation failed.", 400, { reason: pilotReason, foundation });
+      }
+    }
+    const validationError = validateAutoRestartPatch(patch, foundation);
+    if (validationError) {
+      return jsonError("Auto Restart settings validation failed.", 400, { reason: validationError, foundation });
+    }
+    if (!foundation.settingsWritable) {
+      return jsonError("Auto Restart settings table is not deployed.", 503, {
+        reason: "auto_restart_foundation_not_deployed",
+        foundation,
+      });
+    }
+
     const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("auto_restart_settings")
@@ -135,11 +227,25 @@ export async function PATCH(request: Request) {
       });
     }
 
+    const requestId = `auto-restart-settings-${Date.now().toString(36)}`;
+    try {
+      await auditSettingsMutation(supabase, {
+        actorId: userContext?.userId ?? null,
+        patch,
+        requestId,
+      });
+    } catch {
+      // Audit is best-effort; settings row is canonical.
+    }
+
     return jsonOk({
       rules: rulesFromSettingsRow(data),
       saved_at: now,
       backend_pending: false,
-      log_event: "auto_restart_settings_saved",
+      writable: true,
+      foundation,
+      request_id: requestId,
+      log_event: "auto_restart_settings_updated",
     });
   } catch {
     return jsonError("Could not save Auto Restart settings.", 500);
