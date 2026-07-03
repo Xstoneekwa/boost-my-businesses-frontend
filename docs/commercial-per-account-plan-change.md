@@ -53,6 +53,37 @@ A plan change on account A never modifies entitlements, credits, packages, or po
 
 First purchase, additional account, simulations, and public checkout pages are unchanged.
 
+## Server-only RPC access (per-account)
+
+The five per-account plan-change RPCs are **server-only** and must never be called from browser `anon`/`authenticated` PostgREST clients:
+
+- `commercial_plan_change_source_revision_for_account_source`
+- `account_scoped_credit_balance_cents`
+- `activate_commercial_plan_change_per_account`
+- `apply_account_commercial_package_plan_change`
+- `bump_account_commercial_policy_revision`
+
+**Authorized role**: `service_role` only (Next.js API routes via `createSupabaseClient()`).
+
+**Explicitly denied**: `public`, `anon`, `authenticated`.
+
+Migration `20260710150300_restrict_per_account_plan_change_rpc_privileges.sql` enforces this with `REVOKE`/`GRANT` only (no body or signature changes).
+
+**PostgreSQL effective privilege check** (local disposable instance, after applying `20260710150200` + `20260710150300`):
+
+```sql
+select p.proname,
+  has_function_privilege('anon', p.oid, 'EXECUTE') as anon,
+  has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated,
+  has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.proname in (...);
+```
+
+Expected: `anon=false`, `authenticated=false`, `service_role=true`; no `=X/` PUBLIC entry in `proacl`.
+
+**Production follow-up** (separate task): apply `20260710150300` remotely, then reconcile migration history (`20260703134532` → `20260710150200`) without re-running DDL.
+
 ## Local PostgreSQL validation (pre-production)
 
 Before applying commercial migrations to production, run the full SQL file on a disposable local PostgreSQL instance with the plan-change prerequisite migrations (`20260615143000`, `20260621120000`, `20260622120000`) plus production tables already present on the shared database (`account_commercial_packages`, `client_instagram_accounts`). The migration must execute without PostgreSQL errors; `commercial_plan_change_source_revision_for_account_source` must return a non-empty revision for coherent entitlement/session/account fixtures and `NULL` on account or client mismatch.
