@@ -37,10 +37,19 @@ export type SafeCatalogMappingStage =
   | "mapping_write"
   | "validation";
 
+export type SafeCatalogMappingCheckpoint =
+  | "manifest"
+  | "catalog_shape"
+  | "price_attributes"
+  | "mapping_shape"
+  | "mapping_store_contract"
+  | "stripe_client";
+
 export type SafeCatalogMappingFailurePayload = {
   ok: false;
   code: string;
   stage: SafeCatalogMappingStage;
+  checkpoint?: SafeCatalogMappingCheckpoint;
   provider_status?: number;
   provider_code?: string;
 };
@@ -48,12 +57,14 @@ export type SafeCatalogMappingFailurePayload = {
 export class SafeCatalogMappingError extends Error {
   code: string;
   stage: SafeCatalogMappingStage;
+  checkpoint?: SafeCatalogMappingCheckpoint;
   provider_status?: number;
   provider_code?: string;
 
   constructor(input: {
     code: string;
     stage: SafeCatalogMappingStage;
+    checkpoint?: SafeCatalogMappingCheckpoint;
     provider_status?: number;
     provider_code?: string;
   }) {
@@ -61,6 +72,7 @@ export class SafeCatalogMappingError extends Error {
     this.name = "SafeCatalogMappingError";
     this.code = input.code;
     this.stage = input.stage;
+    this.checkpoint = input.checkpoint;
     this.provider_status = input.provider_status;
     this.provider_code = input.provider_code;
   }
@@ -481,6 +493,7 @@ async function syncStripePublicCatalogMappingInner(
     throw new SafeCatalogMappingError({
       code: "stripe_catalog_manifest_invalid",
       stage: "validation",
+      checkpoint: "manifest",
     });
   }
   if ("ok" in plan && plan.ok === false) {
@@ -561,6 +574,7 @@ export function safeCatalogMappingFailurePayload(
       ok: false,
       code: safeError.code,
       stage: safeError.stage,
+      checkpoint: safeError.checkpoint,
       provider_status: safeError.provider_status,
       provider_code: safeError.provider_code,
     });
@@ -569,6 +583,7 @@ export function safeCatalogMappingFailurePayload(
     ok: false,
     code: fallback.code,
     stage: fallback.stage,
+    checkpoint: safeCheckpoint(error),
     provider_status: safeProviderStatus(error),
     provider_code: safeProviderCode(error),
   });
@@ -895,6 +910,7 @@ function safeCatalogMappingErrorLike(error: unknown) {
     return {
       code,
       stage: stage as SafeCatalogMappingStage,
+      checkpoint: safeCheckpoint(error),
       provider_status: safePayloadProviderStatus(record) ?? safeProviderStatus(error),
       provider_code: safePayloadProviderCode(record) ?? safeProviderCode(error),
     };
@@ -923,6 +939,24 @@ const ALLOWED_SAFE_STAGES = new Set([
   "mapping_read",
   "mapping_write",
   "validation",
+]);
+
+function safeCheckpoint(error: unknown) {
+  const record = errorRecord(error);
+  const checkpoint = record.checkpoint;
+  if (typeof checkpoint === "string" && ALLOWED_SAFE_CHECKPOINTS.has(checkpoint)) {
+    return checkpoint as SafeCatalogMappingCheckpoint;
+  }
+  return undefined;
+}
+
+const ALLOWED_SAFE_CHECKPOINTS = new Set([
+  "manifest",
+  "catalog_shape",
+  "price_attributes",
+  "mapping_shape",
+  "mapping_store_contract",
+  "stripe_client",
 ]);
 
 const ALLOWED_SAFE_FAILURE_CODES = new Set([

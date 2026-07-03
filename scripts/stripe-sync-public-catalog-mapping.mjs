@@ -33,15 +33,25 @@ export async function runStripeCatalogMappingCli(options = {}) {
   try {
     const stripeSecretKey = readStripeTestKey(env);
     const supabase = createProductionSupabaseClient(env, makeSupabaseClient);
-    const result = await syncMapping({
-      environment: "test",
-      secretKey: stripeSecretKey,
-      client: makeStripeClient({
+    let stripeClient;
+    try {
+      stripeClient = makeStripeClient({
         secretKey: stripeSecretKey,
         webhookSecret: null,
         billingPortalConfigurationId: null,
         testCheckoutEnabled: true,
-      }),
+      });
+    } catch {
+      throw new SafeCatalogMappingError({
+        code: "stripe_catalog_validation_failed",
+        stage: "validation",
+        checkpoint: "stripe_client",
+      });
+    }
+    const result = await syncMapping({
+      environment: "test",
+      secretKey: stripeSecretKey,
+      client: stripeClient,
       store: new SupabaseMappingStore(supabase),
       dryRun: !apply,
     });
@@ -161,6 +171,7 @@ function safeCliFailurePayload(failure) {
       ok: false,
       code: failure.code,
       stage: failure.stage,
+      checkpoint: failure.checkpoint,
       provider_status: failure.provider_status,
       provider_code: failure.provider_code,
     }).filter(([, value]) => value !== undefined),
