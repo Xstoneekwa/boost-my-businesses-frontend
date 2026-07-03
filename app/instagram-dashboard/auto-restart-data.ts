@@ -1,6 +1,7 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
+import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-restart-scheduler-state";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
@@ -108,6 +109,7 @@ export type AutoRestartOverview = {
     blockReasons: string[];
     lastSchedulerCheck: string | null;
     nextSchedulerCheck: string | null;
+    lastTickStatus: string | null;
     activeRestartCandidates: number;
     blockedCandidates: number;
     schedulerSourceStatus: AutoRestartStatus;
@@ -720,6 +722,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     phoneRestOverridesResult,
     deviceLocksResult,
     openIncidentsResult,
+    latestCompletedTickResult,
   ] = await Promise.all([
     supabase.from("auto_restart_settings").select("*").eq("id", "global").limit(1).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
@@ -757,6 +760,14 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         .in("status", ["open", "acknowledged"])
         .limit(500)
       : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from("auto_restart_tick_locks")
+      .select("idempotency_key,worker_id,tick_started_at,tick_completed_at,status,metadata_safe")
+      .eq("status", "completed")
+      .not("tick_completed_at", "is", null)
+      .order("tick_completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
   ]);
   const rules = rulesFromSettings(autoRestartSettingsResult.data as SupabaseRecord | null | undefined);
 
@@ -781,6 +792,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     phoneRestOverridesResult.error,
     deviceLocksResult.error,
     openIncidentsResult.error,
+    latestCompletedTickResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -884,6 +896,15 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         ? `Blocked: ${operational.blockReasons.join(", ")}`
         : "Auto Restart disabled.";
 
+  const schedulerChecks = resolveSchedulerCheckState({
+    latestCompletedTick: latestCompletedTickResult.error
+      ? null
+      : (latestCompletedTickResult.data as SupabaseRecord | null | undefined),
+    checkEveryMinutes: rules.checkEveryMinutes,
+    enabled: rules.enabled,
+    mode: rules.mode,
+  });
+
   return {
     status: {
       enabled: rules.enabled,
@@ -891,10 +912,9 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       statusLabel,
       operationalState: operational.state,
       blockReasons: operational.blockReasons,
-      lastSchedulerCheck: null,
-      nextSchedulerCheck: rules.enabled
-        ? new Date(Date.now() + rules.checkEveryMinutes * 60_000).toISOString()
-        : null,
+      lastSchedulerCheck: schedulerChecks.lastSchedulerCheck,
+      nextSchedulerCheck: schedulerChecks.nextSchedulerCheck,
+      lastTickStatus: schedulerChecks.lastTickStatus,
       activeRestartCandidates,
       blockedCandidates,
       schedulerSourceStatus: autoRestartSettingsResult.error ? "pending" : "connected",
