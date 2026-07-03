@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import StripeTestCheckoutPanel from "./StripeTestCheckoutPanel";
 
 type AuthorizationStatus = {
   id: string;
@@ -148,6 +149,8 @@ export default function CommercialProdTestAdminPanel() {
           ))}
         </ul>
       </section>
+
+      <StripeTestCheckoutPanel />
 
       <style jsx>{`
         .commercial-prod-test-admin { display: grid; gap: 16px; max-width: 760px; }

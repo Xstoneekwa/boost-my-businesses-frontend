@@ -6,7 +6,7 @@ import {
   type InitialCheckoutSimulationDenyReason,
 } from "./initial-checkout-simulation-guard.ts";
 
-export type PaymentProvider = "simulated" | "paddle";
+export type PaymentProvider = "simulated" | "paddle" | "stripe";
 
 export type ConfirmCommercialPaymentInput = {
   provider: PaymentProvider;
@@ -17,6 +17,8 @@ export type ConfirmCommercialPaymentInput = {
   env?: NodeJS.ProcessEnv;
   /** When set, bypasses isolated fictional-email guard for an admin-authorized prod test checkout. */
   simulationAccessSource?: "prod_test_authorization" | null;
+  /** Required when provider is stripe — confirms webhook verified payment. */
+  stripeWebhookVerified?: boolean;
 };
 
 export type ConfirmCommercialPaymentSuccess = {
@@ -52,6 +54,25 @@ export function confirmCommercialPayment(
   const idempotencyKey = input.idempotencyKey.trim();
   if (!idempotencyKey) {
     return failureFromReason("simulated_checkout_disabled");
+  }
+
+  if (input.provider === "stripe") {
+    if (!input.stripeWebhookVerified) {
+      return {
+        ok: false,
+        code: "provider_not_configured",
+        reason: "provider_not_configured",
+        messageFr: "Le paiement Stripe nécessite une confirmation webhook.",
+        messageEn: "Stripe payment requires webhook confirmation.",
+      };
+    }
+    return {
+      ok: true,
+      paymentProvider: "stripe",
+      paymentStatus: "confirmed",
+      confirmedAt: new Date().toISOString(),
+      idempotencyKey,
+    };
   }
 
   if (input.provider === "paddle") {

@@ -60,6 +60,8 @@ export type ActivateCheckoutInput = {
   password?: string | null;
   passwordConfirmation?: string | null;
   mode: "simulated" | "stripe";
+  stripeWebhookConfirmed?: boolean;
+  precreatedCheckoutSessionId?: string | null;
 };
 
 export type ActivateCheckoutResult =
@@ -169,7 +171,11 @@ async function findExistingActivatedSession(supabase: SupabaseClient, idempotenc
     console.error("[commercial/checkout/activate] checkout session lookup failed", { idempotencyKey, error });
     return { kind: "storage_error" as const };
   }
-  if (!data?.id || readString(data.status) !== "checkout_activated_test") {
+  if (!data?.id) {
+    return { kind: "missing" as const };
+  }
+  const status = readString(data.status);
+  if (status !== "checkout_activated_test" && status !== "checkout_paid") {
     return { kind: "missing" as const };
   }
   const { data: entitlement, error: entitlementError } = await supabase
@@ -427,7 +433,14 @@ export async function activateClientAccountEntitlementFromCheckout(
   };
 
   try {
-    if (input.mode !== "simulated") {
+    if (input.mode === "stripe") {
+      if (!input.stripeWebhookConfirmed) {
+        return activationFailure(403, "stripe_webhook_required", {
+          messageFr: "Activation Stripe réservée au webhook confirmé.",
+          messageEn: "Stripe activation requires a confirmed webhook.",
+        });
+      }
+    } else if (input.mode !== "simulated") {
       return activationFailure(501, "stripe_not_enabled", {
         messageFr: "Le paiement réel n'est pas encore disponible.",
         messageEn: "Real payment is not available yet.",
@@ -457,7 +470,7 @@ export async function activateClientAccountEntitlementFromCheckout(
       return activationFailure(503, "checkout_storage_unavailable");
     }
 
-    if (existing.kind !== "found" && input.flowType !== "plan_change") {
+    if (existing.kind !== "found" && input.flowType !== "plan_change" && input.mode !== "stripe") {
       const simulationAccess = await evaluateCheckoutSimulationAccess({
         supabase,
         email,
@@ -512,12 +525,14 @@ export async function activateClientAccountEntitlementFromCheckout(
     }
 
     if (existing.kind !== "found" && checkoutContext === "public_new_workspace") {
+      const paymentProvider = input.mode === "stripe" ? "stripe" as const : "simulated" as const;
       const payment = confirmCommercialPayment({
-        provider: "simulated",
+        provider: paymentProvider,
         purchaserEmail: email,
         amountDueCents: quoteResult.totalPeriodCents,
         idempotencyKey: tracker.idempotencyKey,
         checkoutContext,
+        stripeWebhookVerified: input.mode === "stripe",
         simulationAccessSource: tracker.simulationAccessSource === "prod_test_authorization"
           ? "prod_test_authorization"
           : null,
@@ -743,15 +758,29 @@ export async function activateClientAccountEntitlementFromCheckout(
 
     const now = new Date().toISOString();
 
-    const skipCheckoutSessionInsert = existing.kind === "partial" || Boolean(checkoutSessionId);
+    const skipCheckoutSessionInsert = existing.kind === "partial"
+      || Boolean(checkoutSessionId)
+      || Boolean(input.precreatedCheckoutSessionId);
+
+    if (input.precreatedCheckoutSessionId && !checkoutSessionId) {
+      checkoutSessionId = input.precreatedCheckoutSessionId;
+    }
 
     if (!skipCheckoutSessionInsert) {
+      const sessionStatus = input.mode === "stripe" ? "checkout_paid" : "checkout_activated_test";
+      const paymentMeta = input.mode === "stripe"
+        ? { mode: "stripe_test", payment_provider: "stripe", payment_status: "confirmed" }
+        : {
+            mode: "simulated",
+            payment_provider: "simulated",
+            payment_status: "simulated_confirmed",
+          };
       const { data: checkoutSession, error: checkoutError } = await supabase
         .from("commercial_checkout_sessions")
         .insert({
           idempotency_key: tracker.idempotencyKey,
           flow_type: input.flowType,
-          status: "checkout_activated_test",
+          status: sessionStatus,
           client_id: clientId,
           auth_user_id: authUserId,
           purchaser_email: email,
@@ -773,9 +802,7 @@ export async function activateClientAccountEntitlementFromCheckout(
           catalog_snapshot: finalQuote.catalogSnapshot,
           pricing_snapshot: finalQuote.pricingSnapshot,
           metadata: {
-            mode: "simulated",
-            payment_provider: "simulated",
-            payment_status: "simulated_confirmed",
+            ...paymentMeta,
             checkout_context: checkoutContext,
             internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
             billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",

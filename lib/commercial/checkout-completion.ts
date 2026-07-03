@@ -67,7 +67,11 @@ export async function verifyActivationCompletion(
   if (!entitlement.data?.id || readString(entitlement.data.status) !== "entitlement_reserved") {
     return { ok: false as const, reason: "entitlement_missing" };
   }
-  if (!checkoutSession.data?.id || readString(checkoutSession.data.status) !== "checkout_activated_test") {
+  if (!checkoutSession.data?.id) {
+    return { ok: false as const, reason: "checkout_session_missing" };
+  }
+  const checkoutStatus = readString(checkoutSession.data.status);
+  if (checkoutStatus !== "checkout_activated_test" && checkoutStatus !== "checkout_paid") {
     return { ok: false as const, reason: "checkout_session_missing" };
   }
   if (!auditEvent.data?.id) return { ok: false as const, reason: "audit_event_missing" };
