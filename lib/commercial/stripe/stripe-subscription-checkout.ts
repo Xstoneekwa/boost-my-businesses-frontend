@@ -5,13 +5,24 @@ import { evaluateCheckoutSimulationAccess } from "../checkout-simulation-access.
 import { resolveSimulatedPublicAuth } from "../checkout-auth.ts";
 import { requireStripeTestConfig, StripeFoundationError } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
-import { resolveServerStripePriceId } from "./stripe-price-resolver.ts";
+import {
+  resolveStripeComponentPriceId,
+  resolveStripeProductIdForComponent,
+} from "./stripe-component-price-resolver.ts";
 import {
   createInternalCheckoutSessionPending,
   createStripeCheckoutAttempt,
 } from "./stripe-checkout-attempts.ts";
 import { buildSafeStripeMetadata, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
 import { isStripeTestFoundationReady, getStripeTestReadiness } from "./stripe-readiness.ts";
+import {
+  componentsFromPricingSnapshot,
+  inferCommercialMode,
+  isPublicCatalogComponent,
+  validateEntitlementBillingBinding,
+  type CommercialMode,
+  type StripeBillingComponent,
+} from "./stripe-per-entitlement-billing.ts";
 
 export type CreateStripeSubscriptionCheckoutInput = {
   planKey: string;
@@ -33,6 +44,52 @@ export type CreateStripeSubscriptionCheckoutResult =
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+async function buildSubscriptionLineItems(
+  supabase: SupabaseClient,
+  input: {
+    components: StripeBillingComponent[];
+    pricingSnapshotFingerprint: string;
+    commercialMode: CommercialMode;
+  },
+) {
+  const lineItems = [];
+  for (const component of input.components) {
+    if (isPublicCatalogComponent(component)) {
+      const price = await resolveStripeComponentPriceId(supabase, {
+        environment: "test",
+        component,
+      });
+      if (!price) return { ok: false as const, code: "stripe_component_price_mapping_missing" as const };
+      lineItems.push({ price, quantity: 1 });
+      continue;
+    }
+
+    const product = await resolveStripeProductIdForComponent(supabase, {
+      environment: "test",
+      component,
+    });
+    if (!product) return { ok: false as const, code: "stripe_component_product_mapping_missing" as const };
+    lineItems.push({
+      quantity: 1,
+      price_data: {
+        currency: component.currency,
+        unit_amount: component.amountCents,
+        recurring: {
+          interval: "month" as const,
+          interval_count: component.billingIntervalMonths,
+        },
+        product,
+        metadata: buildSafeStripeMetadata({
+          pricing_snapshot_fingerprint: input.pricingSnapshotFingerprint,
+          component_kind: component.componentKind,
+          commercial_mode: input.commercialMode,
+        }),
+      },
+    });
+  }
+  return { ok: true as const, lineItems };
 }
 
 export async function createStripeSubscriptionCheckoutSession(
@@ -101,14 +158,25 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 400, code: quote.error, messageEn: "Invalid checkout selection." };
   }
 
-  const stripePriceId = await resolveServerStripePriceId(supabase, {
-    environment: "test",
+  const commercialMode = inferCommercialMode({
     planKey,
-    billingIntervalMonths,
     outreachAddonKey: input.outreachAddonKey,
+    explicitMode: "full_cycle",
   });
-  if (!stripePriceId) {
-    return { ok: false, status: 503, code: "stripe_price_mapping_missing", messageEn: "Stripe test price mapping is missing." };
+  if (!commercialMode) {
+    return { ok: false, status: 400, code: "commercial_mode_invalid", messageEn: "Invalid commercial mode." };
+  }
+  const components = componentsFromPricingSnapshot(quote.pricingSnapshot, commercialMode);
+  if (!Array.isArray(components)) {
+    return { ok: false, status: 400, code: components.code, messageEn: "Invalid billing components." };
+  }
+  const lineItems = await buildSubscriptionLineItems(supabase, {
+    components,
+    pricingSnapshotFingerprint: quote.pricingSnapshot.version,
+    commercialMode,
+  });
+  if (!lineItems.ok) {
+    return { ok: false, status: 503, code: lineItems.code, messageEn: "Stripe test component mapping is missing." };
   }
 
   let authUserId: string | null = null;
@@ -154,10 +222,25 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 503, code: pendingSession.code, messageEn: "Could not create internal checkout session." };
   }
 
+  const binding = validateEntitlementBillingBinding({
+    clientId: clientId ?? "pending-client",
+    entitlementId: pendingSession.checkoutSessionId,
+    accountId: null,
+    commercialMode,
+    pricingSnapshotFingerprint: quote.pricingSnapshot.version,
+    pricingMode: components.every(isPublicCatalogComponent) ? "public_catalog" : "immutable_snapshot",
+    components,
+  });
+  if (!binding.ok) {
+    return { ok: false, status: 400, code: binding.code, messageEn: "Invalid entitlement billing binding." };
+  }
+
   const metadata = buildSafeStripeMetadata({
     internal_attempt_id: idempotencyKey,
     internal_checkout_session_id: pendingSession.checkoutSessionId,
     flow_type: flowType,
+    commercial_mode: commercialMode,
+    pricing_snapshot_fingerprint: quote.pricingSnapshot.version,
   });
   rejectUnsafeStripeMetadataKeys(metadata);
 
@@ -166,11 +249,10 @@ export async function createStripeSubscriptionCheckoutSession(
     mode: "subscription",
     customer_email: email,
     client_reference_id: pendingSession.checkoutSessionId,
-    line_items: [{ price: stripePriceId, quantity: 1 }],
+    line_items: lineItems.lineItems,
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata,
-    payment_method_types: ["card"],
     subscription_data: {
       metadata,
     },

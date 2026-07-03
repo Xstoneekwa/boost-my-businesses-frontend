@@ -16,6 +16,10 @@ export type StripeCheckoutAttemptRow = {
   stripe_subscription_id: string | null;
   stripe_payment_intent_id: string | null;
   target_stripe_price_id: string | null;
+  client_account_entitlement_id: string | null;
+  account_id: string | null;
+  commercial_mode: string | null;
+  pricing_snapshot_fingerprint: string | null;
   checkout_mode: "subscription" | "payment";
   status: string;
   client_id: string | null;
@@ -44,6 +48,10 @@ function normalizeAttemptRow(data: Row): StripeCheckoutAttemptRow {
     stripe_subscription_id: readString(data.stripe_subscription_id) || null,
     stripe_payment_intent_id: readString(data.stripe_payment_intent_id) || null,
     target_stripe_price_id: readString(data.target_stripe_price_id) || null,
+    client_account_entitlement_id: readString(data.client_account_entitlement_id) || null,
+    account_id: readString(data.account_id) || null,
+    commercial_mode: readString(data.commercial_mode) || null,
+    pricing_snapshot_fingerprint: readString(data.pricing_snapshot_fingerprint) || null,
     checkout_mode: readString(data.checkout_mode) as "subscription" | "payment",
     status: readString(data.status),
     client_id: readString(data.client_id) || null,
@@ -131,6 +139,10 @@ export async function createStripeCheckoutAttempt(
     stripeCustomerId?: string | null;
     stripeSubscriptionId?: string | null;
     targetStripePriceId?: string | null;
+    clientAccountEntitlementId?: string | null;
+    accountId?: string | null;
+    commercialMode?: string | null;
+    pricingSnapshotFingerprint?: string | null;
     metadataSafe?: Record<string, string>;
   },
 ) {
@@ -154,6 +166,10 @@ export async function createStripeCheckoutAttempt(
       stripe_customer_id: input.stripeCustomerId ?? null,
       stripe_subscription_id: input.stripeSubscriptionId ?? null,
       target_stripe_price_id: input.targetStripePriceId ?? null,
+      client_account_entitlement_id: input.clientAccountEntitlementId ?? null,
+      account_id: input.accountId ?? null,
+      commercial_mode: input.commercialMode ?? null,
+      pricing_snapshot_fingerprint: input.pricingSnapshotFingerprint ?? null,
       metadata_safe: metadata,
     })
     .select("id")

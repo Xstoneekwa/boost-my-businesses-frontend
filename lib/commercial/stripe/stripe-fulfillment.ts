@@ -16,7 +16,10 @@ import {
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
 import { syncStripeSubscriptionPriceAfterPlanChangePayment } from "./stripe-plan-change-checkout.ts";
-import { upsertStripeBillingProfile } from "./stripe-subscription-projection.ts";
+import {
+  upsertStripeBillingProfile,
+  upsertStripeSubscriptionProjection,
+} from "./stripe-subscription-projection.ts";
 import { getStripeClient } from "./stripe-client.ts";
 import { assertStripeTestLivemode } from "./stripe-config.ts";
 import { STRIPE_ATTEMPT_STATUS, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
@@ -192,6 +195,22 @@ async function fulfillSubscriptionAttempt(
       clientId: activation.clientId || input.attempt.client_id,
       stripeCustomerId: input.customerId,
       billingEmail: input.attempt.purchaser_email,
+    });
+    await upsertStripeSubscriptionProjection(supabase, {
+      clientId: activation.clientId,
+      stripeSubscriptionId: input.subscriptionId,
+      stripeCustomerId: input.customerId,
+      stripePriceId: null,
+      clientAccountEntitlementId: activation.entitlementId,
+      accountId: null,
+      commercialCheckoutSessionId: readString(checkoutSession.id),
+      commercialMode: "full_cycle",
+      pricingMode: "public_catalog",
+      pricingSnapshotFingerprint: readString((checkoutSession.pricing_snapshot as Row | null)?.version),
+      status: "active",
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
     });
   }
 

@@ -29,6 +29,12 @@ export async function upsertStripeSubscriptionProjection(
     stripeSubscriptionId: string;
     stripeCustomerId: string;
     stripePriceId: string | null;
+    clientAccountEntitlementId?: string | null;
+    accountId?: string | null;
+    commercialCheckoutSessionId?: string | null;
+    commercialMode?: string | null;
+    pricingMode?: string | null;
+    pricingSnapshotFingerprint?: string | null;
     status: string;
     currentPeriodStart: string | null;
     currentPeriodEnd: string | null;
@@ -42,6 +48,12 @@ export async function upsertStripeSubscriptionProjection(
       stripe_subscription_id: input.stripeSubscriptionId,
       stripe_customer_id: input.stripeCustomerId,
       stripe_price_id: input.stripePriceId,
+      client_account_entitlement_id: input.clientAccountEntitlementId ?? null,
+      account_id: input.accountId ?? null,
+      commercial_checkout_session_id: input.commercialCheckoutSessionId ?? null,
+      commercial_mode: input.commercialMode ?? null,
+      pricing_mode: input.pricingMode ?? null,
+      pricing_snapshot_fingerprint: input.pricingSnapshotFingerprint ?? null,
       status: input.status,
       livemode: false,
       current_period_start: input.currentPeriodStart,

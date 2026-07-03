@@ -45,9 +45,19 @@ A plan change on account A never modifies entitlements, credits, packages, or po
 ## Stripe Test foundation
 
 - Plan-change Stripe checkout still uses `quote.amount_due_cents` (no second prorata).
-- Metadata may include `account_id` and `change_scope`.
+- Metadata includes `account_id`, `change_scope`, and source entitlement identity when present.
 - Target recurring price resolution may use `target_outreach_addon_key` from the quote.
+- Stripe subscription lookup is entitlement-scoped, not client-wide.
+- Payment confirmation must rebind only the source entitlement/account projection. If rebind or sync cannot be proven, fulfillment stays `reconciliation_required`; no internal activation and no second Checkout.
 - No Stripe Dashboard / Product / Price setup in this phase.
+
+Unsupported transitions remain fail-closed until a dedicated product decision/implementation:
+
+- `full_cycle -> outreach_only`
+- `outreach_only -> full_cycle`
+- Outreach Standard -> Outreach AI
+- Outreach removal
+- duration changes
 
 ## Public flows
 

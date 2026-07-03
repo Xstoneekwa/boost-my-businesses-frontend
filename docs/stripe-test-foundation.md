@@ -71,7 +71,7 @@ Plan-change one-off fulfillment requires:
 
 Unpaid / async-pending sessions are stored as attempt status `awaiting_payment`. No entitlement, no workspace, no internal plan change.
 
-Stripe Test Foundation currently restricts Checkout to `payment_method_types: ["card"]` to avoid deferred payment methods in V1.
+Stripe Checkout does **not** pass `payment_method_types`; payment methods stay controlled by Stripe Dashboard settings.
 
 ## Webhook event state machine
 
@@ -146,9 +146,28 @@ First purchase without client workspace: user must sign in with the pre-created 
 
 ## Price mapping
 
-Test Price IDs are stored in `commercial_stripe_price_catalog` (environment=`test` only from admin UI). The browser never sends `price_id` as source of truth.
+Legacy combined Test Price IDs are stored in `commercial_stripe_price_catalog` for compatibility/audit.
+
+New per-entitlement checkout paths resolve component Price IDs from `commercial_stripe_component_price_catalog`:
+
+- package component: Growth / Pro / Premium;
+- outreach component: Outreach Standard / Outreach AI;
+- public catalog: existing recurring Price ID;
+- immutable agency snapshot: server-created inline recurring Price per component, attached to the canonical Product.
+
+The browser never sends `price_id`, `product_id`, amount, interval, discount, or entitlement binding as source of truth.
 
 Plan-change one-off amounts are built from immutable `commercial_plan_change_quotes.amount_due_cents` server-side.
+
+## Per-entitlement billing
+
+Stripe Customer remains client-level. Stripe Subscription is entitlement-level:
+
+`client_id -> Stripe Customer -> client_account_entitlement_id -> account_id when consumed -> Stripe Subscription`.
+
+`full_cycle` subscriptions contain exactly one package item and optionally one outreach item. `outreach_only` subscriptions contain exactly one outreach item and no package item. Outreach Standard/AI exclusivity is per entitlement only; the same client may have Standard on A/B and AI on C.
+
+Stripe never decides phone routing. Existing internal runtime data (`client_subscriptions.subscription_type`, assignments, `phone_devices.pool_type`) remains canonical.
 
 ## Identity pre-checkout (first purchase)
 

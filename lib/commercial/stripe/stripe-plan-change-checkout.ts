@@ -17,12 +17,13 @@ function readString(value: unknown, fallback = "") {
 
 async function resolveClientStripeSubscription(
   supabase: SupabaseClient,
-  clientId: string,
+  input: { clientId: string; entitlementId: string },
 ) {
   const { data: subscriptionRow } = await supabase
     .from("commercial_stripe_subscriptions")
     .select("stripe_subscription_id")
-    .eq("client_id", clientId)
+    .eq("client_id", input.clientId)
+    .eq("client_account_entitlement_id", input.entitlementId)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle<Row>();
@@ -78,9 +79,19 @@ export async function createStripePlanChangePaymentSession(
   if (!isPlanKey(targetPlanKey)) {
     return { ok: false as const, status: 400, code: "invalid_plan", messageEn: "Invalid target plan." };
   }
-
+  if (readString(quote.change_scope) !== "per_account") {
+    return { ok: false as const, status: 400, code: "per_account_scope_required", messageEn: "Plan change must target one account." };
+  }
+  const accountId = readString(quote.account_id);
+  const sourceEntitlementId = readString(quote.source_entitlement_id);
+  if (!accountId || !sourceEntitlementId) {
+    return { ok: false as const, status: 400, code: "entitlement_account_binding_required", messageEn: "Plan change must target one entitlement and account." };
+  }
   const billingIntervalMonths = Number(quote.billing_interval_months ?? 1) as 1 | 3 | 6 | 12;
-  const stripeSubscriptionId = await resolveClientStripeSubscription(supabase, input.clientId);
+  const stripeSubscriptionId = await resolveClientStripeSubscription(supabase, {
+    clientId: input.clientId,
+    entitlementId: sourceEntitlementId,
+  });
   if (!stripeSubscriptionId) {
     return {
       ok: false as const,
@@ -110,7 +121,8 @@ export async function createStripePlanChangePaymentSession(
     quote_id: input.quoteId,
     source_revision: readString(quote.source_revision),
     flow_type: "plan_change",
-    account_id: readString(quote.account_id) || undefined,
+    account_id: accountId,
+    entitlement_id: sourceEntitlementId,
     change_scope: readString(quote.change_scope) || undefined,
   });
   rejectUnsafeStripeMetadataKeys(metadata);
@@ -133,7 +145,6 @@ export async function createStripePlanChangePaymentSession(
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata,
-    payment_method_types: ["card"],
   });
 
   if (!stripeSession.id || !stripeSession.url) {
@@ -150,6 +161,10 @@ export async function createStripePlanChangePaymentSession(
     clientId: input.clientId,
     stripeSubscriptionId,
     targetStripePriceId: targetPriceId,
+    clientAccountEntitlementId: sourceEntitlementId,
+    accountId,
+    commercialMode: "full_cycle",
+    pricingSnapshotFingerprint: readString((quote.pricing_snapshot as Row | null)?.version),
     metadataSafe: metadata,
   });
   if (!attempt.ok) {
