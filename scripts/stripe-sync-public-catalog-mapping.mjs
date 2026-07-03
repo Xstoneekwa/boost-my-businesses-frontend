@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { createClient } from "@supabase/supabase-js";
+import { pathToFileURL } from "node:url";
 import {
+  SafeCatalogMappingError,
+  safeCatalogMappingFailurePayload,
   syncStripePublicCatalogMapping,
 } from "../lib/commercial/stripe/stripe-catalog-provisioner.ts";
 import { createStripeClient } from "../lib/commercial/stripe/stripe-client.ts";
@@ -12,76 +15,90 @@ import {
 const PRODUCTION_REF = "zgafnshkjywfltxgbtzg";
 const FORBIDDEN_TEST_REF = "nxntngkhkoynljcagmkq";
 
-class SafeMappingError extends Error {
-  constructor(code) {
-    super(code);
-    this.code = code;
-  }
-}
-const args = new Set(process.argv.slice(2));
-const apply = args.has("--apply");
+export async function runStripeCatalogMappingCli(options = {}) {
+  const argv = options.argv ?? process.argv.slice(2);
+  const env = options.env ?? process.env;
+  const stderr = options.stderr ?? ((line) => process.stderr.write(`${line}\n`));
+  const stdout = options.stdout ?? ((line) => process.stdout.write(`${line}\n`));
+  const syncMapping = options.syncStripePublicCatalogMapping ?? syncStripePublicCatalogMapping;
+  const makeStripeClient = options.createStripeClient ?? createStripeClient;
+  const makeSupabaseClient = options.createSupabaseClient ?? createClient;
+  const args = new Set(argv);
+  const apply = args.has("--apply");
 
-if (apply && !args.has("--i-understand-this-writes-production-mapping")) {
-  console.error(JSON.stringify({ ok: false, code: "mapping_apply_confirmation_required" }));
-  process.exit(2);
-}
-try {
-  const stripeSecretKey = readStripeTestKey();
-  const supabase = createProductionSupabaseClient();
-  const result = await syncStripePublicCatalogMapping({
-    environment: "test",
-    secretKey: stripeSecretKey,
-    client: createStripeClient({
+  if (apply && !args.has("--i-understand-this-writes-production-mapping")) {
+    stderr(JSON.stringify({ ok: false, code: "mapping_apply_confirmation_required", stage: "validation" }));
+    return 2;
+  }
+  try {
+    const stripeSecretKey = readStripeTestKey(env);
+    const supabase = createProductionSupabaseClient(env, makeSupabaseClient);
+    const result = await syncMapping({
+      environment: "test",
       secretKey: stripeSecretKey,
-      webhookSecret: null,
-      billingPortalConfigurationId: null,
-      testCheckoutEnabled: true,
-    }),
-    store: new SupabaseMappingStore(supabase),
-    dryRun: !apply,
-  });
+      client: makeStripeClient({
+        secretKey: stripeSecretKey,
+        webhookSecret: null,
+        billingPortalConfigurationId: null,
+        testCheckoutEnabled: true,
+      }),
+      store: new SupabaseMappingStore(supabase),
+      dryRun: !apply,
+    });
 
-  if (!result.ok) {
-    console.error(JSON.stringify({ ok: false, code: result.code }));
-    process.exit(2);
+    if (!result.ok) {
+      stderr(JSON.stringify(safeCliFailurePayload(result)));
+      return 2;
+    }
+
+    stdout(JSON.stringify({
+      ok: true,
+      environment: result.environment,
+      mode: apply ? "apply" : "dry_run",
+      productCount: result.productCount,
+      priceCount: result.priceCount,
+      mappingsCreated: result.mappingsCreated,
+      mappingsReconciled: result.mappingsReconciled,
+      livemodeFalse: result.livemodeFalse,
+      productNames: result.productNames,
+      states: result.states,
+    }, null, 2));
+    return 0;
+  } catch (error) {
+    stderr(JSON.stringify(safeCliFailurePayload(safeCatalogMappingFailurePayload(error, {
+      code: "unexpected_sync_failure",
+      stage: "validation",
+    }))));
+    return 2;
   }
-
-  console.log(JSON.stringify({
-    ok: true,
-    environment: result.environment,
-    mode: apply ? "apply" : "dry_run",
-    productCount: result.productCount,
-    priceCount: result.priceCount,
-    mappingsCreated: result.mappingsCreated,
-    mappingsReconciled: result.mappingsReconciled,
-    livemodeFalse: result.livemodeFalse,
-    productNames: result.productNames,
-    states: result.states,
-  }, null, 2));
-} catch (error) {
-  console.error(JSON.stringify({
-    ok: false,
-    code: error instanceof SafeMappingError ? error.code : "stripe_catalog_mapping_sync_failed",
-  }));
-  process.exit(2);
 }
 
-function readStripeTestKey() {
-  const key = String(process.env.STRIPE_SECRET_KEY ?? "").trim();
-  if (!key) throw new SafeMappingError("stripe_test_key_required");
-  if (isStripeLiveSecretKey(key)) throw new SafeMappingError("stripe_live_key_rejected");
-  if (!isStripeTestSecretKey(key)) throw new SafeMappingError("stripe_test_mode_required");
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exitCode = await runStripeCatalogMappingCli();
+}
+
+function readStripeTestKey(env) {
+  const key = String(env.STRIPE_SECRET_KEY ?? "").trim();
+  if (!key) throw new SafeCatalogMappingError({ code: "stripe_test_key_required", stage: "validation" });
+  if (isStripeLiveSecretKey(key)) throw new SafeCatalogMappingError({ code: "stripe_live_key_rejected", stage: "validation" });
+  if (!isStripeTestSecretKey(key)) throw new SafeCatalogMappingError({ code: "stripe_test_mode_required", stage: "validation" });
   return key;
 }
 
-function createProductionSupabaseClient() {
-  const supabaseUrl = String(process.env.SUPABASE_URL ?? "").trim();
-  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
-  if (!supabaseUrl || !serviceRoleKey) throw new SafeMappingError("supabase_production_config_required");
+function createProductionSupabaseClient(env, makeSupabaseClient) {
+  const supabaseUrl = String(env.SUPABASE_URL ?? "").trim();
+  const serviceRoleKey = String(env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new SafeCatalogMappingError({ code: "supabase_production_config_required", stage: "validation" });
+  }
   const ref = extractSupabaseProjectRefFromUrl(supabaseUrl);
-  if (ref === FORBIDDEN_TEST_REF) throw new SafeMappingError("forbidden_supabase_project_ref");
-  if (ref !== PRODUCTION_REF) throw new SafeMappingError("production_supabase_ref_required");
-  return createClient(supabaseUrl, serviceRoleKey, {
+  if (ref === FORBIDDEN_TEST_REF) {
+    throw new SafeCatalogMappingError({ code: "forbidden_supabase_project_ref", stage: "validation" });
+  }
+  if (ref !== PRODUCTION_REF) {
+    throw new SafeCatalogMappingError({ code: "production_supabase_ref_required", stage: "validation" });
+  }
+  return makeSupabaseClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -116,7 +133,11 @@ class SupabaseMappingStore {
       ].join(","))
       .eq("environment", environment)
       .eq("active", true);
-    if (error) throw new SafeMappingError("mapping_store_read_failed");
+    if (error) throw safeSupabaseError(error, {
+      code: "production_mapping_read_failed",
+      stage: "mapping_read",
+      schemaOrRlsCode: "production_mapping_schema_or_rls_failed",
+    });
     return data ?? [];
   }
 
@@ -127,6 +148,78 @@ class SupabaseMappingStore {
       .upsert(rows, {
         onConflict: "environment,product_key,component_kind,billing_interval_months,expected_amount_cents,currency",
       });
-    if (error) throw new SafeMappingError("mapping_store_write_failed");
+    if (error) throw safeSupabaseError(error, {
+      code: "production_mapping_write_failed",
+      stage: "mapping_write",
+    });
   }
 }
+
+function safeCliFailurePayload(failure) {
+  return Object.fromEntries(
+    Object.entries({
+      ok: false,
+      code: failure.code,
+      stage: failure.stage,
+      provider_status: failure.provider_status,
+      provider_code: failure.provider_code,
+    }).filter(([, value]) => value !== undefined),
+  );
+}
+
+function safeSupabaseError(error, input) {
+  const provider_status = safeProviderStatus(error);
+  const provider_code = safeProviderCode(error);
+  let code = input.code;
+  if (
+    input.schemaOrRlsCode
+    && (
+      provider_status === 401
+      || provider_status === 403
+      || provider_code === "42501"
+      || provider_code === "42P01"
+      || provider_code === "42703"
+      || provider_code === "PGRST200"
+      || provider_code === "PGRST204"
+    )
+  ) {
+    code = input.schemaOrRlsCode;
+  }
+  return new SafeCatalogMappingError({
+    code,
+    stage: input.stage,
+    provider_status,
+    provider_code,
+  });
+}
+
+function safeProviderStatus(error) {
+  const record = errorRecord(error);
+  for (const value of [record.status, record.statusCode]) {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function safeProviderCode(error) {
+  const record = errorRecord(error);
+  const value = record.code;
+  if (typeof value === "string" && ALLOWED_SUPABASE_PROVIDER_CODES.has(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function errorRecord(value) {
+  return value && typeof value === "object" ? value : {};
+}
+
+const ALLOWED_SUPABASE_PROVIDER_CODES = new Set([
+  "42501",
+  "42P01",
+  "42703",
+  "PGRST200",
+  "PGRST204",
+]);

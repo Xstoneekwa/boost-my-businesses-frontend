@@ -31,6 +31,41 @@ type StripeListResult<T> = {
   has_more?: boolean;
 };
 
+export type SafeCatalogMappingStage =
+  | "stripe_catalog_read"
+  | "mapping_read"
+  | "mapping_write"
+  | "validation";
+
+export type SafeCatalogMappingFailurePayload = {
+  ok: false;
+  code: string;
+  stage: SafeCatalogMappingStage;
+  provider_status?: number;
+  provider_code?: string;
+};
+
+export class SafeCatalogMappingError extends Error {
+  code: string;
+  stage: SafeCatalogMappingStage;
+  provider_status?: number;
+  provider_code?: string;
+
+  constructor(input: {
+    code: string;
+    stage: SafeCatalogMappingStage;
+    provider_status?: number;
+    provider_code?: string;
+  }) {
+    super(input.code);
+    this.name = "SafeCatalogMappingError";
+    this.code = input.code;
+    this.stage = input.stage;
+    this.provider_status = input.provider_status;
+    this.provider_code = input.provider_code;
+  }
+}
+
 export type StripeCatalogProductObject = {
   id: string;
   name: string;
@@ -145,6 +180,9 @@ export type StripeCatalogMappingSyncResult =
       code: string;
       environment: StripeCatalogEnvironment;
       mode: "sync_mapping";
+      stage?: SafeCatalogMappingStage;
+      provider_status?: number;
+      provider_code?: string;
       productName?: string;
       priceKey?: string;
     };
@@ -403,27 +441,40 @@ export async function applyStripePublicCatalog(
 export async function syncStripePublicCatalogMapping(
   input: StripeCatalogMappingSyncInput,
 ): Promise<StripeCatalogMappingSyncResult> {
+  try {
+    return await syncStripePublicCatalogMappingInner(input);
+  } catch (error) {
+    return mappingSyncFailure(input.environment, safeCatalogMappingFailurePayload(error, {
+      code: "unexpected_sync_failure",
+      stage: "validation",
+    }));
+  }
+}
+
+async function syncStripePublicCatalogMappingInner(
+  input: StripeCatalogMappingSyncInput,
+): Promise<StripeCatalogMappingSyncResult> {
   if (input.environment !== "test") {
-    return { ok: false, code: "stripe_test_environment_required", environment: input.environment, mode: "sync_mapping" };
+    return { ok: false, code: "stripe_test_environment_required", environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
   if (!input.client) {
-    return { ok: false, code: "stripe_client_required", environment: input.environment, mode: "sync_mapping" };
+    return { ok: false, code: "stripe_client_required", environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
   const secretKey = String(input.secretKey ?? "").trim();
   if (!secretKey) {
-    return { ok: false, code: "stripe_test_key_required", environment: input.environment, mode: "sync_mapping" };
+    return { ok: false, code: "stripe_test_key_required", environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
   const keyCheck = assertProvisionerKeyMatchesEnvironment({ environment: "test", secretKey });
   if (!keyCheck.ok) {
-    return { ok: false, code: keyCheck.code, environment: input.environment, mode: "sync_mapping" };
+    return { ok: false, code: keyCheck.code, environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
   if (!input.dryRun && !input.store) {
-    return { ok: false, code: "mapping_store_required", environment: input.environment, mode: "sync_mapping" };
+    return { ok: false, code: "mapping_store_required", environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
 
   const plan = buildStripeCatalogProvisionerPlan({ environment: "test", mode: "dry_run" });
   if ("ok" in plan && plan.ok === false) {
-    return { ok: false, code: plan.code, environment: input.environment, mode: "sync_mapping" };
+    return { ok: false, code: plan.code, environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
 
   const productResult = await loadCanonicalStripeProducts(input.client, plan.products);
@@ -442,7 +493,16 @@ export async function syncStripePublicCatalogMapping(
   let mappingsCreated = desiredRows.length;
   let mappingsReconciled = 0;
   if (!input.dryRun) {
-    const existingRows = await input.store!.listMappings("test");
+    let existingRows: StripeComponentPriceCatalogMappingRow[];
+    try {
+      existingRows = await input.store!.listMappings("test");
+    } catch (error) {
+      throw safeProviderError(error, {
+        code: "production_mapping_read_failed",
+        stage: "mapping_read",
+        schemaOrRlsCode: "production_mapping_schema_or_rls_failed",
+      });
+    }
     const reconcileResult = reconcileMappingRows(existingRows, desiredRows);
     if (!reconcileResult.ok) {
       return { ...reconcileResult, environment: input.environment, mode: "sync_mapping" };
@@ -450,7 +510,14 @@ export async function syncStripePublicCatalogMapping(
     mappingsCreated = reconcileResult.rowsToCreate.length;
     mappingsReconciled = reconcileResult.mappingsReconciled;
     if (reconcileResult.rowsToCreate.length > 0) {
-      await input.store!.upsertMappings(reconcileResult.rowsToCreate);
+      try {
+        await input.store!.upsertMappings(reconcileResult.rowsToCreate);
+      } catch (error) {
+        throw safeProviderError(error, {
+          code: "production_mapping_write_failed",
+          stage: "mapping_write",
+        });
+      }
     }
   }
 
@@ -468,14 +535,61 @@ export async function syncStripePublicCatalogMapping(
   };
 }
 
+export function safeCatalogMappingFailurePayload(
+  error: unknown,
+  fallback: {
+    code: string;
+    stage: SafeCatalogMappingStage;
+  },
+): SafeCatalogMappingFailurePayload {
+  if (error instanceof SafeCatalogMappingError) {
+    return compactFailurePayload({
+      ok: false,
+      code: error.code,
+      stage: error.stage,
+      provider_status: error.provider_status,
+      provider_code: error.provider_code,
+    });
+  }
+  return compactFailurePayload({
+    ok: false,
+    code: fallback.code,
+    stage: fallback.stage,
+    provider_status: safeProviderStatus(error),
+    provider_code: safeProviderCode(error),
+  });
+}
+
 async function listAll<T>(
   resource: { list(input: Record<string, unknown>): Promise<StripeListResult<T>> },
   params: Record<string, unknown>,
+  diagnostics?: { stage: "stripe_catalog_read" },
 ) {
   const all: T[] = [];
   let startingAfter: string | null = null;
   do {
-    const result = await resource.list(startingAfter ? { ...params, starting_after: startingAfter } : params);
+    let result: StripeListResult<T>;
+    try {
+      result = await resource.list(startingAfter ? { ...params, starting_after: startingAfter } : params);
+    } catch (error) {
+      if (diagnostics) throw safeProviderError(error, {
+        code: "stripe_catalog_read_failed",
+        stage: diagnostics.stage,
+        forbiddenCode: "stripe_catalog_read_forbidden",
+      });
+      throw error;
+    }
+    if (!result || !Array.isArray(result.data) || (
+      result.has_more !== undefined
+      && typeof result.has_more !== "boolean"
+    )) {
+      if (diagnostics) {
+        throw new SafeCatalogMappingError({
+          code: "stripe_catalog_invalid_response",
+          stage: diagnostics.stage,
+        });
+      }
+    }
     all.push(...result.data);
     const last = result.data.at(-1) as { id?: string } | undefined;
     startingAfter = result.has_more && last?.id ? last.id : null;
@@ -530,7 +644,7 @@ async function loadCanonicalStripeProducts(
   | { ok: true; productsByKey: Map<string, StripeCatalogProductObject> }
   | { ok: false; code: string; productName?: string }
 > {
-  const allProducts = await listAll(client.products, {});
+  const allProducts = await listAll(client.products, {}, { stage: "stripe_catalog_read" });
   const productsByKey = new Map<string, StripeCatalogProductObject>();
   for (const product of allProducts) {
     if (product.livemode) return { ok: false, code: "stripe_live_product_rejected" };
@@ -568,7 +682,7 @@ async function loadCanonicalStripePrices(
   for (const priceManifest of prices) {
     const product = productsByKey.get(priceManifest.productKey);
     if (!product) return { ok: false, code: "price_product_missing", priceKey: priceManifest.deterministicKey };
-    const matches = await listAll(client.prices, { lookup_keys: [priceManifest.deterministicKey] });
+    const matches = await listAll(client.prices, { lookup_keys: [priceManifest.deterministicKey] }, { stage: "stripe_catalog_read" });
     const canonicalPrices = matches.filter((price) => price.lookup_key === priceManifest.deterministicKey);
     if (canonicalPrices.length === 0) return { ok: false, code: "price_missing", priceKey: priceManifest.deterministicKey };
     if (canonicalPrices.length > 1) return { ok: false, code: "price_identity_duplicate", priceKey: priceManifest.deterministicKey };
@@ -670,3 +784,100 @@ function mappingRowsMatch(
     && existing.catalog_version === desired.catalog_version
     && existing.fingerprint === desired.fingerprint;
 }
+
+function mappingSyncFailure(
+  environment: StripeCatalogEnvironment,
+  failure: SafeCatalogMappingFailurePayload,
+) {
+  return {
+    ...failure,
+    environment,
+    mode: "sync_mapping" as const,
+  };
+}
+
+function safeProviderError(
+  error: unknown,
+  input: {
+    code: string;
+    stage: SafeCatalogMappingStage;
+    forbiddenCode?: string;
+    schemaOrRlsCode?: string;
+  },
+) {
+  const provider_status = safeProviderStatus(error);
+  const provider_code = safeProviderCode(error);
+  let code = input.code;
+  if ((provider_status === 401 || provider_status === 403) && input.forbiddenCode) {
+    code = input.forbiddenCode;
+  }
+  if (
+    input.schemaOrRlsCode
+    && (
+      provider_status === 401
+      || provider_status === 403
+      || provider_code === "42501"
+      || provider_code === "42P01"
+      || provider_code === "42703"
+      || provider_code === "PGRST200"
+      || provider_code === "PGRST204"
+    )
+  ) {
+    code = input.schemaOrRlsCode;
+  }
+  return new SafeCatalogMappingError({
+    code,
+    stage: input.stage,
+    provider_status,
+    provider_code,
+  });
+}
+
+function safeProviderStatus(error: unknown) {
+  const record = errorRecord(error);
+  const raw = errorRecord(record.raw);
+  const response = errorRecord(record.response);
+  for (const value of [record.status, record.statusCode, raw.status, raw.statusCode, response.status]) {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function safeProviderCode(error: unknown) {
+  const record = errorRecord(error);
+  const raw = errorRecord(record.raw);
+  const response = errorRecord(record.response);
+  const body = errorRecord(response.body);
+  for (const value of [record.code, raw.code, body.code]) {
+    if (typeof value === "string" && ALLOWED_PROVIDER_CODES.has(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function errorRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function compactFailurePayload(payload: SafeCatalogMappingFailurePayload): SafeCatalogMappingFailurePayload {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  ) as SafeCatalogMappingFailurePayload;
+}
+
+const ALLOWED_PROVIDER_CODES = new Set([
+  "permission_denied",
+  "authentication_error",
+  "api_connection_error",
+  "rate_limit_error",
+  "invalid_request_error",
+  "resource_missing",
+  "42501",
+  "42P01",
+  "42703",
+  "PGRST200",
+  "PGRST204",
+]);
