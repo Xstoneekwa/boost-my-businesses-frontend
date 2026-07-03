@@ -81,11 +81,18 @@ as $$
     p_active_commercial_period_value_cents,
     e.id,
     s.id
-  ) || ':' || coalesce(p_account_id::text, '');
+  ) || ':' || coalesce(p_account_id::text, '')
+  from public.client_account_entitlements e
+  inner join public.commercial_checkout_sessions s on s.id = p_session_id
+  where e.id = p_entitlement_id
+    and p_account_id is not null
+    and e.account_id is not null
+    and e.account_id = p_account_id
+    and e.client_id = s.client_id;
 $$;
 
 comment on function public.commercial_plan_change_source_revision_for_account_source(uuid, uuid, uuid, integer) is
-  'Per-account plan change revision: canonical workspace revision suffixed with account_id.';
+  'Per-account plan change revision: canonical workspace revision suffixed with account_id. Returns NULL when entitlement/session/account linkage is inconsistent (fail-closed).';
 
 create or replace function public.bump_account_commercial_policy_revision(
   p_account_id uuid,

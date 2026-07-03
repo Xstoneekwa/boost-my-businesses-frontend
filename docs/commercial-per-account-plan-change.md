@@ -4,6 +4,7 @@
 
 - **Scope**: each plan change targets exactly one `ig_accounts.id` via a consumed `client_account_entitlements` row (`account_id` set, `status = entitlement_consumed`).
 - **Quotes**: `commercial_plan_change_quotes.change_scope = per_account`, `account_id`, `target_outreach_addon_key`, immutable `pricing_snapshot`, `source_revision` via `commercial_plan_change_source_revision_for_account_source`.
+- **Source revision per-account**: `commercial_plan_change_source_revision_for_account_source` reuses the legacy MD5 formula from `commercial_plan_change_source_revision`, then appends `:` + `account_id`. It joins `client_account_entitlements` (`e`) and `commercial_checkout_sessions` (`s`) with `e.id = p_entitlement_id`, `s.id = p_session_id`, `e.account_id = p_account_id`, `e.account_id IS NOT NULL`, and `e.client_id = s.client_id`. Any mismatch returns `NULL` (fail-closed).
 - **Credits**: `client_credit_ledger.account_id` scopes usable balance. Legacy rows with `account_id IS NULL` are preserved and **never** consumed by new per-account flows (`account_scoped_credit_balance_cents`).
 - **Activation RPC**: `activate_commercial_plan_change_per_account` cancels only the source entitlement for account A, creates a new consumed entitlement on A, writes account-scoped ledger entries, updates `account_commercial_packages` for A only, bumps `account_commercial_policy_revisions`.
 - **Legacy**: workspace-wide quotes (`change_scope = workspace`, `account_id` null) and `activate_commercial_plan_change` remain readable and replayable.
@@ -51,3 +52,7 @@ A plan change on account A never modifies entitlements, credits, packages, or po
 ## Public flows
 
 First purchase, additional account, simulations, and public checkout pages are unchanged.
+
+## Local PostgreSQL validation (pre-production)
+
+Before applying commercial migrations to production, run the full SQL file on a disposable local PostgreSQL instance with the plan-change prerequisite migrations (`20260615143000`, `20260621120000`, `20260622120000`) plus production tables already present on the shared database (`account_commercial_packages`, `client_instagram_accounts`). The migration must execute without PostgreSQL errors; `commercial_plan_change_source_revision_for_account_source` must return a non-empty revision for coherent entitlement/session/account fixtures and `NULL` on account or client mismatch.
