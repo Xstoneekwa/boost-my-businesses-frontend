@@ -193,6 +193,7 @@ export type StripeCatalogMappingSyncInput = {
   client?: Pick<StripeCatalogProvisionerClient, "products" | "prices">;
   store?: StripeCatalogMappingStore;
   dryRun?: boolean;
+  buildPlanForTests?: () => StripeCatalogProvisionerPlan | { ok: false; code: string };
 };
 
 export function assertProvisionerKeyMatchesEnvironment(input: {
@@ -472,9 +473,21 @@ async function syncStripePublicCatalogMappingInner(
     return { ok: false, code: "mapping_store_required", environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
 
-  const plan = buildStripeCatalogProvisionerPlan({ environment: "test", mode: "dry_run" });
+  let plan: StripeCatalogProvisionerPlan | { ok: false; code: string };
+  try {
+    plan = input.buildPlanForTests?.() ?? buildStripeCatalogProvisionerPlan({ environment: "test", mode: "dry_run" });
+  } catch (error) {
+    if (safeCatalogMappingErrorLike(error)) throw error;
+    throw new SafeCatalogMappingError({
+      code: "stripe_catalog_manifest_invalid",
+      stage: "validation",
+    });
+  }
   if ("ok" in plan && plan.ok === false) {
-    return { ok: false, code: plan.code, environment: input.environment, mode: "sync_mapping", stage: "validation" };
+    const code = ALLOWED_SAFE_FAILURE_CODES.has(plan.code)
+      ? plan.code
+      : "stripe_catalog_validation_failed";
+    return { ok: false, code, environment: input.environment, mode: "sync_mapping", stage: "validation" };
   }
 
   const productResult = await loadCanonicalStripeProducts(input.client, plan.products);
@@ -542,13 +555,14 @@ export function safeCatalogMappingFailurePayload(
     stage: SafeCatalogMappingStage;
   },
 ): SafeCatalogMappingFailurePayload {
-  if (error instanceof SafeCatalogMappingError) {
+  const safeError = safeCatalogMappingErrorLike(error);
+  if (safeError) {
     return compactFailurePayload({
       ok: false,
-      code: error.code,
-      stage: error.stage,
-      provider_status: error.provider_status,
-      provider_code: error.provider_code,
+      code: safeError.code,
+      stage: safeError.stage,
+      provider_status: safeError.provider_status,
+      provider_code: safeError.provider_code,
     });
   }
   return compactFailurePayload({
@@ -867,6 +881,82 @@ function compactFailurePayload(payload: SafeCatalogMappingFailurePayload): SafeC
     Object.entries(payload).filter(([, value]) => value !== undefined),
   ) as SafeCatalogMappingFailurePayload;
 }
+
+function safeCatalogMappingErrorLike(error: unknown) {
+  const record = errorRecord(error);
+  const code = record.code;
+  const stage = record.stage;
+  if (
+    typeof code === "string"
+    && typeof stage === "string"
+    && ALLOWED_SAFE_FAILURE_CODES.has(code)
+    && ALLOWED_SAFE_STAGES.has(stage)
+  ) {
+    return {
+      code,
+      stage: stage as SafeCatalogMappingStage,
+      provider_status: safePayloadProviderStatus(record) ?? safeProviderStatus(error),
+      provider_code: safePayloadProviderCode(record) ?? safeProviderCode(error),
+    };
+  }
+  return null;
+}
+
+function safePayloadProviderStatus(record: Record<string, unknown>) {
+  const value = record.provider_status;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+    return value;
+  }
+  return undefined;
+}
+
+function safePayloadProviderCode(record: Record<string, unknown>) {
+  const value = record.provider_code;
+  if (typeof value === "string" && ALLOWED_PROVIDER_CODES.has(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+const ALLOWED_SAFE_STAGES = new Set([
+  "stripe_catalog_read",
+  "mapping_read",
+  "mapping_write",
+  "validation",
+]);
+
+const ALLOWED_SAFE_FAILURE_CODES = new Set([
+  "stripe_test_environment_required",
+  "stripe_client_required",
+  "stripe_test_key_required",
+  "stripe_live_key_rejected",
+  "stripe_test_mode_required",
+  "test_environment_requires_test_key",
+  "live_environment_requires_live_key",
+  "mapping_store_required",
+  "stripe_catalog_manifest_invalid",
+  "stripe_catalog_validation_failed",
+  "stripe_catalog_read_failed",
+  "stripe_catalog_read_forbidden",
+  "stripe_catalog_invalid_response",
+  "stripe_live_product_rejected",
+  "stripe_live_price_rejected",
+  "product_identity_duplicate",
+  "product_name_ambiguous",
+  "product_identity_conflict",
+  "product_missing",
+  "price_product_missing",
+  "price_missing",
+  "price_identity_duplicate",
+  "price_identity_conflict",
+  "mapping_identity_duplicate",
+  "mapping_identity_conflict",
+  "production_mapping_read_failed",
+  "production_mapping_schema_or_rls_failed",
+  "production_mapping_write_failed",
+  "production_mapping_validation_failed",
+  "unexpected_sync_failure",
+]);
 
 const ALLOWED_PROVIDER_CODES = new Set([
   "permission_denied",
