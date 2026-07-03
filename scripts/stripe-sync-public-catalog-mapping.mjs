@@ -12,6 +12,12 @@ import {
 const PRODUCTION_REF = "zgafnshkjywfltxgbtzg";
 const FORBIDDEN_TEST_REF = "nxntngkhkoynljcagmkq";
 
+class SafeMappingError extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+}
 const args = new Set(process.argv.slice(2));
 const apply = args.has("--apply");
 
@@ -19,7 +25,6 @@ if (apply && !args.has("--i-understand-this-writes-production-mapping")) {
   console.error(JSON.stringify({ ok: false, code: "mapping_apply_confirmation_required" }));
   process.exit(2);
 }
-
 try {
   const stripeSecretKey = readStripeTestKey();
   const supabase = createProductionSupabaseClient();
@@ -123,12 +128,5 @@ class SupabaseMappingStore {
         onConflict: "environment,product_key,component_kind,billing_interval_months,expected_amount_cents,currency",
       });
     if (error) throw new SafeMappingError("mapping_store_write_failed");
-  }
-}
-
-class SafeMappingError extends Error {
-  constructor(code) {
-    super(code);
-    this.code = code;
   }
 }
