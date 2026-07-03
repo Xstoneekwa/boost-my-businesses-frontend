@@ -29,9 +29,17 @@ There are no combined package + outreach Prices.
 
 ## Environments
 
-Test and Live mappings are separate. A test provisioner run must reject live keys. A live provisioner run must reject test keys.
+Test and Live mappings are separate. The committed provisioner is Test-only for apply mode: it must reject live keys, uncertain keys, and `--live --apply`.
 
-The source-controlled provisioner is dry-run by default. Apply mode requires an explicit safety flag and must verify the full catalog before writing mappings.
+The source-controlled provisioner is dry-run by default. Apply mode requires an explicit safety flag, a server Stripe Test configuration, and fail-closed reconciliation of the full catalog before creating any object.
+
+Apply reconciliation is non-destructive:
+
+- existing canonical Products/Prices are reused;
+- missing canonical Products/Prices are created with deterministic idempotency keys;
+- ambiguous visible Product names stop the run before creating duplicates;
+- existing canonical Prices with different economics stop the run;
+- no Product or Price is archived, disabled, deleted, or updated.
 
 ## Database Mapping
 
