@@ -23,11 +23,17 @@ export async function runStripeCatalogMappingCli(options = {}) {
   const syncMapping = options.syncStripePublicCatalogMapping ?? syncStripePublicCatalogMapping;
   const makeStripeClient = options.createStripeClient ?? createStripeClient;
   const makeSupabaseClient = options.createSupabaseClient ?? createClient;
+  const makeMappingStore = options.createMappingStore ?? ((supabase) => new SupabaseMappingStore(supabase));
   const args = new Set(argv);
   const apply = args.has("--apply");
 
   if (apply && !args.has("--i-understand-this-writes-production-mapping")) {
-    stderr(JSON.stringify({ ok: false, code: "mapping_apply_confirmation_required", stage: "validation" }));
+    stderr(JSON.stringify({
+      ok: false,
+      code: "mapping_apply_confirmation_required",
+      stage: "validation",
+      checkpoint: "cli_preflight",
+    }));
     return 2;
   }
   try {
@@ -45,15 +51,16 @@ export async function runStripeCatalogMappingCli(options = {}) {
       throw new SafeCatalogMappingError({
         code: "stripe_catalog_validation_failed",
         stage: "validation",
-        checkpoint: "stripe_client",
+        checkpoint: "cli_preflight",
       });
     }
     const result = await syncMapping({
       environment: "test",
       secretKey: stripeSecretKey,
       client: stripeClient,
-      store: new SupabaseMappingStore(supabase),
+      store: makeMappingStore(supabase),
       dryRun: !apply,
+      buildPlanForTests: options.buildPlanForTests,
     });
 
     if (!result.ok) {
@@ -89,9 +96,9 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 
 function readStripeTestKey(env) {
   const key = String(env.STRIPE_SECRET_KEY ?? "").trim();
-  if (!key) throw new SafeCatalogMappingError({ code: "stripe_test_key_required", stage: "validation" });
-  if (isStripeLiveSecretKey(key)) throw new SafeCatalogMappingError({ code: "stripe_live_key_rejected", stage: "validation" });
-  if (!isStripeTestSecretKey(key)) throw new SafeCatalogMappingError({ code: "stripe_test_mode_required", stage: "validation" });
+  if (!key) throw new SafeCatalogMappingError({ code: "stripe_test_key_required", stage: "validation", checkpoint: "cli_preflight" });
+  if (isStripeLiveSecretKey(key)) throw new SafeCatalogMappingError({ code: "stripe_live_key_rejected", stage: "validation", checkpoint: "cli_preflight" });
+  if (!isStripeTestSecretKey(key)) throw new SafeCatalogMappingError({ code: "stripe_test_mode_required", stage: "validation", checkpoint: "cli_preflight" });
   return key;
 }
 
@@ -99,14 +106,14 @@ function createProductionSupabaseClient(env, makeSupabaseClient) {
   const supabaseUrl = String(env.SUPABASE_URL ?? "").trim();
   const serviceRoleKey = String(env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new SafeCatalogMappingError({ code: "supabase_production_config_required", stage: "validation" });
+    throw new SafeCatalogMappingError({ code: "supabase_production_config_required", stage: "validation", checkpoint: "cli_preflight" });
   }
   const ref = extractSupabaseProjectRefFromUrl(supabaseUrl);
   if (ref === FORBIDDEN_TEST_REF) {
-    throw new SafeCatalogMappingError({ code: "forbidden_supabase_project_ref", stage: "validation" });
+    throw new SafeCatalogMappingError({ code: "forbidden_supabase_project_ref", stage: "validation", checkpoint: "cli_preflight" });
   }
   if (ref !== PRODUCTION_REF) {
-    throw new SafeCatalogMappingError({ code: "production_supabase_ref_required", stage: "validation" });
+    throw new SafeCatalogMappingError({ code: "production_supabase_ref_required", stage: "validation", checkpoint: "cli_preflight" });
   }
   return makeSupabaseClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -146,6 +153,7 @@ class SupabaseMappingStore {
     if (error) throw safeSupabaseError(error, {
       code: "production_mapping_read_failed",
       stage: "mapping_read",
+      checkpoint: "mapping_store_read",
       schemaOrRlsCode: "production_mapping_schema_or_rls_failed",
     });
     return data ?? [];
@@ -161,6 +169,7 @@ class SupabaseMappingStore {
     if (error) throw safeSupabaseError(error, {
       code: "production_mapping_write_failed",
       stage: "mapping_write",
+      checkpoint: "mapping_store_write",
     });
   }
 }
@@ -199,6 +208,7 @@ function safeSupabaseError(error, input) {
   return new SafeCatalogMappingError({
     code,
     stage: input.stage,
+    checkpoint: input.checkpoint,
     provider_status,
     provider_code,
   });
