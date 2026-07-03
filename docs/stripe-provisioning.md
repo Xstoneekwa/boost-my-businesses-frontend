@@ -75,3 +75,20 @@ No secrets are stored in the repo. Provisioning reports must be redacted and mus
 4. Verify all 20 component mappings.
 5. Apply database mappings only after Stripe objects are verified.
 6. Keep Test and Live catalogs separate.
+
+## Production Mapping Sync
+
+After `20260710150400_commercial_stripe_per_entitlement_multicomponent_billing.sql`
+exists on Production, sync Test catalog mappings with:
+
+```bash
+node scripts/stripe-sync-public-catalog-mapping.mjs --apply --i-understand-this-writes-production-mapping
+```
+
+The script is Test-only for Stripe and Production-only for Supabase:
+
+- Stripe key must be `sk_test_...` or `rk_test_...`;
+- `SUPABASE_URL` must target `zgafnshkjywfltxgbtzg`;
+- the isolated test project `nxntngkhkoynljcagmkq` is refused;
+- Stripe Products/Prices are read-only in mapping mode;
+- no Customer, Checkout, Subscription, webhook, coupon, or promotion is created.
