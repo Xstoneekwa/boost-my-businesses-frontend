@@ -15,6 +15,21 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
+async function resolveClientStripeSubscription(
+  supabase: SupabaseClient,
+  clientId: string,
+) {
+  const { data: subscriptionRow } = await supabase
+    .from("commercial_stripe_subscriptions")
+    .select("stripe_subscription_id")
+    .eq("client_id", clientId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<Row>();
+
+  return readString(subscriptionRow?.stripe_subscription_id) || null;
+}
+
 export async function createStripePlanChangePaymentSession(
   supabase: SupabaseClient,
   input: {
@@ -65,6 +80,31 @@ export async function createStripePlanChangePaymentSession(
   }
 
   const billingIntervalMonths = Number(quote.billing_interval_months ?? 1) as 1 | 3 | 6 | 12;
+  const stripeSubscriptionId = await resolveClientStripeSubscription(supabase, input.clientId);
+  if (!stripeSubscriptionId) {
+    return {
+      ok: false as const,
+      status: 503,
+      code: "stripe_subscription_missing",
+      messageEn: "Stripe subscription is required before plan change checkout.",
+    };
+  }
+
+  const targetPriceId = await resolveServerStripePriceId(supabase, {
+    environment: "test",
+    planKey: targetPlanKey as PlanKey,
+    billingIntervalMonths,
+    outreachAddonKey: null,
+  });
+  if (!targetPriceId) {
+    return {
+      ok: false as const,
+      status: 503,
+      code: "stripe_price_mapping_missing",
+      messageEn: "Stripe test price mapping is missing for the target plan.",
+    };
+  }
+
   const metadata = buildSafeStripeMetadata({
     internal_attempt_id: input.idempotencyKey,
     quote_id: input.quoteId,
@@ -91,6 +131,7 @@ export async function createStripePlanChangePaymentSession(
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata,
+    payment_method_types: ["card"],
   });
 
   if (!stripeSession.id || !stripeSession.url) {
@@ -105,18 +146,13 @@ export async function createStripePlanChangePaymentSession(
     checkoutMode: "payment",
     purchaserEmail: input.purchaserEmail,
     clientId: input.clientId,
+    stripeSubscriptionId,
+    targetStripePriceId: targetPriceId,
     metadataSafe: metadata,
   });
   if (!attempt.ok) {
     return { ok: false as const, status: 503, code: attempt.code, messageEn: "Could not record Stripe checkout attempt." };
   }
-
-  const targetPriceId = await resolveServerStripePriceId(supabase, {
-    environment: "test",
-    planKey: targetPlanKey as PlanKey,
-    billingIntervalMonths,
-    outreachAddonKey: null,
-  });
 
   return {
     ok: true as const,

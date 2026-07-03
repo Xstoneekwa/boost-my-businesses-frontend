@@ -1,7 +1,10 @@
 import { jsonError, jsonOk } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
-import { getSafeStripeSessionStatus } from "@/lib/commercial/stripe/stripe-webhook-handler.ts";
-import { requireClientInstagramSession } from "@/lib/instagram-client/_utils";
+import {
+  getSafeStripeSessionStatus,
+  verifyStripeSessionStatusOwnership,
+} from "@/lib/commercial/stripe/stripe-webhook-handler.ts";
+import { getInstagramUserContext } from "@/lib/restaurant-analytics/session";
 import { requireInstagramAdmin } from "@/app/api/instagram-dashboard/_utils";
 
 export const dynamic = "force-dynamic";
@@ -17,13 +20,35 @@ export async function GET(request: Request) {
   const internalCheckoutSessionId = readString(url.searchParams.get("internal_checkout_session_id"));
   const stripeCheckoutSessionId = readString(url.searchParams.get("session_id"));
 
-  const clientSession = await requireClientInstagramSession();
+  if (!internalCheckoutSessionId && !stripeCheckoutSessionId) {
+    return jsonError("Checkout session identifier is required.", 400, { code: "session_required" });
+  }
+
   const adminUnauthorized = await requireInstagramAdmin();
-  if (!clientSession.ok && adminUnauthorized) {
+  const isAdmin = !adminUnauthorized;
+
+  const userContext = await getInstagramUserContext();
+  if (!isAdmin && !userContext?.userId) {
     return jsonError("Authentication is required.", 401, { code: "session_required" });
   }
 
-  const status = await getSafeStripeSessionStatus(createSupabaseClient(), {
+  const supabase = createSupabaseClient();
+  const ownership = await verifyStripeSessionStatusOwnership(supabase, {
+    requesterUserId: userContext?.userId ?? "",
+    requesterClientId: userContext?.tenantId ?? null,
+    isAdmin,
+    internalCheckoutSessionId: internalCheckoutSessionId || null,
+    stripeCheckoutSessionId: stripeCheckoutSessionId || null,
+  });
+
+  if (!ownership.ok) {
+    if (ownership.code === "session_not_found") {
+      return jsonError("Checkout session was not found.", 404, { code: ownership.code });
+    }
+    return jsonError("You are not allowed to view this checkout session.", 403, { code: ownership.code });
+  }
+
+  const status = await getSafeStripeSessionStatus(supabase, {
     internalCheckoutSessionId: internalCheckoutSessionId || null,
     stripeCheckoutSessionId: stripeCheckoutSessionId || null,
   });

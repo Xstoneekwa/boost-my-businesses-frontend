@@ -203,6 +203,42 @@ export default function StripeTestCheckoutPanel() {
 
       {error ? <p className="commercial-prod-test-stripe-error">{error}</p> : null}
       {success ? <p className="commercial-prod-test-stripe-success">{success}</p> : null}
+
+      <form
+        className="commercial-prod-test-stripe-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const attemptId = (event.currentTarget.elements.namedItem("attempt_id") as HTMLInputElement).value.trim();
+          if (!attemptId) return;
+          setLoading(true);
+          setError("");
+          setSuccess("");
+          try {
+            const response = await fetch("/api/instagram-dashboard/commercial/stripe-test/recover-fulfillment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ attempt_id: attemptId }),
+            });
+            const payload = await response.json() as { ok?: boolean; data?: { message_en?: string }; error?: string };
+            if (!payload.ok) throw new Error(payload.error || "recovery_failed");
+            setSuccess(payload.data?.message_en || "Recovery completed.");
+          } catch (recoveryError) {
+            setError(recoveryError instanceof Error ? recoveryError.message : "recovery_failed");
+          } finally {
+            setLoading(false);
+          }
+        }}
+      >
+        <h3>Recover paid attempt fulfillment</h3>
+        <p className="commercial-prod-test-stripe-intro">
+          Retries fulfillment for an existing paid attempt. Does not create a new Checkout or charge again.
+        </p>
+        <label>
+          Attempt ID
+          <input name="attempt_id" placeholder="uuid" required />
+        </label>
+        <button type="submit" disabled={loading}>Retry fulfillment</button>
+      </form>
     </section>
   );
 }

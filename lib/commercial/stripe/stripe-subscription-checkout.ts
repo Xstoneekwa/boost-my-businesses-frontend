@@ -170,6 +170,7 @@ export async function createStripeSubscriptionCheckoutSession(
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata,
+    payment_method_types: ["card"],
     subscription_data: {
       metadata,
     },

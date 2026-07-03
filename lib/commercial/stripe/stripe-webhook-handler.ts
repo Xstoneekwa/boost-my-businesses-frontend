@@ -1,17 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
-import { activateClientAccountEntitlementFromCheckout } from "../activate-client-account-entitlement-from-checkout.ts";
-import { activatePlanChangeQuote } from "../plan-change-quote.ts";
-import { beginStripeWebhookEvent, finishStripeWebhookEvent } from "./stripe-webhook-ledger.ts";
+import { claimStripeWebhookEvent, finishStripeWebhookEvent } from "./stripe-webhook-ledger.ts";
 import {
   findStripeCheckoutAttemptByStripeSessionId,
-  markCommercialCheckoutSessionPaid,
-  markStripeCheckoutAttemptCompleted,
+  markStripeCheckoutAttemptAwaitingPayment,
+  markStripeCheckoutAttemptPaymentConfirmed,
 } from "./stripe-checkout-attempts.ts";
-import { syncStripeSubscriptionPriceAfterPlanChangePayment } from "./stripe-plan-change-checkout.ts";
-import { upsertStripeBillingProfile, upsertStripeSubscriptionProjection } from "./stripe-subscription-projection.ts";
+import {
+  fulfillStripeCheckoutAttempt,
+  markStripeAttemptReconciliationFailure,
+  StripeFulfillmentError,
+} from "./stripe-fulfillment.ts";
+import { upsertStripeSubscriptionProjection } from "./stripe-subscription-projection.ts";
 import { assertStripeTestLivemode, requireStripeTestConfig } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
+import { mapAttemptStatusToCommercialStatus, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
+import {
+  validatePlanChangeCheckoutPayment,
+  validateSubscriptionCheckoutPayment,
+} from "./stripe-payment-confirmation.ts";
 
 type Row = Record<string, unknown>;
 
@@ -46,7 +53,7 @@ export async function handleStripeWebhookEvent(
   supabase: SupabaseClient,
   event: Stripe.Event,
 ) {
-  const ledger = await beginStripeWebhookEvent(supabase, {
+  const claim = await claimStripeWebhookEvent(supabase, {
     stripeEventId: event.id,
     eventType: event.type,
     livemode: event.livemode,
@@ -57,20 +64,23 @@ export async function handleStripeWebhookEvent(
     metadataSafe: { type: event.type },
   });
 
-  if (!ledger.ok) {
-    return { ok: false as const, status: 503, code: ledger.code };
+  if (!claim.ok) {
+    return { ok: false as const, status: claim.status, code: claim.code };
   }
-  if (ledger.deduplicated) {
+  if (claim.deduplicated) {
     return { ok: true as const, status: 200, deduplicated: true as const };
   }
-  if (!ledger.eventRowId) {
-    return { ok: true as const, status: 200, deduplicated: true as const };
+
+  const eventRowId = claim.eventRowId;
+  if (!eventRowId) {
+    return { ok: false as const, status: 503, code: "webhook_ledger_unavailable" as const };
   }
 
   try {
     switch (event.type) {
       case "checkout.session.completed":
-        await handleCheckoutSessionCompleted(supabase, event);
+      case "checkout.session.async_payment_succeeded":
+        await handleCheckoutSessionFulfillmentEvent(supabase, event);
         break;
       case "checkout.session.expired":
         await handleCheckoutSessionExpired(supabase, event);
@@ -86,28 +96,33 @@ export async function handleStripeWebhookEvent(
         break;
       default:
         await finishStripeWebhookEvent(supabase, {
-          eventRowId: ledger.eventRowId,
+          eventRowId,
           status: "ignored",
         });
         return { ok: true as const, status: 200, ignored: true as const };
     }
 
     await finishStripeWebhookEvent(supabase, {
-      eventRowId: ledger.eventRowId,
+      eventRowId,
       status: "processed",
     });
     return { ok: true as const, status: 200, processed: true as const };
   } catch (error) {
+    const retryable = !(error instanceof StripeFulfillmentError) || error.retryable;
     await finishStripeWebhookEvent(supabase, {
-      eventRowId: ledger.eventRowId,
-      status: "failed",
+      eventRowId,
+      status: retryable ? "retryable" : "failed",
       errorRedacted: error instanceof Error ? error.message.slice(0, 200) : "handler_failed",
     });
-    return { ok: false as const, status: 500, code: "webhook_handler_failed" as const };
+    return {
+      ok: false as const,
+      status: retryable ? 500 : 422,
+      code: error instanceof StripeFulfillmentError ? error.code : "webhook_handler_failed",
+    };
   }
 }
 
-async function handleCheckoutSessionCompleted(supabase: SupabaseClient, event: Stripe.Event) {
+async function handleCheckoutSessionFulfillmentEvent(supabase: SupabaseClient, event: Stripe.Event) {
   const session = event.data.object as Stripe.Checkout.Session;
   assertStripeTestLivemode(session.livemode);
 
@@ -115,117 +130,62 @@ async function handleCheckoutSessionCompleted(supabase: SupabaseClient, event: S
   if (!attemptLookup.ok) {
     return;
   }
-  const attempt = attemptLookup.attempt;
 
-  if (attempt.status === "completed") {
+  const attempt = attemptLookup.attempt;
+  if (isStripeAttemptFulfilled(attempt.status)) {
     return;
   }
 
-  await markStripeCheckoutAttemptCompleted(supabase, attempt.id, {
-    stripeSubscriptionId: readString(session.subscription),
-    stripePaymentIntentId: readString(session.payment_intent),
-    stripeCustomerId: readString(session.customer),
-  });
-
-  if (attempt.checkout_mode === "subscription" && attempt.commercial_checkout_session_id) {
-    await markCommercialCheckoutSessionPaid(supabase, attempt.commercial_checkout_session_id);
-
-    const { data: checkoutSession } = await supabase
-      .from("commercial_checkout_sessions")
-      .select("*")
-      .eq("id", attempt.commercial_checkout_session_id)
-      .maybeSingle<Row>();
-
-    if (!checkoutSession?.id) {
+  const stripe = getStripeClient();
+  if (attempt.checkout_mode === "subscription") {
+    const subscriptionRef = session.subscription;
+    const subscriptionId = typeof subscriptionRef === "string" ? subscriptionRef : readString(subscriptionRef?.id);
+    const subscription = subscriptionId ? await stripe.subscriptions.retrieve(subscriptionId) : null;
+    const validation = validateSubscriptionCheckoutPayment({ session, subscription });
+    if (!validation.ok) {
+      await markStripeCheckoutAttemptAwaitingPayment(supabase, attempt.id, { reason: validation.reason });
       return;
     }
-
-    await activateClientAccountEntitlementFromCheckout(supabase, {
-      planKey: readString(checkoutSession.plan_key),
-      billingIntervalMonths: Number(checkoutSession.billing_interval_months ?? 1),
-      outreachAddonKey: readString(checkoutSession.outreach_addon_key) || null,
-      purchaserEmail: readString(checkoutSession.purchaser_email),
-      idempotencyKey: readString(checkoutSession.idempotency_key),
-      flowType: readString(checkoutSession.flow_type) === "additional_account" ? "additional_account" : "first_purchase",
-      clientId: readString(checkoutSession.client_id) || attempt.client_id,
-      authUserId: readString(checkoutSession.auth_user_id) || attempt.auth_user_id,
-      mode: "stripe",
-      stripeWebhookConfirmed: true,
-      precreatedCheckoutSessionId: readString(checkoutSession.id),
-    });
-  }
-
-  if (attempt.checkout_mode === "payment" && attempt.plan_change_quote_id) {
-    const quoteId = attempt.plan_change_quote_id;
-    const stripe = getStripeClient();
-    const customerId = readString(session.customer);
-    const { data: billingProfile } = await supabase
-      .from("commercial_stripe_billing_profiles")
-      .select("client_id")
-      .eq("stripe_customer_id", customerId)
-      .maybeSingle<Row>();
-
-    const { data: subscriptionRow } = billingProfile?.client_id
-      ? await supabase
-        .from("commercial_stripe_subscriptions")
-        .select("stripe_subscription_id")
-        .eq("client_id", String(billingProfile.client_id))
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<Row>()
-      : { data: null };
-
-    const stripeSubscriptionId = readString(subscriptionRow?.stripe_subscription_id);
-    const { data: quoteRow } = await supabase
-      .from("commercial_plan_change_quotes")
-      .select("target_plan_key,billing_interval_months,source_revision,idempotency_key,client_id")
-      .eq("id", quoteId)
-      .maybeSingle<Row>();
-
-    if (stripeSubscriptionId && quoteRow) {
-      const { resolveServerStripePriceId } = await import("./stripe-price-resolver.ts");
-      const targetPriceId = await resolveServerStripePriceId(supabase, {
-        environment: "test",
-        planKey: readString(quoteRow.target_plan_key) as "growth" | "pro" | "premium",
-        billingIntervalMonths: Number(quoteRow.billing_interval_months ?? 1) as 1 | 3 | 6 | 12,
-        outreachAddonKey: null,
-      });
-      if (targetPriceId) {
-        const sync = await syncStripeSubscriptionPriceAfterPlanChangePayment(stripe, {
-          stripeSubscriptionId,
-          targetPriceId,
-        });
-        if (!sync.ok) {
-          throw new Error("stripe_subscription_sync_failed");
-        }
-      }
-    }
-
-    await supabase
-      .from("commercial_plan_change_quotes")
-      .update({
-        payment_status: "confirmed",
-        payment_provider: "stripe",
-        provider_transaction_id: readString(session.payment_intent) || session.id,
-        payment_confirmed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", quoteId);
-
-    await activatePlanChangeQuote(supabase, {
-      quoteId,
-      idempotencyKey: readString(quoteRow?.idempotency_key) || attempt.idempotency_key,
-      actorEmail: attempt.purchaser_email,
-      simulatedActivation: false,
-    });
-  }
-
-  if (readString(session.customer)) {
-    await upsertStripeBillingProfile(supabase, {
-      clientId: attempt.client_id,
+    await markStripeCheckoutAttemptPaymentConfirmed(supabase, attempt.id, {
+      stripeSubscriptionId: validation.subscriptionId,
+      stripePaymentIntentId: readString(session.payment_intent),
       stripeCustomerId: readString(session.customer),
-      billingEmail: attempt.purchaser_email,
     });
+  } else {
+    const paymentIntentRef = session.payment_intent;
+    const paymentIntentId = typeof paymentIntentRef === "string" ? paymentIntentRef : readString(paymentIntentRef?.id);
+    const paymentIntent = paymentIntentId ? await stripe.paymentIntents.retrieve(paymentIntentId) : null;
+    const validation = validatePlanChangeCheckoutPayment({ session, paymentIntent });
+    if (!validation.ok) {
+      await markStripeCheckoutAttemptAwaitingPayment(supabase, attempt.id, { reason: validation.reason });
+      return;
+    }
+    await markStripeCheckoutAttemptPaymentConfirmed(supabase, attempt.id, {
+      stripePaymentIntentId: paymentIntentId,
+      stripeCustomerId: readString(session.customer),
+    });
+  }
+
+  const refreshed = await findStripeCheckoutAttemptByStripeSessionId(supabase, session.id);
+  if (!refreshed.ok) {
+    throw new StripeFulfillmentError("attempt_not_found", "Checkout attempt not found.", false);
+  }
+
+  try {
+    const result = await fulfillStripeCheckoutAttempt(supabase, {
+      attempt: refreshed.attempt,
+      session,
+      stripe,
+    });
+    if ("awaitingPayment" in result && result.awaitingPayment) {
+      await markStripeCheckoutAttemptAwaitingPayment(supabase, refreshed.attempt.id, {
+        reason: readString(result.reason, "payment_not_confirmed"),
+      });
+      return;
+    }
+  } catch (error) {
+    await markStripeAttemptReconciliationFailure(supabase, refreshed.attempt.id, error);
+    throw error;
   }
 }
 
@@ -324,6 +284,55 @@ function readCheckoutSessionId(event: Stripe.Event) {
   return readString(object.id) || null;
 }
 
+export async function verifyStripeSessionStatusOwnership(
+  supabase: SupabaseClient,
+  input: {
+    requesterUserId: string;
+    requesterClientId?: string | null;
+    isAdmin: boolean;
+    internalCheckoutSessionId?: string | null;
+    stripeCheckoutSessionId?: string | null;
+  },
+) {
+  if (input.isAdmin) {
+    return { ok: true as const };
+  }
+
+  if (input.internalCheckoutSessionId) {
+    const { data } = await supabase
+      .from("commercial_checkout_sessions")
+      .select("auth_user_id,client_id,purchaser_email")
+      .eq("id", input.internalCheckoutSessionId)
+      .maybeSingle<Row>();
+    if (!data?.auth_user_id && !data?.client_id) {
+      return { ok: false as const, code: "session_forbidden" as const };
+    }
+    if (readString(data.auth_user_id) === input.requesterUserId) {
+      return { ok: true as const };
+    }
+    if (input.requesterClientId && readString(data.client_id) === input.requesterClientId) {
+      return { ok: true as const };
+    }
+    return { ok: false as const, code: "session_forbidden" as const };
+  }
+
+  if (input.stripeCheckoutSessionId) {
+    const attempt = await findStripeCheckoutAttemptByStripeSessionId(supabase, input.stripeCheckoutSessionId);
+    if (!attempt.ok) {
+      return { ok: false as const, code: "session_not_found" as const };
+    }
+    if (readString(attempt.attempt.auth_user_id) === input.requesterUserId) {
+      return { ok: true as const };
+    }
+    if (input.requesterClientId && readString(attempt.attempt.client_id) === input.requesterClientId) {
+      return { ok: true as const };
+    }
+    return { ok: false as const, code: "session_forbidden" as const };
+  }
+
+  return { ok: false as const, code: "session_required" as const };
+}
+
 export async function getSafeStripeSessionStatus(
   supabase: SupabaseClient,
   input: { internalCheckoutSessionId?: string | null; stripeCheckoutSessionId?: string | null },
@@ -347,8 +356,8 @@ export async function getSafeStripeSessionStatus(
     if (attempt.ok) {
       return {
         ok: true as const,
-        commercialStatus: attempt.attempt.status === "completed" ? "checkout_paid" : "checkout_pending_payment",
-        activatedAt: null,
+        commercialStatus: mapAttemptStatusToCommercialStatus(attempt.attempt.status),
+        activatedAt: attempt.attempt.fulfilled_at || null,
       };
     }
   }
