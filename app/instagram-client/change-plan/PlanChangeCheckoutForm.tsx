@@ -7,9 +7,20 @@ import { COMMERCIAL_PLANS, isPlanKey, type PlanKey } from "@/lib/commercial/cata
 import type { CommercialPricingSnapshot } from "@/lib/commercial/pricing-snapshot";
 import CommercialDiscountBreakdown from "@/app/instagram-client/CommercialDiscountBreakdown";
 
+type EligibleAccount = {
+  account_id: string;
+  username: string;
+  current_plan_key: PlanKey | null;
+  current_plan_label: string;
+  source_entitlement_id: string | null;
+  eligible: boolean;
+  ineligible_code: string | null;
+};
+
 type PlanChangeQuote = {
   quoteId: string;
   idempotencyKey: string;
+  accountId: string;
   expiresAt: string;
   currentPlanLabel: string;
   currentPlanKey: PlanKey;
@@ -32,6 +43,7 @@ type PlanChangeQuote = {
 };
 
 type CurrentPlan = {
+  account_id?: string;
   label: string;
   period_end_at: string;
   billing_interval_months: number;
@@ -57,21 +69,60 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const intention = searchParams.get("intention")?.trim() ?? "";
+  const accountFromQuery = searchParams.get("account_id")?.trim() ?? "";
   const targetFromQuery = searchParams.get("target")?.trim() ?? "";
   const initialTargetPlan: PlanKey = intention === "welcome_dm" && isPlanKey(targetFromQuery)
     ? targetFromQuery
     : intention === "welcome_dm"
       ? "pro"
       : "growth";
+
+  const [eligibleAccounts, setEligibleAccounts] = useState<EligibleAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [selectedAccountId, setSelectedAccountId] = useState(accountFromQuery);
   const [targetPlanKey, setTargetPlanKey] = useState<PlanKey>(initialTargetPlan);
+
   useEffect(() => {
     setTargetPlanKey(initialTargetPlan);
   }, [initialTargetPlan]);
 
-  const quoteIdempotencyKey = useMemo(
-    () => `${targetPlanKey}:${crypto.randomUUID()}`,
-    [targetPlanKey],
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAccounts() {
+      setAccountsLoading(true);
+      const response = await fetch("/api/commercial/checkout/plan-change/accounts", {
+        headers: { Accept: "application/json" },
+      });
+      const parsed = await parseCheckoutApiResponse<{ accounts?: EligibleAccount[] }>(response, {
+        messageFr: "Impossible de charger vos comptes Instagram.",
+        messageEn: "Could not load your Instagram accounts.",
+      });
+      if (cancelled) return;
+      setAccountsLoading(false);
+      if (!parsed.ok || !parsed.data?.accounts) {
+        setEligibleAccounts([]);
+        return;
+      }
+      setEligibleAccounts(parsed.data.accounts);
+      if (!selectedAccountId) {
+        const firstEligible = parsed.data.accounts.find((account) => account.eligible);
+        if (firstEligible) setSelectedAccountId(firstEligible.account_id);
+      }
+    }
+    void loadAccounts();
+    return () => { cancelled = true; };
+  }, [selectedAccountId]);
+
+  const selectedAccount = useMemo(
+    () => eligibleAccounts.find((account) => account.account_id === selectedAccountId) ?? null,
+    [eligibleAccounts, selectedAccountId],
   );
+
+  const quoteIdempotencyKey = useMemo(
+    () => `${selectedAccountId}:${targetPlanKey}:${crypto.randomUUID()}`,
+    [selectedAccountId, targetPlanKey],
+  );
+
   const [currentPlan, setCurrentPlan] = useState<CurrentPlan | null>(null);
   const [quote, setQuote] = useState<PlanChangeQuote | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,6 +131,11 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
+    if (!selectedAccountId || !selectedAccount?.eligible) {
+      setQuote(null);
+      return undefined;
+    }
+
     let cancelled = false;
     async function loadQuote() {
       setQuoting(true);
@@ -89,6 +145,8 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
+          account_id: selectedAccountId,
+          source_entitlement_id: selectedAccount?.source_entitlement_id,
           target_plan_key: targetPlanKey,
           idempotency_key: quoteIdempotencyKey,
         }),
@@ -112,7 +170,7 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
     }
     void loadQuote();
     return () => { cancelled = true; };
-  }, [targetPlanKey, quoteIdempotencyKey, lang]);
+  }, [selectedAccountId, selectedAccount, targetPlanKey, quoteIdempotencyKey, lang]);
 
   async function onConfirm() {
     if (!quote) return;
@@ -156,8 +214,8 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
     <div className="commercial-checkout">
       <div className="commercial-checkout-banner">
         {lang === "fr"
-          ? "Changement de formule — simulation interne, aucun paiement réel prélevé."
-          : "Plan change — internal simulation, no real payment collected."}
+          ? "Changement de formule par compte — simulation interne, aucun paiement réel prélevé."
+          : "Per-account plan change — internal simulation, no real payment collected."}
       </div>
 
       <h1>{intention === "welcome_dm"
@@ -174,8 +232,41 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
 
       <div className="commercial-checkout-grid">
         <label>
+          {lang === "fr" ? "Compte Instagram" : "Instagram account"}
+          <select
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            disabled={accountsLoading}
+          >
+            <option value="">
+              {accountsLoading
+                ? (lang === "fr" ? "Chargement..." : "Loading...")
+                : (lang === "fr" ? "Sélectionnez un compte" : "Select an account")}
+            </option>
+            {eligibleAccounts.map((account) => (
+              <option key={account.account_id} value={account.account_id} disabled={!account.eligible}>
+                @{account.username} — {account.current_plan_label}
+                {!account.eligible ? (lang === "fr" ? " (indisponible)" : " (unavailable)") : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {selectedAccount && !selectedAccount.eligible ? (
+          <p className="commercial-checkout-error">
+            {lang === "fr"
+              ? "Ce compte n'est pas éligible au changement de formule pour le moment."
+              : "This account is not eligible for a plan change right now."}
+          </p>
+        ) : null}
+
+        <label>
           {lang === "fr" ? "Nouveau pack" : "New plan"}
-          <select value={targetPlanKey} onChange={(e) => setTargetPlanKey(e.target.value as PlanKey)}>
+          <select
+            value={targetPlanKey}
+            onChange={(e) => setTargetPlanKey(e.target.value as PlanKey)}
+            disabled={!selectedAccount?.eligible}
+          >
             {Object.values(COMMERCIAL_PLANS)
               .filter((plan) => isPlanKey(plan.planKey))
               .map((plan) => (
@@ -192,6 +283,11 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
 
       {quote && (
         <div className="commercial-checkout-lines">
+          <div className="line">
+            <strong>{lang === "fr" ? "Compte concerné" : "Target account"}</strong>
+            <div>@{selectedAccount?.username ?? "—"}</div>
+          </div>
+
           <div className="line">
             <strong>{lang === "fr" ? "Formule actuelle" : "Current plan"}</strong>
             <div>{quote.currentPlanLabel}</div>
@@ -215,7 +311,7 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
 
           {quote.existingCustomerCreditCents > 0 ? (
             <div className="line">
-              <strong>{lang === "fr" ? "Avoir client existant" : "Existing client credit"}</strong>
+              <strong>{lang === "fr" ? "Avoir existant du compte" : "Existing account credit"}</strong>
               <div>{euros(quote.existingCustomerCreditCents, lang)}</div>
             </div>
           ) : null}
@@ -239,8 +335,8 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
 
           <p className="commercial-checkout-notice">
             {lang === "fr"
-              ? `Votre échéance reste fixée au ${formatDate(quote.periodEndAt, lang)}.`
-              : `Your subscription end date stays ${formatDate(quote.periodEndAt, lang)}.`}
+              ? `L'échéance de ce compte reste fixée au ${formatDate(quote.periodEndAt, lang)}. Les autres comptes ne sont pas modifiés.`
+              : `This account end date stays ${formatDate(quote.periodEndAt, lang)}. Other accounts are unchanged.`}
           </p>
         </div>
       )}
@@ -260,6 +356,7 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
           loading
           || quoting
           || !quote
+          || !selectedAccount?.eligible
           || (Boolean(quote?.amountDueCents) && quote!.amountDueCents > 0 && !quote?.simulatedActivationAvailable)
         }
         onClick={() => void onConfirm()}

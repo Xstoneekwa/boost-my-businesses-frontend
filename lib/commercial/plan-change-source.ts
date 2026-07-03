@@ -2,17 +2,21 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   COMMERCIAL_PLANS,
   type BillingIntervalMonths,
+  type OutreachAddonKey,
   type PlanKey,
   isBillingIntervalMonths,
+  isOutreachAddonKey,
   isPlanKey,
 } from "./catalog.ts";
 import { addCalendarMonthsUtcIso } from "./plan-change-proration.ts";
 import { resolveActiveCommercialPeriodValueCents } from "./plan-change-commercial-value.ts";
+import { assertPlanChangeAccountEligible } from "./plan-change-account-eligibility.ts";
 
 type Row = Record<string, unknown>;
 
 export type PlanChangeSource = {
   clientId: string;
+  accountId: string;
   sourceEntitlementId: string;
   sourceCheckoutSessionId: string;
   currentPlanKey: PlanKey;
@@ -24,6 +28,8 @@ export type PlanChangeSource = {
   sourceRevision: string;
   purchaserEmail: string;
   billableAccountCount: number;
+  outreachAddonKey: OutreachAddonKey | null;
+  changeScope: "per_account";
 };
 
 export type PlanChangeSourceErrorCode =
@@ -71,8 +77,20 @@ export async function loadCommercialPlanChangeSourceRevision(
     entitlementId: string;
     sessionId: string;
     activeCommercialPeriodValueCents: number;
+    accountId?: string | null;
   },
 ): Promise<string | null> {
+  if (input.accountId) {
+    const { data, error } = await supabase.rpc("commercial_plan_change_source_revision_for_account_source", {
+      p_entitlement_id: input.entitlementId,
+      p_session_id: input.sessionId,
+      p_account_id: input.accountId,
+      p_active_commercial_period_value_cents: input.activeCommercialPeriodValueCents,
+    });
+    if (error || typeof data !== "string" || !data.trim()) return null;
+    return data.trim();
+  }
+
   const { data, error } = await supabase.rpc("commercial_plan_change_source_revision_for_source", {
     p_entitlement_id: input.entitlementId,
     p_session_id: input.sessionId,
@@ -142,10 +160,169 @@ export function resolveCanonicalWorkspaceCommercialSource(input: {
   return { ok: true, entitlement: candidates[0].entitlement, session: candidates[0].session };
 }
 
+function isAccountCommercialEntitlement(row: Row) {
+  if (!readString(row.account_id)) return false;
+  if (readString(row.status) !== "entitlement_consumed") return false;
+  if (readMetadataString(row.metadata, "superseded_at")) return false;
+  return true;
+}
+
+function isCommercialCheckoutSession(row: Row) {
+  const flowType = readString(row.flow_type);
+  if (!["first_purchase", "additional_account", "plan_change"].includes(flowType)) return false;
+  if (readString(row.status) !== "checkout_activated_test") return false;
+  return true;
+}
+
+export async function loadPlanChangeSourceForAccount(
+  supabase: SupabaseClient,
+  input: {
+    clientId: string;
+    accountId: string;
+    sourceEntitlementId?: string | null;
+  },
+): Promise<{ ok: true; source: PlanChangeSource } | { ok: false; code: PlanChangeSourceErrorCode | string }> {
+  const eligibility = await assertPlanChangeAccountEligible(supabase, input);
+  if (!eligibility.ok) {
+    const codeMap: Record<string, PlanChangeSourceErrorCode> = {
+      entitlement_not_found: "source_not_found",
+      entitlement_not_consumed: "source_inactive",
+      entitlement_reserved: "source_inactive",
+      source_inactive: "source_inactive",
+    };
+    return { ok: false, code: codeMap[eligibility.code] ?? eligibility.code };
+  }
+
+  const { data: entitlement, error: entitlementError } = await supabase
+    .from("client_account_entitlements")
+    .select(`
+      id,
+      client_id,
+      checkout_session_id,
+      plan_key,
+      billing_interval_months,
+      status,
+      account_id,
+      outreach_addon_key,
+      consumed_at,
+      pack_period_total_cents,
+      updated_at,
+      created_at,
+      metadata
+    `)
+    .eq("id", eligibility.sourceEntitlementId)
+    .eq("client_id", input.clientId)
+    .eq("account_id", input.accountId)
+    .maybeSingle<Row>();
+
+  if (entitlementError || !entitlement?.id || !isAccountCommercialEntitlement(entitlement)) {
+    return { ok: false, code: "source_not_found" };
+  }
+
+  const sessionId = readString(entitlement.checkout_session_id);
+  if (!sessionId) return { ok: false, code: "source_not_found" };
+
+  const { data: sessionRow, error: sessionError } = await supabase
+    .from("commercial_checkout_sessions")
+    .select(`
+      id,
+      client_id,
+      flow_type,
+      status,
+      plan_key,
+      billing_interval_months,
+      total_period_cents,
+      pack_period_total_cents,
+      activated_at,
+      created_at,
+      updated_at,
+      purchaser_email,
+      billable_account_count,
+      metadata
+    `)
+    .eq("id", sessionId)
+    .maybeSingle<Row>();
+
+  if (sessionError || !sessionRow?.id || !isCommercialCheckoutSession(sessionRow)) {
+    return { ok: false, code: "source_not_found" };
+  }
+
+  if (readString(sessionRow.client_id) && readString(sessionRow.client_id) !== input.clientId) {
+    return { ok: false, code: "source_not_found" };
+  }
+
+  const planKeyRaw = readString(entitlement.plan_key || sessionRow.plan_key).toLowerCase();
+  if (!isPlanKey(planKeyRaw)) return { ok: false, code: "source_ambiguous_pricing" };
+
+  const billingIntervalMonths = readNumber(entitlement.billing_interval_months ?? sessionRow.billing_interval_months, 0);
+  if (!isBillingIntervalMonths(billingIntervalMonths)) return { ok: false, code: "source_period_invalid" };
+
+  const activeCommercialPeriodValueCents = resolveActiveCommercialPeriodValueCents({ session: sessionRow, entitlement });
+  if (activeCommercialPeriodValueCents == null || activeCommercialPeriodValueCents <= 0) {
+    return { ok: false, code: "source_ambiguous_pricing" };
+  }
+
+  const sessionMetadata = sessionRow.metadata && typeof sessionRow.metadata === "object"
+    ? sessionRow.metadata as Row
+    : null;
+  const entitlementMetadata = entitlement.metadata && typeof entitlement.metadata === "object"
+    ? entitlement.metadata as Row
+    : null;
+
+  const periodStartAt = readString(entitlement.consumed_at)
+    || readString(sessionRow.activated_at)
+    || readString(sessionRow.created_at)
+    || readString(entitlement.created_at);
+  if (!periodStartAt) return { ok: false, code: "source_period_invalid" };
+
+  const periodEndAt = readMetadataString(entitlementMetadata, "period_end_at")
+    || readMetadataString(sessionMetadata, "period_end_at")
+    || resolvePeriodEndAt(periodStartAt, billingIntervalMonths);
+  if (!periodEndAt) return { ok: false, code: "source_period_invalid" };
+
+  const currency = readMetadataString(sessionMetadata, "currency", "EUR").toUpperCase();
+  if (currency !== "EUR") return { ok: false, code: "source_currency_unsupported" };
+
+  const outreachRaw = readString(entitlement.outreach_addon_key).toLowerCase();
+  const outreachAddonKey = isOutreachAddonKey(outreachRaw) ? outreachRaw : null;
+
+  const sourceRevision = await loadCommercialPlanChangeSourceRevision(supabase, {
+    entitlementId: readString(entitlement.id),
+    sessionId: readString(sessionRow.id),
+    activeCommercialPeriodValueCents,
+    accountId: input.accountId,
+  });
+  if (!sourceRevision) {
+    return { ok: false, code: "source_revision_unavailable" };
+  }
+
+  return {
+    ok: true,
+    source: {
+      clientId: input.clientId,
+      accountId: input.accountId,
+      sourceEntitlementId: readString(entitlement.id),
+      sourceCheckoutSessionId: readString(sessionRow.id),
+      currentPlanKey: planKeyRaw,
+      billingIntervalMonths,
+      currency: "EUR",
+      periodStartAt,
+      periodEndAt,
+      activeCommercialPeriodValueCents,
+      sourceRevision,
+      purchaserEmail: readString(sessionRow.purchaser_email),
+      billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
+      outreachAddonKey,
+      changeScope: "per_account",
+    },
+  };
+}
+
+/** @deprecated Legacy workspace-wide source. New plan-change quotes must use loadPlanChangeSourceForAccount. */
 export async function loadPlanChangeSource(
   supabase: SupabaseClient,
   clientId: string,
-): Promise<{ ok: true; source: PlanChangeSource } | { ok: false; code: PlanChangeSourceErrorCode }> {
+): Promise<{ ok: true; source: Omit<PlanChangeSource, "accountId" | "changeScope" | "outreachAddonKey"> & { accountId?: never } } | { ok: false; code: PlanChangeSourceErrorCode }> {
   const { data: entitlementRows, error: entitlementError } = await supabase
     .from("client_account_entitlements")
     .select(`

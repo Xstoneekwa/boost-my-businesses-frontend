@@ -94,7 +94,7 @@ export async function createStripePlanChangePaymentSession(
     environment: "test",
     planKey: targetPlanKey as PlanKey,
     billingIntervalMonths,
-    outreachAddonKey: null,
+    outreachAddonKey: readString(quote.target_outreach_addon_key) || null,
   });
   if (!targetPriceId) {
     return {
@@ -110,6 +110,8 @@ export async function createStripePlanChangePaymentSession(
     quote_id: input.quoteId,
     source_revision: readString(quote.source_revision),
     flow_type: "plan_change",
+    account_id: readString(quote.account_id) || undefined,
+    change_scope: readString(quote.change_scope) || undefined,
   });
   rejectUnsafeStripeMetadataKeys(metadata);
 

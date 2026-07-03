@@ -2,8 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildCommercialQuote } from "./pricing.ts";
 import type { CommercialPricingSnapshot } from "./pricing-snapshot.ts";
 import { buildPlanChangeProrationQuote } from "./plan-change-proration.ts";
-import { evaluatePlanChangeCapacity } from "./plan-change-capacity.ts";
-import { loadPlanChangeSource, clientVisiblePlanLabel } from "./plan-change-source.ts";
+import { loadPlanChangeSourceForAccount, clientVisiblePlanLabel, type PlanChangeSource } from "./plan-change-source.ts";
 import { isPlanKey, type PlanKey } from "./catalog.ts";
 import { evaluatePlanChangeActivation, planChangeActivationClientMessages } from "./plan-change-activation-guard.ts";
 
@@ -14,6 +13,7 @@ const QUOTE_TTL_MS = 15 * 60 * 1000;
 export type PlanChangeQuoteView = {
   quoteId: string;
   idempotencyKey: string;
+  accountId: string;
   expiresAt: string;
   currentPlanLabel: string;
   currentPlanKey: PlanKey;
@@ -49,6 +49,23 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
+export async function readAccountScopedCreditBalanceCents(
+  supabase: SupabaseClient,
+  clientId: string,
+  accountId: string,
+  currency = "EUR",
+) {
+  const { data, error } = await supabase.rpc("account_scoped_credit_balance_cents", {
+    p_client_id: clientId,
+    p_account_id: accountId,
+    p_currency: currency,
+  });
+
+  if (error || data == null || !Number.isFinite(Number(data))) return null;
+  return Number(data);
+}
+
+/** @deprecated Legacy client-wide balance. Per-account quotes must use readAccountScopedCreditBalanceCents. */
 export async function readClientCreditBalanceCents(
   supabase: SupabaseClient,
   clientId: string,
@@ -73,6 +90,8 @@ export async function createPlanChangeQuote(
   supabase: SupabaseClient,
   input: {
     clientId: string;
+    accountId: string;
+    sourceEntitlementId?: string | null;
     targetPlanKey: string;
     idempotencyKey: string;
   },
@@ -80,6 +99,17 @@ export async function createPlanChangeQuote(
   | { ok: true; quote: PlanChangeQuoteView }
   | { ok: false; status: number; code: string; messageFr: string; messageEn: string }
 > {
+  const accountId = readString(input.accountId);
+  if (!accountId) {
+    return {
+      ok: false,
+      status: 400,
+      code: "account_required",
+      messageFr: "Sélectionnez le compte Instagram à modifier.",
+      messageEn: "Select the Instagram account to change.",
+    };
+  }
+
   if (!isPlanKey(input.targetPlanKey)) {
     return {
       ok: false,
@@ -90,12 +120,40 @@ export async function createPlanChangeQuote(
     };
   }
 
-  const sourceResult = await loadPlanChangeSource(supabase, input.clientId);
+  const sourceResult = await loadPlanChangeSourceForAccount(supabase, {
+    clientId: input.clientId,
+    accountId,
+    sourceEntitlementId: input.sourceEntitlementId,
+  });
   if (!sourceResult.ok) {
     const messages: Record<string, { fr: string; en: string }> = {
       source_not_found: {
-        fr: "Aucun abonnement actif trouvé pour changer de formule.",
-        en: "No active subscription found to change plan.",
+        fr: "Aucun abonnement actif trouvé pour ce compte.",
+        en: "No active subscription found for this account.",
+      },
+      account_paused: {
+        fr: "Ce compte est en pause. Réactivez-le avant de changer de formule.",
+        en: "This account is paused. Reactivate it before changing plan.",
+      },
+      account_needs_assistance: {
+        fr: "Ce compte nécessite une assistance avant tout changement de formule.",
+        en: "This account needs assistance before a plan change.",
+      },
+      account_cancelled: {
+        fr: "Ce compte est annulé et ne peut pas changer de formule.",
+        en: "This cancelled account cannot change plan.",
+      },
+      entitlement_reserved: {
+        fr: "Ce compte n'a pas encore d'abonnement actif consommé.",
+        en: "This account does not have an active consumed subscription yet.",
+      },
+      entitlement_account_mismatch: {
+        fr: "L'abonnement sélectionné ne correspond pas à ce compte.",
+        en: "The selected subscription does not match this account.",
+      },
+      account_client_mismatch: {
+        fr: "Ce compte n'appartient pas à votre espace client.",
+        en: "This account does not belong to your client workspace.",
       },
       source_ambiguous_entitlement: {
         fr: "Plusieurs abonnements actifs ont été détectés. Contactez le support pour modifier votre formule.",
@@ -138,37 +196,31 @@ export async function createPlanChangeQuote(
       ok: false,
       status: 400,
       code: "same_plan_selected",
-      messageFr: "Vous êtes déjà sur cette formule.",
-      messageEn: "You are already on this plan.",
+      messageFr: "Ce compte est déjà sur cette formule.",
+      messageEn: "This account is already on this plan.",
     };
   }
 
-  const capacity = await evaluatePlanChangeCapacity(supabase, input.clientId, input.targetPlanKey);
-  if (!capacity.ok) {
-    return {
-      ok: false,
-      status: 409,
-      code: capacity.code,
-      messageFr: capacity.messageFr,
-      messageEn: capacity.messageEn,
-    };
-  }
-
-  const existingCustomerCreditCents = await readClientCreditBalanceCents(supabase, input.clientId, source.currency);
+  const existingCustomerCreditCents = await readAccountScopedCreditBalanceCents(
+    supabase,
+    input.clientId,
+    accountId,
+    source.currency,
+  );
   if (existingCustomerCreditCents == null) {
     return {
       ok: false,
       status: 503,
       code: "credit_ledger_unavailable",
-      messageFr: "Impossible de calculer votre avoir client pour le moment.",
-      messageEn: "Could not compute your client credit balance right now.",
+      messageFr: "Impossible de calculer l'avoir de ce compte pour le moment.",
+      messageEn: "Could not compute this account credit balance right now.",
     };
   }
 
   const catalogQuote = buildCommercialQuote({
     planKey: input.targetPlanKey,
     billingIntervalMonths: source.billingIntervalMonths,
-    outreachAddonKey: null,
+    outreachAddonKey: source.outreachAddonKey,
     pricingContext: "plan_change",
     billableAccountCountOverride: source.billableAccountCount,
   });
@@ -204,11 +256,14 @@ export async function createPlanChangeQuote(
     .from("commercial_plan_change_quotes")
     .insert({
       client_id: input.clientId,
+      account_id: accountId,
+      change_scope: "per_account",
       idempotency_key: input.idempotencyKey,
       source_entitlement_id: source.sourceEntitlementId,
       source_checkout_session_id: source.sourceCheckoutSessionId,
       source_plan_key: source.currentPlanKey,
       target_plan_key: input.targetPlanKey,
+      target_outreach_addon_key: source.outreachAddonKey,
       billing_interval_months: source.billingIntervalMonths,
       currency: source.currency,
       period_start_at: source.periodStartAt,
@@ -229,7 +284,9 @@ export async function createPlanChangeQuote(
       payment_provider: null,
       payment_status: proration.amountDueCents > 0 ? "pending" : "not_required",
       metadata: {
-        checkout_context: "existing_workspace_plan_change",
+        checkout_context: "per_account_plan_change",
+        change_scope: "per_account",
+        account_id: accountId,
       },
       pricing_snapshot: catalogQuote.pricingSnapshot,
     })
@@ -246,7 +303,7 @@ export async function createPlanChangeQuote(
       if (existing?.id && readString(existing.status) === "quote_pending") {
         return {
           ok: true,
-          quote: mapQuoteRow(existing, source.currentPlanKey, input.targetPlanKey as PlanKey, activationEval),
+          quote: mapQuoteRow(existing, source, input.targetPlanKey as PlanKey, activationEval),
         };
       }
     }
@@ -280,7 +337,7 @@ export async function createPlanChangeQuote(
 
 function buildQuoteView(
   row: Row,
-  source: { currentPlanKey: PlanKey; billingIntervalMonths: number; periodEndAt: string; periodStartAt: string; currency: "EUR"; activeCommercialPeriodValueCents: number },
+  source: PlanChangeSource,
   targetPlanKey: PlanKey,
   proration: ReturnType<typeof buildPlanChangeProrationQuote>,
   activationEval: ReturnType<typeof evaluatePlanChangeActivation>,
@@ -293,6 +350,7 @@ function buildQuoteView(
   return {
     quoteId: readString(row.id),
     idempotencyKey: readString(row.idempotency_key),
+    accountId: source.accountId,
     expiresAt: readString(row.quote_expires_at, expiresAt),
     currentPlanLabel: clientVisiblePlanLabel(source.currentPlanKey),
     currentPlanKey: source.currentPlanKey,
@@ -321,7 +379,7 @@ function buildQuoteView(
 
 function mapQuoteRow(
   row: Row,
-  currentPlanKey: PlanKey,
+  source: PlanChangeSource,
   targetPlanKey: PlanKey,
   activationEval: ReturnType<typeof evaluatePlanChangeActivation>,
 ): PlanChangeQuoteView {
@@ -331,9 +389,10 @@ function mapQuoteRow(
   return {
     quoteId: readString(row.id),
     idempotencyKey: readString(row.idempotency_key),
+    accountId: readString(row.account_id, source.accountId),
     expiresAt: readString(row.quote_expires_at),
-    currentPlanLabel: clientVisiblePlanLabel(currentPlanKey),
-    currentPlanKey,
+    currentPlanLabel: clientVisiblePlanLabel(source.currentPlanKey),
+    currentPlanKey: source.currentPlanKey,
     targetPlanKey,
     targetPlanLabel: clientVisiblePlanLabel(targetPlanKey),
     billingIntervalMonths: readNumber(row.billing_interval_months),
@@ -368,10 +427,20 @@ export async function activatePlanChangeQuote(
     simulatedActivation?: boolean;
   },
 ): Promise<
-  | { ok: true; idempotentReplay: boolean; clientId: string; checkoutSessionId: string | null }
+  | { ok: true; idempotentReplay: boolean; clientId: string; accountId: string | null; checkoutSessionId: string | null }
   | { ok: false; status: number; code: string; messageFr: string; messageEn: string }
 > {
-  const { data, error } = await supabase.rpc("activate_commercial_plan_change", {
+  const { data: quoteScope } = await supabase
+    .from("commercial_plan_change_quotes")
+    .select("change_scope,account_id")
+    .eq("id", input.quoteId)
+    .maybeSingle<Row>();
+
+  const rpcName = readString(quoteScope?.change_scope) === "per_account" && readString(quoteScope?.account_id)
+    ? "activate_commercial_plan_change_per_account"
+    : "activate_commercial_plan_change";
+
+  const { data, error } = await supabase.rpc(rpcName, {
     p_quote_id: input.quoteId,
     p_idempotency_key: input.idempotencyKey,
     p_actor_email: input.actorEmail ?? null,
@@ -403,8 +472,23 @@ export async function activatePlanChangeQuote(
         status: 409,
       },
       credit_balance_changed: {
-        fr: "Votre avoir client a changé depuis le devis. Recalculez votre changement de formule.",
-        en: "Your client credit changed since the quote. Recalculate your plan change.",
+        fr: "L'avoir de ce compte a changé depuis le devis. Recalculez votre changement de formule.",
+        en: "This account credit changed since the quote. Recalculate your plan change.",
+        status: 409,
+      },
+      entitlement_account_mismatch: {
+        fr: "L'abonnement source ne correspond plus à ce compte.",
+        en: "The source subscription no longer matches this account.",
+        status: 409,
+      },
+      account_client_mismatch: {
+        fr: "Ce compte n'appartient pas à votre espace client.",
+        en: "This account does not belong to your client workspace.",
+        status: 409,
+      },
+      quote_scope_invalid: {
+        fr: "Ce devis n'est pas éligible à l'activation per-account.",
+        en: "This quote is not eligible for per-account activation.",
         status: 409,
       },
       quote_not_found: {
@@ -440,6 +524,7 @@ export async function activatePlanChangeQuote(
     ok: true,
     idempotentReplay: Boolean(payload.idempotent_replay),
     clientId: readString(payload.client_id),
+    accountId: readString(payload.account_id) || null,
     checkoutSessionId: readString(payload.checkout_session_id) || null,
   };
 }

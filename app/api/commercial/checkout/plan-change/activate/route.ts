@@ -108,16 +108,17 @@ export async function POST(request: Request) {
 
     return checkoutJsonOk({
       idempotent_replay: result.idempotentReplay,
-      checkout_context: "existing_workspace_plan_change",
+      checkout_context: "per_account_plan_change",
       redirect_path: "/instagram-client",
       client_id: result.clientId,
+      account_id: result.accountId,
       checkout_session_id: result.checkoutSessionId,
       message_fr: result.idempotentReplay
-        ? "Changement de formule déjà confirmé."
-        : "Changement de formule confirmé. Votre échéance actuelle est conservée.",
+        ? "Changement de formule déjà confirmé pour ce compte."
+        : "Changement de formule confirmé pour ce compte. Votre échéance actuelle est conservée.",
       message_en: result.idempotentReplay
-        ? "Plan change was already confirmed."
-        : "Plan change confirmed. Your current subscription end date is unchanged.",
+        ? "Plan change was already confirmed for this account."
+        : "Plan change confirmed for this account. Your current subscription end date is unchanged.",
     });
   } catch (error) {
     return checkoutActivationUnexpectedError(error);

@@ -1,7 +1,7 @@
 import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
-import { activatePlanChangeQuote, createPlanChangeQuote } from "@/lib/commercial/plan-change-quote";
-import { loadPlanChangeSource, clientVisiblePlanLabel } from "@/lib/commercial/plan-change-source";
+import { createPlanChangeQuote } from "@/lib/commercial/plan-change-quote";
+import { loadPlanChangeSourceForAccount, clientVisiblePlanLabel } from "@/lib/commercial/plan-change-source";
 import { requireClientInstagramSession, readString } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 type QuoteBody = {
   target_plan_key?: unknown;
   idempotency_key?: unknown;
+  account_id?: unknown;
+  source_entitlement_id?: unknown;
   client_id?: unknown;
   amount_due_cents?: unknown;
 };
@@ -58,13 +60,29 @@ export async function POST(request: Request) {
     });
   }
 
+  const accountId = readString(body.account_id);
+  if (!accountId) {
+    return jsonError("Compte Instagram requis.", 400, {
+      code: "account_required",
+      message_fr: "Sélectionnez le compte Instagram à modifier.",
+      message_en: "Select the Instagram account to change.",
+    });
+  }
+
   const targetPlanKey = readString(body.target_plan_key);
   const idempotencyKey = readString(body.idempotency_key) || crypto.randomUUID();
+  const sourceEntitlementId = readString(body.source_entitlement_id) || null;
   const supabase = createSupabaseClient();
 
-  const sourcePreview = await loadPlanChangeSource(supabase, session.clientId);
+  const sourcePreview = await loadPlanChangeSourceForAccount(supabase, {
+    clientId: session.clientId,
+    accountId,
+    sourceEntitlementId,
+  });
   const result = await createPlanChangeQuote(supabase, {
     clientId: session.clientId,
+    accountId,
+    sourceEntitlementId,
     targetPlanKey,
     idempotencyKey,
   });
@@ -79,9 +97,10 @@ export async function POST(request: Request) {
 
   return jsonOk({
     quote: result.quote,
-    checkout_context: "existing_workspace_plan_change",
+    checkout_context: "per_account_plan_change",
     current_plan: sourcePreview.ok
       ? {
+        account_id: sourcePreview.source.accountId,
         plan_key: sourcePreview.source.currentPlanKey,
         label: clientVisiblePlanLabel(sourcePreview.source.currentPlanKey),
         period_end_at: sourcePreview.source.periodEndAt,
