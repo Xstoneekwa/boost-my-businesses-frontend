@@ -328,6 +328,28 @@ export async function verifyStripeSessionStatusOwnership(
     return { ok: true as const };
   }
 
+  if (
+    !input.requesterUserId
+    && input.stripeCheckoutSessionId
+    && !input.internalCheckoutSessionId
+  ) {
+    const attempt = await findStripeCheckoutAttemptByStripeSessionId(
+      supabase,
+      input.stripeCheckoutSessionId,
+    );
+    if (!attempt.ok) {
+      return { ok: false as const, code: "session_not_found" as const };
+    }
+    if (attempt.attempt.flow_type !== "first_purchase") {
+      return { ok: false as const, code: "session_forbidden" as const };
+    }
+    return { ok: true as const, publicPostPaymentPoll: true as const };
+  }
+
+  if (!input.requesterUserId) {
+    return { ok: false as const, code: "session_forbidden" as const };
+  }
+
   if (input.internalCheckoutSessionId) {
     const { data } = await supabase
       .from("commercial_checkout_sessions")
@@ -370,24 +392,30 @@ export async function getSafeStripeSessionStatus(
   if (input.internalCheckoutSessionId) {
     const { data } = await supabase
       .from("commercial_checkout_sessions")
-      .select("status,activated_at")
+      .select("status,activated_at,auth_user_id")
       .eq("id", input.internalCheckoutSessionId)
       .maybeSingle<Row>();
     if (data?.status) {
+      const commercialStatus = readString(data.status);
+      const authUserId = readString(data.auth_user_id);
       return {
         ok: true as const,
-        commercialStatus: readString(data.status),
+        commercialStatus,
         activatedAt: readString(data.activated_at) || null,
+        readyForLogin: commercialStatus === "checkout_paid" && Boolean(authUserId),
       };
     }
   }
   if (input.stripeCheckoutSessionId) {
     const attempt = await findStripeCheckoutAttemptByStripeSessionId(supabase, input.stripeCheckoutSessionId);
     if (attempt.ok) {
+      const commercialStatus = mapAttemptStatusToCommercialStatus(attempt.attempt.status);
+      const authUserId = readString(attempt.attempt.auth_user_id);
       return {
         ok: true as const,
-        commercialStatus: mapAttemptStatusToCommercialStatus(attempt.attempt.status),
+        commercialStatus,
         activatedAt: attempt.attempt.fulfilled_at || null,
+        readyForLogin: isStripeAttemptFulfilled(attempt.attempt.status) && Boolean(authUserId),
       };
     }
   }

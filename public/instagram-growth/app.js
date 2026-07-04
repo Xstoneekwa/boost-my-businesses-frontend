@@ -71,6 +71,9 @@
       var offer = el.getAttribute("data-checkout-offer");
       var href = PUBLIC_CHECKOUT_HREFS[offer];
       if (!href) return;
+      if (currentLang === "en") {
+        href += (href.indexOf("?") >= 0 ? "&" : "?") + "lang=en";
+      }
       el.setAttribute("href", href);
     });
   }

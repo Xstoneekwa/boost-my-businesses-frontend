@@ -6,6 +6,7 @@ import {
 } from "@/lib/commercial/stripe/stripe-webhook-handler.ts";
 import { getInstagramUserContext } from "@/lib/restaurant-analytics/session";
 import { requireInstagramAdmin } from "@/app/api/instagram-dashboard/_utils";
+import { publicCheckoutLoginPath } from "@/lib/commercial/public-checkout-lang.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,7 +29,14 @@ export async function GET(request: Request) {
   const isAdmin = !adminUnauthorized;
 
   const userContext = await getInstagramUserContext();
-  if (!isAdmin && !userContext?.userId) {
+  const allowPublicPostPaymentPoll = Boolean(
+    stripeCheckoutSessionId
+    && !internalCheckoutSessionId
+    && !userContext?.userId
+    && !isAdmin,
+  );
+
+  if (!isAdmin && !userContext?.userId && !allowPublicPostPaymentPoll) {
     return jsonError("Authentication is required.", 401, { code: "session_required" });
   }
 
@@ -60,7 +68,7 @@ export async function GET(request: Request) {
   return jsonOk({
     commercial_status: status.commercialStatus,
     activated_at: status.activatedAt,
-    informational_only: true,
-    activation_source: "webhook_only",
+    ready_for_login: status.readyForLogin,
+    login_path: status.readyForLogin ? publicCheckoutLoginPath("fr") : null,
   });
 }

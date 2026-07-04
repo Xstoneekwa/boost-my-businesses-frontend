@@ -20,6 +20,11 @@ import {
   validatePublicCheckoutPassword,
 } from "@/lib/commercial/checkout-password";
 import { parseCheckoutApiResponse } from "@/lib/commercial/parse-checkout-api-response";
+import { publicCheckoutCopy } from "@/lib/commercial/public-checkout-copy";
+import {
+  resolvePublicCheckoutLang,
+  type PublicCheckoutLang,
+} from "@/lib/commercial/public-checkout-lang";
 import type { CommercialPricingSnapshot } from "@/lib/commercial/pricing-snapshot";
 import CommercialDiscountBreakdown from "@/app/instagram-client/CommercialDiscountBreakdown";
 import {
@@ -71,16 +76,16 @@ function renewalLabel(months: number, lang: "fr" | "en") {
 }
 
 export default function CommercialCheckoutForm(props: {
-  lang?: "fr" | "en";
+  lang?: PublicCheckoutLang;
   flowType: "first_purchase" | "additional_account";
   checkoutMode?: "simulated" | "stripe_test";
   initialPlan?: string;
   initialMonths?: number;
   initialOutreach?: string;
 }) {
-  const lang = props.lang ?? "fr";
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const [lang, setLang] = useState<PublicCheckoutLang>(props.lang ?? "fr");
+  const router = useRouter();
   const isPublicCheckout = props.flowType === "first_purchase";
   const isStripeTestCheckout = props.checkoutMode === "stripe_test";
 
@@ -136,6 +141,13 @@ export default function CommercialCheckoutForm(props: {
   const [handoffLoginPath, setHandoffLoginPath] = useState<string | null>(null);
   const [conflictRedirectPath, setConflictRedirectPath] = useState<string | null>(null);
   const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
+
+  useEffect(() => {
+    setLang(resolvePublicCheckoutLang({
+      searchParam: searchParams.get("lang"),
+      fallback: props.lang ?? "fr",
+    }));
+  }, [searchParams, props.lang]);
 
   const activationState = useMemo(() => resolveCommercialCheckoutActivationState({
     isPublicCheckout,
@@ -357,17 +369,13 @@ export default function CommercialCheckoutForm(props: {
 
   return (
     <div className="commercial-checkout">
-      <div className="commercial-checkout-banner">
-        {isStripeTestCheckout
-          ? (lang === "fr"
-            ? "Stripe Test — le paiement est confirmé uniquement par webhook avant activation."
-            : "Stripe Test — payment is confirmed only by webhook before activation.")
-          : (lang === "fr"
-            ? "Simulation interne — aucun paiement ne sera prélevé."
-            : "Internal simulation — no payment will be charged.")}
-      </div>
+      {!isStripeTestCheckout ? (
+        <div className="commercial-checkout-banner">
+          {publicCheckoutCopy(lang, "simulatedBanner")}
+        </div>
+      ) : null}
 
-      <h1>{lang === "fr" ? "Récapitulatif checkout" : "Checkout summary"}</h1>
+      <h1>{publicCheckoutCopy(lang, "checkoutSummaryTitle")}</h1>
 
       <div className="commercial-checkout-grid">
         {commercialMode === "full_cycle" ? (
@@ -545,10 +553,10 @@ export default function CommercialCheckoutForm(props: {
       >
         {loading
           ? (isStripeTestCheckout
-            ? (lang === "fr" ? "Préparation Stripe..." : "Preparing Stripe...")
+            ? publicCheckoutCopy(lang, "paymentPreparing")
             : (lang === "fr" ? "Activation..." : "Activating..."))
           : (isStripeTestCheckout
-            ? (lang === "fr" ? "Continuer vers Stripe Test" : "Continue to Stripe Test")
+            ? publicCheckoutCopy(lang, "paymentCta")
             : (lang === "fr" ? "Simuler l'activation" : "Simulate activation"))}
       </button>
 
