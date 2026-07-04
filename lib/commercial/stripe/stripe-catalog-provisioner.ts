@@ -39,9 +39,12 @@ export type SafeCatalogMappingStage =
 
 export type SafeCatalogMappingCheckpoint =
   | "cli_preflight"
-  | "catalog_fetch"
+  | "stripe_client_init"
+  | "stripe_products_read"
+  | "stripe_prices_read"
   | "manifest_match"
   | "price_attributes"
+  | "mapping_store_init"
   | "mapping_store_read"
   | "mapping_conflict_check"
   | "mapping_store_write";
@@ -208,6 +211,7 @@ export type StripeCatalogMappingSyncInput = {
   store?: StripeCatalogMappingStore;
   dryRun?: boolean;
   buildPlanForTests?: () => StripeCatalogProvisionerPlan | { ok: false; code: string };
+  onCheckpoint?: (checkpoint: SafeCatalogMappingCheckpoint) => void;
 };
 
 export function assertProvisionerKeyMatchesEnvironment(input: {
@@ -456,19 +460,27 @@ export async function applyStripePublicCatalog(
 export async function syncStripePublicCatalogMapping(
   input: StripeCatalogMappingSyncInput,
 ): Promise<StripeCatalogMappingSyncResult> {
+  let activeCheckpoint: SafeCatalogMappingCheckpoint = "cli_preflight";
+  const setCheckpoint = (checkpoint: SafeCatalogMappingCheckpoint) => {
+    activeCheckpoint = checkpoint;
+    input.onCheckpoint?.(checkpoint);
+  };
   try {
-    return await syncStripePublicCatalogMappingInner(input);
+    return await syncStripePublicCatalogMappingInner(input, setCheckpoint);
   } catch (error) {
     return mappingSyncFailure(input.environment, safeCatalogMappingFailurePayload(error, {
       code: "unexpected_sync_failure",
       stage: "validation",
+      checkpoint: activeCheckpoint,
     }));
   }
 }
 
 async function syncStripePublicCatalogMappingInner(
   input: StripeCatalogMappingSyncInput,
+  setCheckpoint: (checkpoint: SafeCatalogMappingCheckpoint) => void,
 ): Promise<StripeCatalogMappingSyncResult> {
+  setCheckpoint("cli_preflight");
   if (input.environment !== "test") {
     return validationFailure("stripe_test_environment_required", input.environment, "cli_preflight");
   }
@@ -488,10 +500,12 @@ async function syncStripePublicCatalogMappingInner(
   }
 
   let plan: StripeCatalogProvisionerPlan | { ok: false; code: string };
+  setCheckpoint("manifest_match");
   try {
     plan = input.buildPlanForTests?.() ?? buildStripeCatalogProvisionerPlan({ environment: "test", mode: "dry_run" });
   } catch (error) {
     if (safeCatalogMappingErrorLike(error)) throw error;
+    if (isUnexpectedRuntimeError(error)) throw error;
     throw new SafeCatalogMappingError({
       code: "stripe_catalog_manifest_invalid",
       stage: "validation",
@@ -505,7 +519,7 @@ async function syncStripePublicCatalogMappingInner(
     return validationFailure(code, input.environment, "manifest_match");
   }
 
-  const productResult = await loadCanonicalStripeProducts(input.client, plan.products);
+  const productResult = await loadCanonicalStripeProducts(input.client, plan.products, setCheckpoint);
   if (!productResult.ok) {
     return {
       ...productResult,
@@ -515,7 +529,7 @@ async function syncStripePublicCatalogMappingInner(
       checkpoint: productResult.checkpoint ?? "manifest_match",
     };
   }
-  const priceResult = await loadCanonicalStripePrices(input.client, productResult.productsByKey, plan.prices);
+  const priceResult = await loadCanonicalStripePrices(input.client, productResult.productsByKey, plan.prices, setCheckpoint);
   if (!priceResult.ok) {
     return {
       ...priceResult,
@@ -534,9 +548,11 @@ async function syncStripePublicCatalogMappingInner(
   let mappingsReconciled = 0;
   if (!input.dryRun) {
     let existingRows: StripeComponentPriceCatalogMappingRow[];
+    setCheckpoint("mapping_store_read");
     try {
       existingRows = await input.store!.listMappings("test");
     } catch (error) {
+      if (isUnexpectedRuntimeError(error)) throw error;
       throw safeProviderError(error, {
         code: "production_mapping_read_failed",
         stage: "mapping_read",
@@ -551,6 +567,7 @@ async function syncStripePublicCatalogMappingInner(
         checkpoint: "mapping_store_read",
       });
     }
+    setCheckpoint("mapping_conflict_check");
     const reconcileResult = reconcileMappingRows(existingRows, desiredRows);
     if (!reconcileResult.ok) {
       return { ...reconcileResult, environment: input.environment, mode: "sync_mapping", stage: "validation", checkpoint: "mapping_conflict_check" };
@@ -558,9 +575,11 @@ async function syncStripePublicCatalogMappingInner(
     mappingsCreated = reconcileResult.rowsToCreate.length;
     mappingsReconciled = reconcileResult.mappingsReconciled;
     if (reconcileResult.rowsToCreate.length > 0) {
+      setCheckpoint("mapping_store_write");
       try {
         await input.store!.upsertMappings(reconcileResult.rowsToCreate);
       } catch (error) {
+        if (isUnexpectedRuntimeError(error)) throw error;
         throw safeProviderError(error, {
           code: "production_mapping_write_failed",
           stage: "mapping_write",
@@ -604,6 +623,7 @@ export function safeCatalogMappingFailurePayload(
   fallback: {
     code: string;
     stage: SafeCatalogMappingStage;
+    checkpoint?: SafeCatalogMappingCheckpoint;
   },
 ): SafeCatalogMappingFailurePayload {
   const safeError = safeCatalogMappingErrorLike(error);
@@ -621,7 +641,7 @@ export function safeCatalogMappingFailurePayload(
     ok: false,
     code: fallback.code,
     stage: fallback.stage,
-    checkpoint: safeCheckpoint(error),
+    checkpoint: safeCheckpoint(error) ?? fallback.checkpoint,
     provider_status: safeProviderStatus(error),
     provider_code: safeProviderCode(error),
   });
@@ -630,7 +650,7 @@ export function safeCatalogMappingFailurePayload(
 async function listAll<T>(
   resource: { list(input: Record<string, unknown>): Promise<StripeListResult<T>> },
   params: Record<string, unknown>,
-  diagnostics?: { stage: "stripe_catalog_read" },
+  diagnostics?: { stage: "stripe_catalog_read"; checkpoint: SafeCatalogMappingCheckpoint },
 ) {
   const all: T[] = [];
   let startingAfter: string | null = null;
@@ -639,10 +659,11 @@ async function listAll<T>(
     try {
       result = await resource.list(startingAfter ? { ...params, starting_after: startingAfter } : params);
     } catch (error) {
+      if (diagnostics && isUnexpectedRuntimeError(error)) throw error;
       if (diagnostics) throw safeProviderError(error, {
         code: "stripe_catalog_read_failed",
         stage: diagnostics.stage,
-        checkpoint: "catalog_fetch",
+        checkpoint: diagnostics.checkpoint,
         forbiddenCode: "stripe_catalog_read_forbidden",
       });
       throw error;
@@ -655,7 +676,7 @@ async function listAll<T>(
         throw new SafeCatalogMappingError({
           code: "stripe_catalog_invalid_response",
           stage: diagnostics.stage,
-          checkpoint: "catalog_fetch",
+          checkpoint: diagnostics.checkpoint,
         });
       }
     }
@@ -713,19 +734,22 @@ function priceMatchesManifest(
 async function loadCanonicalStripeProducts(
   client: Pick<StripeCatalogProvisionerClient, "products">,
   products: StripePublicProductManifestEntry[],
+  setCheckpoint: (checkpoint: SafeCatalogMappingCheckpoint) => void,
 ): Promise<
   | { ok: true; productsByKey: Map<string, StripeCatalogProductObject> }
   | { ok: false; code: string; productName?: string; checkpoint?: SafeCatalogMappingCheckpoint }
 > {
-  const allProducts = await listAll(client.products, {}, { stage: "stripe_catalog_read" });
+  setCheckpoint("stripe_products_read");
+  const allProducts = await listAll(client.products, {}, { stage: "stripe_catalog_read", checkpoint: "stripe_products_read" });
   const productsByKey = new Map<string, StripeCatalogProductObject>();
   for (const product of allProducts) {
-    if (product.livemode) return { ok: false, code: "stripe_live_product_rejected", checkpoint: "catalog_fetch" };
+    if (product.livemode) return { ok: false, code: "stripe_live_product_rejected", checkpoint: "stripe_products_read" };
     const productKey = product.metadata?.[PRODUCT_KEY_METADATA];
     if (productKey && productsByKey.has(productKey)) return { ok: false, code: "product_identity_duplicate", checkpoint: "manifest_match" };
     if (productKey) productsByKey.set(productKey, product);
   }
 
+  setCheckpoint("manifest_match");
   for (const productManifest of products) {
     const ambiguousByName = allProducts.find((product) => (
       product.name === productManifest.name
@@ -735,7 +759,7 @@ async function loadCanonicalStripeProducts(
       return { ok: false, code: "product_name_ambiguous", productName: productManifest.name, checkpoint: "manifest_match" };
     }
     const product = productsByKey.get(productManifest.productKey);
-    if (!product) return { ok: false, code: "product_missing", productName: productManifest.name, checkpoint: "catalog_fetch" };
+    if (!product) return { ok: false, code: "product_missing", productName: productManifest.name, checkpoint: "stripe_products_read" };
     if (product.name !== productManifest.name || product.active === false) {
       return { ok: false, code: "product_identity_conflict", productName: productManifest.name, checkpoint: "manifest_match" };
     }
@@ -747,6 +771,7 @@ async function loadCanonicalStripePrices(
   client: Pick<StripeCatalogProvisionerClient, "prices">,
   productsByKey: Map<string, StripeCatalogProductObject>,
   prices: StripePublicPriceManifestEntry[],
+  setCheckpoint: (checkpoint: SafeCatalogMappingCheckpoint) => void,
 ): Promise<
   | { ok: true; pricesByKey: Map<string, StripeCatalogPriceObject> }
   | { ok: false; code: string; priceKey?: string; checkpoint?: SafeCatalogMappingCheckpoint }
@@ -755,12 +780,14 @@ async function loadCanonicalStripePrices(
   for (const priceManifest of prices) {
     const product = productsByKey.get(priceManifest.productKey);
     if (!product) return { ok: false, code: "price_product_missing", priceKey: priceManifest.deterministicKey, checkpoint: "manifest_match" };
-    const matches = await listAll(client.prices, { lookup_keys: [priceManifest.deterministicKey] }, { stage: "stripe_catalog_read" });
+    setCheckpoint("stripe_prices_read");
+    const matches = await listAll(client.prices, { lookup_keys: [priceManifest.deterministicKey] }, { stage: "stripe_catalog_read", checkpoint: "stripe_prices_read" });
     const canonicalPrices = matches.filter((price) => price.lookup_key === priceManifest.deterministicKey);
-    if (canonicalPrices.length === 0) return { ok: false, code: "price_missing", priceKey: priceManifest.deterministicKey, checkpoint: "catalog_fetch" };
+    if (canonicalPrices.length === 0) return { ok: false, code: "price_missing", priceKey: priceManifest.deterministicKey, checkpoint: "stripe_prices_read" };
     if (canonicalPrices.length > 1) return { ok: false, code: "price_identity_duplicate", priceKey: priceManifest.deterministicKey, checkpoint: "manifest_match" };
     const price = canonicalPrices[0];
-    if (price.livemode) return { ok: false, code: "stripe_live_price_rejected", priceKey: priceManifest.deterministicKey, checkpoint: "catalog_fetch" };
+    if (price.livemode) return { ok: false, code: "stripe_live_price_rejected", priceKey: priceManifest.deterministicKey, checkpoint: "stripe_prices_read" };
+    setCheckpoint("price_attributes");
     if (!priceMatchesManifest(price, product.id, priceManifest)) {
       return { ok: false, code: "price_identity_conflict", priceKey: priceManifest.deterministicKey, checkpoint: "price_attributes" };
     }
@@ -937,6 +964,12 @@ function errorRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
+function isUnexpectedRuntimeError(error: unknown) {
+  return error instanceof TypeError
+    || error instanceof ReferenceError
+    || error instanceof RangeError;
+}
+
 function compactFailurePayload(payload: SafeCatalogMappingFailurePayload): SafeCatalogMappingFailurePayload {
   return Object.fromEntries(
     Object.entries(payload).filter(([, value]) => value !== undefined),
@@ -998,9 +1031,12 @@ function safeCheckpoint(error: unknown) {
 
 const ALLOWED_SAFE_CHECKPOINTS = new Set([
   "cli_preflight",
-  "catalog_fetch",
+  "stripe_client_init",
+  "stripe_products_read",
+  "stripe_prices_read",
   "manifest_match",
   "price_attributes",
+  "mapping_store_init",
   "mapping_store_read",
   "mapping_conflict_check",
   "mapping_store_write",

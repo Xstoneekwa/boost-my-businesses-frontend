@@ -26,6 +26,12 @@ export async function runStripeCatalogMappingCli(options = {}) {
   const makeMappingStore = options.createMappingStore ?? ((supabase) => new SupabaseMappingStore(supabase));
   const args = new Set(argv);
   const apply = args.has("--apply");
+  let activeCheckpoint = "cli_preflight";
+  const setActiveCheckpoint = (checkpoint) => {
+    if (ALLOWED_RUNTIME_CHECKPOINTS.has(checkpoint)) {
+      activeCheckpoint = checkpoint;
+    }
+  };
 
   if (apply && !args.has("--i-understand-this-writes-production-mapping")) {
     stderr(JSON.stringify({
@@ -37,8 +43,10 @@ export async function runStripeCatalogMappingCli(options = {}) {
     return 2;
   }
   try {
+    setActiveCheckpoint("cli_preflight");
     const stripeSecretKey = readStripeTestKey(env);
     const supabase = createProductionSupabaseClient(env, makeSupabaseClient);
+    setActiveCheckpoint("stripe_client_init");
     let stripeClient;
     try {
       stripeClient = makeStripeClient({
@@ -47,20 +55,24 @@ export async function runStripeCatalogMappingCli(options = {}) {
         billingPortalConfigurationId: null,
         testCheckoutEnabled: true,
       });
-    } catch {
+    } catch (error) {
+      if (isUnexpectedRuntimeError(error)) throw error;
       throw new SafeCatalogMappingError({
         code: "stripe_catalog_validation_failed",
         stage: "validation",
-        checkpoint: "cli_preflight",
+        checkpoint: "stripe_client_init",
       });
     }
+    setActiveCheckpoint("mapping_store_init");
+    const mappingStore = makeMappingStore(supabase);
     const result = await syncMapping({
       environment: "test",
       secretKey: stripeSecretKey,
       client: stripeClient,
-      store: makeMappingStore(supabase),
+      store: mappingStore,
       dryRun: !apply,
       buildPlanForTests: options.buildPlanForTests,
+      onCheckpoint: setActiveCheckpoint,
     });
 
     if (!result.ok) {
@@ -85,6 +97,7 @@ export async function runStripeCatalogMappingCli(options = {}) {
     stderr(JSON.stringify(safeCliFailurePayload(safeCatalogMappingFailurePayload(error, {
       code: "unexpected_sync_failure",
       stage: "validation",
+      checkpoint: activeCheckpoint,
     }))));
     return 2;
   }
@@ -237,10 +250,29 @@ function errorRecord(value) {
   return value && typeof value === "object" ? value : {};
 }
 
+function isUnexpectedRuntimeError(error) {
+  return error instanceof TypeError
+    || error instanceof ReferenceError
+    || error instanceof RangeError;
+}
+
 const ALLOWED_SUPABASE_PROVIDER_CODES = new Set([
   "42501",
   "42P01",
   "42703",
   "PGRST200",
   "PGRST204",
+]);
+
+const ALLOWED_RUNTIME_CHECKPOINTS = new Set([
+  "cli_preflight",
+  "stripe_client_init",
+  "stripe_products_read",
+  "stripe_prices_read",
+  "manifest_match",
+  "price_attributes",
+  "mapping_store_init",
+  "mapping_store_read",
+  "mapping_conflict_check",
+  "mapping_store_write",
 ]);
