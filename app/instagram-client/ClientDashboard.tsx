@@ -15,6 +15,7 @@ import ClientAccountTargetsDrawer, { mainTargetingItems } from "./ClientAccountT
 import ClientActivityPanel from "./ClientActivityPanel";
 import ClientDmTemplatesSection from "./ClientDmTemplatesSection";
 import ClientOverviewRecentFeed from "./ClientOverviewRecentFeed";
+import { ClientPaymentBillingDrawer } from "./ClientPaymentBillingDrawer";
 import TargetAvatar from "./TargetAvatar";
 import { buildTargetsOverview, isArchivedOrDeletedTarget, type TargetSafeRow, type TargetsOverview } from "@/app/instagram-dashboard/targets-data";
 import { normalizeTargetUsername } from "@/lib/instagram-targets";
@@ -282,48 +283,6 @@ function formatLinkedAccountLine(account: ClientLinkedInstagramAccount, lang: La
         ? (lang === "fr" ? "Vérification requise" : "Verification required")
         : (lang === "fr" ? "Configuration en cours" : "Setup pending");
   return `@${account.username} · ${account.packageLabel} · ${status}`;
-}
-
-function PaymentBillingDrawer({ open, onClose, lang, t, billing }: {
-  open: boolean;
-  onClose: () => void;
-  lang: Lang;
-  t: typeof T["fr"];
-  billing: ClientWorkspaceView["billing"] | null;
-}) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && open) onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
-  return (
-    <>
-      <div className={`cd-dwr-scrim${open ? " open" : ""}`} onClick={onClose}/>
-      <aside className={`cd-dwr cd-billing-dwr${open ? " open" : ""}`} aria-hidden={!open}>
-        <header className="cd-dwr-hd">
-          <div className="cd-dwr-hd-l">
-            <div>
-              <div className="cd-dwr-kicker">{t.account.subscription}</div>
-              <div className="cd-dwr-title">{t.account.billingTitle}</div>
-            </div>
-          </div>
-          <button className="cd-dwr-x" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 24 24" width={17} height={17} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </header>
-        <div className="cd-dwr-body">
-          <section className="cd-card cd-setup-required">
-            <div className="cd-s-title">{billing?.status === "configured" ? t.account.managePayment : t.account.billingSoon}</div>
-            <h2>{billing?.paymentMethodLabel || t.account.billingNoMethod}</h2>
-            <p className="cd-setup-note">{t.account.billingInvoicesSoon}</p>
-          </section>
-        </div>
-      </aside>
-    </>
-  );
 }
 
 function fmtPointLabel(capturedAt: string, lang: Lang) {
@@ -1618,7 +1577,18 @@ export default function ClientDashboard({
           onReload={reloadTargeting}
         />
       ) : null}
-      <PaymentBillingDrawer open={billingDrawerOpen} onClose={() => setBillingDrawerOpen(false)} lang={lang} t={t} billing={workspace?.billing ?? null} />
+      <ClientPaymentBillingDrawer
+        open={billingDrawerOpen}
+        onClose={() => setBillingDrawerOpen(false)}
+        lang={lang}
+        accountCopy={{
+          billingTitle: t.account.billingTitle,
+          managePayment: t.account.managePayment,
+          billingNoMethod: t.account.billingNoMethod,
+          billingSoon: t.account.billingSoon,
+          billingInvoicesSoon: t.account.billingInvoicesSoon,
+        }}
+      />
 
       {connectProgress ? (
         <div className="cd-progress-overlay" role="presentation" onMouseDown={() => setConnectProgress(null)}>
@@ -2070,6 +2040,17 @@ const CSS = `
 .cd-fi-in[readonly]{color:var(--ink-mute);cursor:default}
 .cd-fi-textarea{min-height:72px;resize:vertical;line-height:1.5}
 .cd-billing-dwr{max-width:520px}
+.cd-billing-invoice{display:flex;flex-direction:column;gap:10px;padding:12px 0;border-top:1px solid var(--line)}
+.cd-billing-invoice:first-of-type{border-top:none;padding-top:0}
+.cd-billing-invoice-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cd-billing-invoice-meta{display:flex;flex-wrap:wrap;gap:8px;color:var(--ink-mute);font-size:.82rem}
+.cd-billing-invoice-actions{display:flex;flex-wrap:wrap;gap:8px}
+.cd-billing-status{font-size:.72rem;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:4px 8px}
+.cd-billing-status.is-paid{color:var(--good);border-color:var(--good-line);background:var(--good-bg)}
+.cd-billing-status.is-open{color:#FCD34D;border-color:rgba(245,158,11,.45);background:rgba(120,53,15,.22)}
+.cd-billing-status.is-failed{color:var(--bad);border-color:var(--bad-line);background:var(--bad-bg)}
+.cd-billing-status.is-refunded,.cd-billing-status.is-unknown{color:var(--ink-mute)}
+.cd-billing-account+.cd-billing-account{margin-top:4px}
 
 /* Drawer scrim */
 .cd-dwr-scrim{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity var(--tr),visibility var(--tr);z-index:90}
