@@ -54,9 +54,19 @@ export type SafeCatalogMappingFailurePayload = {
   code: string;
   stage: SafeCatalogMappingStage;
   checkpoint?: SafeCatalogMappingCheckpoint;
+  error_class?: SafeCatalogMappingErrorClass;
   provider_status?: number;
   provider_code?: string;
 };
+
+export type SafeCatalogMappingErrorClass =
+  | "safe_failure"
+  | "SafeCatalogMappingError"
+  | "TypeError"
+  | "ReferenceError"
+  | "RangeError"
+  | "Error"
+  | "unknown";
 
 export class SafeCatalogMappingError extends Error {
   code: string;
@@ -198,6 +208,7 @@ export type StripeCatalogMappingSyncResult =
       mode: "sync_mapping";
       stage?: SafeCatalogMappingStage;
       checkpoint?: SafeCatalogMappingCheckpoint;
+      error_class?: SafeCatalogMappingErrorClass;
       provider_status?: number;
       provider_code?: string;
       productName?: string;
@@ -633,6 +644,7 @@ export function safeCatalogMappingFailurePayload(
       code: safeError.code,
       stage: safeError.stage,
       checkpoint: safeError.checkpoint,
+      error_class: safeErrorClass(error),
       provider_status: safeError.provider_status,
       provider_code: safeError.provider_code,
     });
@@ -642,6 +654,7 @@ export function safeCatalogMappingFailurePayload(
     code: fallback.code,
     stage: fallback.stage,
     checkpoint: safeCheckpoint(error) ?? fallback.checkpoint,
+    error_class: safeErrorClass(error),
     provider_status: safeProviderStatus(error),
     provider_code: safeProviderCode(error),
   });
@@ -968,6 +981,15 @@ function isUnexpectedRuntimeError(error: unknown) {
   return error instanceof TypeError
     || error instanceof ReferenceError
     || error instanceof RangeError;
+}
+
+function safeErrorClass(error: unknown): SafeCatalogMappingErrorClass {
+  if (error instanceof TypeError) return "TypeError";
+  if (error instanceof ReferenceError) return "ReferenceError";
+  if (error instanceof RangeError) return "RangeError";
+  if (error instanceof SafeCatalogMappingError) return "SafeCatalogMappingError";
+  if (error instanceof Error) return "Error";
+  return "unknown";
 }
 
 function compactFailurePayload(payload: SafeCatalogMappingFailurePayload): SafeCatalogMappingFailurePayload {

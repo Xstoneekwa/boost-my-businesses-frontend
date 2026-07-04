@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createClient } from "@supabase/supabase-js";
+import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import {
   SafeCatalogMappingError,
@@ -24,8 +25,11 @@ export async function runStripeCatalogMappingCli(options = {}) {
   const makeStripeClient = options.createStripeClient ?? createStripeClient;
   const makeSupabaseClient = options.createSupabaseClient ?? createClient;
   const makeMappingStore = options.createMappingStore ?? ((supabase) => new SupabaseMappingStore(supabase));
+  const writeDiagnosticFile = options.writeDiagnosticFile ?? writeRedactedDiagnosticFile;
+  const now = options.now ?? (() => new Date());
   const args = new Set(argv);
   const apply = args.has("--apply");
+  const mode = apply ? "apply" : "dry_run";
   let activeCheckpoint = "cli_preflight";
   const setActiveCheckpoint = (checkpoint) => {
     if (ALLOWED_RUNTIME_CHECKPOINTS.has(checkpoint)) {
@@ -34,12 +38,21 @@ export async function runStripeCatalogMappingCli(options = {}) {
   };
 
   if (apply && !args.has("--i-understand-this-writes-production-mapping")) {
-    stderr(JSON.stringify({
+    const failure = {
       ok: false,
       code: "mapping_apply_confirmation_required",
       stage: "validation",
       checkpoint: "cli_preflight",
-    }));
+    };
+    await maybeWriteDiagnosticFile({
+      env,
+      failure,
+      mode,
+      errorClass: "safe_failure",
+      now,
+      writeDiagnosticFile,
+    });
+    stderr(JSON.stringify(failure));
     return 2;
   }
   try {
@@ -76,7 +89,16 @@ export async function runStripeCatalogMappingCli(options = {}) {
     });
 
     if (!result.ok) {
-      stderr(JSON.stringify(safeCliFailurePayload(result)));
+      const failure = safeCliFailurePayload(result);
+      await maybeWriteDiagnosticFile({
+        env,
+        failure,
+        mode,
+        errorClass: result.error_class ?? "safe_failure",
+        now,
+        writeDiagnosticFile,
+      });
+      stderr(JSON.stringify(failure));
       return 2;
     }
 
@@ -94,11 +116,20 @@ export async function runStripeCatalogMappingCli(options = {}) {
     }, null, 2));
     return 0;
   } catch (error) {
-    stderr(JSON.stringify(safeCliFailurePayload(safeCatalogMappingFailurePayload(error, {
+    const failure = safeCliFailurePayload(safeCatalogMappingFailurePayload(error, {
       code: "unexpected_sync_failure",
       stage: "validation",
       checkpoint: activeCheckpoint,
-    }))));
+    }));
+    await maybeWriteDiagnosticFile({
+      env,
+      failure,
+      mode,
+      errorClass: safeErrorClass(error),
+      now,
+      writeDiagnosticFile,
+    });
+    stderr(JSON.stringify(failure));
     return 2;
   }
 }
@@ -200,6 +231,38 @@ function safeCliFailurePayload(failure) {
   );
 }
 
+async function maybeWriteDiagnosticFile(input) {
+  const path = String(input.env.STRIPE_MAPPING_DIAGNOSTIC_FILE ?? "").trim();
+  if (!path) return;
+  const diagnostic = safeDiagnosticPayload({
+    failure: input.failure,
+    mode: input.mode,
+    errorClass: input.errorClass,
+    timestamp: input.now().toISOString(),
+  });
+  await input.writeDiagnosticFile(path, diagnostic);
+}
+
+function safeDiagnosticPayload(input) {
+  return Object.fromEntries(
+    Object.entries({
+      ok: false,
+      code: input.failure.code,
+      stage: input.failure.stage,
+      checkpoint: input.failure.checkpoint,
+      error_class: ALLOWED_ERROR_CLASSES.has(input.errorClass) ? input.errorClass : "unknown",
+      provider_status: input.failure.provider_status,
+      provider_code: input.failure.provider_code,
+      timestamp: input.timestamp,
+      mode: input.mode,
+    }).filter(([, value]) => value !== undefined),
+  );
+}
+
+async function writeRedactedDiagnosticFile(path, payload) {
+  await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+}
+
 function safeSupabaseError(error, input) {
   const provider_status = safeProviderStatus(error);
   const provider_code = safeProviderCode(error);
@@ -256,6 +319,15 @@ function isUnexpectedRuntimeError(error) {
     || error instanceof RangeError;
 }
 
+function safeErrorClass(error) {
+  if (error instanceof TypeError) return "TypeError";
+  if (error instanceof ReferenceError) return "ReferenceError";
+  if (error instanceof RangeError) return "RangeError";
+  if (error instanceof SafeCatalogMappingError) return "SafeCatalogMappingError";
+  if (error instanceof Error) return "Error";
+  return "unknown";
+}
+
 const ALLOWED_SUPABASE_PROVIDER_CODES = new Set([
   "42501",
   "42P01",
@@ -275,4 +347,14 @@ const ALLOWED_RUNTIME_CHECKPOINTS = new Set([
   "mapping_store_read",
   "mapping_conflict_check",
   "mapping_store_write",
+]);
+
+const ALLOWED_ERROR_CLASSES = new Set([
+  "safe_failure",
+  "SafeCatalogMappingError",
+  "TypeError",
+  "ReferenceError",
+  "RangeError",
+  "Error",
+  "unknown",
 ]);
