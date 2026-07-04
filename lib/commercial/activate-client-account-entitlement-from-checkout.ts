@@ -26,9 +26,11 @@ import {
 import { verifyActivationCompletion } from "./checkout-completion.ts";
 import { resolveSimulatedPublicAuth, resolveStripePaidPublicAuth, lookupPurchaserAuthState } from "./checkout-auth.ts";
 import { findIncompleteCheckoutSessionForClient } from "./checkout-provisioning-state.ts";
+import type { CommercialCheckoutProvenance } from "./commercial-provenance.ts";
+import { resolveCommercialCheckoutProvenance } from "./commercial-provenance.ts";
 import {
+  buildCheckoutSubscriptionPayload,
   buildClientUserInsertPayload,
-  buildSimulatedCheckoutSubscriptionPayload,
   buildTenantUserInsertPayload,
 } from "./checkout-workspace-payloads.ts";
 import {
@@ -321,6 +323,7 @@ async function ensureClientWorkspace(
     idempotencyKey: string;
     tracker?: ActivationAttemptTracker;
     internalTestClient?: boolean;
+    checkoutProvenance: CommercialCheckoutProvenance;
   },
 ) {
   let clientId = input.resumeClientId?.trim()
@@ -334,13 +337,17 @@ async function ensureClientWorkspace(
         name: input.displayName,
         status: "active",
         metadata: input.internalTestClient
-          ? buildInternalTestClientMetadata({ email: input.email, displayName: input.displayName })
+          ? buildInternalTestClientMetadata({
+            email: input.email,
+            displayName: input.displayName,
+            checkoutSource: input.checkoutProvenance,
+          })
           : {
             contact_email: input.email,
             display_name: input.displayName,
             service_page_url: "/instagram-growth",
             preferred_language: "fr",
-            checkout_source: "simulated_checkout",
+            checkout_source: input.checkoutProvenance,
           },
       })
       .select("id")
@@ -466,7 +473,8 @@ async function ensureClientWorkspace(
   if (!existingSubscription?.id) {
     const { error: subscriptionError } = await supabase
       .from("client_subscriptions")
-      .insert(buildSimulatedCheckoutSubscriptionPayload(clientId, {
+      .insert(buildCheckoutSubscriptionPayload(clientId, {
+        provenance: input.checkoutProvenance,
         internalTestClient: input.internalTestClient,
       }));
     if (subscriptionError) {
@@ -540,6 +548,9 @@ export async function activateClientAccountEntitlementFromCheckout(
 
     const email = normalizeCheckoutEmail(input.purchaserEmail);
     const checkoutContext = resolveCheckoutContext({ flowType: input.flowType });
+    const checkoutProvenance = resolveCommercialCheckoutProvenance({
+      mode: input.mode === "stripe" ? "stripe" : "simulated",
+    });
     const handoff = resolveCheckoutHandoff(checkoutContext);
     const redirectPath = handoffToRedirectPath(handoff);
 
@@ -834,6 +845,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         idempotencyKey: tracker.idempotencyKey,
         tracker,
         internalTestClient: tracker.simulationAccessSource === "prod_test_authorization",
+        checkoutProvenance,
       });
       clientId = workspace.clientId;
       tracker.clientId = clientId;
@@ -887,6 +899,7 @@ export async function activateClientAccountEntitlementFromCheckout(
           auth_user_id: authUserId,
           metadata: {
             mode: "stripe_test",
+            checkout_source: checkoutProvenance,
             payment_provider: "stripe",
             payment_status: "confirmed",
             checkout_context: checkoutContext,
@@ -912,12 +925,18 @@ export async function activateClientAccountEntitlementFromCheckout(
     if (!skipCheckoutSessionInsert) {
       const sessionStatus = input.mode === "stripe" ? "checkout_paid" : "checkout_activated_test";
       const paymentMeta = input.mode === "stripe"
-        ? { mode: "stripe_test", payment_provider: "stripe", payment_status: "confirmed" }
+        ? {
+          mode: "stripe_test",
+          checkout_source: checkoutProvenance,
+          payment_provider: "stripe",
+          payment_status: "confirmed",
+        }
         : {
-            mode: "simulated",
-            payment_provider: "simulated",
-            payment_status: "simulated_confirmed",
-          };
+          mode: "simulated",
+          checkout_source: checkoutProvenance,
+          payment_provider: "simulated",
+          payment_status: "simulated_confirmed",
+        };
       const { data: checkoutSession, error: checkoutError } = await supabase
         .from("commercial_checkout_sessions")
         .insert({

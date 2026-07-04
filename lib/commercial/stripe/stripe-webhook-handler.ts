@@ -19,6 +19,12 @@ import {
   validatePlanChangeCheckoutPayment,
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
+import {
+  buildStripeSubscriptionSnapshot,
+  patchStripeWebhookEventMetadata,
+  reconcileDeferredStripeSubscriptionWebhookEvents,
+  resolveStripeSubscriptionWebhookCorrelation,
+} from "./stripe-subscription-webhook-reconciliation.ts";
 import { clearCheckoutPendingSignupCredentialIdempotent } from "../checkout-pending-signup-credential.ts";
 
 type Row = Record<string, unknown>;
@@ -106,7 +112,7 @@ export async function handleStripeWebhookEvent(
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
-        await handleSubscriptionProjectionEvent(supabase, event);
+        await handleSubscriptionProjectionEvent(supabase, event, { eventRowId });
         break;
       case "invoice.paid":
       case "invoice.payment_failed":
@@ -229,7 +235,11 @@ async function handleCheckoutSessionExpired(supabase: SupabaseClient, event: Str
   }
 }
 
-async function handleSubscriptionProjectionEvent(supabase: SupabaseClient, event: Stripe.Event) {
+async function handleSubscriptionProjectionEvent(
+  supabase: SupabaseClient,
+  event: Stripe.Event,
+  context: { eventRowId: string },
+) {
   const subscription = event.data.object as Stripe.Subscription;
   assertStripeTestLivemode(subscription.livemode);
   const customerId = readString(subscription.customer);
@@ -240,7 +250,34 @@ async function handleSubscriptionProjectionEvent(supabase: SupabaseClient, event
     .maybeSingle<Row>();
 
   if (!profile?.client_id) {
-    throw new StripeFulfillmentError("stripe_customer_unknown", "Stripe customer is not linked to an internal client.", false);
+    if (event.type === "customer.subscription.deleted") {
+      throw new StripeFulfillmentError(
+        "stripe_customer_unknown",
+        "Stripe customer is not linked to an internal client.",
+        false,
+      );
+    }
+    const correlation = await resolveStripeSubscriptionWebhookCorrelation(supabase, {
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscription.id,
+      excludeEventRowId: context.eventRowId,
+    });
+    if (correlation.action === "reject") {
+      throw new StripeFulfillmentError(
+        "stripe_customer_unknown",
+        "Stripe customer is not linked to an internal client.",
+        false,
+      );
+    }
+    await patchStripeWebhookEventMetadata(supabase, context.eventRowId, {
+      defer_reason: "awaiting_billing_profile",
+      subscription_snapshot: buildStripeSubscriptionSnapshot(subscription),
+    });
+    throw new StripeFulfillmentError(
+      "stripe_customer_pending_link",
+      "Stripe customer is not linked to an internal client yet.",
+      true,
+    );
   }
 
   await upsertStripeSubscriptionProjection(supabase, {
@@ -257,6 +294,17 @@ async function handleSubscriptionProjectionEvent(supabase: SupabaseClient, event
       : null,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
   });
+
+  if (
+    event.type === "customer.subscription.created"
+    || event.type === "customer.subscription.updated"
+  ) {
+    await reconcileDeferredStripeSubscriptionWebhookEvents(supabase, {
+      clientId: String(profile.client_id),
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscription.id,
+    });
+  }
 }
 
 async function handleInvoiceEvent(supabase: SupabaseClient, event: Stripe.Event) {

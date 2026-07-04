@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeCheckoutEmail } from "./checkout-context.ts";
 import { readServerSupabaseProjectRef } from "./server-supabase-ref.ts";
 import type { BillingIntervalMonths, PlanKey } from "./catalog.ts";
+import type { CommercialCheckoutProvenance } from "./commercial-provenance.ts";
 
 export const PRODUCTION_CHECKOUT_ALLOWED_REF = "zgafnshkjywfltxgbtzg";
 
@@ -259,22 +260,28 @@ export async function recordProdTestCheckoutAuthorizationUsage(input: {
   }
 }
 
-export function buildInternalTestClientMetadata(input: { email: string; displayName: string }) {
+export function buildInternalTestClientMetadata(input: {
+  email: string;
+  displayName: string;
+  checkoutSource?: CommercialCheckoutProvenance;
+}) {
   return {
     contact_email: normalizeCheckoutEmail(input.email),
     display_name: input.displayName,
     service_page_url: "/instagram-growth",
     preferred_language: "fr",
-    checkout_source: "simulated_checkout",
+    checkout_source: input.checkoutSource ?? "simulated_checkout",
     internal_test_client: true,
     billing_excluded: true,
     non_billable: true,
   };
 }
 
-export function buildInternalTestSubscriptionMetadata() {
+export function buildInternalTestSubscriptionMetadata(input?: {
+  checkoutSource?: CommercialCheckoutProvenance;
+}) {
   return {
-    source: "simulated_checkout",
+    source: input?.checkoutSource ?? "simulated_checkout",
     billing_mode: "per_account_entitlement",
     internal_test_client: true,
     billing_excluded: true,

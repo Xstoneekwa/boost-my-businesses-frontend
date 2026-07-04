@@ -23,6 +23,7 @@ import {
 } from "./stripe-subscription-projection.ts";
 import { getStripeClient } from "./stripe-client.ts";
 import { assertStripeTestLivemode } from "./stripe-config.ts";
+import { reconcileDeferredStripeSubscriptionWebhookEvents } from "./stripe-subscription-webhook-reconciliation.ts";
 import { STRIPE_ATTEMPT_STATUS, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
 import { isValidStripePriceId } from "./stripe-catalog.ts";
 
@@ -239,6 +240,11 @@ async function fulfillSubscriptionAttempt(
       currentPeriodStart: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
+    });
+    await reconcileDeferredStripeSubscriptionWebhookEvents(supabase, {
+      clientId: activation.clientId,
+      stripeCustomerId: input.customerId,
+      stripeSubscriptionId: input.subscriptionId,
     });
   }
 
