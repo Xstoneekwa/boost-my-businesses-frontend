@@ -22,6 +22,17 @@ test("canonical contact email prefers clients.metadata.contact_email", () => {
   assert.equal(resolved.source, "clients.metadata.contact_email");
 });
 
+test("owner auth email is used when canonical client contact email is absent", () => {
+  const resolved = resolveClientCommunicationEmail({
+    client: { metadata: {} },
+    ownerAuthEmail: "OwnerAuth@Example.com",
+  });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  assert.equal(resolved.email, "ownerauth@example.com");
+  assert.equal(resolved.source, "client_users.owner_auth_email");
+});
+
 test("missing canonical contact returns explicit non-sendable state", () => {
   const resolved = resolveClientCommunicationEmail({
     client: { metadata: {} },
@@ -38,11 +49,11 @@ test("instagram and credential sources are forbidden for communication email", (
   assert.equal(isForbiddenCommunicationEmailSource("clients.metadata.contact_email"), false);
 });
 
-test("projectClientContactEmailDisplay surfaces Contact email missing when canonical is absent", () => {
+test("projectClientContactEmailDisplay surfaces Not provided when canonical is absent", () => {
   const projected = projectClientContactEmailDisplay(
-    resolveClientCommunicationEmail({ client: { metadata: {} }, workspaceAuthEmail: "" }),
+    resolveClientCommunicationEmail({ client: { metadata: {} }, ownerAuthEmail: "" }),
   );
-  assert.equal(projected.display, "Contact email missing");
+  assert.equal(projected.display, "Not provided");
   assert.equal(projected.source, "missing");
   assert.equal(projected.available, false);
 });

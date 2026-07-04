@@ -370,12 +370,13 @@ function lifecycleActionAvailability(account: ManageAccount, status: ClientAccou
 function resolveClientContactEmailForAccount(
   account: ManageAccount,
   clientById: Map<string, Record<string, unknown>>,
+  ownerAuthEmailByClientId: Map<string, string>,
 ) {
   const clientId = account.clientId || "";
   const clientRow = clientId ? clientById.get(clientId) ?? null : null;
   return projectClientContactEmailDisplay(resolveClientCommunicationEmail({
     client: clientRow,
-    workspaceAuthEmail: null,
+    ownerAuthEmail: clientId ? ownerAuthEmailByClientId.get(clientId) ?? null : null,
   }));
 }
 
@@ -385,6 +386,7 @@ function mapAccount(
   passwordUpdateAlreadyRequested: boolean,
   needsMoreProjection: { needsMoreTargets: boolean; eligibleTargetCount: number },
   clientById: Map<string, Record<string, unknown>>,
+  ownerAuthEmailByClientId: Map<string, string>,
 ): ClientAccountOperationsItem {
   const needsAssistanceReason = assistanceReason(account, hasDashboardAction);
   const needsAssistance = needsAssistanceReason !== null;
@@ -392,7 +394,7 @@ function mapAccount(
   const profileImageUrl = safeProfileImageUrl(account);
   const readiness = account.readinessProjection;
   const assignmentParts = [account.assignmentStatus, account.scheduleLabel].filter(Boolean);
-  const clientContactEmail = resolveClientContactEmailForAccount(account, clientById);
+  const clientContactEmail = resolveClientContactEmailForAccount(account, clientById, ownerAuthEmailByClientId);
 
   return {
     accountId: account.accountId,
@@ -476,6 +478,61 @@ async function loadClientRowsById(
   );
 }
 
+async function loadOwnerAuthEmailByClientId(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  clientIds: string[],
+): Promise<Map<string, string>> {
+  if (!clientIds.length) return new Map();
+  const { data: clientUsers, error: clientUsersError } = await supabase
+    .from("client_users")
+    .select("client_id,auth_user_id,role,status")
+    .in("client_id", clientIds)
+    .eq("status", "active")
+    .in("role", ["owner", "admin"]);
+  if (clientUsersError || !Array.isArray(clientUsers)) return new Map();
+
+  const ownersByClient = new Map<string, string[]>();
+  for (const row of clientUsers as Record<string, unknown>[]) {
+    const clientId = typeof row.client_id === "string" ? row.client_id.trim() : "";
+    const authUserId = typeof row.auth_user_id === "string" ? row.auth_user_id.trim() : "";
+    if (!clientId || !authUserId) continue;
+    const current = ownersByClient.get(clientId) ?? [];
+    current.push(authUserId);
+    ownersByClient.set(clientId, current);
+  }
+
+  const authUserIds = [...new Set([...ownersByClient.values()].flat())];
+  if (!authUserIds.length) return new Map();
+
+  const { data: authUsers, error: authUsersError } = await supabase
+    .schema("auth")
+    .from("users")
+    .select("id,email")
+    .in("id", authUserIds);
+  if (authUsersError || !Array.isArray(authUsers)) return new Map();
+
+  const emailByUserId = new Map(
+    (authUsers as Record<string, unknown>[])
+      .map((row) => {
+        const id = typeof row.id === "string" ? row.id.trim() : "";
+        const email = typeof row.email === "string" ? row.email.trim() : "";
+        return id && email ? [id, email] as const : null;
+      })
+      .filter((entry): entry is readonly [string, string] => Boolean(entry)),
+  );
+
+  const result = new Map<string, string>();
+  for (const [clientId, authUserIdsForClient] of ownersByClient) {
+    const emails = [
+      ...new Set(authUserIdsForClient
+        .map((authUserId) => emailByUserId.get(authUserId))
+        .filter((email): email is string => Boolean(email))),
+    ];
+    if (emails.length === 1) result.set(clientId, emails[0]);
+  }
+  return result;
+}
+
 export async function getClientAccountsOperationsData(): Promise<ClientAccountsOperationsOverview> {
   const [manageData, credentialsData] = await Promise.all([getManageData(), getCredentialsActionsData()]);
   const actionAccountIds = new Set(credentialsData.actionGroups.map((group) => group.accountId || group.username));
@@ -497,7 +554,10 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
       .map((account) => account.clientId)
       .filter((clientId): clientId is string => Boolean(clientId)),
   )];
-  const clientById = await loadClientRowsById(supabase, clientIds);
+  const [clientById, ownerAuthEmailByClientId] = await Promise.all([
+    loadClientRowsById(supabase, clientIds),
+    loadOwnerAuthEmailByClientId(supabase, clientIds),
+  ]);
   const items = manageData.allAccounts.map((account) => {
     const accountId = account.accountId || "";
     const needsMoreProjection = needsMoreByAccount.get(accountId) ?? {
@@ -510,6 +570,7 @@ export async function getClientAccountsOperationsData(): Promise<ClientAccountsO
       passwordUpdateAccountIds.has(account.accountId || account.username),
       needsMoreProjection,
       clientById,
+      ownerAuthEmailByClientId,
     );
   });
 

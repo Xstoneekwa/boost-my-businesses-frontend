@@ -4,7 +4,7 @@ export type ClientCommunicationEmailSource =
   | "clients.metadata.contact_email"
   | "clients.metadata.notification_email"
   | "clients.metadata.primary_contact_email"
-  | "workspace.auth_email"
+  | "client_users.owner_auth_email"
   | "missing";
 
 export type ResolvedClientCommunicationEmail =
@@ -61,6 +61,7 @@ export function isForbiddenCommunicationEmailSource(source: string) {
 
 export function resolveClientCommunicationEmail(input: {
   client?: SupabaseRecord | null;
+  ownerAuthEmail?: string | null;
   workspaceAuthEmail?: string | null;
 }): ResolvedClientCommunicationEmail {
   const metadata = readMetadata(input.client ?? null);
@@ -77,9 +78,9 @@ export function resolveClientCommunicationEmail(input: {
     }
   }
 
-  const authEmail = normalizeCommunicationEmail(input.workspaceAuthEmail);
+  const authEmail = normalizeCommunicationEmail(input.ownerAuthEmail ?? input.workspaceAuthEmail);
   if (authEmail) {
-    return { ok: true, email: authEmail, source: "workspace.auth_email" };
+    return { ok: true, email: authEmail, source: "client_users.owner_auth_email" };
   }
 
   return {
@@ -91,12 +92,13 @@ export function resolveClientCommunicationEmail(input: {
 
 export function resolveRecipientEmailSnapshot(input: {
   client?: SupabaseRecord | null;
+  ownerAuthEmail?: string | null;
   workspaceAuthEmail?: string | null;
 }) {
   return resolveClientCommunicationEmail(input);
 }
 
-export const CONTACT_EMAIL_MISSING_LABEL = "Contact email missing";
+export const CONTACT_EMAIL_MISSING_LABEL = "Not provided";
 
 export type ProjectedClientContactEmail = {
   display: string;

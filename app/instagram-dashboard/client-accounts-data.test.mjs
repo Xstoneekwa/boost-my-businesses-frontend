@@ -28,6 +28,8 @@ test("client accounts email projection uses safe DB sources and copy UI", () => 
   assert.match(dataSource, /clientContactEmail/);
   assert.match(dataSource, /resolveClientCommunicationEmail/);
   assert.match(dataSource, /from\("clients"\)/);
+  assert.match(dataSource, /from\("client_users"\)/);
+  assert.match(dataSource, /\.schema\("auth"\)/);
   assert.doesNotMatch(dataSource, /resolveAccountEmail/);
   assert.match(pageSource, /EmailCopyButton/);
   assert.doesNotMatch(pageSource, /<td>\{item\.emailDisplay\}<\/td>/);

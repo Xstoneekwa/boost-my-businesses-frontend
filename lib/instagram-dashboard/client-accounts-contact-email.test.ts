@@ -12,9 +12,11 @@ const dataSource = readFileSync(
   "utf8",
 );
 
-test("client accounts contact email uses canonical clients.metadata resolver only", () => {
+test("client accounts contact email uses canonical clients and active owner resolver only", () => {
   assert.match(dataSource, /resolveClientCommunicationEmail/);
   assert.match(dataSource, /from\("clients"\)/);
+  assert.match(dataSource, /from\("client_users"\)/);
+  assert.match(dataSource, /\.schema\("auth"\)/);
   assert.match(dataSource, /clientContactEmail:/);
   assert.match(dataSource, /clientContactEmailSource:/);
   assert.doesNotMatch(dataSource, /resolveAccountEmail/);
@@ -34,6 +36,17 @@ test("canonical contact email is projected for client accounts rows", () => {
   assert.equal(projected.available, true);
 });
 
+test("active owner auth email is projected when client contact email is absent", () => {
+  const resolved = resolveClientCommunicationEmail({
+    client: { metadata: {} },
+    ownerAuthEmail: "owner@example.com",
+  });
+  const projected = projectClientContactEmailDisplay(resolved);
+  assert.equal(projected.display, "owner@example.com");
+  assert.equal(projected.source, "client_users.owner_auth_email");
+  assert.equal(projected.available, true);
+});
+
 test("instagram credential email is never used for client accounts contact column", () => {
   const resolved = resolveClientCommunicationEmail({
     client: { metadata: {} },
@@ -45,11 +58,11 @@ test("instagram credential email is never used for client accounts contact colum
   assert.equal(projected.available, false);
 });
 
-test("missing canonical contact shows explicit Contact email missing label", () => {
+test("missing canonical contact shows explicit Not provided label", () => {
   const projected = projectClientContactEmailDisplay(
-    resolveClientCommunicationEmail({ client: { metadata: {} }, workspaceAuthEmail: "" }),
+    resolveClientCommunicationEmail({ client: { metadata: {} }, ownerAuthEmail: "" }),
   );
-  assert.equal(projected.display, "Contact email missing");
+  assert.equal(projected.display, "Not provided");
   assert.equal(projected.available, false);
 });
 
@@ -61,15 +74,16 @@ test("multi-account client shares the same canonical contact email", () => {
   assert.equal(first.source, second.source);
 });
 
-test("agency multi-user clients resolve from client metadata without arbitrary user fallback", () => {
-  assert.doesNotMatch(dataSource, /client_users/);
-  assert.doesNotMatch(dataSource, /auth\.users/);
+test("agency multi-user clients prefer metadata and avoid cross-tenant email fallback", () => {
+  assert.match(dataSource, /ownersByClient/);
+  assert.match(dataSource, /if \(emails\.length === 1\) result\.set\(clientId, emails\[0\]\)/);
   const resolved = resolveClientCommunicationEmail({
     client: {
       metadata: {
         primary_contact_email: "primary@agency.example",
       },
     },
+    ownerAuthEmail: "other-owner@example.com",
   });
   const projected = projectClientContactEmailDisplay(resolved);
   assert.equal(projected.display, "primary@agency.example");
