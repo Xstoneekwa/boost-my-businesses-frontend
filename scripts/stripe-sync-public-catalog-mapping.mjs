@@ -134,10 +134,6 @@ export async function runStripeCatalogMappingCli(options = {}) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exitCode = await runStripeCatalogMappingCli();
-}
-
 function readStripeTestKey(env) {
   const key = String(env.STRIPE_SECRET_KEY ?? "").trim();
   if (!key) throw new SafeCatalogMappingError({ code: "stripe_test_key_required", stage: "validation", checkpoint: "cli_preflight" });
@@ -358,3 +354,11 @@ const ALLOWED_ERROR_CLASSES = new Set([
   "Error",
   "unknown",
 ]);
+
+async function main() {
+  return runStripeCatalogMappingCli();
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exitCode = await main();
+}

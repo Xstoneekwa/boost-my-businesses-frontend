@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Safe operator wrapper for the Stripe Test -> Production mapping dry-run.
-# It reads the two secrets only from the current terminal environment:
+# It reads the two secrets only from the current terminal session:
 #   STRIPE_SECRET_KEY              restricted Stripe Test key, preferably rk_test_...
 #   SUPABASE_SERVICE_ROLE_KEY      Production Supabase service-role key
 #
@@ -12,12 +12,13 @@ set -euo pipefail
 if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
-  STRIPE_SECRET_KEY=... SUPABASE_SERVICE_ROLE_KEY=... bash scripts/stripe-mapping-dry-run-operator.sh
+  bash scripts/stripe-mapping-dry-run-operator.sh
 
 Optional:
   STRIPE_MAPPING_DIAGNOSTIC_FILE=/tmp/stripe-mapping-diagnostic.json
 
-This script runs dry-run only and refuses all positional arguments.
+The script prompts for missing secrets with masked Bash input, runs dry-run only,
+and refuses all positional arguments.
 EOF
   exit 0
 fi
@@ -34,10 +35,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -z "${STRIPE_SECRET_KEY:-}" || -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
-  echo '{"ok":false,"code":"operator_secrets_required","stage":"validation","checkpoint":"cli_preflight"}' >&2
-  exit 2
-fi
+prompt_secret() {
+  local variable_name="$1"
+  local prompt_text="$2"
+  local current_value="${!variable_name:-}"
+  if [[ -n "${current_value}" ]]; then
+    export "${variable_name}"
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo '{"ok":false,"code":"operator_interactive_terminal_required","stage":"validation","checkpoint":"cli_preflight"}' >&2
+    exit 2
+  fi
+  local secret_value=""
+  IFS= read -r -s -p "${prompt_text}" secret_value
+  printf '\n' >&2
+  if [[ -z "${secret_value}" ]]; then
+    echo '{"ok":false,"code":"operator_secrets_required","stage":"validation","checkpoint":"cli_preflight"}' >&2
+    exit 2
+  fi
+  printf -v "${variable_name}" '%s' "${secret_value}"
+  export "${variable_name}"
+}
+
+prompt_secret "STRIPE_SECRET_KEY" "Stripe Test restricted key (rk_test_...): "
+prompt_secret "SUPABASE_SERVICE_ROLE_KEY" "Supabase Production service-role key: "
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
