@@ -211,6 +211,7 @@ export async function resolveStripePaidPublicAuth(
   input: {
     email: string;
     idempotencyKey: string;
+    password?: string | null;
   },
 ): Promise<SimulatedPublicAuthResult> {
   const email = input.email.trim().toLowerCase();
@@ -240,6 +241,7 @@ export async function resolveStripePaidPublicAuth(
 
   const { data, error } = await supabase.auth.admin.createUser({
     email,
+    ...(input.password ? { password: input.password } : {}),
     email_confirm: true,
   });
   if (error || !data.user?.id) {

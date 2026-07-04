@@ -62,6 +62,7 @@ export async function verifyStripeWebhookSignature(
 export async function handleStripeWebhookEvent(
   supabase: SupabaseClient,
   event: Stripe.Event,
+  env: NodeJS.ProcessEnv = process.env,
 ) {
   if (event.livemode) {
     return { ok: false as const, status: 400, code: "stripe_livemode_rejected" as const };
@@ -96,7 +97,7 @@ export async function handleStripeWebhookEvent(
   try {
     switch (event.type) {
       case "checkout.session.completed":
-        await handleCheckoutSessionFulfillmentEvent(supabase, event);
+        await handleCheckoutSessionFulfillmentEvent(supabase, event, env);
         break;
       case "checkout.session.expired":
         await handleCheckoutSessionExpired(supabase, event);
@@ -134,7 +135,11 @@ export async function handleStripeWebhookEvent(
   }
 }
 
-async function handleCheckoutSessionFulfillmentEvent(supabase: SupabaseClient, event: Stripe.Event) {
+async function handleCheckoutSessionFulfillmentEvent(
+  supabase: SupabaseClient,
+  event: Stripe.Event,
+  env: NodeJS.ProcessEnv = process.env,
+) {
   const session = event.data.object as Stripe.Checkout.Session;
   assertStripeTestLivemode(session.livemode);
 
@@ -188,7 +193,7 @@ async function handleCheckoutSessionFulfillmentEvent(supabase: SupabaseClient, e
       attempt: refreshed.attempt,
       session,
       stripe,
-    });
+    }, env);
     if ("awaitingPayment" in result && result.awaitingPayment) {
       await markStripeCheckoutAttemptAwaitingPayment(supabase, refreshed.attempt.id, {
         reason: readString(result.reason, "payment_not_confirmed"),

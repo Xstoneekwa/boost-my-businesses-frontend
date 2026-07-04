@@ -757,6 +757,7 @@ export async function activateClientAccountEntitlementFromCheckout(
             ? await resolveStripePaidPublicAuth(supabase, {
               email,
               idempotencyKey: tracker.idempotencyKey,
+              password: input.password ?? null,
             })
             : await resolveSimulatedPublicAuth(supabase, {
               email,

@@ -9,6 +9,11 @@ import {
 } from "@/lib/commercial/checkout-api-messages";
 import { resolveCommercialCheckoutActivationState } from "@/lib/commercial/commercial-checkout-form-state";
 import {
+  publicCheckoutPricingPath,
+  resolvePublicCheckoutSelection,
+  type ResolvedPublicCheckoutSelection,
+} from "@/lib/commercial/resolve-public-checkout-selection";
+import {
   CHECKOUT_PASSWORD_MIN_LENGTH,
   publicCheckoutPasswordRulesEn,
   publicCheckoutPasswordRulesFr,
@@ -37,7 +42,7 @@ type QuoteLine = {
 };
 
 type QuotePayload = {
-  planKey: PlanKey;
+  planKey: PlanKey | null;
   billingIntervalMonths: BillingIntervalMonths;
   outreachAddonKey: OutreachAddonKey | null;
   appliedDiscountPercent: number;
@@ -78,22 +83,47 @@ export default function CommercialCheckoutForm(props: {
   const searchParams = useSearchParams();
   const isPublicCheckout = props.flowType === "first_purchase";
   const isStripeTestCheckout = props.checkoutMode === "stripe_test";
-  const [planKey, setPlanKey] = useState<PlanKey>(
-    isPlanKey(props.initialPlan ?? searchParams.get("plan") ?? "pro") ? (props.initialPlan ?? searchParams.get("plan") ?? "pro") as PlanKey : "pro",
+
+  const incomingSelection = useMemo<ResolvedPublicCheckoutSelection | null>(() => {
+    if (!isPublicCheckout) return null;
+    return resolvePublicCheckoutSelection({
+      plan: props.initialPlan ?? searchParams.get("plan"),
+      months: props.initialMonths ?? searchParams.get("months") ?? "1",
+      outreach: props.initialOutreach ?? searchParams.get("outreach"),
+      commercialMode: searchParams.get("commercial_mode"),
+    });
+  }, [
+    isPublicCheckout,
+    props.initialPlan,
+    props.initialMonths,
+    props.initialOutreach,
+    searchParams,
+  ]);
+
+  const selectionBlocked = isPublicCheckout && incomingSelection != null && !incomingSelection.ok;
+  const resolvedSelection = incomingSelection?.ok ? incomingSelection : null;
+
+  const [commercialMode, setCommercialMode] = useState<"full_cycle" | "outreach_only">(
+    resolvedSelection?.commercialMode ?? "full_cycle",
   );
-  const [months, setMonths] = useState<BillingIntervalMonths>(
-    [1, 3, 6, 12].includes(Number(props.initialMonths ?? searchParams.get("months") ?? 1))
-      ? Number(props.initialMonths ?? searchParams.get("months") ?? 1) as BillingIntervalMonths
-      : 1,
-  );
-  const [outreach, setOutreach] = useState<OutreachAddonKey | "">(() => {
-    const raw = props.initialOutreach ?? searchParams.get("outreach") ?? "";
-    return isOutreachAddonKey(raw) ? raw : "";
+  const [planKey, setPlanKey] = useState<PlanKey>(() => {
+    if (resolvedSelection?.commercialMode === "full_cycle") return resolvedSelection.planKey;
+    const fromProp = props.initialPlan ?? searchParams.get("plan") ?? "";
+    return isPlanKey(fromProp) ? fromProp : "pro";
   });
+  const [months, setMonths] = useState<BillingIntervalMonths>(
+    resolvedSelection?.billingIntervalMonths ?? 1,
+  );
+  const [outreach, setOutreach] = useState<OutreachAddonKey | "">(
+    resolvedSelection?.commercialMode === "outreach_only"
+      ? resolvedSelection.outreachAddonKey
+      : (resolvedSelection?.outreachAddonKey ?? ""),
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
   const [quote, setQuote] = useState<QuotePayload | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [activationAvailable, setActivationAvailable] = useState(false);
@@ -119,7 +149,7 @@ export default function CommercialCheckoutForm(props: {
     email,
     password,
     passwordConfirmation,
-    requirePassword: isPublicCheckout && !isStripeTestCheckout,
+    requirePassword: isPublicCheckout,
   }), [
     isPublicCheckout,
     lang,
@@ -136,6 +166,18 @@ export default function CommercialCheckoutForm(props: {
   ]);
 
   useEffect(() => {
+    if (!resolvedSelection) return;
+    setCommercialMode(resolvedSelection.commercialMode);
+    setMonths(resolvedSelection.billingIntervalMonths);
+    if (resolvedSelection.commercialMode === "outreach_only") {
+      setOutreach(resolvedSelection.outreachAddonKey);
+      return;
+    }
+    setPlanKey(resolvedSelection.planKey);
+    setOutreach(resolvedSelection.outreachAddonKey ?? "");
+  }, [resolvedSelection]);
+
+  useEffect(() => {
     let cancelled = false;
     async function loadQuote() {
       setQuoteLoading(true);
@@ -146,9 +188,10 @@ export default function CommercialCheckoutForm(props: {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
-          plan_key: planKey,
+          commercial_mode: commercialMode,
+          plan_key: commercialMode === "full_cycle" ? planKey : null,
           billing_interval_months: months,
-          outreach_addon_key: outreach || null,
+          outreach_addon_key: commercialMode === "outreach_only" ? outreach : (outreach || null),
           purchaser_email: isPublicCheckout ? email.trim() : undefined,
           flow_type: props.flowType,
         }),
@@ -185,10 +228,10 @@ export default function CommercialCheckoutForm(props: {
       if (!cancelled) setQuoteLoading(false);
     });
     return () => { cancelled = true; };
-  }, [planKey, months, outreach, email, lang, props.flowType, isPublicCheckout]);
+  }, [planKey, months, outreach, email, lang, props.flowType, isPublicCheckout, commercialMode]);
 
   async function onActivate() {
-    if (isPublicCheckout && !isStripeTestCheckout) {
+    if (isPublicCheckout) {
       const validation = validatePublicCheckoutPassword({ password, passwordConfirmation });
       if (!validation.ok) {
         return;
@@ -207,14 +250,14 @@ export default function CommercialCheckoutForm(props: {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
-          commercial_mode: "full_cycle",
-          plan_key: planKey,
-          package_key: planKey,
+          commercial_mode: commercialMode,
+          plan_key: commercialMode === "full_cycle" ? planKey : null,
+          package_key: commercialMode === "full_cycle" ? planKey : null,
           billing_interval_months: months,
-          outreach_addon_key: outreach || null,
+          outreach_addon_key: commercialMode === "outreach_only" ? outreach : (outreach || null),
           purchaser_email: email,
-          password: isPublicCheckout && !isStripeTestCheckout ? password : undefined,
-          password_confirmation: isPublicCheckout && !isStripeTestCheckout ? passwordConfirmation : undefined,
+          password: isPublicCheckout ? password : undefined,
+          password_confirmation: isPublicCheckout ? passwordConfirmation : undefined,
           idempotency_key: idempotencyKey,
           flow_type: props.flowType,
         }),
@@ -267,6 +310,24 @@ export default function CommercialCheckoutForm(props: {
     }
   }
 
+  if (selectionBlocked && incomingSelection && !incomingSelection.ok) {
+    return (
+      <div className="commercial-checkout">
+        <div className="commercial-checkout-banner commercial-checkout-banner-error">
+          {lang === "fr" ? incomingSelection.messageFr : incomingSelection.messageEn}
+        </div>
+        <a className="commercial-checkout-success-cta" href={publicCheckoutPricingPath()}>
+          {lang === "fr" ? "Retour aux tarifs" : "Back to pricing"}
+        </a>
+        <style jsx>{`
+          .commercial-checkout { max-width: 720px; margin: 0 auto; padding: 32px 20px; color: #f5f5f4; }
+          .commercial-checkout-banner-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35); padding: 12px 14px; border-radius: 12px; margin-bottom: 20px; }
+          .commercial-checkout-success-cta { display: inline-block; margin-top: 18px; padding: 12px 18px; border-radius: 999px; background: #10b981; color: #04120d; font-weight: 700; text-decoration: none; }
+        `}</style>
+      </div>
+    );
+  }
+
   if (activationComplete && handoffLoginPath) {
     return (
       <div className="commercial-checkout">
@@ -309,14 +370,21 @@ export default function CommercialCheckoutForm(props: {
       <h1>{lang === "fr" ? "Récapitulatif checkout" : "Checkout summary"}</h1>
 
       <div className="commercial-checkout-grid">
-        <label>
-          {lang === "fr" ? "Pack" : "Plan"}
-          <select value={planKey} onChange={(e) => setPlanKey(e.target.value as PlanKey)}>
-            {Object.values(COMMERCIAL_PLANS).map((plan) => (
-              <option key={plan.planKey} value={plan.planKey}>{plan.displayName}</option>
-            ))}
-          </select>
-        </label>
+        {commercialMode === "full_cycle" ? (
+          <label>
+            {lang === "fr" ? "Pack" : "Plan"}
+            <select value={planKey} onChange={(e) => setPlanKey(e.target.value as PlanKey)}>
+              {Object.values(COMMERCIAL_PLANS).map((plan) => (
+                <option key={plan.planKey} value={plan.planKey}>{plan.displayName}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="line">
+            <strong>{lang === "fr" ? "Offre" : "Offer"}</strong>
+            <div>{outreach === "outreach_ai" ? OUTREACH_ADDONS.outreach_ai.displayNameFr : OUTREACH_ADDONS.outreach_standard.displayNameFr}</div>
+          </div>
+        )}
 
         <label>
           {lang === "fr" ? "Durée" : "Term"}
@@ -328,12 +396,14 @@ export default function CommercialCheckoutForm(props: {
           </select>
         </label>
 
-        <fieldset>
-          <legend>{lang === "fr" ? "Outreach (optionnel)" : "Outreach (optional)"}</legend>
-          <label><input type="radio" name="outreach" checked={outreach === ""} onChange={() => setOutreach("")} /> {lang === "fr" ? "Aucun" : "None"}</label>
-          <label><input type="radio" name="outreach" checked={outreach === "outreach_standard"} onChange={() => setOutreach("outreach_standard")} /> {OUTREACH_ADDONS.outreach_standard.displayNameFr}</label>
-          <label><input type="radio" name="outreach" checked={outreach === "outreach_ai"} onChange={() => setOutreach("outreach_ai")} /> {OUTREACH_ADDONS.outreach_ai.displayNameFr}</label>
-        </fieldset>
+        {commercialMode === "full_cycle" && (
+          <fieldset>
+            <legend>{lang === "fr" ? "Outreach (optionnel)" : "Outreach (optional)"}</legend>
+            <label><input type="radio" name="outreach" checked={outreach === ""} onChange={() => setOutreach("")} /> {lang === "fr" ? "Aucun" : "None"}</label>
+            <label><input type="radio" name="outreach" checked={outreach === "outreach_standard"} onChange={() => setOutreach("outreach_standard")} /> {OUTREACH_ADDONS.outreach_standard.displayNameFr}</label>
+            <label><input type="radio" name="outreach" checked={outreach === "outreach_ai"} onChange={() => setOutreach("outreach_ai")} /> {OUTREACH_ADDONS.outreach_ai.displayNameFr}</label>
+          </fieldset>
+        )}
 
         {isPublicCheckout && (
           <>
@@ -350,44 +420,47 @@ export default function CommercialCheckoutForm(props: {
               />
             </label>
 
-            {!isStripeTestCheckout && (
-              <>
-                <label>
-                  {lang === "fr" ? "Créer votre mot de passe" : "Create your password"}
-                  <div className="password-field">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      autoComplete="new-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
-                    />
-                    <button type="button" className="password-toggle" onClick={() => setShowPassword((v) => !v)}>
-                      {showPassword
-                        ? (lang === "fr" ? "Masquer" : "Hide")
-                        : (lang === "fr" ? "Afficher" : "Show")}
-                    </button>
-                  </div>
-                  <span className="field-hint">{lang === "fr" ? publicCheckoutPasswordRulesFr() : publicCheckoutPasswordRulesEn()}</span>
-                </label>
+            <label>
+              {lang === "fr" ? "Créer votre mot de passe" : "Create your password"}
+              <div className="password-field">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
+                />
+                <button type="button" className="password-toggle" onClick={() => setShowPassword((v) => !v)}>
+                  {showPassword
+                    ? (lang === "fr" ? "Masquer" : "Hide")
+                    : (lang === "fr" ? "Afficher" : "Show")}
+                </button>
+              </div>
+              <span className="field-hint">{lang === "fr" ? publicCheckoutPasswordRulesFr() : publicCheckoutPasswordRulesEn()}</span>
+            </label>
 
-                <label>
-                  {lang === "fr" ? "Confirmer votre mot de passe" : "Confirm your password"}
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    value={passwordConfirmation}
-                    onChange={(e) => setPasswordConfirmation(e.target.value)}
-                    minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
-                  />
-                </label>
-              </>
-            )}
+            <label>
+              {lang === "fr" ? "Confirmer votre mot de passe" : "Confirm your password"}
+              <div className="password-field">
+                <input
+                  type={showPasswordConfirmation ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={passwordConfirmation}
+                  onChange={(e) => setPasswordConfirmation(e.target.value)}
+                  minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
+                />
+                <button type="button" className="password-toggle" onClick={() => setShowPasswordConfirmation((v) => !v)}>
+                  {showPasswordConfirmation
+                    ? (lang === "fr" ? "Masquer" : "Hide")
+                    : (lang === "fr" ? "Afficher" : "Show")}
+                </button>
+              </div>
+            </label>
           </>
         )}
       </div>
 
-      {quote && (
+      {quote && commercialMode === "full_cycle" && quote.packLine.billingPeriodTotalCents > 0 && (
         <div className="commercial-checkout-lines">
           <div className="line">
             <strong>{lang === "fr" ? "Pack" : "Plan"} {quote.packLine.label}</strong>
@@ -414,6 +487,24 @@ export default function CommercialCheckoutForm(props: {
             </div>
           )}
 
+          <div className="line total">
+            <strong>{lang === "fr" ? "Total à l'échéance" : "Total due at renewal"}</strong>
+            <div>{euros(quote.totalPeriodCents)} € {renewalLabel(quote.billingIntervalMonths, lang)}</div>
+          </div>
+        </div>
+      )}
+
+      {quote && commercialMode === "outreach_only" && quote.outreachLine && (
+        <div className="commercial-checkout-lines">
+          <div className="line">
+            <strong>{quote.outreachLine.label}</strong>
+            <div>{euros(quote.outreachLine.baseMonthlyPriceCents)} € / {lang === "fr" ? "mois" : "mo"}</div>
+            {quote.appliedDiscountPercent > 0 && (
+              <div>{lang === "fr" ? "Remise appliquée" : "Discount applied"} : -{Math.round(quote.appliedDiscountPercent * 100)} % ({quote.appliedDiscountType})</div>
+            )}
+            <div>{euros(quote.outreachLine.monthlyDiscountedPriceCents)} € / {lang === "fr" ? "mois" : "mo"}</div>
+            <div>{euros(quote.outreachLine.billingPeriodTotalCents)} € {renewalLabel(quote.billingIntervalMonths, lang)}</div>
+          </div>
           <div className="line total">
             <strong>{lang === "fr" ? "Total à l'échéance" : "Total due at renewal"}</strong>
             <div>{euros(quote.totalPeriodCents)} € {renewalLabel(quote.billingIntervalMonths, lang)}</div>

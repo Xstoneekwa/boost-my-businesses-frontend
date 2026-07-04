@@ -39,6 +39,7 @@ export async function POST(request: Request) {
       idempotencyKey: readString(body.idempotency_key) || crypto.randomUUID(),
       clientId: readString(body.client_id) || null,
       password: readString(body.password) || null,
+      passwordConfirmation: readString(body.password_confirmation) || null,
       successUrl: `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/commercial/stripe-test/cancel`,
       allowedOrigins: [origin],

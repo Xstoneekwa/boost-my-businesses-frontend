@@ -2,7 +2,7 @@ import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_
 import { createSupabaseClient } from "@/lib/supabase";
 import { countLinkedInstagramAccountsForClient, countReservedEntitlementsForClient } from "@/lib/commercial/entitlements";
 import { QUOTE_UNAVAILABLE_EN, QUOTE_UNAVAILABLE_FR } from "@/lib/commercial/checkout-api-messages";
-import { buildCommercialQuote } from "@/lib/commercial/pricing";
+import { buildCommercialQuote, buildOutreachOnlyQuote } from "@/lib/commercial/pricing";
 import { deriveAgencyModeSnapshot } from "@/lib/commercial/agency";
 import { projectCheckoutSimulationAvailability } from "@/lib/commercial/checkout-simulation-access";
 import { requireClientInstagramSession, readString } from "@/lib/instagram-client/_utils";
@@ -13,6 +13,7 @@ type QuoteBody = {
   plan_key?: unknown;
   billing_interval_months?: unknown;
   outreach_addon_key?: unknown;
+  commercial_mode?: unknown;
   client_id?: unknown;
   purchaser_email?: unknown;
   flow_type?: unknown;
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     const planKey = readString(body?.plan_key);
     const billingIntervalMonths = Number(body?.billing_interval_months ?? 1);
     const outreachAddonKey = readString(body?.outreach_addon_key) || null;
+    const commercialMode = readString(body?.commercial_mode);
     const flowTypeRaw = readString(body?.flow_type, "first_purchase");
     const flowType = flowTypeRaw === "additional_account" ? "additional_account" : "first_purchase";
 
@@ -48,15 +50,20 @@ export async function POST(request: Request) {
     const agencySnapshot = deriveAgencyModeSnapshot({ linkedAccountCount: linkedCount, reservedEntitlementCount: reservedCount });
     const pricingContext = flowType === "additional_account" ? "new_account" as const : "first_purchase" as const;
 
-    const quote = buildCommercialQuote({
-      planKey,
-      billingIntervalMonths,
-      outreachAddonKey,
-      linkedAccountCount: linkedCount,
-      reservedEntitlementCount: reservedCount,
-      pricingContext,
-      reservedRepresentsQuotedPurchase: flowType === "additional_account" && reservedCount > 0,
-    });
+    const quote = commercialMode === "outreach_only"
+      ? buildOutreachOnlyQuote({
+        outreachAddonKey: outreachAddonKey ?? "",
+        billingIntervalMonths,
+      })
+      : buildCommercialQuote({
+        planKey,
+        billingIntervalMonths,
+        outreachAddonKey,
+        linkedAccountCount: linkedCount,
+        reservedEntitlementCount: reservedCount,
+        pricingContext,
+        reservedRepresentsQuotedPurchase: flowType === "additional_account" && reservedCount > 0,
+      });
     if ("error" in quote) {
       return jsonError("Invalid checkout selection.", 400, {
         code: quote.error,

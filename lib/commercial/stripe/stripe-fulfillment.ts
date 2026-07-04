@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { activateClientAccountEntitlementFromCheckout } from "../activate-client-account-entitlement-from-checkout.ts";
+import { loadCheckoutPendingSignupCredential, clearCheckoutPendingSignupCredential } from "../checkout-pending-signup-credential.ts";
 import { activatePlanChangeQuote } from "../plan-change-quote.ts";
 import {
   type StripeCheckoutAttemptRow,
@@ -76,6 +77,7 @@ export async function fulfillStripeCheckoutAttempt(
     session: Stripe.Checkout.Session;
     stripe?: Stripe;
   },
+  env: NodeJS.ProcessEnv = process.env,
 ) {
   assertStripeTestLivemode(input.session.livemode);
 
@@ -106,7 +108,7 @@ export async function fulfillStripeCheckoutAttempt(
       subscriptionId: paymentValidation.subscriptionId,
       customerId: readString(input.session.customer),
       paymentIntentId: readString(input.session.payment_intent),
-    });
+    }, env);
   }
 
   if (input.attempt.checkout_mode === "payment") {
@@ -145,6 +147,7 @@ async function fulfillSubscriptionAttempt(
     customerId: string;
     paymentIntentId: string;
   },
+  env: NodeJS.ProcessEnv = process.env,
 ) {
   if (!input.attempt.commercial_checkout_session_id) {
     throw new StripeFulfillmentError("commercial_session_missing", "Commercial checkout session is missing.", false);
@@ -168,20 +171,36 @@ async function fulfillSubscriptionAttempt(
     throw new StripeFulfillmentError("commercial_session_missing", "Commercial checkout session was not found.", false);
   }
 
+  const checkoutSessionId = readString(checkoutSession.id);
+  const idempotencyKey = readString(checkoutSession.idempotency_key);
+  let pendingPassword: string | null = null;
+  if (readString(checkoutSession.flow_type) === "first_purchase") {
+    const credential = await loadCheckoutPendingSignupCredential(supabase, {
+      checkoutSessionId,
+      idempotencyKey,
+    }, env);
+    if (!credential.ok) {
+      throw new StripeFulfillmentError(credential.code, credential.messageEn, false);
+    }
+    pendingPassword = credential.password;
+  }
+
   const activation = await activateClientAccountEntitlementFromCheckout(supabase, {
     planKey: readString(checkoutSession.plan_key),
     billingIntervalMonths: Number(checkoutSession.billing_interval_months ?? 1),
     outreachAddonKey: readString(checkoutSession.outreach_addon_key) || null,
     purchaserEmail: readString(checkoutSession.purchaser_email),
-    idempotencyKey: readString(checkoutSession.idempotency_key),
+    idempotencyKey,
     flowType: readString(checkoutSession.flow_type) === "additional_account" ? "additional_account" : "first_purchase",
     clientId: readString(checkoutSession.client_id) || input.attempt.client_id,
     authUserId: readString(checkoutSession.auth_user_id) || input.attempt.auth_user_id,
     mode: "stripe",
     stripeWebhookConfirmed: true,
-    precreatedCheckoutSessionId: readString(checkoutSession.id),
+    precreatedCheckoutSessionId: checkoutSessionId,
     prodTestAuthorizationId: readString((checkoutSession.metadata as Row | null)?.prod_test_authorization_id) || null,
     commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
+    password: pendingPassword,
+    passwordConfirmation: pendingPassword,
   });
 
   if (!activation.ok) {
@@ -190,6 +209,10 @@ async function fulfillSubscriptionAttempt(
       readString(activation.messageEn, "Activation failed."),
       true,
     );
+  }
+
+  if (readString(checkoutSession.flow_type) === "first_purchase") {
+    await clearCheckoutPendingSignupCredential(supabase, checkoutSessionId);
   }
 
   if (input.customerId) {

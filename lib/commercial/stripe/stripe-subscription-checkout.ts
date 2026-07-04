@@ -2,6 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { buildCommercialQuote } from "../pricing.ts";
 import {
+  storeCheckoutPendingSignupCredential,
+  validateStripeFirstPurchaseSignupPassword,
+} from "../checkout-pending-signup-credential.ts";
+import {
   OUTREACH_ADDONS,
   isBillingIntervalMonths,
   isOutreachAddonKey,
@@ -47,6 +51,7 @@ export type CreateStripeSubscriptionCheckoutInput = {
   idempotencyKey: string;
   clientId?: string | null;
   password?: string | null;
+  passwordConfirmation?: string | null;
   successUrl: string;
   cancelUrl: string;
   allowedOrigins?: string[];
@@ -334,6 +339,21 @@ export async function createStripeSubscriptionCheckoutSession(
     };
   }
 
+  if (flowType === "first_purchase") {
+    const passwordValidation = validateStripeFirstPurchaseSignupPassword({
+      password: input.password,
+      passwordConfirmation: input.passwordConfirmation ?? input.password,
+    });
+    if (!passwordValidation.ok) {
+      return {
+        ok: false,
+        status: 400,
+        code: passwordValidation.code,
+        messageEn: passwordValidation.messageEn,
+      };
+    }
+  }
+
   const quote = commercialMode === "full_cycle"
     ? buildCommercialQuote({
       planKey: planKey ?? "",
@@ -397,6 +417,18 @@ export async function createStripeSubscriptionCheckoutSession(
   });
   if (!pendingSession.ok) {
     return { ok: false, status: 503, code: pendingSession.code, messageEn: "Could not create internal checkout session." };
+  }
+
+  if (flowType === "first_purchase" && input.password) {
+    const credentialStored = await storeCheckoutPendingSignupCredential(supabase, {
+      checkoutSessionId: pendingSession.checkoutSessionId,
+      idempotencyKey,
+      password: input.password,
+      passwordConfirmation: input.passwordConfirmation ?? input.password,
+    }, env);
+    if (!credentialStored.ok) {
+      return { ok: false, status: 400, code: credentialStored.code, messageEn: credentialStored.messageEn };
+    }
   }
 
   const binding = validateEntitlementBillingBinding({
