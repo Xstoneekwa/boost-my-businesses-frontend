@@ -102,3 +102,18 @@ export async function resolveStripeProductIdForComponent(
   if (error || !data) return null;
   return readString(data.stripe_product_id) || null;
 }
+
+export async function countActiveStripeComponentPriceCatalogMappings(
+  supabase: SupabaseClient,
+  environment: StripeCatalogEnvironment,
+) {
+  const { count, error } = await supabase
+    .from("commercial_stripe_component_price_catalog")
+    .select("id", { count: "exact", head: true })
+    .eq("environment", environment)
+    .eq("active", true);
+  if (error) {
+    return 0;
+  }
+  return count ?? 0;
+}

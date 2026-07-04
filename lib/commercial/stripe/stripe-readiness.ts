@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { countActiveStripeComponentPriceCatalogMappings } from "./stripe-component-price-resolver.ts";
 import { readStripeTestConfig } from "./stripe-config.ts";
-import { countActiveStripePriceCatalogMappings } from "./stripe-price-resolver.ts";
 
 export type StripeTestReadiness = {
   stripeSdkAvailable: true;
@@ -23,7 +23,7 @@ export async function getStripeTestReadiness(
   }
 
   const mappingsCount = config
-    ? await countActiveStripePriceCatalogMappings(supabase, "test")
+    ? await countActiveStripeComponentPriceCatalogMappings(supabase, "test")
     : 0;
 
   return {
