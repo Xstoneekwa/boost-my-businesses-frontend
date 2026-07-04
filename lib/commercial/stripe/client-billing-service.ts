@@ -467,6 +467,59 @@ export function createStripeGatewayFromClient(stripe: Stripe): ClientBillingStri
   };
 }
 
+function expandedPaymentMethod(
+  paymentMethod: StripePaymentMethodLike | string | null | undefined,
+): StripePaymentMethodLike | null {
+  if (!paymentMethod || typeof paymentMethod === "string") return null;
+  return paymentMethod;
+}
+
+function paymentMethodFingerprint(method: ClientSafePaymentMethod) {
+  if (!method.available) return "";
+  return `${method.brand ?? ""}|${method.last4 ?? ""}|${method.expMonth ?? ""}|${method.expYear ?? ""}`;
+}
+
+export function resolveHeaderPaymentMethod(input: {
+  mode: ClientBillingView["mode"];
+  accountRows: ClientBillingAccountRow[];
+  customerDefault: StripePaymentMethodLike | string | null | undefined;
+  lang: ClientBillingLang;
+}): ClientSafePaymentMethod {
+  const customerResolved = paymentMethodFromStripe(
+    expandedPaymentMethod(input.customerDefault),
+    "agency_default",
+    input.lang,
+  );
+
+  if (input.mode === "standard") {
+    const soleAccount = input.accountRows[0];
+    if (soleAccount?.paymentMethod.available) {
+      return soleAccount.paymentMethod;
+    }
+    return customerResolved.available ? customerResolved : soleAccount?.paymentMethod ?? customerResolved;
+  }
+
+  const effectiveRows = input.accountRows.filter((row) => row.paymentMethod.available);
+  if (!effectiveRows.length) {
+    return customerResolved;
+  }
+
+  const fingerprints = effectiveRows.map((row) => paymentMethodFingerprint(row.paymentMethod));
+  const allSame = fingerprints.every((fingerprint) => fingerprint === fingerprints[0]);
+  if (allSame) {
+    return {
+      ...effectiveRows[0].paymentMethod,
+      scope: "agency_default",
+    };
+  }
+
+  if (customerResolved.available) {
+    return customerResolved;
+  }
+
+  return effectiveRows[0].paymentMethod;
+}
+
 function resolveEffectivePaymentMethod(input: {
   subscriptionId: string | null;
   customerDefault: StripePaymentMethodLike | string | null | undefined;
@@ -474,21 +527,23 @@ function resolveEffectivePaymentMethod(input: {
   lang: ClientBillingLang;
 }): ClientSafePaymentMethod {
   const subscriptionDefault = input.subscriptionId
-    ? input.subscriptionDefaultById.get(input.subscriptionId)
+    ? expandedPaymentMethod(input.subscriptionDefaultById.get(input.subscriptionId))
     : null;
-  if (subscriptionDefault && typeof subscriptionDefault !== "string") {
-    const customerSame = input.customerDefault
-      && typeof input.customerDefault !== "string"
+  const customerDefault = expandedPaymentMethod(input.customerDefault);
+
+  if (subscriptionDefault) {
+    const customerSame = customerDefault
       && subscriptionDefault.id
-      && input.customerDefault.id
-      && subscriptionDefault.id === input.customerDefault.id;
+      && customerDefault.id
+      && subscriptionDefault.id === customerDefault.id;
     return paymentMethodFromStripe(
       subscriptionDefault,
       customerSame ? "agency_default" : "subscription",
       input.lang,
     );
   }
-  return paymentMethodFromStripe(input.customerDefault, "agency_default", input.lang);
+
+  return paymentMethodFromStripe(customerDefault, "agency_default", input.lang);
 }
 
 export async function buildClientBillingView(input: {
@@ -531,7 +586,6 @@ export async function buildClientBillingView(input: {
     for (const sub of subscriptions) {
       subscriptionDefaultById.set(sub.id, sub.default_payment_method);
     }
-    defaultPaymentMethod = paymentMethodFromStripe(customerDefaultPm, "agency_default", lang);
     stripeInvoices = await gateway.listInvoices(customerId, threeMonthsAgoUnix());
     stripeInvoices.sort((a, b) => b.created - a.created);
   }
@@ -607,6 +661,12 @@ export async function buildClientBillingView(input: {
 
   const unassignedInvoices = safeInvoices.filter((invoice) => !invoice.correlationCertain);
   const mode: ClientBillingView["mode"] = linkedAccounts.length > 1 ? "agency" : "standard";
+  defaultPaymentMethod = resolveHeaderPaymentMethod({
+    mode,
+    accountRows,
+    customerDefault: customerDefaultPm,
+    lang,
+  });
 
   return {
     mode,
@@ -661,7 +721,21 @@ export async function resolveAuthorizedClientInvoiceDocument(input: {
 
 export function assertClientBillingPayloadSafe(payload: ClientBillingView) {
   const serialized = JSON.stringify(payload);
-  const forbidden = ["cus_", "sub_", "pm_", "sk_test_", "sk_live_", "whsec_", "entitlement", "webhook", "foundation"];
+  const forbidden = [
+    "cus_",
+    "sub_",
+    "pm_",
+    "sk_test_",
+    "sk_live_",
+    "whsec_",
+    "entitlement",
+    "webhook",
+    "foundation",
+    "invoice_pdf",
+    "hosted_invoice_url",
+    "pay.stripe.com",
+    "files.stripe.com",
+  ];
   for (const token of forbidden) {
     if (serialized.includes(token)) {
       throw new Error(`client_billing_payload_unsafe:${token}`);

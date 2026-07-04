@@ -22,6 +22,11 @@ import { assertStripeTestLivemode, requireStripeTestConfig } from "./stripe-conf
 import { getStripeClient } from "./stripe-client.ts";
 import { mapAttemptStatusToCommercialStatus, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
 import {
+  buildTenantPaymentMethodSyncMetadataSafe,
+  customerDefaultPaymentMethodChanged,
+  syncTenantDefaultPaymentMethodToSubscriptions,
+} from "./stripe-tenant-payment-method-sync.ts";
+import {
   validatePlanChangeCheckoutPayment,
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
@@ -31,6 +36,7 @@ type Row = Record<string, unknown>;
 const ALLOWED_STRIPE_WEBHOOK_EVENTS = new Set([
   "checkout.session.completed",
   "checkout.session.expired",
+  "customer.updated",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -107,6 +113,9 @@ export async function handleStripeWebhookEvent(
         break;
       case "checkout.session.expired":
         await handleCheckoutSessionExpired(supabase, event);
+        break;
+      case "customer.updated":
+        await handleCustomerUpdatedPaymentMethodSync(supabase, event, { eventRowId });
         break;
       case "customer.subscription.created":
       case "customer.subscription.updated":
@@ -289,6 +298,42 @@ async function handleSubscriptionProjectionEvent(
     incomingSnapshot: buildStripeSubscriptionSnapshot(subscription),
     incomingIsTerminalEvent: event.type === "customer.subscription.deleted",
   });
+}
+
+async function handleCustomerUpdatedPaymentMethodSync(
+  supabase: SupabaseClient,
+  event: Stripe.Event,
+  context: { eventRowId: string },
+) {
+  const customer = event.data.object as Stripe.Customer;
+  assertStripeTestLivemode(customer.livemode);
+
+  if (!customerDefaultPaymentMethodChanged(event)) {
+    await patchStripeWebhookEventMetadata(supabase, context.eventRowId, {
+      tenant_payment_method_sync: "ignored_non_payment_method_change",
+    });
+    return;
+  }
+
+  const result = await syncTenantDefaultPaymentMethodToSubscriptions({
+    supabase,
+    stripeCustomerId: readString(customer.id),
+    customer,
+  });
+
+  await patchStripeWebhookEventMetadata(
+    supabase,
+    context.eventRowId,
+    buildTenantPaymentMethodSyncMetadataSafe(result),
+  );
+
+  if (!result.ok) {
+    throw new StripeFulfillmentError(
+      result.code,
+      "Tenant payment method sync failed.",
+      false,
+    );
+  }
 }
 
 async function handleInvoiceEvent(supabase: SupabaseClient, event: Stripe.Event) {

@@ -242,6 +242,45 @@ Password is used **once** server-side via existing `resolveSimulatedPublicAuth` 
 
 Before the first real Checkout Test, confirm: no Live key, no Live object, no arbitrary redirect origin, no browser-supplied Price ID, no runtime/BotApp/phone side effect, and no production migration applied outside the release checklist.
 
+## Client payment drawer — Stripe Test Portal (Gérer le paiement)
+
+Required **after** deploying the billing drawer patch. Do **not** store portal configuration IDs in the repo.
+
+### Stripe Dashboard — Billing Portal configuration (Test mode)
+
+Create one Test configuration with:
+
+| Feature | Setting |
+|---------|---------|
+| Payment methods | **Enabled** (update card) |
+| Invoice history | **Enabled** |
+| Subscription updates | **Disabled** |
+| Subscription cancellation | **Disabled** |
+| Promotion codes | **Disabled** |
+| Return URL | Canonical client dashboard (`/instagram-client`) |
+
+Copy the configuration ID (`bpc_…`).
+
+### Vercel Production
+
+1. Set `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` to the Test portal configuration ID.
+2. Redeploy the frontend.
+3. Confirm `STRIPE_TEST_CHECKOUT_ENABLED=true`, `STRIPE_SECRET_KEY` (test), and `STRIPE_TEST_CHECKOUT_ALLOWED_ORIGINS` remain configured.
+
+### Stripe Test webhook
+
+Add **`customer.updated`** to the Test webhook endpoint event list (alongside existing checkout/subscription/invoice events).
+
+When a client updates their card in the Portal, Stripe sets `customer.invoice_settings.default_payment_method`. Our server handles signed `customer.updated` webhooks and propagates that payment method to **every active/trialing/past_due subscription** of the tenant (fail-closed, idempotent). No plan, price, entitlement, or runtime mutation.
+
+### Manual validation (Liam)
+
+1. Open client dashboard → Mon compte → Gérer le paiement.
+2. Confirm masked card visible (subscription default even if customer default is null).
+3. Click **Modifier le moyen de paiement** → Stripe Portal opens.
+4. Replace Test card → return to dashboard → refresh drawer → new masked last4 visible.
+5. Confirm all tenant subscriptions now use the new default payment method in Stripe Test Dashboard.
+
 ## Rollback
 
 Disable `STRIPE_TEST_CHECKOUT_ENABLED`. Simulation and existing commercial flows continue unchanged.
