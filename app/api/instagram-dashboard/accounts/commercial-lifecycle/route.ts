@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { randomUUID } from "node:crypto";
 import {
   executeCommercialAccountLifecycle,
   loadCommercialLifecycleState,
@@ -62,8 +63,9 @@ export async function PATCH(request: Request) {
       return jsonError("Use mark_needs_assistance via legacy status or pause/resume/cancel for commercial lifecycle.", 400);
     }
 
-    const idempotencyKey = readString(body?.idempotency_key).trim()
-      || `${legacyAction}:${accountId}:${Date.now().toString(36)}`;
+    const idempotencyKey = readString(request.headers.get("idempotency-key"))
+      || readString(body?.idempotency_key).trim()
+      || `commercial:${legacyAction}:${accountId}:${randomUUID()}`;
     const reason = readString(body?.reason, `commercial_${legacyAction}`).slice(0, 500);
 
     const supabase = createSupabaseClient();
@@ -102,6 +104,7 @@ export async function PATCH(request: Request) {
     const message = error instanceof Error ? error.message : "commercial_lifecycle_failed";
     const status = message === "account_not_found" ? 404
       : message === "commercial_subscription_missing" ? 409
+      : message === "lifecycle_operation_conflict" ? 409
       : message === "resume_not_allowed_from_state" || message === "pause_expired" ? 409
       : 500;
     return jsonError(message, status);

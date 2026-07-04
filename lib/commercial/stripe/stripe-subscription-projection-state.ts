@@ -60,6 +60,10 @@ export function shouldApplySubscriptionStatus(
     return true;
   }
 
+  if (STRIPE_SUBSCRIPTION_TERMINAL_STATUSES.has(existing)) {
+    return false;
+  }
+
   if (STRIPE_SUBSCRIPTION_DEGRADED_STATUSES.has(incoming)) {
     return true;
   }

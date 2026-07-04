@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createSupabaseClient } from "@/lib/supabase";
-import { processExpiredCommercialPauses } from "@/lib/commercial/account-lifecycle-service.ts";
+import {
+  processExpiredCommercialPauses,
+  processRecoverableCommercialLifecycleOperations,
+} from "@/lib/commercial/account-lifecycle-service.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,13 +16,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const results = await processExpiredCommercialPauses({
-      supabase: createSupabaseClient(),
+    const supabase = createSupabaseClient();
+    const expiredResults = await processExpiredCommercialPauses({
+      supabase,
       limit: 50,
     });
+    const recoveredResults = await processRecoverableCommercialLifecycleOperations({
+      supabase,
+      limit: 50,
+    });
+    const results = [...expiredResults, ...recoveredResults];
     return NextResponse.json({
       ok: true,
       processed: results.length,
+      expired_processed: expiredResults.length,
+      recovered_processed: recoveredResults.length,
       cancelled: results.filter((row) => row.commercialState === "cancelled").length,
       action_required: results.filter((row) => row.actionRequired).length,
     });

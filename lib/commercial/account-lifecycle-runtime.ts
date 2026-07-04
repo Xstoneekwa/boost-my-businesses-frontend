@@ -13,9 +13,42 @@ export type RuntimeQuiesceResult = {
   quiesced: boolean;
   canceledRequestIds: string[];
   stoppedRunIds: string[];
+  canceledJobCounts: Record<string, number>;
   stillActive: boolean;
   reason: string | null;
 };
+
+const PENDING_JOB_STATUSES = [
+  "pending",
+  "queued",
+  "scheduled",
+  "ready",
+  "retryable",
+  "waiting",
+  "created",
+];
+
+const ACTIVE_JOB_STATUSES = [
+  "claimed",
+  "processing",
+  "running",
+  "in_progress",
+  "sending",
+];
+
+type JobCancelSpec = {
+  table: string;
+  statusColumn: string;
+  cancelStatus: string;
+  extraPatch?: Row;
+};
+
+const JOB_CANCEL_SPECS: JobCancelSpec[] = [
+  { table: "ig_dm_jobs", statusColumn: "status", cancelStatus: "canceled" },
+  { table: "ct_target_verification_jobs", statusColumn: "status", cancelStatus: "canceled" },
+  { table: "client_email_send_intents", statusColumn: "status", cancelStatus: "canceled" },
+  { table: "auto_restart_decisions", statusColumn: "status", cancelStatus: "canceled" },
+];
 
 async function cancelRunRequest(
   supabase: SupabaseClient,
@@ -106,18 +139,78 @@ export async function accountHasActiveRuntime(
   return Boolean((requests ?? []).length || (runs ?? []).length);
 }
 
+async function tableExists(supabase: SupabaseClient, table: string) {
+  const { error } = await supabase.from(table).select("id").limit(1);
+  if (!error) return true;
+  const message = readString(error.message).toLowerCase();
+  return !(message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find"));
+}
+
+async function cancelPendingJobsForAccount(
+  supabase: SupabaseClient,
+  accountId: string,
+  reason: string,
+) {
+  const counts: Record<string, number> = {};
+  for (const spec of JOB_CANCEL_SPECS) {
+    if (!await tableExists(supabase, spec.table)) continue;
+    const { data } = await supabase
+      .from(spec.table)
+      .select("id")
+      .eq("account_id", accountId)
+      .in(spec.statusColumn, PENDING_JOB_STATUSES)
+      .limit(500);
+    const ids = ((data ?? []) as SupabaseRecord[]).map((row) => readString(row.id)).filter(Boolean);
+    if (!ids.length) {
+      counts[spec.table] = 0;
+      continue;
+    }
+    const patch: Row = {
+      [spec.statusColumn]: spec.cancelStatus,
+      updated_at: new Date().toISOString(),
+      ...spec.extraPatch,
+    };
+    const { error } = await supabase
+      .from(spec.table)
+      .update(patch)
+      .in("id", ids);
+    counts[spec.table] = error ? 0 : ids.length;
+  }
+  return counts;
+}
+
+export async function accountHasActiveJobs(
+  supabase: SupabaseClient,
+  accountId: string,
+) {
+  for (const spec of JOB_CANCEL_SPECS) {
+    if (!await tableExists(supabase, spec.table)) continue;
+    const { data } = await supabase
+      .from(spec.table)
+      .select("id")
+      .eq("account_id", accountId)
+      .in(spec.statusColumn, ACTIVE_JOB_STATUSES)
+      .limit(1);
+    if ((data ?? []).length > 0) return true;
+  }
+  return false;
+}
+
 export async function quiesceAccountRuntime(
   supabase: SupabaseClient,
   accountId: string,
   reason: string,
 ): Promise<RuntimeQuiesceResult> {
   const pendingCanceled = await cancelPendingRunRequestsForAccount(supabase, accountId, reason);
+  const canceledJobCounts = await cancelPendingJobsForAccount(supabase, accountId, reason);
   const { stoppedRunIds, canceledRequestIds } = await stopActiveAccountRuntime(supabase, accountId, reason);
-  const stillActive = await accountHasActiveRuntime(supabase, accountId);
+  const stillActive = await accountHasActiveRuntime(supabase, accountId)
+    || await accountHasActiveJobs(supabase, accountId);
   return {
     quiesced: !stillActive,
     canceledRequestIds: [...pendingCanceled, ...canceledRequestIds],
     stoppedRunIds,
+    canceledJobCounts,
     stillActive,
     reason: stillActive ? "runtime_still_active" : null,
   };

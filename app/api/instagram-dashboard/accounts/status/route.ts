@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { randomUUID } from "node:crypto";
 import {
   executeCommercialAccountLifecycle,
 } from "@/lib/commercial/account-lifecycle-service.ts";
@@ -190,8 +191,9 @@ export async function PATCH(request: Request) {
 
     if (action === "pause" || action === "cancel" || action === "reactivate") {
       const operationType = action === "reactivate" ? "resume" : action;
-      const idempotencyKey = readString((body.metadata as Record<string, unknown> | undefined)?.idempotency_key)
-        || `${action}:${accountId}:${readString(reason, "manual")}`;
+      const idempotencyKey = readString(request.headers.get("idempotency-key"))
+        || readString((body.metadata as Record<string, unknown> | undefined)?.idempotency_key)
+        || `status:${action}:${accountId}:${randomUUID()}`;
       const result = await executeCommercialAccountLifecycle({
         supabase,
         accountId,
@@ -281,6 +283,7 @@ export async function PATCH(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update account status.";
-    return jsonError(message, 500);
+    const status = message === "lifecycle_operation_conflict" ? 409 : 500;
+    return jsonError(message, status);
   }
 }

@@ -17,6 +17,17 @@ export type CommercialLifecycleActor = {
   sourceSurface: string;
 };
 
+export type CommercialLifecycleActionRequiredReason =
+  | "commercial_entitlement_missing"
+  | "commercial_entitlement_ambiguous"
+  | "commercial_subscription_missing"
+  | "commercial_subscription_ambiguous"
+  | "runtime_still_active"
+  | "stripe_pause_failed"
+  | "stripe_resume_failed"
+  | "stripe_cancel_failed"
+  | "capacity_release_pending";
+
 export type CommercialLifecycleStateRow = {
   accountId: string;
   entitlementId: string | null;

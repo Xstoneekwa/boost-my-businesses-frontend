@@ -30,6 +30,7 @@ import {
   validatePlanChangeCheckoutPayment,
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
+import { executeCommercialCancelForDeletedSubscription } from "../account-lifecycle-service.ts";
 
 type Row = Record<string, unknown>;
 
@@ -298,6 +299,13 @@ async function handleSubscriptionProjectionEvent(
     incomingSnapshot: buildStripeSubscriptionSnapshot(subscription),
     incomingIsTerminalEvent: event.type === "customer.subscription.deleted",
   });
+  if (event.type === "customer.subscription.deleted") {
+    await executeCommercialCancelForDeletedSubscription({
+      supabase,
+      stripeSubscriptionId: subscription.id,
+      stripeEventId: event.id,
+    });
+  }
 }
 
 async function handleCustomerUpdatedPaymentMethodSync(

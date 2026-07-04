@@ -32,6 +32,10 @@ create index if not exists commercial_account_lifecycle_states_pause_expiry_idx
   on public.commercial_account_lifecycle_states (pause_expires_at)
   where commercial_state = 'paused';
 
+create index if not exists commercial_account_lifecycle_states_action_required_idx
+  on public.commercial_account_lifecycle_states (updated_at)
+  where commercial_state in ('pause_requested', 'resume_requested', 'cancel_requested', 'action_required');
+
 create table if not exists public.commercial_account_lifecycle_operations (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.ig_accounts(id) on delete cascade,
@@ -59,9 +63,109 @@ create table if not exists public.commercial_account_lifecycle_operations (
 create index if not exists commercial_account_lifecycle_operations_account_idx
   on public.commercial_account_lifecycle_operations (account_id, created_at desc);
 
+create unique index if not exists commercial_account_lifecycle_operations_one_open_idx
+  on public.commercial_account_lifecycle_operations (account_id)
+  where state in ('pending', 'in_progress');
+
 alter table public.commercial_stripe_subscriptions
   add column if not exists billing_paused boolean not null default false,
   add column if not exists pause_collection_behavior text null;
+
+alter table public.commercial_account_lifecycle_states enable row level security;
+alter table public.commercial_account_lifecycle_operations enable row level security;
+
+revoke all on table public.commercial_account_lifecycle_states from anon, authenticated;
+revoke all on table public.commercial_account_lifecycle_operations from anon, authenticated;
+grant select, insert, update, delete on table public.commercial_account_lifecycle_states to service_role;
+grant select, insert, update, delete on table public.commercial_account_lifecycle_operations to service_role;
+
+drop policy if exists commercial_account_lifecycle_states_service_role_all on public.commercial_account_lifecycle_states;
+create policy commercial_account_lifecycle_states_service_role_all
+  on public.commercial_account_lifecycle_states
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists commercial_account_lifecycle_operations_service_role_all on public.commercial_account_lifecycle_operations;
+create policy commercial_account_lifecycle_operations_service_role_all
+  on public.commercial_account_lifecycle_operations
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create or replace function public.release_schedule_capacity_on_account_admin_lifecycle()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_reason text;
+  v_commercial_state text;
+begin
+  if old.admin_lifecycle_status is not distinct from new.admin_lifecycle_status then
+    return new;
+  end if;
+
+  if new.admin_lifecycle_status in ('paused', 'needs_assistance') then
+    perform public.audit_schedule_capacity_event(
+      'schedule_capacity_release_skipped',
+      new.id,
+      null,
+      null,
+      case
+        when new.admin_lifecycle_status = 'paused' then 'account_paused_keep_assignment'
+        else 'account_needs_assistance_keep_assignment'
+      end,
+      jsonb_build_object(
+        'source', 'ig_accounts_admin_lifecycle_trigger',
+        'old_admin_lifecycle_status', old.admin_lifecycle_status,
+        'new_admin_lifecycle_status', new.admin_lifecycle_status
+      )
+    );
+    return new;
+  end if;
+
+  if new.admin_lifecycle_status not in ('cancelled') then
+    return new;
+  end if;
+
+  select commercial_state into v_commercial_state
+  from public.commercial_account_lifecycle_states
+  where account_id = new.id
+  limit 1;
+
+  if v_commercial_state in ('cancel_requested', 'action_required', 'cancelled') then
+    perform public.audit_schedule_capacity_event(
+      'schedule_capacity_release_skipped',
+      new.id,
+      null,
+      null,
+      'commercial_lifecycle_release_owner',
+      jsonb_build_object(
+        'source', 'ig_accounts_admin_lifecycle_trigger',
+        'commercial_state', v_commercial_state,
+        'old_admin_lifecycle_status', old.admin_lifecycle_status,
+        'new_admin_lifecycle_status', new.admin_lifecycle_status
+      )
+    );
+    return new;
+  end if;
+
+  v_reason := 'account_cancelled_release';
+
+  perform public.release_account_schedule_capacity(
+    new.id,
+    v_reason,
+    'ig_accounts_admin_lifecycle_trigger',
+    null
+  );
+
+  return new;
+end;
+$function$;
 
 comment on table public.commercial_account_lifecycle_states is
   'Canonical per-account commercial lifecycle (pause/resume/cancel). Server-owned; survives restarts.';

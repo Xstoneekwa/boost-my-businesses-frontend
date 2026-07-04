@@ -11,6 +11,10 @@
     {
       "path": "/api/instagram-dashboard/schedule-session/cron",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/commercial-lifecycle-expiry",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
