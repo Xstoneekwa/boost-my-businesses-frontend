@@ -180,6 +180,7 @@ async function fulfillSubscriptionAttempt(
     mode: "stripe",
     stripeWebhookConfirmed: true,
     precreatedCheckoutSessionId: readString(checkoutSession.id),
+    prodTestAuthorizationId: readString((checkoutSession.metadata as Row | null)?.prod_test_authorization_id) || null,
     commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
   });
 

@@ -60,6 +60,7 @@ export function resolveCommercialCheckoutActivationState(input: {
   email: string;
   password: string;
   passwordConfirmation: string;
+  requirePassword?: boolean;
 }): {
   ctaDisabled: boolean;
   blockers: CheckoutActivationBlocker[];
@@ -69,6 +70,7 @@ export function resolveCommercialCheckoutActivationState(input: {
 } {
   const blockers: CheckoutActivationBlocker[] = [];
   const email = input.email.trim();
+  const requirePassword = input.requirePassword ?? input.isPublicCheckout;
   const passwordValidation = validatePublicCheckoutPassword({
     password: input.password,
     passwordConfirmation: input.passwordConfirmation,
@@ -91,7 +93,7 @@ export function resolveCommercialCheckoutActivationState(input: {
       blockers.push({ code: "email_invalid", field: "email", ...EMAIL_INVALID });
     }
 
-    if (input.password || input.passwordConfirmation) {
+    if (requirePassword || input.password || input.passwordConfirmation) {
       if (!passwordValidation.ok) {
         blockers.push({
           code: "password_invalid",
@@ -125,7 +127,7 @@ export function resolveCommercialCheckoutActivationState(input: {
     || !input.activationAvailable
     || (input.isPublicCheckout && !email)
     || (input.isPublicCheckout && email.length > 0 && !isCheckoutEmailFormatValid(email))
-    || (input.isPublicCheckout && !passwordValidation.ok);
+    || (input.isPublicCheckout && requirePassword && !passwordValidation.ok);
 
   const activationNotice = blockers.find((blocker) => blocker.code === "simulation_unavailable");
   const emailBlocker = blockers.find((blocker) => blocker.field === "email" && blocker.code !== "email_required");

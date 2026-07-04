@@ -83,6 +83,7 @@ export async function createInternalCheckoutSessionPending(
     pricingSnapshot: Record<string, unknown>;
     catalogSnapshot: Record<string, unknown>;
     totalPeriodCents: number;
+    metadataSafe?: Record<string, unknown>;
   },
 ) {
   const { data: existing, error: existingError } = await supabase
@@ -138,6 +139,7 @@ export async function createInternalCheckoutSessionPending(
         mode: "stripe_test",
         payment_provider: "stripe",
         payment_status: "pending",
+        ...(input.metadataSafe ?? {}),
       },
     })
     .select("id")

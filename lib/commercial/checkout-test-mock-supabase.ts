@@ -203,13 +203,13 @@ export function createCheckoutMockSupabase(options: CheckoutMockOptions = {}) {
             error: null,
           };
         },
-        async createUser(input: { email: string; password: string; email_confirm?: boolean }) {
+        async createUser(input: { email: string; password?: string; email_confirm?: boolean }) {
           const existing = authUsers.find((user) => user.email === input.email.trim().toLowerCase());
           if (existing) return { data: { user: null }, error: { message: "already exists" } };
           const user = {
             id: newId("auth"),
             email: input.email.trim().toLowerCase(),
-            password: input.password,
+            password: input.password ?? "",
           };
           authUsers.push(user);
           return { data: { user: { id: user.id, email: user.email } }, error: null };

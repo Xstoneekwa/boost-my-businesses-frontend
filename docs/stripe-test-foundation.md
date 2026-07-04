@@ -2,17 +2,18 @@
 
 ## Scope
 
-This phase adds **Stripe Test Mode infrastructure only**. It does not replace public simulated checkout, legal pages, or client dashboard billing UI.
+This phase adds **Stripe Test Mode infrastructure only**. The canonical client test path is now public Pricing → `/instagram-growth/checkout` → server-side Stripe Test Checkout; legal pages and live billing remain unchanged.
 
 ## Architecture
 
-1. **Admin harness** — `/instagram-dashboard/commercial-prod-test` panel **Stripe Test Checkout** (English UI).
-2. **Server Stripe module** — `lib/commercial/stripe/*` (never imported in browser bundles for secrets).
-3. **Internal commercial session** — `commercial_checkout_sessions.status = checkout_pending_payment` before webhook.
-4. **Stripe attempt ledger** — `commercial_stripe_checkout_attempts` (one row per Stripe Checkout Session).
-5. **Webhook ledger** — `commercial_stripe_webhook_events` (idempotent by `stripe_event_id`, no raw payload storage).
-6. **Activation** — signed webhook only → existing `activateClientAccountEntitlementFromCheckout(mode:"stripe")` or `activatePlanChangeQuote`.
-7. **Success page** — `/commercial/stripe-test/success` polls `session-status`; never activates.
+1. **Public client test path** — landing Pricing Growth CTA → `/instagram-growth/checkout?plan=growth&months=1` → `POST /api/commercial/checkout/stripe/create-session`.
+2. **Admin harness** — `/instagram-dashboard/commercial-prod-test` panel **Stripe Test Checkout** (technical tool only).
+3. **Server Stripe module** — `lib/commercial/stripe/*` (never imported in browser bundles for secrets).
+4. **Internal commercial session** — `commercial_checkout_sessions.status = checkout_pending_payment` before webhook.
+5. **Stripe attempt ledger** — `commercial_stripe_checkout_attempts` (one row per Stripe Checkout Session).
+6. **Webhook ledger** — `commercial_stripe_webhook_events` (idempotent by `stripe_event_id`, no raw payload storage).
+7. **Activation** — signed webhook only → existing `activateClientAccountEntitlementFromCheckout(mode:"stripe")` or `activatePlanChangeQuote`.
+8. **Success page** — `/commercial/stripe-test/success` polls `session-status`; never activates.
 
 ## Expected environment variables (values not stored in repo)
 
@@ -48,6 +49,15 @@ Live keys and `livemode=true` events are **rejected** (`stripe_live_key_rejected
 | `POST /api/commercial/stripe/billing-portal` | Customer Portal (test) |
 | `GET/POST /api/instagram-dashboard/commercial/stripe-test/*` | Admin readiness, catalog, harness checkout |
 | `POST /api/instagram-dashboard/commercial/stripe-test/recover-fulfillment` | Admin-only retry of paid attempt fulfillment |
+
+## Public first-purchase test contract
+
+- `commercial_prod_test_checkout_authorizations` authorizes a normalized email by hash, expiry, allowed flow, optional plan and billing interval.
+- The authorization row may start with `client_id = null`; creating it does not create a client, Auth user, entitlement, Instagram account, assignment, phone slot, or device action.
+- Public Stripe first purchase requires `STRIPE_TEST_CHECKOUT_ENABLED=true`, test Stripe config, production Supabase ref `zgafnshkjywfltxgbtzg`, and an active authorization row.
+- The public browser sends email plus commercial intent only. It never supplies a trusted Stripe Price ID, amount, success/cancel URL, client id, Auth id, or entitlement id.
+- Before payment, only `commercial_checkout_sessions` and `commercial_stripe_checkout_attempts` are created, both pending and without `client_id` / `auth_user_id`.
+- After a paid, signed `checkout.session.completed` webhook, activation creates Auth/client/tenant/entitlement through the existing commercial activation path and records authorization usage idempotently.
 
 ## Payment confirmed vs checkout completed
 

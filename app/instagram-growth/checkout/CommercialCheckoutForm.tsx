@@ -68,6 +68,7 @@ function renewalLabel(months: number, lang: "fr" | "en") {
 export default function CommercialCheckoutForm(props: {
   lang?: "fr" | "en";
   flowType: "first_purchase" | "additional_account";
+  checkoutMode?: "simulated" | "stripe_test";
   initialPlan?: string;
   initialMonths?: number;
   initialOutreach?: string;
@@ -76,6 +77,7 @@ export default function CommercialCheckoutForm(props: {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isPublicCheckout = props.flowType === "first_purchase";
+  const isStripeTestCheckout = props.checkoutMode === "stripe_test";
   const [planKey, setPlanKey] = useState<PlanKey>(
     isPlanKey(props.initialPlan ?? searchParams.get("plan") ?? "pro") ? (props.initialPlan ?? searchParams.get("plan") ?? "pro") as PlanKey : "pro",
   );
@@ -117,6 +119,7 @@ export default function CommercialCheckoutForm(props: {
     email,
     password,
     passwordConfirmation,
+    requirePassword: isPublicCheckout && !isStripeTestCheckout,
   }), [
     isPublicCheckout,
     lang,
@@ -129,6 +132,7 @@ export default function CommercialCheckoutForm(props: {
     email,
     password,
     passwordConfirmation,
+    isStripeTestCheckout,
   ]);
 
   useEffect(() => {
@@ -184,7 +188,7 @@ export default function CommercialCheckoutForm(props: {
   }, [planKey, months, outreach, email, lang, props.flowType, isPublicCheckout]);
 
   async function onActivate() {
-    if (isPublicCheckout) {
+    if (isPublicCheckout && !isStripeTestCheckout) {
       const validation = validatePublicCheckoutPassword({ password, passwordConfirmation });
       if (!validation.ok) {
         return;
@@ -197,16 +201,20 @@ export default function CommercialCheckoutForm(props: {
     setHandoffLoginPath(null);
     setConflictRedirectPath(null);
     try {
-      const response = await fetch("/api/commercial/checkout/simulated/activate", {
+      const response = await fetch(isStripeTestCheckout
+        ? "/api/commercial/checkout/stripe/create-session"
+        : "/api/commercial/checkout/simulated/activate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
+          commercial_mode: "full_cycle",
           plan_key: planKey,
+          package_key: planKey,
           billing_interval_months: months,
           outreach_addon_key: outreach || null,
           purchaser_email: email,
-          password: isPublicCheckout ? password : undefined,
-          password_confirmation: isPublicCheckout ? passwordConfirmation : undefined,
+          password: isPublicCheckout && !isStripeTestCheckout ? password : undefined,
+          password_confirmation: isPublicCheckout && !isStripeTestCheckout ? passwordConfirmation : undefined,
           idempotency_key: idempotencyKey,
           flow_type: props.flowType,
         }),
@@ -215,6 +223,7 @@ export default function CommercialCheckoutForm(props: {
         redirect_path?: string | null;
         handoff_type?: string;
         login_path?: string | null;
+        checkout_url?: string;
         message_fr?: string;
         message_en?: string;
       }>(response, {
@@ -228,6 +237,14 @@ export default function CommercialCheckoutForm(props: {
           setConflictRedirectPath(redirectPath);
         }
         throw new Error(lang === "fr" ? parsed.clientMessageFr : parsed.clientMessageEn);
+      }
+      if (isStripeTestCheckout) {
+        const checkoutUrl = parsed.data?.checkout_url;
+        if (!checkoutUrl) {
+          throw new Error(lang === "fr" ? CHECKOUT_UNAVAILABLE_FR : "Stripe checkout is unavailable.");
+        }
+        window.location.assign(checkoutUrl);
+        return;
       }
       setSuccess(lang === "fr" ? parsed.data?.message_fr ?? "" : parsed.data?.message_en ?? "");
       if (parsed.data?.handoff_type === "email_login") {
@@ -280,9 +297,13 @@ export default function CommercialCheckoutForm(props: {
   return (
     <div className="commercial-checkout">
       <div className="commercial-checkout-banner">
-        {lang === "fr"
-          ? "Simulation interne — aucun paiement ne sera prélevé."
-          : "Internal simulation — no payment will be charged."}
+        {isStripeTestCheckout
+          ? (lang === "fr"
+            ? "Stripe Test — le paiement est confirmé uniquement par webhook avant activation."
+            : "Stripe Test — payment is confirmed only by webhook before activation.")
+          : (lang === "fr"
+            ? "Simulation interne — aucun paiement ne sera prélevé."
+            : "Internal simulation — no payment will be charged.")}
       </div>
 
       <h1>{lang === "fr" ? "Récapitulatif checkout" : "Checkout summary"}</h1>
@@ -329,35 +350,39 @@ export default function CommercialCheckoutForm(props: {
               />
             </label>
 
-            <label>
-              {lang === "fr" ? "Créer votre mot de passe" : "Create your password"}
-              <div className="password-field">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
-                />
-                <button type="button" className="password-toggle" onClick={() => setShowPassword((v) => !v)}>
-                  {showPassword
-                    ? (lang === "fr" ? "Masquer" : "Hide")
-                    : (lang === "fr" ? "Afficher" : "Show")}
-                </button>
-              </div>
-              <span className="field-hint">{lang === "fr" ? publicCheckoutPasswordRulesFr() : publicCheckoutPasswordRulesEn()}</span>
-            </label>
+            {!isStripeTestCheckout && (
+              <>
+                <label>
+                  {lang === "fr" ? "Créer votre mot de passe" : "Create your password"}
+                  <div className="password-field">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
+                    />
+                    <button type="button" className="password-toggle" onClick={() => setShowPassword((v) => !v)}>
+                      {showPassword
+                        ? (lang === "fr" ? "Masquer" : "Hide")
+                        : (lang === "fr" ? "Afficher" : "Show")}
+                    </button>
+                  </div>
+                  <span className="field-hint">{lang === "fr" ? publicCheckoutPasswordRulesFr() : publicCheckoutPasswordRulesEn()}</span>
+                </label>
 
-            <label>
-              {lang === "fr" ? "Confirmer votre mot de passe" : "Confirm your password"}
-              <input
-                type={showPassword ? "text" : "password"}
-                autoComplete="new-password"
-                value={passwordConfirmation}
-                onChange={(e) => setPasswordConfirmation(e.target.value)}
-                minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
-              />
-            </label>
+                <label>
+                  {lang === "fr" ? "Confirmer votre mot de passe" : "Confirm your password"}
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={passwordConfirmation}
+                    onChange={(e) => setPasswordConfirmation(e.target.value)}
+                    minLength={CHECKOUT_PASSWORD_MIN_LENGTH}
+                  />
+                </label>
+              </>
+            )}
           </>
         )}
       </div>
@@ -428,8 +453,12 @@ export default function CommercialCheckoutForm(props: {
         onClick={() => void onActivate()}
       >
         {loading
-          ? (lang === "fr" ? "Activation..." : "Activating...")
-          : (lang === "fr" ? "Simuler l'activation" : "Simulate activation")}
+          ? (isStripeTestCheckout
+            ? (lang === "fr" ? "Préparation Stripe..." : "Preparing Stripe...")
+            : (lang === "fr" ? "Activation..." : "Activating..."))
+          : (isStripeTestCheckout
+            ? (lang === "fr" ? "Continuer vers Stripe Test" : "Continue to Stripe Test")
+            : (lang === "fr" ? "Simuler l'activation" : "Simulate activation"))}
       </button>
 
       <style jsx>{`

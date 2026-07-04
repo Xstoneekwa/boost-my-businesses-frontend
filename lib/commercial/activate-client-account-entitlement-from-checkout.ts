@@ -24,7 +24,7 @@ import {
   type ActivationAttemptTracker,
 } from "./checkout-compensation.ts";
 import { verifyActivationCompletion } from "./checkout-completion.ts";
-import { resolveSimulatedPublicAuth, lookupPurchaserAuthState } from "./checkout-auth.ts";
+import { resolveSimulatedPublicAuth, resolveStripePaidPublicAuth, lookupPurchaserAuthState } from "./checkout-auth.ts";
 import { findIncompleteCheckoutSessionForClient } from "./checkout-provisioning-state.ts";
 import {
   buildClientUserInsertPayload,
@@ -65,6 +65,7 @@ export type ActivateCheckoutInput = {
   mode: "simulated" | "stripe";
   stripeWebhookConfirmed?: boolean;
   precreatedCheckoutSessionId?: string | null;
+  prodTestAuthorizationId?: string | null;
   commercialMode?: "full_cycle" | "outreach_only" | null;
 };
 
@@ -559,6 +560,10 @@ export async function activateClientAccountEntitlementFromCheckout(
     if (existing.kind === "storage_error") {
       return activationFailure(503, "checkout_storage_unavailable");
     }
+    if (input.prodTestAuthorizationId && input.mode === "stripe") {
+      tracker.prodTestAuthorizationId = input.prodTestAuthorizationId;
+      tracker.simulationAccessSource = "prod_test_authorization";
+    }
 
     if (existing.kind !== "found" && input.flowType !== "plan_change" && input.mode !== "stripe") {
       const simulationAccess = await evaluateCheckoutSimulationAccess({
@@ -586,7 +591,7 @@ export async function activateClientAccountEntitlementFromCheckout(
       tracker.simulationAccessSource = simulationAccess.source;
     }
 
-    if (checkoutContext === "public_new_workspace" && existing.kind === "missing") {
+    if (checkoutContext === "public_new_workspace" && existing.kind === "missing" && input.mode !== "stripe") {
       const passwordValidation = validatePublicCheckoutPassword({
         password: input.password ?? "",
         passwordConfirmation: input.passwordConfirmation ?? "",
@@ -748,11 +753,16 @@ export async function activateClientAccountEntitlementFromCheckout(
 
       if (!authUserId) {
         if (checkoutContext === "public_new_workspace") {
-          const authResult = await resolveSimulatedPublicAuth(supabase, {
-            email,
-            password: input.password ?? "",
-            idempotencyKey: tracker.idempotencyKey,
-          });
+          const authResult = input.mode === "stripe"
+            ? await resolveStripePaidPublicAuth(supabase, {
+              email,
+              idempotencyKey: tracker.idempotencyKey,
+            })
+            : await resolveSimulatedPublicAuth(supabase, {
+              email,
+              password: input.password ?? "",
+              idempotencyKey: tracker.idempotencyKey,
+            });
           if (!authResult.ok) {
             return activationFailure(
               authResult.code === "auth_user_exists_no_workspace" || authResult.code === "password_verification_failed"
@@ -867,6 +877,37 @@ export async function activateClientAccountEntitlementFromCheckout(
       checkoutSessionId = input.precreatedCheckoutSessionId;
     }
 
+    if (input.mode === "stripe" && input.precreatedCheckoutSessionId && checkoutSessionId) {
+      const { error: checkoutUpdateError } = await supabase
+        .from("commercial_checkout_sessions")
+        .update({
+          status: "checkout_paid",
+          client_id: clientId,
+          auth_user_id: authUserId,
+          metadata: {
+            mode: "stripe_test",
+            payment_provider: "stripe",
+            payment_status: "confirmed",
+            checkout_context: checkoutContext,
+            internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
+            billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",
+            prod_test_authorization_id: tracker.prodTestAuthorizationId,
+          },
+          activated_at: now,
+          updated_at: now,
+        })
+        .eq("id", checkoutSessionId);
+      if (checkoutUpdateError) {
+        return failWithCompensation(supabase, tracker, {
+          status: 500,
+          code: "checkout_update_failed",
+          stage: "checkout_session_update",
+          reason: "checkout_update_failed",
+          postgresCode: postgresCodeFromError(checkoutUpdateError),
+        });
+      }
+    }
+
     if (!skipCheckoutSessionInsert) {
       const sessionStatus = input.mode === "stripe" ? "checkout_paid" : "checkout_activated_test";
       const paymentMeta = input.mode === "stripe"
@@ -956,7 +997,7 @@ export async function activateClientAccountEntitlementFromCheckout(
           metadata: {
           commercial_mode: commercialMode,
           growth_estimate_label: plan?.growthEstimateLabelFr ?? null,
-          checkout_mode: "simulated",
+          checkout_mode: input.mode,
           checkout_context: checkoutContext,
           internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
           billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",

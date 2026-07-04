@@ -55,6 +55,7 @@ export async function evaluateCheckoutSimulationAccess(input: {
   planKey?: string | null;
   billingIntervalMonths?: number | null;
   env?: NodeJS.ProcessEnv;
+  prodTestOnly?: boolean;
 }): Promise<CheckoutSimulationAccess> {
   const prodTest = await evaluateProdTestCheckoutAuthorization({
     supabase: input.supabase,
@@ -74,6 +75,19 @@ export async function evaluateCheckoutSimulationAccess(input: {
       reason: null,
       messageFr: null,
       messageEn: null,
+    };
+  }
+
+  if (input.prodTestOnly) {
+    const reason = prodTest.reason ?? "authorization_not_found";
+    const messages = prodTestCheckoutClientMessages(reason);
+    return {
+      allowed: false,
+      source: null,
+      prodTestAuthorizationId: null,
+      reason,
+      messageFr: messages.messageFr,
+      messageEn: messages.messageEn,
     };
   }
 

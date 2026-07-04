@@ -779,7 +779,14 @@ export default function LandingPage() {
                 <ul className="pcard-feats">
                   {plan.feats.map((f) => <li key={f}>{f}</li>)}
                 </ul>
-                <a className={`btn ${plan.featured ? "btn-primary" : "btn-soft"}`} href="https://www.boostmybusinesses.com/contact" target="_blank" rel="noopener noreferrer">{plan.cta}</a>
+                <a
+                  className={`btn ${plan.featured ? "btn-primary" : "btn-soft"}`}
+                  href={plan.name === "Growth" ? "/instagram-growth/checkout?plan=growth&months=1" : "https://www.boostmybusinesses.com/contact"}
+                  target={plan.name === "Growth" ? undefined : "_blank"}
+                  rel={plan.name === "Growth" ? undefined : "noopener noreferrer"}
+                >
+                  {plan.cta}
+                </a>
               </div>
             ))}
           </div>

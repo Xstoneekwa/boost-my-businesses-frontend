@@ -12,7 +12,6 @@ import {
   type PlanKey,
 } from "../catalog.ts";
 import { evaluateCheckoutSimulationAccess } from "../checkout-simulation-access.ts";
-import { resolveSimulatedPublicAuth } from "../checkout-auth.ts";
 import { requireStripeTestConfig, StripeFoundationError } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
 import {
@@ -323,6 +322,8 @@ export async function createStripeSubscriptionCheckoutSession(
     clientId: input.clientId ?? null,
     planKey: planKey ?? "growth",
     billingIntervalMonths,
+    env,
+    prodTestOnly: flowType === "first_purchase",
   });
   if (!simulationAccess.allowed && flowType === "first_purchase") {
     return {
@@ -368,29 +369,10 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 503, code: lineItems.code, messageEn: "Stripe test component mapping is missing." };
   }
 
-  let authUserId: string | null = null;
   let clientId = input.clientId ?? null;
-
+  const authUserId: string | null = null;
   if (flowType === "first_purchase") {
-    const password = readString(input.password);
-    if (!password) {
-      return { ok: false, status: 400, code: "password_required", messageEn: "Password is required for first purchase." };
-    }
-    const authResult = await resolveSimulatedPublicAuth(supabase, {
-      email,
-      password,
-      idempotencyKey,
-    });
-    if (!authResult.ok) {
-      return {
-        ok: false,
-        status: 409,
-        code: authResult.code,
-        messageEn: authResult.messageEn,
-      };
-    }
-    authUserId = authResult.authUserId;
-    clientId = authResult.resumeClientId;
+    clientId = null;
   }
 
   const pendingSession = await createInternalCheckoutSessionPending(supabase, {
@@ -408,6 +390,10 @@ export async function createStripeSubscriptionCheckoutSession(
     pricingSnapshot: quote.pricingSnapshot as unknown as Record<string, unknown>,
     catalogSnapshot: quote.catalogSnapshot as unknown as Record<string, unknown>,
     totalPeriodCents: quote.totalPeriodCents,
+    metadataSafe: {
+      prod_test_authorization_id: simulationAccess.prodTestAuthorizationId,
+      checkout_access_source: simulationAccess.source,
+    },
   });
   if (!pendingSession.ok) {
     return { ok: false, status: 503, code: pendingSession.code, messageEn: "Could not create internal checkout session." };

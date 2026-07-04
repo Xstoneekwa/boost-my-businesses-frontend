@@ -206,6 +206,71 @@ export async function resolveSimulatedPublicAuth(
   };
 }
 
+export async function resolveStripePaidPublicAuth(
+  supabase: SupabaseClient,
+  input: {
+    email: string;
+    idempotencyKey: string;
+  },
+): Promise<SimulatedPublicAuthResult> {
+  const email = input.email.trim().toLowerCase();
+  const lookup = await findAuthUserIdByEmail(supabase, email);
+  if (!lookup.ok) {
+    return {
+      ok: false,
+      code: "checkout_storage_unavailable",
+      messageFr: "L'activation de test est temporairement indisponible. Réessayez dans quelques instants.",
+      messageEn: "Test activation is temporarily unavailable. Please try again shortly.",
+    };
+  }
+
+  if (lookup.authUserId) {
+    return {
+      ok: true,
+      authUserId: lookup.authUserId,
+      createdAuth: false,
+      createdClient: false,
+      resumedOrphan: false,
+      resumeClientId: null,
+      resumeMode: "none",
+      existingCheckoutSessionId: null,
+      existingEntitlementId: null,
+    };
+  }
+
+  const { data, error } = await supabase.auth.admin.createUser({
+    email,
+    email_confirm: true,
+  });
+  if (error || !data.user?.id) {
+    logCheckoutActivation({
+      event: "checkout_activation_failed",
+      idempotencyKey: input.idempotencyKey,
+      stage: "auth_create",
+      reason: "auth_user_create_failed",
+      postgresCode: error?.code,
+    });
+    return {
+      ok: false,
+      code: "auth_user_create_failed",
+      messageFr: "Impossible de créer votre accès client pour le moment.",
+      messageEn: "Could not create your client access right now.",
+    };
+  }
+
+  return {
+    ok: true,
+    authUserId: data.user.id,
+    createdAuth: true,
+    createdClient: false,
+    resumedOrphan: false,
+    resumeClientId: null,
+    resumeMode: "none",
+    existingCheckoutSessionId: null,
+    existingEntitlementId: null,
+  };
+}
+
 export async function ensureSimulatedPublicAuthUser(
   supabase: SupabaseClient,
   input: { email: string; password: string; idempotencyKey?: string },
