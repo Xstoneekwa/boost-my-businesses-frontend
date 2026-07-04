@@ -150,3 +150,32 @@ export function resolvePublicCheckoutSelection(input: {
 export function publicCheckoutPricingPath() {
   return PRICING_PATH;
 }
+
+export type PublicPricingOfferKey =
+  | "growth"
+  | "pro"
+  | "premium"
+  | "outreach_standard"
+  | "outreach_ai";
+
+export const PUBLIC_PRICING_OFFER_KEYS: PublicPricingOfferKey[] = [
+  "growth",
+  "pro",
+  "premium",
+  "outreach_standard",
+  "outreach_ai",
+];
+
+export function buildPublicPricingCheckoutHref(
+  offer: PublicPricingOfferKey,
+  months: BillingIntervalMonths = 1,
+): string {
+  const monthsParam = `months=${months}`;
+  if (offer === "growth") return `/instagram-growth/checkout?plan=growth&${monthsParam}`;
+  if (offer === "pro") return `/instagram-growth/checkout?plan=pro&${monthsParam}`;
+  if (offer === "premium") return `/instagram-growth/checkout?plan=premium&${monthsParam}`;
+  if (offer === "outreach_standard") {
+    return `/instagram-growth/checkout?commercial_mode=outreach_only&outreach=outreach_standard&${monthsParam}`;
+  }
+  return `/instagram-growth/checkout?commercial_mode=outreach_only&outreach=outreach_ai&${monthsParam}`;
+}

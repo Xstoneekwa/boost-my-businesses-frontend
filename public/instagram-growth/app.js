@@ -58,7 +58,22 @@
     y: { fr: "facturé sur 12 mois", en: "billed for 12 months" }
   };
   var DISCOUNT = { m: 0, q: 0.10, h: 0.20, y: 0.25 };
+  var PUBLIC_CHECKOUT_HREFS = {
+    growth: "/instagram-growth/checkout?plan=growth&months=1",
+    pro: "/instagram-growth/checkout?plan=pro&months=1",
+    premium: "/instagram-growth/checkout?plan=premium&months=1",
+    outreach_standard: "/instagram-growth/checkout?commercial_mode=outreach_only&outreach=outreach_standard&months=1",
+    outreach_ai: "/instagram-growth/checkout?commercial_mode=outreach_only&outreach=outreach_ai&months=1"
+  };
   var currentPeriod = "m";
+  function syncPublicCheckoutHrefs() {
+    document.querySelectorAll("[data-checkout-offer]").forEach(function (el) {
+      var offer = el.getAttribute("data-checkout-offer");
+      var href = PUBLIC_CHECKOUT_HREFS[offer];
+      if (!href) return;
+      el.setAttribute("href", href);
+    });
+  }
   function updateBilling() {
     document.querySelectorAll("[data-price]").forEach(function (el) {
       var base = parseFloat(el.dataset.m);
@@ -183,5 +198,6 @@
   /* ---------- Init ---------- */
   var saved = "fr";
   try { saved = localStorage.getItem(STORE_LANG) || "fr"; } catch (e) {}
+  syncPublicCheckoutHrefs();
   applyLang(saved);
 })();
