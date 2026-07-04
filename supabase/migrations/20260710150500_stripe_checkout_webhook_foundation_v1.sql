@@ -19,10 +19,12 @@ alter table public.commercial_checkout_sessions
 alter table public.commercial_checkout_sessions
   add constraint commercial_checkout_sessions_commercial_mode_shape_check
   check (
-    commercial_mode is null
-    or (
-      commercial_mode = 'full_cycle'
+    (
+      (commercial_mode is null or commercial_mode = 'full_cycle')
       and plan_key in ('growth', 'pro', 'premium')
+      and pack_base_monthly_cents is not null
+      and pack_monthly_discounted_cents is not null
+      and pack_period_total_cents is not null
     )
     or (
       commercial_mode = 'outreach_only'
@@ -40,11 +42,12 @@ alter table public.client_account_entitlements
 alter table public.client_account_entitlements
   add constraint client_account_entitlements_commercial_mode_shape_check
   check (
-    (metadata->>'commercial_mode') is null
-    or (
-      metadata->>'commercial_mode' = 'full_cycle'
+    (
+      ((metadata->>'commercial_mode') is null or metadata->>'commercial_mode' = 'full_cycle')
       and plan_key in ('growth', 'pro', 'premium')
       and commercial_package_code in ('growth', 'pro', 'premium')
+      and pack_monthly_discounted_cents is not null
+      and pack_period_total_cents is not null
     )
     or (
       metadata->>'commercial_mode' = 'outreach_only'
