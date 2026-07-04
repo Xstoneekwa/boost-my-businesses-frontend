@@ -350,9 +350,12 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 400, code: quote.error, messageEn: "Invalid checkout selection." };
   }
 
-  const components = commercialMode === "full_cycle"
-    ? componentsFromPricingSnapshot(quote.pricingSnapshot, commercialMode)
-    : buildOutreachOnlyComponents({ outreachAddonKey: outreachAddonKey as OutreachAddonKey, billingIntervalMonths });
+  const components = quote.planKey !== null
+    ? componentsFromPricingSnapshot(quote.pricingSnapshot, "full_cycle")
+    : buildOutreachOnlyComponents({
+      outreachAddonKey: quote.outreachAddonKey,
+      billingIntervalMonths: quote.billingIntervalMonths,
+    });
   if (!Array.isArray(components)) {
     return { ok: false, status: 400, code: components.code, messageEn: "Invalid billing components." };
   }
@@ -476,7 +479,7 @@ export async function createStripeSubscriptionCheckoutSession(
     clientId,
     authUserId,
     stripeCustomerId: typeof stripeSession.customer === "string" ? stripeSession.customer : customer.customerId,
-    clientAccountEntitlementId: pendingSession.entitlementId ?? null,
+    clientAccountEntitlementId: "entitlementId" in pendingSession ? readString(pendingSession.entitlementId) || null : null,
     commercialMode,
     pricingSnapshotFingerprint: quote.pricingSnapshot.version,
     metadataSafe: metadata,

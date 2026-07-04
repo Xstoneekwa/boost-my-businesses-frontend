@@ -68,6 +68,10 @@ export type ActivateCheckoutInput = {
   commercialMode?: "full_cycle" | "outreach_only" | null;
 };
 
+type SuccessfulFullCycleActivationQuote = Exclude<ReturnType<typeof buildCommercialQuote>, { ok: false }>;
+type SuccessfulOutreachOnlyActivationQuote = Exclude<ReturnType<typeof buildOutreachOnlyActivationQuote>, { ok: false }>;
+type SuccessfulActivationQuote = SuccessfulFullCycleActivationQuote | SuccessfulOutreachOnlyActivationQuote;
+
 export type ActivateCheckoutResult =
   | {
     ok: true;
@@ -80,9 +84,7 @@ export type ActivateCheckoutResult =
     handoff: ReturnType<typeof resolveCheckoutHandoff>;
     checkoutContext: CheckoutContext;
     activationCompletionVerified: true;
-    quote: ReturnType<typeof buildCommercialQuote> extends infer T
-      ? T extends { ok: false } ? never : T
-      : never;
+    quote: SuccessfulActivationQuote;
   }
   | { ok: false; status: number; error: string; code: string; messageFr?: string; messageEn?: string; redirectPath?: string | null; handoff?: ReturnType<typeof resolveCheckoutHandoff> };
 
@@ -102,6 +104,30 @@ class CheckoutActivationStageError extends Error {
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+function readQuoteErrorCode(quote: { error?: unknown }) {
+  return readString(quote.error, "invalid_checkout_selection");
+}
+
+function activationQuotePricingAuditPayload(quote: SuccessfulActivationQuote) {
+  if (quote.planKey !== null) {
+    return pricingSnapshotAuditPayload(quote.pricingSnapshot);
+  }
+
+  return {
+    pricing_snapshot_version: quote.pricingSnapshot.version,
+    pricing_context: quote.pricingSnapshot.pricingContext,
+    agency_display_count: 1,
+    billable_account_count: quote.billableAccountCount,
+    agency_mode_active: false,
+    duration_discount_percent: quote.termDiscountPercent,
+    volume_discount_percent: quote.agencyDiscountPercent,
+    applied_discount_kind: quote.appliedDiscountType === "term" ? "duration" : "none",
+    applied_discount_percent: quote.appliedDiscountPercent,
+    volume_discount_tier_label: null,
+    total_period_cents: quote.totalPeriodCents,
+  };
 }
 
 function buildOutreachOnlyActivationQuote(input: {
@@ -588,7 +614,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         pricingContext: "first_purchase",
       });
     if ("error" in quoteResult) {
-      return activationFailure(400, quoteResult.error, {
+      return activationFailure(400, readQuoteErrorCode(quoteResult), {
         messageFr: "Sélection checkout invalide.",
         messageEn: "Invalid checkout selection.",
       });
@@ -707,7 +733,7 @@ export async function activateClientAccountEntitlementFromCheckout(
           reservedRepresentsQuotedPurchase: reservedCount > 0,
         });
       if ("error" in pricedQuote) {
-        return activationFailure(400, pricedQuote.error, {
+        return activationFailure(400, readQuoteErrorCode(pricedQuote), {
           messageFr: "Sélection checkout invalide.",
           messageEn: "Invalid checkout selection.",
         });
@@ -953,7 +979,7 @@ export async function activateClientAccountEntitlementFromCheckout(
       entitlementId = readString(entitlement.id);
     }
     const auditPayload = {
-      ...pricingSnapshotAuditPayload(finalQuote.pricingSnapshot),
+      ...activationQuotePricingAuditPayload(finalQuote),
       commercial_mode: commercialMode,
       plan_key: commercialMode === "full_cycle" ? finalQuote.planKey : null,
       billing_interval_months: finalQuote.billingIntervalMonths,

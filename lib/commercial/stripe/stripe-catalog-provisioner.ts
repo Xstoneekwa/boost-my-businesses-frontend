@@ -278,6 +278,12 @@ export function redactProvisionerReport(plan: StripeCatalogProvisionerPlan) {
   };
 }
 
+function isStripeCatalogProvisionerPlanFailure(
+  plan: StripeCatalogProvisionerPlan | { ok: false; code: string },
+): plan is { ok: false; code: string } {
+  return "ok" in plan && plan.ok === false;
+}
+
 export async function applyStripePublicCatalog(
   input: StripeCatalogProvisionerApplyInput,
 ): Promise<StripeCatalogProvisionerApplyResult> {
@@ -297,7 +303,7 @@ export async function applyStripePublicCatalog(
   }
 
   const plan = buildStripeCatalogProvisionerPlan({ environment: "test", mode: "apply" });
-  if ("ok" in plan && plan.ok === false) {
+  if (isStripeCatalogProvisionerPlanFailure(plan)) {
     return { ok: false, code: plan.code, environment: input.environment, mode: input.mode };
   }
 
@@ -523,7 +529,7 @@ async function syncStripePublicCatalogMappingInner(
       checkpoint: "manifest_match",
     });
   }
-  if ("ok" in plan && plan.ok === false) {
+  if (isStripeCatalogProvisionerPlanFailure(plan)) {
     const code = ALLOWED_SAFE_FAILURE_CODES.has(plan.code)
       ? plan.code
       : "stripe_catalog_validation_failed";
