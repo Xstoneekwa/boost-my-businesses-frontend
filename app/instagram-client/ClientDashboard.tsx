@@ -506,6 +506,7 @@ export default function ClientDashboard({
   const [chartPeriod, setChartPeriod]   = useState<FollowerChartPeriod>("all");
   const [drawerOpen, setDrawerOpen]     = useState(false);
   const [billingDrawerOpen, setBillingDrawerOpen] = useState(false);
+  const [canonicalPaymentMethodDisplay, setCanonicalPaymentMethodDisplay] = useState<string | null>(null);
   const [loggingOut, setLoggingOut]     = useState(false);
   const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
   const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
@@ -630,6 +631,31 @@ export default function ClientDashboard({
       setTargetingLoading(false);
     }
   }, [targetingAccountId, useLiveData]);
+
+  const loadCanonicalPaymentMethod = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/instagram-client/billing?lang=${lang}`, { cache: "no-store" });
+      const payload = await response.json() as {
+        ok?: boolean;
+        data?: { defaultPaymentMethod?: { available?: boolean; displayLabel?: string } };
+      };
+      if (!response.ok || !payload.ok || !payload.data?.defaultPaymentMethod) return;
+      const method = payload.data.defaultPaymentMethod;
+      setCanonicalPaymentMethodDisplay(method.available ? (method.displayLabel || null) : null);
+    } catch {
+      // Keep workspace fallback when billing summary is unavailable.
+    }
+  }, [lang]);
+
+  useEffect(() => {
+    void loadCanonicalPaymentMethod();
+  }, [loadCanonicalPaymentMethod]);
+
+  useEffect(() => {
+    if (!billingDrawerOpen) {
+      void loadCanonicalPaymentMethod();
+    }
+  }, [billingDrawerOpen, loadCanonicalPaymentMethod]);
 
   useEffect(() => {
     if (useLiveData && targetingAccountId) {
@@ -928,7 +954,9 @@ export default function ClientDashboard({
   const billingDateValue = billingDateIso
     ? new Date(billingDateIso).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
     : t.account.nextPending;
-  const paymentMethodValue = workspace?.paymentMethodDisplay || t.account.billingNoMethod;
+  const paymentMethodValue = canonicalPaymentMethodDisplay
+    ?? workspace?.paymentMethodDisplay
+    ?? t.account.billingNoMethod;
   const instagramSummary = linkedAccountsForAccountTab.length
     ? linkedAccountsForAccountTab.map((account) => formatLinkedAccountLine(account, lang)).join("\n")
     : (lang === "fr" ? "Aucun compte lié" : "No linked account");
@@ -2050,6 +2078,7 @@ const CSS = `
 .cd-billing-status.is-open{color:#FCD34D;border-color:rgba(245,158,11,.45);background:rgba(120,53,15,.22)}
 .cd-billing-status.is-failed{color:var(--bad);border-color:var(--bad-line);background:var(--bad-bg)}
 .cd-billing-status.is-refunded,.cd-billing-status.is-unknown{color:var(--ink-mute)}
+.cd-billing-pdf-unavailable{font-size:.8rem;color:var(--ink-mute);align-self:center;padding:8px 0}
 .cd-billing-account+.cd-billing-account{margin-top:4px}
 
 /* Drawer scrim */

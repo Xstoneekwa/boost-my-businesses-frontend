@@ -1,10 +1,12 @@
-import type { ClientBillingLang, ClientInvoiceStatus } from "./client-billing-types.ts";
+import type { ClientBillingLang, ClientInvoiceStatus, ClientPaymentMethodScope } from "./client-billing-types.ts";
 
 const COPY = {
   fr: {
     noPaymentMethod: "Aucun moyen de paiement enregistré",
     agencyDefaultScope: "Carte par défaut du compte agence",
+    accountDefaultScope: "Carte par défaut du compte",
     subscriptionScope: "Moyen de paiement de l'abonnement",
+    subscriptionSpecificScope: "Moyen de paiement de cet abonnement",
     invoicePaid: "Payé",
     invoiceOpen: "En attente",
     invoiceFailed: "Échoué",
@@ -28,7 +30,8 @@ const COPY = {
     updatePaymentMethod: "Modifier le moyen de paiement",
     invoicesTitle: "Factures récentes",
     viewInvoice: "Voir la facture",
-    downloadPdf: "Télécharger le PDF",
+    downloadPdf: "Télécharger la facture PDF",
+    pdfUnavailable: "PDF indisponible",
     paymentMethodTitle: "Moyen de paiement",
     managePaymentDrawerTitle: "Gérer le paiement",
     accountInvoices: "Factures",
@@ -38,7 +41,9 @@ const COPY = {
   en: {
     noPaymentMethod: "No payment method on file",
     agencyDefaultScope: "Agency account default card",
+    accountDefaultScope: "Account default card",
     subscriptionScope: "Subscription payment method",
+    subscriptionSpecificScope: "This subscription's payment method",
     invoicePaid: "Paid",
     invoiceOpen: "Pending",
     invoiceFailed: "Failed",
@@ -62,7 +67,8 @@ const COPY = {
     updatePaymentMethod: "Update payment method",
     invoicesTitle: "Recent invoices",
     viewInvoice: "View invoice",
-    downloadPdf: "Download PDF",
+    downloadPdf: "Download invoice PDF",
+    pdfUnavailable: "PDF unavailable",
     paymentMethodTitle: "Payment method",
     managePaymentDrawerTitle: "Manage payment",
     accountInvoices: "Invoices",
@@ -86,10 +92,12 @@ export function invoiceStatusLabel(status: ClientInvoiceStatus, lang: ClientBill
   return t.invoiceUnknown;
 }
 
-export function paymentMethodScopeLabel(scope: "agency_default" | "subscription" | "none", lang: ClientBillingLang) {
+export function paymentMethodScopeLabel(scope: ClientPaymentMethodScope, lang: ClientBillingLang) {
   const t = clientBillingCopy(lang);
   if (scope === "agency_default") return t.agencyDefaultScope;
+  if (scope === "account_default") return t.accountDefaultScope;
   if (scope === "subscription") return t.subscriptionScope;
+  if (scope === "subscription_specific") return t.subscriptionSpecificScope;
   return "";
 }
 

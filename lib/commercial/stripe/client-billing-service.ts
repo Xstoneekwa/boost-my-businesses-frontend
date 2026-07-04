@@ -2,6 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { COMMERCIAL_PLANS, OUTREACH_ADDONS, type PlanKey } from "../catalog.ts";
 import {
+  buildLocalizedInvoiceServiceLabel,
+  stripeInvoiceLineLooksRaw,
+} from "./client-billing-invoice-label.ts";
+import {
   clientBillingCopy,
   interpolateCopy,
   invoiceStatusLabel,
@@ -12,6 +16,7 @@ import type {
   ClientBillingPortalState,
   ClientBillingView,
   ClientInvoiceStatus,
+  ClientPaymentMethodScope,
   ClientSafeInvoice,
   ClientSafePaymentMethod,
 } from "./client-billing-types.ts";
@@ -71,7 +76,7 @@ type StripeInvoiceLike = {
   amount_refunded?: number;
   hosted_invoice_url?: string | null;
   invoice_pdf?: string | null;
-  lines?: { data?: Array<{ description?: string | null }> };
+  lines?: { data?: Array<{ description?: string | null; amount?: number; quantity?: number | null }> };
 };
 
 export type ClientBillingStripeGateway = {
@@ -366,16 +371,30 @@ function resolveInvoiceServiceLabel(
   packageLabel: string,
   lang: ClientBillingLang,
 ) {
-  const lineDescription = invoice.lines?.data?.find((line) => readString(line?.description))?.description;
-  if (lineDescription) return readString(lineDescription);
-  if (projection) {
-    return resolvePlanLabel({
+  const line = invoice.lines?.data?.find((row) => row && (readString(row.description) || typeof row.amount === "number"));
+  const lineDescription = readString(line?.description);
+  const quantity = typeof line?.quantity === "number" && line.quantity > 0 ? line.quantity : 1;
+  const lineAmount = typeof line?.amount === "number" && line.amount > 0
+    ? line.amount
+    : (invoice.total ?? invoice.amount_due ?? 0);
+  const currency = readString(invoice.currency, "eur");
+
+  if (projection || entitlement) {
+    return buildLocalizedInvoiceServiceLabel({
       entitlement,
-      commercialMode: projection.commercialMode,
+      commercialMode: projection?.commercialMode ?? null,
       packageLabel,
+      amountMinor: lineAmount,
+      currency,
+      quantity,
       lang,
     });
   }
+
+  if (lineDescription && !stripeInvoiceLineLooksRaw(lineDescription)) {
+    return lineDescription;
+  }
+
   return lang === "fr" ? "Abonnement" : "Subscription";
 }
 
@@ -479,15 +498,58 @@ function paymentMethodFingerprint(method: ClientSafePaymentMethod) {
   return `${method.brand ?? ""}|${method.last4 ?? ""}|${method.expMonth ?? ""}|${method.expYear ?? ""}`;
 }
 
+function stripePaymentMethodFingerprint(paymentMethod: StripePaymentMethodLike | null | undefined) {
+  if (!paymentMethod?.card?.last4) return "";
+  const card = paymentMethod.card;
+  return `${readString(card.brand)}|${readString(card.last4)}|${card.exp_month ?? ""}|${card.exp_year ?? ""}`;
+}
+
+function isAgencyCustomerLevelShared(input: {
+  customerDefault: StripePaymentMethodLike | null;
+  subscriptionIds: string[];
+  subscriptionDefaultById: Map<string, StripePaymentMethodLike | string | null | undefined>;
+}) {
+  if (!input.customerDefault?.card?.last4) return false;
+  const customerFingerprint = stripePaymentMethodFingerprint(input.customerDefault);
+  if (!customerFingerprint) return false;
+
+  for (const subscriptionId of input.subscriptionIds) {
+    const subscriptionDefault = expandedPaymentMethod(input.subscriptionDefaultById.get(subscriptionId));
+    if (subscriptionDefault) {
+      if (stripePaymentMethodFingerprint(subscriptionDefault) !== customerFingerprint) {
+        return false;
+      }
+      continue;
+    }
+  }
+  return input.subscriptionIds.length > 0;
+}
+
+function finalizeAgencyPaymentMethodScope(
+  paymentMethod: ClientSafePaymentMethod,
+  sharedCustomerLevel: boolean,
+  resolvedFromSubscription: boolean,
+): ClientSafePaymentMethod {
+  if (!paymentMethod.available) return paymentMethod;
+  if (sharedCustomerLevel) {
+    return { ...paymentMethod, scope: "agency_default" };
+  }
+  if (resolvedFromSubscription) {
+    return { ...paymentMethod, scope: "subscription_specific" };
+  }
+  return { ...paymentMethod, scope: "none" };
+}
+
 export function resolveHeaderPaymentMethod(input: {
   mode: ClientBillingView["mode"];
   accountRows: ClientBillingAccountRow[];
   customerDefault: StripePaymentMethodLike | string | null | undefined;
+  agencyCustomerLevelShared: boolean;
   lang: ClientBillingLang;
 }): ClientSafePaymentMethod {
   const customerResolved = paymentMethodFromStripe(
     expandedPaymentMethod(input.customerDefault),
-    "agency_default",
+    input.mode === "agency" && input.agencyCustomerLevelShared ? "agency_default" : "account_default",
     input.lang,
   );
 
@@ -506,24 +568,30 @@ export function resolveHeaderPaymentMethod(input: {
 
   const fingerprints = effectiveRows.map((row) => paymentMethodFingerprint(row.paymentMethod));
   const allSame = fingerprints.every((fingerprint) => fingerprint === fingerprints[0]);
-  if (allSame) {
+  if (allSame && input.agencyCustomerLevelShared) {
     return {
       ...effectiveRows[0].paymentMethod,
       scope: "agency_default",
     };
   }
 
-  if (customerResolved.available) {
+  if (customerResolved.available && input.agencyCustomerLevelShared) {
     return customerResolved;
   }
 
-  return effectiveRows[0].paymentMethod;
+  if (allSame) {
+    return { ...effectiveRows[0].paymentMethod, scope: "none" };
+  }
+
+  return { ...effectiveRows[0].paymentMethod, scope: "none" };
 }
 
 function resolveEffectivePaymentMethod(input: {
+  mode: ClientBillingView["mode"];
   subscriptionId: string | null;
   customerDefault: StripePaymentMethodLike | string | null | undefined;
   subscriptionDefaultById: Map<string, StripePaymentMethodLike | string | null | undefined>;
+  agencyCustomerLevelShared: boolean;
   lang: ClientBillingLang;
 }): ClientSafePaymentMethod {
   const subscriptionDefault = input.subscriptionId
@@ -532,18 +600,21 @@ function resolveEffectivePaymentMethod(input: {
   const customerDefault = expandedPaymentMethod(input.customerDefault);
 
   if (subscriptionDefault) {
-    const customerSame = customerDefault
-      && subscriptionDefault.id
-      && customerDefault.id
-      && subscriptionDefault.id === customerDefault.id;
-    return paymentMethodFromStripe(
-      subscriptionDefault,
-      customerSame ? "agency_default" : "subscription",
-      input.lang,
-    );
+    const method = paymentMethodFromStripe(subscriptionDefault, "subscription", input.lang);
+    if (input.mode === "agency") {
+      return finalizeAgencyPaymentMethodScope(method, input.agencyCustomerLevelShared, true);
+    }
+    return method;
   }
 
-  return paymentMethodFromStripe(customerDefault, "agency_default", input.lang);
+  if (customerDefault) {
+    const scope: ClientPaymentMethodScope = input.mode === "agency"
+      ? (input.agencyCustomerLevelShared ? "agency_default" : "account_default")
+      : "account_default";
+    return paymentMethodFromStripe(customerDefault, scope, input.lang);
+  }
+
+  return paymentMethodFromStripe(null, "none", input.lang);
 }
 
 export async function buildClientBillingView(input: {
@@ -623,7 +694,18 @@ export async function buildClientBillingView(input: {
     });
   }
 
-  const accountRows: ClientBillingAccountRow[] = linkedAccounts.map((account) => {
+  const mode: ClientBillingView["mode"] = linkedAccounts.length > 1 ? "agency" : "standard";
+  const activeStatuses = new Set(["active", "trialing", "past_due"]);
+  const activeSubscriptionIds = projections
+    .filter((row) => activeStatuses.has(row.status.toLowerCase()))
+    .map((row) => row.stripeSubscriptionId);
+  const agencyCustomerLevelShared = mode === "agency" && isAgencyCustomerLevelShared({
+    customerDefault: expandedPaymentMethod(customerDefaultPm),
+    subscriptionIds: activeSubscriptionIds,
+    subscriptionDefaultById,
+  });
+
+  const finalizedAccountRows: ClientBillingAccountRow[] = linkedAccounts.map((account) => {
     const accountProjections = projections.filter((row) => row.accountId === account.accountId
       || (row.entitlementId && entitlementById.get(row.entitlementId)?.accountId === account.accountId));
     const primaryProjection = accountProjections[0] ?? null;
@@ -650,9 +732,11 @@ export async function buildClientBillingView(input: {
         ? formatDateLabel(primaryProjection.currentPeriodEnd, lang)
         : null,
       paymentMethod: resolveEffectivePaymentMethod({
+        mode,
         subscriptionId,
         customerDefault: customerDefaultPm,
         subscriptionDefaultById,
+        agencyCustomerLevelShared,
         lang,
       }),
       invoices: safeInvoices.filter((invoice) => invoice.correlationCertain && invoice.accountUsername === account.username),
@@ -660,11 +744,11 @@ export async function buildClientBillingView(input: {
   });
 
   const unassignedInvoices = safeInvoices.filter((invoice) => !invoice.correlationCertain);
-  const mode: ClientBillingView["mode"] = linkedAccounts.length > 1 ? "agency" : "standard";
   defaultPaymentMethod = resolveHeaderPaymentMethod({
     mode,
-    accountRows,
+    accountRows: finalizedAccountRows,
     customerDefault: customerDefaultPm,
+    agencyCustomerLevelShared,
     lang,
   });
 
@@ -676,7 +760,22 @@ export async function buildClientBillingView(input: {
     globalNextBillingLabel: computeGlobalNextBillingLabel(projections, lang),
     recentInvoices: mode === "standard" ? safeInvoices : [],
     unassignedInvoices: mode === "agency" ? unassignedInvoices : [],
-    accounts: accountRows,
+    accounts: finalizedAccountRows,
+  };
+}
+
+export async function loadClientBillingPaymentSummary(input: {
+  supabase: SupabaseClient;
+  clientId: string;
+  lang: ClientBillingLang;
+  env?: NodeJS.ProcessEnv;
+  stripeGateway?: ClientBillingStripeGateway | null;
+}) {
+  const view = await buildClientBillingView(input);
+  return {
+    displayLabel: view.defaultPaymentMethod.displayLabel,
+    available: view.defaultPaymentMethod.available,
+    scope: view.defaultPaymentMethod.scope,
   };
 }
 

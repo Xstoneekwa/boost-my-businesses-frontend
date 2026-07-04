@@ -1,6 +1,11 @@
 export type ClientBillingLang = "fr" | "en";
 
-export type ClientPaymentMethodScope = "agency_default" | "subscription" | "none";
+export type ClientPaymentMethodScope =
+  | "agency_default"
+  | "account_default"
+  | "subscription"
+  | "subscription_specific"
+  | "none";
 
 export type ClientSafePaymentMethod = {
   available: boolean;

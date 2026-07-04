@@ -56,7 +56,9 @@ function InvoiceRow({
           <a className="cd-btn cd-btn-soft" href={invoiceDocumentPath(invoice.invoiceRef, "pdf")} target="_blank" rel="noreferrer">
             {t.downloadPdf}
           </a>
-        ) : null}
+        ) : (
+          <span className="cd-billing-pdf-unavailable">{t.pdfUnavailable}</span>
+        )}
       </div>
     </article>
   );

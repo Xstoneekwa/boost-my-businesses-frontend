@@ -1,5 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
+import { loadClientBillingPaymentSummary } from "@/lib/commercial/stripe/client-billing-service.ts";
 import { projectClientAccountRow } from "./account-projection";
 import { readString, rejectTechnicalClientFields } from "./guards";
 import {
@@ -244,7 +245,22 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     bio: readMetadataString(metadata, "account_manager_bio"),
   };
 
-  const billing = billingSummary(metadata, subscriptionProjection);
+  let paymentMethodDisplay = subscriptionProjection.paymentMethodDisplay;
+  try {
+    const paymentSummary = await loadClientBillingPaymentSummary({
+      supabase,
+      clientId,
+      lang: preferredLanguage,
+    });
+    paymentMethodDisplay = paymentSummary.displayLabel;
+  } catch {
+    // Keep metadata projection fallback when Stripe billing is unavailable.
+  }
+
+  const billing = billingSummary(metadata, {
+    ...subscriptionProjection,
+    paymentMethodDisplay,
+  });
 
   return {
     clientId,
@@ -261,7 +277,7 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     memberSince: subscriptionProjection.memberSince,
     subscriptionPeriodEnd: subscriptionProjection.subscriptionPeriodEnd,
     billingDisplayMode: subscriptionProjection.billingDisplayMode,
-    paymentMethodDisplay: subscriptionProjection.paymentMethodDisplay,
+    paymentMethodDisplay,
     subscriptionLabel: subscriptionProjection.clientPlanLabel,
     subscriptionStatus: readString(subscription?.status, subscriptionProjection.subscriptionStatus),
     subscriptionSince: subscriptionStartsAt || subscriptionProjection.memberSince,
