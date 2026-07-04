@@ -1,5 +1,17 @@
 -- Commercial account lifecycle (pause / resume / cancel) — durable server-side state.
 -- Not applied to production in this checkpoint; code/tests only.
+--
+-- Rollback plan before real lifecycle usage:
+--   1. Revert this migration in git.
+--   2. Drop commercial_account_lifecycle_operations and commercial_account_lifecycle_states.
+--   3. Drop billing_paused and pause_collection_behavior from commercial_stripe_subscriptions if no
+--      application code has read them.
+--   4. Restore the previous release_schedule_capacity_on_account_admin_lifecycle function/trigger body.
+--
+-- Rollback plan after real lifecycle usage:
+--   Do not drop the lifecycle tables or columns. They become the audit ledger and source of truth
+--   for paused/cancelled commercial accounts. Ship a forward migration that disables new lifecycle
+--   entrypoints, reconciles every pending/action_required row, then preserves the ledger read-only.
 
 create table if not exists public.commercial_account_lifecycle_states (
   account_id uuid primary key references public.ig_accounts(id) on delete cascade,
