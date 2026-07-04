@@ -11,7 +11,13 @@ import {
   markStripeAttemptReconciliationFailure,
   StripeFulfillmentError,
 } from "./stripe-fulfillment.ts";
-import { upsertStripeSubscriptionProjection } from "./stripe-subscription-projection.ts";
+import {
+  buildStripeSubscriptionSnapshot,
+  patchStripeWebhookEventMetadata,
+  reconcilePaidStripeSubscriptionProjection,
+  resolveStripeSubscriptionWebhookCorrelation,
+} from "./stripe-subscription-webhook-reconciliation.ts";
+import { clearCheckoutPendingSignupCredentialIdempotent } from "../checkout-pending-signup-credential.ts";
 import { assertStripeTestLivemode, requireStripeTestConfig } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
 import { mapAttemptStatusToCommercialStatus, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
@@ -19,13 +25,6 @@ import {
   validatePlanChangeCheckoutPayment,
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
-import {
-  buildStripeSubscriptionSnapshot,
-  patchStripeWebhookEventMetadata,
-  reconcileDeferredStripeSubscriptionWebhookEvents,
-  resolveStripeSubscriptionWebhookCorrelation,
-} from "./stripe-subscription-webhook-reconciliation.ts";
-import { clearCheckoutPendingSignupCredentialIdempotent } from "../checkout-pending-signup-credential.ts";
 
 type Row = Record<string, unknown>;
 
@@ -280,31 +279,16 @@ async function handleSubscriptionProjectionEvent(
     );
   }
 
-  await upsertStripeSubscriptionProjection(supabase, {
+  await reconcilePaidStripeSubscriptionProjection(supabase, {
     clientId: String(profile.client_id),
-    stripeSubscriptionId: subscription.id,
     stripeCustomerId: customerId,
-    stripePriceId: subscription.items.data[0]?.price?.id ?? null,
-    status: subscription.status,
-    currentPeriodStart: subscription.current_period_start
-      ? new Date(subscription.current_period_start * 1000).toISOString()
-      : null,
-    currentPeriodEnd: subscription.current_period_end
-      ? new Date(subscription.current_period_end * 1000).toISOString()
-      : null,
-    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    stripeSubscriptionId: subscription.id,
+    correlationBasis: event.type === "customer.subscription.deleted"
+      ? "subscription_deleted_webhook"
+      : "subscription_webhook_projection",
+    incomingSnapshot: buildStripeSubscriptionSnapshot(subscription),
+    incomingIsTerminalEvent: event.type === "customer.subscription.deleted",
   });
-
-  if (
-    event.type === "customer.subscription.created"
-    || event.type === "customer.subscription.updated"
-  ) {
-    await reconcileDeferredStripeSubscriptionWebhookEvents(supabase, {
-      clientId: String(profile.client_id),
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: subscription.id,
-    });
-  }
 }
 
 async function handleInvoiceEvent(supabase: SupabaseClient, event: Stripe.Event) {

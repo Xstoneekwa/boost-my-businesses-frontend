@@ -156,6 +156,10 @@ async function claimWebhookEventFallback(
     return { ok: false, code: "webhook_ledger_unavailable", status: 503 };
   }
 
+  const existingMetadata = existing?.metadata_safe && typeof existing.metadata_safe === "object"
+    ? existing.metadata_safe as Record<string, unknown>
+    : {};
+
   const { error: updateError } = await supabase
     .from("commercial_stripe_webhook_events")
     .update({
@@ -167,7 +171,10 @@ async function claimWebhookEventFallback(
       stripe_customer_id: input.stripeCustomerId ?? null,
       stripe_subscription_id: input.stripeSubscriptionId ?? null,
       stripe_checkout_session_id: input.stripeCheckoutSessionId ?? null,
-      metadata_safe: input.metadataSafe ?? {},
+      metadata_safe: {
+        ...existingMetadata,
+        ...(input.metadataSafe ?? {}),
+      },
       last_error_redacted: null,
       processed_at: null,
       error_redacted: null,
