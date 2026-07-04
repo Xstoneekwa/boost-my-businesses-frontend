@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { activateClientAccountEntitlementFromCheckout } from "../activate-client-account-entitlement-from-checkout.ts";
-import { loadCheckoutPendingSignupCredential, clearCheckoutPendingSignupCredential } from "../checkout-pending-signup-credential.ts";
+import { loadCheckoutPendingSignupCredential, clearCheckoutPendingSignupCredentialIdempotent } from "../checkout-pending-signup-credential.ts";
 import { activatePlanChangeQuote } from "../plan-change-quote.ts";
 import {
   type StripeCheckoutAttemptRow,
@@ -178,6 +178,9 @@ async function fulfillSubscriptionAttempt(
     const credential = await loadCheckoutPendingSignupCredential(supabase, {
       checkoutSessionId,
       idempotencyKey,
+      purchaserEmail: readString(checkoutSession.purchaser_email),
+      flowType: "first_purchase",
+      commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
     }, env);
     if (!credential.ok) {
       throw new StripeFulfillmentError(credential.code, credential.messageEn, false);
@@ -212,7 +215,7 @@ async function fulfillSubscriptionAttempt(
   }
 
   if (readString(checkoutSession.flow_type) === "first_purchase") {
-    await clearCheckoutPendingSignupCredential(supabase, checkoutSessionId);
+    await clearCheckoutPendingSignupCredentialIdempotent(supabase, checkoutSessionId);
   }
 
   if (input.customerId) {

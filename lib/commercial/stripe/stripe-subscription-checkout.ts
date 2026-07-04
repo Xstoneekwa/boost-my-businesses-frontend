@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { buildCommercialQuote } from "../pricing.ts";
 import {
+  requireCheckoutSignupCredentialSecret,
   storeCheckoutPendingSignupCredential,
   validateStripeFirstPurchaseSignupPassword,
 } from "../checkout-pending-signup-credential.ts";
@@ -320,6 +321,30 @@ export async function createStripeSubscriptionCheckoutSession(
 
   const flowType = input.flowType === "additional_account" ? "additional_account" : "first_purchase";
 
+  if (flowType === "first_purchase") {
+    const secretResult = requireCheckoutSignupCredentialSecret(env);
+    if (!secretResult.ok) {
+      return {
+        ok: false,
+        status: 503,
+        code: secretResult.code,
+        messageEn: secretResult.messageEn,
+      };
+    }
+    const passwordValidation = validateStripeFirstPurchaseSignupPassword({
+      password: input.password,
+      passwordConfirmation: input.passwordConfirmation ?? input.password,
+    });
+    if (!passwordValidation.ok) {
+      return {
+        ok: false,
+        status: 400,
+        code: passwordValidation.code,
+        messageEn: passwordValidation.messageEn,
+      };
+    }
+  }
+
   const simulationAccess = await evaluateCheckoutSimulationAccess({
     supabase,
     email,
@@ -337,21 +362,6 @@ export async function createStripeSubscriptionCheckoutSession(
       code: readString(simulationAccess.reason, "authorization_required"),
       messageEn: simulationAccess.messageEn ?? "Checkout authorization is required.",
     };
-  }
-
-  if (flowType === "first_purchase") {
-    const passwordValidation = validateStripeFirstPurchaseSignupPassword({
-      password: input.password,
-      passwordConfirmation: input.passwordConfirmation ?? input.password,
-    });
-    if (!passwordValidation.ok) {
-      return {
-        ok: false,
-        status: 400,
-        code: passwordValidation.code,
-        messageEn: passwordValidation.messageEn,
-      };
-    }
   }
 
   const quote = commercialMode === "full_cycle"
@@ -419,18 +429,6 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 503, code: pendingSession.code, messageEn: "Could not create internal checkout session." };
   }
 
-  if (flowType === "first_purchase" && input.password) {
-    const credentialStored = await storeCheckoutPendingSignupCredential(supabase, {
-      checkoutSessionId: pendingSession.checkoutSessionId,
-      idempotencyKey,
-      password: input.password,
-      passwordConfirmation: input.passwordConfirmation ?? input.password,
-    }, env);
-    if (!credentialStored.ok) {
-      return { ok: false, status: 400, code: credentialStored.code, messageEn: credentialStored.messageEn };
-    }
-  }
-
   const binding = validateEntitlementBillingBinding({
     clientId: clientId ?? "pending-client",
     entitlementId: pendingSession.checkoutSessionId,
@@ -485,6 +483,26 @@ export async function createStripeSubscriptionCheckoutSession(
 
   if (!stripeSession.id || !stripeSession.url) {
     return { ok: false, status: 503, code: "stripe_session_create_failed", messageEn: "Stripe checkout session could not be created." };
+  }
+
+  if (flowType === "first_purchase" && input.password) {
+    const credentialStored = await storeCheckoutPendingSignupCredential(supabase, {
+      checkoutSessionId: pendingSession.checkoutSessionId,
+      idempotencyKey,
+      password: input.password,
+      passwordConfirmation: input.passwordConfirmation ?? input.password,
+      purchaserEmail: email,
+      flowType,
+      commercialMode,
+      expiresAtUnix: stripeSession.expires_at ?? null,
+    }, env);
+    if (!credentialStored.ok) {
+      await supabase
+        .from("commercial_checkout_sessions")
+        .update({ status: "checkout_failed", updated_at: new Date().toISOString() })
+        .eq("id", pendingSession.checkoutSessionId);
+      return { ok: false, status: 503, code: credentialStored.code, messageEn: credentialStored.messageEn };
+    }
   }
 
   const attempt = await createStripeCheckoutAttempt(supabase, {

@@ -19,6 +19,7 @@ import {
   validatePlanChangeCheckoutPayment,
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
+import { clearCheckoutPendingSignupCredentialIdempotent } from "../checkout-pending-signup-credential.ts";
 
 type Row = Record<string, unknown>;
 
@@ -221,6 +222,10 @@ async function handleCheckoutSessionExpired(supabase: SupabaseClient, event: Str
       .from("commercial_checkout_sessions")
       .update({ status: "checkout_expired", updated_at: new Date().toISOString() })
       .eq("id", attemptLookup.attempt.commercial_checkout_session_id);
+    await clearCheckoutPendingSignupCredentialIdempotent(
+      supabase,
+      attemptLookup.attempt.commercial_checkout_session_id,
+    );
   }
 }
 

@@ -22,6 +22,7 @@ This phase adds **Stripe Test Mode infrastructure only**. The canonical client t
 - `STRIPE_TEST_CHECKOUT_ENABLED=true`
 - `STRIPE_TEST_CHECKOUT_ALLOWED_ORIGINS` — comma/space separated public app origins allowed for Stripe Test success/cancel redirects
 - `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` — test portal configuration
+- `CHECKOUT_SIGNUP_CREDENTIAL_SECRET` — dedicated secret for sealing public signup passwords before payment (required when Stripe Test checkout is enabled). Minimum 32 characters of random material; recommended: `openssl rand -base64 32`. Never reuse `SUPABASE_SERVICE_ROLE_KEY` or any other operational secret.
 
 Live keys and `livemode=true` events are **rejected** (`stripe_live_key_rejected`, `stripe_livemode_rejected`).
 
@@ -57,7 +58,8 @@ Live keys and `livemode=true` events are **rejected** (`stripe_live_key_rejected
 - Public Stripe first purchase requires `STRIPE_TEST_CHECKOUT_ENABLED=true`, test Stripe config, production Supabase ref `zgafnshkjywfltxgbtzg`, and an active authorization row.
 - The public browser sends email plus commercial intent only. It never supplies a trusted Stripe Price ID, amount, success/cancel URL, client id, Auth id, or entitlement id.
 - Before payment, only `commercial_checkout_sessions` and `commercial_stripe_checkout_attempts` are created, both pending and without `client_id` / `auth_user_id`.
-- After a paid, signed `checkout.session.completed` webhook, activation creates Auth/client/tenant/entitlement through the existing commercial activation path and records authorization usage idempotently.
+- Public first purchase stores the signup password only as AES-256-GCM ciphertext in `commercial_checkout_sessions.metadata.pending_signup_credential_ciphertext`, bound to checkout session id, email hash, flow type, commercial mode, and expiry via authenticated AAD. Plaintext passwords never appear in Stripe metadata, URLs, logs, or ordinary DB columns.
+- After a paid, signed `checkout.session.completed` webhook, activation creates Auth/client/tenant/entitlement through the existing commercial activation path and records authorization usage idempotently. The sealed credential is cleared idempotently after successful activation, on `checkout.session.expired`, and on other terminal pending-checkout states.
 
 ## Payment confirmed vs checkout completed
 
