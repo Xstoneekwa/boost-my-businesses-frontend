@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const verified = await verifyStripeWebhookSignature(rawBody, signature);
     if (!verified.ok) {
       return new Response(JSON.stringify({ ok: false, code: verified.code }), {
-        status: verified.code === "stripe_signature_invalid" ? 400 : 503,
+        status: verified.code === "stripe_signature_invalid" || verified.code === "stripe_signature_missing" ? 400 : 503,
         headers: { "Content-Type": "application/json" },
       });
     }

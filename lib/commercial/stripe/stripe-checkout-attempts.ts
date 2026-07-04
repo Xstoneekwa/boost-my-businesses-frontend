@@ -74,15 +74,37 @@ export async function createInternalCheckoutSessionPending(
     purchaserEmail: string;
     clientId?: string | null;
     authUserId?: string | null;
-    planKey: string;
+    planKey?: string | null;
     billingIntervalMonths: number;
     outreachAddonKey?: string | null;
+    commercialMode?: string | null;
+    pricingSnapshotFingerprint?: string | null;
     quoteSnapshot: Record<string, unknown>;
     pricingSnapshot: Record<string, unknown>;
     catalogSnapshot: Record<string, unknown>;
     totalPeriodCents: number;
   },
 ) {
+  const { data: existing, error: existingError } = await supabase
+    .from("commercial_checkout_sessions")
+    .select("id,commercial_mode,plan_key,billing_interval_months,outreach_addon_key")
+    .eq("idempotency_key", input.idempotencyKey)
+    .maybeSingle<Row>();
+  if (existingError) {
+    return { ok: false as const, code: "checkout_session_lookup_failed" as const };
+  }
+  if (existing?.id) {
+    if (
+      readString(existing.commercial_mode) !== readString(input.commercialMode)
+      || readString(existing.plan_key) !== readString(input.planKey)
+      || Number(existing.billing_interval_months) !== Number(input.billingIntervalMonths)
+      || readString(existing.outreach_addon_key) !== readString(input.outreachAddonKey)
+    ) {
+      return { ok: false as const, code: "checkout_idempotency_conflict" as const };
+    }
+    return { ok: true as const, checkoutSessionId: String(existing.id), idempotentReplay: true as const };
+  }
+
   const { data, error } = await supabase
     .from("commercial_checkout_sessions")
     .insert({
@@ -92,9 +114,12 @@ export async function createInternalCheckoutSessionPending(
       client_id: input.clientId ?? null,
       auth_user_id: input.authUserId ?? null,
       purchaser_email: input.purchaserEmail,
-      plan_key: input.planKey,
+      plan_key: input.planKey ?? null,
       billing_interval_months: input.billingIntervalMonths,
       outreach_addon_key: input.outreachAddonKey ?? null,
+      commercial_mode: input.commercialMode ?? null,
+      stripe_pricing_mode: "public_catalog",
+      pricing_snapshot_fingerprint: input.pricingSnapshotFingerprint ?? null,
       billable_account_count: Number(input.quoteSnapshot.billableAccountCount ?? 1),
       term_discount_percent: Number(input.quoteSnapshot.termDiscountPercent ?? 0),
       agency_discount_percent: Number(input.quoteSnapshot.agencyDiscountPercent ?? 0),
@@ -148,6 +173,18 @@ export async function createStripeCheckoutAttempt(
 ) {
   const metadata = buildSafeStripeMetadata(input.metadataSafe ?? {});
   rejectUnsafeStripeMetadataKeys(metadata);
+
+  const { data: existing, error: existingError } = await supabase
+    .from("commercial_stripe_checkout_attempts")
+    .select("id")
+    .eq("idempotency_key", input.idempotencyKey)
+    .maybeSingle<Row>();
+  if (existingError) {
+    return { ok: false as const, code: "stripe_attempt_lookup_failed" as const };
+  }
+  if (existing?.id) {
+    return { ok: true as const, attemptId: String(existing.id), idempotentReplay: true as const };
+  }
 
   const { data, error } = await supabase
     .from("commercial_stripe_checkout_attempts")

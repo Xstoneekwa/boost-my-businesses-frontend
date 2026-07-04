@@ -73,6 +73,19 @@ Unpaid / async-pending sessions are stored as attempt status `awaiting_payment`.
 
 Stripe Checkout does **not** pass `payment_method_types`; payment methods stay controlled by Stripe Dashboard settings.
 
+## Checkout Session creation boundary
+
+Checkout Session creation is server-only and Test-only:
+
+- the browser sends only the canonical commercial intent (`full_cycle` / `outreach_only`, package when applicable, outreach when applicable, billing interval, and internal client/entitlement context when applicable);
+- the browser never supplies a trusted Stripe Price ID, amount, coupon, promotion code, Customer Balance, Product ID, or arbitrary redirect URL;
+- server code resolves component Prices from `commercial_stripe_component_price_catalog` with `environment='test'`, `active=true`, expected amount, currency, component kind, and interval;
+- success/cancel URLs are built from an allowlisted server origin;
+- a Stripe Customer is reused from `commercial_stripe_billing_profiles` when a client already exists, otherwise creation is idempotent and server-side only when the internal contract permits it;
+- `mode: subscription` is used with one line item per component.
+
+`full_cycle` creates exactly one package item and optionally one outreach item. `outreach_only` creates exactly one outreach item and no package item.
+
 ## Webhook event state machine
 
 Ledger statuses: `processing`, `processed`, `ignored`, `failed`, `retryable`.
@@ -139,10 +152,12 @@ First purchase without client workspace: user must sign in with the pre-created 
 
 ## Webhook events handled
 
-- `checkout.session.completed` / `checkout.session.async_payment_succeeded` — payment validation + fulfillment
+- `checkout.session.completed` — payment validation + fulfillment
 - `checkout.session.expired` — mark attempt/session expired
 - `customer.subscription.created|updated|deleted` — projection sync
 - `invoice.paid` / `invoice.payment_failed` — billing projection updates
+
+Events outside this allowlist are rejected fail-closed. Unknown customer/session/attempt correlation is also rejected; it is not silently ignored.
 
 ## Price mapping
 
@@ -168,6 +183,12 @@ Stripe Customer remains client-level. Stripe Subscription is entitlement-level:
 `full_cycle` subscriptions contain exactly one package item and optionally one outreach item. `outreach_only` subscriptions contain exactly one outreach item and no package item. Outreach Standard/AI exclusivity is per entitlement only; the same client may have Standard on A/B and AI on C.
 
 Stripe never decides phone routing. Existing internal runtime data (`client_subscriptions.subscription_type`, assignments, `phone_devices.pool_type`) remains canonical.
+
+Stripe is never the source of truth for entitlements. Stripe confirms payment state; internal tables and activation procedures remain authoritative for entitlement status, account binding, runtime mode, and any later worker/device eligibility.
+
+## Local migration added for V1
+
+`20260710150500_stripe_checkout_webhook_foundation_v1.sql` is required before the first real `outreach_only` checkout because historical commercial checkout tables required package fields (`plan_key`, `commercial_package_code`, package cents) to be non-null. The migration only makes those package fields nullable where `commercial_mode='outreach_only'` and adds mode-shape constraints. It is not applied to Production in this checkpoint.
 
 ## Identity pre-checkout (first purchase)
 
@@ -196,14 +217,17 @@ Password is used **once** server-side via existing `resolveSimulatedPublicAuth` 
 
 ## Future test sequence (manual, after config)
 
-1. Apply migrations on isolated DB.
-2. Set test env vars in deployment (not committed).
-3. Admin: create prod-test authorization + test price mappings.
-4. Admin harness: launch Stripe Test checkout.
-5. Complete payment in Stripe Test mode.
-6. Verify webhook activates entitlement once (idempotent replay safe).
-7. Verify failed fulfillment can be retried via webhook or admin recovery without a second charge.
-8. Success page shows status via authenticated polling only.
+1. Apply pending migrations on an isolated DB first, then Production only after review.
+2. Set server-side Test variables in deployment only; do not commit or paste secrets.
+3. Register the Stripe Test webhook endpoint and signing secret.
+4. Confirm the 20 Test component mappings exist with `livemode=false`.
+5. Admin: create prod-test authorization + launch Stripe Test checkout.
+6. Complete payment in Stripe Test mode.
+7. Verify webhook activates entitlement once (idempotent replay safe).
+8. Verify failed fulfillment can be retried via webhook or admin recovery without a second charge.
+9. Success page shows status via authenticated polling only.
+
+Before the first real Checkout Test, confirm: no Live key, no Live object, no arbitrary redirect origin, no browser-supplied Price ID, no runtime/BotApp/phone side effect, and no production migration applied outside the release checklist.
 
 ## Rollback
 

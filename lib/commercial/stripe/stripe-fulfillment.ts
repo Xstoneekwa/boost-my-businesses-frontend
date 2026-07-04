@@ -180,6 +180,7 @@ async function fulfillSubscriptionAttempt(
     mode: "stripe",
     stripeWebhookConfirmed: true,
     precreatedCheckoutSessionId: readString(checkoutSession.id),
+    commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
   });
 
   if (!activation.ok) {
@@ -204,7 +205,7 @@ async function fulfillSubscriptionAttempt(
       clientAccountEntitlementId: activation.entitlementId,
       accountId: null,
       commercialCheckoutSessionId: readString(checkoutSession.id),
-      commercialMode: "full_cycle",
+      commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
       pricingMode: "public_catalog",
       pricingSnapshotFingerprint: readString((checkoutSession.pricing_snapshot as Row | null)?.version),
       status: "active",

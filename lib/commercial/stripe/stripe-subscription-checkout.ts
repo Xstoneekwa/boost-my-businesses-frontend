@@ -1,31 +1,46 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type Stripe from "stripe";
 import { buildCommercialQuote } from "../pricing.ts";
-import { isPlanKey, type CheckoutFlowType, type PlanKey } from "../catalog.ts";
+import {
+  OUTREACH_ADDONS,
+  isBillingIntervalMonths,
+  isOutreachAddonKey,
+  isPlanKey,
+  type BillingIntervalMonths,
+  type CheckoutFlowType,
+  type OutreachAddonKey,
+  type PlanKey,
+} from "../catalog.ts";
 import { evaluateCheckoutSimulationAccess } from "../checkout-simulation-access.ts";
 import { resolveSimulatedPublicAuth } from "../checkout-auth.ts";
 import { requireStripeTestConfig, StripeFoundationError } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
 import {
-  resolveStripeComponentPriceId,
+  loadStripeComponentPriceCatalogRow,
   resolveStripeProductIdForComponent,
 } from "./stripe-component-price-resolver.ts";
 import {
   createInternalCheckoutSessionPending,
   createStripeCheckoutAttempt,
 } from "./stripe-checkout-attempts.ts";
-import { buildSafeStripeMetadata, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
+import { buildSafeStripeMetadata, isValidStripePriceId, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
 import { isStripeTestFoundationReady, getStripeTestReadiness } from "./stripe-readiness.ts";
 import {
   componentsFromPricingSnapshot,
   inferCommercialMode,
   isPublicCatalogComponent,
+  productKeyForOutreach,
+  publicCatalogAmountCents,
   validateEntitlementBillingBinding,
   type CommercialMode,
   type StripeBillingComponent,
 } from "./stripe-per-entitlement-billing.ts";
+import { upsertStripeBillingProfile } from "./stripe-subscription-projection.ts";
 
 export type CreateStripeSubscriptionCheckoutInput = {
-  planKey: string;
+  commercialMode?: string | null;
+  planKey?: string | null;
+  packageKey?: string | null;
   billingIntervalMonths: number;
   outreachAddonKey?: string | null;
   purchaserEmail: string;
@@ -35,6 +50,8 @@ export type CreateStripeSubscriptionCheckoutInput = {
   password?: string | null;
   successUrl: string;
   cancelUrl: string;
+  allowedOrigins?: string[];
+  stripe?: Stripe;
 };
 
 export type CreateStripeSubscriptionCheckoutResult =
@@ -44,6 +61,164 @@ export type CreateStripeSubscriptionCheckoutResult =
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+function normalizeCommercialRequest(input: CreateStripeSubscriptionCheckoutInput):
+  | {
+    ok: true;
+    commercialMode: CommercialMode;
+    planKey: PlanKey | null;
+    billingIntervalMonths: BillingIntervalMonths;
+    outreachAddonKey: OutreachAddonKey | null;
+  }
+  | { ok: false; status: number; code: string; messageEn: string } {
+  const commercialMode = inferCommercialMode({
+    planKey: input.planKey ?? input.packageKey ?? null,
+    outreachAddonKey: input.outreachAddonKey,
+    explicitMode: input.commercialMode,
+  });
+  if (!commercialMode) {
+    return { ok: false, status: 400, code: "commercial_mode_invalid", messageEn: "Invalid commercial mode." };
+  }
+
+  const billingIntervalMonths = Number(input.billingIntervalMonths);
+  if (!isBillingIntervalMonths(billingIntervalMonths)) {
+    return { ok: false, status: 400, code: "invalid_billing_interval", messageEn: "Invalid billing interval." };
+  }
+
+  const packageInput = readString(input.packageKey ?? input.planKey);
+  const planKey = packageInput ? (isPlanKey(packageInput) ? packageInput : null) : null;
+  const outreachInput = readString(input.outreachAddonKey);
+  const outreachAddonKey = outreachInput ? (isOutreachAddonKey(outreachInput) ? outreachInput : null) : null;
+
+  if (packageInput && !planKey) {
+    return { ok: false, status: 400, code: "invalid_package", messageEn: "Invalid package selection." };
+  }
+  if (outreachInput && !outreachAddonKey) {
+    return { ok: false, status: 400, code: "invalid_outreach", messageEn: "Invalid outreach selection." };
+  }
+  if (commercialMode === "full_cycle" && !planKey) {
+    return { ok: false, status: 400, code: "full_cycle_package_required", messageEn: "Full cycle requires one package." };
+  }
+  if (commercialMode === "outreach_only" && planKey) {
+    return { ok: false, status: 400, code: "outreach_only_package_forbidden", messageEn: "Outreach-only cannot include a package." };
+  }
+  if (commercialMode === "outreach_only" && !outreachAddonKey) {
+    return { ok: false, status: 400, code: "outreach_only_outreach_required", messageEn: "Outreach-only requires one outreach product." };
+  }
+
+  return { ok: true, commercialMode, planKey, billingIntervalMonths, outreachAddonKey };
+}
+
+function buildOutreachOnlyComponents(input: {
+  outreachAddonKey: OutreachAddonKey;
+  billingIntervalMonths: BillingIntervalMonths;
+}): StripeBillingComponent[] {
+  return [{
+    componentKind: "outreach",
+    productKey: productKeyForOutreach(input.outreachAddonKey),
+    packageKey: null,
+    outreachKey: input.outreachAddonKey,
+    billingIntervalMonths: input.billingIntervalMonths,
+    amountCents: publicCatalogAmountCents("outreach", input.outreachAddonKey, input.billingIntervalMonths),
+    currency: "eur",
+  }];
+}
+
+function buildOutreachOnlyCommercialQuote(input: {
+  outreachAddonKey: OutreachAddonKey;
+  billingIntervalMonths: BillingIntervalMonths;
+}) {
+  const addon = OUTREACH_ADDONS[input.outreachAddonKey];
+  const amountCents = publicCatalogAmountCents("outreach", input.outreachAddonKey, input.billingIntervalMonths);
+  const line = {
+    lineKey: "outreach",
+    label: addon.displayNameFr,
+    baseMonthlyPriceCents: addon.baseMonthlyPriceCents,
+    discountPercent: 0,
+    discountType: "none",
+    monthlyDiscountedPriceCents: Math.round(amountCents / input.billingIntervalMonths),
+    billingIntervalMonths: input.billingIntervalMonths,
+    billingPeriodTotalCents: amountCents,
+  };
+  return {
+    planKey: null,
+    billingIntervalMonths: input.billingIntervalMonths,
+    outreachAddonKey: input.outreachAddonKey,
+    billableAccountCount: 1,
+    termDiscountPercent: 0,
+    agencyDiscountPercent: 0,
+    appliedDiscountPercent: 0,
+    appliedDiscountType: "none",
+    packLine: {
+      lineKey: "pack",
+      label: "No package",
+      baseMonthlyPriceCents: 0,
+      discountPercent: 0,
+      discountType: "none",
+      monthlyDiscountedPriceCents: 0,
+      billingIntervalMonths: input.billingIntervalMonths,
+      billingPeriodTotalCents: 0,
+    },
+    outreachLine: line,
+    totalPeriodCents: amountCents,
+    catalogSnapshot: {},
+    pricingSnapshot: {
+      version: `outreach-only:${input.outreachAddonKey}:${input.billingIntervalMonths}`,
+      planKey: null,
+      billingIntervalMonths: input.billingIntervalMonths,
+      outreachAddonKey: input.outreachAddonKey,
+      packPeriodTotalCents: 0,
+      outreachPeriodTotalCents: amountCents,
+      totalPeriodCents: amountCents,
+    },
+  };
+}
+
+function validateCheckoutUrl(url: string, allowedOrigins: string[]) {
+  try {
+    const parsed = new URL(url);
+    return allowedOrigins.includes(parsed.origin);
+  } catch {
+    return false;
+  }
+}
+
+async function resolveStripeCustomer(
+  supabase: SupabaseClient,
+  input: {
+    stripe: Stripe;
+    clientId?: string | null;
+    email: string;
+    idempotencyKey: string;
+  },
+) {
+  if (!input.clientId) return { ok: true as const, customerId: null };
+  const { data: existing, error } = await supabase
+    .from("commercial_stripe_billing_profiles")
+    .select("stripe_customer_id")
+    .eq("client_id", input.clientId)
+    .eq("livemode", false)
+    .maybeSingle<Record<string, unknown>>();
+  if (error) return { ok: false as const, code: "stripe_customer_lookup_failed" as const };
+  const existingId = readString(existing?.stripe_customer_id);
+  if (existingId) return { ok: true as const, customerId: existingId };
+
+  const customer = await input.stripe.customers.create({
+    email: input.email,
+    metadata: buildSafeStripeMetadata({ client_id: input.clientId }),
+  }, {
+    idempotencyKey: `${input.idempotencyKey}:customer`,
+  });
+  if (customer.livemode || !customer.id) {
+    return { ok: false as const, code: "stripe_customer_create_failed" as const };
+  }
+  await upsertStripeBillingProfile(supabase, {
+    clientId: input.clientId,
+    stripeCustomerId: customer.id,
+    billingEmail: input.email,
+  });
+  return { ok: true as const, customerId: customer.id };
 }
 
 async function buildSubscriptionLineItems(
@@ -57,12 +232,14 @@ async function buildSubscriptionLineItems(
   const lineItems = [];
   for (const component of input.components) {
     if (isPublicCatalogComponent(component)) {
-      const price = await resolveStripeComponentPriceId(supabase, {
+      const row = await loadStripeComponentPriceCatalogRow(supabase, {
         environment: "test",
         component,
       });
-      if (!price) return { ok: false as const, code: "stripe_component_price_mapping_missing" as const };
-      lineItems.push({ price, quantity: 1 });
+      if (!row?.active || row.environment !== "test" || !isValidStripePriceId(row.stripe_price_id)) {
+        return { ok: false as const, code: "stripe_component_price_mapping_missing" as const };
+      }
+      lineItems.push({ price: row.stripe_price_id, quantity: 1 });
       continue;
     }
 
@@ -109,14 +286,6 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 503, code: "stripe_test_not_configured", messageEn: "Stripe Test foundation is incomplete." };
   }
 
-  if (!isPlanKey(input.planKey)) {
-    return { ok: false, status: 400, code: "invalid_plan", messageEn: "Invalid plan selection." };
-  }
-  const planKey = input.planKey as PlanKey;
-  const billingIntervalMonths = [1, 3, 6, 12].includes(Number(input.billingIntervalMonths))
-    ? Number(input.billingIntervalMonths) as 1 | 3 | 6 | 12
-    : 1;
-
   const email = readString(input.purchaserEmail).toLowerCase();
   if (!email.includes("@")) {
     return { ok: false, status: 400, code: "invalid_email", messageEn: "Valid email is required." };
@@ -127,6 +296,24 @@ export async function createStripeSubscriptionCheckoutSession(
     return { ok: false, status: 400, code: "idempotency_required", messageEn: "Idempotency key is required." };
   }
 
+  const canonical = normalizeCommercialRequest(input);
+  if (!canonical.ok) return canonical;
+  const { commercialMode, planKey, billingIntervalMonths, outreachAddonKey } = canonical;
+
+  const fallbackOrigin = (() => {
+    try {
+      return new URL(input.successUrl).origin;
+    } catch {
+      return "";
+    }
+  })();
+  const allowedOrigins = input.allowedOrigins?.length
+    ? input.allowedOrigins
+    : [fallbackOrigin].filter(Boolean);
+  if (!validateCheckoutUrl(input.successUrl, allowedOrigins) || !validateCheckoutUrl(input.cancelUrl, allowedOrigins)) {
+    return { ok: false, status: 400, code: "checkout_url_origin_forbidden", messageEn: "Checkout redirect origin is not allowed." };
+  }
+
   const flowType = input.flowType === "additional_account" ? "additional_account" : "first_purchase";
 
   const simulationAccess = await evaluateCheckoutSimulationAccess({
@@ -134,7 +321,7 @@ export async function createStripeSubscriptionCheckoutSession(
     email,
     flowType,
     clientId: input.clientId ?? null,
-    planKey,
+    planKey: planKey ?? "growth",
     billingIntervalMonths,
   });
   if (!simulationAccess.allowed && flowType === "first_purchase") {
@@ -146,27 +333,26 @@ export async function createStripeSubscriptionCheckoutSession(
     };
   }
 
-  const quote = buildCommercialQuote({
-    planKey,
-    billingIntervalMonths,
-    outreachAddonKey: input.outreachAddonKey,
-    linkedAccountCount: 0,
-    reservedEntitlementCount: 0,
-    pricingContext: flowType === "additional_account" ? "new_account" : "first_purchase",
-  });
+  const quote = commercialMode === "full_cycle"
+    ? buildCommercialQuote({
+      planKey: planKey ?? "",
+      billingIntervalMonths,
+      outreachAddonKey,
+      linkedAccountCount: 0,
+      reservedEntitlementCount: 0,
+      pricingContext: flowType === "additional_account" ? "new_account" : "first_purchase",
+    })
+    : buildOutreachOnlyCommercialQuote({
+      outreachAddonKey: outreachAddonKey as OutreachAddonKey,
+      billingIntervalMonths,
+    });
   if ("error" in quote) {
     return { ok: false, status: 400, code: quote.error, messageEn: "Invalid checkout selection." };
   }
 
-  const commercialMode = inferCommercialMode({
-    planKey,
-    outreachAddonKey: input.outreachAddonKey,
-    explicitMode: "full_cycle",
-  });
-  if (!commercialMode) {
-    return { ok: false, status: 400, code: "commercial_mode_invalid", messageEn: "Invalid commercial mode." };
-  }
-  const components = componentsFromPricingSnapshot(quote.pricingSnapshot, commercialMode);
+  const components = commercialMode === "full_cycle"
+    ? componentsFromPricingSnapshot(quote.pricingSnapshot, commercialMode)
+    : buildOutreachOnlyComponents({ outreachAddonKey: outreachAddonKey as OutreachAddonKey, billingIntervalMonths });
   if (!Array.isArray(components)) {
     return { ok: false, status: 400, code: components.code, messageEn: "Invalid billing components." };
   }
@@ -212,7 +398,9 @@ export async function createStripeSubscriptionCheckoutSession(
     authUserId,
     planKey,
     billingIntervalMonths,
-    outreachAddonKey: input.outreachAddonKey,
+    outreachAddonKey,
+    commercialMode,
+    pricingSnapshotFingerprint: quote.pricingSnapshot.version,
     quoteSnapshot: quote as unknown as Record<string, unknown>,
     pricingSnapshot: quote.pricingSnapshot as unknown as Record<string, unknown>,
     catalogSnapshot: quote.catalogSnapshot as unknown as Record<string, unknown>,
@@ -244,10 +432,18 @@ export async function createStripeSubscriptionCheckoutSession(
   });
   rejectUnsafeStripeMetadataKeys(metadata);
 
-  const stripe = getStripeClient(env);
-  const stripeSession = await stripe.checkout.sessions.create({
+  const stripe = input.stripe ?? getStripeClient(env);
+  const customer = await resolveStripeCustomer(supabase, {
+    stripe,
+    clientId,
+    email,
+    idempotencyKey: pendingSession.checkoutSessionId,
+  });
+  if (!customer.ok) {
+    return { ok: false, status: 503, code: customer.code, messageEn: "Could not resolve Stripe customer." };
+  }
+  const stripeSessionInput: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
-    customer_email: email,
     client_reference_id: pendingSession.checkoutSessionId,
     line_items: lineItems.lineItems,
     success_url: input.successUrl,
@@ -256,6 +452,14 @@ export async function createStripeSubscriptionCheckoutSession(
     subscription_data: {
       metadata,
     },
+  };
+  if (customer.customerId) {
+    stripeSessionInput.customer = customer.customerId;
+  } else {
+    stripeSessionInput.customer_email = email;
+  }
+  const stripeSession = await stripe.checkout.sessions.create(stripeSessionInput, {
+    idempotencyKey: `${pendingSession.checkoutSessionId}:checkout`,
   });
 
   if (!stripeSession.id || !stripeSession.url) {
@@ -271,7 +475,10 @@ export async function createStripeSubscriptionCheckoutSession(
     purchaserEmail: email,
     clientId,
     authUserId,
-    stripeCustomerId: typeof stripeSession.customer === "string" ? stripeSession.customer : null,
+    stripeCustomerId: typeof stripeSession.customer === "string" ? stripeSession.customer : customer.customerId,
+    clientAccountEntitlementId: pendingSession.entitlementId ?? null,
+    commercialMode,
+    pricingSnapshotFingerprint: quote.pricingSnapshot.version,
     metadataSafe: metadata,
   });
   if (!attempt.ok) {

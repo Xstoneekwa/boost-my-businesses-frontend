@@ -2,10 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   COMMERCIAL_PLANS,
   OUTREACH_ADDONS,
+  TERM_DISCOUNT_PERCENT,
   type CheckoutFlowType,
   type OutreachAddonKey,
   type PlanKey,
-} from "./catalog";
+  isBillingIntervalMonths,
+  isOutreachAddonKey,
+} from "./catalog.ts";
 import {
   evaluatePublicCheckoutConflict,
   normalizeCheckoutEmail,
@@ -14,7 +17,7 @@ import {
   handoffToRedirectPath,
   type CheckoutContext,
   type CheckoutSessionSnapshot,
-} from "./checkout-context";
+} from "./checkout-context.ts";
 import { logCheckoutActivation } from "./checkout-activation-log.ts";
 import {
   compensateFailedActivationAttempt,
@@ -32,10 +35,10 @@ import {
   countLinkedInstagramAccountsForClient,
   countReservedEntitlementsForClient,
   insertCheckoutAuditEvent,
-} from "./entitlements";
-import { buildCommercialQuote } from "./pricing";
-import { pricingSnapshotAuditPayload } from "./pricing-snapshot";
-import { validatePublicCheckoutPassword } from "./checkout-password";
+} from "./entitlements.ts";
+import { buildCommercialQuote } from "./pricing.ts";
+import { pricingSnapshotAuditPayload } from "./pricing-snapshot.ts";
+import { validatePublicCheckoutPassword } from "./checkout-password.ts";
 import { confirmCommercialPayment } from "./confirm-commercial-payment.ts";
 import { evaluateCheckoutSimulationAccess } from "./checkout-simulation-access.ts";
 import {
@@ -62,6 +65,7 @@ export type ActivateCheckoutInput = {
   mode: "simulated" | "stripe";
   stripeWebhookConfirmed?: boolean;
   precreatedCheckoutSessionId?: string | null;
+  commercialMode?: "full_cycle" | "outreach_only" | null;
 };
 
 export type ActivateCheckoutResult =
@@ -98,6 +102,66 @@ class CheckoutActivationStageError extends Error {
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+function buildOutreachOnlyActivationQuote(input: {
+  outreachAddonKey?: string | null;
+  billingIntervalMonths: number;
+}) {
+  const outreachAddonKey = readString(input.outreachAddonKey);
+  const billingIntervalMonths = Number(input.billingIntervalMonths);
+  if (!isOutreachAddonKey(outreachAddonKey)) return { ok: false as const, error: "outreach_only_outreach_required" };
+  if (!isBillingIntervalMonths(billingIntervalMonths)) return { ok: false as const, error: "invalid_billing_interval" };
+
+  const addon = OUTREACH_ADDONS[outreachAddonKey];
+  const discountPercent = TERM_DISCOUNT_PERCENT[billingIntervalMonths];
+  const monthlyDiscountedPriceCents = Math.round(addon.baseMonthlyPriceCents * (1 - discountPercent));
+  const periodTotalCents = monthlyDiscountedPriceCents * billingIntervalMonths;
+  const line = {
+    lineKey: "outreach" as const,
+    label: addon.displayNameFr,
+    baseMonthlyPriceCents: addon.baseMonthlyPriceCents,
+    discountPercent,
+    discountType: discountPercent > 0 ? "term" as const : "none" as const,
+    monthlyDiscountedPriceCents,
+    billingIntervalMonths,
+    billingPeriodTotalCents: periodTotalCents,
+  };
+  return {
+    planKey: null,
+    billingIntervalMonths,
+    outreachAddonKey,
+    billableAccountCount: 1,
+    termDiscountPercent: discountPercent,
+    agencyDiscountPercent: 0,
+    appliedDiscountPercent: discountPercent,
+    appliedDiscountType: discountPercent > 0 ? "term" as const : "none" as const,
+    packLine: {
+      lineKey: "pack" as const,
+      label: "No package",
+      baseMonthlyPriceCents: 0,
+      discountPercent: 0,
+      discountType: "none" as const,
+      monthlyDiscountedPriceCents: 0,
+      billingIntervalMonths,
+      billingPeriodTotalCents: 0,
+    },
+    outreachLine: line,
+    totalPeriodCents: periodTotalCents,
+    catalogSnapshot: {},
+    pricingSnapshot: {
+      version: `outreach-only:${outreachAddonKey}:${billingIntervalMonths}`,
+      pricingContext: "first_purchase",
+      planKey: null,
+      billingIntervalMonths,
+      outreachAddonKey,
+      currency: "EUR",
+      billableAccountCount: 1,
+      packPeriodTotalCents: 0,
+      outreachPeriodTotalCents: periodTotalCents,
+      totalPeriodCents: periodTotalCents,
+    },
+  };
 }
 
 function postgresCodeFromError(error: unknown) {
@@ -509,14 +573,20 @@ export async function activateClientAccountEntitlementFromCheckout(
       }
     }
 
-    const quoteResult = buildCommercialQuote({
-      planKey: input.planKey,
-      billingIntervalMonths: input.billingIntervalMonths,
-      outreachAddonKey: input.outreachAddonKey,
-      linkedAccountCount: 0,
-      reservedEntitlementCount: 0,
-      pricingContext: "first_purchase",
-    });
+    const commercialMode = input.commercialMode === "outreach_only" ? "outreach_only" : "full_cycle";
+    const quoteResult = commercialMode === "outreach_only"
+      ? buildOutreachOnlyActivationQuote({
+        outreachAddonKey: input.outreachAddonKey,
+        billingIntervalMonths: input.billingIntervalMonths,
+      })
+      : buildCommercialQuote({
+        planKey: input.planKey,
+        billingIntervalMonths: input.billingIntervalMonths,
+        outreachAddonKey: input.outreachAddonKey,
+        linkedAccountCount: 0,
+        reservedEntitlementCount: 0,
+        pricingContext: "first_purchase",
+      });
     if ("error" in quoteResult) {
       return activationFailure(400, quoteResult.error, {
         messageFr: "Sélection checkout invalide.",
@@ -622,15 +692,20 @@ export async function activateClientAccountEntitlementFromCheckout(
     } else {
       const linkedCount = clientId ? await countLinkedInstagramAccountsForClient(supabase, clientId) : 0;
       const reservedCount = clientId ? await countReservedEntitlementsForClient(supabase, clientId) : 0;
-      const pricedQuote = buildCommercialQuote({
-        planKey: input.planKey,
-        billingIntervalMonths: input.billingIntervalMonths,
-        outreachAddonKey: input.outreachAddonKey,
-        linkedAccountCount: linkedCount,
-        reservedEntitlementCount: reservedCount,
-        pricingContext: checkoutContext === "public_new_workspace" ? "first_purchase" : "new_account",
-        reservedRepresentsQuotedPurchase: reservedCount > 0,
-      });
+      const pricedQuote = commercialMode === "outreach_only"
+        ? buildOutreachOnlyActivationQuote({
+          outreachAddonKey: input.outreachAddonKey,
+          billingIntervalMonths: input.billingIntervalMonths,
+        })
+        : buildCommercialQuote({
+          planKey: input.planKey,
+          billingIntervalMonths: input.billingIntervalMonths,
+          outreachAddonKey: input.outreachAddonKey,
+          linkedAccountCount: linkedCount,
+          reservedEntitlementCount: reservedCount,
+          pricingContext: checkoutContext === "public_new_workspace" ? "first_purchase" : "new_account",
+          reservedRepresentsQuotedPurchase: reservedCount > 0,
+        });
       if ("error" in pricedQuote) {
         return activationFailure(400, pricedQuote.error, {
           messageFr: "Sélection checkout invalide.",
@@ -711,14 +786,14 @@ export async function activateClientAccountEntitlementFromCheckout(
         }
       }
 
-      const plan = COMMERCIAL_PLANS[finalQuote.planKey as PlanKey];
+      const plan = commercialMode === "full_cycle" ? COMMERCIAL_PLANS[finalQuote.planKey as PlanKey] : null;
       const workspace = await ensureClientWorkspace(supabase, {
         checkoutContext,
         clientId: clientId || null,
         resumeClientId,
         email,
         authUserId,
-        displayName: plan.displayName,
+        displayName: plan?.displayName ?? OUTREACH_ADDONS[finalQuote.outreachAddonKey as OutreachAddonKey].displayNameEn,
         idempotencyKey: tracker.idempotencyKey,
         tracker,
         internalTestClient: tracker.simulationAccessSource === "prod_test_authorization",
@@ -751,7 +826,7 @@ export async function activateClientAccountEntitlementFromCheckout(
     tracker.authUserId = authUserId;
     tracker.clientId = clientId;
 
-    const plan = COMMERCIAL_PLANS[finalQuote.planKey as PlanKey];
+    const plan = commercialMode === "full_cycle" ? COMMERCIAL_PLANS[finalQuote.planKey as PlanKey] : null;
     const outreachAddon = finalQuote.outreachAddonKey
       ? OUTREACH_ADDONS[finalQuote.outreachAddonKey as OutreachAddonKey]
       : null;
@@ -784,9 +859,12 @@ export async function activateClientAccountEntitlementFromCheckout(
           client_id: clientId,
           auth_user_id: authUserId,
           purchaser_email: email,
-          plan_key: finalQuote.planKey,
+          plan_key: commercialMode === "full_cycle" ? finalQuote.planKey : null,
           billing_interval_months: finalQuote.billingIntervalMonths,
           outreach_addon_key: finalQuote.outreachAddonKey,
+          commercial_mode: commercialMode,
+          stripe_pricing_mode: "public_catalog",
+          pricing_snapshot_fingerprint: readString(finalQuote.pricingSnapshot.version),
           billable_account_count: finalQuote.billableAccountCount,
           term_discount_percent: finalQuote.termDiscountPercent,
           agency_discount_percent: finalQuote.agencyDiscountPercent,
@@ -833,8 +911,8 @@ export async function activateClientAccountEntitlementFromCheckout(
       .insert({
         client_id: clientId,
         checkout_session_id: checkoutSessionId,
-        plan_key: finalQuote.planKey,
-        commercial_package_code: plan.commercialPackageCode,
+          plan_key: commercialMode === "full_cycle" ? finalQuote.planKey : null,
+          commercial_package_code: plan?.commercialPackageCode ?? null,
         billing_interval_months: finalQuote.billingIntervalMonths,
         outreach_addon_key: finalQuote.outreachAddonKey,
         outreach_variant: outreachAddon?.outreachVariant ?? null,
@@ -849,8 +927,9 @@ export async function activateClientAccountEntitlementFromCheckout(
         catalog_snapshot: finalQuote.catalogSnapshot,
         pricing_snapshot: finalQuote.pricingSnapshot,
         status: "entitlement_reserved",
-        metadata: {
-          growth_estimate_label: plan.growthEstimateLabelFr,
+          metadata: {
+          commercial_mode: commercialMode,
+          growth_estimate_label: plan?.growthEstimateLabelFr ?? null,
           checkout_mode: "simulated",
           checkout_context: checkoutContext,
           internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
@@ -875,7 +954,8 @@ export async function activateClientAccountEntitlementFromCheckout(
     }
     const auditPayload = {
       ...pricingSnapshotAuditPayload(finalQuote.pricingSnapshot),
-      plan_key: finalQuote.planKey,
+      commercial_mode: commercialMode,
+      plan_key: commercialMode === "full_cycle" ? finalQuote.planKey : null,
       billing_interval_months: finalQuote.billingIntervalMonths,
       outreach_addon_key: finalQuote.outreachAddonKey,
       idempotency_key: tracker.idempotencyKey,

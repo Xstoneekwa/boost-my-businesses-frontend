@@ -22,6 +22,16 @@ import {
 
 type Row = Record<string, unknown>;
 
+const ALLOWED_STRIPE_WEBHOOK_EVENTS = new Set([
+  "checkout.session.completed",
+  "checkout.session.expired",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.paid",
+  "invoice.payment_failed",
+]);
+
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
@@ -53,6 +63,13 @@ export async function handleStripeWebhookEvent(
   supabase: SupabaseClient,
   event: Stripe.Event,
 ) {
+  if (event.livemode) {
+    return { ok: false as const, status: 400, code: "stripe_livemode_rejected" as const };
+  }
+  if (!ALLOWED_STRIPE_WEBHOOK_EVENTS.has(event.type)) {
+    return { ok: false as const, status: 400, code: "stripe_event_type_not_allowed" as const };
+  }
+
   const claim = await claimStripeWebhookEvent(supabase, {
     stripeEventId: event.id,
     eventType: event.type,
@@ -79,7 +96,6 @@ export async function handleStripeWebhookEvent(
   try {
     switch (event.type) {
       case "checkout.session.completed":
-      case "checkout.session.async_payment_succeeded":
         await handleCheckoutSessionFulfillmentEvent(supabase, event);
         break;
       case "checkout.session.expired":
@@ -95,11 +111,7 @@ export async function handleStripeWebhookEvent(
         await handleInvoiceEvent(supabase, event);
         break;
       default:
-        await finishStripeWebhookEvent(supabase, {
-          eventRowId,
-          status: "ignored",
-        });
-        return { ok: true as const, status: 200, ignored: true as const };
+        throw new StripeFulfillmentError("stripe_event_type_not_allowed", "Unsupported Stripe event type.", false);
     }
 
     await finishStripeWebhookEvent(supabase, {
@@ -128,7 +140,7 @@ async function handleCheckoutSessionFulfillmentEvent(supabase: SupabaseClient, e
 
   const attemptLookup = await findStripeCheckoutAttemptByStripeSessionId(supabase, session.id);
   if (!attemptLookup.ok) {
-    return;
+    throw new StripeFulfillmentError("attempt_not_found", "Checkout attempt not found for Stripe session.", false);
   }
 
   const attempt = attemptLookup.attempt;
@@ -217,7 +229,9 @@ async function handleSubscriptionProjectionEvent(supabase: SupabaseClient, event
     .eq("stripe_customer_id", customerId)
     .maybeSingle<Row>();
 
-  if (!profile?.client_id) return;
+  if (!profile?.client_id) {
+    throw new StripeFulfillmentError("stripe_customer_unknown", "Stripe customer is not linked to an internal client.", false);
+  }
 
   await upsertStripeSubscriptionProjection(supabase, {
     clientId: String(profile.client_id),
@@ -238,23 +252,29 @@ async function handleSubscriptionProjectionEvent(supabase: SupabaseClient, event
 async function handleInvoiceEvent(supabase: SupabaseClient, event: Stripe.Event) {
   const invoice = event.data.object as Stripe.Invoice;
   assertStripeTestLivemode(invoice.livemode);
+  const customerId = readString(invoice.customer);
+  const { data: profile } = await supabase
+    .from("commercial_stripe_billing_profiles")
+    .select("client_id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle<Row>();
+  if (!profile?.client_id) {
+    throw new StripeFulfillmentError("stripe_customer_unknown", "Stripe customer is not linked to an internal client.", false);
+  }
+
+  if (event.type === "invoice.paid") {
+    return;
+  }
+
   if (event.type === "invoice.payment_failed") {
-    const customerId = readString(invoice.customer);
-    const { data: profile } = await supabase
-      .from("commercial_stripe_billing_profiles")
-      .select("client_id")
-      .eq("stripe_customer_id", customerId)
-      .maybeSingle<Row>();
-    if (profile?.client_id) {
-      await supabase
-        .from("commercial_stripe_subscriptions")
-        .update({
-          status: "past_due",
-          updated_at: new Date().toISOString(),
-          metadata_safe: { last_invoice_payment_failed: true },
-        })
-        .eq("client_id", String(profile.client_id));
-    }
+    await supabase
+      .from("commercial_stripe_subscriptions")
+      .update({
+        status: "past_due",
+        updated_at: new Date().toISOString(),
+        metadata_safe: { last_invoice_payment_failed: true },
+      })
+      .eq("client_id", String(profile.client_id));
   }
 }
 

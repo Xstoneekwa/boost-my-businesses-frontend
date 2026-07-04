@@ -26,7 +26,9 @@ export async function POST(request: Request) {
     }
     const origin = new URL(request.url).origin;
     const result = await createStripeSubscriptionCheckoutSession(createSupabaseClient(), {
+      commercialMode: readString(body.mode || body.commercial_mode),
       planKey: readString(body.plan_key),
+      packageKey: readString(body.package_key || body.plan_key),
       billingIntervalMonths: Number(body.billing_interval_months ?? 1),
       outreachAddonKey: readString(body.outreach_addon_key) || null,
       purchaserEmail: readString(body.purchaser_email),
@@ -34,8 +36,9 @@ export async function POST(request: Request) {
       idempotencyKey: readString(body.idempotency_key) || crypto.randomUUID(),
       clientId: readString(body.client_id) || null,
       password: readString(body.password) || null,
-      successUrl: readString(body.success_url) || `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: readString(body.cancel_url) || `${origin}/commercial/stripe-test/cancel`,
+      successUrl: `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/commercial/stripe-test/cancel`,
+      allowedOrigins: [origin],
     });
 
     if (!result.ok) {
