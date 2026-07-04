@@ -21,6 +21,7 @@ alter table public.commercial_checkout_sessions
   check (
     (
       (commercial_mode is null or commercial_mode = 'full_cycle')
+      and plan_key is not null
       and plan_key in ('growth', 'pro', 'premium')
       and pack_base_monthly_cents is not null
       and pack_monthly_discounted_cents is not null
@@ -29,6 +30,7 @@ alter table public.commercial_checkout_sessions
     or (
       commercial_mode = 'outreach_only'
       and plan_key is null
+      and outreach_addon_key is not null
       and outreach_addon_key in ('outreach_standard', 'outreach_ai')
       and coalesce(pack_base_monthly_cents, 0) = 0
       and coalesce(pack_monthly_discounted_cents, 0) = 0
@@ -44,7 +46,9 @@ alter table public.client_account_entitlements
   check (
     (
       ((metadata->>'commercial_mode') is null or metadata->>'commercial_mode' = 'full_cycle')
+      and plan_key is not null
       and plan_key in ('growth', 'pro', 'premium')
+      and commercial_package_code is not null
       and commercial_package_code in ('growth', 'pro', 'premium')
       and pack_monthly_discounted_cents is not null
       and pack_period_total_cents is not null
@@ -53,6 +57,7 @@ alter table public.client_account_entitlements
       metadata->>'commercial_mode' = 'outreach_only'
       and plan_key is null
       and commercial_package_code is null
+      and outreach_addon_key is not null
       and outreach_addon_key in ('outreach_standard', 'outreach_ai')
       and coalesce(pack_monthly_discounted_cents, 0) = 0
       and coalesce(pack_period_total_cents, 0) = 0
