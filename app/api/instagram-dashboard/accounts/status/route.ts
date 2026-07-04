@@ -1,5 +1,8 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import {
+  executeCommercialAccountLifecycle,
+} from "@/lib/commercial/account-lifecycle-service.ts";
+import {
   getInstagramAdminUserContext,
   jsonError,
   jsonOk,
@@ -184,6 +187,46 @@ export async function PATCH(request: Request) {
     }
 
     const supabase = createSupabaseClient();
+
+    if (action === "pause" || action === "cancel" || action === "reactivate") {
+      const operationType = action === "reactivate" ? "resume" : action;
+      const idempotencyKey = readString((body.metadata as Record<string, unknown> | undefined)?.idempotency_key)
+        || `${action}:${accountId}:${readString(reason, "manual")}`;
+      const result = await executeCommercialAccountLifecycle({
+        supabase,
+        accountId,
+        operationType,
+        idempotencyKey,
+        reason: reason || `accounts_status_${action}`,
+        actor: {
+          actorType: auth.mode === "relay_key" ? "botapp" : "admin",
+          actorId: auth.userId,
+          sourceSurface: auth.mode === "relay_key" ? "botapp_profiles_actions" : "client_accounts_actions",
+        },
+      });
+      return jsonOk({
+        account_id: accountId,
+        action,
+        status_before: null,
+        status_after: result.commercialState === "active" ? "active"
+          : result.commercialState === "paused" || result.commercialState === "pause_requested" ? "paused"
+            : result.commercialState === "cancelled" || result.commercialState === "cancel_requested" ? "cancelled"
+              : "active",
+        commercial_state: result.commercialState,
+        converged: result.converged,
+        action_required: result.actionRequired,
+        action_required_reason: result.actionRequiredReason,
+        pause_expires_at: result.pauseExpiresAt,
+        capacity_release_status: result.capacityReleaseStatus,
+        runtime_quiesced: result.runtimeQuiesced,
+        audit_event: eventForAction(action),
+        audit_event_id: result.operationId,
+        run_started: false,
+        provisioning_started: false,
+        login_started: false,
+      });
+    }
+
     const { data: currentRow, error: currentError } = await supabase
       .from("ig_accounts")
       .select("id,status,admin_lifecycle_status")
@@ -194,16 +237,7 @@ export async function PATCH(request: Request) {
     if (currentError) return jsonError(currentError.message, 500);
     if (!currentRow) return jsonError("Instagram account not found.", 404);
 
-    if (action === "cancel" && await hasActiveRuntime(supabase, accountId)) {
-      return jsonError("Cannot cancel while a run or run request is active. Stop the runtime first.", 409);
-    }
-
     const oldStatus = readString(currentRow.admin_lifecycle_status, readString(currentRow.status, "active")).toLowerCase();
-    const accountLifecycleStatus = readString(currentRow.status, "active").toLowerCase();
-    if (action === "reactivate") {
-      const blockReason = await reactivateBlockReason(supabase, accountId, accountLifecycleStatus);
-      if (blockReason) return jsonError(blockReason, 409);
-    }
     const newStatus = statusForAction(action);
 
     const { data: updatedRow, error: updateError } = await supabase
@@ -217,15 +251,6 @@ export async function PATCH(request: Request) {
     if (!updatedRow) return jsonError("Instagram account not found.", 404);
 
     let capacityReleaseStatus: "not_applicable" | "released" | "pending_schema" = "not_applicable";
-    if (action === "cancel") {
-      const { error: releaseError } = await supabase.rpc("release_account_schedule_capacity", {
-        p_account_id: accountId,
-        p_reason: "account_cancelled_release",
-        p_source: "accounts_status_api",
-        p_actor_id: auth.userId,
-      });
-      capacityReleaseStatus = releaseError ? "pending_schema" : "released";
-    }
 
     const auditEventId = await auditStatusChange(supabase, {
       accountId,

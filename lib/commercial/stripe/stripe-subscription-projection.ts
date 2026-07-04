@@ -20,6 +20,8 @@ export type StripeSubscriptionProjectionInput = {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  billingPaused?: boolean;
+  pauseCollectionBehavior?: string | null;
   incomingIsTerminalEvent?: boolean;
 };
 
@@ -71,6 +73,9 @@ export function mergeStripeSubscriptionProjectionInput(
     cancel_at_period_end: statusChanged
       ? incoming.cancelAtPeriodEnd
       : (incoming.cancelAtPeriodEnd ?? existing?.cancel_at_period_end === true),
+    billing_paused: incoming.billingPaused ?? existing?.billing_paused === true,
+    pause_collection_behavior: readNullableString(incoming.pauseCollectionBehavior)
+      ?? readNullableString(existing?.pause_collection_behavior),
     updated_at: new Date().toISOString(),
   };
 }

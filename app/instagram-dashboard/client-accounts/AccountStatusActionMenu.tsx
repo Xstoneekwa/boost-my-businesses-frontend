@@ -23,14 +23,14 @@ const actions: Array<{
 }> = [
   {
     action: "pause",
-    label: "Pause account",
-    description: "Blocks runs but keeps the assigned slot and app instance.",
+    label: "Suspendre la campagne",
+    description: "Suspend billing and campaign activity for this account. Slot and clone stay reserved.",
     Icon: PauseCircle,
   },
   {
     action: "cancel",
-    label: "Cancel account",
-    description: "Releases the slot and app instance when no run is active.",
+    label: "Résilier le service du compte",
+    description: "Cancel Stripe billing, close entitlement, and release slot when runtime is terminal.",
     tone: "danger",
     Icon: XCircle,
   },
@@ -42,8 +42,8 @@ const actions: Array<{
   },
   {
     action: "reactivate",
-    label: "Reactivate account",
-    description: "Requests reactivation; runtime gates still decide readiness.",
+    label: "Reprendre la campagne",
+    description: "Resume Stripe billing and campaign eligibility when pause has not expired.",
     Icon: RotateCcw,
   },
 ];
@@ -73,12 +73,30 @@ export default function AccountStatusActionMenu({
           metadata: { source_status: operationsStatus },
         }),
       });
-      const payload = await response.json() as { ok?: boolean; error?: string };
+      const payload = await response.json() as {
+        ok?: boolean;
+        error?: string;
+        converged?: boolean;
+        action_required?: boolean;
+        action_required_reason?: string | null;
+        commercial_state?: string;
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Could not update account status.");
       }
+      const actionLabel = actions.find((item) => item.action === action)?.label ?? "Status";
+      if (payload.action_required) {
+        setMessage(`${actionLabel} — convergence en cours (${payload.action_required_reason || "action_required"}).`);
+        router.refresh();
+        return;
+      }
+      if (payload.converged === false) {
+        setMessage(`${actionLabel} — convergence en cours.`);
+        router.refresh();
+        return;
+      }
       setIsOpen(false);
-      setMessage(`${actions.find((item) => item.action === action)?.label ?? "Status"} updated.`);
+      setMessage(`${actionLabel} confirmé.`);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not update account status.");

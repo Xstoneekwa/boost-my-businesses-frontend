@@ -20,6 +20,8 @@ export type StripeSubscriptionSnapshot = {
   current_period_start: number | null;
   current_period_end: number | null;
   cancel_at_period_end: boolean;
+  billing_paused: boolean;
+  pause_collection_behavior: string | null;
 };
 
 export type StripeSubscriptionWebhookCorrelation =
@@ -54,6 +56,7 @@ export function buildStripeSubscriptionSnapshot(subscription: Stripe.Subscriptio
   const stripeCustomerId = typeof customerRef === "string"
     ? customerRef
     : readString(customerRef?.id);
+  const pauseCollection = subscription.pause_collection;
   return {
     stripe_subscription_id: subscription.id,
     stripe_customer_id: stripeCustomerId,
@@ -62,6 +65,8 @@ export function buildStripeSubscriptionSnapshot(subscription: Stripe.Subscriptio
     current_period_start: subscription.current_period_start ?? null,
     current_period_end: subscription.current_period_end ?? null,
     cancel_at_period_end: subscription.cancel_at_period_end,
+    billing_paused: Boolean(pauseCollection),
+    pause_collection_behavior: pauseCollection?.behavior ?? null,
   };
 }
 
@@ -81,6 +86,8 @@ function snapshotFromMetadata(metadataSafe: unknown): StripeSubscriptionSnapshot
     current_period_start: typeof row.current_period_start === "number" ? row.current_period_start : null,
     current_period_end: typeof row.current_period_end === "number" ? row.current_period_end : null,
     cancel_at_period_end: row.cancel_at_period_end === true,
+    billing_paused: row.billing_paused === true,
+    pause_collection_behavior: readString(row.pause_collection_behavior) || null,
   };
 }
 
@@ -368,6 +375,9 @@ export async function reconcilePaidStripeSubscriptionProjection(
       currentPeriodStart: isoFromUnix(latestSnapshot?.current_period_start ?? null),
       currentPeriodEnd: isoFromUnix(latestSnapshot?.current_period_end ?? null),
       cancelAtPeriodEnd: latestSnapshot?.cancel_at_period_end ?? existing?.cancel_at_period_end === true,
+      billingPaused: latestSnapshot?.billing_paused ?? existing?.billing_paused === true,
+      pauseCollectionBehavior: (latestSnapshot?.pause_collection_behavior
+        ?? readString(existing?.pause_collection_behavior)) || null,
       incomingIsTerminalEvent: input.incomingIsTerminalEvent,
     });
     projectionUpdated = true;
