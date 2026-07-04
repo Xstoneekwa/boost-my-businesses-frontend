@@ -19,6 +19,7 @@ This phase adds **Stripe Test Mode infrastructure only**. It does not replace pu
 - `STRIPE_SECRET_KEY` — must be **test** (`sk_test_…` / `rk_test_…` only)
 - `STRIPE_WEBHOOK_SECRET` — webhook signing secret (test)
 - `STRIPE_TEST_CHECKOUT_ENABLED=true`
+- `STRIPE_TEST_CHECKOUT_ALLOWED_ORIGINS` — comma/space separated public app origins allowed for Stripe Test success/cancel redirects
 - `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` — test portal configuration
 
 Live keys and `livemode=true` events are **rejected** (`stripe_live_key_rejected`, `stripe_livemode_rejected`).
@@ -80,7 +81,7 @@ Checkout Session creation is server-only and Test-only:
 - the browser sends only the canonical commercial intent (`full_cycle` / `outreach_only`, package when applicable, outreach when applicable, billing interval, and internal client/entitlement context when applicable);
 - the browser never supplies a trusted Stripe Price ID, amount, coupon, promotion code, Customer Balance, Product ID, or arbitrary redirect URL;
 - server code resolves component Prices from `commercial_stripe_component_price_catalog` with `environment='test'`, `active=true`, expected amount, currency, component kind, and interval;
-- success/cancel URLs are built from an allowlisted server origin;
+- success/cancel URLs are built from the request origin only after it matches `STRIPE_TEST_CHECKOUT_ALLOWED_ORIGINS`;
 - a Stripe Customer is reused from `commercial_stripe_billing_profiles` when a client already exists, otherwise creation is idempotent and server-side only when the internal contract permits it;
 - `mode: subscription` is used with one line item per component.
 

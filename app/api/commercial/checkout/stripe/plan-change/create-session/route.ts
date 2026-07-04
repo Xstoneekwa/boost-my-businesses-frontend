@@ -2,7 +2,10 @@ import { readJsonBody, jsonError, jsonOk } from "@/app/api/instagram-dashboard/_
 import { createSupabaseClient } from "@/lib/supabase";
 import { requireClientInstagramSession, readString } from "@/lib/instagram-client/_utils";
 import { createStripePlanChangePaymentSession } from "@/lib/commercial/stripe/stripe-plan-change-checkout.ts";
-import { StripeFoundationError } from "@/lib/commercial/stripe/stripe-config.ts";
+import {
+  resolveStripeTestCheckoutRedirectOrigin,
+  StripeFoundationError,
+} from "@/lib/commercial/stripe/stripe-config.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,15 +36,15 @@ export async function POST(request: Request) {
     const supabase = createSupabaseClient();
     const { data: authUser } = await supabase.auth.admin.getUserById(session.userId);
     const purchaserEmail = readString(authUser.user?.email);
-    const origin = new URL(request.url).origin;
+    const origin = resolveStripeTestCheckoutRedirectOrigin(request.url);
 
     const result = await createStripePlanChangePaymentSession(supabase, {
       quoteId,
       clientId: session.clientId,
       purchaserEmail,
       idempotencyKey,
-      successUrl: readString(body.success_url) || `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: readString(body.cancel_url) || `${origin}/commercial/stripe-test/cancel`,
+      successUrl: `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/commercial/stripe-test/cancel`,
     });
 
     if (!result.ok) {

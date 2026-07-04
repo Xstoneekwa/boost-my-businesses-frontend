@@ -2,7 +2,9 @@ export type StripeFoundationErrorCode =
   | "stripe_test_not_configured"
   | "stripe_test_mode_required"
   | "stripe_live_key_rejected"
-  | "stripe_livemode_rejected";
+  | "stripe_livemode_rejected"
+  | "stripe_redirect_origin_not_configured"
+  | "stripe_redirect_origin_forbidden";
 
 export class StripeFoundationError extends Error {
   code: StripeFoundationErrorCode;
@@ -87,6 +89,47 @@ export function assertStripeTestLivemode(livemode: boolean) {
       "Live-mode Stripe objects are rejected in Stripe Test Foundation.",
     );
   }
+}
+
+export function readStripeTestAllowedRedirectOrigins(env: NodeJS.ProcessEnv = process.env) {
+  const raw = String(env.STRIPE_TEST_CHECKOUT_ALLOWED_ORIGINS ?? "").trim();
+  if (!raw) return [];
+
+  const origins = new Set<string>();
+  for (const value of raw.split(/[\s,]+/)) {
+    const candidate = value.trim();
+    if (!candidate) continue;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
+      origins.add(parsed.origin);
+    } catch {
+      continue;
+    }
+  }
+  return [...origins];
+}
+
+export function resolveStripeTestCheckoutRedirectOrigin(
+  requestUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const allowedOrigins = readStripeTestAllowedRedirectOrigins(env);
+  if (allowedOrigins.length === 0) {
+    throw new StripeFoundationError(
+      "stripe_redirect_origin_not_configured",
+      "Stripe Test checkout redirect origins are not configured.",
+    );
+  }
+
+  const requestOrigin = new URL(requestUrl).origin;
+  if (!allowedOrigins.includes(requestOrigin)) {
+    throw new StripeFoundationError(
+      "stripe_redirect_origin_forbidden",
+      "Stripe Test checkout redirect origin is not allowed.",
+    );
+  }
+  return requestOrigin;
 }
 
 function readBooleanFlag(value: unknown) {

@@ -1,7 +1,10 @@
 import { readJsonBody, jsonError, jsonOk } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
 import { createStripeSubscriptionCheckoutSession } from "@/lib/commercial/stripe/stripe-subscription-checkout.ts";
-import { StripeFoundationError } from "@/lib/commercial/stripe/stripe-config.ts";
+import {
+  resolveStripeTestCheckoutRedirectOrigin,
+  StripeFoundationError,
+} from "@/lib/commercial/stripe/stripe-config.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,7 +27,7 @@ export async function POST(request: Request) {
     if (!body) {
       return jsonError("Invalid checkout payload.", 400, { code: "invalid_payload" });
     }
-    const origin = new URL(request.url).origin;
+    const origin = resolveStripeTestCheckoutRedirectOrigin(request.url);
     const result = await createStripeSubscriptionCheckoutSession(createSupabaseClient(), {
       commercialMode: readString(body.mode || body.commercial_mode),
       planKey: readString(body.plan_key),
