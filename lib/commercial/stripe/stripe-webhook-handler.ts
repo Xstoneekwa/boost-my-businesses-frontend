@@ -50,6 +50,22 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
+async function hasActivatedCheckoutEntitlement(
+  supabase: SupabaseClient,
+  checkoutSessionId: string,
+  clientId: string,
+) {
+  if (!checkoutSessionId || !clientId) return false;
+  const { data } = await supabase
+    .from("client_account_entitlements")
+    .select("id,status,client_id,checkout_session_id")
+    .eq("checkout_session_id", checkoutSessionId)
+    .eq("client_id", clientId)
+    .in("status", ["active", "entitlement_consumed"])
+    .limit(1);
+  return Array.isArray(data) && data.length > 0;
+}
+
 export async function verifyStripeWebhookSignature(
   rawBody: string,
   signatureHeader: string | null,
@@ -477,17 +493,23 @@ export async function getSafeStripeSessionStatus(
   if (input.internalCheckoutSessionId) {
     const { data } = await supabase
       .from("commercial_checkout_sessions")
-      .select("status,activated_at,auth_user_id")
+      .select("id,status,activated_at,auth_user_id,client_id")
       .eq("id", input.internalCheckoutSessionId)
       .maybeSingle<Row>();
     if (data?.status) {
       const commercialStatus = readString(data.status);
       const authUserId = readString(data.auth_user_id);
+      const clientId = readString(data.client_id);
+      const entitlementReady = await hasActivatedCheckoutEntitlement(
+        supabase,
+        readString(data.id) || input.internalCheckoutSessionId,
+        clientId,
+      );
       return {
         ok: true as const,
         commercialStatus,
         activatedAt: readString(data.activated_at) || null,
-        readyForLogin: commercialStatus === "checkout_paid" && Boolean(authUserId),
+        readyForLogin: commercialStatus === "checkout_paid" && Boolean(authUserId) && Boolean(clientId) && entitlementReady,
       };
     }
   }
@@ -495,12 +517,37 @@ export async function getSafeStripeSessionStatus(
     const attempt = await findStripeCheckoutAttemptByStripeSessionId(supabase, input.stripeCheckoutSessionId);
     if (attempt.ok) {
       const commercialStatus = mapAttemptStatusToCommercialStatus(attempt.attempt.status);
-      const authUserId = readString(attempt.attempt.auth_user_id);
+      let authUserId = readString(attempt.attempt.auth_user_id);
+      let clientId = readString(attempt.attempt.client_id);
+      let canonicalSessionActivatedAt: string | null = null;
+      let canonicalSessionStatus = "";
+      const commercialCheckoutSessionId = readString(attempt.attempt.commercial_checkout_session_id);
+      if (commercialCheckoutSessionId) {
+        const { data } = await supabase
+          .from("commercial_checkout_sessions")
+          .select("status,activated_at,auth_user_id,client_id")
+          .eq("id", commercialCheckoutSessionId)
+          .maybeSingle<Row>();
+        canonicalSessionStatus = readString(data?.status);
+        canonicalSessionActivatedAt = readString(data?.activated_at) || null;
+        authUserId ||= readString(data?.auth_user_id);
+        clientId ||= readString(data?.client_id);
+      }
+      const entitlementReady = await hasActivatedCheckoutEntitlement(
+        supabase,
+        commercialCheckoutSessionId,
+        clientId,
+      );
+      const canonicalSessionReady = canonicalSessionStatus === "checkout_paid"
+        && Boolean(canonicalSessionActivatedAt)
+        && Boolean(authUserId)
+        && Boolean(clientId)
+        && entitlementReady;
       return {
         ok: true as const,
         commercialStatus,
-        activatedAt: attempt.attempt.fulfilled_at || null,
-        readyForLogin: isStripeAttemptFulfilled(attempt.attempt.status) && Boolean(authUserId),
+        activatedAt: attempt.attempt.fulfilled_at || canonicalSessionActivatedAt,
+        readyForLogin: isStripeAttemptFulfilled(attempt.attempt.status) && canonicalSessionReady,
       };
     }
   }

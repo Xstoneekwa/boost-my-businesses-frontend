@@ -58,6 +58,7 @@ export type ManageAccount = {
   invoiceStatus: string;
   pendingActionsCount: number;
   blockingCampaign: boolean;
+  primaryBlockReason?: string | null;
   latestIncidentSeverity: string;
   lastSafeUpdate: string | null;
   phoneName: string;
@@ -735,15 +736,18 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       errors.unshift("Readiness projection partially unavailable.");
     }
 
-    const actionCountsByAccount = new Map<string, { total: number; blocking: number }>();
+    const actionCountsByAccount = new Map<string, { total: number; blocking: number; firstBlockingAction: string | null }>();
     for (const row of ((dashboardActionsResult.data ?? []) as SupabaseRecord[])) {
       const accountId = readString(row, ["account_id"], "");
       if (!accountId) continue;
-      const current = actionCountsByAccount.get(accountId) ?? { total: 0, blocking: 0 };
+      const current = actionCountsByAccount.get(accountId) ?? { total: 0, blocking: 0, firstBlockingAction: null };
       current.total += 1;
       const actionType = readString(row, ["action_type"], "").toLowerCase();
       const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
-      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction) current.blocking += 1;
+      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction) {
+        current.blocking += 1;
+        current.firstBlockingAction ||= actionType || "blocking_dashboard_action";
+      }
       actionCountsByAccount.set(accountId, current);
     }
 
@@ -766,11 +770,13 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       const actionCounts = actionCountsByAccount.get(account.accountId) ?? {
         total: account.pendingActionsCount,
         blocking: account.blockingCampaign ? 1 : 0,
+        firstBlockingAction: account.primaryBlockReason ?? null,
       };
       const hasFreshActionCounts = actionCountsByAccount.has(account.accountId);
       return {
         ...account,
         blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
+        primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
         readinessProjection: buildAdminReadinessProjection({
           accountId: account.accountId,
           username: account.username,
@@ -915,6 +921,7 @@ function mapLegacyAccount(account: SupabaseRecord, settings: SupabaseRecord[], r
     invoiceStatus: "unknown",
     pendingActionsCount,
     blockingCampaign: isAttentionStatus(latestRunStatus),
+    primaryBlockReason: isAttentionStatus(latestRunStatus) ? latestRunStatus : null,
     latestIncidentSeverity: isAttentionStatus(`${adminStatus} ${latestRunStatus}`) ? "warning" : "unknown",
     lastSafeUpdate: readIso(account, ["last_safe_update", "last_seen_at", "updated_at", "created_at"]),
     phoneName: readString(account, ["device_name", "device", "phone_name"], readString(accountSettings, ["device_name", "device", "phone_name"], unknownPhone)),
@@ -975,6 +982,7 @@ function mapAdminDashboardAccount(row: SupabaseRecord): ManageAccount {
     invoiceStatus: readString(row, ["invoice_status"], "unknown"),
     pendingActionsCount: readNumber(row, ["pending_actions_count"], 0),
     blockingCampaign: readBoolean(row, ["blocking_campaign"], false),
+    primaryBlockReason: readOptionalString(row, ["primary_block_reason", "primaryBlockReason"]),
     latestIncidentSeverity: readString(row, ["latest_incident_severity"], "unknown"),
     lastSafeUpdate: readIso(row, ["last_safe_update"]),
     phoneName: readString(row, ["phone_name", "device_name"], unknownPhone),
