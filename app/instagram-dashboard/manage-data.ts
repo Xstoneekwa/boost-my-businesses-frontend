@@ -275,6 +275,28 @@ function readBoolean(row: SupabaseRecord | undefined, keys: string[], fallback =
   return fallback;
 }
 
+function readRecord(row: SupabaseRecord | undefined, keys: string[]): SupabaseRecord | null {
+  if (!row) return null;
+  for (const key of keys) {
+    const value = row[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as SupabaseRecord;
+  }
+  return null;
+}
+
+function isStaleSessionReplacementAction(row: SupabaseRecord, actionType: string) {
+  if (actionType !== "review_login_package_mismatch") return false;
+  const metadata = readRecord(row, ["metadata", "metadata_safe"]);
+  if (!metadata) return false;
+  const state = readString(metadata, ["connected_account_state", "previous_account_state", "stale_account_state"], "").toLowerCase();
+  const flow = readString(metadata, ["replacement_flow", "selected_route", "replacement_route"], "").toLowerCase();
+  const safety = readString(metadata, ["replacement_safety_status", "stale_replacement_safety_status"], "").toLowerCase();
+  const explicitAllowed = readBoolean(metadata, ["stale_session_replacement_allowed", "replacement_allowed"], false);
+  const staleStateAllowed = ["deleted", "archived", "orphaned", "unmanaged", "not_managed", "missing"].includes(state);
+  const canonicalFlow = ["previous_account_replacement", "stale_session_replacement", "controlled_replacement"].includes(flow);
+  return explicitAllowed && staleStateAllowed && canonicalFlow && safety === "allowed";
+}
+
 function readNullableBoolean(row: SupabaseRecord | undefined, keys: string[]) {
   if (!row) return null;
 
@@ -744,7 +766,8 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       current.total += 1;
       const actionType = readString(row, ["action_type"], "").toLowerCase();
       const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
-      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction) {
+      const isReplacementInProgress = isStaleSessionReplacementAction(row, actionType);
+      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction && !isReplacementInProgress) {
         current.blocking += 1;
         current.firstBlockingAction ||= actionType || "blocking_dashboard_action";
       }

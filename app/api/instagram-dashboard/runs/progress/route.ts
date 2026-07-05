@@ -133,6 +133,46 @@ function joinLandingProgressLogs(loginSummary: SupabaseRecord | null) {
   return logs;
 }
 
+function hasStaleReplacementEvidence(loginSummary: SupabaseRecord | null) {
+  if (!loginSummary) return false;
+  const flow = readString(loginSummary.replacement_flow, readString(loginSummary.selected_route, "")).toLowerCase();
+  return loginSummary.stale_session_replacement_allowed === true
+    || loginSummary.replacement_allowed === true
+    || ["previous_account_replacement", "stale_session_replacement", "controlled_replacement"].includes(flow);
+}
+
+function staleReplacementStepStatus(loginSummary: SupabaseRecord | null, keys: string[], fallback: "pending" | "running" | "done" | "failed" = "pending") {
+  if (!loginSummary) return fallback;
+  for (const key of keys) {
+    const value = loginSummary[key];
+    if (value === true) return "done";
+    if (value === false) return "failed";
+    const normalized = readString(value, "").toLowerCase();
+    if (["done", "success", "succeeded", "completed", "verified", "allowed"].includes(normalized)) return "done";
+    if (["running", "started", "in_progress", "pending"].includes(normalized)) return "running";
+    if (["failed", "blocked", "denied", "not_allowed"].includes(normalized)) return "failed";
+  }
+  return fallback;
+}
+
+function staleReplacementProgressSteps(loginSummary: SupabaseRecord | null) {
+  if (!hasStaleReplacementEvidence(loginSummary)) return [];
+  const connectedUsername = readString(
+    loginSummary?.previous_account_username,
+    readString(loginSummary?.connected_username, readString(loginSummary?.current_username, "previous account")),
+  );
+  const targetUsername = readString(loginSummary?.target_username, readString(loginSummary?.expected_username, "target account"));
+  return [
+    step("detect_different_account", "Different Instagram account detected", `Current session: @${connectedUsername}.`, "done"),
+    step("verify_clone_assignment", "Verify clone assignment", "Checking that the target account owns this exact app instance.", staleReplacementStepStatus(loginSummary, ["assignment_guard_status", "clone_assignment_guard_status"], "running")),
+    step("verify_replacement_safety", "Verify replacement safety", "Checking runs, requests, lifecycle, ownership, entitlement, and subscription protections.", staleReplacementStepStatus(loginSummary, ["replacement_safety_status", "stale_replacement_safety_status"], "pending")),
+    step("detect_unassigned_account", "Unassigned account detected", "Connected account is stale, orphaned, deleted, archived, or unmanaged.", staleReplacementStepStatus(loginSummary, ["stale_account_status", "connected_account_state", "previous_account_state"], "pending")),
+    step("controlled_logout_previous", "Logout previous account", "Using the canonical controlled logout/recovery path.", staleReplacementStepStatus(loginSummary, ["controlled_logout_status", "logout_previous_status", "previous_account_logout_status"], "pending")),
+    step("login_target_account", "Login target account", `Connecting @${targetUsername}.`, staleReplacementStepStatus(loginSummary, ["target_login_status", "login_target_status", "submit_status"], "pending")),
+    step("verify_final_identity", "Verify final identity", "Confirming the connected Instagram identity matches the assigned target.", staleReplacementStepStatus(loginSummary, ["final_identity_status", "identity_verification_status"], "pending")),
+  ];
+}
+
 async function authorizeProgress(request: Request, accountId: string) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return { ok: true, audience: "admin" as const };
@@ -250,6 +290,7 @@ function buildSteps(requestRow: SupabaseRecord | null, runRow: SupabaseRecord | 
     step("dispatcher_claim", "Dispatcher claim", hasRun || ["claimed", "starting", "running", "completed"].includes(requestStatus) ? `dispatcher status ${requestStatus}` : "Waiting for dispatcher claim.", hasRun || ["claimed", "starting", "running", "completed"].includes(requestStatus) ? "done" : hasRequest ? "running" : "pending", requestRow),
     step("open_instagram", "Open Instagram", hasRun ? `run ${readString(runRow?.id).slice(0, 8)} · ${runStatus || "running"}` : appOpened ? "Instagram package opened by login worker." : "Worker has not linked a run yet.", hasRun ? (ACTIVE_RUN_STATUSES.has(runStatus) ? "running" : "done") : appOpened ? "done" : "pending", runRow),
     step("check_session", "Check current session", joinLandingDetected ? "Join Instagram landing detected." : actionRequired ? "Instagram requires manual confirmation." : runLinkMissing ? "Worker finished without run/status evidence." : "Worker checks the current Instagram session.", actionRequired ? "action_required" : connected || statusSyncMissing || localConnected || existingProfilePathUsed ? "done" : failed ? "failed" : hasRun ? "running" : "pending", runRow),
+    ...staleReplacementProgressSteps(loginSummary),
     step("enter_credentials", "Enter credentials", credentialsFailureDetail, connected || statusSyncMissing || localConnected || credentialsSubmitted ? "done" : actionRequired ? "skipped" : failed && (credentialsReadFailed || packageInterrupted || fieldMissingFailure || loginFormEmptyDetected) ? "failed" : loginFormAfterJoinDetected || loginFormEmptyDetected || hasRun ? "running" : "pending", runRow),
     step("verify_identity", "Verify identity", identityFailureDetail, actionRequired ? "action_required" : connected || statusSyncMissing || localConnected || credentialsSubmitted ? "done" : failed && !credentialsSubmitted ? "failed" : hasRun ? "running" : "pending", runRow),
     step("save_login_status", "Save login status", connected ? "Login status saved." : statusSyncMissing ? "Worker connected locally but did not publish account status." : actionRequired ? "Waiting for manual completion." : failed ? "Run failed before ready status." : "Waiting for terminal login status.", connected ? "done" : statusSyncMissing ? "failed" : actionRequired ? "action_required" : failed ? "failed" : "pending", runRow),

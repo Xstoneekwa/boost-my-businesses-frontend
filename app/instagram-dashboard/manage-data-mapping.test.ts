@@ -75,3 +75,14 @@ test("Manage exposes precise social blocking action instead of a stale generic b
   assert.match(manageSource, /primaryBlockReason: actionCounts\.firstBlockingAction/);
   assert.match(manageSource, /primary_block_reason/);
 });
+
+test("Manage only unblocks stale-session replacement with explicit runtime proof", () => {
+  assert.match(manageSource, /function isStaleSessionReplacementAction/);
+  assert.match(manageSource, /stale_session_replacement_allowed/);
+  assert.match(manageSource, /replacement_safety_status/);
+  assert.match(manageSource, /previous_account_replacement/);
+  assert.match(manageSource, /staleStateAllowed/);
+  assert.match(manageSource, /canonicalFlow/);
+  assert.match(manageSource, /safety === "allowed"/);
+  assert.match(manageSource, /!isReplacementInProgress/);
+});

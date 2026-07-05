@@ -14,6 +14,7 @@ const submitServiceSource = source("../../lib/instagram-dashboard/submit-verific
 const runControlSource = source("../../lib/instagram-dashboard/run-control.ts");
 const loadProgressSource = source("../../lib/instagram-client/load-client-connect-progress.ts");
 const credentialsPageSource = source("./credentials-actions/page.tsx");
+const runProgressRouteSource = source("../api/instagram-dashboard/runs/progress/route.ts");
 
 test("admin Auto Login challenge surfaces through email verification banner and modal", () => {
   assert.match(bannerSource, /Email verification code required/);
@@ -80,4 +81,18 @@ test("admin Auto Login popup cycle remains independent from client dashboard con
   assert.match(submitRouteSource, /isInstagramAdmin \? "admin" : "client"/);
   assert.doesNotMatch(bannerSource, /ClientAccountsSection/);
   assert.doesNotMatch(credentialsPageSource, /connect_operation_token/);
+});
+
+test("run progress exposes canonical stale-session replacement stages from provisioner summary", () => {
+  assert.match(runProgressRouteSource, /hasStaleReplacementEvidence/);
+  assert.match(runProgressRouteSource, /stale_session_replacement_allowed/);
+  assert.match(runProgressRouteSource, /previous_account_replacement/);
+  assert.match(runProgressRouteSource, /detect_different_account/);
+  assert.match(runProgressRouteSource, /verify_clone_assignment/);
+  assert.match(runProgressRouteSource, /verify_replacement_safety/);
+  assert.match(runProgressRouteSource, /detect_unassigned_account/);
+  assert.match(runProgressRouteSource, /controlled_logout_previous/);
+  assert.match(runProgressRouteSource, /login_target_account/);
+  assert.match(runProgressRouteSource, /verify_final_identity/);
+  assert.match(runProgressRouteSource, /password=\[redacted\]/);
 });
