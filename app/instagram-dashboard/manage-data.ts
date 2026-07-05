@@ -11,6 +11,11 @@ import {
 } from "@/lib/instagram-dashboard/resolve-account-email";
 import { getAccountPackageSummaries } from "./package-summary-data";
 import { resolveOrphanLoginRecoveryProjection } from "@/lib/instagram-dashboard/orphan-login-recovery";
+import {
+  projectCanonicalAccountCapacityState,
+  type AccountAssignmentHealth,
+  type AccountAssignmentHealthReason,
+} from "@/lib/instagram-dashboard/account-capacity-state";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -59,6 +64,8 @@ export type ManageAccount = {
   macHostName: string;
   deviceId?: string | null;
   assignmentStatus?: string | null;
+  assignmentHealth?: AccountAssignmentHealth;
+  assignmentHealthReason?: AccountAssignmentHealthReason;
   appInstanceId?: string | null;
   appInstanceLabel?: string | null;
   appInstanceIndex?: number | null;
@@ -502,7 +509,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
 
   try {
     const supabase = createSupabaseClient();
-    const [credentialsResult, assignmentsResult, clientAccountsResult, settingsResult] = await Promise.all([
+    const [credentialsResult, assignmentsResult, clientAccountsResult, settingsResult, appInstancesByAccountResult] = await Promise.all([
       supabase
         .from("account_credentials")
         .select("account_id,status,reauth_required,secret_ref,created_at,metadata_safe")
@@ -511,7 +518,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .limit(1000),
       supabase
         .from("account_assignments")
-        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,schedule_mode,slot_kind")
+        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,released_at,schedule_mode,slot_kind")
         .in("account_id", accountIds)
         .in("status", ["pending", "reserved", "active"])
         .order("starts_at", { ascending: false })
@@ -526,9 +533,14 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .select("account_id,email")
         .in("account_id", accountIds)
         .limit(1000),
+      supabase
+        .from("phone_app_instances")
+        .select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id")
+        .in("current_account_id", accountIds)
+        .limit(1000),
     ]);
 
-    if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error || settingsResult.error) {
+    if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error || settingsResult.error || appInstancesByAccountResult.error) {
       return { ...overview, errors: ["Assignment or credential projection unavailable.", ...overview.errors] };
     }
 
@@ -551,20 +563,35 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     }
 
     const assignments = ((assignmentsResult.data ?? []) as SupabaseRecord[]);
+    const assignmentsByAccount = new Map<string, SupabaseRecord[]>();
     const assignmentByAccount = new Map<string, SupabaseRecord>();
     for (const row of assignments) {
       const accountId = readString(row, ["account_id"], "");
+      if (accountId) assignmentsByAccount.set(accountId, [...(assignmentsByAccount.get(accountId) ?? []), row]);
       if (accountId && !assignmentByAccount.has(accountId)) assignmentByAccount.set(accountId, row);
     }
 
-    const deviceIds = [...new Set(assignments.map((row) => readString(row, ["device_id"], "")).filter(Boolean))];
-    const appInstanceIds = [...new Set(assignments.map((row) => readString(row, ["app_instance_id"], "")).filter(Boolean))];
+    const appInstancesPointingByAccount = new Map<string, SupabaseRecord[]>();
+    for (const row of ((appInstancesByAccountResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["current_account_id"], "");
+      if (accountId) appInstancesPointingByAccount.set(accountId, [...(appInstancesPointingByAccount.get(accountId) ?? []), row]);
+    }
+
+    const currentAppInstances = ((appInstancesByAccountResult.data ?? []) as SupabaseRecord[]);
+    const deviceIds = [...new Set([
+      ...assignments.map((row) => readString(row, ["device_id"], "")),
+      ...currentAppInstances.map((row) => readString(row, ["device_id"], "")),
+    ].filter(Boolean))];
+    const appInstanceIds = [...new Set([
+      ...assignments.map((row) => readString(row, ["app_instance_id"], "")),
+      ...currentAppInstances.map((row) => readString(row, ["id"], "")),
+    ].filter(Boolean))];
     const [devicesResult, appInstancesResult] = await Promise.all([
       deviceIds.length
         ? supabase.from("phone_devices").select("id,name,device_name,status,timezone").in("id", deviceIds)
         : Promise.resolve({ data: [], error: null }),
       appInstanceIds.length
-        ? supabase.from("phone_app_instances").select("id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login").in("id", appInstanceIds)
+        ? supabase.from("phone_app_instances").select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id").in("id", appInstanceIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -573,15 +600,20 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     }
 
     const deviceById = new Map(((devicesResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row, ["id"], ""), row]));
-    const appInstanceById = new Map(((appInstancesResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row, ["id"], ""), row]));
+    const appInstanceById = new Map([
+      ...currentAppInstances,
+      ...((appInstancesResult.data ?? []) as SupabaseRecord[]),
+    ].map((row) => [readString(row, ["id"], ""), row]));
 
     const enrich = (account: ManageAccount): ManageAccount => {
       const credential = credentialsByAccount.get(account.accountId);
       const clientAccount = clientAccountByAccount.get(account.accountId);
       const settings = settingsByAccount.get(account.accountId);
       const assignment = assignmentByAccount.get(account.accountId);
-      const device = deviceById.get(readString(assignment, ["device_id"], ""));
-      const appInstance = appInstanceById.get(readString(assignment, ["app_instance_id"], ""));
+      const appInstancesPointingToAccount = appInstancesPointingByAccount.get(account.accountId) ?? [];
+      const fallbackAppInstance = appInstancesPointingToAccount[0];
+      const appInstance = appInstanceById.get(readString(assignment, ["app_instance_id"], "")) ?? fallbackAppInstance;
+      const device = deviceById.get(readString(assignment, ["device_id"], "") || readString(appInstance, ["device_id"], ""));
       const phoneLabel = readString(device, ["name", "device_name"], account.phoneName);
       const appLabel = readString(appInstance, ["visible_label"], "");
       const appInstanceIndex = readNullableNumber(appInstance, ["instance_index"]);
@@ -614,6 +646,14 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
       const assignmentStartsAt = readIso(assignment, ["starts_at"]);
       const assignmentEndsAt = readIso(assignment, ["ends_at"]);
+      const capacityState = projectCanonicalAccountCapacityState({
+        accountId: account.accountId,
+        assignment,
+        activeAssignmentCount: assignmentsByAccount.get(account.accountId)?.length ?? 0,
+        device,
+        appInstance,
+        appInstancesPointingToAccount,
+      });
       const scheduleMode = assignment
         ? readString(assignment, ["schedule_mode"], "scheduled") || "scheduled"
         : account.scheduleMode ?? null;
@@ -638,9 +678,11 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
         phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
-        deviceId: assignedDeviceId || account.deviceId || null,
-        appInstanceId: assignedAppInstanceId || account.appInstanceId || null,
+        deviceId: assignedDeviceId || readString(appInstance, ["device_id"], "") || account.deviceId || null,
+        appInstanceId: assignedAppInstanceId || readString(appInstance, ["id"], "") || account.appInstanceId || null,
         appInstanceIndex: appInstanceIndex ?? account.appInstanceIndex ?? null,
+        assignmentHealth: capacityState.assignmentHealth,
+        assignmentHealthReason: capacityState.assignmentHealthReason,
         assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
         assignmentStartsAt,
         assignmentEndsAt,

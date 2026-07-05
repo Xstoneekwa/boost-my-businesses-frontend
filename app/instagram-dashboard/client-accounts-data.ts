@@ -75,6 +75,8 @@ export type ClientAccountOperationsItem = {
   provisioningStatus: string;
   onboardingStatus: string;
   assignmentLabel: string | null;
+  assignmentHealth: ManageAccount["assignmentHealth"];
+  assignmentHealthReason: ManageAccount["assignmentHealthReason"];
   deviceLabel: string | null;
   appInstanceLabel: string | null;
   appPackageName: string | null;
@@ -427,6 +429,8 @@ function mapAccount(
     provisioningStatus: account.provisioningStatus,
     onboardingStatus: account.onboardingStatus,
     assignmentLabel: assignmentParts.length ? assignmentParts.join(" · ") : null,
+    assignmentHealth: account.assignmentHealth ?? "unassigned",
+    assignmentHealthReason: account.assignmentHealthReason ?? "no_active_assignment",
     deviceLabel: account.phoneName || null,
     appInstanceLabel: account.appInstanceLabel ?? null,
     appPackageName: account.appPackageName ?? null,

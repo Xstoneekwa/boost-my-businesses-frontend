@@ -11,6 +11,9 @@ test("Manage enriches legacy accounts with modern assignment phone and clone dat
   assert.match(manageSource, /from\("phone_app_instances"\)/);
   assert.match(manageSource, /visible_label/);
   assert.match(manageSource, /package_name/);
+  assert.match(manageSource, /current_account_id/);
+  assert.match(manageSource, /projectCanonicalAccountCapacityState/);
+  assert.match(manageSource, /assignmentHealth/);
   assert.match(manageSource, /phoneName: appLabel \? `\$\{phoneLabel\} · \$\{appLabel\}` : phoneLabel/);
 });
 
