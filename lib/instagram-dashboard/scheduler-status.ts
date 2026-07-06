@@ -12,6 +12,12 @@
  */
 
 import { normalizeSchedulerReason, type SchedulerReasonKind } from "./scheduler-reasons.ts";
+import {
+  dailySlotLabel,
+  extractDailySlot,
+  projectDailyWindows,
+  SCHEDULE_PROJECTION_HORIZON_HOURS,
+} from "./schedule-recurrence.ts";
 
 export type SchedulerEngineStatus = "running" | "degraded" | "unknown";
 export type SchedulerBackendMode = "enabled" | "disabled_by_config";
@@ -48,6 +54,29 @@ export type SchedulerDailyEngine = {
   state: "technical_disabled" | "dry_run" | "scheduler_disabled" | "active";
 };
 
+/**
+ * CP2 — derived daily occurrence of a `scheduled` account inside the 48h
+ * horizon. Pure projection of the durable Schedule (single open assignment
+ * row): nothing here is a second source of truth and nothing creates runs.
+ */
+export type SchedulerUpcomingWindow = {
+  account_id: string;
+  username: string | null;
+  device_id: string | null;
+  device_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  timezone: string;
+  /** Local slot label, e.g. "06:00–12:00". */
+  local_slot: string;
+  /** True while now is inside this occurrence. */
+  is_open: boolean;
+  /** True when the stored dated window already matches this occurrence. */
+  materialized: boolean;
+  /** True when the stored dated window has expired and awaits roll-forward. */
+  stored_window_expired: boolean;
+};
+
 export type SchedulerStatus = {
   read_only: true;
   engine_status: SchedulerEngineStatus;
@@ -65,6 +94,8 @@ export type SchedulerStatus = {
   recent_decisions: SchedulerRecentDecision[];
   settings_updated_at: string | null;
   daily_engine: SchedulerDailyEngine | null;
+  windows_horizon_hours: number;
+  upcoming_windows: SchedulerUpcomingWindow[];
 };
 
 type QueryResult = { data?: unknown; error?: { message?: string } | null };
@@ -159,6 +190,86 @@ async function loadRecentDecisions(supabase: SchedulerStatusSupabase, sinceIso: 
     .limit(200);
   if (result.error) throw new Error(result.error.message || "auto_restart_decisions_unavailable");
   return readRows(result.data);
+}
+
+async function loadOpenScheduledAssignments(supabase: SchedulerStatusSupabase) {
+  const result = await query(supabase, "account_assignments")
+    .select("id,account_id,device_id,starts_at,ends_at,status,schedule_mode,assignment_type")
+    .in("status", ["reserved", "active"])
+    .eq("schedule_mode", "scheduled")
+    .order("starts_at", { ascending: true })
+    .limit(50);
+  if (result.error) throw new Error(result.error.message || "account_assignments_unavailable");
+  return readRows(result.data).filter((row) => readString(row.assignment_type, "full_cycle") === "full_cycle");
+}
+
+async function loadDeviceNames(supabase: SchedulerStatusSupabase, deviceIds: string[]) {
+  const map = new Map<string, { name: string | null; timezone: string | null }>();
+  if (!deviceIds.length) return map;
+  const result = await query(supabase, "phone_devices")
+    .select("id,name,timezone")
+    .in("id", deviceIds)
+    .limit(deviceIds.length);
+  if (result.error) return map;
+  for (const row of readRows(result.data)) {
+    const id = readString(row.id);
+    if (!id) continue;
+    map.set(id, {
+      name: readString(row.name) || null,
+      timezone: readString(row.timezone) || null,
+    });
+  }
+  return map;
+}
+
+/**
+ * CP2 — derives the 48h projection from the open `scheduled` assignments.
+ * manual_only rows are excluded upstream (hard exclusion) and a stored window
+ * that cannot express a daily slot is skipped rather than invented.
+ */
+export function projectUpcomingWindows(
+  assignments: Record<string, unknown>[],
+  usernames: Map<string, string>,
+  devices: Map<string, { name: string | null; timezone: string | null }>,
+  now: Date,
+  horizonHours = SCHEDULE_PROJECTION_HORIZON_HOURS,
+): SchedulerUpcomingWindow[] {
+  const windows: SchedulerUpcomingWindow[] = [];
+  for (const row of assignments) {
+    if (readString(row.schedule_mode, "scheduled") !== "scheduled") continue;
+    const accountId = readString(row.account_id);
+    const startsAt = readString(row.starts_at);
+    const endsAt = readString(row.ends_at);
+    if (!accountId || !startsAt || !endsAt) continue;
+
+    const deviceId = readString(row.device_id) || null;
+    const device = deviceId ? devices.get(deviceId) : undefined;
+    const rawTimezone = device?.timezone && device.timezone !== "UTC" ? device.timezone : null;
+    const slot = extractDailySlot(startsAt, endsAt, rawTimezone);
+    if (!slot) continue;
+
+    const storedEndsMs = Date.parse(endsAt);
+    const storedExpired = Number.isFinite(storedEndsMs) && storedEndsMs <= now.getTime();
+    const storedStartsIso = Number.isFinite(Date.parse(startsAt)) ? new Date(startsAt).toISOString() : startsAt;
+
+    for (const occurrence of projectDailyWindows(slot, now, horizonHours)) {
+      windows.push({
+        account_id: accountId,
+        username: usernames.get(accountId) || null,
+        device_id: deviceId,
+        device_name: device?.name ?? null,
+        starts_at: occurrence.starts_at,
+        ends_at: occurrence.ends_at,
+        timezone: slot.timezone,
+        local_slot: dailySlotLabel(slot),
+        is_open: Date.parse(occurrence.starts_at) <= now.getTime() && now.getTime() < Date.parse(occurrence.ends_at),
+        materialized: occurrence.starts_at === storedStartsIso,
+        stored_window_expired: storedExpired,
+      });
+    }
+  }
+  windows.sort((a, b) => a.starts_at.localeCompare(b.starts_at) || (a.username || "").localeCompare(b.username || ""));
+  return windows;
 }
 
 async function loadUsernames(supabase: SchedulerStatusSupabase, accountIds: string[]) {
@@ -282,18 +393,29 @@ export async function buildSchedulerStatus(
   const sinceIso = new Date(now.getTime() - windowHours * 3_600_000).toISOString();
 
   const settingsRow = await loadSettingsRow(supabase);
-  const [tickLocks, decisions] = await Promise.all([
+  const [tickLocks, decisions, scheduledAssignments] = await Promise.all([
     loadRecentTickLocks(supabase),
     loadRecentDecisions(supabase, sinceIso),
+    loadOpenScheduledAssignments(supabase),
   ]);
 
   const tickSummary = summarizeTickLocks(tickLocks);
   const decisionSummary = summarizeDecisions(decisions);
 
   const accountIds = Array.from(
-    new Set(decisions.map((row) => readString(row.account_id)).filter(Boolean)),
+    new Set([
+      ...decisions.map((row) => readString(row.account_id)).filter(Boolean),
+      ...scheduledAssignments.map((row) => readString(row.account_id)).filter(Boolean),
+    ]),
   );
-  const usernames = await loadUsernames(supabase, accountIds);
+  const deviceIds = Array.from(
+    new Set(scheduledAssignments.map((row) => readString(row.device_id)).filter(Boolean)),
+  );
+  const [usernames, deviceNames] = await Promise.all([
+    loadUsernames(supabase, accountIds),
+    loadDeviceNames(supabase, deviceIds),
+  ]);
+  const upcomingWindows = projectUpcomingWindows(scheduledAssignments, usernames, deviceNames, now);
 
   const recentDecisions: SchedulerRecentDecision[] = decisions.slice(0, recentLimit).map(projectRecentDecision(usernames));
 
@@ -331,5 +453,7 @@ export async function buildSchedulerStatus(
     recent_decisions: recentDecisions,
     settings_updated_at: readString(settingsRow?.updated_at) || null,
     daily_engine: dailyEngine,
+    windows_horizon_hours: SCHEDULE_PROJECTION_HORIZON_HOURS,
+    upcoming_windows: upcomingWindows,
   };
 }

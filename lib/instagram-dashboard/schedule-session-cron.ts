@@ -6,6 +6,10 @@ import {
   SCHEDULER_DISABLED_REASON,
   type SchedulerAutomaticRunAuthorization,
 } from "./scheduler-authorization.ts";
+import {
+  deriveCurrentDailyWindow,
+  extractDailySlot,
+} from "./schedule-recurrence.ts";
 
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
@@ -89,6 +93,9 @@ export type ScheduleSessionCronSummary = {
   skipped_missing_assignment_target_count: number;
   skipped_botapp_runtime_unavailable_count: number;
   skipped_scheduler_disabled_count: number;
+  /** CP2 — expired scheduled windows rolled forward to the derived daily occurrence. */
+  rolled_forward_count: number;
+  roll_forward_failed_count: number;
 };
 
 export type ScheduleSessionCronResult = {
@@ -158,6 +165,8 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_missing_assignment_target_count: 0,
     skipped_botapp_runtime_unavailable_count: 0,
     skipped_scheduler_disabled_count: 0,
+    rolled_forward_count: 0,
+    roll_forward_failed_count: 0,
   };
 }
 
@@ -230,6 +239,106 @@ export function assignmentWindowActive(startsAt: string, endsAt: string, now: Da
 
 export function scheduleSessionIdempotencyKey(assignmentId: string, startsAt: string) {
   return `schedule-session:${assignmentId}:${startsAt}`;
+}
+
+type UpdateCapableBuilder = QueryBuilder & {
+  update: (values: Record<string, unknown>) => QueryBuilder;
+};
+
+async function listExpiredScheduledAssignments(supabase: SupabaseLike, now: Date, limit: number) {
+  const result = await query(supabase, "account_assignments")
+    .select("id,account_id,device_id,starts_at,ends_at,status,schedule_mode,assignment_type,metadata")
+    .in("status", ["reserved", "active"])
+    .eq("schedule_mode", "scheduled")
+    .lte("ends_at", now.toISOString())
+    .order("ends_at", { ascending: true })
+    .limit(limit) as QueryResult;
+  if (result.error) throw new Error(result.error.message || "expired_assignments_unavailable");
+  return readRows(result.data).filter((row) => readString(row.assignment_type, "full_cycle") === "full_cycle");
+}
+
+/**
+ * CP2 — daily recurrence materialization (roll-forward).
+ *
+ * The durable intent stays the existing Schedule (single open assignment row
+ * per account, local slot in the device timezone). This step only re-derives
+ * the dated window of EXPIRED `scheduled` rows to the current-or-next daily
+ * occurrence of the same local slot:
+ * - single row updated in place → duplicates are structurally impossible;
+ * - the derivation is deterministic and the update is guarded by the previous
+ *   `ends_at` (optimistic idempotency: a concurrent cron updates 0 rows);
+ * - `manual_only` rows are never selected (hard exclusion);
+ * - this is a state derivation, NEVER a run creation: the canonical Scheduler
+ *   toggle plus the atomic RPC guard keep governing every automatic run.
+ * A window that cannot express a daily slot is left untouched and counted as
+ * `roll_forward_failed_count` (explicit, never silent).
+ */
+async function rollForwardExpiredScheduledWindows(
+  supabase: SupabaseLike,
+  now: Date,
+  summary: ScheduleSessionCronSummary,
+) {
+  const expired = await listExpiredScheduledAssignments(supabase, now, 50);
+  if (!expired.length) return;
+
+  const deviceIds = [...new Set(expired.map((row) => readString(row.device_id)).filter(Boolean))];
+  const devicesById = await listDevices(supabase, deviceIds);
+
+  for (const row of expired) {
+    // Hard exclusion re-checked in the loop, never trusted to the query alone:
+    // a manual_only account is never materialized automatically.
+    if (readString(row.schedule_mode, "scheduled") !== "scheduled") continue;
+    const assignmentId = readString(row.id);
+    const startsAt = readString(row.starts_at);
+    const endsAt = readString(row.ends_at);
+    if (!assignmentId || !startsAt || !endsAt) {
+      summary.roll_forward_failed_count += 1;
+      continue;
+    }
+
+    const device = devicesById.get(readString(row.device_id));
+    const rawTimezone = readString(device?.timezone, "");
+    // UTC is the legacy phone_devices default; business slots live in Africa/Johannesburg.
+    const timezone = rawTimezone && rawTimezone !== "UTC" ? rawTimezone : null;
+
+    const slot = extractDailySlot(startsAt, endsAt, timezone);
+    if (!slot) {
+      summary.roll_forward_failed_count += 1;
+      continue;
+    }
+    const nextWindow = deriveCurrentDailyWindow(slot, now);
+    if (nextWindow.starts_at === startsAt && nextWindow.ends_at === endsAt) continue;
+
+    const existingMetadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+    const builder = query(supabase, "account_assignments") as UpdateCapableBuilder;
+    const result = await builder
+      .update({
+        starts_at: nextWindow.starts_at,
+        ends_at: nextWindow.ends_at,
+        updated_at: now.toISOString(),
+        metadata: {
+          ...existingMetadata,
+          recurrence: {
+            source: "schedule_session_cron",
+            rolled_forward_at: now.toISOString(),
+            previous_starts_at: startsAt,
+            previous_ends_at: endsAt,
+            local_slot: `${slot.localStart}-${slot.localEnd}`,
+            timezone: slot.timezone,
+          },
+        },
+      })
+      .eq("id", assignmentId)
+      .eq("ends_at", endsAt)
+      .select("id") as unknown as QueryResult;
+    if (result.error) {
+      summary.roll_forward_failed_count += 1;
+      continue;
+    }
+    if (readRows(result.data).length > 0) summary.rolled_forward_count += 1;
+  }
 }
 
 async function listActiveWindowAssignments(supabase: SupabaseLike, now: Date, limit: number) {
@@ -382,6 +491,18 @@ export async function runScheduleSessionCron(
   if (!tokensMatch(env.configuredToken, callerToken)) return { status: 403, result: skippedResult(env, "invalid_caller_token") };
   if (!env.enabled) return { status: 200, result: skippedResult(env, "technical_disabled") };
 
+  const now = options.now ?? new Date();
+  const summary = emptySummary();
+
+  // CP2 — daily recurrence: roll expired `scheduled` windows forward to the
+  // derived daily occurrence BEFORE any run gate. This is a state derivation
+  // (single row per account, idempotent) and never creates a run, so it also
+  // runs while the Scheduler toggle is OFF — windows stay fresh and
+  // observability never shows a silent expired window. Dry-run scans only.
+  if (!env.dryRun) {
+    await rollForwardExpiredScheduledWindows(supabase, now, summary);
+  }
+
   // CP0 — canonical Scheduler toggle: the single business authorization for
   // any automatic run creation. OFF => the cron stays technically healthy but
   // never creates an account_run_request (stable observable state below).
@@ -391,15 +512,13 @@ export async function runScheduleSessionCron(
   if (!schedulerAuthorization.allowed && !env.dryRun) {
     return {
       status: 200,
-      result: skippedResult(env, SCHEDULER_DISABLED_REASON, emptySummary(), schedulerAuthorization.enabled),
+      result: skippedResult(env, SCHEDULER_DISABLED_REASON, summary, schedulerAuthorization.enabled),
     };
   }
 
-  const now = options.now ?? new Date();
   const evaluateEligibility = options.evaluateEligibility ?? defaultEligibilityEvaluator;
   const loadRuntimeHealth = options.loadRuntimeHealth ?? defaultRuntimeHealthLoader;
   const assignments = await listActiveWindowAssignments(supabase, now, env.limit);
-  const summary = emptySummary();
   summary.scanned_assignments_count = assignments.length;
   if (!assignments.length) {
     return { status: 200, result: skippedResult(env, "no_active_windows", summary, schedulerAuthorization.enabled) };

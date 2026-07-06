@@ -60,8 +60,10 @@ function makeSupabase(overrides: {
   rpcError?: { message: string };
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const assignmentUpdates: Array<Record<string, unknown>> = [];
   return {
     rpcCalls,
+    assignmentUpdates,
     client: {
       from(table: string) {
         if (table === "auto_restart_settings") {
@@ -70,15 +72,26 @@ function makeSupabase(overrides: {
         if (table === "account_assignments") {
           const rows = overrides.assignments ?? [defaultAssignment];
           const query = makeQueryResult(rows);
-          return {
+          const withUpdate = (base: Record<string, unknown>) => ({
+            ...base,
+            update: (values: Record<string, unknown>) => {
+              assignmentUpdates.push(values);
+              const chain = {
+                eq: () => chain,
+                select: () => Promise.resolve({ data: [{ id: "assignment-1" }], error: null }),
+              };
+              return chain;
+            },
+          });
+          return withUpdate({
             ...query,
             eq: (column: string, value: unknown) => {
               if (column === "schedule_mode" && value === "scheduled") {
-                return makeQueryResult(rows.filter((row) => row.schedule_mode === "scheduled"));
+                return withUpdate(makeQueryResult(rows.filter((row) => row.schedule_mode === "scheduled")) as unknown as Record<string, unknown>);
               }
-              return query;
+              return withUpdate(query as unknown as Record<string, unknown>);
             },
-          };
+          });
         }
         if (table === "phone_devices") {
           return makeQueryResult(overrides.devices ?? [{
@@ -246,6 +259,127 @@ test("scheduler settings read failure fails closed (no automatic request)", asyn
 
   assert.equal(run.status, 200);
   assert.equal(run.result.state, "scheduler_disabled");
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("CP2: expired scheduled window rolls forward to today's derived occurrence, without any run", async () => {
+  // Stored window: July 3rd 06:00–12:00 local (04:00–10:00 UTC), expired.
+  const supabase = makeSupabase({
+    schedulerEnabled: false,
+    assignments: [{
+      ...defaultAssignment,
+      starts_at: "2026-07-03T04:00:00.000Z",
+      ends_at: "2026-07-03T10:00:00.000Z",
+    }],
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: new Date("2026-07-06T03:00:00.000Z"), // 05:00 local, before today's slot
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  // The derivation happens even while the Scheduler toggle is OFF…
+  assert.equal(run.result.state, "scheduler_disabled");
+  assert.equal(run.result.summary.rolled_forward_count, 1);
+  assert.equal(supabase.assignmentUpdates.length, 1);
+  const update = supabase.assignmentUpdates[0];
+  assert.equal(update.starts_at, "2026-07-06T04:00:00.000Z");
+  assert.equal(update.ends_at, "2026-07-06T10:00:00.000Z");
+  const recurrence = (update.metadata as Record<string, unknown>).recurrence as Record<string, unknown>;
+  assert.equal(recurrence.source, "schedule_session_cron");
+  assert.equal(recurrence.previous_ends_at, "2026-07-03T10:00:00.000Z");
+  assert.equal(recurrence.local_slot, "06:00-12:00");
+  // …but it NEVER creates a run: zero RPC, zero enqueue.
+  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(run.result.summary.queued_count, 0);
+});
+
+test("CP2: dry run derives nothing and writes nothing", async () => {
+  const supabase = makeSupabase({
+    assignments: [{
+      ...defaultAssignment,
+      starts_at: "2026-07-03T04:00:00.000Z",
+      ends_at: "2026-07-03T10:00:00.000Z",
+    }],
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: baseEnv, // dry-run
+    callerToken: "cron-token",
+    now: new Date("2026-07-06T03:00:00.000Z"),
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.rolled_forward_count, 0);
+  assert.equal(supabase.assignmentUpdates.length, 0);
+});
+
+test("CP2: a fresh window is an idempotent no-op for the roll-forward", async () => {
+  const supabase = makeSupabase();
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.rolled_forward_count, 0);
+  assert.equal(run.result.summary.roll_forward_failed_count, 0);
+  assert.equal(supabase.assignmentUpdates.length, 0);
+});
+
+test("CP2: a window that cannot express a daily slot is left untouched and counted", async () => {
+  const supabase = makeSupabase({
+    schedulerEnabled: false,
+    assignments: [{
+      ...defaultAssignment,
+      // 30h window: not a daily slot — never invented, explicitly counted.
+      starts_at: "2026-07-03T00:00:00.000Z",
+      ends_at: "2026-07-04T06:00:00.000Z",
+    }],
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: new Date("2026-07-06T03:00:00.000Z"),
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.rolled_forward_count, 0);
+  assert.equal(run.result.summary.roll_forward_failed_count, 1);
+  assert.equal(supabase.assignmentUpdates.length, 0);
+});
+
+test("CP2: manual_only assignments are never materialized (hard exclusion)", async () => {
+  const supabase = makeSupabase({
+    schedulerEnabled: false,
+    assignments: [{
+      ...defaultAssignment,
+      schedule_mode: "manual_only",
+      starts_at: "2026-07-03T04:00:00.000Z",
+      ends_at: "2026-07-03T10:00:00.000Z",
+    }],
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: new Date("2026-07-06T03:00:00.000Z"),
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.rolled_forward_count, 0);
+  assert.equal(run.result.summary.roll_forward_failed_count, 0);
+  assert.equal(supabase.assignmentUpdates.length, 0);
   assert.equal(supabase.rpcCalls.length, 0);
 });
 

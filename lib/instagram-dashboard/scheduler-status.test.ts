@@ -204,6 +204,86 @@ test("legacy literal unknown is projected as reason_unavailable, never invented"
   assert.equal(status.recent_decisions[0].reason, "unknown");
 });
 
+test("CP2: upcoming windows derive the daily recurrence over 48h from the open assignments", async () => {
+  const supabase = mockSupabase({
+    auto_restart_settings: [{ auto_restart_enabled: false, check_every_minutes: 20, updated_at: "2026-07-06T14:25:27Z" }],
+    auto_restart_tick_locks: [],
+    auto_restart_decisions: [],
+    account_assignments: [
+      {
+        id: "assign-fresh",
+        account_id: "acc-fresh",
+        device_id: "dev-1",
+        // Fresh window: July 6th 06:00–12:00 local (04:00–10:00 UTC), open now.
+        starts_at: "2026-07-06T04:00:00.000Z",
+        ends_at: "2026-07-06T10:00:00.000Z",
+        status: "reserved",
+        schedule_mode: "scheduled",
+        assignment_type: "full_cycle",
+      },
+      {
+        id: "assign-expired",
+        account_id: "acc-expired",
+        device_id: "dev-1",
+        // Expired window (July 3rd): projection must show the derived next
+        // occurrences, flag the stored row as expired, never stay silent.
+        starts_at: "2026-07-03T20:00:00.000Z",
+        ends_at: "2026-07-04T02:00:00.000Z",
+        status: "reserved",
+        schedule_mode: "scheduled",
+        assignment_type: "full_cycle",
+      },
+      {
+        id: "assign-manual",
+        account_id: "acc-manual",
+        device_id: "dev-1",
+        starts_at: "2026-07-03T04:00:00.000Z",
+        ends_at: "2026-07-03T10:00:00.000Z",
+        status: "reserved",
+        schedule_mode: "manual_only",
+        assignment_type: "full_cycle",
+      },
+    ],
+    phone_devices: [{ id: "dev-1", name: "Samsung A16-01", timezone: "Africa/Johannesburg" }],
+    ig_accounts: [
+      { id: "acc-fresh", username: "client_fresh" },
+      { id: "acc-expired", username: "client_expired" },
+      { id: "acc-manual", username: "client_manual" },
+    ],
+  });
+
+  const status = await buildSchedulerStatus(supabase, {
+    engineHealth: null,
+    now: new Date("2026-07-06T05:00:00.000Z"), // 07:00 local
+  });
+
+  assert.equal(status.windows_horizon_hours, 48);
+  // manual_only is a hard exclusion: never projected.
+  assert.equal(status.upcoming_windows.some((w) => w.account_id === "acc-manual"), false);
+
+  const fresh = status.upcoming_windows.filter((w) => w.account_id === "acc-fresh");
+  assert.equal(fresh.length, 3); // today (open) + 2 next days inside 48h
+  assert.equal(fresh[0].is_open, true);
+  assert.equal(fresh[0].materialized, true);
+  assert.equal(fresh[0].stored_window_expired, false);
+  assert.equal(fresh[0].local_slot, "06:00–12:00");
+  assert.equal(fresh[0].username, "client_fresh");
+  assert.equal(fresh[0].device_name, "Samsung A16-01");
+  assert.equal(fresh[1].starts_at, "2026-07-07T04:00:00.000Z");
+
+  const expired = status.upcoming_windows.filter((w) => w.account_id === "acc-expired");
+  assert.ok(expired.length >= 2);
+  // 22:00–04:00 local slot: next occurrence tonight, clearly flagged as
+  // derived from an expired stored window (not yet materialized).
+  assert.equal(expired[0].starts_at, "2026-07-06T20:00:00.000Z");
+  assert.equal(expired[0].stored_window_expired, true);
+  assert.equal(expired[0].materialized, false);
+  assert.equal(expired[0].local_slot, "22:00–04:00");
+  // Windows are sorted by start time.
+  const starts = status.upcoming_windows.map((w) => w.starts_at);
+  assert.deepEqual(starts, [...starts].sort());
+});
+
 test("daily engine projection follows env plus the canonical toggle", async () => {
   const fixtures = {
     auto_restart_settings: [{ auto_restart_enabled: false, check_every_minutes: 20, updated_at: "2026-07-06T14:25:27Z" }],

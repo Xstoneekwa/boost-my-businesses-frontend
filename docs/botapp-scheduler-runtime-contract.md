@@ -185,6 +185,51 @@ projection fell back to the literal `"unknown"`, which the view displayed
 as-is. Canonical classification: `resume_plan_missing` (blocked, business),
 not a technical error, not `botapp_runtime_unavailable`, not `phone_busy`.
 
+## CP2 — Daily recurrence, derived windows and 48h projection
+
+Product decision: a `schedule_mode=scheduled` account repeats its Schedule
+slot **every day**; `manual_only` is a hard exclusion (never materialized,
+never selected automatically).
+
+Single source of truth (unchanged): the existing Schedule — the single open
+`account_assignments` row per account (unique index
+`one_open_assignment_per_account`), whose dated `starts_at`/`ends_at` encode
+the durable local slot (e.g. 06:00–12:00 Africa/Johannesburg) in the device
+timezone. No new table, no new cron, no second source of truth.
+
+Derivation module: `lib/instagram-dashboard/schedule-recurrence.ts`:
+
+- `extractDailySlot` recovers the local slot from the stored dated window
+  (timezone + DST safe via `zonedLocalDateTimeToUtc`, cross-midnight slots
+  supported; a window that cannot express a daily slot is rejected — nothing
+  is invented);
+- `deriveCurrentDailyWindow` returns the current-or-next dated occurrence
+  (deterministic: concurrent callers derive the same window);
+- `projectDailyWindows` lists occurrences over the 48h horizon.
+
+Materialization (roll-forward) inside `schedule-session-cron` (canonical
+source, gate order updated):
+
+1. Cron token + technical enabled flag (`technical_disabled`)
+2. **CP2 roll-forward**: expired `scheduled` windows are re-derived in place
+   (same row → duplicates structurally impossible; optimistic guard on the
+   previous `ends_at` → concurrent crons update 0 rows). Skipped in dry-run.
+   Runs even while the Scheduler toggle is OFF because it is a state
+   derivation, never a run creation — automatic runs stay governed by the
+   toggle + atomic RPC guard. Counters: `rolled_forward_count`,
+   `roll_forward_failed_count` (explicit, never silent).
+3. Canonical Scheduler toggle ON (`scheduler_disabled` otherwise; CP0)
+4. …existing gates unchanged (window, runtime, phone, idempotency,
+   eligibility, atomic RPC guard).
+
+Observability: the scheduler-status read-model exposes
+`upcoming_windows` (+ `windows_horizon_hours: 48`) — per derived occurrence:
+account, device, dated UTC bounds, timezone, `local_slot`, `is_open`,
+`materialized`, `stored_window_expired`. BotApp renders the "Upcoming
+windows (48h)" card with honest states (`open now`, `planned`,
+`awaiting roll-forward`) — no false "growth waiting", no silent expired
+window, manual-only accounts never listed.
+
 ## Future Admin Dashboard relay contract (not implemented in 19B)
 
 Admin Dashboard remains **read-mostly** and must never spawn local processes from the browser.
