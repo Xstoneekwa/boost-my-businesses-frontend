@@ -38,6 +38,53 @@ No infinite Auto Restart loop is attempted for a voluntary shutdown.
 | `POST` | `/api/instagram-dashboard/botapp/scheduler-runtime-health` | relay/admin | Publish BotApp scheduler heartbeat |
 | `GET` | `/api/instagram-dashboard/botapp/scheduler-runtime-health` | relay/admin | Read projected runtime health |
 | `GET/POST` | `/api/instagram-dashboard/schedule-session/cron` | cron token | Evaluate windows; enqueue only if runtime healthy |
+| `GET` | `/api/instagram-dashboard/auto-restart/scheduler-status` | relay/admin | Read-only scheduler observability read-model (see below) |
+| `PATCH` | `/api/instagram-dashboard/auto-restart/settings` | relay/admin | Canonical global scheduler ON/OFF (`auto_restart_enabled`) |
+
+## Scheduler global ON/OFF + observability read-model
+
+The scheduler engine is embedded in the dispatcher worker
+(`account_run_request_consumer.py` → `auto_restart_dispatcher_tick.py` →
+`POST /api/instagram-dashboard/auto-restart/tick`). The backend is the **only
+selection authority**: caps, schedules, readiness, assignment, lifecycle and
+`manual_only` (hard exclusion, `manual_only_requires_manual_trigger`).
+
+Two independent axes, never to be conflated:
+
+- **Engine status** (`running` / `degraded` / `unknown`): projection of the
+  dispatcher `worker_heartbeats` row. The engine runs as long as the launchd
+  service runs, regardless of the switch.
+- **Backend mode** (`enabled` / `disabled_by_config`): the canonical flag
+  `auto_restart_settings.auto_restart_enabled` (row `id='global'`).
+
+Switch semantics (global operator/admin setting, never per tenant/account):
+
+- **OFF**: the next canonical tick skips selection (`scheduler_disabled`,
+  gate `schedulerTickGate` in `lib/instagram-dashboard/auto-restart-tick-helpers.ts`).
+  No new scheduled `account_run_request` is created. **Active runs are never
+  interrupted** — the tick never touches `ig_runs`.
+- **ON**: the next canonical tick may select genuinely eligible accounts.
+  Flipping the flag never creates a run by itself.
+- Mutations go only through the existing `PATCH /auto-restart/settings`
+  (relay/admin auth, audited as `auto_restart_settings_updated` in
+  `auto_restart_decisions`). No endpoint calls a worker directly.
+
+`GET /auto-restart/scheduler-status` (`lib/instagram-dashboard/scheduler-status.ts`)
+is a **read-model derived from canonical facts only** — it never decides
+eligibility, never creates runs, and is never a second source of truth:
+
+- `auto_restart_settings` → `backend_mode`, `tick_interval_seconds`;
+- `auto_restart_tick_locks` → `last_tick_at`, `last_success_at`, `last_error`
+  (real ticks only; disabled ticks persist nothing, so a stale `last_tick_at`
+  with backend OFF is expected);
+- `auto_restart_decisions` (24h window) → `examined_count`, `enqueued_count`,
+  `blocked_count`, `recent_decisions` (canonical reasons, account only when it
+  really exists);
+- dispatcher heartbeat projection → `engine_status`.
+
+No estimated `next_tick` is ever invented. BotApp consumes this contract in
+its `Scheduler` view (observability + switch); it performs no local
+eligibility computation and never calls the tick endpoint to refresh.
 
 ## Schedule-session cron gate order
 

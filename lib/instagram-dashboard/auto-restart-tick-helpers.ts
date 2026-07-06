@@ -1,5 +1,19 @@
 export const AUTO_RESTART_TICK_TOKEN_HEADER = "x-instagram-auto-restart-tick-token";
 export const AUTO_RESTART_TICK_SOURCE = "auto_restart_tick";
+export const SCHEDULER_DISABLED_REASON = "scheduler_disabled";
+
+/**
+ * Canonical scheduler ON/OFF gate applied by the tick before any selection.
+ * OFF (auto_restart_enabled=false) skips the whole tick: nothing is examined,
+ * nothing is enqueued and running runs are never touched.
+ */
+export function schedulerTickGate(input: { enabled: boolean; mode: string; dryRun?: boolean }) {
+  const executableMode = input.mode === "production" || input.mode === "active";
+  return {
+    forceDryRun: Boolean(input.dryRun) || !input.enabled || !executableMode,
+    skipReason: input.enabled ? null : SCHEDULER_DISABLED_REASON,
+  } as const;
+}
 
 export function autoRestartTickIdempotencyKey(workerId: string, bucketStartIso: string) {
   return `auto-restart-tick:${workerId}:${bucketStartIso}`;
