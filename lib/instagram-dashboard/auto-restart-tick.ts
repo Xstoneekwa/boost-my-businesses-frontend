@@ -7,6 +7,7 @@ import {
   autoRestartTickIdempotencyKey,
   passesRiskPolicy,
   resumePlanRuntimeSupported,
+  sanitizeTickFailureReason,
   schedulerTickGate,
 } from "./auto-restart-tick-helpers";
 import {
@@ -173,13 +174,50 @@ async function acquireTickLock(
   return { acquired: true, reason: "" as const };
 }
 
-async function completeTickLock(supabase: SupabaseLike, idempotencyKey: string, status: "completed" | "failed") {
+async function completeTickLock(
+  supabase: SupabaseLike,
+  idempotencyKey: string,
+  status: "completed" | "failed",
+  failure?: { reason: string },
+) {
+  const update: Record<string, unknown> = {
+    status,
+    tick_completed_at: new Date().toISOString(),
+  };
+  if (status === "failed" && failure) {
+    // Preserve the acquisition metadata and add the redacted failure reason so
+    // the scheduler-status read-model can expose a real last_error.
+    const existing = await query(supabase, "auto_restart_tick_locks")
+      .select("metadata_safe")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    const currentMetadata = existing.data && typeof existing.data === "object"
+      ? ((existing.data as Record<string, unknown>).metadata_safe ?? {})
+      : {};
+    update.metadata_safe = {
+      ...(currentMetadata && typeof currentMetadata === "object" && !Array.isArray(currentMetadata) ? currentMetadata : {}),
+      failure_reason: failure.reason,
+    };
+  }
   await query(supabase, "auto_restart_tick_locks")
-    .update({
-      status,
-      tick_completed_at: new Date().toISOString(),
-    })
+    .update(update)
     .eq("idempotency_key", idempotencyKey);
+}
+
+/**
+ * Finalizes a held tick lock as failed after an unexpected exception, with a
+ * redacted stable reason. Best-effort: finalization must never mask the
+ * original error, and the bucket-based idempotency key guarantees the next
+ * tick bucket stays runnable even if this update itself fails.
+ */
+async function failTickLock(supabase: SupabaseLike, idempotencyKey: string, error: unknown) {
+  try {
+    await completeTickLock(supabase, idempotencyKey, "failed", {
+      reason: sanitizeTickFailureReason(error),
+    });
+  } catch {
+    // Swallow: the original tick error is the signal that matters.
+  }
 }
 
 async function writeDecision(
@@ -351,6 +389,7 @@ export async function runAutoRestartTick(
   const tickBucket = tickBucketStart(now, checkEveryMinutes);
   const tickId = autoRestartTickIdempotencyKey(options.workerId, tickBucket);
   const requestId = `auto-restart-tick-${Date.now().toString(36)}`;
+  const lockHeld = !forceDryRun && !options.manual;
 
   if (!forceDryRun && !options.manual) {
     const lock = await acquireTickLock(supabase, {
@@ -375,263 +414,275 @@ export async function runAutoRestartTick(
     summary.tick_id = tickId;
     summary.dry_run = forceDryRun;
     summary.skipped = true;
-    if (!forceDryRun && !options.manual) await completeTickLock(supabase, tickId, "completed");
+    if (lockHeld) await completeTickLock(supabase, tickId, "completed");
     return { status: 200, result: summary };
   }
 
-  const overview = options.overview
-    ? { candidates: options.overview.candidates as never[], enabled: true, mode: extendedRules.mode } as unknown as Awaited<ReturnType<typeof getAutoRestartData>>
-    : await getAutoRestartData();
   const summary = emptySummary(options.workerId, forceDryRun, null);
   summary.tick_id = tickId;
   summary.dry_run = forceDryRun;
-  summary.scanned_candidates = overview.candidates.length;
 
-  const since = todayStartIso(now);
-  for (const candidate of overview.candidates) {
-    if (!candidate.restartEligible) {
-      summary.blocked_count += 1;
-      summary.blocked.push({
-        account_id: candidate.accountId,
-        username: candidate.username,
-        reason: candidate.blockReason || "blocked",
-      });
-      continue;
-    }
+  try {
+    const overview = options.overview
+      ? { candidates: options.overview.candidates as never[], enabled: true, mode: extendedRules.mode } as unknown as Awaited<ReturnType<typeof getAutoRestartData>>
+      : await getAutoRestartData();
+    summary.scanned_candidates = overview.candidates.length;
 
-    summary.eligible_candidates += 1;
-    const blockReasons: string[] = [];
-    const riskReason = passesRiskPolicy(candidate, extendedRules);
-    if (riskReason) blockReasons.push(riskReason);
-
-    const resumeSupport = resumePlanRuntimeSupported(candidate);
-    if (!resumeSupport.ok) blockReasons.push(resumeSupport.reason);
-
-    const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
-    if (delayReason) blockReasons.push(delayReason);
-
-    const attemptsReason = maxAttemptsBlockReason(
-      candidate.reliability.currentAttempt,
-      extendedRules.maxAttemptsPerSession,
-    );
-    if (attemptsReason) blockReasons.push(attemptsReason);
-
-    const restartsToday = await countRestartsToday(supabase, candidate.accountId, since);
-    if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
-      blockReasons.push("max_restarts_day");
-    }
-    if (extendedRules.maxRestartsPerWindow > 0 && restartsToday >= extendedRules.maxRestartsPerWindow) {
-      blockReasons.push("max_restarts_window");
-    }
-
-    if (blockReasons.length) {
-      summary.blocked_count += 1;
-      const reason = blockReasons.join(",");
-      summary.blocked.push({ account_id: candidate.accountId, username: candidate.username, reason });
-      await writeDecision(supabase, {
-        requestId,
-        idempotencyKey: `${tickId}:${candidate.accountId}:blocked`,
-        actor: options.actor || "system",
-        accountId: candidate.accountId,
-        deviceId: null,
-        action: "auto_restart_candidate_evaluated",
-        decision: "blocked",
-        reason,
-        mode: extendedRules.mode,
-        metadata: { username: candidate.username },
-        priorRunId: candidate.reliability.lastRunId || null,
-        restartCountDay: restartsToday,
-      });
-      continue;
-    }
-
-    if (forceDryRun) {
-      summary.enqueued_count += 1;
-      summary.enqueued.push({ account_id: candidate.accountId, username: candidate.username, request_id: null });
-      continue;
-    }
-
-    const businessSessionId = candidate.reliability.lastRunId || candidate.accountId;
-    const enqueueKey = autoRestartEnqueueIdempotencyKey({
-      accountId: candidate.accountId,
-      businessSessionId,
-      tickBucketIso: tickBucket,
-    });
-
-    let deviceId: string | null = null;
-    try {
-      const { evaluateRunStartEligibility } = await import("./run-control.ts");
-      const eligibility = await evaluateRunStartEligibility(
-        candidate.accountId,
-        candidate.plannedRunType === "outreach_session" ? "outreach_session" : "account_session",
-        { trigger: "scheduler" },
-      );
-      if (!eligibility.ok) {
+    const since = todayStartIso(now);
+    for (const candidate of overview.candidates) {
+      if (!candidate.restartEligible) {
         summary.blocked_count += 1;
         summary.blocked.push({
           account_id: candidate.accountId,
           username: candidate.username,
-          reason: eligibility.reason,
+          reason: candidate.blockReason || "blocked",
         });
+        continue;
+      }
+
+      summary.eligible_candidates += 1;
+      const blockReasons: string[] = [];
+      const riskReason = passesRiskPolicy(candidate, extendedRules);
+      if (riskReason) blockReasons.push(riskReason);
+
+      const resumeSupport = resumePlanRuntimeSupported(candidate);
+      if (!resumeSupport.ok) blockReasons.push(resumeSupport.reason);
+
+      const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
+      if (delayReason) blockReasons.push(delayReason);
+
+      const attemptsReason = maxAttemptsBlockReason(
+        candidate.reliability.currentAttempt,
+        extendedRules.maxAttemptsPerSession,
+      );
+      if (attemptsReason) blockReasons.push(attemptsReason);
+
+      const restartsToday = await countRestartsToday(supabase, candidate.accountId, since);
+      if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
+        blockReasons.push("max_restarts_day");
+      }
+      if (extendedRules.maxRestartsPerWindow > 0 && restartsToday >= extendedRules.maxRestartsPerWindow) {
+        blockReasons.push("max_restarts_window");
+      }
+
+      if (blockReasons.length) {
+        summary.blocked_count += 1;
+        const reason = blockReasons.join(",");
+        summary.blocked.push({ account_id: candidate.accountId, username: candidate.username, reason });
         await writeDecision(supabase, {
           requestId,
-          idempotencyKey: `${enqueueKey}:blocked`,
+          idempotencyKey: `${tickId}:${candidate.accountId}:blocked`,
           actor: options.actor || "system",
           accountId: candidate.accountId,
           deviceId: null,
-          action: "auto_restart_candidate_blocked",
+          action: "auto_restart_candidate_evaluated",
           decision: "blocked",
-          reason: eligibility.reason,
+          reason,
           mode: extendedRules.mode,
+          metadata: { username: candidate.username },
           priorRunId: candidate.reliability.lastRunId || null,
           restartCountDay: restartsToday,
         });
         continue;
       }
 
-      deviceId = candidate.deviceId || null;
-      let executionWorkerId = options.workerId;
-      let trustedDispatcherVerifiedAt: string | null = null;
-      if (deviceId) {
-        const dispatcherResolution = manualActorOnly
-          ? await resolveTrustedDispatcherWorkerForPhoneDevice(supabase, deviceId)
-          : {
-            ok: true as const,
-            workerId: options.workerId,
-            verifiedAt: new Date().toISOString(),
-            reason: "",
-          };
-        if (!dispatcherResolution.ok) {
+      if (forceDryRun) {
+        summary.enqueued_count += 1;
+        summary.enqueued.push({ account_id: candidate.accountId, username: candidate.username, request_id: null });
+        continue;
+      }
+
+      const businessSessionId = candidate.reliability.lastRunId || candidate.accountId;
+      const enqueueKey = autoRestartEnqueueIdempotencyKey({
+        accountId: candidate.accountId,
+        businessSessionId,
+        tickBucketIso: tickBucket,
+      });
+
+      let deviceId: string | null = null;
+      try {
+        const { evaluateRunStartEligibility } = await import("./run-control.ts");
+        const eligibility = await evaluateRunStartEligibility(
+          candidate.accountId,
+          candidate.plannedRunType === "outreach_session" ? "outreach_session" : "account_session",
+          { trigger: "scheduler" },
+        );
+        if (!eligibility.ok) {
           summary.blocked_count += 1;
           summary.blocked.push({
             account_id: candidate.accountId,
             username: candidate.username,
-            reason: dispatcherResolution.reason,
+            reason: eligibility.reason,
+          });
+          await writeDecision(supabase, {
+            requestId,
+            idempotencyKey: `${enqueueKey}:blocked`,
+            actor: options.actor || "system",
+            accountId: candidate.accountId,
+            deviceId: null,
+            action: "auto_restart_candidate_blocked",
+            decision: "blocked",
+            reason: eligibility.reason,
+            mode: extendedRules.mode,
+            priorRunId: candidate.reliability.lastRunId || null,
+            restartCountDay: restartsToday,
           });
           continue;
         }
-        executionWorkerId = dispatcherResolution.workerId;
-        trustedDispatcherVerifiedAt = dispatcherResolution.verifiedAt;
-        if (!manualActorOnly) {
-          const deviceTrust = await assertTrustedDispatcherIdentity(supabase, executionWorkerId, {
-            deviceIds: [deviceId],
-          });
-          if (!deviceTrust.ok) {
+
+        deviceId = candidate.deviceId || null;
+        let executionWorkerId = options.workerId;
+        let trustedDispatcherVerifiedAt: string | null = null;
+        if (deviceId) {
+          const dispatcherResolution = manualActorOnly
+            ? await resolveTrustedDispatcherWorkerForPhoneDevice(supabase, deviceId)
+            : {
+              ok: true as const,
+              workerId: options.workerId,
+              verifiedAt: new Date().toISOString(),
+              reason: "",
+            };
+          if (!dispatcherResolution.ok) {
             summary.blocked_count += 1;
             summary.blocked.push({
               account_id: candidate.accountId,
               username: candidate.username,
-              reason: deviceTrust.reason,
+              reason: dispatcherResolution.reason,
+            });
+            continue;
+          }
+          executionWorkerId = dispatcherResolution.workerId;
+          trustedDispatcherVerifiedAt = dispatcherResolution.verifiedAt;
+          if (!manualActorOnly) {
+            const deviceTrust = await assertTrustedDispatcherIdentity(supabase, executionWorkerId, {
+              deviceIds: [deviceId],
+            });
+            if (!deviceTrust.ok) {
+              summary.blocked_count += 1;
+              summary.blocked.push({
+                account_id: candidate.accountId,
+                username: candidate.username,
+                reason: deviceTrust.reason,
+              });
+              continue;
+            }
+          }
+          const deviceLock = await acquireDeviceLock(supabase, {
+            deviceId,
+            workerId: executionWorkerId,
+            accountId: candidate.accountId,
+            appInstanceId: candidate.appInstanceId || null,
+            leaseSeconds: env.deviceLockLeaseSeconds,
+          });
+          if (!deviceLock.ok) {
+            summary.blocked_count += 1;
+            summary.blocked.push({
+              account_id: candidate.accountId,
+              username: candidate.username,
+              reason: deviceLock.reason,
             });
             continue;
           }
         }
-        const deviceLock = await acquireDeviceLock(supabase, {
-          deviceId,
-          workerId: executionWorkerId,
+
+        const resumeMetadata = buildAutoRestartResumePlanMetadata(candidate);
+        const requestedByActor = options.requestedByActor
+          || (options.manual ? MANUAL_RESTART_AUDIT_ACTOR : options.actor || "system");
+        const requestData = await enqueueAutoRestartRequest(supabase, {
           accountId: candidate.accountId,
-          appInstanceId: candidate.appInstanceId || null,
-          leaseSeconds: env.deviceLockLeaseSeconds,
-        });
-        if (!deviceLock.ok) {
-          summary.blocked_count += 1;
-          summary.blocked.push({
-            account_id: candidate.accountId,
-            username: candidate.username,
-            reason: deviceLock.reason,
-          });
-          continue;
-        }
-      }
-
-      const resumeMetadata = buildAutoRestartResumePlanMetadata(candidate);
-      const requestedByActor = options.requestedByActor
-        || (options.manual ? MANUAL_RESTART_AUDIT_ACTOR : options.actor || "system");
-      const requestData = await enqueueAutoRestartRequest(supabase, {
-        accountId: candidate.accountId,
-        workerId: executionWorkerId,
-        idempotencyKey: enqueueKey,
-        runType: candidate.plannedRunType === "outreach_session" ? "outreach_session" : "account_session",
-        metadata: {
-          source: AUTO_RESTART_TICK_SOURCE,
-          trigger_source: options.manual ? "manual_auto_restart" : "scheduled_auto_restart",
-          trigger: options.manual ? "manual_operator" : "scheduler_tick",
-          requested_by_actor: requestedByActor,
-          execution_worker_id: executionWorkerId,
-          trusted_dispatcher_verified_at: trustedDispatcherVerifiedAt,
-          worker_id: executionWorkerId,
-          auto_restart: true,
-          ...resumeMetadata,
-        },
-      });
-
-      const newRequestId = readString((requestData as Record<string, unknown>)?.id, "") || null;
-      if (deviceId && newRequestId) {
-        const bound = await bindDeviceLockToRequest(supabase, {
-          deviceId,
           workerId: executionWorkerId,
-          requestId: newRequestId,
-          leaseSeconds: env.deviceLockLeaseSeconds,
+          idempotencyKey: enqueueKey,
+          runType: candidate.plannedRunType === "outreach_session" ? "outreach_session" : "account_session",
+          metadata: {
+            source: AUTO_RESTART_TICK_SOURCE,
+            trigger_source: options.manual ? "manual_auto_restart" : "scheduled_auto_restart",
+            trigger: options.manual ? "manual_operator" : "scheduler_tick",
+            requested_by_actor: requestedByActor,
+            execution_worker_id: executionWorkerId,
+            trusted_dispatcher_verified_at: trustedDispatcherVerifiedAt,
+            worker_id: executionWorkerId,
+            auto_restart: true,
+            ...resumeMetadata,
+          },
         });
-        if (!bound.ok) {
-          await supabase.rpc("cancel_account_run_request", {
-            p_request_id: newRequestId,
-            p_reason: bound.reason,
+
+        const newRequestId = readString((requestData as Record<string, unknown>)?.id, "") || null;
+        if (deviceId && newRequestId) {
+          const bound = await bindDeviceLockToRequest(supabase, {
+            deviceId,
+            workerId: executionWorkerId,
+            requestId: newRequestId,
+            leaseSeconds: env.deviceLockLeaseSeconds,
           });
-          await releaseDeviceLock(supabase, deviceId, executionWorkerId);
-          summary.blocked_count += 1;
-          summary.blocked.push({
-            account_id: candidate.accountId,
-            username: candidate.username,
-            reason: bound.reason,
-          });
-          continue;
+          if (!bound.ok) {
+            await supabase.rpc("cancel_account_run_request", {
+              p_request_id: newRequestId,
+              p_reason: bound.reason,
+            });
+            await releaseDeviceLock(supabase, deviceId, executionWorkerId);
+            summary.blocked_count += 1;
+            summary.blocked.push({
+              account_id: candidate.accountId,
+              username: candidate.username,
+              reason: bound.reason,
+            });
+            continue;
+          }
         }
-      }
-      summary.enqueued_count += 1;
-      summary.enqueued.push({
-        account_id: candidate.accountId,
-        username: candidate.username,
-        request_id: newRequestId,
-      });
-      await writeDecision(supabase, {
-        requestId,
-        idempotencyKey: enqueueKey,
-        actor: options.actor || "system",
-        accountId: candidate.accountId,
-        deviceId,
-        action: "auto_restart_request_enqueued",
-        decision: "enqueued",
-        reason: "eligible",
-        mode: extendedRules.mode,
-        priorRunId: candidate.reliability.lastRunId || null,
-        newRequestId,
-        restartCountDay: restartsToday + 1,
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "auto_restart_enqueue_failed";
-      summary.blocked_count += 1;
-      summary.blocked.push({ account_id: candidate.accountId, username: candidate.username, reason });
-      await writeDecision(supabase, {
-        requestId,
-        idempotencyKey: `${enqueueKey}:error`,
-        actor: options.actor || "system",
-        accountId: candidate.accountId,
-        deviceId,
-        action: "auto_restart_runtime_rejected",
-        decision: "blocked",
-        reason,
-        mode: extendedRules.mode,
-        priorRunId: candidate.reliability.lastRunId || null,
-        restartCountDay: restartsToday,
-      });
-      if (deviceId) {
-        await releaseDeviceLock(supabase, deviceId, options.workerId);
+        summary.enqueued_count += 1;
+        summary.enqueued.push({
+          account_id: candidate.accountId,
+          username: candidate.username,
+          request_id: newRequestId,
+        });
+        await writeDecision(supabase, {
+          requestId,
+          idempotencyKey: enqueueKey,
+          actor: options.actor || "system",
+          accountId: candidate.accountId,
+          deviceId,
+          action: "auto_restart_request_enqueued",
+          decision: "enqueued",
+          reason: "eligible",
+          mode: extendedRules.mode,
+          priorRunId: candidate.reliability.lastRunId || null,
+          newRequestId,
+          restartCountDay: restartsToday + 1,
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "auto_restart_enqueue_failed";
+        summary.blocked_count += 1;
+        summary.blocked.push({ account_id: candidate.accountId, username: candidate.username, reason });
+        await writeDecision(supabase, {
+          requestId,
+          idempotencyKey: `${enqueueKey}:error`,
+          actor: options.actor || "system",
+          accountId: candidate.accountId,
+          deviceId,
+          action: "auto_restart_runtime_rejected",
+          decision: "blocked",
+          reason,
+          mode: extendedRules.mode,
+          priorRunId: candidate.reliability.lastRunId || null,
+          restartCountDay: restartsToday,
+        });
+        if (deviceId) {
+          await releaseDeviceLock(supabase, deviceId, options.workerId);
+        }
       }
     }
+
+  } catch (error) {
+    // Unexpected engine/backend failure: finalize the held lock as failed
+    // with a redacted reason so scheduler-status exposes a real last_error,
+    // then surface the original error to the caller. Business outcomes
+    // (disabled, no candidates, exclusions, per-candidate errors) never
+    // reach this path.
+    if (lockHeld) await failTickLock(supabase, tickId, error);
+    throw error;
   }
 
-  if (!forceDryRun && !options.manual) {
+  if (lockHeld) {
     await completeTickLock(supabase, tickId, "completed");
   }
 

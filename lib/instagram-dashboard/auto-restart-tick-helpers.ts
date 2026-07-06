@@ -1,6 +1,31 @@
 export const AUTO_RESTART_TICK_TOKEN_HEADER = "x-instagram-auto-restart-tick-token";
 export const AUTO_RESTART_TICK_SOURCE = "auto_restart_tick";
 export const SCHEDULER_DISABLED_REASON = "scheduler_disabled";
+export const UNEXPECTED_TICK_FAILURE_REASON = "unexpected_tick_error";
+const TICK_FAILURE_REASON_MAX_LENGTH = 160;
+
+/**
+ * Produces a stable, redacted failure reason for a failed tick lock.
+ * Never leaks secrets: long opaque tokens, key/token/secret assignments and
+ * URLs are masked before the message is persisted or exposed to operators.
+ */
+export function sanitizeTickFailureReason(error: unknown): string {
+  const raw = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  if (!normalized) return UNEXPECTED_TICK_FAILURE_REASON;
+  const redacted = normalized
+    .replace(/\b(key|token|secret|password|authorization|bearer)\b\s*[:=]\s*\S+/gi, "$1=[redacted]")
+    .replace(/\bhttps?:\/\/\S+/gi, "[redacted-url]")
+    .replace(/\b[A-Za-z0-9+/_-]{24,}\b/g, "[redacted]");
+  const truncated = redacted.length > TICK_FAILURE_REASON_MAX_LENGTH
+    ? `${redacted.slice(0, TICK_FAILURE_REASON_MAX_LENGTH)}…`
+    : redacted;
+  return truncated || UNEXPECTED_TICK_FAILURE_REASON;
+}
 
 /**
  * Canonical scheduler ON/OFF gate applied by the tick before any selection.

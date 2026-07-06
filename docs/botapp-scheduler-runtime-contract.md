@@ -77,6 +77,16 @@ eligibility, never creates runs, and is never a second source of truth:
 - `auto_restart_tick_locks` → `last_tick_at`, `last_success_at`, `last_error`
   (real ticks only; disabled ticks persist nothing, so a stale `last_tick_at`
   with backend OFF is expected);
+  - **Failed tick finalization**: business outcomes (`scheduler_disabled`,
+    no candidates, exclusions such as `manual_only`, per-candidate enqueue
+    errors absorbed as `blocked` decisions) always finalize the lock as
+    `completed`. Only an unexpected engine/backend exception finalizes the
+    lock as `failed` (`failTickLock` in `auto-restart-tick.ts`), persisting a
+    redacted stable reason (`sanitizeTickFailureReason`, secrets/URLs/tokens
+    masked, bounded length) in `metadata_safe.failure_reason`. The lock is
+    always finalized so the next tick bucket stays runnable, and
+    `scheduler-status` exposes this real reason as `last_error.reason`
+    (fallback `tick_failed` for legacy rows).
 - `auto_restart_decisions` (24h window) → `examined_count`, `enqueued_count`,
   `blocked_count`, `recent_decisions` (canonical reasons, account only when it
   really exists);

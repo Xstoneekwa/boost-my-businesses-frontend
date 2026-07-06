@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   SCHEDULER_DISABLED_REASON,
+  UNEXPECTED_TICK_FAILURE_REASON,
+  sanitizeTickFailureReason,
   schedulerTickGate,
 } from "./auto-restart-tick-helpers.ts";
 
@@ -73,4 +75,49 @@ test("ON/OFF mutations go only through the relay/admin protected settings endpoi
   assert.match(settingsRouteSource, /requireRelayOrAdmin\(request, "Auto Restart settings"\)/);
   assert.match(settingsRouteSource, /auto_restart_settings_updated/);
   assert.doesNotMatch(settingsRouteSource, /create_account_run_request/);
+});
+
+test("tick failure reason is stable and redacted", () => {
+  assert.equal(sanitizeTickFailureReason(new Error("")), UNEXPECTED_TICK_FAILURE_REASON);
+  assert.equal(sanitizeTickFailureReason(undefined), UNEXPECTED_TICK_FAILURE_REASON);
+  assert.equal(sanitizeTickFailureReason(new Error("db timeout")), "db timeout");
+
+  const withSecret = sanitizeTickFailureReason(
+    new Error("request failed key=sk_live_1234567890abcdef token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload at https://internal.example.com/tick?token=abc"),
+  );
+  assert.doesNotMatch(withSecret, /sk_live|eyJhbGci|internal\.example\.com/);
+  assert.match(withSecret, /\[redacted/);
+
+  const longMessage = sanitizeTickFailureReason(new Error("x y ".repeat(400)));
+  assert.ok(longMessage.length <= 161, "reason must be truncated to a stable bound");
+});
+
+test("unexpected tick exception finalizes the lock as failed and stays observable", () => {
+  // The whole candidate scan runs inside a try/catch that finalizes the held
+  // lock as failed with a redacted reason, then rethrows the original error.
+  assert.match(
+    tickSource,
+    /\} catch \(error\) \{[\s\S]*?if \(lockHeld\) await failTickLock\(supabase, tickId, error\);[\s\S]*?throw error;[\s\S]*?\}/,
+  );
+  // failTickLock persists the sanitized reason through the canonical finalizer.
+  assert.match(
+    tickSource,
+    /completeTickLock\(supabase, idempotencyKey, "failed", \{[\s\S]*?reason: sanitizeTickFailureReason\(error\),[\s\S]*?\}\)/,
+  );
+  // Lock finalization failure must never mask the original tick error.
+  assert.match(tickSource, /async function failTickLock[\s\S]*?\} catch \{/);
+});
+
+test("business outcomes stay successful ticks and never reach the failed path", () => {
+  // scheduler_disabled: the OFF gate completes the lock as a successful tick.
+  assert.match(tickSource, /if \(tickGate\.skipReason\) \{[\s\S]*?completeTickLock\(supabase, tickId, "completed"\);[\s\S]*?return \{ status: 200, result: summary \};/);
+  // Per-candidate enqueue errors are absorbed as blocked decisions inside the
+  // loop (auto_restart_runtime_rejected), not as tick failures.
+  assert.match(tickSource, /action: "auto_restart_runtime_rejected",[\s\S]*?decision: "blocked",/);
+  // The nominal end of scan (no candidates, exclusions, runs created) always
+  // finalizes the lock as completed.
+  assert.match(tickSource, /if \(lockHeld\) \{\n    await completeTickLock\(supabase, tickId, "completed"\);\n  \}/);
+  // failTickLock is called from exactly one place: the unexpected-exception path.
+  const failCalls = tickSource.match(/await failTickLock\(/g) ?? [];
+  assert.equal(failCalls.length, 1);
 });

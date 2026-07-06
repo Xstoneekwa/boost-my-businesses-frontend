@@ -70,6 +70,18 @@ test("tick lock summary keeps only real timestamps and errors", () => {
   assert.deepEqual(summary.lastError, { at: "2026-07-06T09:40:02Z", reason: "tick_failed" });
 });
 
+test("tick lock summary exposes the persisted redacted failure reason", () => {
+  const summary = summarizeTickLocks([
+    {
+      tick_started_at: "2026-07-06T09:40:00Z",
+      tick_completed_at: "2026-07-06T09:40:02Z",
+      status: "failed",
+      metadata_safe: { tick_bucket: "2026-07-06T09:40:00Z", failure_reason: "db timeout" },
+    },
+  ]);
+  assert.deepEqual(summary.lastError, { at: "2026-07-06T09:40:02Z", reason: "db timeout" });
+});
+
 test("tick lock summary reports no error when none is persisted", () => {
   const summary = summarizeTickLocks([
     { tick_started_at: "2026-07-06T10:00:00Z", tick_completed_at: "2026-07-06T10:00:05Z", status: "completed" },

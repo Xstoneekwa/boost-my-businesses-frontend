@@ -125,7 +125,7 @@ async function loadSettingsRow(supabase: SchedulerStatusSupabase) {
 
 async function loadRecentTickLocks(supabase: SchedulerStatusSupabase) {
   const result = await query(supabase, "auto_restart_tick_locks")
-    .select("idempotency_key,worker_id,tick_started_at,tick_completed_at,status")
+    .select("idempotency_key,worker_id,tick_started_at,tick_completed_at,status,metadata_safe")
     .order("tick_started_at", { ascending: false })
     .limit(20);
   if (result.error) throw new Error(result.error.message || "auto_restart_tick_locks_unavailable");
@@ -172,7 +172,15 @@ export function summarizeTickLocks(locks: Record<string, unknown>[]) {
     }
     if (status === "failed") {
       const at = completedAt || startedAt;
-      if (at && (!lastError || at > lastError.at)) lastError = { at, reason: "tick_failed" };
+      if (at && (!lastError || at > lastError.at)) {
+        // The tick engine persists a redacted failure reason in the lock
+        // metadata when it finalizes a failed tick; fall back to the stable
+        // generic reason for legacy rows.
+        const metadata = lock.metadata_safe && typeof lock.metadata_safe === "object" && !Array.isArray(lock.metadata_safe)
+          ? (lock.metadata_safe as Record<string, unknown>)
+          : {};
+        lastError = { at, reason: readString(metadata.failure_reason) || "tick_failed" };
+      }
     }
   }
   return { lastTickAt, lastSuccessAt, lastError };
