@@ -347,9 +347,12 @@ function reliabilityFromLatestRun(
 
   return {
     restartAllowed,
+    // CP1: a run without any resume-plan verdict is a real, explainable state
+    // (the worker never produced a restart decision for it) — expose the
+    // stable canonical reason instead of the former literal "unknown".
     restartBlockReason: readString(
       resumePlan?.restart_block_reason,
-      readString(performance?.auto_restart_restart_block_reason, "unknown"),
+      readString(performance?.auto_restart_restart_block_reason, "resume_plan_missing"),
     ),
     unsafeMarkers,
     currentAttempt: readString(resumePlan?.current_attempt_id, "—") || "—",

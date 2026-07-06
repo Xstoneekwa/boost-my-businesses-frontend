@@ -138,6 +138,105 @@ test("buildSchedulerStatus projects canonical facts without inventing values", a
   assert.equal(status.recent_decisions.length, 1);
   assert.equal(status.recent_decisions[0].username, "client_account");
   assert.equal(status.recent_decisions[0].reason, "manual_only_requires_manual_trigger");
+  assert.equal(status.recent_decisions[0].reason_code, "manual_only_requires_manual_trigger");
+  assert.equal(status.recent_decisions[0].reason_kind, "business");
+  assert.equal(status.recent_decisions[0].event, "account_decision");
+  assert.equal(status.daily_engine, null);
+});
+
+test("global settings events are typed scheduler_config, never account decisions", async () => {
+  const supabase = mockSupabase({
+    auto_restart_settings: [{ auto_restart_enabled: false, check_every_minutes: 20, updated_at: "2026-07-06T14:25:27Z" }],
+    auto_restart_tick_locks: [],
+    auto_restart_decisions: [
+      {
+        account_id: null,
+        action: "auto_restart_settings_updated",
+        decision: "disabled",
+        reason: "settings_patch",
+        created_at: "2026-07-06T14:25:27Z",
+        metadata_safe: { auto_restart_enabled: false, check_every_minutes: 20 },
+      },
+      {
+        account_id: null,
+        action: "auto_restart_settings_updated",
+        decision: "production",
+        reason: "settings_patch",
+        created_at: "2026-07-06T14:21:22Z",
+        metadata_safe: { auto_restart_enabled: true, check_every_minutes: 20 },
+      },
+    ],
+  });
+
+  const status = await buildSchedulerStatus(supabase, { engineHealth: null });
+  assert.equal(status.recent_decisions.length, 2);
+  const [off, on] = status.recent_decisions;
+  assert.equal(off.event, "scheduler_config");
+  assert.equal(off.config_enabled, false);
+  assert.equal(off.reason_kind, "config");
+  assert.equal(off.reason_code, "settings_patch");
+  assert.equal(on.event, "scheduler_config");
+  assert.equal(on.config_enabled, true);
+  // Config events never count as examined accounts.
+  assert.equal(status.examined_count, 0);
+});
+
+test("legacy literal unknown is projected as reason_unavailable, never invented", async () => {
+  const supabase = mockSupabase({
+    auto_restart_settings: [{ auto_restart_enabled: false, check_every_minutes: 20, updated_at: "2026-07-06T14:25:27Z" }],
+    auto_restart_tick_locks: [],
+    auto_restart_decisions: [
+      {
+        account_id: "acc-legacy",
+        action: "auto_restart_candidate_evaluated",
+        decision: "blocked",
+        reason: "unknown",
+        created_at: "2026-07-06T14:21:29Z",
+        metadata_safe: { username: "i_m_your_traker" },
+      },
+    ],
+    ig_accounts: [{ id: "acc-legacy", username: "i_m_your_traker" }],
+  });
+
+  const status = await buildSchedulerStatus(supabase, { engineHealth: null });
+  assert.equal(status.recent_decisions[0].reason_code, "reason_unavailable");
+  assert.equal(status.recent_decisions[0].reason_kind, "unavailable");
+  assert.equal(status.recent_decisions[0].reason, "unknown");
+});
+
+test("daily engine projection follows env plus the canonical toggle", async () => {
+  const fixtures = {
+    auto_restart_settings: [{ auto_restart_enabled: false, check_every_minutes: 20, updated_at: "2026-07-06T14:25:27Z" }],
+    auto_restart_tick_locks: [],
+    auto_restart_decisions: [],
+  };
+
+  const disabled = await buildSchedulerStatus(mockSupabase(fixtures), {
+    engineHealth: null,
+    dailyEngineEnv: { technicalEnabled: false, dryRun: true },
+  });
+  assert.equal(disabled.daily_engine?.state, "technical_disabled");
+
+  const dryRun = await buildSchedulerStatus(mockSupabase(fixtures), {
+    engineHealth: null,
+    dailyEngineEnv: { technicalEnabled: true, dryRun: true },
+  });
+  assert.equal(dryRun.daily_engine?.state, "dry_run");
+
+  const schedulerOff = await buildSchedulerStatus(mockSupabase(fixtures), {
+    engineHealth: null,
+    dailyEngineEnv: { technicalEnabled: true, dryRun: false },
+  });
+  assert.equal(schedulerOff.daily_engine?.state, "scheduler_disabled");
+
+  const active = await buildSchedulerStatus(mockSupabase({
+    ...fixtures,
+    auto_restart_settings: [{ auto_restart_enabled: true, check_every_minutes: 20, updated_at: "2026-07-06T14:25:27Z" }],
+  }), {
+    engineHealth: null,
+    dailyEngineEnv: { technicalEnabled: true, dryRun: false },
+  });
+  assert.equal(active.daily_engine?.state, "active");
 });
 
 test("buildSchedulerStatus omits tick interval when settings row is absent", async () => {

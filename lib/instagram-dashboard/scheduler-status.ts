@@ -11,6 +11,8 @@
  * a second source of truth: every field is a projection of persisted facts.
  */
 
+import { normalizeSchedulerReason, type SchedulerReasonKind } from "./scheduler-reasons.ts";
+
 export type SchedulerEngineStatus = "running" | "degraded" | "unknown";
 export type SchedulerBackendMode = "enabled" | "disabled_by_config";
 
@@ -21,13 +23,29 @@ export type SchedulerEngineHealthInput = {
   reason?: string | null;
 };
 
+/**
+ * CP1 — every projected decision carries a stable `reason_code` + kind, and
+ * global configuration events (auto_restart_settings_updated) are explicitly
+ * typed so no consumer ever renders them as an "unknown account".
+ */
 export type SchedulerRecentDecision = {
   account_id: string | null;
   username: string | null;
   action: string;
   decision: string;
   reason: string;
+  reason_code: string;
+  reason_kind: SchedulerReasonKind;
+  event: "account_decision" | "scheduler_config";
+  config_enabled: boolean | null;
   created_at: string;
+};
+
+/** CP0/CP1 — projection of the daily engine configuration (schedule-session cron). */
+export type SchedulerDailyEngine = {
+  technical_enabled: boolean;
+  dry_run: boolean;
+  state: "technical_disabled" | "dry_run" | "scheduler_disabled" | "active";
 };
 
 export type SchedulerStatus = {
@@ -46,6 +64,7 @@ export type SchedulerStatus = {
   blocked_count: number;
   recent_decisions: SchedulerRecentDecision[];
   settings_updated_at: string | null;
+  daily_engine: SchedulerDailyEngine | null;
 };
 
 type QueryResult = { data?: unknown; error?: { message?: string } | null };
@@ -205,6 +224,44 @@ export function summarizeDecisions(decisions: Record<string, unknown>[]) {
   };
 }
 
+/** Global configuration events written by the settings PATCH route. */
+const SCHEDULER_CONFIG_ACTIONS = new Set(["auto_restart_settings_updated"]);
+
+function readBooleanOrNull(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) return true;
+    if (["false", "0", "no"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+export function projectRecentDecision(usernames: Map<string, string>) {
+  return (row: Record<string, unknown>): SchedulerRecentDecision => {
+    const accountId = readString(row.account_id) || null;
+    const metadata = row.metadata_safe && typeof row.metadata_safe === "object" && !Array.isArray(row.metadata_safe)
+      ? (row.metadata_safe as Record<string, unknown>)
+      : {};
+    const username = (accountId ? usernames.get(accountId) : null) || readString(metadata.username) || null;
+    const action = readString(row.action);
+    const isConfigEvent = !accountId && SCHEDULER_CONFIG_ACTIONS.has(action);
+    const normalizedReason = normalizeSchedulerReason(readString(row.reason));
+    return {
+      account_id: accountId,
+      username,
+      action,
+      decision: readString(row.decision),
+      reason: normalizedReason.raw,
+      reason_code: normalizedReason.code,
+      reason_kind: isConfigEvent ? "config" : normalizedReason.kind,
+      event: isConfigEvent ? "scheduler_config" : "account_decision",
+      config_enabled: isConfigEvent ? readBooleanOrNull(metadata.auto_restart_enabled) : null,
+      created_at: readString(row.created_at),
+    };
+  };
+}
+
 export const SCHEDULER_DECISIONS_WINDOW_HOURS = 24;
 export const SCHEDULER_RECENT_DECISIONS_LIMIT = 20;
 
@@ -215,6 +272,8 @@ export async function buildSchedulerStatus(
     now?: Date;
     decisionsWindowHours?: number;
     recentLimit?: number;
+    /** Daily engine (schedule-session cron) env projection, provided by the route. */
+    dailyEngineEnv?: { technicalEnabled: boolean; dryRun: boolean } | null;
   },
 ): Promise<SchedulerStatus> {
   const now = options.now ?? new Date();
@@ -236,30 +295,31 @@ export async function buildSchedulerStatus(
   );
   const usernames = await loadUsernames(supabase, accountIds);
 
-  const recentDecisions: SchedulerRecentDecision[] = decisions.slice(0, recentLimit).map((row) => {
-    const accountId = readString(row.account_id) || null;
-    const metadata = row.metadata_safe && typeof row.metadata_safe === "object" && !Array.isArray(row.metadata_safe)
-      ? (row.metadata_safe as Record<string, unknown>)
-      : {};
-    const username = (accountId ? usernames.get(accountId) : null) || readString(metadata.username) || null;
-    return {
-      account_id: accountId,
-      username,
-      action: readString(row.action),
-      decision: readString(row.decision),
-      reason: readString(row.reason),
-      created_at: readString(row.created_at),
-    };
-  });
+  const recentDecisions: SchedulerRecentDecision[] = decisions.slice(0, recentLimit).map(projectRecentDecision(usernames));
 
   const checkEveryMinutes = readNumber(settingsRow?.check_every_minutes, 0);
+
+  const backendMode = projectSchedulerBackendMode(settingsRow);
+  const dailyEngine: SchedulerDailyEngine | null = options.dailyEngineEnv
+    ? {
+      technical_enabled: options.dailyEngineEnv.technicalEnabled,
+      dry_run: options.dailyEngineEnv.dryRun,
+      state: !options.dailyEngineEnv.technicalEnabled
+        ? "technical_disabled"
+        : options.dailyEngineEnv.dryRun
+          ? "dry_run"
+          : backendMode === "disabled_by_config"
+            ? "scheduler_disabled"
+            : "active",
+    }
+    : null;
 
   return {
     read_only: true,
     engine_status: projectSchedulerEngineStatus(options.engineHealth),
     engine_worker_id: options.engineHealth?.dispatcherWorkerId ?? null,
     engine_last_seen_at: options.engineHealth?.lastSeenAt ?? null,
-    backend_mode: projectSchedulerBackendMode(settingsRow),
+    backend_mode: backendMode,
     tick_interval_seconds: checkEveryMinutes > 0 ? Math.round(checkEveryMinutes * 60) : null,
     last_tick_at: tickSummary.lastTickAt,
     last_success_at: tickSummary.lastSuccessAt,
@@ -270,5 +330,6 @@ export async function buildSchedulerStatus(
     blocked_count: decisionSummary.blockedCount,
     recent_decisions: recentDecisions,
     settings_updated_at: readString(settingsRow?.updated_at) || null,
+    daily_engine: dailyEngine,
   };
 }

@@ -145,6 +145,46 @@ is then the only switch left to govern automatic starts.
 8. Atomic RPC guard at insert (`scheduler_disabled` counted as
    `skipped_scheduler_disabled_count`, never fatal)
 
+## CP1 — Stable reasons and Scheduler observability
+
+Canonical nomenclature: `lib/instagram-dashboard/scheduler-reasons.ts`.
+Normalization happens at **projection time only** (scheduler-status read-model
+and BotApp view); persisted decisions are never rewritten.
+
+Contract:
+
+- every projected decision carries a stable `reason_code` plus a
+  `reason_kind` (`business` | `technical` | `config` | `unavailable`);
+- technical errors (`enqueue_failed`, `unexpected_tick_error`, `tick_failed`,
+  …) stay distinct from business blocks (`phone_busy`, `active_run_exists`,
+  `assignment_window_closed`, …);
+- legacy/emitter-specific values converge through aliases
+  (`already_running` → `active_run_exists`, `skipped_phone_busy` →
+  `phone_busy`, `worker_plan:*` → `resume_plan_missing` / `no_recent_run` /
+  `restart_not_allowed`, …) while the raw redacted reason is preserved for
+  tooltips and forensics;
+- `unknown` is **gone as an invented value**: a run without any resume-plan
+  verdict now projects the real state `resume_plan_missing`
+  (`auto-restart-data.ts` fallback fixed); when no canonical data allows a
+  conclusion the projection says `reason_unavailable` and BotApp displays
+  “reason unavailable” — nothing is ever invented;
+- global ON/OFF settings events (`auto_restart_settings_updated`,
+  `account_id=null`) are typed `event="scheduler_config"` with
+  `config_enabled`; BotApp renders them as “Scheduler configuration — ON/OFF”,
+  never as an “unknown account”;
+- the scheduler-status read-model exposes a `daily_engine` block
+  (`technical_enabled`, `dry_run`, `state`) so BotApp distinguishes the daily
+  engine (schedule-session cron), the Auto Restart engine (dispatcher tick)
+  and the global toggle.
+
+Forensic reference (2026-07-06, `i_m_your_traker`, decision 14:21:29Z):
+the tick evaluated the account while Scheduler was ON, every gate passed
+except the resume-plan check — the last run (June 8) predates the resume-plan
+contract, so the worker never produced a restart verdict. The candidate
+projection fell back to the literal `"unknown"`, which the view displayed
+as-is. Canonical classification: `resume_plan_missing` (blocked, business),
+not a technical error, not `botapp_runtime_unavailable`, not `phone_busy`.
+
 ## Future Admin Dashboard relay contract (not implemented in 19B)
 
 Admin Dashboard remains **read-mostly** and must never spawn local processes from the browser.

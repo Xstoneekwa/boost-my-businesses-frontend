@@ -1,5 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { getRunControlHealth } from "@/lib/instagram-dashboard/run-control";
+import { readScheduleSessionCronEnv } from "@/lib/instagram-dashboard/schedule-session-cron";
 import { buildSchedulerStatus } from "@/lib/instagram-dashboard/scheduler-status";
 import { jsonError, jsonOk, requireRelayOrAdmin } from "../../_utils";
 
@@ -21,12 +22,17 @@ export async function GET(request: Request) {
 
     const supabase = createSupabaseClient();
     const engineHealth = await getRunControlHealth();
+    const dailyEngineEnv = readScheduleSessionCronEnv();
     const status = await buildSchedulerStatus(supabase as never, {
       engineHealth: {
         healthy: engineHealth.healthy,
         dispatcherWorkerId: engineHealth.dispatcherWorkerId,
         lastSeenAt: engineHealth.lastSeenAt,
         reason: engineHealth.reason ?? null,
+      },
+      dailyEngineEnv: {
+        technicalEnabled: dailyEngineEnv.enabled,
+        dryRun: dailyEngineEnv.dryRun,
       },
     });
     return jsonOk({
