@@ -44,6 +44,7 @@ function makeQueryResult(rows: unknown[]) {
     gt: () => query,
     order: () => query,
     limit: () => Promise.resolve({ data: rows, error: null }),
+    maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
   };
   return query;
 }
@@ -55,12 +56,17 @@ function makeSupabase(overrides: {
   peers?: Array<Record<string, unknown>>;
   activeRequests?: Array<Record<string, unknown>>;
   activeRuns?: Array<Record<string, unknown>>;
+  schedulerEnabled?: boolean;
+  rpcError?: { message: string };
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   return {
     rpcCalls,
     client: {
       from(table: string) {
+        if (table === "auto_restart_settings") {
+          return makeQueryResult([{ auto_restart_enabled: overrides.schedulerEnabled ?? true }]);
+        }
         if (table === "account_assignments") {
           const rows = overrides.assignments ?? [defaultAssignment];
           const query = makeQueryResult(rows);
@@ -100,6 +106,9 @@ function makeSupabase(overrides: {
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
+        if (overrides.rpcError) {
+          return Promise.resolve({ data: null, error: overrides.rpcError });
+        }
         return Promise.resolve({ data: { id: "request-1", status: "queued" }, error: null });
       },
     },
@@ -142,12 +151,102 @@ test("account in active window queues one scheduled run", async () => {
 
   assert.equal(run.status, 200);
   if (run.status !== 200) return;
+  assert.equal(run.result.state, "active");
+  assert.equal(run.result.scheduler_enabled, true);
   assert.equal(run.result.summary.eligible_count, 1);
   assert.equal(run.result.summary.queued_count, 1);
   assert.equal(supabase.rpcCalls.length, 1);
   assert.equal(supabase.rpcCalls[0]?.name, "create_account_run_request");
   assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "account_session");
   assert.equal((supabase.rpcCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
+});
+
+test("technical disable is reported as technical_disabled without any read", async () => {
+  const supabase = makeSupabase();
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_ENABLED: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.state, "technical_disabled");
+  assert.equal(run.result.reason, "technical_disabled");
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("scheduler toggle OFF yields scheduler_disabled and zero automatic request", async () => {
+  const supabase = makeSupabase({ schedulerEnabled: false });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.state, "scheduler_disabled");
+  assert.equal(run.result.reason, "scheduler_disabled");
+  assert.equal(run.result.scheduler_enabled, false);
+  assert.equal(run.result.skipped, true);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("dry run state stays observable and never enqueues even with scheduler ON", async () => {
+  const supabase = makeSupabase({ schedulerEnabled: true });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: baseEnv,
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.state, "dry_run");
+  assert.equal(run.result.dry_run, true);
+  assert.equal(run.result.summary.eligible_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("atomic RPC scheduler_disabled rejection is counted, not fatal", async () => {
+  const supabase = makeSupabase({ rpcError: { message: "scheduler_disabled" } });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.skipped_scheduler_disabled_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+});
+
+test("scheduler settings read failure fails closed (no automatic request)", async () => {
+  const supabase = makeSupabase();
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+    loadSchedulerAuthorization: async () => ({
+      enabled: false,
+      allowed: false,
+      reason: "scheduler_disabled",
+      settingsAvailable: false,
+    }),
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.state, "scheduler_disabled");
+  assert.equal(supabase.rpcCalls.length, 0);
 });
 
 test("account outside active window produces zero runs", async () => {

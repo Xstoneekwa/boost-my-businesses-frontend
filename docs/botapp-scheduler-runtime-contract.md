@@ -96,14 +96,54 @@ No estimated `next_tick` is ever invented. BotApp consumes this contract in
 its `Scheduler` view (observability + switch); it performs no local
 eligibility computation and never calls the tick endpoint to refresh.
 
+## CP0 — Single toggle for every automatic start
+
+`auto_restart_settings.auto_restart_enabled` is the **only** business
+authorization for automatic `account_run_request` creation, for both
+automatic sources:
+
+- `instagram_schedule_session_cron` (daily cold starts within a Schedule window);
+- `auto_restart_tick` (resume-plan restarts).
+
+Contract: `lib/instagram-dashboard/scheduler-authorization.ts`
+(`automaticRunCreationAllowed`, `loadSchedulerAutomaticRunAuthorization`,
+fail-closed on missing settings). `schedulerTickGate` and
+`runScheduleSessionCron` both delegate to it.
+
+Atomic enforcement: migration
+`20260710160000_cp0_scheduler_toggle_gates_automatic_run_requests.sql` — the
+`create_account_run_request` RPC locks the settings row `FOR SHARE` and raises
+`scheduler_disabled` for automatic source surfaces when the toggle is OFF, so
+a concurrent toggle OFF can never race an automatic insert.
+
+Not gated by the toggle (own guards + future device leases apply): manual
+Play/Start/Stop, explicit Auto Login, `login_provisioning`,
+`login_email_code_resume`, assisted provisioning surfaces.
+
+Cron observable states (`state` in the cron result):
+
+| State | Meaning |
+|-------|---------|
+| `technical_disabled` | `INSTAGRAM_SCHEDULE_SESSION_CRON_ENABLED=false` |
+| `dry_run` | technical dry-run on: scan only, zero enqueue |
+| `scheduler_disabled` | cron healthy, not dry-run, toggle OFF: zero automatic request |
+| `active` | cron healthy, toggle ON, canonical gates apply |
+
+Production target after CP0: `INSTAGRAM_SCHEDULE_SESSION_CRON_ENABLED=true`,
+`INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN=false` — the BotApp Scheduler toggle
+is then the only switch left to govern automatic starts.
+
 ## Schedule-session cron gate order
 
-1. Cron token + enabled flag
-2. Active scheduled assignment window
-3. **BotApp scheduler runtime healthy** (`schedulerConnected=true`)
-4. Physical phone + fresh `device_heartbeats`
-5. No active request/run / slot idempotency / phone busy
-6. `evaluateRunStartEligibility(trigger=scheduler)`
+1. Cron token + technical enabled flag (`technical_disabled`)
+2. **Canonical Scheduler toggle ON** (`scheduler_disabled` otherwise; CP0)
+3. Active scheduled assignment window
+4. **BotApp scheduler runtime healthy** (`schedulerConnected=true`)
+5. Physical phone + fresh `device_heartbeats`
+6. No active request/run / slot idempotency / phone busy
+7. `evaluateRunStartEligibility(trigger=scheduler)`
+8. Atomic RPC guard at insert (`scheduler_disabled` counted as
+   `skipped_scheduler_disabled_count`, never fatal)
 
 ## Future Admin Dashboard relay contract (not implemented in 19B)
 

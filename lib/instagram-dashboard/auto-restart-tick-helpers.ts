@@ -1,6 +1,8 @@
+import { automaticRunCreationAllowed } from "./scheduler-authorization.ts";
+
 export const AUTO_RESTART_TICK_TOKEN_HEADER = "x-instagram-auto-restart-tick-token";
 export const AUTO_RESTART_TICK_SOURCE = "auto_restart_tick";
-export const SCHEDULER_DISABLED_REASON = "scheduler_disabled";
+export { SCHEDULER_DISABLED_REASON } from "./scheduler-authorization.ts";
 export const UNEXPECTED_TICK_FAILURE_REASON = "unexpected_tick_error";
 const TICK_FAILURE_REASON_MAX_LENGTH = 160;
 
@@ -31,12 +33,15 @@ export function sanitizeTickFailureReason(error: unknown): string {
  * Canonical scheduler ON/OFF gate applied by the tick before any selection.
  * OFF (auto_restart_enabled=false) skips the whole tick: nothing is examined,
  * nothing is enqueued and running runs are never touched.
+ * Delegates the ON/OFF decision to the single automatic-run authorization
+ * contract shared with schedule-session-cron (CP0).
  */
 export function schedulerTickGate(input: { enabled: boolean; mode: string; dryRun?: boolean }) {
   const executableMode = input.mode === "production" || input.mode === "active";
+  const authorization = automaticRunCreationAllowed({ enabled: input.enabled });
   return {
-    forceDryRun: Boolean(input.dryRun) || !input.enabled || !executableMode,
-    skipReason: input.enabled ? null : SCHEDULER_DISABLED_REASON,
+    forceDryRun: Boolean(input.dryRun) || !authorization.allowed || !executableMode,
+    skipReason: authorization.reason,
   } as const;
 }
 

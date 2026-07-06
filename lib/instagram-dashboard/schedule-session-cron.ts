@@ -1,5 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 
+import {
+  isSchedulerDisabledEnqueueError,
+  loadSchedulerAutomaticRunAuthorization,
+  SCHEDULER_DISABLED_REASON,
+  type SchedulerAutomaticRunAuthorization,
+} from "./scheduler-authorization.ts";
+
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
 const EMULATOR_DEVICE_KIND = "emulator";
@@ -34,13 +41,29 @@ function isAssignmentHeartbeatLive(
 }
 
 export type ScheduleSessionCronReason =
-  | "cron_disabled"
+  | "technical_disabled"
+  | "scheduler_disabled"
   | "cron_token_not_configured"
   | "missing_caller_token"
   | "invalid_caller_token"
   | "no_active_windows"
   | "no_eligible_accounts"
   | "botapp_runtime_unavailable";
+
+/**
+ * CP0 — distinct observable states of the daily cron:
+ * - technical_disabled: the cron env switch itself is off;
+ * - dry_run: technical dry-run is on (scan only, never enqueue);
+ * - scheduler_disabled: cron technically healthy and not dry-run, but the
+ *   canonical Scheduler toggle (auto_restart_settings.auto_restart_enabled)
+ *   is OFF — zero automatic run request is created;
+ * - active: cron healthy, Scheduler ON, normal gates apply.
+ */
+export type ScheduleSessionCronState =
+  | "technical_disabled"
+  | "dry_run"
+  | "scheduler_disabled"
+  | "active";
 
 export type ScheduleSessionCronEnv = {
   enabled: boolean;
@@ -65,11 +88,14 @@ export type ScheduleSessionCronSummary = {
   skipped_eligibility_count: number;
   skipped_missing_assignment_target_count: number;
   skipped_botapp_runtime_unavailable_count: number;
+  skipped_scheduler_disabled_count: number;
 };
 
 export type ScheduleSessionCronResult = {
   enabled: boolean;
   dry_run: boolean;
+  state: ScheduleSessionCronState;
+  scheduler_enabled: boolean | null;
   worker_id: string;
   skipped: boolean;
   reason: ScheduleSessionCronReason | null;
@@ -131,6 +157,7 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_eligibility_count: 0,
     skipped_missing_assignment_target_count: 0,
     skipped_botapp_runtime_unavailable_count: 0,
+    skipped_scheduler_disabled_count: 0,
   };
 }
 
@@ -168,10 +195,24 @@ function tokensMatch(expected: string, provided: string) {
   return timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
-function skippedResult(env: ScheduleSessionCronEnv, reason: ScheduleSessionCronReason, summary = emptySummary()): ScheduleSessionCronResult {
+function cronState(env: ScheduleSessionCronEnv, schedulerAllowed: boolean | null): ScheduleSessionCronState {
+  if (!env.enabled) return "technical_disabled";
+  if (env.dryRun) return "dry_run";
+  if (schedulerAllowed === false) return "scheduler_disabled";
+  return "active";
+}
+
+function skippedResult(
+  env: ScheduleSessionCronEnv,
+  reason: ScheduleSessionCronReason,
+  summary = emptySummary(),
+  schedulerEnabled: boolean | null = null,
+): ScheduleSessionCronResult {
   return {
     enabled: env.enabled,
     dry_run: env.dryRun,
+    state: cronState(env, schedulerEnabled),
+    scheduler_enabled: schedulerEnabled,
     worker_id: env.workerId,
     skipped: true,
     reason,
@@ -308,6 +349,10 @@ const defaultEligibilityEvaluator: ScheduleSessionEligibilityEvaluator = async (
   return { ok: false, reason: result.reason };
 };
 
+export type ScheduleSessionSchedulerAuthorizationLoader = (
+  supabase: SupabaseLike,
+) => Promise<SchedulerAutomaticRunAuthorization>;
+
 export type ScheduleSessionRuntimeHealthLoader = (
   supabase: SupabaseLike,
   input?: { now?: Date },
@@ -327,6 +372,7 @@ export async function runScheduleSessionCron(
     now?: Date;
     evaluateEligibility?: ScheduleSessionEligibilityEvaluator;
     loadRuntimeHealth?: ScheduleSessionRuntimeHealthLoader;
+    loadSchedulerAuthorization?: ScheduleSessionSchedulerAuthorizationLoader;
   } = {},
 ): Promise<{ status: 200 | 401 | 403 | 503; result: ScheduleSessionCronResult }> {
   const env = readScheduleSessionCronEnv(options.env);
@@ -334,7 +380,20 @@ export async function runScheduleSessionCron(
   const callerToken = options.callerToken?.trim() ?? "";
   if (!callerToken) return { status: 401, result: skippedResult(env, "missing_caller_token") };
   if (!tokensMatch(env.configuredToken, callerToken)) return { status: 403, result: skippedResult(env, "invalid_caller_token") };
-  if (!env.enabled) return { status: 200, result: skippedResult(env, "cron_disabled") };
+  if (!env.enabled) return { status: 200, result: skippedResult(env, "technical_disabled") };
+
+  // CP0 — canonical Scheduler toggle: the single business authorization for
+  // any automatic run creation. OFF => the cron stays technically healthy but
+  // never creates an account_run_request (stable observable state below).
+  // The atomic enforcement also lives inside create_account_run_request.
+  const loadSchedulerAuthorization = options.loadSchedulerAuthorization ?? loadSchedulerAutomaticRunAuthorization;
+  const schedulerAuthorization = await loadSchedulerAuthorization(supabase);
+  if (!schedulerAuthorization.allowed && !env.dryRun) {
+    return {
+      status: 200,
+      result: skippedResult(env, SCHEDULER_DISABLED_REASON, emptySummary(), schedulerAuthorization.enabled),
+    };
+  }
 
   const now = options.now ?? new Date();
   const evaluateEligibility = options.evaluateEligibility ?? defaultEligibilityEvaluator;
@@ -342,7 +401,9 @@ export async function runScheduleSessionCron(
   const assignments = await listActiveWindowAssignments(supabase, now, env.limit);
   const summary = emptySummary();
   summary.scanned_assignments_count = assignments.length;
-  if (!assignments.length) return { status: 200, result: skippedResult(env, "no_active_windows", summary) };
+  if (!assignments.length) {
+    return { status: 200, result: skippedResult(env, "no_active_windows", summary, schedulerAuthorization.enabled) };
+  }
 
   const runtimeHealth = await loadRuntimeHealth(supabase, { now });
   if (!runtimeHealth.schedulerConnected) {
@@ -352,6 +413,8 @@ export async function runScheduleSessionCron(
       result: {
         enabled: true,
         dry_run: env.dryRun,
+        state: cronState(env, schedulerAuthorization.enabled),
+        scheduler_enabled: schedulerAuthorization.enabled,
         worker_id: env.workerId,
         skipped: true,
         reason: "botapp_runtime_unavailable",
@@ -443,14 +506,24 @@ export async function runScheduleSessionCron(
 
     summary.eligible_count += 1;
     if (!env.dryRun) {
-      await queueScheduledSession(supabase, {
-        accountId,
-        assignmentId,
-        startsAt,
-        endsAt,
-        workerId: env.workerId,
-        deviceTimezone: readString(device.timezone, "") || null,
-      });
+      try {
+        await queueScheduledSession(supabase, {
+          accountId,
+          assignmentId,
+          startsAt,
+          endsAt,
+          workerId: env.workerId,
+          deviceTimezone: readString(device.timezone, "") || null,
+        });
+      } catch (error) {
+        // Atomic RPC guard: a concurrent Scheduler OFF rejects the insert with
+        // a stable reason instead of failing the whole cron pass.
+        if (isSchedulerDisabledEnqueueError(error)) {
+          summary.skipped_scheduler_disabled_count += 1;
+          continue;
+        }
+        throw error;
+      }
       summary.queued_count += 1;
       activeRequestKeys.add(idempotencyKey);
       activeRequestAccounts.add(accountId);
@@ -462,6 +535,8 @@ export async function runScheduleSessionCron(
     result: {
       enabled: true,
       dry_run: env.dryRun,
+      state: cronState(env, schedulerAuthorization.enabled),
+      scheduler_enabled: schedulerAuthorization.enabled,
       worker_id: env.workerId,
       skipped: summary.eligible_count === 0,
       reason: summary.eligible_count === 0 ? "no_eligible_accounts" : null,
