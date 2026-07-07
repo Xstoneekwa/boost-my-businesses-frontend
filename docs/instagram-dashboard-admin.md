@@ -148,7 +148,7 @@ Ne pas casser:
 - Les redactions de logs.
 - Les signaux de risque qui alimentent Credentials/Actions.
 
-### Incidents (P2/P3/P3.1)
+### Incidents (P2/P3/P3.2)
 
 Route: `/instagram-dashboard/incidents`
 
@@ -156,7 +156,7 @@ Objectif:
 
 - Vue interne des incidents runtime canoniques (`account_incidents`) avec
   raisons stables, compteurs opérationnels et workflow de reprise contrôlée
-  (P3).
+  (P3). **UI opérateur Incidents en anglais uniquement** (P3.2).
 
 Deep-link depuis Slack/Discord (P3.1):
 
@@ -167,34 +167,46 @@ Deep-link depuis Slack/Discord (P3.1):
 - Authentification Admin normale requise.
 - Charge explicitement l'incident cible, même si `metadata.test=true`
   (les incidents test restent masqués dans la liste par défaut).
-- Ouvre un panneau détail « Reprise contrôlée » en tête de page et surligne
+- Ouvre un panneau **Controlled recovery** en tête de page et surligne
   la ligne correspondante.
 - Le lien de notification Slack/Discord inclut déjà `incident_id`.
 
-États recovery visibles:
+États recovery visibles (libellés UI anglais exacts):
 
 | État | Libellé Admin |
 |------|---------------|
-| Éligible, non armé | bouton **Prêt à relancer** (action status-only) |
-| Autorisation armée | **Reprise autorisée — en attente du prochain tick** |
-| Reprise en cours | **Reprise demandée** |
-| Échec / budget consommé | **Nouvelle intervention requise** |
-| Fenêtre fermée | reason stable affichée (ex. `resume_window_closed`) |
+| Éligible, non armé | bouton **Ready to resume** (action status-only) |
+| Autorisation armée | **Resume authorized — awaiting next tick** + **Armed — awaiting next tick** |
+| Reprise en cours | **Resume requested** |
+| Échec / budget consommé | **New intervention required** |
+| Fenêtre fermée | **Recovery window expired** (reason stable) |
 
-Règles:
+Règles UX (P3.2):
 
-- Le bouton **Prêt à relancer** arme une autorisation durable ; il ne crée
-  **jamais** de run, ne force jamais un tick, ne contacte jamais le worker.
+- Incident recovery **éligible non armé** : seul **Ready to resume** est
+  visible (Admin + BotApp). Pas de `Resolve after verification`, `Keep paused`
+  ni `Acknowledge` ambigu.
+- Incident recovery **déjà armé** : aucun bouton d'action ; statuts armés
+  uniquement. Pas de second **Ready to resume**.
+- Incident recovery **non éligible / fenêtre expirée** : reason claire +
+  **Resolve without resuming** si résolution humaine sans reprise.
+- Incident **non recovery** : actions génériques existantes inchangées.
+
+Règles métier:
+
+- **Ready to resume** arme une autorisation durable ; il ne crée **jamais** de
+  run, ne force jamais un tick, ne contacte jamais le worker.
 - Seul le tick Auto Restart canonique consomme l'autorisation (Scheduler ON).
 - **Scheduler OFF bloque toujours** toute reprise automatique : l'autorisation
   peut être armée et visualisée, mais aucune request n'est créée tant que le
   Scheduler reste désactivé.
 - Les incidents `test=true` sont exclus des compteurs opérationnels par défaut ;
-  toggle « Show test incidents » ou deep-link explicite pour les visualiser.
+  toggle **Show test incidents** ou deep-link explicite pour les visualiser.
 
 Source de donnees:
 
-- `app/instagram-dashboard/incidents/page.tsx` (liste + deep-link P3.1).
+- `app/instagram-dashboard/incidents/page.tsx` (liste + deep-link P3.1/P3.2).
+- `app/instagram-dashboard/incidents/ReadyToResumeButton.tsx` (action Admin).
 - `app/api/instagram-dashboard/incidents/*` (API relay/admin).
 - `lib/instagram-dashboard/incident-resume-authorization.ts` (éligibilité,
   armement, consommation atomique côté tick).

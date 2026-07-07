@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * P3.1 — Admin « Prêt à relancer » button.
+ * P3.1/P3.2 — Admin "Ready to resume" button.
  *
  * Status/recovery action only: it calls the existing audited incident action
  * route (admin session auth, no relay key) which arms ONE durable
@@ -50,7 +50,7 @@ export function ReadyToResumeButton({ incidentId }: { incidentId: string }) {
         disabled={pending}
         data-testid="ready-to-resume-button"
       >
-        {pending ? "Armement…" : "Prêt à relancer"}
+        {pending ? "Arming…" : "Ready to resume"}
       </button>
       {refusalReason ? (
         <code className="ig-inc-ready-refusal" role="alert">{refusalReason}</code>

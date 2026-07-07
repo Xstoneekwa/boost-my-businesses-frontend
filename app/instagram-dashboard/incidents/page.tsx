@@ -30,28 +30,28 @@ function formatDateTime(value: string | null) {
 }
 
 function stateLabel(state: IncidentViewModel["displayState"]) {
-  if (state === "action_required") return "Action requise";
-  if (state === "resolved") return "Résolu";
+  if (state === "action_required") return "Action required";
+  if (state === "resolved") return "Resolved";
   if (state === "acknowledged") return "Acknowledged";
   if (state === "ignored") return "Ignored";
-  // P3 recovery states. "Prêt à relancer" is reserved for the BUTTON on an
+  // P3 recovery states. "Ready to resume" is reserved for the BUTTON on an
   // eligible, not-yet-armed incident; the armed state reads unambiguously.
-  if (state === "ready_to_resume") return "Reprise autorisée — en attente du prochain tick";
-  if (state === "resume_requested") return "Reprise demandée";
-  if (state === "reintervention_required") return "Nouvelle intervention requise";
+  if (state === "ready_to_resume") return "Resume authorized — awaiting next tick";
+  if (state === "resume_requested") return "Resume requested";
+  if (state === "reintervention_required") return "New intervention required";
   return "Open";
 }
 
 /** Stable, safe operator copy for recovery refusal reasons (CP1 codes). */
 const RECOVERY_REASON_COPY: Record<string, string> = {
-  awaiting_next_scheduler_tick: "Autorisation armée — en attente du prochain tick Auto Restart.",
-  resume_window_closed: "Fenêtre de session fermée — aucune reprise armable.",
-  resume_authorization_expired: "Fenêtre expirée — l'autorisation de reprise a expiré.",
-  resume_authorization_already_armed: "Une autorisation de reprise est déjà armée.",
-  resume_retry_window_exhausted: "Budget de reprise déjà consommé pour cette fenêtre.",
-  resume_plan_missing: "Aucun resume plan pour ce run (run antérieur à P3).",
-  resume_plan_not_recoverable: "Incident non récupérable automatiquement — résolution simple.",
-  incident_not_active: "Incident déjà résolu ou ignoré.",
+  awaiting_next_scheduler_tick: "Authorization armed — awaiting the next Auto Restart tick.",
+  resume_window_closed: "Recovery window closed — no resume can be armed.",
+  resume_authorization_expired: "Recovery window expired — the resume authorization expired.",
+  resume_authorization_already_armed: "A resume authorization is already armed.",
+  resume_retry_window_exhausted: "Resume budget already consumed for this window.",
+  resume_plan_missing: "No resume plan for this run (pre-P3 run).",
+  resume_plan_not_recoverable: "Incident not automatically recoverable — resolve manually.",
+  incident_not_active: "Incident already resolved or ignored.",
 };
 
 function recoveryReasonLabel(reason: string | null): string | null {
@@ -61,9 +61,9 @@ function recoveryReasonLabel(reason: string | null): string | null {
 
 function authorizationLabel(status: string | null): string | null {
   if (!status) return null;
-  if (status === "armed") return "Armée — en attente du prochain tick";
-  if (status === "consumed") return "Autorisation consommée";
-  if (status === "expired") return "Fenêtre expirée";
+  if (status === "armed") return "Armed — awaiting next tick";
+  if (status === "consumed") return "Authorization consumed";
+  if (status === "expired") return "Recovery window expired";
   return status;
 }
 
@@ -239,8 +239,8 @@ export default async function InstagramIncidentsPage({
 
       {focusedIncidentId && !focused && !error ? (
         <section className="ig-inc-alert" role="alert">
-          <strong>Incident introuvable</strong>
-          <span>Aucun incident avec l&apos;id {focusedIncidentId}.</span>
+          <strong>Incident not found</strong>
+          <span>No incident with id {focusedIncidentId}.</span>
         </section>
       ) : null}
 
@@ -271,19 +271,23 @@ export default async function InstagramIncidentsPage({
             ) : null}
           </div>
           <div className="ig-inc-focused-recovery">
-            <h3>Reprise contrôlée</h3>
+            <h3>Controlled recovery</h3>
             <dl>
               <div>
-                <dt>Fenêtre de reprise</dt>
+                <dt>Recovery state</dt>
+                <dd>{stateLabel(focused.model.displayState)}</dd>
+              </div>
+              <div>
+                <dt>Recovery window</dt>
                 <dd>
                   {focused.recovery.windowStart || focused.recovery.windowEnd
-                    ? `${formatWindow(focused.recovery.windowStart, focused.recovery.windowEnd)}${focused.recovery.windowActive ? " (active)" : " (fermée)"}`
+                    ? `${formatWindow(focused.recovery.windowStart, focused.recovery.windowEnd)}${focused.recovery.windowActive ? " (active)" : " (closed)"}`
                     : "—"}
                 </dd>
               </div>
               {focused.recovery.authorizationStatus ? (
                 <div>
-                  <dt>Autorisation</dt>
+                  <dt>Authorization</dt>
                   <dd>{authorizationLabel(focused.recovery.authorizationStatus)}</dd>
                 </div>
               ) : null}
@@ -293,7 +297,7 @@ export default async function InstagramIncidentsPage({
             ) : (
               <p className="ig-inc-focused-reason">
                 {recoveryReasonLabel(focused.recovery.reason)
-                  ?? "Aucune action de reprise disponible pour cet incident."}
+                  ?? "No resume action available for this incident."}
               </p>
             )}
           </div>
@@ -337,7 +341,7 @@ export default async function InstagramIncidentsPage({
                   windows.get(incident.runId)?.start ?? null,
                   windows.get(incident.runId)?.end ?? null,
                 ) ? (
-                  <span> · fenêtre {formatWindow(
+                  <span> · window {formatWindow(
                     windows.get(incident.runId)?.start ?? null,
                     windows.get(incident.runId)?.end ?? null,
                   )}</span>
