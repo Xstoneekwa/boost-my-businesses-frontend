@@ -120,12 +120,24 @@ function makeSupabase(overrides: {
         if (table === "auto_restart_device_locks") {
           return makeQueryResult([]);
         }
+        if (table === "app_instances") {
+          return makeQueryResult([{ id: "app-1", package_name: "com.instagram.android" }]);
+        }
         return makeQueryResult([]);
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
-        if (overrides.rpcError) {
+        if (overrides.rpcError && name === "create_account_run_request") {
           return Promise.resolve({ data: null, error: overrides.rpcError });
+        }
+        if (name === "get_valid_scheduled_session_preflight") {
+          return Promise.resolve({
+            data: { id: "preflight-1", request_id: "preflight-request-1", status: "preflight_ready" },
+            error: null,
+          });
+        }
+        if (name === "handoff_preflight_device_lock_to_request") {
+          return Promise.resolve({ data: { ok: true, transferred: true }, error: null });
         }
         if (name === "auto_restart_acquire_device_lock") {
           return Promise.resolve({ data: { ok: true, acquired: true, lease_id: "lease-1" }, error: null });
@@ -183,11 +195,12 @@ test("account in active window queues one scheduled run", async () => {
   assert.equal(run.result.summary.eligible_count, 1);
   assert.equal(run.result.summary.queued_count, 1);
   assert.equal(supabase.rpcCalls.length, 3);
-  assert.equal(supabase.rpcCalls[0]?.name, "create_account_run_request");
-  assert.equal(supabase.rpcCalls[1]?.name, "auto_restart_acquire_device_lock");
-  assert.equal(supabase.rpcCalls[2]?.name, "auto_restart_bind_device_lock_to_request");
-  assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "account_session");
-  assert.equal((supabase.rpcCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
+  assert.equal(supabase.rpcCalls[0]?.name, "get_valid_scheduled_session_preflight");
+  assert.equal(supabase.rpcCalls[1]?.name, "create_account_run_request");
+  assert.equal(supabase.rpcCalls[2]?.name, "handoff_preflight_device_lock_to_request");
+  assert.equal(supabase.rpcCalls[1]?.args.p_requested_run_type, "account_session");
+  assert.equal((supabase.rpcCalls[1]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
+  assert.equal((supabase.rpcCalls[1]?.args.p_metadata_safe as Record<string, unknown>)?.business_action_deadline, "2026-06-30T09:50:00.000Z");
 });
 
 test("technical disable is reported as technical_disabled without any read", async () => {
@@ -255,6 +268,7 @@ test("atomic RPC scheduler_disabled rejection is counted, not fatal", async () =
   assert.equal(run.status, 200);
   assert.equal(run.result.summary.skipped_scheduler_disabled_count, 1);
   assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), true);
 });
 
 test("scheduler settings read failure fails closed (no automatic request)", async () => {

@@ -22,7 +22,8 @@ export type DeviceSessionLockReason =
   | "scheduler_run"
   | "login_provisioning"
   | "login_email_code_resume"
-  | "login_orphan_challenge_recovery";
+  | "login_orphan_challenge_recovery"
+  | "scheduled_session_preflight";
 
 export type ActiveDeviceSessionLock = {
   deviceId: string;

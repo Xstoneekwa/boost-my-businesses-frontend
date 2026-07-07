@@ -10,6 +10,7 @@ import {
   sanitizeTickFailureReason,
   schedulerTickGate,
 } from "./auto-restart-tick-helpers";
+import { deriveSessionTransitionTimestamps, isBusinessActionsAllowed } from "./session-transition-buffer.ts";
 import {
   acquireDeviceSessionLock,
   bindDeviceSessionLockToRequest,
@@ -833,6 +834,15 @@ async function processHumanConfirmedResumes(
           continue;
         }
         deviceId = readString(plan.device_id) || null;
+      }
+
+      // CP4: no P3 resume after business_action_deadline for the scheduled window.
+      if (windowStart && windowEnd) {
+        const transition = deriveSessionTransitionTimestamps(windowStart, windowEnd);
+        if (transition && !isBusinessActionsAllowed(now, transition)) {
+          await blockResume("session_transition_buffer_active");
+          continue;
+        }
       }
 
       // CP3: acquire phone UI lease BEFORE consuming the armed authorization.

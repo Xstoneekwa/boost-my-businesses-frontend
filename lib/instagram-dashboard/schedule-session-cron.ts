@@ -10,6 +10,12 @@ import {
   deriveCurrentDailyWindow,
   extractDailySlot,
 } from "./schedule-recurrence.ts";
+import { isBusinessActionsAllowed, deriveSessionTransitionTimestamps } from "./session-transition-buffer.ts";
+import {
+  buildSchedulerSessionMetadata,
+  getValidScheduledSessionPreflight,
+  handoffPreflightLeaseToSchedulerRequest,
+} from "./scheduled-session-preflight.ts";
 
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
@@ -94,6 +100,9 @@ export type ScheduleSessionCronSummary = {
   skipped_missing_assignment_target_count: number;
   skipped_botapp_runtime_unavailable_count: number;
   skipped_scheduler_disabled_count: number;
+  skipped_preflight_missing_count: number;
+  skipped_preflight_invalid_count: number;
+  skipped_transition_buffer_count: number;
   /** CP2 — expired scheduled windows rolled forward to the derived daily occurrence. */
   rolled_forward_count: number;
   roll_forward_failed_count: number;
@@ -167,6 +176,9 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_missing_assignment_target_count: 0,
     skipped_botapp_runtime_unavailable_count: 0,
     skipped_scheduler_disabled_count: 0,
+    skipped_preflight_missing_count: 0,
+    skipped_preflight_invalid_count: 0,
+    skipped_transition_buffer_count: 0,
     rolled_forward_count: 0,
     roll_forward_failed_count: 0,
   };
@@ -427,6 +439,9 @@ async function queueScheduledSession(
     deviceId: string;
     appInstanceId?: string | null;
     deviceTimezone: string | null;
+    expectedPackage: string;
+    preflightRequestId: string;
+    preflightId: string;
   },
 ) {
   const { data, error } = await supabase.rpc("create_account_run_request", {
@@ -437,37 +452,33 @@ async function queueScheduledSession(
     p_requested_run_type: "account_session",
     p_idempotency_key: scheduleSessionIdempotencyKey(input.assignmentId, input.startsAt),
     p_priority: 0,
-    p_metadata_safe: {
-      source: "schedule_session_cron",
-      trigger: "scheduler",
-      assignment_id: input.assignmentId,
-      worker_id: input.workerId,
-      scheduled_session_at: input.startsAt,
-      scheduled_session_ends_at: input.endsAt,
-      device_timezone: input.deviceTimezone,
-    },
+    p_metadata_safe: buildSchedulerSessionMetadata({
+      assignmentId: input.assignmentId,
+      workerId: input.workerId,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      deviceTimezone: input.deviceTimezone,
+      preflightId: input.preflightId,
+    }),
   });
   if (error) throw new Error(error.message || "schedule_session_enqueue_failed");
   const requestRow = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
   const requestId = readString(requestRow?.id, "");
   if (!requestId) throw new Error("schedule_session_request_missing");
 
-  const { acquireAndBindDeviceUiLeaseForRequest, releaseDeviceUiLeaseForCanceledRequest } = await import("./device-ui-lease.ts");
-  const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, {
+  const pendingWorkerId = `pending-request:${requestId}`;
+  const handoff = await handoffPreflightLeaseToSchedulerRequest(supabase, {
     deviceId: input.deviceId,
-    accountId: input.accountId,
-    appInstanceId: input.appInstanceId ?? null,
-    requestId,
-    reason: "scheduler_run",
-    ownerKind: "scheduler",
-    operationPhase: "queued",
+    preflightRequestId: input.preflightRequestId,
+    schedulerRequestId: requestId,
+    workerId: pendingWorkerId,
   });
-  if (!leased.ok) {
+  if (!handoff.ok) {
     await supabase.rpc("cancel_account_run_request", {
       p_request_id: requestId,
-      p_reason: leased.reason,
+      p_reason: handoff.reason || "preflight_lease_handoff_failed",
     });
-    throw new Error(leased.reason);
+    throw new Error(handoff.reason || "preflight_lease_handoff_failed");
   }
   return { requestId };
 }
@@ -607,6 +618,12 @@ export async function runScheduleSessionCron(
       continue;
     }
 
+    const transition = deriveSessionTransitionTimestamps(startsAt, endsAt);
+    if (!transition || !isBusinessActionsAllowed(now, transition)) {
+      summary.skipped_transition_buffer_count += 1;
+      continue;
+    }
+
     const device = devicesById.get(deviceId);
     if (!device || isEmulatorDevice(device) || !isPhysicalPhoneDevice(device)) {
       summary.skipped_emulator_device_count += 1;
@@ -644,10 +661,25 @@ export async function runScheduleSessionCron(
 
     const { getActiveDeviceSessionLock } = await import("./device-session-lock.ts");
     const activeDeviceLease = await getActiveDeviceSessionLock(supabase, deviceId);
-    if (activeDeviceLease) {
+    if (
+      activeDeviceLease
+      && activeDeviceLease.ownerKind !== "preflight"
+      && activeDeviceLease.accountId !== accountId
+    ) {
       summary.skipped_device_lease_unavailable_count += 1;
       continue;
     }
+
+    const appInstanceId = readString(assignment.app_instance_id);
+    const expectedPackage = await (async () => {
+      if (!appInstanceId) return "";
+      const result = await query(supabase, "app_instances")
+        .select("package_name")
+        .eq("id", appInstanceId)
+        .limit(1) as QueryResult;
+      const row = readRows(result.data)[0];
+      return readString(row?.package_name);
+    })();
 
     const eligibility = await evaluateEligibility(accountId);
     if (!eligibility.ok) {
@@ -657,6 +689,22 @@ export async function runScheduleSessionCron(
 
     summary.eligible_count += 1;
     if (!env.dryRun) {
+      const validPreflight = await getValidScheduledSessionPreflight(supabase, {
+        accountId,
+        assignmentId,
+        deviceId,
+        appInstanceId,
+        expectedPackage,
+        startsAt,
+        endsAt,
+        now,
+      });
+      if (!validPreflight?.request_id) {
+        summary.skipped_preflight_missing_count += 1;
+        summary.eligible_count -= 1;
+        continue;
+      }
+
       try {
         await queueScheduledSession(supabase, {
           accountId,
@@ -665,18 +713,28 @@ export async function runScheduleSessionCron(
           endsAt,
           workerId: env.workerId,
           deviceId,
-          appInstanceId: readString(assignment.app_instance_id) || null,
+          appInstanceId,
           deviceTimezone: readString(device.timezone, "") || null,
+          expectedPackage,
+          preflightRequestId: validPreflight.request_id,
+          preflightId: validPreflight.id,
         });
       } catch (error) {
         // Atomic RPC guard: a concurrent Scheduler OFF rejects the insert with
         // a stable reason instead of failing the whole cron pass.
         if (isSchedulerDisabledEnqueueError(error)) {
           summary.skipped_scheduler_disabled_count += 1;
+          summary.eligible_count -= 1;
           continue;
         }
         if (error instanceof Error && error.message === "device_lease_unavailable") {
           summary.skipped_device_lease_unavailable_count += 1;
+          summary.eligible_count -= 1;
+          continue;
+        }
+        if (error instanceof Error && (error.message === "preflight_lease_handoff_failed" || error.message.includes("preflight"))) {
+          summary.skipped_preflight_invalid_count += 1;
+          summary.eligible_count -= 1;
           continue;
         }
         throw error;

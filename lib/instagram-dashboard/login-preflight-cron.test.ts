@@ -27,6 +27,8 @@ const defaultAssignments = [
     starts_at: "2026-06-09T08:10:00.000Z",
     ends_at: "2026-06-09T08:30:00.000Z",
     status: "reserved",
+    schedule_mode: "scheduled",
+    assignment_type: "full_cycle",
   },
   {
     id: "assignment-connected",
@@ -36,6 +38,8 @@ const defaultAssignments = [
     starts_at: "2026-06-09T08:04:00.000Z",
     ends_at: "2026-06-09T08:24:00.000Z",
     status: "reserved",
+    schedule_mode: "scheduled",
+    assignment_type: "full_cycle",
   },
 ];
 
@@ -72,8 +76,25 @@ function makeSupabase(overrides: {
   statuses?: Array<Record<string, unknown>>;
   activeRequests?: Array<Record<string, unknown>>;
   activeRuns?: Array<Record<string, unknown>>;
+  schedulerEnabled?: boolean;
+  preflights?: Array<Record<string, unknown>>;
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const devices = [
+    { id: "device-1", device_kind: "physical_phone", status: "online", timezone: "Africa/Johannesburg" },
+    { id: "device-2", device_kind: "physical_phone", status: "online", timezone: "Africa/Johannesburg" },
+    { id: "device-peer", device_kind: "physical_phone", status: "online", timezone: "Africa/Johannesburg" },
+  ];
+  const heartbeats = [
+    { device_id: "device-1", status: "online", last_seen_at: "2026-06-09T07:59:00.000Z" },
+    { device_id: "device-2", status: "online", last_seen_at: "2026-06-09T07:59:00.000Z" },
+    { device_id: "device-peer", status: "online", last_seen_at: "2026-06-09T07:59:00.000Z" },
+  ];
+  const appInstances = [
+    { id: "app-1", package_name: "com.instagram.android.clone1" },
+    { id: "app-2", package_name: "com.instagram.android.clone2" },
+    { id: "app-peer", package_name: "com.instagram.android.clone3" },
+  ];
   return {
     rpcCalls,
     client: {
@@ -82,13 +103,40 @@ function makeSupabase(overrides: {
           return makeQueryResult(overrides.assignments ?? defaultAssignments);
         }
         if (table === "client_instagram_accounts") {
-          return makeQueryResult(overrides.statuses ?? defaultStatuses);
+          return makeQueryResult((overrides.statuses ?? defaultStatuses).map((row) => ({
+            ...row,
+            username: row.username ?? `user_${readString(row.account_id).slice(-5)}`,
+          })));
         }
         if (table === "account_run_requests") {
           return makeQueryResult(overrides.activeRequests ?? []);
         }
         if (table === "ig_runs") {
           return makeQueryResult(overrides.activeRuns ?? []);
+        }
+        if (table === "phone_devices") {
+          return makeQueryResult(devices);
+        }
+        if (table === "device_heartbeats") {
+          return makeQueryResult(heartbeats);
+        }
+        if (table === "app_instances") {
+          return makeQueryResult(appInstances);
+        }
+        if (table === "scheduled_session_preflights") {
+          return makeQueryResult(overrides.preflights ?? []);
+        }
+        if (table === "auto_restart_settings") {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({
+                  data: { auto_restart_enabled: overrides.schedulerEnabled === true },
+                  error: null,
+                }),
+              }),
+            }),
+          };
         }
         return makeQueryResult([]);
       },
@@ -106,10 +154,20 @@ function makeSupabase(overrides: {
         if (name === "cancel_account_run_request") {
           return Promise.resolve({ data: { ok: true }, error: null });
         }
+        if (name === "upsert_scheduled_session_preflight") {
+          return Promise.resolve({ data: { id: "preflight-1", status: "preflight_due" }, error: null });
+        }
+        if (name === "bind_scheduled_session_preflight_request") {
+          return Promise.resolve({ data: { id: "preflight-1", status: "preflight_running" }, error: null });
+        }
         return Promise.resolve({ data: { id: "request-1", status: "queued" }, error: null });
       },
     },
   };
+}
+
+function readString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value.trim() || fallback : fallback;
 }
 
 test("readLoginPreflightCronEnv defaults to disabled dry-run", () => {
@@ -151,7 +209,7 @@ test("runLoginPreflightCron skips when disabled", async () => {
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
-test("runLoginPreflightCron dry-run reports eligibility without enqueue", async () => {
+test("runLoginPreflightCron dry-run reports scheduler-off skips without enqueue", async () => {
   const supabase = makeSupabase();
   const run = await runLoginPreflightCron(supabase.client as never, {
     env: baseEnv,
@@ -161,14 +219,13 @@ test("runLoginPreflightCron dry-run reports eligibility without enqueue", async 
 
   assert.equal(run.status, 200);
   assert.equal(run.result.dry_run, true);
-  assert.equal(run.result.summary.eligible_count, 1);
+  assert.equal(run.result.summary.skipped_scheduler_off_count, 2);
   assert.equal(run.result.summary.queued_count, 0);
-  assert.equal(run.result.summary.skipped_connected_count, 1);
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
-test("runLoginPreflightCron queues login_provisioning when enabled and dry-run is false", async () => {
-  const supabase = makeSupabase();
+test("runLoginPreflightCron queues scheduled_session_preflight when scheduler ON and dry-run is false", async () => {
+  const supabase = makeSupabase({ schedulerEnabled: true, assignments: [defaultAssignments[0]] });
   const run = await runLoginPreflightCron(supabase.client as never, {
     env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "false" },
     callerToken: "cron-token",
@@ -178,29 +235,19 @@ test("runLoginPreflightCron queues login_provisioning when enabled and dry-run i
   assert.equal(run.status, 200);
   assert.equal(run.result.summary.queued_count, 1);
   assert.equal(run.result.summary.dashboard_action_count, 1);
-  assert.equal(supabase.rpcCalls[0].name, "create_account_run_request");
-  assert.equal(supabase.rpcCalls[0].args.p_requested_run_type, "login_provisioning");
-  assert.equal(supabase.rpcCalls[0].args.p_idempotency_key, "login-preflight:assignment-needs-login:t10");
-  assert.deepEqual(
-    supabase.rpcCalls[0].args.p_metadata_safe,
-    {
-      source: "login_preflight_cron",
-      assignment_id: "assignment-needs-login",
-      phase: "t10",
-      worker_id: "login_preflight_cron",
-      scheduled_session_at: "2026-06-09T08:10:00.000Z",
-      scheduled_session_ends_at: "2026-06-09T08:30:00.000Z",
-      deadline_at: "2026-06-09T08:09:00.000Z",
-    },
-  );
+  const createCall = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
+  assert.ok(createCall);
+  assert.equal(createCall?.args.p_requested_run_type, "scheduled_session_preflight");
+  assert.equal(createCall?.args.p_idempotency_key, "scheduled-preflight:assignment-needs-login:2026-06-09T08:10:00.000Z");
   const rpcNames = supabase.rpcCalls.map((call) => call.name);
+  assert.ok(rpcNames.includes("upsert_scheduled_session_preflight"));
   assert.ok(rpcNames.includes("auto_restart_acquire_device_lock"), "acquires device UI lease");
   assert.ok(rpcNames.includes("auto_restart_bind_device_lock_to_request"), "binds device UI lease to request");
   assert.ok(rpcNames.includes("upsert_account_dashboard_action"), "still upserts dashboard action");
 });
 
 test("runLoginPreflightCron skips enqueue when device UI lease is unavailable", async () => {
-  const supabase = makeSupabase();
+  const supabase = makeSupabase({ schedulerEnabled: true, assignments: [defaultAssignments[0]] });
   supabase.client.rpc = ((name: string, args: Record<string, unknown>) => {
     supabase.rpcCalls.push({ name, args });
     if (name === "auto_restart_acquire_device_lock") {
@@ -228,6 +275,7 @@ test("runLoginPreflightCron skips enqueue when device UI lease is unavailable", 
 
 test("runLoginPreflightCron skips assignments without device_id", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [{ ...defaultAssignments[0], device_id: "" }],
   });
   const run = await runLoginPreflightCron(supabase.client as never, {
@@ -243,6 +291,7 @@ test("runLoginPreflightCron skips assignments without device_id", async () => {
 
 test("runLoginPreflightCron skips assignments without app_instance_id", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [{ ...defaultAssignments[0], app_instance_id: "" }],
   });
   const run = await runLoginPreflightCron(supabase.client as never, {
@@ -256,8 +305,9 @@ test("runLoginPreflightCron skips assignments without app_instance_id", async ()
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
-test("runLoginPreflightCron skips account already connected and ready", async () => {
+test("runLoginPreflightCron still evaluates connected accounts for verification preflight", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [defaultAssignments[1]],
     statuses: [defaultStatuses[1]],
   });
@@ -267,13 +317,13 @@ test("runLoginPreflightCron skips account already connected and ready", async ()
     now: new Date("2026-06-09T08:00:00.000Z"),
   });
 
-  assert.equal(run.result.summary.skipped_connected_count, 1);
-  assert.equal(run.result.summary.eligible_count, 0);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(run.result.summary.eligible_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
 });
 
 test("runLoginPreflightCron skips active request on same account", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [defaultAssignments[0]],
     activeRequests: [{ account_id: "account-needs-login", status: "queued", requested_run_type: "account_session" }],
   });
@@ -290,6 +340,7 @@ test("runLoginPreflightCron skips active request on same account", async () => {
 
 test("runLoginPreflightCron skips active run on same account", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [defaultAssignments[0]],
     activeRuns: [{ account_id: "account-needs-login", status: "running" }],
   });
@@ -306,6 +357,7 @@ test("runLoginPreflightCron skips active run on same account", async () => {
 
 test("runLoginPreflightCron skips phone busy from active request on same device or app instance", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [
       defaultAssignments[0],
       {
@@ -333,6 +385,7 @@ test("runLoginPreflightCron skips phone busy from active request on same device 
 
 test("runLoginPreflightCron skips phone busy from active run on same device or app instance", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [
       defaultAssignments[0],
       {
@@ -360,12 +413,13 @@ test("runLoginPreflightCron skips phone busy from active run on same device or a
 
 test("runLoginPreflightCron skips duplicate active preflight for same assignment phase", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [defaultAssignments[0]],
     activeRequests: [{
       account_id: "account-needs-login",
       status: "queued",
       requested_run_type: "login_provisioning",
-      idempotency_key: "login-preflight:assignment-needs-login:t10",
+      idempotency_key: "scheduled-preflight:assignment-needs-login:2026-06-09T08:10:00.000Z",
     }],
   });
   const run = await runLoginPreflightCron(supabase.client as never, {
@@ -379,13 +433,13 @@ test("runLoginPreflightCron skips duplicate active preflight for same assignment
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
-test("runLoginPreflightCron T5 queues only while account is still unresolved", async () => {
+test("runLoginPreflightCron T5 queues verification preflight while scheduler ON", async () => {
   const t5Assignment = {
     ...defaultAssignments[0],
     starts_at: "2026-06-09T08:05:00.000Z",
     ends_at: "2026-06-09T08:25:00.000Z",
   };
-  const unresolved = makeSupabase({ assignments: [t5Assignment] });
+  const unresolved = makeSupabase({ schedulerEnabled: true, assignments: [t5Assignment] });
   const queued = await runLoginPreflightCron(unresolved.client as never, {
     env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "false" },
     callerToken: "cron-token",
@@ -393,24 +447,13 @@ test("runLoginPreflightCron T5 queues only while account is still unresolved", a
   });
 
   assert.equal(queued.result.summary.queued_count, 1);
-  assert.equal(unresolved.rpcCalls[0].args.p_idempotency_key, "login-preflight:assignment-needs-login:t5");
-
-  const resolved = makeSupabase({
-    assignments: [t5Assignment],
-    statuses: [{ account_id: "account-needs-login", login_status: "connected", provisioning_status: "ready" }],
-  });
-  const skipped = await runLoginPreflightCron(resolved.client as never, {
-    env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "false" },
-    callerToken: "cron-token",
-    now: new Date("2026-06-09T08:00:00.000Z"),
-  });
-
-  assert.equal(skipped.result.summary.skipped_connected_count, 1);
-  assert.equal(resolved.rpcCalls.length, 0);
+  const createCall = unresolved.rpcCalls.find((call) => call.name === "create_account_run_request");
+  assert.equal(createCall?.args.p_idempotency_key, "scheduled-preflight:assignment-needs-login:2026-06-09T08:05:00.000Z");
 });
 
 test("runLoginPreflightCron does not enqueue when deadline is too close", async () => {
   const supabase = makeSupabase({
+    schedulerEnabled: true,
     assignments: [{
       ...defaultAssignments[0],
       starts_at: "2026-06-09T08:02:00.000Z",
@@ -429,14 +472,15 @@ test("runLoginPreflightCron does not enqueue when deadline is too close", async 
 });
 
 test("runLoginPreflightCron result and queued metadata do not expose phone app identifiers", async () => {
-  const supabase = makeSupabase();
+  const supabase = makeSupabase({ schedulerEnabled: true, assignments: [defaultAssignments[0]] });
   const run = await runLoginPreflightCron(supabase.client as never, {
     env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "false" },
     callerToken: "cron-token",
     now: new Date("2026-06-09T08:00:00.000Z"),
   });
+  const createCall = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
   const returned = JSON.stringify(run.result);
-  const metadata = JSON.stringify(supabase.rpcCalls[0].args.p_metadata_safe);
+  const metadata = JSON.stringify(createCall?.args.p_metadata_safe ?? {});
 
   for (const forbidden of ["device-1", "app-1", "password", "secret", "vault", "service_role", "adb"]) {
     assert.equal(returned.includes(forbidden), false);

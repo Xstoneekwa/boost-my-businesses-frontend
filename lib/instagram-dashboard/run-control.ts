@@ -129,6 +129,7 @@ export type RunStartBlockReason =
   | "already_requested"
   | "device_lock_held"
   | "device_lease_unavailable"
+  | "session_transition_buffer_active"
   | "invalid_run_type";
 
 const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
@@ -1466,8 +1467,13 @@ export async function evaluateLoginChallengeRunEligibility(
   if (assignedDeviceId) {
     const { getActiveDeviceSessionLock } = await import("./device-session-lock");
     const activeLock = await getActiveDeviceSessionLock(supabase, assignedDeviceId);
-    if (activeLock && activeLock.accountId !== accountId) {
-      return { ok: false as const, reason: "device_lease_unavailable" as RunStartBlockReason, health };
+    if (activeLock) {
+      if (activeLock.accountId !== accountId) {
+        return { ok: false as const, reason: "device_lease_unavailable" as RunStartBlockReason, health };
+      }
+      if (readString(activeLock.ownerKind).toLowerCase() === "preflight") {
+        return { ok: false as const, reason: "device_lease_unavailable" as RunStartBlockReason, health };
+      }
     }
   }
 
@@ -1931,6 +1937,25 @@ export async function evaluateRunStartEligibility(
   const scheduleBlock = await evaluateScheduleStartGate(accountId, normalizedRunType, normalizedTrigger);
   if (scheduleBlock) {
     return { ok: false as const, reason: scheduleBlock, health };
+  }
+
+  if (normalizedRunType === "account_session" || normalizedRunType === "outreach_session") {
+    const { data: assignmentRow } = await supabase
+      .from("account_assignments")
+      .select("starts_at,ends_at")
+      .eq("account_id", accountId)
+      .in("status", ["reserved", "active"])
+      .limit(1)
+      .maybeSingle();
+    const startsAt = readString(assignmentRow?.starts_at);
+    const endsAt = readString(assignmentRow?.ends_at);
+    if (startsAt && endsAt) {
+      const { deriveSessionTransitionTimestamps, isBusinessActionsAllowed } = await import("./session-transition-buffer.ts");
+      const transition = deriveSessionTransitionTimestamps(startsAt, endsAt);
+      if (transition && !isBusinessActionsAllowed(new Date(), transition)) {
+        return { ok: false as const, reason: "session_transition_buffer_active" as RunStartBlockReason, health };
+      }
+    }
   }
 
   if (requiresLoginConnected(normalizedRunType)) {
@@ -2430,6 +2455,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
     case "device_lock_held":
     case "device_lease_unavailable":
       return "Device currently in use.";
+    case "session_transition_buffer_active":
+      return "Session transition buffer is active on this device.";
     case "invalid_run_type":
       return "Requested run type is not allowed.";
     default:

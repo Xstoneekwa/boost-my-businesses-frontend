@@ -18,6 +18,10 @@ import {
   projectDailyWindows,
   SCHEDULE_PROJECTION_HORIZON_HOURS,
 } from "./schedule-recurrence.ts";
+import {
+  classifySessionTransitionPhase,
+  deriveSessionTransitionTimestamps,
+} from "./session-transition-buffer.ts";
 
 export type SchedulerEngineStatus = "running" | "degraded" | "unknown";
 export type SchedulerBackendMode = "enabled" | "disabled_by_config";
@@ -75,6 +79,14 @@ export type SchedulerUpcomingWindow = {
   materialized: boolean;
   /** True when the stored dated window has expired and awaits roll-forward. */
   stored_window_expired: boolean;
+  /** CP4 — absolute business cutoff (session_end - 10m). */
+  business_action_deadline: string | null;
+  /** CP4 — absolute preflight window start (session_start - 10m). */
+  preflight_start: string | null;
+  /** CP4 — derived phase label for operator read-model. */
+  transition_phase: string | null;
+  /** CP4 — English operator label when buffer/preflight is active. */
+  transition_operator_label: string | null;
 };
 
 export type SchedulerStatus = {
@@ -253,6 +265,15 @@ export function projectUpcomingWindows(
     const storedStartsIso = Number.isFinite(Date.parse(startsAt)) ? new Date(startsAt).toISOString() : startsAt;
 
     for (const occurrence of projectDailyWindows(slot, now, horizonHours)) {
+      const transition = deriveSessionTransitionTimestamps(occurrence.starts_at, occurrence.ends_at);
+      const phase = transition ? classifySessionTransitionPhase(now, transition) : null;
+      const operatorLabel = phase === "transition_buffer_active"
+        ? "Transition buffer active"
+        : phase === "preflight_due"
+          ? "Preflight due"
+          : phase === "session_open" && transition
+            ? "Business actions until"
+            : null;
       windows.push({
         account_id: accountId,
         username: usernames.get(accountId) || null,
@@ -265,6 +286,10 @@ export function projectUpcomingWindows(
         is_open: Date.parse(occurrence.starts_at) <= now.getTime() && now.getTime() < Date.parse(occurrence.ends_at),
         materialized: occurrence.starts_at === storedStartsIso,
         stored_window_expired: storedExpired,
+        business_action_deadline: transition?.business_action_deadline ?? null,
+        preflight_start: transition?.preflight_start ?? null,
+        transition_phase: phase,
+        transition_operator_label: operatorLabel,
       });
     }
   }
