@@ -31,6 +31,7 @@ export type LoginPreflightCronSummary = {
   skipped_duplicate_preflight_count: number;
   skipped_phone_busy_count: number;
   skipped_deadline_too_close_count: number;
+  skipped_device_lease_unavailable_count: number;
   dashboard_action_count: number;
 };
 
@@ -97,6 +98,7 @@ function emptySummary(): LoginPreflightCronSummary {
     skipped_duplicate_preflight_count: 0,
     skipped_phone_busy_count: 0,
     skipped_deadline_too_close_count: 0,
+    skipped_device_lease_unavailable_count: 0,
     dashboard_action_count: 0,
   };
 }
@@ -393,7 +395,7 @@ export async function runLoginPreflightCron(
 
     summary.eligible_count += 1;
     if (!env.dryRun) {
-      await queueLoginPreflight(supabase, {
+      const enqueued = await queueLoginPreflight(supabase, {
         accountId,
         assignmentId,
         startsAt,
@@ -402,6 +404,29 @@ export async function runLoginPreflightCron(
         workerId: env.workerId,
         deadlineAt: deadline.toISOString(),
       });
+      // CP3.1: bind the phone UI lease atomically with the freshly created
+      // login provisioning request. If the phone is already leased, the request
+      // is cancelled and this account is skipped (device_lease_unavailable).
+      const requestRow = (Array.isArray(enqueued) ? enqueued[0] : enqueued) as Record<string, unknown> | null;
+      const requestId = readString(requestRow?.id);
+      let leaseOk = true;
+      if (requestId) {
+        const { leaseRequestOrCancel } = await import("./device-ui-lease.ts");
+        const leased = await leaseRequestOrCancel(supabase, {
+          deviceId,
+          accountId,
+          appInstanceId,
+          requestId,
+          reason: "login_provisioning",
+          ownerKind: "login",
+          operationPhase: "queued",
+        });
+        leaseOk = leased.ok;
+      }
+      if (!leaseOk) {
+        summary.skipped_device_lease_unavailable_count += 1;
+        continue;
+      }
       summary.queued_count += 1;
       await upsertLoginAction(supabase, { accountId, assignmentId, startsAt, phase });
       summary.dashboard_action_count += 1;

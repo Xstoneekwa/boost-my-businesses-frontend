@@ -102,6 +102,63 @@ test("terminal failed request does not block new connect enqueue", async () => {
   assert.match(String(supabase.rpcCalls[0]?.args.p_idempotency_key), /^login-preflight-now:assignment-1:/);
 });
 
+test("binds device UI lease when deviceId is provided", async () => {
+  const supabase = makeSupabase([]);
+  const baseRpc = supabase.client.rpc.bind(supabase.client);
+  supabase.client.rpc = (name: string, args: Record<string, unknown>) => {
+    if (name === "auto_restart_acquire_device_lock") {
+      supabase.rpcCalls.push({ name, args });
+      return Promise.resolve({ data: { ok: true, acquired: true, lease_id: "lease-1" }, error: null });
+    }
+    if (name === "auto_restart_bind_device_lock_to_request") {
+      supabase.rpcCalls.push({ name, args });
+      return Promise.resolve({ data: { ok: true, bound: true }, error: null });
+    }
+    return baseRpc(name, args);
+  };
+  const result = await enqueueClientConnectRequest(supabase.client, {
+    accountId,
+    actorId: "actor-1",
+    assignmentId,
+    deadlineAt: "2026-06-23T12:00:00.000Z",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+  });
+  assert.equal(result.preflight_request_created, true);
+  const names = supabase.rpcCalls.map((call) => call.name);
+  assert.ok(names.includes("auto_restart_acquire_device_lock"));
+  assert.ok(names.includes("auto_restart_bind_device_lock_to_request"));
+});
+
+test("refuses connect enqueue when device UI lease is unavailable", async () => {
+  const supabase = makeSupabase([]);
+  const baseRpc = supabase.client.rpc.bind(supabase.client);
+  supabase.client.rpc = (name: string, args: Record<string, unknown>) => {
+    if (name === "auto_restart_acquire_device_lock") {
+      supabase.rpcCalls.push({ name, args });
+      return Promise.resolve({ data: { ok: false, acquired: false, reason: "device_lease_unavailable" }, error: null });
+    }
+    if (name === "auto_restart_release_device_lock" || name === "cancel_account_run_request") {
+      supabase.rpcCalls.push({ name, args });
+      return Promise.resolve({ data: { ok: true }, error: null });
+    }
+    return baseRpc(name, args);
+  };
+  const result = await enqueueClientConnectRequest(supabase.client, {
+    accountId,
+    actorId: "actor-1",
+    assignmentId,
+    deadlineAt: "2026-06-23T12:00:00.000Z",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+  });
+  assert.equal(result.preflight_request_created, false);
+  assert.equal(result.reason, "device_lease_unavailable");
+  assert.equal(result.request_id, null);
+  const names = supabase.rpcCalls.map((call) => call.name);
+  assert.ok(names.includes("cancel_account_run_request"));
+});
+
 test("active login_provisioning request is reused without second rpc", async () => {
   const supabase = makeSupabase([{
     id: "request-active",

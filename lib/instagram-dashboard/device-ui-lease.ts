@@ -238,6 +238,39 @@ export async function releaseDeviceUiLeaseForCanceledRequest(
   });
 }
 
+/**
+ * CP3.1: acquire + bind the phone UI lease immediately after a request row is
+ * created. If the phone is already leased, the freshly created request is
+ * cancelled and its (never-bound) lease released so no Worker can ever claim a
+ * UI request without a bound lease. Stable refusal: device_lease_unavailable.
+ */
+export async function leaseRequestOrCancel(
+  supabase: SupabaseLike,
+  input: {
+    deviceId: string;
+    accountId: string;
+    appInstanceId?: string | null;
+    requestId: string;
+    reason: DeviceSessionLockReason;
+    leaseSeconds?: number;
+    ownerKind?: string;
+    operationPhase?: string;
+  },
+): Promise<{ ok: true } | { ok: false; reason: string; operatorLabel: string }> {
+  const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, input);
+  if (leased.ok) return { ok: true };
+  await supabase.rpc("cancel_account_run_request", {
+    p_request_id: input.requestId,
+    p_reason: leased.reason,
+  });
+  await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+    deviceId: input.deviceId,
+    requestId: input.requestId,
+    releaseReason: leased.reason,
+  }).catch(() => undefined);
+  return { ok: false, reason: leased.reason, operatorLabel: DEVICE_LEASE_OPERATOR_LABEL };
+}
+
 export async function resolveAccountDeviceLeaseBlock(
   supabase: SupabaseLike,
   accountId: string,

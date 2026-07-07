@@ -1717,6 +1717,27 @@ export async function createLoginEmailCodeResumeRunRequest({
     p_metadata_safe: metadata,
   });
 
+  // CP3.1: bind the phone UI lease before the Worker can claim this resume
+  // request. Shared across the normal and parent-handoff-retry enqueue paths so
+  // neither can leave an unbound login_email_code_resume request for the Worker.
+  const bindResumeLease = async (bindRequestId: string): Promise<string | null> => {
+    if (!bindRequestId) return null;
+    const { resolveAccountDeviceContext } = await import("./device-session-lock");
+    const deviceContext = await resolveAccountDeviceContext(supabase, accountId);
+    if (!deviceContext?.deviceId) return null;
+    const { leaseRequestOrCancel } = await import("./device-ui-lease");
+    const leased = await leaseRequestOrCancel(supabase, {
+      deviceId: deviceContext.deviceId,
+      accountId,
+      appInstanceId: deviceContext.appInstanceId,
+      requestId: bindRequestId,
+      reason: "login_email_code_resume",
+      ownerKind: "login",
+      operationPhase: "queued",
+    });
+    return leased.ok ? null : leased.reason;
+  };
+
   const { data, error } = await enqueueResume();
 
   if (error) {
@@ -1759,6 +1780,18 @@ export async function createLoginEmailCodeResumeRunRequest({
           const retryRow = (Array.isArray(retry.data) ? retry.data[0] : retry.data) as SupabaseRecord | null;
           const retryRequestId = readString(retryRow?.id, "");
           const retryRequestStatus = readString(retryRow?.status, "queued");
+          const retryLeaseFailure = await bindResumeLease(retryRequestId);
+          if (retryLeaseFailure) {
+            return {
+              queued: false,
+              idempotent: false,
+              requestId: null,
+              requestStatus: null,
+              reason: retryLeaseFailure,
+              parentRequestId,
+              connectAttemptId,
+            };
+          }
           return mapResumeRequestResult({
             requestId: retryRequestId,
             requestStatus: retryRequestStatus,
@@ -1785,41 +1818,17 @@ export async function createLoginEmailCodeResumeRunRequest({
   const requestId = readString(requestRow?.id, "");
   const requestStatus = readString(requestRow?.status, "queued");
 
-  if (requestId) {
-    const { resolveAccountDeviceContext } = await import("./device-session-lock");
-    const deviceContext = await resolveAccountDeviceContext(supabase, accountId);
-    if (deviceContext?.deviceId) {
-      const { acquireAndBindDeviceUiLeaseForRequest, releaseDeviceUiLeaseForCanceledRequest } = await import("./device-ui-lease");
-      const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, {
-        deviceId: deviceContext.deviceId,
-        accountId,
-        appInstanceId: deviceContext.appInstanceId,
-        requestId,
-        reason: "login_email_code_resume",
-        ownerKind: "login",
-        operationPhase: "queued",
-      });
-      if (!leased.ok) {
-        await supabase.rpc("cancel_account_run_request", {
-          p_request_id: requestId,
-          p_reason: leased.reason,
-        });
-        await releaseDeviceUiLeaseForCanceledRequest(supabase, {
-          deviceId: deviceContext.deviceId,
-          requestId,
-          releaseReason: leased.reason,
-        });
-        return {
-          queued: false,
-          idempotent: false,
-          requestId: null,
-          requestStatus: null,
-          reason: leased.reason,
-          parentRequestId,
-          connectAttemptId,
-        };
-      }
-    }
+  const leaseFailure = await bindResumeLease(requestId);
+  if (leaseFailure) {
+    return {
+      queued: false,
+      idempotent: false,
+      requestId: null,
+      requestStatus: null,
+      reason: leaseFailure,
+      parentRequestId,
+      connectAttemptId,
+    };
   }
 
   return mapResumeRequestResult({

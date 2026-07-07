@@ -143,6 +143,34 @@ export async function POST(
       return jsonError("Orphan recovery request was not created.", 500);
     }
 
+    // CP3.1: bind the phone UI lease before the Worker can claim this request.
+    // Orphan recovery drives Android, so no request may reach the Worker without
+    // a bound device-level lease. If the phone is busy, cancel and refuse safely.
+    const { resolveAccountDeviceContext } = await import("@/lib/instagram-dashboard/device-session-lock");
+    const deviceContext = await resolveAccountDeviceContext(supabase, accountId);
+    if (deviceContext?.deviceId) {
+      const { leaseRequestOrCancel } = await import("@/lib/instagram-dashboard/device-ui-lease");
+      const leased = await leaseRequestOrCancel(supabase as never, {
+        deviceId: deviceContext.deviceId,
+        accountId,
+        appInstanceId: deviceContext.appInstanceId,
+        requestId,
+        reason: "login_orphan_challenge_recovery",
+        ownerKind: "login",
+        operationPhase: "queued",
+      });
+      if (!leased.ok) {
+        await insertManualRunAudit(
+          accountId,
+          "login_orphan_recovery_blocked",
+          "blocked",
+          runStartBlockMessage("device_lease_unavailable"),
+          { reason: leased.reason, request_id: requestId, device_id: deviceContext.deviceId },
+        ).catch(() => undefined);
+        return jsonError(runStartBlockMessage("device_lease_unavailable"), 409, { reason: leased.reason });
+      }
+    }
+
     await insertManualRunAudit(
       accountId,
       "login_orphan_recovery_requested",

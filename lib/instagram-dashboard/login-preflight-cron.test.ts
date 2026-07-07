@@ -94,6 +94,18 @@ function makeSupabase(overrides: {
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
+        if (name === "auto_restart_acquire_device_lock") {
+          return Promise.resolve({ data: { ok: true, acquired: true, lease_id: "lease-1" }, error: null });
+        }
+        if (name === "auto_restart_bind_device_lock_to_request") {
+          return Promise.resolve({ data: { ok: true, bound: true }, error: null });
+        }
+        if (name === "auto_restart_release_device_lock") {
+          return Promise.resolve({ data: { ok: true, released: true }, error: null });
+        }
+        if (name === "cancel_account_run_request") {
+          return Promise.resolve({ data: { ok: true }, error: null });
+        }
         return Promise.resolve({ data: { id: "request-1", status: "queued" }, error: null });
       },
     },
@@ -181,7 +193,37 @@ test("runLoginPreflightCron queues login_provisioning when enabled and dry-run i
       deadline_at: "2026-06-09T08:09:00.000Z",
     },
   );
-  assert.equal(supabase.rpcCalls[1].name, "upsert_account_dashboard_action");
+  const rpcNames = supabase.rpcCalls.map((call) => call.name);
+  assert.ok(rpcNames.includes("auto_restart_acquire_device_lock"), "acquires device UI lease");
+  assert.ok(rpcNames.includes("auto_restart_bind_device_lock_to_request"), "binds device UI lease to request");
+  assert.ok(rpcNames.includes("upsert_account_dashboard_action"), "still upserts dashboard action");
+});
+
+test("runLoginPreflightCron skips enqueue when device UI lease is unavailable", async () => {
+  const supabase = makeSupabase();
+  supabase.client.rpc = ((name: string, args: Record<string, unknown>) => {
+    supabase.rpcCalls.push({ name, args });
+    if (name === "auto_restart_acquire_device_lock") {
+      return Promise.resolve({ data: { ok: false, acquired: false, reason: "device_lease_unavailable" }, error: null });
+    }
+    if (name === "auto_restart_release_device_lock") {
+      return Promise.resolve({ data: { ok: true, released: true }, error: null });
+    }
+    if (name === "cancel_account_run_request") {
+      return Promise.resolve({ data: { ok: true }, error: null });
+    }
+    return Promise.resolve({ data: { id: "request-1", status: "queued" }, error: null });
+  }) as never;
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: new Date("2026-06-09T08:00:00.000Z"),
+  });
+
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(run.result.summary.skipped_device_lease_unavailable_count, 1);
+  const rpcNames = supabase.rpcCalls.map((call) => call.name);
+  assert.ok(rpcNames.includes("cancel_account_run_request"), "cancels the request when lease unavailable");
 });
 
 test("runLoginPreflightCron skips assignments without device_id", async () => {

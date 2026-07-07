@@ -700,9 +700,49 @@ export async function runReadinessNow(
     });
   }
 
+  const requestId = readString(request?.id, "");
   const requestStatus = readString(request?.status, "queued");
   const requestActive = activeRequestStatuses.includes(requestStatus);
   const idempotentHit = idempotentFromConflict;
+
+  // CP3.1: bind the phone UI lease before the Worker can claim a freshly created
+  // login provisioning request. Only active requests need a lease; terminal ones
+  // are ignored. Read-only readiness (passiveOnly) never reaches here. Idempotent
+  // hits already own a bound lease from their initial enqueue.
+  if (requestActive && !idempotentHit && requestId) {
+    const deviceId = readString(assignment.device_id);
+    if (deviceId) {
+      const { leaseRequestOrCancel } = await import("./device-ui-lease.ts");
+      const leased = await leaseRequestOrCancel(supabase, {
+        deviceId,
+        accountId: input.accountId,
+        appInstanceId: readString(assignment.app_instance_id) || null,
+        requestId,
+        reason: "login_provisioning",
+        ownerKind: "login",
+        operationPhase: "queued",
+      });
+      if (!leased.ok) {
+        return safeResult({
+          audience,
+          readiness_status: "retry_later",
+          client_status: "try_again_later",
+          assignment_status: "ready",
+          phone_available: true,
+          app_instance_available: true,
+          preflight_request_created: false,
+          idempotent: false,
+          request_id: null,
+          run_request_status: null,
+          next_action: "try_again_later",
+          reason: leased.reason,
+          blockers: ["device_lease_unavailable"],
+          checks,
+        });
+      }
+    }
+  }
+
   return safeResult({
     audience,
     readiness_status: requestActive ? "checking_connection" : "retry_later",

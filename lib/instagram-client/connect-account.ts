@@ -202,6 +202,8 @@ export async function connectClientInstagramAccount(input: {
     actorId: input.userId,
     assignmentId: readString(assignment.id),
     deadlineAt: deadline.toISOString(),
+    deviceId: readString(assignment.device_id) || null,
+    appInstanceId: readString(assignment.app_instance_id) || null,
   });
   const requestStatus = readString(enqueue.run_request_status).toLowerCase();
   const requestActive = ACTIVE_CONNECT_REQUEST_STATUSES.has(requestStatus);

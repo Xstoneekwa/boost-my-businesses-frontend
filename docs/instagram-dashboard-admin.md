@@ -224,10 +224,24 @@ Flows soumis au lease canonique (`auto_restart_device_locks` / RPC
 - Play / Start manuel (`runs/start`) ;
 - Auto Login / `login_provisioning` ;
 - `login_email_code_resume` ;
-- `login_orphan_challenge_recovery`.
+- `login_orphan_challenge_recovery` ;
+- `readiness-now` (mode `connect_enqueue`) — CP3.1 ;
+- connect client (`enqueue-client-connect`) — CP3.1 ;
+- `login-preflight-cron` (si activé) — CP3.1.
 
-**Ne prennent pas de lease :** lecture dashboard, heartbeat passif, notifier,
-scrcpy passive, affichage Admin/BotApp.
+**CP3.1 — Lease bindé dès l'enqueue :** chaque flow qui crée une
+`account_run_request` pilotant Android acquiert et binde le lease téléphone
+*immédiatement après* la création de la request (helper `leaseRequestOrCancel`).
+Si le téléphone est déjà leased, la request fraîche est annulée
+(`cancel_account_run_request`) et le lease relâché : aucune request UI n'est
+jamais visible par un Worker sans lease bindé. Le Worker conserve un filet de
+sécurité au claim (transfer/acquire du lock `pending-request:<id>`) pour tout
+`DEVICE_BOUND_RUN_TYPES`, mais ne peut plus recevoir une request non couverte.
+
+**Ne prennent pas de lease (lecture seule) :** lecture dashboard, readiness
+passive (`readiness_only` / `dryRun`), heartbeat passif, notifier, scrcpy /
+Open Phone (contrôle manuel opérateur hors pipeline automatisé), affichage
+Admin/BotApp, `check-readiness` client.
 
 **Reason stable :** `device_lease_unavailable` — libellé opérateur anglais :
 `Device currently in use`.

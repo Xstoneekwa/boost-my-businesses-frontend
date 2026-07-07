@@ -115,6 +115,8 @@ export async function enqueueClientConnectRequest(
     actorId?: string | null;
     assignmentId: string;
     deadlineAt: string;
+    deviceId?: string | null;
+    appInstanceId?: string | null;
   },
 ): Promise<EnqueueClientConnectResult> {
   const accountId = readString(input.accountId);
@@ -172,6 +174,35 @@ export async function enqueueClientConnectRequest(
         connect_attempt_id: attemptId,
         blockers: ["login_preflight_request_not_active"],
       };
+    }
+    // CP3.1: bind the phone UI lease before the Worker can claim this client
+    // connect login provisioning request. If the phone is already leased, cancel
+    // and refuse with the stable device_lease_unavailable reason.
+    const requestId = readString(request.id);
+    const deviceId = readString(input.deviceId);
+    if (requestId && deviceId) {
+      const { leaseRequestOrCancel } = await import("../instagram-dashboard/device-ui-lease.ts");
+      const leased = await leaseRequestOrCancel(supabase, {
+        deviceId,
+        accountId,
+        appInstanceId: readString(input.appInstanceId) || null,
+        requestId,
+        reason: "login_provisioning",
+        ownerKind: "login",
+        operationPhase: "queued",
+      });
+      if (!leased.ok) {
+        return {
+          request: null,
+          preflight_request_created: false,
+          idempotent: false,
+          reason: leased.reason,
+          run_request_status: null,
+          request_id: null,
+          connect_attempt_id: null,
+          blockers: ["device_lease_unavailable"],
+        };
+      }
     }
     return {
       request,
