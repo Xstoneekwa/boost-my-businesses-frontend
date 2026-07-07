@@ -24,11 +24,20 @@ function formatDateTime(value: string | null) {
 }
 
 function stateLabel(state: IncidentViewModel["displayState"]) {
-  if (state === "action_required") return "Action required";
-  if (state === "resolved") return "Resolved";
+  if (state === "action_required") return "Action requise";
+  if (state === "resolved") return "Résolu";
   if (state === "acknowledged") return "Acknowledged";
   if (state === "ignored") return "Ignored";
+  // P3 recovery states (read-only in Admin; actions live in BotApp).
+  if (state === "ready_to_resume") return "Prêt à relancer";
+  if (state === "resume_requested") return "Reprise demandée";
+  if (state === "reintervention_required") return "Nouvelle intervention requise";
   return "Open";
+}
+
+function formatWindow(start: string | null, end: string | null) {
+  if (!start || !end) return null;
+  return `${formatDateTime(start)} → ${formatDateTime(end)}`;
 }
 
 function deliveryLabel(state: IncidentViewModel["deliveryState"]) {
@@ -48,7 +57,12 @@ async function loadIncidents(includeTest: boolean) {
     .order("last_seen_at", { ascending: false })
     .limit(100);
   if (error) {
-    return { models: [] as IncidentViewModel[], counters: buildIncidentCounters([]), error: error.message };
+    return {
+      models: [] as IncidentViewModel[],
+      counters: buildIncidentCounters([]),
+      windows: new Map<string, { start: string | null; end: string | null }>(),
+      error: error.message,
+    };
   }
   const incidentIds = (incidentRows ?? []).map((row) => String(row.id ?? "")).filter(Boolean);
   let notificationRows: Record<string, unknown>[] = [];
@@ -63,7 +77,25 @@ async function loadIncidents(includeTest: boolean) {
   const counters = buildIncidentCounters(
     buildIncidentList(incidentRows ?? [], notificationRows, { includeTest: true }),
   );
-  return { models, counters, error: null as string | null };
+
+  // P3: resume windows per incident run (read-only recovery context).
+  const runIds = models.map((m) => m.runId).filter((id): id is string => Boolean(id));
+  const windows = new Map<string, { start: string | null; end: string | null }>();
+  if (runIds.length) {
+    const { data: planRows } = await supabase
+      .from("account_session_resume_plans")
+      .select("run_id,scheduled_window_start,scheduled_window_end")
+      .in("run_id", runIds);
+    for (const row of planRows ?? []) {
+      const runId = String(row.run_id ?? "");
+      if (!runId) continue;
+      windows.set(runId, {
+        start: (row.scheduled_window_start as string | null) ?? null,
+        end: (row.scheduled_window_end as string | null) ?? null,
+      });
+    }
+  }
+  return { models, counters, windows, error: null as string | null };
 }
 
 export default async function InstagramIncidentsPage({
@@ -78,7 +110,7 @@ export default async function InstagramIncidentsPage({
 
   const params = (await searchParams) ?? {};
   const includeTest = params.include_test === "1";
-  const { models, counters, error } = await loadIncidents(includeTest);
+  const { models, counters, windows, error } = await loadIncidents(includeTest);
 
   return (
     <main className="dashboard-page ig-incidents-page">
@@ -139,6 +171,20 @@ export default async function InstagramIncidentsPage({
             </div>
             {incident.actionRequired ? (
               <p className="ig-inc-action">{incident.actionRequired}</p>
+            ) : null}
+            {incident.recoveryState ? (
+              <p className="ig-inc-recovery">
+                Recovery : {stateLabel(incident.displayState)}
+                {incident.runId && formatWindow(
+                  windows.get(incident.runId)?.start ?? null,
+                  windows.get(incident.runId)?.end ?? null,
+                ) ? (
+                  <span> · fenêtre {formatWindow(
+                    windows.get(incident.runId)?.start ?? null,
+                    windows.get(incident.runId)?.end ?? null,
+                  )}</span>
+                ) : null}
+              </p>
             ) : null}
             <div className="ig-inc-row-meta">
               {incident.accountHref ? (
@@ -255,6 +301,14 @@ export default async function InstagramIncidentsPage({
         .ig-inc-badge-resolved { background: rgba(34,197,94,.16); color: #86efac; }
         .ig-inc-badge-acknowledged { background: rgba(250,204,21,.14); color: #fde68a; }
         .ig-inc-badge-ignored { background: rgba(148,163,184,.16); color: #cbd5e1; }
+        .ig-inc-badge-ready_to_resume { background: rgba(45,212,191,.16); color: #5eead4; }
+        .ig-inc-badge-resume_requested { background: rgba(59,130,246,.18); color: #93c5fd; }
+        .ig-inc-badge-reintervention_required { background: rgba(248,113,113,.2); color: #fca5a5; }
+        .ig-inc-recovery {
+          margin: 0;
+          color: #5eead4;
+          font-size: 12.5px;
+        }
         .ig-inc-severity {
           font-size: 11px;
           font-weight: 800;

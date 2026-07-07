@@ -59,8 +59,12 @@ test("incident routes only expose redacted metadata through the view model", () 
   assert.doesNotMatch(detailSource, /metadata: incidentRow\.metadata/);
 });
 
-test("incident actions are limited to status-only operations in P2", () => {
-  assert.match(actionSource, /"acknowledge", "resolve", "keep_paused"/);
+test("incident actions are limited to status/recovery operations", () => {
+  assert.match(actionSource, /"acknowledge"/);
+  assert.match(actionSource, /"resolve"/);
+  assert.match(actionSource, /"keep_paused"/);
+  // P3: the only recovery action is ready_to_resume ("Prêt à relancer").
+  assert.match(actionSource, /READY_TO_RESUME_ACTION/);
   assert.doesNotMatch(actionSource, /"manual_retry"/);
   assert.match(actionSource, /action_reserved_for_next_checkpoint/);
 });
@@ -69,4 +73,14 @@ test("incident actions can never create a run or run request", () => {
   assert.match(actionSource, /runCreated: false/);
   assert.doesNotMatch(actionSource, /ig_runs|account_run_requests|run_requests/);
   assert.doesNotMatch(actionSource, /\.insert\(/);
+});
+
+test("ready_to_resume arms an authorization and never launches anything", () => {
+  // The route delegates arming to the dedicated lib (audited insert there),
+  // updates only incident metadata and returns stable reasons on refusal.
+  assert.match(actionSource, /armReadyToResume/);
+  assert.match(actionSource, /recoveryState/);
+  assert.match(actionSource, /ready_to_resume/);
+  // Refusals surface a stable safe reason with HTTP 409.
+  assert.match(actionSource, /409/);
 });

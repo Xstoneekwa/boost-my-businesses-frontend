@@ -66,6 +66,32 @@ test("display state derives action_required only for active incidents", () => {
   );
 });
 
+test("P3 recovery states drive the display state while the incident is active", () => {
+  const withRecovery = (state: string, overrides: Record<string, unknown> = {}) =>
+    identityIncidentRow({
+      metadata: { run_request_id: "req-1", recovery: { state } },
+      ...overrides,
+    });
+  assert.equal(incidentDisplayState(withRecovery("ready_to_resume")), "ready_to_resume");
+  assert.equal(incidentDisplayState(withRecovery("resume_requested")), "resume_requested");
+  assert.equal(
+    incidentDisplayState(withRecovery("reintervention_required")),
+    "reintervention_required",
+  );
+  assert.equal(
+    incidentDisplayState(withRecovery("resume_authorization_expired")),
+    "reintervention_required",
+  );
+  // Resolution always wins: a resolved incident never shows a recovery state.
+  assert.equal(
+    incidentDisplayState(withRecovery("ready_to_resume", { status: "resolved" })),
+    "resolved",
+  );
+  // The model exposes the raw recovery state for the drawer.
+  assert.equal(mapIncidentRow(withRecovery("ready_to_resume")).recoveryState, "ready_to_resume");
+  assert.equal(mapIncidentRow(identityIncidentRow()).recoveryState, null);
+});
+
 test("metadata is redacted: no secrets, serials, packages or raw xml", () => {
   const safe = redactIncidentMetadata({
     run_request_id: "req-1",

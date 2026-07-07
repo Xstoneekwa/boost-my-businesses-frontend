@@ -1,5 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { mapIncidentRow } from "@/lib/instagram-dashboard/incident-operations";
+import { evaluateReadyToResume } from "@/lib/instagram-dashboard/incident-resume-authorization";
 import { jsonError, jsonOk, requireRelayOrAdmin } from "../../_utils";
 
 export const dynamic = "force-dynamic";
@@ -35,13 +36,34 @@ export async function GET(
     if (outboxError) return jsonError(outboxError.message, 500);
 
     const model = mapIncidentRow(incidentRow, outboxRows ?? []);
+    // P3: recovery view for the "Prêt à relancer" workflow. Read-only here;
+    // failures degrade to a safe "not evaluable" state, never to a 500.
+    let recovery: Record<string, unknown> = {
+      state: model.recoveryState ?? "none",
+      eligible: false,
+      reason: "recovery_state_unavailable",
+      windowStart: null,
+      windowEnd: null,
+      windowActive: false,
+      authorizationId: null,
+      authorizationStatus: null,
+    };
+    try {
+      const view = await evaluateReadyToResume(supabase, incidentRow as Record<string, unknown>);
+      recovery = { ...view };
+    } catch {
+      // Keep the safe default above.
+    }
+
     return jsonOk({
       incident: {
         ...model,
         // BotApp drawer contract: `reason` carries the stable reason code.
         reason: model.reasonCode,
         requestId: model.runRequestId,
+        recovery,
       },
+      recovery,
       notifications: model.deliveries.map((delivery) => ({
         channel: delivery.channel,
         status: delivery.status,

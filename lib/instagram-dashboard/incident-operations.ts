@@ -15,7 +15,11 @@ export type IncidentDisplayState =
   | "action_required"
   | "resolved"
   | "acknowledged"
-  | "ignored";
+  | "ignored"
+  // P3 recovery display states, derived from metadata.recovery.state:
+  | "ready_to_resume"
+  | "resume_requested"
+  | "reintervention_required";
 
 export type IncidentDeliveryState =
   | "delivered"
@@ -50,6 +54,7 @@ export interface IncidentViewModel {
   lastSeenAt: string | null;
   resolvedAt: string | null;
   source: string | null;
+  recoveryState: string | null;
   isTest: boolean;
   deliveryState: IncidentDeliveryState;
   deliveries: IncidentChannelDelivery[];
@@ -137,10 +142,30 @@ export function redactIncidentMetadata(metadata: unknown): Record<string, unknow
   return out;
 }
 
+/** P3: recovery state carried in metadata.recovery.state (worker/backend). */
+export function incidentRecoveryState(row: IncidentDbRow): string {
+  const metadata = row.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "";
+  const recovery = (metadata as Record<string, unknown>).recovery;
+  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return "";
+  return readString((recovery as Record<string, unknown>).state);
+}
+
 export function incidentDisplayState(row: IncidentDbRow): IncidentDisplayState {
   const status = readString(row.status).toLowerCase();
   if (status === "resolved") return "resolved";
   if (status === "ignored") return "ignored";
+  // P3 recovery states take precedence over the generic action_required
+  // display while the incident is still active.
+  const recoveryState = incidentRecoveryState(row);
+  if (recoveryState === "ready_to_resume") return "ready_to_resume";
+  if (recoveryState === "resume_requested") return "resume_requested";
+  if (
+    recoveryState === "reintervention_required"
+    || recoveryState === "resume_authorization_expired"
+  ) {
+    return "reintervention_required";
+  }
   if (status === "acknowledged") return "acknowledged";
   // Open + explicit operator action => action_required display state.
   if (readString(row.action_required)) return "action_required";
@@ -199,6 +224,7 @@ export function mapIncidentRow(
     lastSeenAt: readString(row.last_seen_at) || null,
     resolvedAt: readString(row.resolved_at) || null,
     source: readString(row.source) || null,
+    recoveryState: incidentRecoveryState(row) || null,
     isTest: isTestIncident(row),
     deliveryState: incidentDeliveryState(deliveries),
     deliveries,
@@ -237,8 +263,15 @@ export function buildIncidentCounters(models: IncidentViewModel[]): IncidentCoun
   // callers filter them before counting unless include_test is requested.
   const operational = models.filter((model) => !model.isTest);
   return {
-    open: operational.filter((m) => m.displayState === "open").length,
-    actionRequired: operational.filter((m) => m.displayState === "action_required").length,
+    // Recovery states in flight (armed / requested) still count as open.
+    open: operational.filter((m) =>
+      m.displayState === "open"
+      || m.displayState === "ready_to_resume"
+      || m.displayState === "resume_requested").length,
+    // A failed resume needs a human again: it is action_required-class.
+    actionRequired: operational.filter((m) =>
+      m.displayState === "action_required"
+      || m.displayState === "reintervention_required").length,
     resolved: operational.filter((m) => m.displayState === "resolved").length,
     deliveryDegraded: operational.filter((m) => m.deliveryState === "delivery_degraded").length,
     total: operational.length,

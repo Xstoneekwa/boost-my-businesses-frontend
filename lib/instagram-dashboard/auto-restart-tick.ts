@@ -35,6 +35,15 @@ import {
   maxAttemptsBlockReason,
   restartDelayBlockReason,
 } from "./auto-restart-operational";
+import {
+  bindAuthorizationToRequest,
+  claimAuthorizationAtomically,
+  loadResumePlanForRun,
+  markAuthorizationExpired,
+  setResumePlanState,
+  updateIncidentRecoveryState,
+  windowContainsNow,
+} from "./incident-resume-authorization";
 
 export async function getAutoRestartTickStatus(supabase: SupabaseLike) {
   const settingsRow = await loadSettingsRow(supabase);
@@ -672,6 +681,20 @@ export async function runAutoRestartTick(
       }
     }
 
+    // P3: human-confirmed resume authorizations ("Prêt à relancer") are
+    // consumed here, on the same canonical tick, never in dry-run/shadow.
+    if (!forceDryRun) {
+      await processHumanConfirmedResumes(supabase, {
+        summary,
+        requestId,
+        actor: options.actor || "system",
+        mode: extendedRules.mode,
+        workerId: options.workerId,
+        leaseSeconds: env.deviceLockLeaseSeconds,
+        now,
+      });
+    }
+
   } catch (error) {
     // Unexpected engine/backend failure: finalize the held lock as failed
     // with a redacted reason so scheduler-status exposes a real last_error,
@@ -704,4 +727,217 @@ function emptySummary(workerId: string, dryRun: boolean, reason: string | null):
     blocked: [],
     enqueued: [],
   };
+}
+
+/**
+ * P3 — consume human-confirmed resume authorizations ("Prêt à relancer").
+ *
+ * Runs inside the canonical Auto Restart tick (no second scheduler). For
+ * each ARMED authorization:
+ *   - the active window must still contain now (else the authorization is
+ *     expired with the stable reason `resume_authorization_expired`);
+ *   - the canonical run-start gates apply (manual_only excluded, no active
+ *     run/request, assignment window active);
+ *   - the authorization is claimed ATOMICALLY (armed -> consumed) BEFORE
+ *     the request is created: two concurrent ticks can never consume twice
+ *     (`resume_authorization_consumed` for the loser);
+ *   - exactly one resume request is created through the canonical path
+ *     (create_account_run_request RPC + CP0 atomic guard);
+ *   - if creation fails after consumption, the authorization STAYS consumed
+ *     (anti-loop) and the incident flips to `reintervention_required`.
+ */
+async function processHumanConfirmedResumes(
+  supabase: SupabaseLike,
+  input: {
+    summary: AutoRestartTickSummary;
+    requestId: string;
+    actor: string;
+    mode: AutoRestartMode;
+    workerId: string;
+    leaseSeconds: number;
+    now: Date;
+  },
+) {
+  const { summary, now } = input;
+  const armedResult = await (query(supabase, "incident_resume_authorizations")
+    .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,test") as QueryBuilder)
+    .eq("status", "armed")
+    .limit(20) as unknown as QueryResult;
+  if (armedResult.error) {
+    throw new Error(armedResult.error.message || "resume_authorizations_unavailable");
+  }
+  const authorizations = readRows(armedResult.data);
+
+  for (const authorization of authorizations) {
+    const authorizationId = readString(authorization.id);
+    const incidentId = readString(authorization.incident_id);
+    const accountId = readString(authorization.account_id);
+    const originalRunId = readString(authorization.run_id);
+    const resumePlanId = readString(authorization.resume_plan_id);
+    const resumeWindowKey = readString(authorization.resume_window_key);
+    if (!authorizationId || !accountId || !incidentId) continue;
+
+    const blockResume = async (reason: string) => {
+      summary.blocked_count += 1;
+      summary.blocked.push({ account_id: accountId, username: "", reason });
+      await writeDecision(supabase, {
+        requestId: input.requestId,
+        idempotencyKey: `resume-auth:${authorizationId}:${reason}`,
+        actor: input.actor,
+        accountId,
+        deviceId: null,
+        action: "human_confirmed_resume_evaluated",
+        decision: "blocked",
+        reason,
+        mode: input.mode,
+        metadata: { incident_id: incidentId, authorization_id: authorizationId },
+        priorRunId: originalRunId || null,
+      });
+    };
+
+    try {
+      // Internal test authorizations are visible but never enqueue anything.
+      if (authorization.test === true) {
+        await blockResume("test_authorization_excluded");
+        continue;
+      }
+
+      const windowStart = readString(authorization.scheduled_window_start) || null;
+      const windowEnd = readString(authorization.scheduled_window_end) || null;
+      if (!windowContainsNow(windowStart, windowEnd, now)) {
+        await markAuthorizationExpired(supabase, authorizationId, now);
+        await updateIncidentRecoveryState(supabase, incidentId, "resume_authorization_expired");
+        await blockResume("resume_authorization_expired");
+        continue;
+      }
+
+      // Canonical run-start gates: manual_only excluded, no active run or
+      // request, assignment window still active for a scheduler trigger.
+      const { evaluateRunStartEligibility } = await import("./run-control.ts");
+      const eligibility = await evaluateRunStartEligibility(accountId, "account_session", {
+        trigger: "scheduler",
+      });
+      if (!eligibility.ok) {
+        // The authorization stays armed: a later tick in the same window may
+        // still consume it once the transient gate clears.
+        await blockResume(eligibility.reason);
+        continue;
+      }
+
+      // Package/assignment coherence + device for the session lock.
+      let deviceId: string | null = null;
+      if (originalRunId) {
+        const plan = await loadResumePlanForRun(supabase, originalRunId);
+        if (!plan || readString(plan.resume_state) !== "awaiting_human_resume_authorization") {
+          await blockResume("resume_plan_not_recoverable");
+          continue;
+        }
+        deviceId = readString(plan.device_id) || null;
+      }
+
+      // Atomic consumption BEFORE request creation: 1 click -> max 1 resume.
+      const claimed = await claimAuthorizationAtomically(supabase, authorizationId, now);
+      if (!claimed) {
+        await blockResume("resume_authorization_consumed");
+        continue;
+      }
+
+      if (deviceId) {
+        const deviceLock = await acquireDeviceLock(supabase, {
+          deviceId,
+          workerId: input.workerId,
+          accountId,
+          appInstanceId: null,
+          leaseSeconds: input.leaseSeconds,
+        });
+        if (!deviceLock.ok) {
+          // Consumed but not creatable: stable terminal outcome, no loop.
+          await bindAuthorizationToRequest(supabase, authorizationId, null, deviceLock.reason);
+          await updateIncidentRecoveryState(supabase, incidentId, "reintervention_required", {
+            consume_error: deviceLock.reason,
+          });
+          await blockResume(deviceLock.reason);
+          continue;
+        }
+      }
+
+      try {
+        if (resumePlanId) {
+          await setResumePlanState(supabase, resumePlanId, "resume_requested");
+        }
+        const requestData = await enqueueAutoRestartRequest(supabase, {
+          accountId,
+          workerId: input.workerId,
+          idempotencyKey: `resume-auth:${authorizationId}`,
+          runType: "account_session",
+          metadata: {
+            source: AUTO_RESTART_TICK_SOURCE,
+            trigger: "scheduler_tick",
+            trigger_source: "scheduled_auto_restart",
+            requested_by_actor: input.actor,
+            execution_worker_id: input.workerId,
+            worker_id: input.workerId,
+            auto_restart: true,
+            recovery_mode: "human_confirmed_resume",
+            incident_id: incidentId,
+            original_run_id: originalRunId || null,
+            prior_run_id: originalRunId || null,
+            resume_plan_id: resumePlanId || null,
+            resume_window_key: resumeWindowKey || null,
+          },
+        });
+        const newRequestId = readString((requestData as Record<string, unknown>)?.id, "") || null;
+        if (deviceId && newRequestId) {
+          await bindDeviceLockToRequest(supabase, {
+            deviceId,
+            workerId: input.workerId,
+            requestId: newRequestId,
+            leaseSeconds: input.leaseSeconds,
+          });
+        }
+        await bindAuthorizationToRequest(supabase, authorizationId, newRequestId);
+        await updateIncidentRecoveryState(supabase, incidentId, "resume_requested", {
+          resume_request_id: newRequestId,
+        });
+        summary.enqueued_count += 1;
+        summary.enqueued.push({ account_id: accountId, username: "", request_id: newRequestId });
+        await writeDecision(supabase, {
+          requestId: input.requestId,
+          idempotencyKey: `resume-auth:${authorizationId}`,
+          actor: input.actor,
+          accountId,
+          deviceId,
+          action: "human_confirmed_resume_enqueued",
+          decision: "enqueued",
+          reason: "human_confirmed_resume",
+          mode: input.mode,
+          metadata: {
+            incident_id: incidentId,
+            authorization_id: authorizationId,
+            resume_window_key: resumeWindowKey || null,
+          },
+          priorRunId: originalRunId || null,
+          newRequestId,
+        });
+      } catch (error) {
+        // Anti-loop by contract: the consumed authorization is never re-armed
+        // automatically. The incident asks for a new human intervention.
+        const reason = error instanceof Error ? error.message : "resume_enqueue_failed";
+        await bindAuthorizationToRequest(supabase, authorizationId, null, reason);
+        if (resumePlanId) {
+          await setResumePlanState(supabase, resumePlanId, "awaiting_human_resume_authorization");
+        }
+        await updateIncidentRecoveryState(supabase, incidentId, "reintervention_required", {
+          consume_error: reason.slice(0, 200),
+        });
+        if (deviceId) {
+          await releaseDeviceLock(supabase, deviceId, input.workerId);
+        }
+        await blockResume(sanitizeTickFailureReason(error));
+      }
+    } catch (error) {
+      // Per-authorization isolation: one broken row never stops the tick.
+      await blockResume(sanitizeTickFailureReason(error));
+    }
+  }
 }

@@ -1,15 +1,25 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import {
+  READY_TO_RESUME_ACTION,
+  armReadyToResume,
+} from "@/lib/instagram-dashboard/incident-resume-authorization";
 import { jsonError, jsonOk, requireRelayOrAdmin } from "../../_utils";
 
 export const dynamic = "force-dynamic";
 
 /**
- * P2 scope: status-only operator actions. No action here may create a run,
- * a run request or any scheduling side effect. `manual_retry` and any
- * resume-after-human-intervention flow are explicitly reserved for the next
- * checkpoint and rejected.
+ * Status/recovery operator actions only. No action here may create a run,
+ * a run request or any scheduling side effect. `manual_retry` remains
+ * rejected. P3 adds `ready_to_resume` ("Prêt à relancer"): it arms one
+ * durable, audited authorization that ONLY the Auto Restart tick may
+ * consume; the click itself never launches anything.
  */
-const ALLOWED_ACTIONS = new Set(["acknowledge", "resolve", "keep_paused"]);
+const ALLOWED_ACTIONS = new Set([
+  "acknowledge",
+  "resolve",
+  "keep_paused",
+  READY_TO_RESUME_ACTION,
+]);
 
 export async function POST(request: Request) {
   try {
@@ -31,7 +41,7 @@ export async function POST(request: Request) {
     const supabase = createSupabaseClient();
     const { data: incidentRow, error } = await supabase
       .from("account_incidents")
-      .select("id,status,metadata")
+      .select("id,status,metadata,account_id,run_id,incident_type,reason,failure_reason")
       .eq("id", incidentId)
       .maybeSingle();
     if (error) return jsonError(error.message, 500);
@@ -48,6 +58,56 @@ export async function POST(request: Request) {
       at: nowIso,
       ...(resolutionNote ? { resolution_note: resolutionNote } : {}),
     };
+
+    if (action === READY_TO_RESUME_ACTION) {
+      // Recovery-only action: arms one durable authorization. It never
+      // creates a run and never forces a tick; the Auto Restart tick is the
+      // single consumer. Unavailable states return a stable, safe reason.
+      const armResult = await armReadyToResume(supabase, {
+        incidentRow: incidentRow as Record<string, unknown>,
+        armedBy: null,
+        armedSource: "botapp_relay",
+        resolutionNote,
+      });
+      const recoveryMetadata = {
+        ...previousMetadata,
+        last_operator_action: auditEntry,
+        ...(armResult.ok
+          ? {
+            recovery: {
+              ...(previousMetadata.recovery && typeof previousMetadata.recovery === "object"
+                ? previousMetadata.recovery as Record<string, unknown>
+                : {}),
+              state: "ready_to_resume",
+              authorization_id: armResult.authorizationId,
+              armed_at: nowIso,
+            },
+          }
+          : {}),
+      };
+      const { error: recoveryUpdateError } = await supabase
+        .from("account_incidents")
+        .update({ updated_at: nowIso, metadata: recoveryMetadata })
+        .eq("id", incidentId)
+        .select("id")
+        .maybeSingle();
+      if (recoveryUpdateError) return jsonError(recoveryUpdateError.message, 500);
+      if (!armResult.ok) {
+        return jsonError(`Prêt à relancer indisponible: ${armResult.reason}.`, 409, {
+          reason: armResult.reason,
+          recoveryState: armResult.state,
+          runCreated: false,
+        });
+      }
+      return jsonOk({
+        incidentId,
+        action,
+        status: incidentRow.status,
+        recoveryState: armResult.state,
+        authorizationId: armResult.authorizationId,
+        runCreated: false,
+      });
+    }
 
     const update: Record<string, unknown> = {
       updated_at: nowIso,
