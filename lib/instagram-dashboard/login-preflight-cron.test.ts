@@ -177,6 +177,13 @@ test("readLoginPreflightCronEnv defaults to disabled dry-run", () => {
   assert.equal(env.configuredToken, null);
 });
 
+test("readLoginPreflightCronEnv falls back to schedule session cron token", () => {
+  const env = readLoginPreflightCronEnv({
+    INSTAGRAM_SCHEDULE_SESSION_CRON_TOKEN: "shared-cron-token",
+  });
+  assert.equal(env.configuredToken, "shared-cron-token");
+});
+
 test("extractLoginPreflightCronToken reads bearer and custom header", () => {
   assert.equal(extractLoginPreflightCronToken(makeRequest({ Authorization: "Bearer cron-token" })), "cron-token");
   assert.equal(

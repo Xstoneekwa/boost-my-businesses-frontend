@@ -261,6 +261,46 @@ terminal réel (CP5 traitera `operator_stop_suppressed`).
 **Hors scope CP3 :** buffer T-10, provisioning slots CP6, popup classifier,
 `operator_stop_suppressed`.
 
+### Session transition buffer + scheduled preflight (CP4)
+
+**Contrat T-10** (fenêtre matérialisée CP2, timezone IANA device) :
+
+```text
+business_action_deadline = scheduled_session_end - 10 minutes
+preflight_start = scheduled_session_start - 10 minutes
+```
+
+- **Avant `business_action_deadline`** : actions business autorisées (follow,
+  mute, like, DM, cold start Scheduler, reprise P3).
+- **À partir de `business_action_deadline`** : buffer technique — aucune
+  nouvelle action business, aucun cold start Scheduler, aucune autorisation P3
+  armable/consommable ; le run en cours termine proprement avec reason
+  `session_transition_buffer_active`.
+- **Fenêtre préflight** `[preflight_start, scheduled_session_start)` :
+  `login-preflight-cron` (verification-only, pas login/logout/follow) acquiert
+  le lease CP3 et persiste `scheduled_session_preflights`.
+- **À `scheduled_session_start`** : `schedule-session-cron` exige
+  `preflight_ready` + handoff atomique du lease (`handoff_preflight_device_lock_to_request`) ;
+  zéro démarrage à l'aveugle.
+
+**Scheduler OFF** : CP2 continue de matérialiser les fenêtres ; read-models
+calculent buffers/preflights ; `login-preflight-cron` techniquement actif
+(`INSTAGRAM_LOGIN_PREFLIGHT_CRON_ENABLED=true`, `DRY_RUN=false`) retourne
+`scheduler_disabled` / `preflight_skipped_scheduler_off` — zéro action Android,
+zéro lease préflight, zéro request.
+
+**États préflight persistants** (`scheduled_session_preflights`) :
+`preflight_due`, `preflight_running`, `preflight_ready`, `preflight_blocked`,
+`preflight_lease_unavailable`, `preflight_expired`, `preflight_invalidated`,
+`preflight_skipped_scheduler_off`.
+
+**Labels opérateur (anglais)** : `Business actions until`, `Transition buffer
+active`, `Preflight due`, `Preflight running`, `Preflight ready`,
+`Preflight blocked`, `Device reserved for scheduled preflight`, etc.
+
+**Hors scope CP4** : `operator_stop_suppressed`, détection popup Meta dédiée,
+provisioning slots client (CP6).
+
 ### Server Check
 
 Route: `/instagram-dashboard/server-check`
