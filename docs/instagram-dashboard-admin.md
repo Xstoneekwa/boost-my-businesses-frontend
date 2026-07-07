@@ -251,8 +251,18 @@ jamais arrêté automatiquement. P3 : l'autorisation armée n'est consommée que
 si le lease est obtenu.
 
 **Release :** terminal run/request, cancel avant worker, expiration stale
-(`reconcile_stale_device_ui_leases`). Stop opérateur conserve le lease jusqu'au
-terminal réel (CP5 traitera `operator_stop_suppressed`).
+(`reconcile_stale_device_ui_leases`). Stop opérateur : cleanup confirmé puis
+release lease ; `operator_stop_suppressed` bloque toute reprise automatique
+dans la fenêtre courante ; Play manuel reste la seule reprise autorisée après
+terminal.
+
+**CP5 Operator Stop (2026-07-08)** :
+- Stop source-agnostique via `POST /api/instagram-dashboard/stop`.
+- Table `operator_stop_suppressions` ; reason `operator_stop_suppressed`.
+- Pas de réconciliation DB prématurée sur run `running` ; `Stopping…` jusqu'au
+  terminal worker.
+- Play bloqué pendant `stop_cleanup_in_progress`.
+- Libellé anglais : `Stopped by operator — manual restart required`.
 
 **Observabilité Admin :** Devices API expose `ui_lease_status`,
 `ui_lease_operator_label`, `ui_lease_current_operation`. Profiles relay projette

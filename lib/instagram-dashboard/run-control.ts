@@ -130,6 +130,8 @@ export type RunStartBlockReason =
   | "device_lock_held"
   | "device_lease_unavailable"
   | "session_transition_buffer_active"
+  | "operator_stop_suppressed"
+  | "stop_cleanup_in_progress"
   | "invalid_run_type";
 
 const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
@@ -1939,6 +1941,20 @@ export async function evaluateRunStartEligibility(
     return { ok: false as const, reason: scheduleBlock, health };
   }
 
+  const {
+    getActiveOperatorStopSuppression,
+    getStopCleanupState,
+    shouldBlockAutomaticRestartForOperatorStop,
+  } = await import("./operator-stop-suppression.ts");
+  const stopCleanup = await getStopCleanupState(supabase as never, accountId);
+  if (stopCleanup.inProgress) {
+    return { ok: false as const, reason: "stop_cleanup_in_progress" as RunStartBlockReason, health };
+  }
+  const operatorStopSuppression = await getActiveOperatorStopSuppression(supabase as never, accountId);
+  if (shouldBlockAutomaticRestartForOperatorStop(normalizedTrigger, operatorStopSuppression)) {
+    return { ok: false as const, reason: "operator_stop_suppressed" as RunStartBlockReason, health };
+  }
+
   if (normalizedRunType === "account_session" || normalizedRunType === "outreach_session") {
     const { data: assignmentRow } = await supabase
       .from("account_assignments")
@@ -2457,6 +2473,10 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Device currently in use.";
     case "session_transition_buffer_active":
       return "Session transition buffer is active on this device.";
+    case "operator_stop_suppressed":
+      return "Stopped by operator — manual restart required.";
+    case "stop_cleanup_in_progress":
+      return "Cleanup in progress. Manual restart will be available after the active operation fully stops.";
     case "invalid_run_type":
       return "Requested run type is not allowed.";
     default:

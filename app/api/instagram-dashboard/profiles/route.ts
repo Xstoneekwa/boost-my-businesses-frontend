@@ -7,6 +7,11 @@ import {
   TOTAL_INTERACTIONS_DEFINITION,
 } from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
+import {
+  getActiveOperatorStopSuppression,
+  getStopCleanupState,
+  operatorStopRunControlProjection,
+} from "@/lib/instagram-dashboard/operator-stop-suppression";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -73,10 +78,13 @@ function activeRunControlProjection(
   activeRun: RecordValue | undefined,
 ) {
   if (!activeRequest && !activeRun) return {};
-  const reason = activeRun ? "already_running" : "already_requested";
+  const cancelRequestedAt = activeRequest ? readString(activeRequest.cancel_requested_at, "") : "";
+  const requestStatus = activeRequest ? readString(activeRequest.status, "") : "";
+  const stopping = Boolean(cancelRequestedAt) || requestStatus.toLowerCase() === "stopping";
+  const reason = stopping ? "stop_cleanup_in_progress" : activeRun ? "already_running" : "already_requested";
   return {
-    runStatus: "running",
-    currentRunStatus: "running",
+    runStatus: stopping ? "stopping" : "running",
+    currentRunStatus: stopping ? "stopping" : "running",
     eligibility: "blocked_now",
     eligibility_status: "blocked_now",
     eligibilityReason: reason,
@@ -84,13 +92,15 @@ function activeRunControlProjection(
     primary_block_reason: reason,
     primaryBlockReason: reason,
     activeRunRequestId: activeRequest ? readString(activeRequest.id, "") : null,
-    activeRunRequestStatus: activeRequest ? readString(activeRequest.status, "") : null,
+    activeRunRequestStatus: stopping ? "stopping" : (activeRequest ? readString(activeRequest.status, "") : null),
     activeRunId: activeRun
       ? readString(activeRun.id, "")
       : activeRequest
         ? readString(activeRequest.run_id, "")
         : null,
-    activeRunStatus: activeRun ? readString(activeRun.status, "") : null,
+    activeRunStatus: stopping ? "stopping" : (activeRun ? readString(activeRun.status, "") : null),
+    runControlPhase: stopping ? "stopping" : null,
+    runControlLabel: stopping ? "Stopping…" : null,
   };
 }
 
@@ -313,7 +323,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
-      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
+      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,cancel_requested_at").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
@@ -363,7 +373,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       if (!id) continue;
       interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
     }
-    return accounts.map((account) => {
+    return Promise.all(accounts.map(async (account) => {
       const id = accountId(account);
       const runtimeSummary = safeSettingsSummary(
         account,
@@ -377,6 +387,28 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       const activeRequest = activeRequestByAccount.get(id);
       const activeRun = activeRunByAccount.get(id);
       const runId = activeRunId(activeRequest, activeRun);
+      let operatorStopProjection = {};
+      try {
+        const [cleanup, suppression] = await Promise.all([
+          getStopCleanupState(supabase as never, id),
+          getActiveOperatorStopSuppression(supabase as never, id),
+        ]);
+        operatorStopProjection = operatorStopRunControlProjection({ cleanup, suppression });
+      } catch {
+        operatorStopProjection = {};
+      }
+      const runtimeProjection = activeRunControlProjection(activeRequest, activeRun);
+      const stopProjection = operatorStopProjection as Record<string, unknown>;
+      const eligibilityOverride = typeof stopProjection.eligibility === "string"
+        ? {
+            eligibility: stopProjection.eligibility,
+            eligibility_status: stopProjection.eligibility,
+            eligibilityReason: readString(stopProjection.eligibilityReason, readString(runtimeProjection.eligibilityReason, "")),
+            eligibility_reason: readString(stopProjection.eligibilityReason, readString(runtimeProjection.eligibility_reason, "")),
+            primary_block_reason: readString(stopProjection.primary_block_reason, readString(runtimeProjection.primary_block_reason, "")),
+            primaryBlockReason: readString(stopProjection.primary_block_reason, readString(runtimeProjection.primaryBlockReason, "")),
+          }
+        : {};
       return {
         ...account,
         ...runtimeSummary,
@@ -387,9 +419,11 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
           interactionEventsByAccount.get(id) ?? [],
         ),
         runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
-        ...activeRunControlProjection(activeRequest, activeRun),
+        ...runtimeProjection,
+        ...operatorStopProjection,
+        ...eligibilityOverride,
       };
-    });
+    }));
   } catch {
     return accounts;
   }
