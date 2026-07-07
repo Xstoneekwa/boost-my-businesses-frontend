@@ -120,7 +120,7 @@ function makeSupabase(overrides: {
         if (table === "auto_restart_device_locks") {
           return makeQueryResult([]);
         }
-        if (table === "app_instances") {
+        if (table === "phone_app_instances") {
           return makeQueryResult([{ id: "app-1", package_name: "com.instagram.android" }]);
         }
         return makeQueryResult([]);

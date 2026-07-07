@@ -241,17 +241,17 @@ async function listDeviceHeartbeats(supabase: SupabaseLike, deviceIds: string[])
 
 async function listAccountUsernames(supabase: SupabaseLike, accountIds: string[]) {
   if (!accountIds.length) return new Map<string, string>();
-  const result = await query(supabase, "client_instagram_accounts")
-    .select("account_id,username")
-    .in("account_id", accountIds)
+  const result = await query(supabase, "ig_accounts")
+    .select("id,username")
+    .in("id", accountIds)
     .limit(accountIds.length) as QueryResult;
   if (result.error) throw new Error(result.error.message || "accounts_unavailable");
-  return new Map(readRows(result.data).map((row) => [readString(row.account_id), readString(row.username)]));
+  return new Map(readRows(result.data).map((row) => [readString(row.id), readString(row.username)]));
 }
 
 async function listAppPackages(supabase: SupabaseLike, appInstanceIds: string[]) {
   if (!appInstanceIds.length) return new Map<string, string>();
-  const result = await query(supabase, "app_instances")
+  const result = await query(supabase, "phone_app_instances")
     .select("id,package_name")
     .in("id", appInstanceIds)
     .limit(appInstanceIds.length) as QueryResult;

@@ -102,10 +102,10 @@ function makeSupabase(overrides: {
         if (table === "account_assignments") {
           return makeQueryResult(overrides.assignments ?? defaultAssignments);
         }
-        if (table === "client_instagram_accounts") {
+        if (table === "ig_accounts") {
           return makeQueryResult((overrides.statuses ?? defaultStatuses).map((row) => ({
-            ...row,
-            username: row.username ?? `user_${readString(row.account_id).slice(-5)}`,
+            id: readString(row.id) || readString(row.account_id),
+            username: row.username ?? `user_${readString(row.account_id ?? row.id).slice(-5)}`,
           })));
         }
         if (table === "account_run_requests") {
@@ -120,7 +120,7 @@ function makeSupabase(overrides: {
         if (table === "device_heartbeats") {
           return makeQueryResult(heartbeats);
         }
-        if (table === "app_instances") {
+        if (table === "phone_app_instances") {
           return makeQueryResult(appInstances);
         }
         if (table === "scheduled_session_preflights") {

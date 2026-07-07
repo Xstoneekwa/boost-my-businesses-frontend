@@ -673,7 +673,7 @@ export async function runScheduleSessionCron(
     const appInstanceId = readString(assignment.app_instance_id);
     const expectedPackage = await (async () => {
       if (!appInstanceId) return "";
-      const result = await query(supabase, "app_instances")
+      const result = await query(supabase, "phone_app_instances")
         .select("package_name")
         .eq("id", appInstanceId)
         .limit(1) as QueryResult;
