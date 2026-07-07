@@ -19,7 +19,7 @@ test("device lock blocks manual start when another session holds the phone", () 
     },
     { accountId: "account-b" },
   );
-  assert.equal(reason, "device_lock_held");
+  assert.equal(reason, "device_lease_unavailable");
 });
 
 test("device lock allows same pending manual request owner", () => {
@@ -51,5 +51,5 @@ test("clone on same phone is blocked by device-level lock", () => {
     },
     { accountId: "account-b", requestId: "req-2" },
   );
-  assert.equal(reason, "device_lock_held");
+  assert.equal(reason, "device_lease_unavailable");
 });

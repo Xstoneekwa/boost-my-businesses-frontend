@@ -172,6 +172,35 @@ export async function POST(request: Request) {
       return jsonError("Run request was not created.", 500);
     }
 
+    const deviceContext =
+      "deviceContext" in eligibility && eligibility.deviceContext
+        ? eligibility.deviceContext
+        : null;
+    if (deviceContext?.deviceId) {
+      const { acquireAndBindDeviceUiLeaseForRequest } = await import("@/lib/instagram-dashboard/device-ui-lease");
+      const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase as never, {
+        deviceId: deviceContext.deviceId,
+        accountId,
+        appInstanceId: deviceContext.appInstanceId,
+        requestId,
+        reason: trigger === "manual" ? "manual_run" : "account_session",
+      });
+      if (!leased.ok) {
+        await supabase.rpc("cancel_account_run_request", {
+          p_request_id: requestId,
+          p_reason: leased.reason,
+        });
+        await insertManualRunAudit(
+          accountId,
+          "manual_run_blocked",
+          "blocked",
+          runStartBlockMessage("device_lease_unavailable"),
+          { reason: leased.reason, request_id: requestId, device_id: deviceContext.deviceId },
+        ).catch(() => undefined);
+        return jsonError(runStartBlockMessage("device_lease_unavailable"), 409, { reason: leased.reason });
+      }
+    }
+
     await insertManualRunAudit(
       accountId,
       "manual_run_requested",

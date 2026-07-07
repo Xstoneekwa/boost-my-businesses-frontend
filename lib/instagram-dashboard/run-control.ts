@@ -127,6 +127,8 @@ export type RunStartBlockReason =
   | "manual_start_allowed_manual_only"
   | "already_running"
   | "already_requested"
+  | "device_lock_held"
+  | "device_lease_unavailable"
   | "invalid_run_type";
 
 const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
@@ -1460,6 +1462,15 @@ export async function evaluateLoginChallengeRunEligibility(
     }
   }
 
+  const assignedDeviceId = readString(assignment.device_id);
+  if (assignedDeviceId) {
+    const { getActiveDeviceSessionLock } = await import("./device-session-lock");
+    const activeLock = await getActiveDeviceSessionLock(supabase, assignedDeviceId);
+    if (activeLock && activeLock.accountId !== accountId) {
+      return { ok: false as const, reason: "device_lease_unavailable" as RunStartBlockReason, health };
+    }
+  }
+
   return {
     ok: true as const,
     health,
@@ -1468,6 +1479,10 @@ export async function evaluateLoginChallengeRunEligibility(
     reason: readString(assignment.schedule_mode, "").toLowerCase() === "manual_only"
       ? "technical_run_allowed_manual_only" as const
       : "technical_run_allowed_outside_campaign_window" as const,
+    deviceContext: {
+      deviceId: readString(assignment.device_id),
+      appInstanceId: readString(assignment.app_instance_id) || null,
+    },
   };
 }
 
@@ -1769,6 +1784,43 @@ export async function createLoginEmailCodeResumeRunRequest({
   const requestRow = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
   const requestId = readString(requestRow?.id, "");
   const requestStatus = readString(requestRow?.status, "queued");
+
+  if (requestId) {
+    const { resolveAccountDeviceContext } = await import("./device-session-lock");
+    const deviceContext = await resolveAccountDeviceContext(supabase, accountId);
+    if (deviceContext?.deviceId) {
+      const { acquireAndBindDeviceUiLeaseForRequest, releaseDeviceUiLeaseForCanceledRequest } = await import("./device-ui-lease");
+      const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, {
+        deviceId: deviceContext.deviceId,
+        accountId,
+        appInstanceId: deviceContext.appInstanceId,
+        requestId,
+        reason: "login_email_code_resume",
+        ownerKind: "login",
+        operationPhase: "queued",
+      });
+      if (!leased.ok) {
+        await supabase.rpc("cancel_account_run_request", {
+          p_request_id: requestId,
+          p_reason: leased.reason,
+        });
+        await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+          deviceId: deviceContext.deviceId,
+          requestId,
+          releaseReason: leased.reason,
+        });
+        return {
+          queued: false,
+          idempotent: false,
+          requestId: null,
+          requestStatus: null,
+          reason: leased.reason,
+          parentRequestId,
+          connectAttemptId,
+        };
+      }
+    }
+  }
 
   return mapResumeRequestResult({
     requestId,
@@ -2194,7 +2246,16 @@ export async function evaluateRunStartEligibility(
     return { ok: false as const, reason: "already_requested" as RunStartBlockReason, health, activeRequest };
   }
 
-  return { ok: true as const, health, normalizedRunType, trigger: normalizedTrigger, followFiltersSummary: safeFollowFiltersSummary };
+  const { resolveAccountDeviceLeaseBlock } = await import("./device-ui-lease");
+  const leaseBlock = await resolveAccountDeviceLeaseBlock(supabase, accountId);
+  if (leaseBlock) {
+    return { ok: false as const, reason: leaseBlock.reason, health, deviceContext: leaseBlock.deviceContext };
+  }
+
+  const { resolveAccountDeviceContext } = await import("./device-session-lock");
+  const deviceContext = await resolveAccountDeviceContext(supabase, accountId);
+
+  return { ok: true as const, health, normalizedRunType, trigger: normalizedTrigger, followFiltersSummary: safeFollowFiltersSummary, deviceContext };
 }
 
 export async function evaluateScheduleStartGate(
@@ -2357,6 +2418,9 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "A run is already active for this account.";
     case "already_requested":
       return "A manual run is already requested for this account.";
+    case "device_lock_held":
+    case "device_lease_unavailable":
+      return "Device currently in use.";
     case "invalid_run_type":
       return "Requested run type is not allowed.";
     default:

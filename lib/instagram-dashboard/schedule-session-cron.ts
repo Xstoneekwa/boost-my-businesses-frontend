@@ -87,6 +87,7 @@ export type ScheduleSessionCronSummary = {
   skipped_active_run_count: number;
   skipped_duplicate_slot_count: number;
   skipped_phone_busy_count: number;
+  skipped_device_lease_unavailable_count: number;
   skipped_emulator_device_count: number;
   skipped_stale_device_count: number;
   skipped_eligibility_count: number;
@@ -159,6 +160,7 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_active_run_count: 0,
     skipped_duplicate_slot_count: 0,
     skipped_phone_busy_count: 0,
+    skipped_device_lease_unavailable_count: 0,
     skipped_emulator_device_count: 0,
     skipped_stale_device_count: 0,
     skipped_eligibility_count: 0,
@@ -422,6 +424,8 @@ async function queueScheduledSession(
     startsAt: string;
     endsAt: string;
     workerId: string;
+    deviceId: string;
+    appInstanceId?: string | null;
     deviceTimezone: string | null;
   },
 ) {
@@ -444,7 +448,28 @@ async function queueScheduledSession(
     },
   });
   if (error) throw new Error(error.message || "schedule_session_enqueue_failed");
-  return data;
+  const requestRow = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  const requestId = readString(requestRow?.id, "");
+  if (!requestId) throw new Error("schedule_session_request_missing");
+
+  const { acquireAndBindDeviceUiLeaseForRequest, releaseDeviceUiLeaseForCanceledRequest } = await import("./device-ui-lease.ts");
+  const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, {
+    deviceId: input.deviceId,
+    accountId: input.accountId,
+    appInstanceId: input.appInstanceId ?? null,
+    requestId,
+    reason: "scheduler_run",
+    ownerKind: "scheduler",
+    operationPhase: "queued",
+  });
+  if (!leased.ok) {
+    await supabase.rpc("cancel_account_run_request", {
+      p_request_id: requestId,
+      p_reason: leased.reason,
+    });
+    throw new Error(leased.reason);
+  }
+  return { requestId };
 }
 
 export type ScheduleSessionEligibilityEvaluator = (
@@ -617,6 +642,13 @@ export async function runScheduleSessionCron(
       continue;
     }
 
+    const { getActiveDeviceSessionLock } = await import("./device-session-lock.ts");
+    const activeDeviceLease = await getActiveDeviceSessionLock(supabase, deviceId);
+    if (activeDeviceLease) {
+      summary.skipped_device_lease_unavailable_count += 1;
+      continue;
+    }
+
     const eligibility = await evaluateEligibility(accountId);
     if (!eligibility.ok) {
       summary.skipped_eligibility_count += 1;
@@ -632,6 +664,8 @@ export async function runScheduleSessionCron(
           startsAt,
           endsAt,
           workerId: env.workerId,
+          deviceId,
+          appInstanceId: readString(assignment.app_instance_id) || null,
           deviceTimezone: readString(device.timezone, "") || null,
         });
       } catch (error) {
@@ -639,6 +673,10 @@ export async function runScheduleSessionCron(
         // a stable reason instead of failing the whole cron pass.
         if (isSchedulerDisabledEnqueueError(error)) {
           summary.skipped_scheduler_disabled_count += 1;
+          continue;
+        }
+        if (error instanceof Error && error.message === "device_lease_unavailable") {
+          summary.skipped_device_lease_unavailable_count += 1;
           continue;
         }
         throw error;

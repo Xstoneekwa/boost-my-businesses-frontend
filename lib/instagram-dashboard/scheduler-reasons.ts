@@ -50,6 +50,7 @@ export const SCHEDULER_REASON_CONTRACT: Record<string, ReasonDescriptor> = {
   device_heartbeat_stale: { label: "phone heartbeat stale", kind: "business" },
   device_unavailable: { label: "phone unavailable", kind: "business" },
   device_lock_held: { label: "phone busy (lock held)", kind: "business" },
+  device_lease_unavailable: { label: "device currently in use", kind: "business" },
   phone_busy: { label: "phone busy", kind: "business" },
   phone_rest_active: { label: "phone rest active", kind: "business" },
 

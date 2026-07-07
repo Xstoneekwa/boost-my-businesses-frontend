@@ -43,8 +43,10 @@ function makeQueryResult(rows: unknown[]) {
     lte: () => query,
     gt: () => query,
     order: () => query,
-    limit: () => Promise.resolve({ data: rows, error: null }),
+    limit: () => query,
     maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
+    then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve({ data: rows, error: null }).then(resolve),
   };
   return query;
 }
@@ -115,12 +117,24 @@ function makeSupabase(overrides: {
         if (table === "ig_runs") {
           return makeQueryResult(overrides.activeRuns ?? []);
         }
+        if (table === "auto_restart_device_locks") {
+          return makeQueryResult([]);
+        }
         return makeQueryResult([]);
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
         if (overrides.rpcError) {
           return Promise.resolve({ data: null, error: overrides.rpcError });
+        }
+        if (name === "auto_restart_acquire_device_lock") {
+          return Promise.resolve({ data: { ok: true, acquired: true, lease_id: "lease-1" }, error: null });
+        }
+        if (name === "auto_restart_bind_device_lock_to_request") {
+          return Promise.resolve({ data: { ok: true, bound: true }, error: null });
+        }
+        if (name === "cancel_account_run_request") {
+          return Promise.resolve({ data: { ok: true }, error: null });
         }
         return Promise.resolve({ data: { id: "request-1", status: "queued" }, error: null });
       },
@@ -168,8 +182,10 @@ test("account in active window queues one scheduled run", async () => {
   assert.equal(run.result.scheduler_enabled, true);
   assert.equal(run.result.summary.eligible_count, 1);
   assert.equal(run.result.summary.queued_count, 1);
-  assert.equal(supabase.rpcCalls.length, 1);
+  assert.equal(supabase.rpcCalls.length, 3);
   assert.equal(supabase.rpcCalls[0]?.name, "create_account_run_request");
+  assert.equal(supabase.rpcCalls[1]?.name, "auto_restart_acquire_device_lock");
+  assert.equal(supabase.rpcCalls[2]?.name, "auto_restart_bind_device_lock_to_request");
   assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "account_session");
   assert.equal((supabase.rpcCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
 });

@@ -15,7 +15,14 @@ type QueryBuilder = {
   maybeSingle: () => Promise<{ data?: unknown; error?: { message?: string } | null }>;
 };
 
-export type DeviceSessionLockReason = "auto_restart" | "manual_run" | "account_session";
+export type DeviceSessionLockReason =
+  | "auto_restart"
+  | "manual_run"
+  | "account_session"
+  | "scheduler_run"
+  | "login_provisioning"
+  | "login_email_code_resume"
+  | "login_orphan_challenge_recovery";
 
 export type ActiveDeviceSessionLock = {
   deviceId: string;
@@ -25,6 +32,10 @@ export type ActiveDeviceSessionLock = {
   requestId: string | null;
   reason: string;
   leaseExpiresAt: string;
+  leaseId?: string | null;
+  ownerKind?: string | null;
+  operationPhase?: string | null;
+  heartbeatAt?: string | null;
 };
 
 function readString(value: unknown, fallback = "") {
@@ -69,7 +80,7 @@ export async function getActiveDeviceSessionLock(
 ): Promise<ActiveDeviceSessionLock | null> {
   const nowIso = new Date().toISOString();
   const result = await query(supabase, "auto_restart_device_locks")
-    .select("device_id,worker_id,account_id,app_instance_id,request_id,reason,lease_expires_at")
+    .select("device_id,worker_id,account_id,app_instance_id,request_id,reason,lease_expires_at,lease_id,owner_kind,operation_phase,heartbeat_at")
     .eq("device_id", deviceId)
     .limit(1)
     .maybeSingle();
@@ -85,6 +96,10 @@ export async function getActiveDeviceSessionLock(
     requestId: readString(row.request_id) || null,
     reason: readString(row.reason, "device_session"),
     leaseExpiresAt: lease,
+    leaseId: readString(row.lease_id) || null,
+    ownerKind: readString(row.owner_kind) || null,
+    operationPhase: readString(row.operation_phase) || null,
+    heartbeatAt: readString(row.heartbeat_at) || null,
   };
 }
 
@@ -101,7 +116,7 @@ export function deviceSessionLockBlocksStart(
   if (input.workerId && lock.workerId === input.workerId && input.accountId && lock.accountId === input.accountId) {
     return null;
   }
-  return "device_lock_held" as const;
+  return "device_lease_unavailable" as const;
 }
 
 export async function acquireDeviceSessionLock(
@@ -113,6 +128,8 @@ export async function acquireDeviceSessionLock(
     appInstanceId?: string | null;
     leaseSeconds: number;
     reason: DeviceSessionLockReason;
+    ownerKind?: string;
+    operationPhase?: string;
   },
 ) {
   const { data, error } = await supabase.rpc("auto_restart_acquire_device_lock", {
@@ -122,13 +139,23 @@ export async function acquireDeviceSessionLock(
     p_app_instance_id: input.appInstanceId ?? null,
     p_lease_seconds: input.leaseSeconds,
     p_reason: input.reason,
+    p_owner_kind: input.ownerKind ?? "worker",
+    p_operation_phase: input.operationPhase ?? "executing",
   });
   if (error) throw new Error(error.message || "device_lock_failed");
   const payload = (data ?? {}) as Record<string, unknown>;
   if (!readBoolean(payload.ok) || !readBoolean(payload.acquired)) {
-    return { ok: false as const, reason: readString(payload.reason, "device_lock_held") };
+    return {
+      ok: false as const,
+      reason: readString(payload.reason, "device_lease_unavailable"),
+      leaseId: readString(payload.lease_id) || null,
+    };
   }
-  return { ok: true as const, reason: "" };
+  return {
+    ok: true as const,
+    reason: "",
+    leaseId: readString(payload.lease_id) || null,
+  };
 }
 
 export async function bindDeviceSessionLockToRequest(
@@ -151,11 +178,12 @@ export async function bindDeviceSessionLockToRequest(
 
 export async function releaseDeviceSessionLock(
   supabase: SupabaseLike,
-  input: { deviceId: string; workerId: string; requestId?: string | null },
+  input: { deviceId: string; workerId: string; requestId?: string | null; releaseReason?: string },
 ) {
   const params: Record<string, unknown> = {
     p_device_id: input.deviceId,
     p_worker_id: input.workerId,
+    p_release_reason: input.releaseReason ?? "terminal",
   };
   if (input.requestId) params.p_request_id = input.requestId;
   const { data, error } = await supabase.rpc("auto_restart_release_device_lock", params);

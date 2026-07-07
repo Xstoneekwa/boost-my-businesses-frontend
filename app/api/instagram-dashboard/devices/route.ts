@@ -180,6 +180,12 @@ export function safePhoneDevice(row: SupabaseRecord, appInstances: AppInstanceRo
     phone_wide_availability: availableCount > 0 && readString(row.status, "unknown") === "available" ? "available" : "limited",
     next_window_label: "Next valid schedule slot selected on create",
     notes: "",
+    ui_lease_status: readString(row.ui_lease_status, "available") || "available",
+    ui_lease_operator_label: readString(row.ui_lease_operator_label, "Device available") || "Device available",
+    ui_lease_current_operation: readString(row.ui_lease_current_operation, "") || null,
+    ui_lease_owner_kind: readString(row.ui_lease_owner_kind, "") || null,
+    ui_lease_age_seconds: readNumber(row.ui_lease_age_seconds, 0) || null,
+    ui_lease_expires_at: readString(row.ui_lease_expires_at, "") || null,
     ...heartbeatProjection(heartbeat),
   };
 }
@@ -195,7 +201,7 @@ async function requireRelayOrAdmin(request: Request) {
 
 export async function getDashboardDevices() {
   const supabase = createSupabaseClient();
-  const [{ data: phones, error: phoneError }, { data: appInstances, error: appError }, { data: heartbeats }, { data: assignments }] = await Promise.all([
+  const [{ data: phones, error: phoneError }, { data: appInstances, error: appError }, { data: heartbeats }, { data: assignments }, { data: deviceLocks }] = await Promise.all([
       supabase
         .from("phone_devices")
         .select("id,device_kind,name,device_name,adb_serial,host_machine,pool_type,max_clones,status,timezone,updated_at")
@@ -213,6 +219,10 @@ export async function getDashboardDevices() {
         .from("account_assignments")
         .select("id,account_id,device_id,app_instance_id,status,schedule_mode,ig_accounts(username,status)")
         .in("status", ["pending", "reserved", "active"]),
+      supabase
+        .from("auto_restart_device_locks")
+        .select("device_id,account_id,reason,owner_kind,heartbeat_at,lease_expires_at,request_id")
+        .limit(500),
   ]);
 
   if (phoneError || appError) {
@@ -222,13 +232,39 @@ export async function getDashboardDevices() {
   const heartbeatByDevice = new Map(
     ((heartbeats ?? []) as HeartbeatRow[]).map((row) => [readString(row.device_id, ""), row]),
   );
+  const nowIso = new Date().toISOString();
+  const leaseByDevice = new Map(
+    ((deviceLocks ?? []) as SupabaseRecord[])
+      .filter((row) => {
+        const lease = readString(row.lease_expires_at, "");
+        return lease && lease > nowIso;
+      })
+      .map((row) => [readString(row.device_id, ""), row]),
+  );
   const devices = ((phones ?? []) as SupabaseRecord[])
-    .map((phone) => safePhoneDevice(
-      phone,
-      (appInstances ?? []) as AppInstanceRow[],
-      heartbeatByDevice.get(readString(phone.id, "")),
-      (assignments ?? []) as unknown as AssignmentRow[],
-    ))
+    .map((phone) => {
+      const deviceId = readString(phone.id, "");
+      const lease = leaseByDevice.get(deviceId);
+      const heartbeatAt = readString(lease?.heartbeat_at, "");
+      const heartbeatMs = heartbeatAt ? Date.parse(heartbeatAt) : Number.NaN;
+      const ageSeconds = Number.isFinite(heartbeatMs)
+        ? Math.max(0, Math.round((Date.now() - heartbeatMs) / 1000))
+        : null;
+      return safePhoneDevice(
+        {
+          ...phone,
+          ui_lease_status: lease ? "active" : "available",
+          ui_lease_operator_label: lease ? "Device currently in use" : "Device available",
+          ui_lease_current_operation: lease ? readString(lease.reason, "ui_operation").replace(/_/g, " ") : null,
+          ui_lease_owner_kind: readString(lease?.owner_kind, "") || null,
+          ui_lease_age_seconds: ageSeconds,
+          ui_lease_expires_at: readString(lease?.lease_expires_at, "") || null,
+        },
+        (appInstances ?? []) as AppInstanceRow[],
+        heartbeatByDevice.get(deviceId),
+        (assignments ?? []) as unknown as AssignmentRow[],
+      );
+    })
     .filter((phone) => phone.id);
   return devices.length ? devices : [localDevice];
 }

@@ -835,13 +835,8 @@ async function processHumanConfirmedResumes(
         deviceId = readString(plan.device_id) || null;
       }
 
-      // Atomic consumption BEFORE request creation: 1 click -> max 1 resume.
-      const claimed = await claimAuthorizationAtomically(supabase, authorizationId, now);
-      if (!claimed) {
-        await blockResume("resume_authorization_consumed");
-        continue;
-      }
-
+      // CP3: acquire phone UI lease BEFORE consuming the armed authorization.
+      // If the device is busy, keep the authorization armed for a later tick.
       if (deviceId) {
         const deviceLock = await acquireDeviceLock(supabase, {
           deviceId,
@@ -851,14 +846,19 @@ async function processHumanConfirmedResumes(
           leaseSeconds: input.leaseSeconds,
         });
         if (!deviceLock.ok) {
-          // Consumed but not creatable: stable terminal outcome, no loop.
-          await bindAuthorizationToRequest(supabase, authorizationId, null, deviceLock.reason);
-          await updateIncidentRecoveryState(supabase, incidentId, "reintervention_required", {
-            consume_error: deviceLock.reason,
-          });
-          await blockResume(deviceLock.reason);
+          await blockResume(deviceLock.reason || "device_lease_unavailable");
           continue;
         }
+      }
+
+      // Atomic consumption AFTER lease acquisition: 1 click -> max 1 resume.
+      const claimed = await claimAuthorizationAtomically(supabase, authorizationId, now);
+      if (!claimed) {
+        if (deviceId) {
+          await releaseDeviceLock(supabase, deviceId, input.workerId);
+        }
+        await blockResume("resume_authorization_consumed");
+        continue;
       }
 
       try {

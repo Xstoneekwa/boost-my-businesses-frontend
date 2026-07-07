@@ -211,6 +211,42 @@ Source de donnees:
 - `lib/instagram-dashboard/incident-resume-authorization.ts` (éligibilité,
   armement, consommation atomique côté tick).
 
+### Device UI lease (CP3)
+
+**Règle produit :** 1 téléphone physique = 1 seule opération UI active à la
+fois (tous clones confondus).
+
+Flows soumis au lease canonique (`auto_restart_device_locks` / RPC
+`acquire_device_ui_lease`) :
+
+- Scheduler cold start (`schedule-session-cron`) ;
+- Auto Restart tick + reprise P3 humaine ;
+- Play / Start manuel (`runs/start`) ;
+- Auto Login / `login_provisioning` ;
+- `login_email_code_resume` ;
+- `login_orphan_challenge_recovery`.
+
+**Ne prennent pas de lease :** lecture dashboard, heartbeat passif, notifier,
+scrcpy passive, affichage Admin/BotApp.
+
+**Reason stable :** `device_lease_unavailable` — libellé opérateur anglais :
+`Device currently in use`.
+
+**Pas de préemption :** un second flux est refusé ; le run en cours n'est
+jamais arrêté automatiquement. P3 : l'autorisation armée n'est consommée que
+si le lease est obtenu.
+
+**Release :** terminal run/request, cancel avant worker, expiration stale
+(`reconcile_stale_device_ui_leases`). Stop opérateur conserve le lease jusqu'au
+terminal réel (CP5 traitera `operator_stop_suppressed`).
+
+**Observabilité Admin :** Devices API expose `ui_lease_status`,
+`ui_lease_operator_label`, `ui_lease_current_operation`. Profiles relay projette
+`runtimeLock: device_level_lock` quand le téléphone assigné est leased.
+
+**Hors scope CP3 :** buffer T-10, provisioning slots CP6, popup classifier,
+`operator_stop_suppressed`.
+
 ### Server Check
 
 Route: `/instagram-dashboard/server-check`

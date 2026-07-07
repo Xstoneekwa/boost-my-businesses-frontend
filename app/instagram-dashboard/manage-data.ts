@@ -89,6 +89,7 @@ export type ManageAccount = {
   usernameVerificationReason?: string | null;
   orphanRecoveryState?: string | null;
   orphanRecoveryBotappActionAvailable?: boolean;
+  runtimeLock?: "none" | "device_level_lock" | "assignment_reserved";
   sourceLabel: string;
   archivedAt: string | null;
   trashedAt: string | null;
@@ -609,17 +610,26 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
       ...assignments.map((row) => readString(row, ["app_instance_id"], "")),
       ...currentAppInstances.map((row) => readString(row, ["id"], "")),
     ].filter(Boolean))];
-    const [devicesResult, appInstancesResult] = await Promise.all([
+    const [devicesResult, appInstancesResult, deviceLocksResult] = await Promise.all([
       deviceIds.length
         ? supabase.from("phone_devices").select("id,name,device_name,status,timezone").in("id", deviceIds)
         : Promise.resolve({ data: [], error: null }),
       appInstanceIds.length
         ? supabase.from("phone_app_instances").select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id").in("id", appInstanceIds)
         : Promise.resolve({ data: [], error: null }),
+      supabase.from("auto_restart_device_locks").select("device_id,account_id,reason,lease_expires_at").limit(500),
     ]);
 
     if (devicesResult.error || appInstancesResult.error) {
       return { ...overview, errors: ["Phone assignment projection unavailable.", ...overview.errors] };
+    }
+
+    const nowIso = new Date().toISOString();
+    const activeDeviceLocks = new Map<string, SupabaseRecord>();
+    for (const row of ((deviceLocksResult.data ?? []) as SupabaseRecord[])) {
+      const deviceId = readString(row, ["device_id"], "");
+      const lease = readString(row, ["lease_expires_at"], "");
+      if (deviceId && lease && lease > nowIso) activeDeviceLocks.set(deviceId, row);
     }
 
     const deviceById = new Map(((devicesResult.data ?? []) as SupabaseRecord[]).map((row) => [readString(row, ["id"], ""), row]));
@@ -688,6 +698,12 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         timezone,
         hasAssignment: Boolean(assignment),
       });
+      const activeLock = assignedDeviceId ? activeDeviceLocks.get(assignedDeviceId) : undefined;
+      const lockAccountId = readString(activeLock, ["account_id"], "");
+      const runtimeLock = activeLock
+        ? (lockAccountId && lockAccountId !== account.accountId ? "device_level_lock" : "device_level_lock")
+        : "none";
+      const leaseBlockedByOtherAccount = Boolean(activeLock && lockAccountId && lockAccountId !== account.accountId);
 
       return {
         ...account,
@@ -719,6 +735,8 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         appInstanceStatus: readString(appInstance, ["status"], account.appInstanceStatus ?? "") || account.appInstanceStatus || null,
         appInstanceLaunchable: readNullableBoolean(appInstance, ["is_launchable"]) ?? account.appInstanceLaunchable ?? null,
         appInstanceUsableForAutoLogin: readNullableBoolean(appInstance, ["usable_for_auto_login"]) ?? account.appInstanceUsableForAutoLogin ?? null,
+        runtimeLock,
+        primaryBlockReason: leaseBlockedByOtherAccount ? "device_lease_unavailable" : account.primaryBlockReason ?? null,
       };
     };
 

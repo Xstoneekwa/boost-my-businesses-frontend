@@ -77,6 +77,15 @@ export async function cancelPendingAutoRestartRequests(
       p_reason: "auto_restart_disabled_before_claim",
     });
     if (!error) canceled.push(requestId);
+    const assignmentDeviceId = readString(metadata.device_id);
+    if (assignmentDeviceId) {
+      const { releaseDeviceUiLeaseForCanceledRequest } = await import("./device-ui-lease");
+      await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+        deviceId: assignmentDeviceId,
+        requestId,
+        releaseReason: "auto_restart_disabled_before_claim",
+      }).catch(() => undefined);
+    }
     await query(supabase, "auto_restart_decisions").insert({
       request_id: input.requestId,
       idempotency_key: `auto-restart-disable:${requestId}`,
