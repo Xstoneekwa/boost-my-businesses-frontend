@@ -256,7 +256,7 @@ export async function resolveAccountDeviceLeaseBlock(
     return null;
   }
   return {
-    reason: DEVICE_LEASE_UNAVAILABLE as const,
+    reason: DEVICE_LEASE_UNAVAILABLE,
     operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
     deviceId: deviceContext.deviceId,
     deviceContext,

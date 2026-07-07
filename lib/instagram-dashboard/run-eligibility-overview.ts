@@ -88,10 +88,13 @@ export async function buildRunEligibilityOverview(
   const accounts = await mapWithConcurrency(activeAccounts, concurrency, async (account) => {
     const eligibility = await evaluateRunStartEligibility(account.accountId, requestedRunType, { trigger: "manual" });
     const readinessStatus = account.readinessProjection?.overall_readiness_status ?? "unknown";
-    const readyReason = eligibility.ok && "reason" in eligibility ? eligibility.reason : "ready";
+    const readyReason = eligibility.ok && "reason" in eligibility && typeof eligibility.reason === "string"
+      ? eligibility.reason
+      : "ready";
     const technicalReady =
       readyReason === "technical_run_allowed_outside_campaign_window" ||
       readyReason === "technical_run_allowed_manual_only";
+    const blockReason = !eligibility.ok ? eligibility.reason : null;
     const message = eligibility.ok
       ? technicalReady
         ? "Technical account run is ready now."
@@ -103,14 +106,14 @@ export async function buildRunEligibilityOverview(
       readiness_status: readinessStatus,
       eligibility_status: eligibility.ok ? "ready" : "blocked",
       play_enabled: eligibility.ok === true,
-      reason: eligibility.ok ? readyReason : eligibility.reason,
-      primary_block_reason: eligibility.ok ? null : eligibility.reason,
+      reason: eligibility.ok ? readyReason : (blockReason ?? "eligibility_query_failed"),
+      primary_block_reason: eligibility.ok ? null : (blockReason ?? "eligibility_query_failed"),
       reason_label: eligibility.ok ? "Ready" : message,
       reason_description: eligibility.ok
         ? technicalReady
           ? "Technical account run is allowed without a campaign schedule window."
           : "Account settings and run eligibility are ready for this manual run."
-        : runStartBlockDescription(eligibility.reason),
+        : runStartBlockDescription(blockReason ?? "eligibility_query_failed"),
       message,
     } satisfies RunEligibilityOverviewItem;
   });
