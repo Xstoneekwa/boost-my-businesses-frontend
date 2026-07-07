@@ -6,8 +6,14 @@ import { createSupabaseClient } from "@/lib/supabase";
 import {
   buildIncidentCounters,
   buildIncidentList,
+  mapIncidentRow,
   type IncidentViewModel,
 } from "@/lib/instagram-dashboard/incident-operations";
+import {
+  evaluateReadyToResume,
+  type RecoveryView,
+} from "@/lib/instagram-dashboard/incident-resume-authorization";
+import { ReadyToResumeButton } from "./ReadyToResumeButton";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +34,37 @@ function stateLabel(state: IncidentViewModel["displayState"]) {
   if (state === "resolved") return "Résolu";
   if (state === "acknowledged") return "Acknowledged";
   if (state === "ignored") return "Ignored";
-  // P3 recovery states (read-only in Admin; actions live in BotApp).
-  if (state === "ready_to_resume") return "Prêt à relancer";
+  // P3 recovery states. "Prêt à relancer" is reserved for the BUTTON on an
+  // eligible, not-yet-armed incident; the armed state reads unambiguously.
+  if (state === "ready_to_resume") return "Reprise autorisée — en attente du prochain tick";
   if (state === "resume_requested") return "Reprise demandée";
   if (state === "reintervention_required") return "Nouvelle intervention requise";
   return "Open";
+}
+
+/** Stable, safe operator copy for recovery refusal reasons (CP1 codes). */
+const RECOVERY_REASON_COPY: Record<string, string> = {
+  awaiting_next_scheduler_tick: "Autorisation armée — en attente du prochain tick Auto Restart.",
+  resume_window_closed: "Fenêtre de session fermée — aucune reprise armable.",
+  resume_authorization_expired: "Fenêtre expirée — l'autorisation de reprise a expiré.",
+  resume_authorization_already_armed: "Une autorisation de reprise est déjà armée.",
+  resume_retry_window_exhausted: "Budget de reprise déjà consommé pour cette fenêtre.",
+  resume_plan_missing: "Aucun resume plan pour ce run (run antérieur à P3).",
+  resume_plan_not_recoverable: "Incident non récupérable automatiquement — résolution simple.",
+  incident_not_active: "Incident déjà résolu ou ignoré.",
+};
+
+function recoveryReasonLabel(reason: string | null): string | null {
+  if (!reason) return null;
+  return RECOVERY_REASON_COPY[reason] ?? reason;
+}
+
+function authorizationLabel(status: string | null): string | null {
+  if (!status) return null;
+  if (status === "armed") return "Armée — en attente du prochain tick";
+  if (status === "consumed") return "Autorisation consommée";
+  if (status === "expired") return "Fenêtre expirée";
+  return status;
 }
 
 function formatWindow(start: string | null, end: string | null) {
@@ -47,13 +79,57 @@ function deliveryLabel(state: IncidentViewModel["deliveryState"]) {
   return "Not notified";
 }
 
-async function loadIncidents(includeTest: boolean) {
+const INCIDENT_SELECT =
+  "id,status,severity,incident_type,reason,failure_reason,action_required,admin_message,account_id,account_username,run_id,occurrence_count,first_seen_at,last_seen_at,resolved_at,source,metadata";
+
+interface FocusedIncident {
+  model: IncidentViewModel;
+  recovery: RecoveryView;
+}
+
+/**
+ * P3.1 deep-link: load ONE incident explicitly by id (Slack/Discord link),
+ * even when it is metadata.test=true, with its server-evaluated recovery view.
+ */
+async function loadFocusedIncident(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  incidentId: string,
+): Promise<FocusedIncident | null> {
+  const { data: incidentRow, error } = await supabase
+    .from("account_incidents")
+    .select(INCIDENT_SELECT)
+    .eq("id", incidentId)
+    .maybeSingle();
+  if (error || !incidentRow) return null;
+  const { data: outboxRows } = await supabase
+    .from("account_incident_notifications")
+    .select("incident_id,channel,status,attempt_count,delivered_at,last_error")
+    .eq("incident_id", incidentId);
+  const model = mapIncidentRow(incidentRow, outboxRows ?? []);
+  let recovery: RecoveryView;
+  try {
+    recovery = await evaluateReadyToResume(supabase, incidentRow as Record<string, unknown>);
+  } catch {
+    recovery = {
+      state: "none",
+      eligible: false,
+      reason: "recovery_state_unavailable",
+      windowStart: null,
+      windowEnd: null,
+      windowActive: false,
+      resumePlanId: null,
+      authorizationId: null,
+      authorizationStatus: null,
+    };
+  }
+  return { model, recovery };
+}
+
+async function loadIncidents(includeTest: boolean, focusedIncidentId: string) {
   const supabase = createSupabaseClient();
   const { data: incidentRows, error } = await supabase
     .from("account_incidents")
-    .select(
-      "id,status,severity,incident_type,reason,failure_reason,action_required,admin_message,account_id,account_username,run_id,occurrence_count,first_seen_at,last_seen_at,resolved_at,source,metadata",
-    )
+    .select(INCIDENT_SELECT)
     .order("last_seen_at", { ascending: false })
     .limit(100);
   if (error) {
@@ -61,6 +137,7 @@ async function loadIncidents(includeTest: boolean) {
       models: [] as IncidentViewModel[],
       counters: buildIncidentCounters([]),
       windows: new Map<string, { start: string | null; end: string | null }>(),
+      focused: null as FocusedIncident | null,
       error: error.message,
     };
   }
@@ -73,10 +150,19 @@ async function loadIncidents(includeTest: boolean) {
       .in("incident_id", incidentIds);
     notificationRows = outboxRows ?? [];
   }
-  const models = buildIncidentList(incidentRows ?? [], notificationRows, { includeTest });
+  let models = buildIncidentList(incidentRows ?? [], notificationRows, { includeTest });
   const counters = buildIncidentCounters(
     buildIncidentList(incidentRows ?? [], notificationRows, { includeTest: true }),
   );
+
+  // Deep-link target: loaded explicitly, shown even when test incidents are
+  // hidden by the default filter, and force-included in the list.
+  const focused = focusedIncidentId
+    ? await loadFocusedIncident(supabase, focusedIncidentId)
+    : null;
+  if (focused && !models.some((m) => m.id === focused.model.id)) {
+    models = [focused.model, ...models];
+  }
 
   // P3: resume windows per incident run (read-only recovery context).
   const runIds = models.map((m) => m.runId).filter((id): id is string => Boolean(id));
@@ -95,7 +181,7 @@ async function loadIncidents(includeTest: boolean) {
       });
     }
   }
-  return { models, counters, windows, error: null as string | null };
+  return { models, counters, windows, focused, error: null as string | null };
 }
 
 export default async function InstagramIncidentsPage({
@@ -110,7 +196,12 @@ export default async function InstagramIncidentsPage({
 
   const params = (await searchParams) ?? {};
   const includeTest = params.include_test === "1";
-  const { models, counters, windows, error } = await loadIncidents(includeTest);
+  const focusedIncidentId =
+    typeof params.incident_id === "string" ? params.incident_id.trim() : "";
+  const { models, counters, windows, focused, error } = await loadIncidents(
+    includeTest,
+    focusedIncidentId,
+  );
 
   return (
     <main className="dashboard-page ig-incidents-page">
@@ -146,6 +237,69 @@ export default async function InstagramIncidentsPage({
         </section>
       ) : null}
 
+      {focusedIncidentId && !focused && !error ? (
+        <section className="ig-inc-alert" role="alert">
+          <strong>Incident introuvable</strong>
+          <span>Aucun incident avec l&apos;id {focusedIncidentId}.</span>
+        </section>
+      ) : null}
+
+      {focused ? (
+        <section className="ig-inc-focused" data-testid="incident-focused-detail">
+          <div className="ig-inc-row-head">
+            <span className={`ig-inc-badge ig-inc-badge-${focused.model.displayState}`}>
+              {stateLabel(focused.model.displayState)}
+            </span>
+            <span className={`ig-inc-severity ig-inc-severity-${focused.model.severity}`}>
+              {focused.model.severity}
+            </span>
+            {focused.model.isTest ? <span className="ig-inc-test-badge">TEST</span> : null}
+            <span className="ig-inc-time">{formatDateTime(focused.model.lastSeenAt)}</span>
+          </div>
+          <div className="ig-inc-row-main">
+            <strong>{focused.model.operatorLabel}</strong>
+            <code>{focused.model.reasonCode}</code>
+          </div>
+          {focused.model.adminMessage ? (
+            <p className="ig-inc-focused-message">{focused.model.adminMessage}</p>
+          ) : null}
+          <div className="ig-inc-row-meta">
+            <span>@{focused.model.accountUsername || focused.model.accountId || "internal"}</span>
+            <span>{focused.model.incidentType}</span>
+            {focused.model.runId ? (
+              <span title={focused.model.runId}>run {focused.model.runId.slice(0, 8)}…</span>
+            ) : null}
+          </div>
+          <div className="ig-inc-focused-recovery">
+            <h3>Reprise contrôlée</h3>
+            <dl>
+              <div>
+                <dt>Fenêtre de reprise</dt>
+                <dd>
+                  {focused.recovery.windowStart || focused.recovery.windowEnd
+                    ? `${formatWindow(focused.recovery.windowStart, focused.recovery.windowEnd)}${focused.recovery.windowActive ? " (active)" : " (fermée)"}`
+                    : "—"}
+                </dd>
+              </div>
+              {focused.recovery.authorizationStatus ? (
+                <div>
+                  <dt>Autorisation</dt>
+                  <dd>{authorizationLabel(focused.recovery.authorizationStatus)}</dd>
+                </div>
+              ) : null}
+            </dl>
+            {focused.recovery.eligible ? (
+              <ReadyToResumeButton incidentId={focused.model.id} />
+            ) : (
+              <p className="ig-inc-focused-reason">
+                {recoveryReasonLabel(focused.recovery.reason)
+                  ?? "Aucune action de reprise disponible pour cet incident."}
+              </p>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       {models.length === 0 && !error ? (
         <section className="ig-inc-empty">
           No incidents{includeTest ? "" : " (test incidents hidden)"}.
@@ -154,7 +308,11 @@ export default async function InstagramIncidentsPage({
 
       <ul className="ig-inc-list">
         {models.map((incident) => (
-          <li key={incident.id} className={`ig-inc-row ig-inc-state-${incident.displayState}`}>
+          <li
+            key={incident.id}
+            id={`incident-${incident.id}`}
+            className={`ig-inc-row ig-inc-state-${incident.displayState}${incident.id === focusedIncidentId ? " ig-inc-row-focused" : ""}`}
+          >
             <div className="ig-inc-row-head">
               <span className={`ig-inc-badge ig-inc-badge-${incident.displayState}`}>
                 {stateLabel(incident.displayState)}
@@ -207,9 +365,25 @@ export default async function InstagramIncidentsPage({
 
       <footer className="ig-inc-footer">
         {includeTest ? (
-          <Link href="/instagram-dashboard/incidents">Hide test incidents</Link>
+          <Link
+            href={
+              focusedIncidentId
+                ? `/instagram-dashboard/incidents?incident_id=${encodeURIComponent(focusedIncidentId)}`
+                : "/instagram-dashboard/incidents"
+            }
+          >
+            Hide test incidents
+          </Link>
         ) : (
-          <Link href="/instagram-dashboard/incidents?include_test=1">Show test incidents</Link>
+          <Link
+            href={
+              focusedIncidentId
+                ? `/instagram-dashboard/incidents?include_test=1&incident_id=${encodeURIComponent(focusedIncidentId)}`
+                : "/instagram-dashboard/incidents?include_test=1"
+            }
+          >
+            Show test incidents
+          </Link>
         )}
       </footer>
 
@@ -301,13 +475,79 @@ export default async function InstagramIncidentsPage({
         .ig-inc-badge-resolved { background: rgba(34,197,94,.16); color: #86efac; }
         .ig-inc-badge-acknowledged { background: rgba(250,204,21,.14); color: #fde68a; }
         .ig-inc-badge-ignored { background: rgba(148,163,184,.16); color: #cbd5e1; }
-        .ig-inc-badge-ready_to_resume { background: rgba(45,212,191,.16); color: #5eead4; }
+        .ig-inc-badge-ready_to_resume { background: rgba(45,212,191,.16); color: #5eead4; text-transform: none; }
         .ig-inc-badge-resume_requested { background: rgba(59,130,246,.18); color: #93c5fd; }
         .ig-inc-badge-reintervention_required { background: rgba(248,113,113,.2); color: #fca5a5; }
         .ig-inc-recovery {
           margin: 0;
           color: #5eead4;
           font-size: 12.5px;
+        }
+        .ig-inc-focused {
+          margin-bottom: 18px;
+          padding: 14px 16px;
+          border: 1px solid rgba(45,212,191,.45);
+          border-radius: 12px;
+          background: rgba(45,212,191,.06);
+          display: grid;
+          gap: 8px;
+        }
+        .ig-inc-focused-message {
+          margin: 0;
+          color: #cbd5e1;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+        .ig-inc-focused-recovery {
+          border-top: 1px solid rgba(255,255,255,.08);
+          padding-top: 10px;
+        }
+        .ig-inc-focused-recovery h3 {
+          margin: 0 0 8px;
+          color: #5eead4;
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: .05em;
+          text-transform: uppercase;
+        }
+        .ig-inc-focused-recovery dl {
+          margin: 0 0 10px;
+          display: grid;
+          gap: 6px;
+        }
+        .ig-inc-focused-recovery dt {
+          color: #8a8f98;
+          font-size: 11px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: .05em;
+        }
+        .ig-inc-focused-recovery dd {
+          margin: 2px 0 0;
+          color: #f8fafc;
+          font-size: 13px;
+        }
+        .ig-inc-focused-reason {
+          margin: 0;
+          color: #fdba74;
+          font-size: 13px;
+        }
+        .ig-inc-ready-wrap { display: inline-flex; align-items: center; gap: 10px; }
+        .ig-inc-ready-btn {
+          padding: 8px 16px;
+          border: none;
+          border-radius: 8px;
+          background: #2dd4bf;
+          color: #042f2e;
+          font-size: 13px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .ig-inc-ready-btn:disabled { opacity: .6; cursor: wait; }
+        .ig-inc-ready-refusal { color: #fca5a5; font-size: 12px; }
+        .ig-inc-row-focused {
+          border-color: rgba(45,212,191,.55);
+          box-shadow: 0 0 0 1px rgba(45,212,191,.35);
         }
         .ig-inc-severity {
           font-size: 11px;

@@ -148,6 +148,57 @@ Ne pas casser:
 - Les redactions de logs.
 - Les signaux de risque qui alimentent Credentials/Actions.
 
+### Incidents (P2/P3/P3.1)
+
+Route: `/instagram-dashboard/incidents`
+
+Objectif:
+
+- Vue interne des incidents runtime canoniques (`account_incidents`) avec
+  raisons stables, compteurs opérationnels et workflow de reprise contrôlée
+  (P3).
+
+Deep-link depuis Slack/Discord (P3.1):
+
+```text
+/instagram-dashboard/incidents?incident_id=<uuid>
+```
+
+- Authentification Admin normale requise.
+- Charge explicitement l'incident cible, même si `metadata.test=true`
+  (les incidents test restent masqués dans la liste par défaut).
+- Ouvre un panneau détail « Reprise contrôlée » en tête de page et surligne
+  la ligne correspondante.
+- Le lien de notification Slack/Discord inclut déjà `incident_id`.
+
+États recovery visibles:
+
+| État | Libellé Admin |
+|------|---------------|
+| Éligible, non armé | bouton **Prêt à relancer** (action status-only) |
+| Autorisation armée | **Reprise autorisée — en attente du prochain tick** |
+| Reprise en cours | **Reprise demandée** |
+| Échec / budget consommé | **Nouvelle intervention requise** |
+| Fenêtre fermée | reason stable affichée (ex. `resume_window_closed`) |
+
+Règles:
+
+- Le bouton **Prêt à relancer** arme une autorisation durable ; il ne crée
+  **jamais** de run, ne force jamais un tick, ne contacte jamais le worker.
+- Seul le tick Auto Restart canonique consomme l'autorisation (Scheduler ON).
+- **Scheduler OFF bloque toujours** toute reprise automatique : l'autorisation
+  peut être armée et visualisée, mais aucune request n'est créée tant que le
+  Scheduler reste désactivé.
+- Les incidents `test=true` sont exclus des compteurs opérationnels par défaut ;
+  toggle « Show test incidents » ou deep-link explicite pour les visualiser.
+
+Source de donnees:
+
+- `app/instagram-dashboard/incidents/page.tsx` (liste + deep-link P3.1).
+- `app/api/instagram-dashboard/incidents/*` (API relay/admin).
+- `lib/instagram-dashboard/incident-resume-authorization.ts` (éligibilité,
+  armement, consommation atomique côté tick).
+
 ### Server Check
 
 Route: `/instagram-dashboard/server-check`
