@@ -58,6 +58,14 @@ export type SchedulerDailyEngine = {
   state: "technical_disabled" | "dry_run" | "scheduler_disabled" | "active";
 };
 
+/** CP3 — BotApp scheduler runtime gate used by schedule-session cron. */
+export type SchedulerDailyRuntimeGate = {
+  scheduler_connected: boolean;
+  status: string;
+  heartbeat_age_seconds: number | null;
+  reason: string;
+};
+
 /**
  * CP2 — derived daily occurrence of a `scheduled` account inside the 48h
  * horizon. Pure projection of the durable Schedule (single open assignment
@@ -106,6 +114,7 @@ export type SchedulerStatus = {
   recent_decisions: SchedulerRecentDecision[];
   settings_updated_at: string | null;
   daily_engine: SchedulerDailyEngine | null;
+  daily_runtime_gate: SchedulerDailyRuntimeGate | null;
   windows_horizon_hours: number;
   upcoming_windows: SchedulerUpcomingWindow[];
 };
@@ -410,6 +419,8 @@ export async function buildSchedulerStatus(
     recentLimit?: number;
     /** Daily engine (schedule-session cron) env projection, provided by the route. */
     dailyEngineEnv?: { technicalEnabled: boolean; dryRun: boolean } | null;
+    /** BotApp scheduler runtime gate projection for schedule-session cron. */
+    dailyRuntimeGate?: SchedulerDailyRuntimeGate | null;
   },
 ): Promise<SchedulerStatus> {
   const now = options.now ?? new Date();
@@ -478,6 +489,7 @@ export async function buildSchedulerStatus(
     recent_decisions: recentDecisions,
     settings_updated_at: readString(settingsRow?.updated_at) || null,
     daily_engine: dailyEngine,
+    daily_runtime_gate: options.dailyRuntimeGate ?? null,
     windows_horizon_hours: SCHEDULE_PROJECTION_HORIZON_HOURS,
     upcoming_windows: upcomingWindows,
   };

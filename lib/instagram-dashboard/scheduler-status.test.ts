@@ -319,6 +319,28 @@ test("daily engine projection follows env plus the canonical toggle", async () =
   assert.equal(active.daily_engine?.state, "active");
 });
 
+test("buildSchedulerStatus projects daily runtime gate when provided", async () => {
+  const supabase = mockSupabase({
+    auto_restart_settings: [{ auto_restart_enabled: true, check_every_minutes: 20, updated_at: "2026-07-08T12:00:00Z" }],
+    auto_restart_tick_locks: [],
+    auto_restart_decisions: [],
+    account_assignments: [],
+  });
+  const status = await buildSchedulerStatus(supabase, {
+    engineHealth: { healthy: true, dispatcherWorkerId: "run-dispatcher:host", lastSeenAt: "2026-07-08T19:00:00Z", reason: null },
+    dailyEngineEnv: { technicalEnabled: true, dryRun: false },
+    dailyRuntimeGate: {
+      scheduler_connected: false,
+      status: "stale",
+      heartbeat_age_seconds: 240,
+      reason: "BotApp scheduler runtime heartbeat is stale.",
+    },
+  });
+  assert.equal(status.daily_runtime_gate?.status, "stale");
+  assert.equal(status.daily_runtime_gate?.scheduler_connected, false);
+  assert.equal(status.daily_runtime_gate?.heartbeat_age_seconds, 240);
+});
+
 test("buildSchedulerStatus omits tick interval when settings row is absent", async () => {
   const supabase = mockSupabase({
     auto_restart_settings: [],

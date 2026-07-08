@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { loadBotAppSchedulerRuntimeHealth } from "@/lib/instagram-dashboard/botapp-scheduler-runtime-health";
 import { getRunControlHealth } from "@/lib/instagram-dashboard/run-control";
 import { readScheduleSessionCronEnv } from "@/lib/instagram-dashboard/schedule-session-cron";
 import { buildSchedulerStatus } from "@/lib/instagram-dashboard/scheduler-status";
@@ -21,7 +22,10 @@ export async function GET(request: Request) {
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const supabase = createSupabaseClient();
-    const engineHealth = await getRunControlHealth();
+    const [engineHealth, botappRuntimeHealth] = await Promise.all([
+      getRunControlHealth(),
+      loadBotAppSchedulerRuntimeHealth(supabase as never),
+    ]);
     const dailyEngineEnv = readScheduleSessionCronEnv();
     const status = await buildSchedulerStatus(supabase as never, {
       engineHealth: {
@@ -33,6 +37,12 @@ export async function GET(request: Request) {
       dailyEngineEnv: {
         technicalEnabled: dailyEngineEnv.enabled,
         dryRun: dailyEngineEnv.dryRun,
+      },
+      dailyRuntimeGate: {
+        scheduler_connected: botappRuntimeHealth.schedulerConnected,
+        status: botappRuntimeHealth.status,
+        heartbeat_age_seconds: botappRuntimeHealth.heartbeatAgeSeconds,
+        reason: botappRuntimeHealth.reason,
       },
     });
     return jsonOk({
