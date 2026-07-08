@@ -5,8 +5,11 @@ import {
   ensureLateActiveWindowPreflight,
   hasLatePreflightRunway,
   isLateActiveWindowEligible,
+  isRetryableTerminalPreflightStatus,
+  isTerminalPreflightRequestStatus,
   resolveExistingPreflightDisposition,
   scheduledPreflightIdempotencyKey,
+  scheduledPreflightLateIdempotencyKey,
 } from "./late-active-window-preflight.ts";
 import { deriveSessionTransitionTimestamps } from "./session-transition-buffer.ts";
 import { runScheduleSessionCron } from "./schedule-session-cron.ts";
@@ -62,6 +65,7 @@ function makeLatePreflightSupabase(overrides: {
   validPreflight?: Record<string, unknown> | null;
   leaseOk?: boolean;
   rpcError?: string;
+  runRequests?: Array<Record<string, unknown>>;
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const leaseOk = overrides.leaseOk ?? true;
@@ -70,13 +74,20 @@ function makeLatePreflightSupabase(overrides: {
     client: {
       from(table: string) {
         if (table === "scheduled_session_preflights") {
-          return makeQueryResult(overrides.preflights ?? []);
+          const rows = (overrides.preflights ?? []).map((row) => ({
+            scheduled_window_start: windowStart,
+            ...row,
+          }));
+          return makeQueryResult(rows);
         }
         if (table === "client_provisioning_slot_reservations") {
           return makeQueryResult(overrides.reservations ?? []);
         }
         if (table === "auto_restart_device_locks") {
           return makeQueryResult(overrides.deviceLock ? [overrides.deviceLock] : []);
+        }
+        if (table === "account_run_requests") {
+          return makeQueryResult(overrides.runRequests ?? []);
         }
         return makeQueryResult([]);
       },
@@ -103,7 +114,13 @@ function makeLatePreflightSupabase(overrides: {
           };
         }
         if (name === "create_account_run_request") {
-          return { data: [{ id: "preflight-request-late-1" }], error: null };
+          return { data: [{ id: "preflight-request-late-1", status: "queued" }], error: null };
+        }
+        if (name === "upsert_account_dashboard_action") {
+          return { data: { ok: true }, error: null };
+        }
+        if (name === "auto_restart_release_device_lock") {
+          return { data: { ok: true }, error: null };
         }
         if (name === "bind_scheduled_session_preflight_request") {
           return { data: { id: "preflight-late-1", request_id: args.p_request_id }, error: null };
@@ -183,6 +200,7 @@ test("scheduler ON mid-window with no preflight creates late preflight request",
   assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), true);
   const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
   assert.equal(enqueue?.args.p_requested_run_type, "scheduled_session_preflight");
+  assert.equal(enqueue?.args.p_idempotency_key, scheduledPreflightLateIdempotencyKey("assignment-1", windowStart));
   assert.equal((enqueue?.args.p_metadata_safe as Record<string, unknown>)?.late_preflight, true);
   assert.equal((enqueue?.args.p_metadata_safe as Record<string, unknown>)?.verification_only, true);
 });
@@ -557,9 +575,262 @@ test("schedule-session-cron cold starts when late preflight already ready", asyn
   assert.ok(schedulerEnqueue);
 });
 
-test("preflight idempotency key stays stable for late and classic preflight", () => {
+test("expired T-10 preflight is retryable and uses a distinct late idempotency key", async () => {
+  assert.equal(isRetryableTerminalPreflightStatus("preflight_expired"), true);
+  assert.equal(resolveExistingPreflightDisposition({
+    status: "preflight_expired",
+    request_id: "req-failed-1",
+    id: "pf-expired-1",
+  }), null);
+
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: "pf-expired-1",
+      status: "preflight_expired",
+      request_id: "req-failed-1",
+      reason_code: "preflight_start_window_elapsed",
+    }],
+    runRequests: [{ id: "req-failed-1", status: "failed" }],
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.android",
+    expectedUsername: "demo_user",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.outcome, "started");
+  const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
+  assert.equal(enqueue?.args.p_idempotency_key, scheduledPreflightLateIdempotencyKey("assignment-1", windowStart));
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "upsert_account_dashboard_action"),
+    true,
+  );
+});
+
+test("failed preflight request with active row does not short-circuit as already_running", () => {
+  const disposition = resolveExistingPreflightDisposition({
+    status: "preflight_due",
+    request_id: "req-failed-1",
+    id: "pf-1",
+  }, "failed");
+  assert.equal(disposition, null);
+  assert.equal(isTerminalPreflightRequestStatus("failed"), true);
+});
+
+test("preflight idempotency keys differ between T-10 and late retry", () => {
   assert.equal(
     scheduledPreflightIdempotencyKey("assignment-1", windowStart),
     "scheduled-preflight:assignment-1:2026-07-08T10:00:00.000Z",
   );
+  assert.equal(
+    scheduledPreflightLateIdempotencyKey("assignment-1", windowStart),
+    "scheduled-preflight-late:assignment-1:2026-07-08T10:00:00.000Z",
+  );
+});
+
+const prodWindowStart = "2026-07-08 16:00:00+00";
+const prodWindowEnd = "2026-07-08 22:00:00+00";
+const prodMidWindowNow = new Date("2026-07-08T18:30:00.000Z");
+
+function makeProdLatePreflightSupabase(overrides: {
+  createRequestStatus?: string;
+  activeLateRequest?: boolean;
+} = {}) {
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const createRequestStatus = overrides.createRequestStatus ?? "queued";
+  return {
+    rpcCalls,
+    client: {
+      from(table: string) {
+        if (table === "scheduled_session_preflights") {
+          return makeQueryResult([{
+            id: "pf-expired-prod",
+            status: "preflight_expired",
+            request_id: "req-failed-t10",
+            scheduled_window_start: "2026-07-08 16:00:00+00",
+            reason_code: "preflight_start_window_elapsed",
+          }]);
+        }
+        if (table === "account_run_requests") {
+          return makeQueryResult([{ id: "req-failed-t10", status: "failed" }]);
+        }
+        if (table === "client_provisioning_slot_reservations") return makeQueryResult([]);
+        if (table === "auto_restart_device_locks") {
+          return makeQueryResult([{
+            device_id: "device-1",
+            worker_id: "preflight-worker",
+            account_id: "account-1",
+            request_id: "req-failed-t10",
+            lease_expires_at: "2026-07-08T16:05:00.000Z",
+            owner_kind: "preflight",
+          }]);
+        }
+        return makeQueryResult([]);
+      },
+      async rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (name === "get_active_operator_stop_suppression") {
+          return { data: null, error: null };
+        }
+        if (name === "get_valid_scheduled_session_preflight") {
+          return { data: null, error: null };
+        }
+        if (name === "upsert_scheduled_session_preflight") {
+          return {
+            data: {
+              id: "pf-expired-prod",
+              status: args.p_status ?? "preflight_due",
+              request_id: null,
+              metadata_safe: args.p_metadata_safe ?? {},
+            },
+            error: null,
+          };
+        }
+        if (name === "create_account_run_request") {
+          const key = String(args.p_idempotency_key ?? "");
+          if (key.startsWith("scheduled-preflight:") && !key.includes("-late:")) {
+            return { data: [{ id: "req-failed-t10", status: "failed" }], error: null };
+          }
+          return { data: [{ id: "preflight-request-late-prod", status: createRequestStatus }], error: null };
+        }
+        if (name === "upsert_account_dashboard_action") {
+          return { data: { ok: true }, error: null };
+        }
+        if (name === "auto_restart_release_device_lock") {
+          return { data: { ok: true }, error: null };
+        }
+        if (name === "bind_scheduled_session_preflight_request") {
+          return { data: { id: "pf-expired-prod", request_id: args.p_request_id }, error: null };
+        }
+        if (name === "auto_restart_acquire_device_lock") {
+          return { data: { ok: true, acquired: true, lease_id: "lease-1" }, error: null };
+        }
+        if (name === "auto_restart_bind_device_lock_to_request") {
+          return { data: { ok: true, bound: true }, error: null };
+        }
+        return { data: { ok: true }, error: null };
+      },
+    },
+    activeLateRequest: overrides.activeLateRequest ?? false,
+  };
+}
+
+test("prod-shaped preflight_expired with failed T-10 request enqueues distinct late preflight", async () => {
+  const supabase = makeProdLatePreflightSupabase();
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.android",
+    expectedUsername: "i_m_your_traker",
+    startsAt: prodWindowStart,
+    endsAt: prodWindowEnd,
+    workerId: "schedule_session_cron",
+    now: prodMidWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: prodMidWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.outcome, "started");
+  const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
+  assert.equal(
+    enqueue?.args.p_idempotency_key,
+    scheduledPreflightLateIdempotencyKey("assignment-1", prodWindowStart),
+  );
+  assert.equal(
+    enqueue?.args.p_idempotency_key,
+    "scheduled-preflight-late:assignment-1:2026-07-08 16:00:00+00",
+  );
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "upsert_account_dashboard_action"),
+    true,
+  );
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "auto_restart_release_device_lock"),
+    true,
+  );
+});
+
+test("terminal idempotency replay does not enqueue late preflight", async () => {
+  const supabase = makeProdLatePreflightSupabase({ createRequestStatus: "failed" });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.android",
+    expectedUsername: "demo_user",
+    startsAt: prodWindowStart,
+    endsAt: prodWindowEnd,
+    workerId: "schedule_session_cron",
+    now: prodMidWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: prodMidWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "late_preflight_unavailable");
+});
+
+test("preflight_blocked is not retried", async () => {
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: "pf-blocked-1",
+      status: "preflight_blocked",
+      request_id: "req-blocked-1",
+      reason_code: "login_challenge",
+    }],
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.android",
+    expectedUsername: "demo_user",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "late_preflight_blocked");
+  assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
+});
+
+test("active late request idempotency key blocks duplicate enqueue", async () => {
+  const lateKey = scheduledPreflightLateIdempotencyKey("assignment-1", windowStart);
+  const result = await ensureLateActiveWindowPreflight(makeLatePreflightSupabase().client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.android",
+    expectedUsername: "demo_user",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+    activeRequestKeys: new Set([lateKey]),
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "active_request_present");
 });
