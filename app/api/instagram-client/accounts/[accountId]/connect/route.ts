@@ -47,12 +47,14 @@ export async function POST(
       });
     }
 
-    await readJsonBody<Body>(request);
+    const body = await readJsonBody<Body & { lang?: unknown }>(request);
+    const lang = readString(body?.lang).toLowerCase() === "en" ? "en" : "fr";
 
     const result = await connectClientInstagramAccount({
       accountId: normalizedAccountId,
       userId: session.userId,
       clientId: session.clientId,
+      lang,
     });
 
     if (result.passive_blocked) {
@@ -71,7 +73,7 @@ export async function POST(
       return clientConnectError({
         status: result.connectStatus,
         code: result.connectStatus === "not_created" ? "connect_request_rejected" : "connect_failed",
-        message: result.message || clientConnectMessage(result.connectStatus, "fr"),
+        message: result.message || clientConnectMessage(result.connectStatus, lang),
         httpStatus: result.connectStatus === "not_created" ? 409 : 500,
         reason: result.reason,
         data: { account: result.account },

@@ -8,7 +8,11 @@ export type ClientReadinessStatus =
   | "credentials_need_attention"
   | "device_temporarily_unavailable"
   | "schedule_not_ready"
-  | "already_connected";
+  | "already_connected"
+  | "provisioning_slot_reserved"
+  | "provisioning_slot_open"
+  | "provisioning_slot_expired"
+  | "provisioning_slot_unavailable";
 
 const CLIENT_READINESS_MESSAGES: Record<ClientReadinessStatus, { fr: string; en: string }> = {
   ready_to_connect: {
@@ -42,6 +46,22 @@ const CLIENT_READINESS_MESSAGES: Record<ClientReadinessStatus, { fr: string; en:
   already_connected: {
     fr: "Votre compte Instagram est déjà connecté.",
     en: "Your Instagram account is already connected.",
+  },
+  provisioning_slot_reserved: {
+    fr: "Votre connexion est réservée. Revenez pendant votre créneau de 30 minutes.",
+    en: "Your connection is reserved. Come back during your 30-minute window.",
+  },
+  provisioning_slot_open: {
+    fr: "Votre créneau de connexion est ouvert. Vous pouvez connecter votre compte maintenant.",
+    en: "Your connection window is open. You can connect your account now.",
+  },
+  provisioning_slot_expired: {
+    fr: "Votre créneau de connexion a expiré. Relancez une vérification.",
+    en: "Your connection window has expired. Run a new readiness check.",
+  },
+  provisioning_slot_unavailable: {
+    fr: "Aucun créneau de connexion n'est disponible pour le moment.",
+    en: "No connection slot is available right now.",
   },
 };
 
@@ -92,7 +112,7 @@ export function clientReadinessMessage(status: ClientReadinessStatus, lang: "fr"
 }
 
 export function clientReadinessAllowsConnect(status: ClientReadinessStatus) {
-  return status === "ready_to_connect";
+  return status === "ready_to_connect" || status === "provisioning_slot_open";
 }
 
 export function clientReadinessIsAutomaticPreparationInProgress(status: ClientReadinessStatus | string | null | undefined) {
@@ -105,5 +125,6 @@ export function clientReadinessIsBlocked(status: ClientReadinessStatus | string 
   return normalized === "preparation_blocked"
     || normalized === "credentials_need_attention"
     || normalized === "device_temporarily_unavailable"
-    || normalized === "schedule_not_ready";
+    || normalized === "schedule_not_ready"
+    || normalized === "provisioning_slot_unavailable";
 }

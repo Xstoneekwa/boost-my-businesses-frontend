@@ -1,3 +1,4 @@
+import AssistedLoginActionPanel from "../AssistedLoginActionPanel";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
@@ -17,8 +18,14 @@ import { formatDateTime, formatInteger, getRadarData, statusTone } from "../rada
 
 export const dynamic = "force-dynamic";
 
-export default async function InstagramCredentialsActionsPage() {
+export default async function InstagramCredentialsActionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ action_id?: string }>;
+}) {
   const userContext = await requireInstagramDashboardAccess();
+  const resolvedSearchParams = await searchParams;
+  const focusedActionId = String(resolvedSearchParams?.action_id || "").trim();
 
   if (!canAccessTenantPages(userContext)) {
     notFound();
@@ -39,6 +46,17 @@ export default async function InstagramCredentialsActionsPage() {
     description: action.description,
   }));
 
+  const assistedActions = data.actions.filter((action) => action.actionType === "client_assisted_login_requested");
+  const focusedAssistedAction = assistedActions.find((action) => action.id === focusedActionId)
+    ?? assistedActions[0]
+    ?? null;
+  const focusedMetadata = focusedAssistedAction?.metadata ?? {};
+  const focusedReservationId = String(focusedMetadata.reservation_id || "").trim();
+  const focusedDeviceId = String(focusedMetadata.device_id || "").trim();
+  const focusedAppInstanceId = String(focusedMetadata.app_instance_id || "").trim();
+  const focusedWindowStart = String(focusedMetadata.window_start_utc || "").trim();
+  const focusedWindowEnd = String(focusedMetadata.window_end_utc || "").trim();
+
   return (
     <main className="dashboard-page ig-credentials-page">
       <DashboardPageHeader
@@ -49,6 +67,25 @@ export default async function InstagramCredentialsActionsPage() {
       />
 
       <EmailVerificationActionBanner initialActions={emailVerificationBannerActions} />
+
+      {focusedAssistedAction && focusedReservationId ? (
+        <AnalyticsSectionCard
+          eyebrow="Assisted connection"
+          title="Client requested assisted connection"
+          description="Reserved phone and clone are shown for operator review only."
+        >
+          <AssistedLoginActionPanel
+            accountId={focusedAssistedAction.accountId}
+            actionId={focusedAssistedAction.id}
+            reservationId={focusedReservationId}
+            username={focusedAssistedAction.username}
+            deviceLabel={focusedDeviceId || "Reserved phone"}
+            cloneLabel={focusedAppInstanceId || "Reserved app instance"}
+            windowLabel={`${focusedWindowStart || "—"} → ${focusedWindowEnd || "—"} (UTC)`}
+            availabilityLabel="Revalidated when Start Auto Login is clicked"
+          />
+        </AnalyticsSectionCard>
+      ) : null}
 
       {data.errors.length > 0 && (
         <section className="ig-credentials-alert" role="alert">

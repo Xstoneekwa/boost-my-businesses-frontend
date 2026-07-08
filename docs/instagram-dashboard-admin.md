@@ -268,8 +268,37 @@ terminal.
 `ui_lease_operator_label`, `ui_lease_current_operation`. Profiles relay projette
 `runtimeLock: device_level_lock` quand le téléphone assigné est leased.
 
-**Hors scope CP3 :** buffer T-10, provisioning slots CP6, popup classifier,
+**Hors scope CP3 :** buffer T-10, popup classifier,
 `operator_stop_suppressed`.
+
+### Client provisioning slot reservations (CP6)
+
+**Feature flag (rollout) :** `CLIENT_PROVISIONING_SLOT_RESERVATIONS_ENABLED=false`
+par défaut. OFF = comportement client inchangé, aucune réservation créée.
+
+**Contrat :**
+- Quand tous les téléphones physiques sont occupés mais des clones restent
+  disponibles, Connect ne lance pas `enqueueClientConnectRequest`.
+- Une réservation canonique de **30 minutes** est créée dans
+  `client_provisioning_slot_reservations` (phone + clone + fenêtre UTC).
+- Réservation future **≠** lease CP3 **≠** `account_run_request` **≠**
+  session Scheduler **≠** lancement automatique.
+- Le client revient et clique Connect lui-même pendant sa fenêtre.
+- Option client **Let our team connect your account** → action durable
+  `account_dashboard_actions.client_assisted_login_requested`, Slack/Discord
+  sûrs, deep-link Admin `/instagram-dashboard/credentials-actions?action_id=…`.
+- Bouton opérateur anglais **Start Auto Login** via
+  `POST /api/instagram-dashboard/assisted-login/start` (réutilise Auto Login
+  existant, sans Stop implicite).
+
+**Tables / RPC :** `client_provisioning_slot_reservations`,
+`reserve_client_provisioning_slot`, `expire_client_provisioning_slot_reservations`,
+`consume_client_provisioning_slot_reservation`,
+`mark_client_provisioning_assisted_requested`.
+
+**Services :** `evaluatePhoneIdleForClientConnect`,
+`provisioning-slot-scheduler`, `client-provisioning-slot-reservations`.
+
 
 ### Session transition buffer + scheduled preflight (CP4)
 
@@ -309,7 +338,7 @@ active`, `Preflight due`, `Preflight running`, `Preflight ready`,
 `Preflight blocked`, `Device reserved for scheduled preflight`, etc.
 
 **Hors scope CP4** : `operator_stop_suppressed`, détection popup Meta dédiée,
-provisioning slots client (CP6).
+provisioning slots client (CP6) — voir section dédiée ci-dessus.
 
 ### Server Check
 

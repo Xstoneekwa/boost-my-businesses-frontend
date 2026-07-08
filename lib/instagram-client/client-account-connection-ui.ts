@@ -1,4 +1,4 @@
-import { resolveClientAccountState } from "./client-account-state";
+import { resolveClientAccountState, type ClientAccountStateUi } from "./client-account-state";
 
 export type ClientAccountConnectionInput = {
   connected: boolean;
@@ -11,27 +11,7 @@ export type ClientAccountConnectionInput = {
   activeConnectStatus?: string | null;
 };
 
-export type ClientAccountConnectionUi = {
-  badgeLabel: string;
-  badgeTone: "success" | "warning" | "neutral";
-  subtext: string | null;
-  readinessLabel: string;
-  readinessTone: "success" | "warning" | "neutral";
-  readinessDisabled: boolean;
-  showRecheckReadiness: boolean;
-  recheckReadinessLabel: string;
-  connectLabel: string;
-  connectTone: "success" | "primary" | "neutral";
-  connectDisabled: boolean;
-  connectPrimary: boolean;
-  showRefresh: boolean;
-  isAsyncPending: boolean;
-  phase: ReturnType<typeof resolveClientAccountState>["phase"];
-  showVerificationReopen: boolean;
-  verificationReopenLabel: string;
-  showCancelRestart: boolean;
-  cancelRestartLabel: string;
-};
+export type ClientAccountConnectionUi = ClientAccountStateUi;
 
 export function resolveClientAccountConnectionUi(
   account: ClientAccountConnectionInput,

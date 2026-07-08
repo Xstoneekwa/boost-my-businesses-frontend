@@ -4,7 +4,7 @@ import { checkClientAccountReadiness } from "@/lib/instagram-client/connect-acco
 
 export const dynamic = "force-dynamic";
 
-type Body = { dry_run?: unknown; mode?: unknown };
+type Body = { dry_run?: unknown; mode?: unknown; lang?: unknown };
 
 export async function POST(
   request: Request,
@@ -20,12 +20,14 @@ export async function POST(
   const authorized = await authorizeClientInstagramAccount(session.userId, normalizedAccountId);
   if (!authorized.ok) return jsonError(authorized.error, authorized.status);
 
-  await readJsonBody<Body>(request);
+  const body = await readJsonBody<Body>(request);
+  const lang = readString(body?.lang).toLowerCase() === "en" ? "en" : "fr";
 
   const result = await checkClientAccountReadiness({
     accountId: normalizedAccountId,
     userId: session.userId,
     clientId: session.clientId,
+    lang,
   });
 
   return jsonOk(result);

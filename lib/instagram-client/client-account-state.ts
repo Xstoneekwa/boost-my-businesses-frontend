@@ -48,6 +48,10 @@ export type ClientAccountStateUi = {
   verificationReopenLabel: string;
   showCancelRestart: boolean;
   cancelRestartLabel: string;
+  showAssistedConnect: boolean;
+  assistedConnectLabel: string;
+  assistedConnectDisabled: boolean;
+  provisioningSlotMessage: string | null;
 };
 
 function label(lang: "fr" | "en", fr: string, en: string) {
@@ -67,6 +71,10 @@ function recheckDefaults(lang: "fr" | "en") {
     verificationReopenLabel: label(lang, "Saisir le code de vérification", "Enter verification code"),
     showCancelRestart: false,
     cancelRestartLabel: label(lang, "Annuler et recommencer", "Cancel and start over"),
+    showAssistedConnect: false,
+    assistedConnectLabel: label(lang, "Laisser notre équipe connecter mon compte", "Let our team connect your account"),
+    assistedConnectDisabled: false,
+    provisioningSlotMessage: null,
   };
 }
 
@@ -178,6 +186,9 @@ function clientReadinessSubtext(status: string | null | undefined, lang: "fr" | 
     || normalized === "credentials_need_attention"
     || normalized === "device_temporarily_unavailable"
     || normalized === "schedule_not_ready"
+    || normalized === "provisioning_slot_reserved"
+    || normalized === "provisioning_slot_expired"
+    || normalized === "provisioning_slot_unavailable"
   ) {
     return clientReadinessMessage(normalized as ClientReadinessStatus, lang);
   }
@@ -295,6 +306,7 @@ export function resolveClientAccountState(
 
   if (activeConnectStatus === "failed" || activeConnectStatus === "blocked") {
     return {
+      ...defaults,
       phase: "added",
       badgeLabel: label(lang, "Compte ajouté", "Account added"),
       badgeTone: "neutral",
@@ -336,24 +348,33 @@ export function resolveClientAccountState(
   }
 
   const readinessPrepared = clientReadinessStatus === "ready_to_connect";
+  const provisioningSlotOpen = clientReadinessStatus === "provisioning_slot_open";
+  const provisioningSlotReserved = clientReadinessStatus === "provisioning_slot_reserved";
+  const provisioningSlotExpired = clientReadinessStatus === "provisioning_slot_expired";
   const automaticPreparationInProgress = clientReadinessIsAutomaticPreparationInProgress(clientReadinessStatus);
   const readinessChecked = Boolean(clientReadinessStatus)
     && !automaticPreparationInProgress;
   const pendingSubtext = clientReadinessSubtext(input.clientReadinessStatus, lang);
 
-  if (readinessPrepared) {
+  if (readinessPrepared || provisioningSlotOpen) {
     return {
       ...defaults,
       phase: "added",
-      badgeLabel: label(lang, "Prêt à connecter", "Ready to connect"),
+      badgeLabel: provisioningSlotOpen
+        ? label(lang, "Créneau ouvert", "Window open")
+        : label(lang, "Prêt à connecter", "Ready to connect"),
       badgeTone: "success",
-      subtext: label(lang, "Votre compte est prêt à être connecté.", "Your account is ready to connect."),
+      subtext: provisioningSlotOpen
+        ? clientReadinessMessage("provisioning_slot_open", lang)
+        : label(lang, "Votre compte est prêt à être connecté.", "Your account is ready to connect."),
       readinessLabel: label(lang, "Préparation vérifiée", "Readiness verified"),
       readinessTone: "success",
       readinessDisabled: true,
       showRecheckReadiness: true,
       recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
-      connectLabel: label(lang, "Connecter le compte", "Connect account"),
+      connectLabel: provisioningSlotOpen
+        ? label(lang, "Connecter maintenant", "Connect now")
+        : label(lang, "Connecter le compte", "Connect account"),
       connectTone: "primary",
       connectDisabled: false,
       connectPrimary: true,
@@ -362,7 +383,31 @@ export function resolveClientAccountState(
     };
   }
 
+  if (provisioningSlotReserved || provisioningSlotExpired) {
+    return {
+      ...defaults,
+      phase: "added",
+      badgeLabel: label(lang, "Connexion réservée", "Connection reserved"),
+      badgeTone: provisioningSlotExpired ? "warning" : "neutral",
+      subtext: clientReadinessSubtext(clientReadinessStatus, lang),
+      readinessLabel: label(lang, "Revérifier", "Check again"),
+      readinessTone: "neutral",
+      readinessDisabled: false,
+      connectLabel: label(lang, "Connecter le compte", "Connect account"),
+      connectTone: "primary",
+      connectDisabled: true,
+      connectPrimary: false,
+      showRefresh: true,
+      isAsyncPending: false,
+      showAssistedConnect: !provisioningSlotExpired,
+      assistedConnectLabel: defaults.assistedConnectLabel,
+      assistedConnectDisabled: provisioningSlotExpired,
+      provisioningSlotMessage: clientReadinessSubtext(clientReadinessStatus, lang),
+    };
+  }
+
   return {
+    ...defaults,
     phase: "added",
     badgeLabel: automaticPreparationInProgress
       ? label(lang, "Préparation en cours", "Setup in progress")

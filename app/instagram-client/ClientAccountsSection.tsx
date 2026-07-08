@@ -567,6 +567,33 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     }
   }
 
+  async function requestAssistedConnect(account: ClientInstagramAccountView, reservationId?: string) {
+    if (actionBusy) return;
+    setActionKind("connect");
+    setActionAccountId(account.accountId);
+    try {
+      const response = await fetch(
+        `/api/instagram-client/accounts/${encodeURIComponent(account.accountId)}/request-assisted-connect`,
+        {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ lang, reservation_id: reservationId ?? null }),
+        },
+      );
+      const payload = await parseClientApiResponse<{ message?: string }>(response, lang);
+      pushMessage(
+        payload.data?.message || payload.message || labelFor(lang, "Demande envoyée.", "Request sent."),
+        payload.ok === false ? "error" : "success",
+      );
+      await refreshFromServer();
+    } catch {
+      pushMessage(labelFor(lang, "Demande indisponible.", "Request unavailable."), "error");
+    } finally {
+      setActionKind(null);
+      setActionAccountId(null);
+    }
+  }
+
   async function runConnectProcess(account: ClientInstagramAccountView, mode: "connect" | "check_readiness") {
     if (actionBusy || processModal) return;
 
@@ -605,8 +632,8 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         },
         body: JSON.stringify(
           mode === "check_readiness"
-            ? { dry_run: true, mode: "readiness_only" }
-            : { dry_run: false, mode: "connect_enqueue" },
+            ? { dry_run: true, mode: "readiness_only", lang }
+            : { dry_run: false, mode: "connect_enqueue", lang },
         ),
       });
       type ConnectResponseData = {
@@ -844,6 +871,16 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                         {busy && actionKind === "connect"
                           ? labelFor(lang, "Connexion…", "Connecting…")
                           : ui.connectLabel}
+                      </button>
+                    ) : null}
+                    {ui.showAssistedConnect ? (
+                      <button
+                        type="button"
+                        className="cd-btn cd-btn-soft cd-btn-compact"
+                        disabled={busy || ui.assistedConnectDisabled || Boolean(processModal)}
+                        onClick={() => void requestAssistedConnect(account)}
+                      >
+                        {ui.assistedConnectLabel}
                       </button>
                     ) : null}
                     {ui.showCancelRestart ? (

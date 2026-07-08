@@ -13,6 +13,7 @@ export type CredentialsActionType =
   | "review_login_failure"
   | "review_account_mismatch"
   | "review_credentials"
+  | "client_assisted_login_requested"
   | "unknown";
 
 export type DashboardActionSeverity = "info" | "warning" | "error" | "critical" | "unknown";
@@ -57,6 +58,7 @@ export type DashboardActionItem = {
   sourceLabel: string;
   deepLink: string | null;
   backendMutationStatus: BackendMutationStatus;
+  metadata?: Record<string, unknown>;
 };
 
 export type DashboardActionSignal = {
@@ -138,6 +140,8 @@ type PersistedDashboardActionRow = {
   title?: unknown;
   safe_client_message?: unknown;
   action_deep_link?: unknown;
+  admin_message?: unknown;
+  metadata?: unknown;
 };
 
 function normalize(value: string | null | undefined) {
@@ -161,7 +165,8 @@ function asActionType(value: unknown): CredentialsActionType {
     normalized === "review_login_challenge" ||
     normalized === "review_login_failure" ||
     normalized === "review_account_mismatch" ||
-    normalized === "review_credentials"
+    normalized === "review_credentials" ||
+    normalized === "client_assisted_login_requested"
   ) {
     return normalized;
   }
@@ -341,7 +346,7 @@ async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
       .from("account_dashboard_actions")
-      .select("id,account_id,action_type,status,severity,audience,requires_client_action,blocking_campaign,title,safe_client_message,action_deep_link")
+      .select("id,account_id,action_type,status,severity,audience,requires_client_action,blocking_campaign,title,safe_client_message,action_deep_link,admin_message,metadata")
       .in("account_id", accountIds)
       .in("status", activeDashboardActionStatuses)
       .order("created_at", { ascending: false })
@@ -362,7 +367,7 @@ async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[
           username: account.username,
           actionType: asActionType(row.action_type),
           title: readText(row.title, "Dashboard action"),
-          description: readText(row.safe_client_message, "Safe dashboard action requires review."),
+          description: readText(row.safe_client_message, readText(row.admin_message, "Safe dashboard action requires review.")),
           severity: asSeverity(row.severity),
           status: asStatus(row.status),
           requiresClientAction: row.requires_client_action === true,
@@ -371,6 +376,9 @@ async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[
           sourceLabel: persistedSourceLabel,
           deepLink: readText(row.action_deep_link) || `/instagram-dashboard/accounts/${encodeURIComponent(accountId)}`,
           backendMutationStatus: "connected",
+          metadata: row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+            ? row.metadata as Record<string, unknown>
+            : {},
         };
       })
       .filter((action): action is DashboardActionItem => Boolean(action));
