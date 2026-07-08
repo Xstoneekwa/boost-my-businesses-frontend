@@ -273,8 +273,9 @@ terminal.
 
 ### Client provisioning slot reservations (CP6)
 
-**Feature flag (rollout) :** `CLIENT_PROVISIONING_SLOT_RESERVATIONS_ENABLED=false`
-par défaut. OFF = comportement client inchangé, aucune réservation créée.
+**Feature flag (rollout) :** `CLIENT_PROVISIONING_SLOT_RESERVATIONS_ENABLED=true`
+en production depuis **2026-07-08 11:37 UTC** (après gate CP6.1).
+OFF = comportement client inchangé, aucune réservation créée.
 
 **Contrat :**
 - Quand tous les téléphones physiques sont occupés mais des clones restent
@@ -316,6 +317,53 @@ par défaut. OFF = comportement client inchangé, aucune réservation créée.
   expired reservation; own active reservation excluded from idle self-conflict;
   never falls back to another phone/clone.
 - **Flag remains OFF** after CP6.1 deploy; live client validation still pending.
+
+### Production activation (2026-07-08)
+
+**Activated at:** 2026-07-08 ~11:37 UTC
+
+| Control | Value |
+|---------|-------|
+| Backend commit (prod) | `886ee86` (redeploy `dpl_B2n51o8T1TSbMtge5gXF31ZMwhBX`) |
+| Worker runtime | `7224ccd` (dispatcher) |
+| BotApp | `efe6f9e` |
+| `CLIENT_PROVISIONING_SLOT_RESERVATIONS_ENABLED` | **true** (Vercel Production) |
+| `auto_restart_enabled` | **true** |
+
+**P3 test fixtures neutralized before Scheduler ON:**
+
+| id | username | class | action |
+|----|----------|-------|--------|
+| `a48370b9-…` | `p3_internal_recovery_test` | A fixture test | `expired` + audit note |
+| `021164b7-…` | `p3_2_admin_recovery_test` | A fixture test | `expired` + audit note |
+| `befc6276-…` | `p3_2_botapp_recovery_test` | A fixture test | `expired` + audit note |
+
+All had `test=true`. Zero consumption, zero run/request created.
+
+**60-minute impact projection (at activation):**
+
+- **Active window:** `@i_m_your_traker` — session open until 16:00 UTC,
+  business deadline 15:50 UTC, preflight window already passed (09:50–10:00).
+- **No new scheduled windows** starting in the next 60 minutes.
+- **Potential scheduler activity:** cold-start possible for `@i_m_your_traker` if
+  phones become visible to heartbeat; blocked at auto-restart tick with
+  `resume_plan_missing` (observed, no enqueue).
+- **CP6:** available for real client Connect flows; no automatic reservation.
+- **Heartbeat:** 0 physical phones observed at activation window — may block
+  automatic runs until devices reconnect.
+
+**Post-activation observation (~13 min):**
+
+- 2 auto-restart ticks completed (`11:37`, `11:40` UTC).
+- 0 run/request/lease/CP6 reservation/assisted action.
+- Notifier: `sent_count=0`, heartbeat cycles OK.
+- No P3 test authorization consumed.
+
+**Rollback (prepared, not executed):**
+
+1. `CLIENT_PROVISIONING_SLOT_RESERVATIONS_ENABLED=false` (Vercel)
+2. `auto_restart_settings.auto_restart_enabled=false` (DB)
+3. No destructive DB reset; audits preserved.
 
 ### Session transition buffer + scheduled preflight (CP4)
 
