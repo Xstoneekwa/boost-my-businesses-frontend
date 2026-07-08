@@ -74,6 +74,14 @@ export const SCHEDULER_REASON_CONTRACT: Record<string, ReasonDescriptor> = {
   assignment_or_device_pending: { label: "assignment to verify", kind: "business" },
   eligible: { label: "eligible", kind: "business" },
 
+  // CP4 / CP4.1 — scheduled session preflight
+  late_preflight_started: { label: "late preflight started", kind: "business" },
+  late_preflight_ready: { label: "late preflight ready", kind: "business" },
+  late_preflight_blocked: { label: "late preflight blocked", kind: "business" },
+  late_preflight_unavailable: { label: "late preflight unavailable", kind: "business" },
+  late_preflight_too_close_to_deadline: { label: "too close to business deadline", kind: "business" },
+  skipped_preflight_missing: { label: "preflight missing", kind: "business" },
+
   // Technical errors (never conflated with business blocks)
   enqueue_failed: { label: "enqueue failed", kind: "technical" },
   unexpected_tick_error: { label: "unexpected tick error", kind: "technical" },

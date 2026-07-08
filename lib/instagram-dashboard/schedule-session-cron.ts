@@ -11,6 +11,7 @@ import {
   extractDailySlot,
 } from "./schedule-recurrence.ts";
 import { isBusinessActionsAllowed, deriveSessionTransitionTimestamps } from "./session-transition-buffer.ts";
+import { ensureLateActiveWindowPreflight } from "./late-active-window-preflight.ts";
 import {
   buildSchedulerSessionMetadata,
   getValidScheduledSessionPreflight,
@@ -102,6 +103,10 @@ export type ScheduleSessionCronSummary = {
   skipped_scheduler_disabled_count: number;
   skipped_preflight_missing_count: number;
   skipped_preflight_invalid_count: number;
+  late_preflight_started_count: number;
+  late_preflight_blocked_count: number;
+  late_preflight_unavailable_count: number;
+  late_preflight_too_close_to_deadline_count: number;
   skipped_transition_buffer_count: number;
   /** CP2 — expired scheduled windows rolled forward to the derived daily occurrence. */
   rolled_forward_count: number;
@@ -178,6 +183,10 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_scheduler_disabled_count: 0,
     skipped_preflight_missing_count: 0,
     skipped_preflight_invalid_count: 0,
+    late_preflight_started_count: 0,
+    late_preflight_blocked_count: 0,
+    late_preflight_unavailable_count: 0,
+    late_preflight_too_close_to_deadline_count: 0,
     skipped_transition_buffer_count: 0,
     rolled_forward_count: 0,
     roll_forward_failed_count: 0,
@@ -689,7 +698,7 @@ export async function runScheduleSessionCron(
 
     summary.eligible_count += 1;
     if (!env.dryRun) {
-      const validPreflight = await getValidScheduledSessionPreflight(supabase, {
+      let validPreflight = await getValidScheduledSessionPreflight(supabase, {
         accountId,
         assignmentId,
         deviceId,
@@ -699,6 +708,81 @@ export async function runScheduleSessionCron(
         endsAt,
         now,
       });
+      if (!validPreflight?.request_id) {
+        const expectedUsername = await (async () => {
+          const result = await query(supabase, "ig_accounts")
+            .select("username")
+            .eq("id", accountId)
+            .limit(1) as QueryResult;
+          const row = readRows(result.data)[0];
+          return readString(row?.username);
+        })();
+        const busyPeerAccounts = peerAssignments
+          .filter((row) => readString(row.account_id) !== accountId)
+          .filter((row) => readString(row.device_id) === deviceId)
+          .map((row) => readString(row.account_id))
+          .filter(Boolean)
+          .filter((peerAccountId) => activeRequestAccounts.has(peerAccountId) || activeRunAccounts.has(peerAccountId));
+        const lateResult = await ensureLateActiveWindowPreflight(supabase, {
+          accountId,
+          assignmentId,
+          deviceId,
+          appInstanceId,
+          expectedPackage,
+          expectedUsername,
+          startsAt,
+          endsAt,
+          workerId: env.workerId,
+          now,
+          schedulerEnabled: schedulerAuthorization.allowed,
+          heartbeatLastSeenAt: readString(heartbeat?.last_seen_at),
+          heartbeatStatus: readString(heartbeat?.status),
+          activeRequestAccounts,
+          activeRunAccounts,
+          activeRequestKeys,
+          peerBusyAccountIds: busyPeerAccounts,
+        });
+        if (lateResult.ok) {
+          if (lateResult.outcome === "already_ready") {
+            validPreflight = await getValidScheduledSessionPreflight(supabase, {
+              accountId,
+              assignmentId,
+              deviceId,
+              appInstanceId,
+              expectedPackage,
+              startsAt,
+              endsAt,
+              now,
+            });
+          } else {
+            summary.late_preflight_started_count += 1;
+            summary.eligible_count -= 1;
+            continue;
+          }
+        } else {
+          switch (lateResult.reason) {
+            case "late_preflight_blocked":
+              summary.late_preflight_blocked_count += 1;
+              break;
+            case "late_preflight_too_close_to_deadline":
+              summary.late_preflight_too_close_to_deadline_count += 1;
+              break;
+            case "late_preflight_unavailable":
+            case "device_lease_unavailable":
+            case "stale_device_heartbeat":
+            case "provisioning_reservation_conflict":
+            case "stop_cleanup_in_progress":
+            case "operator_stop_suppressed":
+              summary.late_preflight_unavailable_count += 1;
+              break;
+            default:
+              summary.skipped_preflight_missing_count += 1;
+              break;
+          }
+          summary.eligible_count -= 1;
+          continue;
+        }
+      }
       if (!validPreflight?.request_id) {
         summary.skipped_preflight_missing_count += 1;
         summary.eligible_count -= 1;

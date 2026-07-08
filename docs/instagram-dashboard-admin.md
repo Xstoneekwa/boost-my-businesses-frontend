@@ -405,6 +405,57 @@ active`, `Preflight due`, `Preflight running`, `Preflight ready`,
 **Hors scope CP4** : `operator_stop_suppressed`, détection popup Meta dédiée,
 provisioning slots client (CP6) — voir section dédiée ci-dessus.
 
+### CP4.1 — Late active-window preflight
+
+When the Scheduler is turned ON **after** the canonical T-10 preflight window
+(`[preflight_start, session_start)`) but **before** `business_action_deadline`,
+`schedule-session-cron` may create a **late preflight** instead of waiting for
+the next daily window.
+
+**Trigger (all required):**
+
+```text
+Scheduler ON
+AND session already open (now >= session_start)
+AND now < business_action_deadline
+AND now <= business_action_deadline - 10 minutes (MIN_LATE_PREFLIGHT_RUNWAY)
+AND no preflight_ready for this window
+AND phone heartbeat fresh
+AND no active run/request/lease conflict
+AND no CP5 stop cleanup / operator_stop_suppressed
+AND no CP6 provisioning reservation conflict
+```
+
+**Flow:**
+
+1. `schedule-session-cron` calls `ensureLateActiveWindowPreflight` when
+   `get_valid_scheduled_session_preflight` returns null.
+2. Late preflight upserts `scheduled_session_preflights` with
+   `metadata_safe.late_preflight=true`, enqueues a **verification-only**
+   `scheduled_session_preflight` request (same worker contract as CP4 T-10),
+   acquires the CP3 preflight lease, binds `request_id`.
+3. Worker completes verification → `preflight_ready` or `preflight_blocked`.
+4. A later `schedule-session-cron` pass performs the normal cold start only when
+   `preflight_ready` exists (lease handoff unchanged).
+
+**Stable reasons (operator labels in English):**
+
+- `late_preflight_started` — verification queued, cold start deferred
+- `late_preflight_ready` — ready preflight reused, normal cold start allowed
+- `late_preflight_blocked` — terminal blocked preflight, no loop
+- `late_preflight_unavailable` — transient gate (heartbeat, lease, etc.)
+- `late_preflight_too_close_to_deadline` — runway under 10 minutes
+- `skipped_preflight_missing` — legacy path when late preflight not applicable
+
+**Non-goals / preserved contracts:**
+
+- No blind start: `account_session` impossible without `preflight_ready`.
+- Auto Restart unchanged (`resume_plan_missing` on historic runs stays correct).
+- CP0–CP6 contracts preserved; Worker/BotApp unchanged for CP4.1.
+
+**Rollback:** redeploy previous backend build; no schema migration required.
+Late preflight rows remain observable in `scheduled_session_preflights`.
+
 ### Server Check
 
 Route: `/instagram-dashboard/server-check`
