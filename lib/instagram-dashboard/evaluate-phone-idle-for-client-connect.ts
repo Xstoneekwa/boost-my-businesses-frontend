@@ -58,9 +58,11 @@ export type PhoneIdleEvaluationInput = {
   /** When validating a future reservation window, pass the full interval. */
   windowStart?: string | null;
   windowEnd?: string | null;
+  /** Own provisioning reservation must not block connect inside its window. */
+  excludeProvisioningReservationId?: string | null;
 };
 
-async function query(supabase: SupabaseLike, table: string) {
+function query(supabase: SupabaseLike, table: string) {
   return supabase.from(table) as {
     select: (cols: string) => {
       eq: (col: string, value: string) => {
@@ -80,8 +82,8 @@ async function query(supabase: SupabaseLike, table: string) {
 
 async function loadPhoneAndApp(supabase: SupabaseLike, deviceId: string, appInstanceId: string) {
   const [phoneResult, appResult] = await Promise.all([
-    (await query(supabase, "phone_devices")).select("id,status,device_kind,last_seen_at").eq("id", deviceId).limit(1),
-    (await query(supabase, "phone_app_instances")).select("id,device_id,status,usable_for_auto_login,is_launchable").eq("id", appInstanceId).limit(1),
+    query(supabase, "phone_devices").select("id,status,device_kind,last_seen_at").eq("id", deviceId).limit(1),
+    query(supabase, "phone_app_instances").select("id,device_id,status,usable_for_auto_login,is_launchable").eq("id", appInstanceId).limit(1),
   ]);
   if (phoneResult.error) throw new Error(phoneResult.error.message || "phone_unavailable");
   if (appResult.error) throw new Error(appResult.error.message || "app_instance_unavailable");
@@ -314,7 +316,11 @@ export async function evaluatePhoneIdleForClientConnect(
     }
   }
 
-  const reservations = await listActiveReservationsOnDevice(supabase, input.deviceId);
+  const reservations = await listActiveReservationsOnDevice(
+    supabase,
+    input.deviceId,
+    input.excludeProvisioningReservationId,
+  );
   for (const reservation of reservations) {
     const start = Date.parse(readString(reservation.window_start_utc));
     const end = Date.parse(readString(reservation.window_end_utc));

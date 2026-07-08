@@ -10,6 +10,7 @@ import { runReadinessNow } from "./readiness-now.ts";
 import {
   deadlineForClientConnectAssignment,
   enqueueClientConnectRequest,
+  loadClientConnectAssignment,
 } from "../instagram-client/enqueue-client-connect.ts";
 
 type SupabaseLike = Parameters<typeof connectNowForAccount>[0];
@@ -76,12 +77,31 @@ export async function startAssistedAutoLoginFromReservation(
     return fail("provisioning_window_not_open", "The reserved provisioning window is not open yet.");
   }
 
+  const assignment = await loadClientConnectAssignment(supabase, input.accountId);
+  if (!assignment) {
+    return fail("assignment_required", "Assignment required before Auto Login.");
+  }
+  const assignmentId = readString(assignment.id);
+  const assignmentDeviceId = readString(assignment.device_id);
+  const assignmentAppInstanceId = readString(assignment.app_instance_id);
+  if (
+    assignmentId !== reservation.assignment_id
+    || assignmentDeviceId !== reservation.device_id
+    || assignmentAppInstanceId !== reservation.app_instance_id
+  ) {
+    return fail(
+      "provisioning_reservation_resource_mismatch",
+      "Reserved phone or clone no longer matches the assignment.",
+    );
+  }
+
   const idle = await evaluatePhoneIdleForClientConnect(supabase, {
     accountId: input.accountId,
     assignmentId: reservation.assignment_id,
     deviceId: reservation.device_id,
     appInstanceId: reservation.app_instance_id,
     now,
+    excludeProvisioningReservationId: reservation.id,
   });
   if (!idle.idle) {
     return fail(idle.reason, "Phone is not idle. Wait for availability or use Stop separately before retrying.");
@@ -99,14 +119,14 @@ export async function startAssistedAutoLoginFromReservation(
     return fail(readiness.reason || "readiness_not_satisfied", "Account is not ready to connect.");
   }
 
-  const assignment = {
+  const deadlineAssignment = {
     id: reservation.assignment_id,
     device_id: reservation.device_id,
     app_instance_id: reservation.app_instance_id,
     starts_at: reservation.window_start_utc,
     ends_at: reservation.window_end_utc,
   };
-  const deadline = deadlineForClientConnectAssignment(assignment, now);
+  const deadline = deadlineForClientConnectAssignment(deadlineAssignment, now);
   const enqueue = await enqueueClientConnectRequest(supabase, {
     accountId: input.accountId,
     actorId: input.actorId ?? null,

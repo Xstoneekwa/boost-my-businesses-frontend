@@ -299,6 +299,23 @@ par défaut. OFF = comportement client inchangé, aucune réservation créée.
 **Services :** `evaluatePhoneIdleForClientConnect`,
 `provisioning-slot-scheduler`, `client-provisioning-slot-reservations`.
 
+### CP6.1 hardening gate (before flag activation)
+
+**Mandatory before** `CLIENT_PROVISIONING_SLOT_RESERVATIONS_ENABLED=true` :
+
+- Integration tests in `client-provisioning-slot-cp6-1-hardening.test.ts` and harness
+  `cp6-integration-test-harness.ts`.
+- **DB anti-collision** : in-memory store mirrors PostgreSQL GIST `[start,end)` overlap;
+  one winner per `device_id` + overlapping window; idempotent return per
+  `client_instagram_account_id`; capacity released after expiration.
+- **CP4/CP5 blocking** : preflight running/ready, buffer T-10, scheduler session,
+  active run/request, CP3 lease, operator stop suppression block provisioning scan,
+  reservation, or Start Auto Login — no enqueue, no lease, stable reasons.
+- **Start Auto Login E2E (backend-controlled, no Android)** : exact reserved
+  `device_id` + `app_instance_id`; refuses phone busy, clone/assignment mismatch,
+  expired reservation; own active reservation excluded from idle self-conflict;
+  never falls back to another phone/clone.
+- **Flag remains OFF** after CP6.1 deploy; live client validation still pending.
 
 ### Session transition buffer + scheduled preflight (CP4)
 

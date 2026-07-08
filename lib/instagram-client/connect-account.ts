@@ -379,6 +379,7 @@ export async function connectClientInstagramAccount(input: {
       assignmentId: readString(assignment.id),
       deviceId: readString(assignment.device_id),
       appInstanceId: readString(assignment.app_instance_id),
+      excludeProvisioningReservationId: activeReservation?.id ?? null,
     });
     if (!idleConfirm.idle) {
       return buildReservationBlockedResult({
