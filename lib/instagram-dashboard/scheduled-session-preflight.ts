@@ -122,6 +122,71 @@ export function deriveAssignmentTransitionTimestamps(startsAt: string, endsAt: s
   return deriveSessionTransitionTimestamps(startsAt, endsAt);
 }
 
+export function preflightDashboardActionDedupeKey(
+  accountId: string,
+  assignmentId: string,
+  startsAt: string,
+) {
+  return `account:${accountId}:scheduled_preflight:${assignmentId}:${startsAt}`;
+}
+
+export function resolvePreflightDashboardActionStatus(
+  terminalStatus: ScheduledSessionPreflightStatus | string,
+): "completed" | "action_required" {
+  return terminalStatus === "preflight_blocked" ? "action_required" : "completed";
+}
+
+export function resolvePreflightExpiresAt(
+  timestamps: SessionTransitionTimestamps,
+  metadataSafe?: Record<string, unknown>,
+) {
+  return metadataSafe?.late_preflight === true
+    ? timestamps.business_action_deadline
+    : timestamps.session_start;
+}
+
+export async function reconcilePreflightDashboardAction(
+  supabase: SupabaseLike,
+  input: {
+    accountId: string;
+    assignmentId: string;
+    startsAt: string;
+    terminalStatus: ScheduledSessionPreflightStatus | string;
+    reasonCode?: string | null;
+    source?: string;
+    metadataSafe?: Record<string, unknown>;
+  },
+) {
+  const reasonSuffix = input.reasonCode ? ` (${input.reasonCode})` : "";
+  const actionStatus = resolvePreflightDashboardActionStatus(input.terminalStatus);
+  await supabase.rpc("upsert_account_dashboard_action", {
+    p_account_id: input.accountId,
+    p_client_id: null,
+    p_incident_id: null,
+    p_action_type: "scheduled_session_preflight",
+    p_status: actionStatus,
+    p_title: "Scheduled session preflight",
+    p_dedupe_key: preflightDashboardActionDedupeKey(input.accountId, input.assignmentId, input.startsAt),
+    p_safe_client_message: null,
+    p_admin_message: `Scheduled session preflight terminalized: ${input.terminalStatus}${reasonSuffix}.`,
+    p_assistant_message: null,
+    p_action_label: actionStatus === "action_required" ? "Review preflight" : "Monitor",
+    p_action_deep_link: "/instagram-dashboard/devices",
+    p_severity: input.terminalStatus === "preflight_blocked" ? "warning" : "info",
+    p_audience: "admin",
+    p_requires_client_action: input.terminalStatus === "preflight_blocked",
+    p_blocking_campaign: false,
+    p_metadata: {
+      source: input.source ?? "scheduled_session_preflight",
+      assignment_id: input.assignmentId,
+      scheduled_session_at: input.startsAt,
+      preflight_status: input.terminalStatus,
+      ...(input.reasonCode ? { reason_code: input.reasonCode } : {}),
+      ...(input.metadataSafe ?? {}),
+    },
+  });
+}
+
 export async function upsertScheduledSessionPreflight(
   supabase: SupabaseLike,
   input: {
@@ -153,7 +218,7 @@ export async function upsertScheduledSessionPreflight(
     p_preflight_start: timestamps.preflight_start,
     p_status: input.status ?? "preflight_due",
     p_reason_code: input.reasonCode ?? null,
-    p_expires_at: timestamps.session_start,
+    p_expires_at: resolvePreflightExpiresAt(timestamps, input.metadataSafe),
     p_metadata_safe: input.metadataSafe ?? {},
   });
   if (error) throw new Error(error.message || "preflight_upsert_failed");

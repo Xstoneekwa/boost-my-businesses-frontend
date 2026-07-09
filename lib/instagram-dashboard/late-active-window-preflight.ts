@@ -205,31 +205,15 @@ async function reconcileStalePreflightDashboardAction(
     reasonCode?: string | null;
   },
 ) {
-  const reasonSuffix = input.reasonCode ? ` (${input.reasonCode})` : "";
-  await supabase.rpc("upsert_account_dashboard_action", {
-    p_account_id: input.accountId,
-    p_client_id: null,
-    p_incident_id: null,
-    p_action_type: "scheduled_session_preflight",
-    p_status: "completed",
-    p_title: "Scheduled session preflight",
-    p_dedupe_key: preflightDashboardActionDedupeKey(input.accountId, input.assignmentId, input.startsAt),
-    p_safe_client_message: null,
-    p_admin_message: `Scheduled session preflight terminalized: ${input.terminalStatus}${reasonSuffix}.`,
-    p_assistant_message: null,
-    p_action_label: "Monitor",
-    p_action_deep_link: "/instagram-dashboard/devices",
-    p_severity: "info",
-    p_audience: "admin",
-    p_requires_client_action: false,
-    p_blocking_campaign: false,
-    p_metadata: {
-      source: "schedule_session_cron",
-      assignment_id: input.assignmentId,
-      scheduled_session_at: input.startsAt,
-      preflight_status: input.terminalStatus,
-      late_preflight_retry: true,
-    },
+  const { reconcilePreflightDashboardAction } = await import("./scheduled-session-preflight.ts");
+  await reconcilePreflightDashboardAction(supabase, {
+    accountId: input.accountId,
+    assignmentId: input.assignmentId,
+    startsAt: input.startsAt,
+    terminalStatus: input.terminalStatus,
+    reasonCode: input.reasonCode,
+    source: "schedule_session_cron",
+    metadataSafe: { late_preflight_retry: true },
   });
 }
 
