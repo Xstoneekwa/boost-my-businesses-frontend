@@ -9,6 +9,10 @@ import {
   type ActiveDeviceSessionLock,
   type DeviceSessionLockReason,
 } from "./device-session-lock.ts";
+import {
+  reconcileStaleDeviceLockBeforePreflight,
+  type ReconcileStaleDeviceLockResult,
+} from "./reconcile-stale-device-lock-before-preflight.ts";
 
 type SupabaseLike = {
   from: (table: string) => unknown;
@@ -256,9 +260,27 @@ export async function leaseRequestOrCancel(
     ownerKind?: string;
     operationPhase?: string;
   },
-): Promise<{ ok: true } | { ok: false; reason: string; operatorLabel: string }> {
+): Promise<
+  | { ok: true }
+  | {
+    ok: false;
+    reason: string;
+    operatorLabel: string;
+    reconcile?: ReconcileStaleDeviceLockResult;
+  }
+> {
+  let reconcile: ReconcileStaleDeviceLockResult | undefined;
+  if (input.reason === "scheduled_session_preflight") {
+    reconcile = await reconcileStaleDeviceLockBeforePreflight(supabase, {
+      deviceId: input.deviceId,
+      accountId: input.accountId,
+      context: input.operationPhase ?? "cp4_preflight",
+    });
+  }
+
   const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, input);
   if (leased.ok) return { ok: true };
+
   await supabase.rpc("cancel_account_run_request", {
     p_request_id: input.requestId,
     p_reason: leased.reason,
@@ -268,7 +290,12 @@ export async function leaseRequestOrCancel(
     requestId: input.requestId,
     releaseReason: leased.reason,
   }).catch(() => undefined);
-  return { ok: false, reason: leased.reason, operatorLabel: DEVICE_LEASE_OPERATOR_LABEL };
+  return {
+    ok: false,
+    reason: leased.reason,
+    operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
+    reconcile,
+  };
 }
 
 export async function resolveAccountDeviceLeaseBlock(

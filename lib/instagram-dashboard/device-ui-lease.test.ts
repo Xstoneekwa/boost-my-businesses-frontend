@@ -4,6 +4,7 @@ import {
   DEVICE_LEASE_OPERATOR_LABEL,
   DEVICE_LEASE_UNAVAILABLE,
   deviceLeaseOperatorLabel,
+  leaseRequestOrCancel,
   mapDeviceLockReasonToLeaseReason,
   runtimeLockFromActiveLease,
 } from "./device-ui-lease.ts";
@@ -56,5 +57,63 @@ describe("device ui lease CP3", () => {
       { accountId: "acct-b" },
     );
     assert.equal(reason, "device_lease_unavailable");
+  });
+
+  it("scheduled preflight lease path reconciles stale lock before acquire", async () => {
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const supabase = {
+      from(table: string) {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            if (table === "auto_restart_device_locks") {
+              return {
+                data: {
+                  device_id: "device-1",
+                  worker_id: "pending-request:req-old",
+                  request_id: "req-old",
+                  lease_id: "lease-1",
+                  lease_expires_at: "2026-07-08T16:05:30.000Z",
+                },
+                error: null,
+              };
+            }
+            if (table === "account_run_requests") {
+              return { data: { status: "failed" }, error: null };
+            }
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
+      async rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (name === "auto_restart_release_device_lock") {
+          return { data: { ok: true, released: true }, error: null };
+        }
+        if (name === "auto_restart_acquire_device_lock") {
+          return { data: { ok: true, acquired: true, lease_id: "lease-new" }, error: null };
+        }
+        if (name === "auto_restart_bind_device_lock_to_request") {
+          return { data: { ok: true, bound: true }, error: null };
+        }
+        return { data: {}, error: null };
+      },
+    };
+
+    const result = await leaseRequestOrCancel(supabase, {
+      deviceId: "device-1",
+      accountId: "account-1",
+      requestId: "req-new",
+      reason: "scheduled_session_preflight",
+      ownerKind: "preflight",
+      operationPhase: "queued",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(rpcCalls[0]?.name, "auto_restart_release_device_lock");
+    assert.ok(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"));
   });
 });

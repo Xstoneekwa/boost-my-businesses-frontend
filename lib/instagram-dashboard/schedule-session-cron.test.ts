@@ -123,6 +123,12 @@ function makeSupabase(overrides: {
         if (table === "phone_app_instances") {
           return makeQueryResult([{ id: "app-1", package_name: "com.instagram.android" }]);
         }
+        if (table === "ig_accounts") {
+          return makeQueryResult([{ id: "account-1", username: "i_m_your_traker" }]);
+        }
+        if (table === "account_dashboard_actions") {
+          return makeQueryResult([]);
+        }
         return makeQueryResult([]);
       },
       rpc(name: string, args: Record<string, unknown>) {
@@ -559,6 +565,25 @@ test("login required blocks scheduled launch", async () => {
 
   assert.equal(run.result.summary.skipped_eligibility_count, 1);
   assert.equal(run.result.summary.queued_count, 0);
+});
+
+test("welcome_real_send_disabled reports scheduler launch block action", async () => {
+  process.env.SCHEDULER_LAUNCH_BLOCK_NOTIFICATIONS_ENABLED = "false";
+  const supabase = makeSupabase();
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: false, reason: "welcome_real_send_disabled" }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.result.summary.skipped_eligibility_count, 1);
+  assert.equal(run.result.summary.scheduler_launch_block_reported_count, 1);
+  const upsert = supabase.rpcCalls.find((call) => call.name === "upsert_account_dashboard_action");
+  assert.ok(upsert);
+  assert.equal(upsert?.args.p_action_type, "scheduler_launch_blocked");
+  assert.equal((upsert?.args.p_metadata as Record<string, unknown>).reason_code, "welcome_real_send_disabled");
 });
 
 test("manual_only assignment is excluded by active window query", async () => {

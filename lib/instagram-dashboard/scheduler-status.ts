@@ -22,6 +22,7 @@ import {
   classifySessionTransitionPhase,
   deriveSessionTransitionTimestamps,
 } from "./session-transition-buffer.ts";
+import { buildDailySchedulerPipeline, type DailySchedulerPipeline } from "./daily-scheduler-pipeline.ts";
 
 export type SchedulerEngineStatus = "running" | "degraded" | "unknown";
 export type SchedulerBackendMode = "enabled" | "disabled_by_config";
@@ -117,6 +118,7 @@ export type SchedulerStatus = {
   daily_runtime_gate: SchedulerDailyRuntimeGate | null;
   windows_horizon_hours: number;
   upcoming_windows: SchedulerUpcomingWindow[];
+  daily_scheduler_pipeline: DailySchedulerPipeline | null;
 };
 
 type QueryResult = { data?: unknown; error?: { message?: string } | null };
@@ -453,6 +455,12 @@ export async function buildSchedulerStatus(
   ]);
   const upcomingWindows = projectUpcomingWindows(scheduledAssignments, usernames, deviceNames, now);
 
+  const dailySchedulerPipeline = await buildDailySchedulerPipeline(supabase, {
+    upcomingWindows,
+    usernames,
+    now,
+  });
+
   const recentDecisions: SchedulerRecentDecision[] = decisions.slice(0, recentLimit).map(projectRecentDecision(usernames));
 
   const checkEveryMinutes = readNumber(settingsRow?.check_every_minutes, 0);
@@ -492,5 +500,6 @@ export async function buildSchedulerStatus(
     daily_runtime_gate: options.dailyRuntimeGate ?? null,
     windows_horizon_hours: SCHEDULE_PROJECTION_HORIZON_HOURS,
     upcoming_windows: upcomingWindows,
+    daily_scheduler_pipeline: dailySchedulerPipeline,
   };
 }

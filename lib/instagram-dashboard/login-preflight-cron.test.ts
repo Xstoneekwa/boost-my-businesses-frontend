@@ -58,6 +58,20 @@ const defaultStatuses = [
   },
 ];
 
+function makeMaybeSingleQuery(row: unknown = null) {
+  const query = {
+    select: () => query,
+    eq: () => query,
+    in: () => query,
+    gte: () => query,
+    lte: () => query,
+    order: () => query,
+    limit: () => query,
+    maybeSingle: () => Promise.resolve({ data: row, error: null }),
+  };
+  return query;
+}
+
 function makeQueryResult(rows: unknown[]) {
   const query = {
     select: () => query,
@@ -67,6 +81,7 @@ function makeQueryResult(rows: unknown[]) {
     order: () => query,
     eq: () => query,
     limit: () => Promise.resolve({ data: rows, error: null }),
+    maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
   };
   return query;
 }
@@ -110,6 +125,9 @@ function makeSupabase(overrides: {
         }
         if (table === "account_run_requests") {
           return makeQueryResult(overrides.activeRequests ?? []);
+        }
+        if (table === "auto_restart_device_locks") {
+          return makeMaybeSingleQuery(null);
         }
         if (table === "ig_runs") {
           return makeQueryResult(overrides.activeRuns ?? []);

@@ -37,6 +37,7 @@ export type ScheduledSessionPreflightRow = {
   lease_id: string | null;
   request_id: string | null;
   metadata_safe: Record<string, unknown>;
+  updated_at?: string | null;
 };
 
 type SupabaseLike = {
@@ -67,7 +68,7 @@ function query(supabase: SupabaseLike, table: string): QueryBuilder {
   return supabase.from(table) as QueryBuilder;
 }
 
-function mapPreflightRow(row: Record<string, unknown> | null | undefined): ScheduledSessionPreflightRow | null {
+export function mapPreflightRow(row: Record<string, unknown> | null | undefined): ScheduledSessionPreflightRow | null {
   if (!row) return null;
   const id = readString(row.id);
   if (!id) return null;
@@ -92,6 +93,7 @@ function mapPreflightRow(row: Record<string, unknown> | null | undefined): Sched
     metadata_safe: row.metadata_safe && typeof row.metadata_safe === "object" && !Array.isArray(row.metadata_safe)
       ? (row.metadata_safe as Record<string, unknown>)
       : {},
+    updated_at: readString(row.updated_at) || null,
   };
 }
 
@@ -130,10 +132,33 @@ export function preflightDashboardActionDedupeKey(
   return `account:${accountId}:scheduled_preflight:${assignmentId}:${startsAt}`;
 }
 
+/** Identity/IG blocks surface as error severity; technical blocks stay warning. */
+export const IDENTITY_PREFLIGHT_BLOCKED_REASONS = [
+  "own_profile_open_failed",
+  "active_instagram_account_mismatch",
+  "identity_mismatch",
+  "possible_username_rename_detected",
+  "login_challenge",
+  "checkpoint",
+] as const;
+
+const ACTIVE_DASHBOARD_ACTION_STATUSES = ["pending", "acknowledged", "pending_verification"] as const;
+
 export function resolvePreflightDashboardActionStatus(
   terminalStatus: ScheduledSessionPreflightStatus | string,
-): "completed" | "action_required" {
-  return terminalStatus === "preflight_blocked" ? "action_required" : "completed";
+): "resolved" | "pending" {
+  return terminalStatus === "preflight_blocked" ? "pending" : "resolved";
+}
+
+export function resolvePreflightDashboardActionSeverity(
+  terminalStatus: ScheduledSessionPreflightStatus | string,
+  reasonCode?: string | null,
+): "info" | "warning" | "error" {
+  if (terminalStatus !== "preflight_blocked") return "info";
+  const reason = readString(reasonCode).toLowerCase();
+  return (IDENTITY_PREFLIGHT_BLOCKED_REASONS as readonly string[]).includes(reason)
+    ? "error"
+    : "warning";
 }
 
 export function resolvePreflightExpiresAt(
@@ -143,6 +168,20 @@ export function resolvePreflightExpiresAt(
   return metadataSafe?.late_preflight === true
     ? timestamps.business_action_deadline
     : timestamps.session_start;
+}
+
+async function findActivePreflightDashboardActionId(
+  supabase: SupabaseLike,
+  dedupeKey: string,
+) {
+  const result = await query(supabase, "account_dashboard_actions")
+    .select("id,status")
+    .eq("dedupe_key", dedupeKey)
+    .in("status", [...ACTIVE_DASHBOARD_ACTION_STATUSES])
+    .limit(1);
+  if (result.error) return null;
+  const row = readRows(result.data)[0] ?? null;
+  return readString(row?.id) || null;
 }
 
 export async function reconcilePreflightDashboardAction(
@@ -157,8 +196,31 @@ export async function reconcilePreflightDashboardAction(
     metadataSafe?: Record<string, unknown>;
   },
 ) {
-  const reasonSuffix = input.reasonCode ? ` (${input.reasonCode})` : "";
   const actionStatus = resolvePreflightDashboardActionStatus(input.terminalStatus);
+  const dedupeKey = preflightDashboardActionDedupeKey(input.accountId, input.assignmentId, input.startsAt);
+  const metadata = {
+    source: input.source ?? "scheduled_session_preflight",
+    assignment_id: input.assignmentId,
+    scheduled_session_at: input.startsAt,
+    preflight_status: input.terminalStatus,
+    ...(input.reasonCode ? { reason_code: input.reasonCode } : {}),
+    ...(input.metadataSafe ?? {}),
+  };
+  if (actionStatus === "resolved") {
+    // Non-blocked terminals resolve any active CP4 action via the audited
+    // transition RPC; the upsert RPC rejects non-active statuses.
+    const actionId = await findActivePreflightDashboardActionId(supabase, dedupeKey);
+    if (!actionId) return;
+    await supabase.rpc("transition_account_dashboard_action", {
+      p_action_id: actionId,
+      p_new_status: "resolved",
+      p_actor_type: "system",
+      p_actor_id: null,
+      p_reason: `preflight_terminal:${input.terminalStatus}${input.reasonCode ? `:${input.reasonCode}` : ""}`,
+      p_metadata: metadata,
+    });
+    return;
+  }
   await supabase.rpc("upsert_account_dashboard_action", {
     p_account_id: input.accountId,
     p_client_id: null,
@@ -166,24 +228,17 @@ export async function reconcilePreflightDashboardAction(
     p_action_type: "scheduled_session_preflight",
     p_status: actionStatus,
     p_title: "Scheduled session preflight",
-    p_dedupe_key: preflightDashboardActionDedupeKey(input.accountId, input.assignmentId, input.startsAt),
+    p_dedupe_key: dedupeKey,
     p_safe_client_message: null,
-    p_admin_message: `Scheduled session preflight terminalized: ${input.terminalStatus}${reasonSuffix}.`,
+    p_admin_message: `Scheduled session preflight blocked: ${input.reasonCode || input.terminalStatus}.`,
     p_assistant_message: null,
-    p_action_label: actionStatus === "action_required" ? "Review preflight" : "Monitor",
+    p_action_label: "Review preflight",
     p_action_deep_link: "/instagram-dashboard/devices",
-    p_severity: input.terminalStatus === "preflight_blocked" ? "warning" : "info",
+    p_severity: resolvePreflightDashboardActionSeverity(input.terminalStatus, input.reasonCode),
     p_audience: "admin",
-    p_requires_client_action: input.terminalStatus === "preflight_blocked",
+    p_requires_client_action: true,
     p_blocking_campaign: false,
-    p_metadata: {
-      source: input.source ?? "scheduled_session_preflight",
-      assignment_id: input.assignmentId,
-      scheduled_session_at: input.startsAt,
-      preflight_status: input.terminalStatus,
-      ...(input.reasonCode ? { reason_code: input.reasonCode } : {}),
-      ...(input.metadataSafe ?? {}),
-    },
+    p_metadata: metadata,
   });
 }
 

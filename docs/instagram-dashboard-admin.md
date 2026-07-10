@@ -1,6 +1,8 @@
 # Instagram Dashboard Admin - Base de connaissance frontend
 
-Derniere mise a jour: 2026-05-29
+Derniere mise a jour: 2026-07-10
+
+**Interim checkpoint (Scheduler / CP4 / observability):** [`docs/checkpoints/2026-07-10-scheduler-cp4-observability-checkpoint.md`](checkpoints/2026-07-10-scheduler-cp4-observability-checkpoint.md) — block not fully closed yet.
 
 Ce document decrit l'etat frontend du dashboard admin Instagram dans `boost-ai-frontend`. Il sert de reference projet pour les vues, routes, contrats no-leak, dependances backend Phone Farm, limites connues et prochaines etapes.
 

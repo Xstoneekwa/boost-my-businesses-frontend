@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 
 import { loadSchedulerAutomaticRunAuthorization } from "./scheduler-authorization.ts";
+import { buildDeviceLeaseUnavailableReconcileMetadata } from "./reconcile-stale-device-lock-before-preflight.ts";
+import type { ReconcileStaleDeviceLockResult } from "./reconcile-stale-device-lock-before-preflight.ts";
 import {
   assignmentIsInPreflightWindow,
   bindScheduledSessionPreflightRequest,
@@ -540,6 +542,7 @@ export async function runLoginPreflightCron(
     const requestRow = (Array.isArray(enqueued) ? enqueued[0] : enqueued) as Record<string, unknown> | null;
     const requestId = readString(requestRow?.id);
     let leaseOk = true;
+    let leaseReconcile: ReconcileStaleDeviceLockResult | undefined;
     if (requestId) {
       const { leaseRequestOrCancel } = await import("./device-ui-lease.ts");
       const leased = await leaseRequestOrCancel(supabase, {
@@ -552,6 +555,9 @@ export async function runLoginPreflightCron(
         operationPhase: "queued",
       });
       leaseOk = leased.ok;
+      if (!leased.ok) {
+        leaseReconcile = leased.reconcile;
+      }
       if (leaseOk) {
         await bindScheduledSessionPreflightRequest(supabase, {
           preflightId: preflightRow.id,
@@ -572,6 +578,7 @@ export async function runLoginPreflightCron(
         endsAt,
         status: "preflight_lease_unavailable",
         reasonCode: "device_lease_unavailable",
+        metadataSafe: buildDeviceLeaseUnavailableReconcileMetadata(leaseReconcile),
       });
       continue;
     }

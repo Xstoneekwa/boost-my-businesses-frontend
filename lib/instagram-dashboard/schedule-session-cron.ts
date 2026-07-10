@@ -12,6 +12,7 @@ import {
 } from "./schedule-recurrence.ts";
 import { isBusinessActionsAllowed, deriveSessionTransitionTimestamps } from "./session-transition-buffer.ts";
 import { ensureLateActiveWindowPreflight } from "./late-active-window-preflight.ts";
+import { reportSchedulerLaunchBlock } from "./schedule-session-launch-block-reporting.ts";
 import {
   buildSchedulerSessionMetadata,
   getValidScheduledSessionPreflight,
@@ -111,6 +112,7 @@ export type ScheduleSessionCronSummary = {
   /** CP2 — expired scheduled windows rolled forward to the derived daily occurrence. */
   rolled_forward_count: number;
   roll_forward_failed_count: number;
+  scheduler_launch_block_reported_count: number;
 };
 
 export type ScheduleSessionCronResult = {
@@ -190,7 +192,32 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_transition_buffer_count: 0,
     rolled_forward_count: 0,
     roll_forward_failed_count: 0,
+    scheduler_launch_block_reported_count: 0,
   };
+}
+
+async function maybeReportSchedulerLaunchBlock(
+  supabase: SupabaseLike,
+  summary: ScheduleSessionCronSummary,
+  input: {
+    accountId: string;
+    assignmentId: string;
+    startsAt: string;
+    endsAt: string;
+    reason: string;
+    username?: string | null;
+    dryRun: boolean;
+  },
+) {
+  if (input.dryRun) return;
+  try {
+    const result = await reportSchedulerLaunchBlock(supabase, input);
+    if (result.reported) {
+      summary.scheduler_launch_block_reported_count += 1;
+    }
+  } catch {
+    // Cron must stay healthy even if operator reporting fails.
+  }
 }
 
 function query(supabase: SupabaseLike, table: string): QueryBuilder {
@@ -693,6 +720,23 @@ export async function runScheduleSessionCron(
     const eligibility = await evaluateEligibility(accountId);
     if (!eligibility.ok) {
       summary.skipped_eligibility_count += 1;
+      const expectedUsername = await (async () => {
+        const result = await query(supabase, "ig_accounts")
+          .select("username")
+          .eq("id", accountId)
+          .limit(1) as QueryResult;
+        const row = readRows(result.data)[0];
+        return readString(row?.username) || null;
+      })();
+      await maybeReportSchedulerLaunchBlock(supabase, summary, {
+        accountId,
+        assignmentId,
+        startsAt,
+        endsAt,
+        reason: eligibility.reason,
+        username: expectedUsername,
+        dryRun: env.dryRun,
+      });
       continue;
     }
 
@@ -779,6 +823,15 @@ export async function runScheduleSessionCron(
               summary.skipped_preflight_missing_count += 1;
               break;
           }
+          await maybeReportSchedulerLaunchBlock(supabase, summary, {
+            accountId,
+            assignmentId,
+            startsAt,
+            endsAt,
+            reason: lateResult.reason,
+            username: expectedUsername,
+            dryRun: env.dryRun,
+          });
           summary.eligible_count -= 1;
           continue;
         }

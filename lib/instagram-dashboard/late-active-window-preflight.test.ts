@@ -6,10 +6,13 @@ import {
   hasLatePreflightRunway,
   isLateActiveWindowEligible,
   isRetryableTerminalPreflightStatus,
+  isTechnicalPreflightBlockedRetryable,
   isTerminalPreflightRequestStatus,
   resolveExistingPreflightDisposition,
+  resolveLatePreflightEnqueueIdempotencyKeys,
   scheduledPreflightIdempotencyKey,
   scheduledPreflightLateIdempotencyKey,
+  scheduledPreflightLateRetryIdempotencyKey,
 } from "./late-active-window-preflight.ts";
 import { deriveSessionTransitionTimestamps } from "./session-transition-buffer.ts";
 import { runScheduleSessionCron } from "./schedule-session-cron.ts";
@@ -46,6 +49,7 @@ function makeQueryResult(rows: unknown[]) {
     select: () => query,
     in: () => query,
     eq: () => query,
+    like: () => query,
     lte: () => query,
     gt: () => query,
     order: () => query,
@@ -610,10 +614,21 @@ test("expired T-10 preflight is retryable and uses a distinct late idempotency k
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.outcome, "started");
   const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
-  assert.equal(enqueue?.args.p_idempotency_key, scheduledPreflightLateIdempotencyKey("assignment-1", windowStart));
   assert.equal(
-    supabase.rpcCalls.some((call) => call.name === "upsert_account_dashboard_action"),
-    true,
+    enqueue?.args.p_idempotency_key,
+    scheduledPreflightLateRetryIdempotencyKey(
+      "assignment-1",
+      windowStart,
+      "preflight-late-1",
+      "req-failed-1",
+    ),
+  );
+  // Reconcile must never send legacy statuses rejected by the RPC.
+  assert.equal(
+    supabase.rpcCalls.some((call) =>
+      call.name === "upsert_account_dashboard_action"
+      && ["action_required", "completed"].includes(String(call.args.p_status))),
+    false,
   );
 });
 
@@ -701,6 +716,9 @@ function makeProdLatePreflightSupabase(overrides: {
           if (key.startsWith("scheduled-preflight:") && !key.includes("-late:")) {
             return { data: [{ id: "req-failed-t10", status: "failed" }], error: null };
           }
+          if (key.includes(":retry:")) {
+            return { data: [{ id: "preflight-request-late-retry", status: "queued" }], error: null };
+          }
           return { data: [{ id: "preflight-request-late-prod", status: createRequestStatus }], error: null };
         }
         if (name === "upsert_account_dashboard_action") {
@@ -747,15 +765,18 @@ test("prod-shaped preflight_expired with failed T-10 request enqueues distinct l
   const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
   assert.equal(
     enqueue?.args.p_idempotency_key,
-    scheduledPreflightLateIdempotencyKey("assignment-1", prodWindowStart),
+    scheduledPreflightLateRetryIdempotencyKey(
+      "assignment-1",
+      prodWindowStart,
+      "pf-expired-prod",
+      "req-failed-t10",
+    ),
   );
   assert.equal(
-    enqueue?.args.p_idempotency_key,
-    "scheduled-preflight-late:assignment-1:2026-07-08 16:00:00+00",
-  );
-  assert.equal(
-    supabase.rpcCalls.some((call) => call.name === "upsert_account_dashboard_action"),
-    true,
+    supabase.rpcCalls.some((call) =>
+      call.name === "upsert_account_dashboard_action"
+      && ["action_required", "completed"].includes(String(call.args.p_status))),
+    false,
   );
   assert.equal(
     supabase.rpcCalls.some((call) => call.name === "auto_restart_release_device_lock"),
@@ -763,8 +784,8 @@ test("prod-shaped preflight_expired with failed T-10 request enqueues distinct l
   );
 });
 
-test("terminal idempotency replay does not enqueue late preflight", async () => {
-  const supabase = makeProdLatePreflightSupabase({ createRequestStatus: "failed" });
+test("terminal idempotency replay enqueues distinct late retry request", async () => {
+  const supabase = makeProdLatePreflightSupabase({ createRequestStatus: "canceled" });
   const result = await ensureLateActiveWindowPreflight(supabase.client, {
     accountId: "account-1",
     assignmentId: "assignment-1",
@@ -780,8 +801,87 @@ test("terminal idempotency replay does not enqueue late preflight", async () => 
     heartbeatLastSeenAt: prodMidWindowNow.toISOString(),
     heartbeatStatus: "online",
   });
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.reason, "late_preflight_unavailable");
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.outcome, "started");
+  const enqueueCalls = supabase.rpcCalls.filter((call) => call.name === "create_account_run_request");
+  assert.equal(enqueueCalls.length, 1);
+  assert.match(String(enqueueCalls[0]?.args.p_idempotency_key), /:retry:pf-expired-prod:req-failed-t10$/);
+  assert.equal(
+    (enqueueCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.late_preflight_retry,
+    true,
+  );
+});
+
+test("preflight_due with canceled late request uses retry idempotency key", async () => {
+  const canceledRequestId = "25404069-0edc-4919-b8f6-8751bf5baa07";
+  const preflightId = "ba124f8f-6a64-4408-bb75-c228b85055bb";
+  const assignmentId = "22e11ec2-b797-49d3-a4ef-bb3613ccb2de";
+  const mythylWindowStart = "2026-07-09T10:00:00+00:00";
+  const mythylWindowEnd = "2026-07-09T16:00:00+00:00";
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: preflightId,
+      status: "preflight_due",
+      request_id: canceledRequestId,
+      reason_code: null,
+      scheduled_window_start: mythylWindowStart,
+    }],
+    runRequests: [{ id: canceledRequestId, status: "canceled" }],
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId,
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.androif",
+    expectedUsername: "mythyl_fitness",
+    startsAt: mythylWindowStart,
+    endsAt: mythylWindowEnd,
+    workerId: "schedule_session_cron",
+    now: new Date("2026-07-09T11:25:00.000Z"),
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: new Date("2026-07-09T11:25:00.000Z").toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.outcome, "started");
+  const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
+  assert.equal(
+    enqueue?.args.p_idempotency_key,
+    scheduledPreflightLateRetryIdempotencyKey(
+      assignmentId,
+      mythylWindowStart,
+      "preflight-late-1",
+      canceledRequestId,
+    ),
+  );
+});
+
+test("resolveLatePreflightEnqueueIdempotencyKeys uses retry generation after terminal supersede", () => {
+  assert.deepEqual(
+    resolveLatePreflightEnqueueIdempotencyKeys({
+      assignmentId: "assignment-1",
+      startsAt: windowStart,
+      preflightId: "preflight-1",
+      supersededRequestId: "req-canceled-1",
+    }),
+    [
+      scheduledPreflightLateRetryIdempotencyKey(
+        "assignment-1",
+        windowStart,
+        "preflight-1",
+        "req-canceled-1",
+      ),
+    ],
+  );
+  assert.deepEqual(
+    resolveLatePreflightEnqueueIdempotencyKeys({
+      assignmentId: "assignment-1",
+      startsAt: windowStart,
+      preflightId: "preflight-1",
+    }),
+    [scheduledPreflightLateIdempotencyKey("assignment-1", windowStart)],
+  );
 });
 
 test("preflight_blocked is not retried", async () => {
@@ -811,6 +911,223 @@ test("preflight_blocked is not retried", async () => {
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.reason, "late_preflight_blocked");
   assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
+});
+
+test("preflight_blocked identity with canceled request is never retried", async () => {
+  for (const reasonCode of [
+    "own_profile_open_failed",
+    "active_instagram_account_mismatch",
+    "login_challenge",
+  ]) {
+    const supabase = makeLatePreflightSupabase({
+      preflights: [{
+        id: "pf-identity-blocked-1",
+        status: "preflight_blocked",
+        request_id: "req-canceled-identity-1",
+        reason_code: reasonCode,
+      }],
+      runRequests: [{ id: "req-canceled-identity-1", status: "canceled" }],
+    });
+    const result = await ensureLateActiveWindowPreflight(supabase.client, {
+      accountId: "account-1",
+      assignmentId: "assignment-1",
+      deviceId: "device-1",
+      appInstanceId: "app-1",
+      expectedPackage: "com.instagram.androif",
+      expectedUsername: "mythyl_fitness",
+      startsAt: windowStart,
+      endsAt: windowEnd,
+      workerId: "schedule_session_cron",
+      now: midWindowNow,
+      schedulerEnabled: true,
+      heartbeatLastSeenAt: midWindowNow.toISOString(),
+      heartbeatStatus: "online",
+    });
+    assert.equal(result.ok, false, `reason_code=${reasonCode} must not retry`);
+    if (!result.ok) assert.equal(result.reason, "late_preflight_blocked");
+    assert.equal(
+      supabase.rpcCalls.some((call) => call.name === "create_account_run_request"),
+      false,
+      `reason_code=${reasonCode} must not enqueue a retry request`,
+    );
+    assert.equal(
+      supabase.rpcCalls.some((call) => call.name === "upsert_scheduled_session_preflight"),
+      false,
+      `reason_code=${reasonCode} must not reset the blocked row to preflight_due`,
+    );
+  }
+});
+
+test("preflight_blocked device_serial_missing with canceled request stays retryable", async () => {
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: "pf-serial-blocked-1",
+      status: "preflight_blocked",
+      request_id: "req-canceled-serial-1",
+      reason_code: "device_serial_missing",
+    }],
+    runRequests: [{ id: "req-canceled-serial-1", status: "canceled" }],
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.androif",
+    expectedUsername: "mythyl_fitness",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.outcome, "started");
+  const enqueue = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
+  assert.equal(
+    enqueue?.args.p_idempotency_key,
+    scheduledPreflightLateRetryIdempotencyKey(
+      "assignment-1",
+      windowStart,
+      "preflight-late-1",
+      "req-canceled-serial-1",
+    ),
+  );
+});
+
+test("preflight_blocked device_serial_missing is technical retryable", async () => {
+  assert.equal(
+    isTechnicalPreflightBlockedRetryable("preflight_blocked", "device_serial_missing"),
+    true,
+  );
+  assert.equal(
+    resolveExistingPreflightDisposition({
+      id: "pf-tech-1",
+      status: "preflight_blocked",
+      request_id: "req-tech-1",
+      reason_code: "device_serial_missing",
+    }),
+    null,
+  );
+  assert.equal(
+    isTechnicalPreflightBlockedRetryable("preflight_blocked", "login_challenge"),
+    false,
+  );
+});
+
+test("late retry under cap is allowed and counts prior retry generations", async () => {
+  const baseKey = scheduledPreflightLateIdempotencyKey("assignment-1", windowStart);
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: "pf-serial-blocked-cap",
+      status: "preflight_blocked",
+      request_id: "req-retry-2",
+      reason_code: "device_serial_missing",
+    }],
+    runRequests: [
+      { id: "req-retry-1", status: "canceled", idempotency_key: `${baseKey}:retry:pf-a:req-0` },
+      { id: "req-retry-2", status: "canceled", idempotency_key: `${baseKey}:retry:pf-a:req-retry-1` },
+    ],
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.androif",
+    expectedUsername: "mythyl_fitness",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.outcome, "started");
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "create_account_run_request"),
+    true,
+  );
+});
+
+test("late retry cap exceeded blocks any further retry generation", async () => {
+  const baseKey = scheduledPreflightLateIdempotencyKey("assignment-1", windowStart);
+  const retryRows = [1, 2, 3].map((generation) => ({
+    id: `req-retry-${generation}`,
+    status: "canceled",
+    idempotency_key: `${baseKey}:retry:pf-a:req-${generation - 1}`,
+  }));
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: "pf-serial-blocked-cap",
+      status: "preflight_blocked",
+      request_id: "req-retry-3",
+      reason_code: "device_serial_missing",
+    }],
+    runRequests: retryRows,
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.androif",
+    expectedUsername: "mythyl_fitness",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "late_preflight_retry_cap_exceeded");
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "create_account_run_request"),
+    false,
+  );
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "upsert_scheduled_session_preflight"),
+    false,
+  );
+});
+
+test("identity blocked never retries even when retry cap is not reached", async () => {
+  const supabase = makeLatePreflightSupabase({
+    preflights: [{
+      id: "pf-identity-cap",
+      status: "preflight_blocked",
+      request_id: "req-identity-1",
+      reason_code: "own_profile_open_failed",
+    }],
+    runRequests: [{ id: "req-identity-1", status: "canceled" }],
+  });
+  const result = await ensureLateActiveWindowPreflight(supabase.client, {
+    accountId: "account-1",
+    assignmentId: "assignment-1",
+    deviceId: "device-1",
+    appInstanceId: "app-1",
+    expectedPackage: "com.instagram.androif",
+    expectedUsername: "mythyl_fitness",
+    startsAt: windowStart,
+    endsAt: windowEnd,
+    workerId: "schedule_session_cron",
+    now: midWindowNow,
+    schedulerEnabled: true,
+    heartbeatLastSeenAt: midWindowNow.toISOString(),
+    heartbeatStatus: "online",
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "late_preflight_blocked");
+  assert.equal(
+    supabase.rpcCalls.some((call) => call.name === "create_account_run_request"),
+    false,
+  );
 });
 
 test("active late request idempotency key blocks duplicate enqueue", async () => {

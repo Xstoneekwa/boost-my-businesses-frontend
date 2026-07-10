@@ -1,4 +1,5 @@
 import { getActiveOperatorStopSuppression } from "./operator-stop-suppression.ts";
+import { reconcileStaleDeviceLockBeforePreflight, buildDeviceLeaseUnavailableReconcileMetadata } from "./reconcile-stale-device-lock-before-preflight.ts";
 import {
   bindScheduledSessionPreflightRequest,
   buildPreflightRequestMetadata,
@@ -16,6 +17,8 @@ import {
 export const MIN_LATE_PREFLIGHT_RUNWAY_MINUTES = 10;
 export const LATE_PREFLIGHT_RUN_TYPE = "scheduled_session_preflight";
 export const LATE_PREFLIGHT_SOURCE_SURFACE = "instagram_schedule_session_cron";
+/** Anti-loop cap: max `:retry:` generations per assignment window (base late attempt excluded). */
+export const MAX_LATE_PREFLIGHT_RETRY_GENERATIONS = 3;
 
 export const RETRYABLE_TERMINAL_PREFLIGHT_STATUSES = [
   "preflight_expired",
@@ -35,6 +38,7 @@ export type LateActiveWindowPreflightReason =
   | "late_preflight_ready"
   | "late_preflight_blocked"
   | "late_preflight_unavailable"
+  | "late_preflight_retry_cap_exceeded"
   | "late_preflight_too_close_to_deadline"
   | "skipped_preflight_missing"
   | "scheduler_disabled"
@@ -65,6 +69,7 @@ type QueryBuilder = {
   select: (...args: unknown[]) => QueryBuilder;
   eq: (...args: unknown[]) => QueryBuilder;
   in: (...args: unknown[]) => QueryBuilder;
+  like: (...args: unknown[]) => QueryBuilder;
   limit: (...args: unknown[]) => QueryBuilder & PromiseLike<QueryResult>;
   maybeSingle: () => Promise<{ data?: unknown; error?: { message?: string } | null }>;
 };
@@ -90,9 +95,68 @@ export function scheduledPreflightLateIdempotencyKey(assignmentId: string, start
   return `scheduled-preflight-late:${assignmentId}:${startsAt}`;
 }
 
+/** Distinct late retry generation after a terminal request supersedes the base late key. */
+export function scheduledPreflightLateRetryIdempotencyKey(
+  assignmentId: string,
+  startsAt: string,
+  preflightId: string,
+  supersededRequestId: string,
+) {
+  const preflight = readString(preflightId);
+  const superseded = readString(supersededRequestId);
+  if (!preflight || !superseded) {
+    return scheduledPreflightLateIdempotencyKey(assignmentId, startsAt);
+  }
+  return `${scheduledPreflightLateIdempotencyKey(assignmentId, startsAt)}:retry:${preflight}:${superseded}`;
+}
+
+export function resolveLatePreflightEnqueueIdempotencyKeys(input: {
+  assignmentId: string;
+  startsAt: string;
+  preflightId: string;
+  supersededRequestId?: string | null;
+}) {
+  const baseKey = scheduledPreflightLateIdempotencyKey(input.assignmentId, input.startsAt);
+  const preflightId = readString(input.preflightId);
+  const supersededRequestId = readString(input.supersededRequestId);
+  if (supersededRequestId && preflightId) {
+    return [
+      scheduledPreflightLateRetryIdempotencyKey(
+        input.assignmentId,
+        input.startsAt,
+        preflightId,
+        supersededRequestId,
+      ),
+    ];
+  }
+  return [baseKey];
+}
+
 export function isRetryableTerminalPreflightStatus(status: string | null | undefined) {
   const normalized = readString(status).toLowerCase();
   return (RETRYABLE_TERMINAL_PREFLIGHT_STATUSES as readonly string[]).includes(normalized);
+}
+
+/**
+ * Technical runtime failures explicitly allowed to retry after a blocked preflight.
+ * Identity/challenge/IG blocks (own_profile_open_failed, active_instagram_account_mismatch,
+ * login_challenge, checkpoint, ...) must stay terminal and never enter this list.
+ */
+export const TECHNICAL_RETRYABLE_PREFLIGHT_BLOCKED_REASONS = [
+  "device_serial_missing",
+] as const;
+
+/** Technical runtime failures only — identity/challenge preflight_blocked stay terminal. */
+export function isTechnicalPreflightBlockedRetryable(
+  status: string | null | undefined,
+  reasonCode?: string | null,
+) {
+  return (
+    readString(status).toLowerCase() === "preflight_blocked"
+    && (TECHNICAL_RETRYABLE_PREFLIGHT_BLOCKED_REASONS as readonly string[]).includes(
+      readString(reasonCode).toLowerCase(),
+    )
+  );
 }
 
 export function isTerminalPreflightRequestStatus(status: string | null | undefined) {
@@ -145,7 +209,7 @@ export function lateActiveWindowBlockReason(
 }
 
 export function resolveExistingPreflightDisposition(
-  existing: { status?: string; request_id?: string | null } | null | undefined,
+  existing: { status?: string; request_id?: string | null; reason_code?: string | null } | null | undefined,
   requestStatus?: string | null,
 ): EnsureLateActiveWindowPreflightResult | null {
   if (!existing) return null;
@@ -164,6 +228,9 @@ export function resolveExistingPreflightDisposition(
     };
   }
   if (status === "preflight_blocked") {
+    if (isTechnicalPreflightBlockedRetryable(status, existing.reason_code)) {
+      return null;
+    }
     return { ok: false, reason: "late_preflight_blocked" };
   }
   if (["preflight_due", "preflight_running"].includes(status) && requestId) {
@@ -179,6 +246,25 @@ export function resolveExistingPreflightDisposition(
     };
   }
   return null;
+}
+
+/**
+ * Anti-loop audit: count `:retry:` request generations already created for
+ * this assignment window. The base late attempt does not match the pattern
+ * and therefore never counts as a retry generation.
+ */
+export async function countLateRetryGenerations(
+  supabase: SupabaseLike,
+  assignmentId: string,
+  startsAt: string,
+) {
+  const pattern = `${scheduledPreflightLateIdempotencyKey(assignmentId, startsAt)}:retry:%`;
+  const result = await query(supabase, "account_run_requests")
+    .select("id,idempotency_key")
+    .like("idempotency_key", pattern)
+    .limit(MAX_LATE_PREFLIGHT_RETRY_GENERATIONS + 2) as unknown as QueryResult;
+  if (result.error) return null;
+  return readRows(result.data).length;
 }
 
 async function loadRunRequestStatus(
@@ -225,29 +311,11 @@ async function releaseExpiredPreflightDeviceLockBestEffort(
     requestId?: string | null;
   },
 ) {
-  const nowIso = new Date().toISOString();
-  const result = await query(supabase, "auto_restart_device_locks")
-    .select("device_id,worker_id,account_id,request_id,lease_expires_at,owner_kind")
-    .eq("device_id", input.deviceId)
-    .limit(1)
-    .maybeSingle();
-  if (result.error || !result.data) return;
-  const row = result.data as Record<string, unknown>;
-  if (readString(row.account_id) !== input.accountId) return;
-  const leaseExpiresAt = readString(row.lease_expires_at);
-  if (leaseExpiresAt && leaseExpiresAt > nowIso) return;
-  const workerId = readString(row.worker_id);
-  if (!workerId) return;
-  try {
-    await supabase.rpc("auto_restart_release_device_lock", {
-      p_device_id: input.deviceId,
-      p_worker_id: workerId,
-      p_request_id: input.requestId ?? (readString(row.request_id) || null),
-      p_release_reason: "preflight_terminal_retry",
-    });
-  } catch {
-    // Best-effort: stale expired locks must not block CP4.1 retry.
-  }
+  await reconcileStaleDeviceLockBeforePreflight(supabase, {
+    deviceId: input.deviceId,
+    accountId: input.accountId,
+    context: "late_cp4_terminal_retry",
+  });
 }
 
 async function reconcileTerminalPreflightBeforeLateRetry(
@@ -329,7 +397,13 @@ async function hasProvisioningReservationConflict(
   return false;
 }
 
-async function queueLatePreflightRequest(
+type LatePreflightEnqueueAttempt = {
+  requestId: string | null;
+  requestStatus: string | null;
+  idempotencyKey: string;
+};
+
+async function enqueueLatePreflightRunRequest(
   supabase: SupabaseLike,
   input: {
     accountId: string;
@@ -338,15 +412,18 @@ async function queueLatePreflightRequest(
     endsAt: string;
     workerId: string;
     preflightId: string;
+    idempotencyKey: string;
+    supersededRequestId?: string | null;
   },
-) {
+): Promise<LatePreflightEnqueueAttempt> {
+  const supersededRequestId = readString(input.supersededRequestId) || null;
   const { data, error } = await supabase.rpc("create_account_run_request", {
     p_account_id: input.accountId,
     p_requested_by: null,
     p_actor_type: "system",
     p_source_surface: LATE_PREFLIGHT_SOURCE_SURFACE,
     p_requested_run_type: LATE_PREFLIGHT_RUN_TYPE,
-    p_idempotency_key: scheduledPreflightLateIdempotencyKey(input.assignmentId, input.startsAt),
+    p_idempotency_key: input.idempotencyKey,
     p_priority: 1,
     p_metadata_safe: {
       ...buildPreflightRequestMetadata({
@@ -359,16 +436,86 @@ async function queueLatePreflightRequest(
       }),
       late_preflight: true,
       late_preflight_phase: "active_window_recovery",
+      late_preflight_retry: Boolean(supersededRequestId),
+      ...(supersededRequestId ? { supersedes_request_id: supersededRequestId } : {}),
     },
   });
   if (error) throw new Error(error.message || "late_preflight_enqueue_failed");
   const requestRow = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
-  const requestId = readString(requestRow?.id) || null;
-  const requestStatus = readString(requestRow?.status);
-  if (!requestId || isTerminalPreflightRequestStatus(requestStatus)) {
-    return null;
+  return {
+    requestId: readString(requestRow?.id) || null,
+    requestStatus: readString(requestRow?.status) || null,
+    idempotencyKey: input.idempotencyKey,
+  };
+}
+
+function parseLatePreflightRetryKey(idempotencyKey: string) {
+  const marker = ":retry:";
+  const markerIndex = idempotencyKey.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const tail = idempotencyKey.slice(markerIndex + marker.length);
+  const separator = tail.lastIndexOf(":");
+  if (separator < 0) return null;
+  return {
+    preflightId: tail.slice(0, separator),
+    supersededRequestId: tail.slice(separator + 1),
+  };
+}
+
+async function queueLatePreflightRequest(
+  supabase: SupabaseLike,
+  input: {
+    accountId: string;
+    assignmentId: string;
+    startsAt: string;
+    endsAt: string;
+    workerId: string;
+    preflightId: string;
+    supersededRequestId?: string | null;
+  },
+) {
+  const preflightId = readString(input.preflightId);
+  if (!preflightId) return null;
+
+  const keysToTry = [
+    ...resolveLatePreflightEnqueueIdempotencyKeys({
+      assignmentId: input.assignmentId,
+      startsAt: input.startsAt,
+      preflightId,
+      supersededRequestId: input.supersededRequestId,
+    }),
+  ];
+  const baseKey = scheduledPreflightLateIdempotencyKey(input.assignmentId, input.startsAt);
+
+  for (let index = 0; index < keysToTry.length; index += 1) {
+    const idempotencyKey = keysToTry[index]!;
+    const retryParts = parseLatePreflightRetryKey(idempotencyKey);
+    const attempt = await enqueueLatePreflightRunRequest(supabase, {
+      ...input,
+      preflightId,
+      idempotencyKey,
+      supersededRequestId: retryParts?.supersededRequestId ?? null,
+    });
+    if (attempt.requestId && !isTerminalPreflightRequestStatus(attempt.requestStatus)) {
+      return attempt.requestId;
+    }
+    if (
+      attempt.requestId
+      && isTerminalPreflightRequestStatus(attempt.requestStatus)
+      && idempotencyKey === baseKey
+    ) {
+      const retryKey = scheduledPreflightLateRetryIdempotencyKey(
+        input.assignmentId,
+        input.startsAt,
+        preflightId,
+        attempt.requestId,
+      );
+      if (!keysToTry.includes(retryKey)) {
+        keysToTry.push(retryKey);
+      }
+    }
   }
-  return requestId;
+  return null;
 }
 
 export async function ensureLateActiveWindowPreflight(
@@ -433,14 +580,41 @@ export async function ensureLateActiveWindowPreflight(
   const existingRequestStatus = existing?.request_id
     ? await loadRunRequestStatus(supabase, existing.request_id)
     : null;
+  // Retry scoping: a terminal request only makes the row retryable when the
+  // preflight itself is non-terminal (due/running with a dead request) or
+  // explicitly retryable. A preflight_blocked identity/challenge row must stay
+  // terminal even when its request is canceled/failed — otherwise the cron
+  // would loop retries on a real operator/IG block.
+  const existingStatus = readString(existing?.status).toLowerCase();
+  const isNonTerminalPreflightStatus = ["preflight_due", "preflight_running"].includes(existingStatus);
   const shouldReconcileTerminalPreflight = Boolean(
     existing
     && (
       isRetryableTerminalPreflightStatus(existing.status)
-      || (existing.request_id && isTerminalPreflightRequestStatus(existingRequestStatus))
+      || isTechnicalPreflightBlockedRetryable(existing.status, existing.reason_code)
+      || (
+        isNonTerminalPreflightStatus
+        && existing.request_id
+        && isTerminalPreflightRequestStatus(existingRequestStatus)
+      )
     ),
   );
   if (shouldReconcileTerminalPreflight && existing) {
+    // Anti-loop cap: never chain more than MAX_LATE_PREFLIGHT_RETRY_GENERATIONS
+    // `:retry:` requests per assignment window, even for technical retryable
+    // reasons. An unreadable count blocks this tick (fail-safe, self-heals on
+    // the next cron pass).
+    const retryGenerations = await countLateRetryGenerations(
+      supabase,
+      input.assignmentId,
+      input.startsAt,
+    );
+    if (retryGenerations == null) {
+      return { ok: false, reason: "late_preflight_unavailable" };
+    }
+    if (retryGenerations >= MAX_LATE_PREFLIGHT_RETRY_GENERATIONS) {
+      return { ok: false, reason: "late_preflight_retry_cap_exceeded" };
+    }
     await reconcileTerminalPreflightBeforeLateRetry(supabase, {
       accountId: input.accountId,
       assignmentId: input.assignmentId,
@@ -537,6 +711,9 @@ export async function ensureLateActiveWindowPreflight(
     endsAt: input.endsAt,
     workerId: input.workerId,
     preflightId: preflightRow.id,
+    supersededRequestId: shouldReconcileTerminalPreflight
+      ? readString(existing?.request_id) || null
+      : null,
   });
   if (!requestId) {
     return { ok: false, reason: "late_preflight_unavailable" };
@@ -552,22 +729,25 @@ export async function ensureLateActiveWindowPreflight(
     ownerKind: "preflight",
     operationPhase: "queued",
   });
-  if (!leased.ok) {
-    await upsertScheduledSessionPreflight(supabase, {
-      accountId: input.accountId,
-      assignmentId: input.assignmentId,
-      deviceId: input.deviceId,
-      appInstanceId: input.appInstanceId,
-      expectedPackage: input.expectedPackage,
-      expectedUsername: input.expectedUsername,
-      startsAt: input.startsAt,
-      endsAt: input.endsAt,
-      status: "preflight_lease_unavailable",
-      reasonCode: "device_lease_unavailable",
-      metadataSafe: { late_preflight: true },
-    });
-    return { ok: false, reason: "device_lease_unavailable" };
-  }
+    if (!leased.ok) {
+      await upsertScheduledSessionPreflight(supabase, {
+        accountId: input.accountId,
+        assignmentId: input.assignmentId,
+        deviceId: input.deviceId,
+        appInstanceId: input.appInstanceId,
+        expectedPackage: input.expectedPackage,
+        expectedUsername: input.expectedUsername,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        status: "preflight_lease_unavailable",
+        reasonCode: "device_lease_unavailable",
+        metadataSafe: {
+          late_preflight: true,
+          ...buildDeviceLeaseUnavailableReconcileMetadata(leased.reconcile),
+        },
+      });
+      return { ok: false, reason: "device_lease_unavailable" };
+    }
 
   await bindScheduledSessionPreflightRequest(supabase, {
     preflightId: preflightRow.id,
@@ -593,6 +773,8 @@ export function mapLatePreflightReasonToOperatorLabel(reason: LateActiveWindowPr
       return "Late preflight blocked";
     case "late_preflight_unavailable":
       return "Late preflight unavailable";
+    case "late_preflight_retry_cap_exceeded":
+      return "Late preflight retry cap exceeded";
     case "late_preflight_too_close_to_deadline":
       return "Too close to business deadline";
     case "skipped_preflight_missing":

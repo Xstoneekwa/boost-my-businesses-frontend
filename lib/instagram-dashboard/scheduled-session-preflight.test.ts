@@ -4,6 +4,7 @@ import {
   deriveAssignmentTransitionTimestamps,
   preflightDashboardActionDedupeKey,
   reconcilePreflightDashboardAction,
+  resolvePreflightDashboardActionSeverity,
   resolvePreflightDashboardActionStatus,
   resolvePreflightExpiresAt,
 } from "./scheduled-session-preflight.ts";
@@ -29,22 +30,45 @@ test("resolvePreflightExpiresAt uses business_action_deadline for late preflight
   );
 });
 
-test("resolvePreflightDashboardActionStatus keeps preflight_blocked non-retryable as action_required", () => {
-  assert.equal(resolvePreflightDashboardActionStatus("preflight_ready"), "completed");
-  assert.equal(resolvePreflightDashboardActionStatus("preflight_expired"), "completed");
-  assert.equal(resolvePreflightDashboardActionStatus("preflight_blocked"), "action_required");
+test("resolvePreflightDashboardActionStatus maps to statuses accepted by the RPC", () => {
+  assert.equal(resolvePreflightDashboardActionStatus("preflight_ready"), "resolved");
+  assert.equal(resolvePreflightDashboardActionStatus("preflight_expired"), "resolved");
+  assert.equal(resolvePreflightDashboardActionStatus("preflight_invalidated"), "resolved");
+  assert.equal(resolvePreflightDashboardActionStatus("preflight_blocked"), "pending");
 });
 
-test("reconcilePreflightDashboardAction resolves CP4 dashboard action on terminal preflight", async () => {
+test("resolvePreflightDashboardActionSeverity maps identity blocks to error", () => {
+  assert.equal(resolvePreflightDashboardActionSeverity("preflight_blocked", "own_profile_open_failed"), "error");
+  assert.equal(resolvePreflightDashboardActionSeverity("preflight_blocked", "active_instagram_account_mismatch"), "error");
+  assert.equal(resolvePreflightDashboardActionSeverity("preflight_blocked", "login_challenge"), "error");
+  assert.equal(resolvePreflightDashboardActionSeverity("preflight_blocked", "device_serial_missing"), "warning");
+  assert.equal(resolvePreflightDashboardActionSeverity("preflight_ready", null), "info");
+});
+
+function makeReconcileSupabase(activeActionRows: Array<Record<string, unknown>> = []) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const supabase = {
-    rpc: async (name: string, args: Record<string, unknown>) => {
-      rpcCalls.push({ name, args });
-      return { data: null, error: null };
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    in: () => builder,
+    limit: () => Promise.resolve({ data: activeActionRows, error: null }),
+  };
+  return {
+    rpcCalls,
+    client: {
+      from: () => builder,
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        rpcCalls.push({ name, args });
+        return { data: null, error: null };
+      },
     },
   };
+}
 
-  await reconcilePreflightDashboardAction(supabase, {
+test("reconcilePreflightDashboardAction resolves active CP4 action on terminal preflight", async () => {
+  const supabase = makeReconcileSupabase([{ id: "action-1", status: "pending" }]);
+
+  await reconcilePreflightDashboardAction(supabase.client, {
     accountId: "acct-1",
     assignmentId: "assign-1",
     startsAt: "2026-07-08T22:00:00.000Z",
@@ -53,32 +77,55 @@ test("reconcilePreflightDashboardAction resolves CP4 dashboard action on termina
     source: "schedule_session_cron",
   });
 
-  assert.equal(rpcCalls.length, 1);
-  assert.equal(rpcCalls[0]?.name, "upsert_account_dashboard_action");
-  assert.equal(rpcCalls[0]?.args.p_status, "completed");
+  assert.equal(supabase.rpcCalls.length, 1);
+  assert.equal(supabase.rpcCalls[0]?.name, "transition_account_dashboard_action");
+  assert.equal(supabase.rpcCalls[0]?.args.p_action_id, "action-1");
+  assert.equal(supabase.rpcCalls[0]?.args.p_new_status, "resolved");
   assert.equal(
-    rpcCalls[0]?.args.p_dedupe_key,
-    preflightDashboardActionDedupeKey("acct-1", "assign-1", "2026-07-08T22:00:00.000Z"),
+    supabase.rpcCalls[0]?.args.p_reason,
+    "preflight_terminal:preflight_expired:preflight_start_window_elapsed",
   );
 });
 
-test("reconcilePreflightDashboardAction marks blocked preflight as action_required", async () => {
-  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const supabase = {
-    rpc: async (name: string, args: Record<string, unknown>) => {
-      rpcCalls.push({ name, args });
-      return { data: null, error: null };
-    },
-  };
+test("reconcilePreflightDashboardAction skips resolution when no active action exists", async () => {
+  const supabase = makeReconcileSupabase([]);
 
-  await reconcilePreflightDashboardAction(supabase, {
+  await reconcilePreflightDashboardAction(supabase.client, {
+    accountId: "acct-1",
+    assignmentId: "assign-1",
+    startsAt: "2026-07-08T22:00:00.000Z",
+    terminalStatus: "preflight_ready",
+  });
+
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("reconcilePreflightDashboardAction marks blocked preflight as pending with real reason", async () => {
+  const supabase = makeReconcileSupabase();
+
+  await reconcilePreflightDashboardAction(supabase.client, {
     accountId: "acct-1",
     assignmentId: "assign-1",
     startsAt: "2026-07-08T22:00:00.000Z",
     terminalStatus: "preflight_blocked",
-    reasonCode: "identity_mismatch",
+    reasonCode: "own_profile_open_failed",
   });
 
-  assert.equal(rpcCalls[0]?.args.p_status, "action_required");
-  assert.equal(rpcCalls[0]?.args.p_requires_client_action, true);
+  assert.equal(supabase.rpcCalls.length, 1);
+  assert.equal(supabase.rpcCalls[0]?.name, "upsert_account_dashboard_action");
+  assert.equal(supabase.rpcCalls[0]?.args.p_status, "pending");
+  assert.equal(supabase.rpcCalls[0]?.args.p_requires_client_action, true);
+  assert.equal(supabase.rpcCalls[0]?.args.p_severity, "error");
+  assert.equal(
+    supabase.rpcCalls[0]?.args.p_admin_message,
+    "Scheduled session preflight blocked: own_profile_open_failed.",
+  );
+  assert.equal(
+    (supabase.rpcCalls[0]?.args.p_metadata as Record<string, unknown>)?.reason_code,
+    "own_profile_open_failed",
+  );
+  assert.equal(
+    supabase.rpcCalls[0]?.args.p_dedupe_key,
+    preflightDashboardActionDedupeKey("acct-1", "assign-1", "2026-07-08T22:00:00.000Z"),
+  );
 });
