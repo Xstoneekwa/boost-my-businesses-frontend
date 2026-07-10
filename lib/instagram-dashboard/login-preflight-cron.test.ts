@@ -73,6 +73,8 @@ function makeMaybeSingleQuery(row: unknown = null) {
 }
 
 function makeQueryResult(rows: unknown[]) {
+  const payload = { data: rows, error: null };
+  const singlePayload = { data: rows[0] ?? null, error: null };
   const query = {
     select: () => query,
     in: () => query,
@@ -80,8 +82,19 @@ function makeQueryResult(rows: unknown[]) {
     lte: () => query,
     order: () => query,
     eq: () => query,
-    limit: () => Promise.resolve({ data: rows, error: null }),
-    maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
+    limit: (count?: number) => {
+      if (typeof count !== "number") {
+        return Promise.resolve(payload);
+      }
+      return {
+        maybeSingle: () => Promise.resolve(singlePayload),
+        then: (
+          onFulfilled: (value: typeof payload) => unknown,
+          onRejected?: (reason: unknown) => unknown,
+        ) => Promise.resolve(payload).then(onFulfilled, onRejected),
+      };
+    },
+    maybeSingle: () => Promise.resolve(singlePayload),
   };
   return query;
 }
@@ -456,6 +469,71 @@ test("runLoginPreflightCron skips duplicate active preflight for same assignment
   assert.equal(run.result.summary.skipped_duplicate_preflight_count, 1);
   assert.equal(run.result.summary.eligible_count, 0);
   assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron skips enqueue when slot is already preflight_ready", async () => {
+  const supabase = makeSupabase({
+    schedulerEnabled: true,
+    assignments: [defaultAssignments[0]],
+    preflights: [{
+      assignment_id: "assignment-needs-login",
+      scheduled_window_start: "2026-06-09T08:10:00.000Z",
+      status: "preflight_ready",
+      request_id: "preflight-request-done",
+    }],
+  });
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: baseEnv,
+    callerToken: "cron-token",
+    now: new Date("2026-06-09T08:00:00.000Z"),
+  });
+
+  assert.equal(run.result.summary.skipped_preflight_ready_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron skips enqueue when slot is already preflight_running", async () => {
+  const supabase = makeSupabase({
+    schedulerEnabled: true,
+    assignments: [defaultAssignments[0]],
+    preflights: [{
+      assignment_id: "assignment-needs-login",
+      scheduled_window_start: "2026-06-09T08:10:00.000Z",
+      status: "preflight_running",
+      request_id: "preflight-request-active",
+    }],
+  });
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: baseEnv,
+    callerToken: "cron-token",
+    now: new Date("2026-06-09T08:00:00.000Z"),
+  });
+
+  assert.equal(run.result.summary.skipped_duplicate_preflight_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron still enqueues when preflight_due exists for same slot", async () => {
+  const supabase = makeSupabase({
+    schedulerEnabled: true,
+    assignments: [defaultAssignments[0]],
+    preflights: [{
+      assignment_id: "assignment-needs-login",
+      scheduled_window_start: "2026-06-09T08:10:00.000Z",
+      status: "preflight_due",
+      request_id: null,
+    }],
+  });
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: new Date("2026-06-09T08:00:00.000Z"),
+  });
+
+  assert.equal(run.result.summary.queued_count, 1);
+  assert.ok(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"));
 });
 
 test("runLoginPreflightCron T5 queues verification preflight while scheduler ON", async () => {

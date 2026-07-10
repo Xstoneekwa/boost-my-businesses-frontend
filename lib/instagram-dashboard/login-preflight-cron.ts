@@ -7,6 +7,7 @@ import {
   assignmentIsInPreflightWindow,
   bindScheduledSessionPreflightRequest,
   buildPreflightRequestMetadata,
+  preflightSlotBlocksNewEnqueue,
   upsertScheduledSessionPreflight,
 } from "./scheduled-session-preflight.ts";
 
@@ -459,8 +460,14 @@ export async function runLoginPreflightCron(
     const existingKey = `${assignmentId}:${window.timestamps.session_start}`;
     const existing = existingPreflights.get(existingKey);
     const existingStatus = readString(existing?.status);
-    if (existingStatus === "preflight_ready") {
-      summary.skipped_preflight_ready_count += 1;
+    if (preflightSlotBlocksNewEnqueue(existingStatus)) {
+      if (existingStatus === "preflight_ready") {
+        summary.skipped_preflight_ready_count += 1;
+      } else if (existingStatus === "preflight_running") {
+        summary.skipped_duplicate_preflight_count += 1;
+      } else {
+        summary.skipped_duplicate_preflight_count += 1;
+      }
       continue;
     }
 

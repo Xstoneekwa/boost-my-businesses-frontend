@@ -18,6 +18,21 @@ export const PREFLIGHT_STATUSES = [
 
 export type ScheduledSessionPreflightStatus = typeof PREFLIGHT_STATUSES[number];
 
+/** Terminal or in-flight preflight rows that must not trigger a new enqueue/lease for the same slot. */
+export const PREFLIGHT_NO_REENQUEUE_STATUSES = new Set<ScheduledSessionPreflightStatus>([
+  "preflight_running",
+  "preflight_ready",
+  "preflight_blocked",
+  "preflight_expired",
+  "preflight_invalidated",
+  "preflight_skipped_scheduler_off",
+]);
+
+export function preflightSlotBlocksNewEnqueue(status: string | null | undefined) {
+  const normalized = readString(status) as ScheduledSessionPreflightStatus;
+  return Boolean(normalized && PREFLIGHT_NO_REENQUEUE_STATUSES.has(normalized));
+}
+
 export type ScheduledSessionPreflightRow = {
   id: string;
   account_id: string;

@@ -3,11 +3,20 @@ import test from "node:test";
 import {
   deriveAssignmentTransitionTimestamps,
   preflightDashboardActionDedupeKey,
+  preflightSlotBlocksNewEnqueue,
   reconcilePreflightDashboardAction,
   resolvePreflightDashboardActionSeverity,
   resolvePreflightDashboardActionStatus,
   resolvePreflightExpiresAt,
 } from "./scheduled-session-preflight.ts";
+
+test("preflightSlotBlocksNewEnqueue blocks terminal and in-flight statuses", () => {
+  assert.equal(preflightSlotBlocksNewEnqueue("preflight_ready"), true);
+  assert.equal(preflightSlotBlocksNewEnqueue("preflight_running"), true);
+  assert.equal(preflightSlotBlocksNewEnqueue("preflight_blocked"), true);
+  assert.equal(preflightSlotBlocksNewEnqueue("preflight_due"), false);
+  assert.equal(preflightSlotBlocksNewEnqueue(null), false);
+});
 
 test("resolvePreflightExpiresAt uses session_start for T-10 preflight", () => {
   const timestamps = deriveAssignmentTransitionTimestamps(

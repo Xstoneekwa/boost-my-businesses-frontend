@@ -66,6 +66,8 @@ describe("device ui lease CP3", () => {
         const query = {
           select: () => query,
           eq: () => query,
+          in: () => query,
+          order: () => query,
           limit: () => query,
           maybeSingle: async () => {
             if (table === "auto_restart_device_locks") {
@@ -82,6 +84,9 @@ describe("device ui lease CP3", () => {
             }
             if (table === "account_run_requests") {
               return { data: { status: "failed" }, error: null };
+            }
+            if (table === "scheduled_session_preflights") {
+              return { data: null, error: null };
             }
             return { data: null, error: null };
           },
@@ -115,5 +120,116 @@ describe("device ui lease CP3", () => {
     assert.equal(result.ok, true);
     assert.equal(rpcCalls[0]?.name, "auto_restart_release_device_lock");
     assert.ok(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"));
+  });
+
+  it("scheduled preflight lease path refuses acquire when slot is preflight_ready", async () => {
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const supabase = {
+      from(table: string) {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          in: () => query,
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            if (table === "scheduled_session_preflights") {
+              return {
+                data: {
+                  id: "preflight-1",
+                  status: "preflight_ready",
+                  request_id: "req-ready",
+                  scheduled_window_start: "2026-07-10T22:00:00.000Z",
+                },
+                error: null,
+              };
+            }
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
+      async rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (name === "cancel_account_run_request") {
+          return { data: { ok: true }, error: null };
+        }
+        if (name === "auto_restart_release_device_lock") {
+          return { data: { ok: true, released: true }, error: null };
+        }
+        return { data: {}, error: null };
+      },
+    };
+
+    const result = await leaseRequestOrCancel(supabase, {
+      deviceId: "device-1",
+      accountId: "account-1",
+      requestId: "req-new",
+      reason: "scheduled_session_preflight",
+      ownerKind: "preflight",
+      operationPhase: "queued",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "preflight_slot_already_ready");
+    }
+    assert.ok(rpcCalls.some((call) => call.name === "cancel_account_run_request"));
+    assert.equal(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"), false);
+  });
+
+  it("scheduled preflight lease path refuses acquire when another preflight is running", async () => {
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const supabase = {
+      from(table: string) {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          in: () => query,
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            if (table === "scheduled_session_preflights") {
+              return {
+                data: {
+                  id: "preflight-1",
+                  status: "preflight_running",
+                  request_id: "req-running",
+                  scheduled_window_start: "2026-07-10T22:00:00.000Z",
+                },
+                error: null,
+              };
+            }
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
+      async rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (name === "cancel_account_run_request") {
+          return { data: { ok: true }, error: null };
+        }
+        if (name === "auto_restart_release_device_lock") {
+          return { data: { ok: true, released: true }, error: null };
+        }
+        return { data: {}, error: null };
+      },
+    };
+
+    const result = await leaseRequestOrCancel(supabase, {
+      deviceId: "device-1",
+      accountId: "account-1",
+      requestId: "req-new",
+      reason: "scheduled_session_preflight",
+      ownerKind: "preflight",
+      operationPhase: "queued",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "preflight_already_running");
+    }
+    assert.equal(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"), false);
   });
 });

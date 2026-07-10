@@ -230,6 +230,37 @@ export async function acquireAndBindDeviceUiLeaseForRequest(
   return { ok: true as const, workerId: lockWorkerId };
 }
 
+type QueryBuilder = {
+  select: (...args: unknown[]) => QueryBuilder;
+  eq: (...args: unknown[]) => QueryBuilder;
+  in: (...args: unknown[]) => QueryBuilder;
+  order: (...args: unknown[]) => QueryBuilder;
+  limit: (...args: unknown[]) => QueryBuilder;
+  maybeSingle: () => Promise<{ data?: unknown; error?: { message?: string } | null }>;
+};
+
+async function loadPreflightSlotForLease(
+  supabase: SupabaseLike,
+  input: { accountId: string; deviceId: string },
+) {
+  const result = await (supabase.from("scheduled_session_preflights") as QueryBuilder)
+    .select("id,status,request_id,scheduled_window_start,updated_at")
+    .eq("account_id", input.accountId)
+    .eq("device_id", input.deviceId)
+    .in("status", ["preflight_ready", "preflight_running"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (result.error || !result.data) return null;
+  const row = result.data as Record<string, unknown>;
+  return {
+    id: readString(row.id),
+    status: readString(row.status),
+    requestId: readString(row.request_id) || null,
+    scheduledWindowStart: readString(row.scheduled_window_start) || null,
+  };
+}
+
 export async function releaseDeviceUiLeaseForCanceledRequest(
   supabase: SupabaseLike,
   input: { deviceId: string; requestId: string; releaseReason?: string },
@@ -276,6 +307,49 @@ export async function leaseRequestOrCancel(
       accountId: input.accountId,
       context: input.operationPhase ?? "cp4_preflight",
     });
+
+    const slot = await loadPreflightSlotForLease(supabase, {
+      accountId: input.accountId,
+      deviceId: input.deviceId,
+    });
+    if (slot?.status === "preflight_ready") {
+      await supabase.rpc("cancel_account_run_request", {
+        p_request_id: input.requestId,
+        p_reason: "preflight_slot_already_ready",
+      });
+      await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+        deviceId: input.deviceId,
+        requestId: input.requestId,
+        releaseReason: "preflight_slot_already_ready",
+      }).catch(() => undefined);
+      return {
+        ok: false,
+        reason: "preflight_slot_already_ready",
+        operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
+        reconcile,
+      };
+    }
+    if (
+      slot?.status === "preflight_running"
+      && slot.requestId
+      && slot.requestId !== input.requestId
+    ) {
+      await supabase.rpc("cancel_account_run_request", {
+        p_request_id: input.requestId,
+        p_reason: "preflight_already_running",
+      });
+      await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+        deviceId: input.deviceId,
+        requestId: input.requestId,
+        releaseReason: "preflight_already_running",
+      }).catch(() => undefined);
+      return {
+        ok: false,
+        reason: "preflight_already_running",
+        operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
+        reconcile,
+      };
+    }
   }
 
   const leased = await acquireAndBindDeviceUiLeaseForRequest(supabase, input);
