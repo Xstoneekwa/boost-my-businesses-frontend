@@ -2,13 +2,100 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deriveAssignmentTransitionTimestamps,
+  isPreflightReadyRowPastDeadline,
   preflightDashboardActionDedupeKey,
+  preflightLeaseSlotConflict,
   preflightSlotBlocksNewEnqueue,
   reconcilePreflightDashboardAction,
   resolvePreflightDashboardActionSeverity,
   resolvePreflightDashboardActionStatus,
   resolvePreflightExpiresAt,
 } from "./scheduled-session-preflight.ts";
+
+test("preflightLeaseSlotConflict blocks duplicate ready for the same window", () => {
+  const windowStart = "2026-07-11T10:00:00.000Z";
+  assert.equal(
+    preflightLeaseSlotConflict(
+      {
+        status: "preflight_ready",
+        scheduledWindowStart: windowStart,
+        businessActionDeadline: "2026-07-11T15:50:00.000Z",
+      },
+      { scheduledWindowStart: windowStart, requestId: "req-new" },
+    ),
+    "preflight_slot_already_ready",
+  );
+});
+
+test("preflightLeaseSlotConflict ignores preflight_ready from an older window", () => {
+  assert.equal(
+    preflightLeaseSlotConflict(
+      {
+        status: "preflight_ready",
+        scheduledWindowStart: "2026-07-10T16:00:00.000Z",
+        businessActionDeadline: "2026-07-10T21:50:00.000Z",
+      },
+      { scheduledWindowStart: "2026-07-11T10:00:00.000Z", requestId: "req-new" },
+    ),
+    null,
+  );
+});
+
+test("preflightLeaseSlotConflict ignores stale preflight_ready past business_action_deadline", () => {
+  const windowStart = "2026-07-11T10:00:00.000Z";
+  assert.equal(
+    preflightLeaseSlotConflict(
+      {
+        status: "preflight_ready",
+        scheduledWindowStart: windowStart,
+        businessActionDeadline: "2026-07-11T09:00:00.000Z",
+      },
+      {
+        scheduledWindowStart: windowStart,
+        requestId: "req-late",
+        now: new Date("2026-07-11T12:00:00.000Z"),
+      },
+    ),
+    null,
+  );
+  assert.equal(
+    isPreflightReadyRowPastDeadline(
+      { businessActionDeadline: "2026-07-11T09:00:00.000Z" },
+      new Date("2026-07-11T12:00:00.000Z"),
+    ),
+    true,
+  );
+});
+
+test("preflightLeaseSlotConflict blocks duplicate running request for the same window", () => {
+  const windowStart = "2026-07-11T10:00:00.000Z";
+  assert.equal(
+    preflightLeaseSlotConflict(
+      {
+        status: "preflight_running",
+        requestId: "req-running",
+        scheduledWindowStart: windowStart,
+      },
+      { scheduledWindowStart: windowStart, requestId: "req-new" },
+    ),
+    "preflight_already_running",
+  );
+});
+
+test("preflightLeaseSlotConflict does not block when running request is the same request", () => {
+  const windowStart = "2026-07-11T10:00:00.000Z";
+  assert.equal(
+    preflightLeaseSlotConflict(
+      {
+        status: "preflight_running",
+        requestId: "req-same",
+        scheduledWindowStart: windowStart,
+      },
+      { scheduledWindowStart: windowStart, requestId: "req-same" },
+    ),
+    null,
+  );
+});
 
 test("preflightSlotBlocksNewEnqueue blocks terminal and in-flight statuses", () => {
   assert.equal(preflightSlotBlocksNewEnqueue("preflight_ready"), true);

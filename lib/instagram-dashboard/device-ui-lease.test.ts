@@ -123,6 +123,7 @@ describe("device ui lease CP3", () => {
   });
 
   it("scheduled preflight lease path refuses acquire when slot is preflight_ready", async () => {
+    const currentWindowStart = "2026-07-11T10:00:00.000Z";
     const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const supabase = {
       from(table: string) {
@@ -139,7 +140,8 @@ describe("device ui lease CP3", () => {
                   id: "preflight-1",
                   status: "preflight_ready",
                   request_id: "req-ready",
-                  scheduled_window_start: "2026-07-10T22:00:00.000Z",
+                  scheduled_window_start: currentWindowStart,
+                  business_action_deadline: "2026-07-11T15:50:00.000Z",
                 },
                 error: null,
               };
@@ -168,6 +170,7 @@ describe("device ui lease CP3", () => {
       reason: "scheduled_session_preflight",
       ownerKind: "preflight",
       operationPhase: "queued",
+      scheduledWindowStart: currentWindowStart,
     });
 
     assert.equal(result.ok, false);
@@ -178,7 +181,111 @@ describe("device ui lease CP3", () => {
     assert.equal(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"), false);
   });
 
+  it("scheduled preflight lease path ignores preflight_ready from an older slot window", async () => {
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const supabase = {
+      from(table: string) {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          in: () => query,
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            if (table === "scheduled_session_preflights") {
+              return { data: null, error: null };
+            }
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
+      async rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (name === "auto_restart_acquire_device_lock") {
+          return { data: { ok: true, acquired: true, lease_id: "lease-new" }, error: null };
+        }
+        if (name === "auto_restart_bind_device_lock_to_request") {
+          return { data: { ok: true, bound: true }, error: null };
+        }
+        return { data: {}, error: null };
+      },
+    };
+
+    const result = await leaseRequestOrCancel(supabase, {
+      deviceId: "device-1",
+      accountId: "account-1",
+      requestId: "req-new",
+      reason: "scheduled_session_preflight",
+      ownerKind: "preflight",
+      operationPhase: "queued",
+      scheduledWindowStart: "2026-07-11T10:00:00.000Z",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(rpcCalls.some((call) => call.name === "cancel_account_run_request"), false);
+    assert.ok(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"));
+  });
+
+  it("scheduled preflight lease path ignores stale preflight_ready past business_action_deadline", async () => {
+    const currentWindowStart = "2026-07-11T10:00:00.000Z";
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const supabase = {
+      from(table: string) {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          in: () => query,
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            if (table === "scheduled_session_preflights") {
+              return {
+                data: {
+                  id: "preflight-stale",
+                  status: "preflight_ready",
+                  request_id: "req-old-ready",
+                  scheduled_window_start: currentWindowStart,
+                  business_action_deadline: "2026-07-11T09:00:00.000Z",
+                },
+                error: null,
+              };
+            }
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
+      async rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (name === "auto_restart_acquire_device_lock") {
+          return { data: { ok: true, acquired: true, lease_id: "lease-new" }, error: null };
+        }
+        if (name === "auto_restart_bind_device_lock_to_request") {
+          return { data: { ok: true, bound: true }, error: null };
+        }
+        return { data: {}, error: null };
+      },
+    };
+
+    const result = await leaseRequestOrCancel(supabase, {
+      deviceId: "device-1",
+      accountId: "account-1",
+      requestId: "req-late",
+      reason: "scheduled_session_preflight",
+      ownerKind: "preflight",
+      operationPhase: "queued",
+      scheduledWindowStart: currentWindowStart,
+      now: new Date("2026-07-11T12:00:00.000Z"),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(rpcCalls.some((call) => call.name === "cancel_account_run_request"), false);
+    assert.ok(rpcCalls.some((call) => call.name === "auto_restart_acquire_device_lock"));
+  });
+
   it("scheduled preflight lease path refuses acquire when another preflight is running", async () => {
+    const currentWindowStart = "2026-07-11T10:00:00.000Z";
     const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const supabase = {
       from(table: string) {
@@ -195,7 +302,8 @@ describe("device ui lease CP3", () => {
                   id: "preflight-1",
                   status: "preflight_running",
                   request_id: "req-running",
-                  scheduled_window_start: "2026-07-10T22:00:00.000Z",
+                  scheduled_window_start: currentWindowStart,
+                  business_action_deadline: "2026-07-11T15:50:00.000Z",
                 },
                 error: null,
               };
@@ -224,6 +332,7 @@ describe("device ui lease CP3", () => {
       reason: "scheduled_session_preflight",
       ownerKind: "preflight",
       operationPhase: "queued",
+      scheduledWindowStart: currentWindowStart,
     });
 
     assert.equal(result.ok, false);

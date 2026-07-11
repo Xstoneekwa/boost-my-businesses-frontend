@@ -33,6 +33,55 @@ export function preflightSlotBlocksNewEnqueue(status: string | null | undefined)
   return Boolean(normalized && PREFLIGHT_NO_REENQUEUE_STATUSES.has(normalized));
 }
 
+export type PreflightLeaseSlotRow = {
+  status: string;
+  requestId?: string | null;
+  scheduledWindowStart?: string | null;
+  businessActionDeadline?: string | null;
+};
+
+export function isPreflightReadyRowPastDeadline(
+  row: { business_action_deadline?: string | null; businessActionDeadline?: string | null } | null | undefined,
+  now: Date = new Date(),
+) {
+  if (!row) return false;
+  const deadlineRaw = readString(row.business_action_deadline) || readString(row.businessActionDeadline);
+  if (!deadlineRaw) return false;
+  const deadlineMs = Date.parse(deadlineRaw);
+  if (!Number.isFinite(deadlineMs)) return false;
+  return now.getTime() >= deadlineMs;
+}
+
+export type PreflightLeaseConflictReason = "preflight_slot_already_ready" | "preflight_already_running";
+
+/** Lease-time duplicate guard scoped to the current materialized session window. */
+export function preflightLeaseSlotConflict(
+  slot: PreflightLeaseSlotRow | null | undefined,
+  input: {
+    scheduledWindowStart: string;
+    requestId: string;
+    now?: Date;
+  },
+): PreflightLeaseConflictReason | null {
+  if (!slot?.status || !input.scheduledWindowStart) return null;
+  const slotWindow = readString(slot.scheduledWindowStart);
+  if (!slotWindow || slotWindow !== input.scheduledWindowStart) return null;
+
+  const now = input.now ?? new Date();
+  if (slot.status === "preflight_ready") {
+    if (isPreflightReadyRowPastDeadline(slot, now)) return null;
+    return "preflight_slot_already_ready";
+  }
+  if (
+    slot.status === "preflight_running"
+    && slot.requestId
+    && slot.requestId !== input.requestId
+  ) {
+    return "preflight_already_running";
+  }
+  return null;
+}
+
 export type ScheduledSessionPreflightRow = {
   id: string;
   account_id: string;

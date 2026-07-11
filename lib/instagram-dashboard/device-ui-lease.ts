@@ -10,6 +10,10 @@ import {
   type DeviceSessionLockReason,
 } from "./device-session-lock.ts";
 import {
+  preflightLeaseSlotConflict,
+  type PreflightLeaseConflictReason,
+} from "./scheduled-session-preflight.ts";
+import {
   reconcileStaleDeviceLockBeforePreflight,
   type ReconcileStaleDeviceLockResult,
 } from "./reconcile-stale-device-lock-before-preflight.ts";
@@ -241,12 +245,13 @@ type QueryBuilder = {
 
 async function loadPreflightSlotForLease(
   supabase: SupabaseLike,
-  input: { accountId: string; deviceId: string },
+  input: { accountId: string; deviceId: string; scheduledWindowStart: string },
 ) {
   const result = await (supabase.from("scheduled_session_preflights") as QueryBuilder)
-    .select("id,status,request_id,scheduled_window_start,updated_at")
+    .select("id,status,request_id,scheduled_window_start,business_action_deadline,updated_at")
     .eq("account_id", input.accountId)
     .eq("device_id", input.deviceId)
+    .eq("scheduled_window_start", input.scheduledWindowStart)
     .in("status", ["preflight_ready", "preflight_running"])
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -258,6 +263,33 @@ async function loadPreflightSlotForLease(
     status: readString(row.status),
     requestId: readString(row.request_id) || null,
     scheduledWindowStart: readString(row.scheduled_window_start) || null,
+    businessActionDeadline: readString(row.business_action_deadline) || null,
+  };
+}
+
+async function cancelLeasedPreflightRequest(
+  supabase: SupabaseLike,
+  input: {
+    deviceId: string;
+    requestId: string;
+    reason: PreflightLeaseConflictReason;
+    reconcile?: ReconcileStaleDeviceLockResult;
+  },
+) {
+  await supabase.rpc("cancel_account_run_request", {
+    p_request_id: input.requestId,
+    p_reason: input.reason,
+  });
+  await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+    deviceId: input.deviceId,
+    requestId: input.requestId,
+    releaseReason: input.reason,
+  }).catch(() => undefined);
+  return {
+    ok: false as const,
+    reason: input.reason,
+    operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
+    reconcile: input.reconcile,
   };
 }
 
@@ -290,6 +322,8 @@ export async function leaseRequestOrCancel(
     leaseSeconds?: number;
     ownerKind?: string;
     operationPhase?: string;
+    scheduledWindowStart?: string | null;
+    now?: Date;
   },
 ): Promise<
   | { ok: true }
@@ -308,47 +342,26 @@ export async function leaseRequestOrCancel(
       context: input.operationPhase ?? "cp4_preflight",
     });
 
-    const slot = await loadPreflightSlotForLease(supabase, {
-      accountId: input.accountId,
-      deviceId: input.deviceId,
-    });
-    if (slot?.status === "preflight_ready") {
-      await supabase.rpc("cancel_account_run_request", {
-        p_request_id: input.requestId,
-        p_reason: "preflight_slot_already_ready",
-      });
-      await releaseDeviceUiLeaseForCanceledRequest(supabase, {
+    const scheduledWindowStart = readString(input.scheduledWindowStart);
+    if (scheduledWindowStart) {
+      const slot = await loadPreflightSlotForLease(supabase, {
+        accountId: input.accountId,
         deviceId: input.deviceId,
-        requestId: input.requestId,
-        releaseReason: "preflight_slot_already_ready",
-      }).catch(() => undefined);
-      return {
-        ok: false,
-        reason: "preflight_slot_already_ready",
-        operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
-        reconcile,
-      };
-    }
-    if (
-      slot?.status === "preflight_running"
-      && slot.requestId
-      && slot.requestId !== input.requestId
-    ) {
-      await supabase.rpc("cancel_account_run_request", {
-        p_request_id: input.requestId,
-        p_reason: "preflight_already_running",
+        scheduledWindowStart,
       });
-      await releaseDeviceUiLeaseForCanceledRequest(supabase, {
-        deviceId: input.deviceId,
+      const conflict = preflightLeaseSlotConflict(slot, {
+        scheduledWindowStart,
         requestId: input.requestId,
-        releaseReason: "preflight_already_running",
-      }).catch(() => undefined);
-      return {
-        ok: false,
-        reason: "preflight_already_running",
-        operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
-        reconcile,
-      };
+        now: input.now,
+      });
+      if (conflict) {
+        return cancelLeasedPreflightRequest(supabase, {
+          deviceId: input.deviceId,
+          requestId: input.requestId,
+          reason: conflict,
+          reconcile,
+        });
+      }
     }
   }
 

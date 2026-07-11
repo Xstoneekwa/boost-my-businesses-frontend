@@ -728,6 +728,8 @@ export async function ensureLateActiveWindowPreflight(
     reason: "scheduled_session_preflight",
     ownerKind: "preflight",
     operationPhase: "queued",
+    scheduledWindowStart: transition.session_start,
+    now: input.now,
   });
     if (!leased.ok) {
       await upsertScheduledSessionPreflight(supabase, {

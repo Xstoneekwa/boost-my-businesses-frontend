@@ -560,6 +560,8 @@ export async function runLoginPreflightCron(
         reason: "scheduled_session_preflight",
         ownerKind: "preflight",
         operationPhase: "queued",
+        scheduledWindowStart: window.timestamps.session_start,
+        now,
       });
       leaseOk = leased.ok;
       if (!leased.ok) {
