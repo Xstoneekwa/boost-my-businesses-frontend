@@ -12,6 +12,7 @@ import {
   getStopCleanupState,
   operatorStopRunControlProjection,
 } from "@/lib/instagram-dashboard/operator-stop-suppression";
+import { projectDeviceRuntimeState } from "@/lib/instagram-dashboard/device-runtime-projection";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -398,6 +399,14 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
         operatorStopProjection = {};
       }
       const runtimeProjection = activeRunControlProjection(activeRequest, activeRun);
+      const runtimeIndicator = runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []);
+      const deviceRuntimeProjection = projectDeviceRuntimeState({
+        phoneStatus: readString(account.phoneStatus, ""),
+        activeRunRequestStatus: activeRequest ? readString(activeRequest.status, "") : "",
+        activeRunRequestCancelRequestedAt: activeRequest ? readString(activeRequest.cancel_requested_at, "") : "",
+        activeRunStatus: activeRun ? readString(activeRun.status, "") : "",
+        runtimeIndicatorState: readString(runtimeIndicator.state, ""),
+      });
       const stopProjection = operatorStopProjection as Record<string, unknown>;
       const eligibilityOverride = typeof stopProjection.eligibility === "string"
         ? {
@@ -418,7 +427,13 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
           sessionRunsByAccount.get(id) ?? [],
           interactionEventsByAccount.get(id) ?? [],
         ),
-        runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
+        runtimeIndicator,
+        phoneStatus: deviceRuntimeProjection.projectedPhoneStatus,
+        deviceRuntimeActive: deviceRuntimeProjection.deviceRuntimeActive,
+        deviceRuntimeProjectionSource: deviceRuntimeProjection.deviceRuntimeProjectionSource,
+        device_runtime_projection_source: deviceRuntimeProjection.device_runtime_projection_source,
+        deviceRuntimeProjectionReason: deviceRuntimeProjection.deviceRuntimeProjectionReason,
+        device_runtime_projection_reason: deviceRuntimeProjection.device_runtime_projection_reason,
         ...runtimeProjection,
         ...operatorStopProjection,
         ...eligibilityOverride,

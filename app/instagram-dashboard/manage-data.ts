@@ -16,6 +16,8 @@ import {
   type AccountAssignmentHealth,
   type AccountAssignmentHealthReason,
 } from "@/lib/instagram-dashboard/account-capacity-state";
+import { isCurrentBlockingDashboardAction } from "@/lib/instagram-dashboard/dashboard-action-blockers";
+import { projectDeviceRuntimeState } from "@/lib/instagram-dashboard/device-runtime-projection";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -81,6 +83,11 @@ export type ManageAccount = {
   appInstanceStatus?: string | null;
   appInstanceLaunchable?: boolean | null;
   appInstanceUsableForAutoLogin?: boolean | null;
+  deviceRuntimeActive?: boolean;
+  deviceRuntimeProjectionSource?: string;
+  device_runtime_projection_source?: string;
+  deviceRuntimeProjectionReason?: string;
+  device_runtime_projection_reason?: string;
   readinessProjection?: AdminReadinessProjection;
   profileImageUrl?: string | null;
   profileImageSource?: string | null;
@@ -752,10 +759,10 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
 
   try {
     const supabase = createSupabaseClient();
-    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult] = await Promise.all([
+    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult, activeRequestsResult, activeRunsResult, successfulRunsResult] = await Promise.all([
       supabase
         .from("account_dashboard_actions")
-        .select("account_id,action_type,status,blocking_campaign")
+        .select("account_id,action_type,status,blocking_campaign,created_at,dedupe_key,metadata,metadata_safe")
         .in("account_id", accountIds)
         .in("status", ["pending", "acknowledged", "pending_verification"])
         .limit(1000),
@@ -769,11 +776,58 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         .select("account_id,unfollow_enabled,unfollow_mode")
         .in("account_id", accountIds)
         .limit(1000),
+      supabase
+        .from("account_run_requests")
+        .select("account_id,status,cancel_requested_at")
+        .in("account_id", accountIds)
+        .in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"])
+        .limit(1000),
+      supabase
+        .from("ig_runs")
+        .select("account_id,status")
+        .in("account_id", accountIds)
+        .in("status", ["pending", "running", "stopping"])
+        .limit(1000),
+      supabase
+        .from("ig_runs")
+        .select("account_id,status,finished_at,started_at,created_at")
+        .in("account_id", accountIds)
+        .eq("status", "completed")
+        .order("finished_at", { ascending: false })
+        .limit(1000),
     ]);
 
     const errors = [...overview.errors];
-    if (dashboardActionsResult.error || dmSettingsResult.error || unfollowSettingsResult.error) {
+    if (
+      dashboardActionsResult.error
+      || dmSettingsResult.error
+      || unfollowSettingsResult.error
+      || activeRequestsResult.error
+      || activeRunsResult.error
+      || successfulRunsResult.error
+    ) {
       errors.unshift("Readiness projection partially unavailable.");
+    }
+
+    const activeRequestByAccount = new Map<string, SupabaseRecord>();
+    for (const row of ((activeRequestsResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId && !activeRequestByAccount.has(accountId)) activeRequestByAccount.set(accountId, row);
+    }
+
+    const activeRunByAccount = new Map<string, SupabaseRecord>();
+    for (const row of ((activeRunsResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["account_id"], "");
+      if (accountId && !activeRunByAccount.has(accountId)) activeRunByAccount.set(accountId, row);
+    }
+
+    const latestSuccessfulSessionByAccount = new Map<string, string>();
+    for (const row of ((successfulRunsResult.data ?? []) as SupabaseRecord[])) {
+      const accountId = readString(row, ["account_id"], "");
+      const finishedAt = readString(row, ["finished_at", "started_at", "created_at"], "");
+      if (accountId && finishedAt && !latestSuccessfulSessionByAccount.has(accountId)) {
+        latestSuccessfulSessionByAccount.set(accountId, finishedAt);
+      }
     }
 
     const actionCountsByAccount = new Map<string, { total: number; blocking: number; firstBlockingAction: string | null }>();
@@ -785,7 +839,10 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       const actionType = readString(row, ["action_type"], "").toLowerCase();
       const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
       const isReplacementInProgress = isStaleSessionReplacementAction(row, actionType);
-      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction && !isReplacementInProgress) {
+      const isCurrentBlocker = isCurrentBlockingDashboardAction(row, {
+        latestSuccessfulSessionAt: latestSuccessfulSessionByAccount.get(accountId) ?? null,
+      });
+      if (isCurrentBlocker && !isCredentialVerificationAction && !isReplacementInProgress) {
         current.blocking += 1;
         current.firstBlockingAction ||= actionType || "blocking_dashboard_action";
       }
@@ -814,10 +871,24 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         firstBlockingAction: account.primaryBlockReason ?? null,
       };
       const hasFreshActionCounts = actionCountsByAccount.has(account.accountId);
+      const activeRequest = activeRequestByAccount.get(account.accountId);
+      const activeRun = activeRunByAccount.get(account.accountId);
+      const deviceRuntimeProjection = projectDeviceRuntimeState({
+        phoneStatus: account.phoneStatus ?? null,
+        activeRunRequestStatus: readString(activeRequest, ["status"], ""),
+        activeRunRequestCancelRequestedAt: readString(activeRequest, ["cancel_requested_at"], ""),
+        activeRunStatus: readString(activeRun, ["status"], ""),
+      });
       return {
         ...account,
         blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
         primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
+        phoneStatus: deviceRuntimeProjection.projectedPhoneStatus,
+        deviceRuntimeActive: deviceRuntimeProjection.deviceRuntimeActive,
+        deviceRuntimeProjectionSource: deviceRuntimeProjection.deviceRuntimeProjectionSource,
+        device_runtime_projection_source: deviceRuntimeProjection.device_runtime_projection_source,
+        deviceRuntimeProjectionReason: deviceRuntimeProjection.deviceRuntimeProjectionReason,
+        device_runtime_projection_reason: deviceRuntimeProjection.device_runtime_projection_reason,
         readinessProjection: buildAdminReadinessProjection({
           accountId: account.accountId,
           username: account.username,
@@ -839,7 +910,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           assignmentStatus: account.assignmentStatus ?? null,
           assignmentStartsAt: account.assignmentStartsAt ?? null,
           scheduleMode: account.scheduleMode ?? null,
-          phoneStatus: account.phoneStatus ?? null,
+          phoneStatus: deviceRuntimeProjection.projectedPhoneStatus,
           appInstanceStatus: account.appInstanceStatus ?? null,
           appPackageName: account.appPackageName ?? null,
           appInstanceLaunchable: account.appInstanceLaunchable ?? null,
