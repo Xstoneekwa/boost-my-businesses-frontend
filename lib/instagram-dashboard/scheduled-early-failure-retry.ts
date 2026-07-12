@@ -343,7 +343,8 @@ export async function loadRunForEarlyFailure(
   if (!row) return null;
   const performance = readRecord(row.performance_summary);
   return {
-    ...row,
+    id: readString(row.id),
+    status: readString(row.status),
     metadata_safe: {
       ...performance,
       performance_summary: row.performance_summary,
@@ -355,7 +356,7 @@ export async function loadRunForEarlyFailure(
       followers_source_username: readString(performance.followers_source_username) || null,
     },
     exit_code: readCount(performance.exit_code),
-  };
+  } as Record<string, unknown>;
 }
 
 function dashboardBaseUrl() {
@@ -384,7 +385,12 @@ export async function sendScheduledEarlyFailureNotification(input: {
 }) {
   let notificationModule: {
     integrationLocalNotificationMode: () => boolean;
-    recordNotificationDeliveryResult: (input: Record<string, unknown>) => Promise<unknown>;
+    recordNotificationDeliveryResult: (input: {
+      channel: NotificationChannel;
+      ok: boolean;
+      errorRedacted?: string | null;
+      test?: boolean;
+    }) => Promise<void>;
     resolveEffectiveNotificationChannel: (channel: NotificationChannel) => Promise<{
       sendAllowed: boolean;
       webhookUrl: string;
@@ -800,7 +806,7 @@ export async function enqueueScheduledEarlyFailureRetry(
 
 export type ScheduledEarlyFailureRetryOutcome =
   | { action: "none" }
-  | { action: "retry_queued"; requestId: string; idempotencyKey: string; incidentId: string; notificationStatus: Record<string, string> }
+  | { action: "retry_queued"; requestId: string; idempotencyKey: string; incidentId: string; notificationStatus: Record<string, string>; requeued?: boolean }
   | { action: "blocked_unsafe"; incidentId: string; deniedReason: string; notificationStatus: Record<string, string> }
   | { action: "blocked_already_retried"; incidentId?: string | null; deniedReason: string }
   | { action: "blocked_retry_in_flight"; retryRequestId: string }
