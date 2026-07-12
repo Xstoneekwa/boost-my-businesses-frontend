@@ -1,12 +1,73 @@
 # Scheduler / CP4 / Preflight / BotApp Observability — Interim Checkpoint
 
 ```text
-Status: INTERIM CHECKPOINT — block not fully closed yet.
+Status: FINAL DOCUMENTED CHECKPOINT — runtime positive path still pending.
 ```
 
-**Checkpoint date (UTC+2):** 2026-07-10 ~17:00  
-**Scope:** Daily Scheduler + CP4 preflight hardening + BotApp pipeline observability  
+**Checkpoint date (UTC+2):** 2026-07-10 ~17:00
+**Scope:** Daily Scheduler + CP4 preflight hardening + BotApp pipeline observability
 **Language:** operator UI remains English-only (BotApp)
+
+**Final documentation update (UTC+2):** 2026-07-13
+**Backend commit documented:** `61d6ccfc334ba084ff73f57b685c7f637e948faa`
+(`fix(botapp): project active device runs and ignore stale blockers`)
+**Production deployment documented:** `dpl_4yJbW11sJ4MwoDoz164xYrHvLmMd`,
+READY on `www.boostmybusinesses.com`.
+
+---
+
+## 0. Chronologie finale du checkpoint 2026-07-12/13
+
+1. **Worker integrity incident diagnosed** —
+   `instagram_navigation.py` was found truncated before any functional patch.
+2. **Forensic backups + targeted restore tested** — truncated file and full diff
+   saved under `/tmp/instagram_navigation.py.truncated.<timestamp>*`, then only
+   `instagram_navigation.py` restored from verified `HEAD`.
+3. **Return CT ambiguous own_unified patched** — worker commit
+   `26cd04cd816c8b358397e5e9d4224360fb5ea54f` reuses `post_back_det` after
+   `compact_safe_back` and concludes `compact_safe_back_then_list`.
+4. **Golden Flow tests passed** — worker py_compile, Return CT targeted test,
+   Golden Flow tests and worker validation completed without device run.
+5. **Tracker preflight repairs diagnosed / patched** — stale/technical blockers
+   were separated from real Instagram challenge/checkpoint/identity blockers.
+6. **Mythyl stale scheduler blockers resolved** — old resolved blockers no
+   longer project as active scheduler/UI blocking state.
+7. **Expired device lock cleanup canonicalized** — stale device lock cleanup kept
+   scoped to canonical lock release; no schedule/caps/package changes.
+8. **Device Busy projection patched** — active request/run now projects device
+   Busy accurately instead of relying on stale local state.
+9. **Historical blocker projection patched** — backend projection ignores stale
+   resolved blockers while preserving current `blocking_campaign=true` blockers.
+10. **Backend deployed** — deployment `dpl_4yJbW11sJ4MwoDoz164xYrHvLmMd` is
+    READY on `www.boostmybusinesses.com`.
+11. **BotApp stale state cleared operationally** — Cmd+Q + one reopen cleared
+    stale packaged state before the final BotApp patch/install.
+12. **Tracker `operator_review_required` diagnosed** — current active action is
+    operator-facing, critical, and tied to
+    `scheduled_retry_not_claimed_before_deadline`.
+13. **Verdict:** `TRACKER_NATURAL_WINDOW_ELIGIBLE` — the action does not block
+    natural scheduler creation/claim because scheduler eligibility only hard
+    blocks credential, checkpoint and identity-mismatch action classes.
+14. **BotApp social fallback patched** — `operator_review_required` maps to
+    `operator review required`, never `social blocked: reason required`.
+15. **BotApp Account Auto Restart status added** — one synthesis row per active
+    scheduled account.
+16. **Recent Auto Restart decisions kept separate** — multiple historical
+    decisions remain under `Recent Auto Restart decisions`, not in the account
+    synthesis rows.
+17. **Official BotApp built/package/installed** — BotApp commit
+    `dcbb85e9a1c9cad9f1a8a49eae9cf1f7e502206d` packaged from clean source and
+    installed to `/Applications/BotApp.app`.
+18. **Official smoke succeeded** — relay operational, dispatcher active,
+    Profiles/Devices loaded, Tracker shows `operator review required`, Mythyl
+    shows `growth ready`, Scheduler shows both accounts and separate history.
+19. **Runtime validations pending** — the next natural Welcome/session runtime
+    validation is not completed by this documentation checkpoint.
+
+Deployment operator incident recorded: an earlier Vercel deploy attempt targeted
+the wrong project and was corrected before the production READY deployment above.
+Do not reuse that wrong-project event as production evidence; no sensitive URL,
+token or credential is documented here.
 
 ---
 
@@ -29,6 +90,23 @@ Status: INTERIM CHECKPOINT — block not fully closed yet.
 ---
 
 ## 2. Corrections backend / CP4 (boost-ai-frontend)
+
+### Final backend projection patch
+
+- Commit:
+  `61d6ccfc334ba084ff73f57b685c7f637e948faa`
+  (`fix(botapp): project active device runs and ignore stale blockers`).
+- Status: **diagnosed / patched / tested / deployed**.
+- Device Busy projection is derived from active request/run state so BotApp can
+  show current device occupation without trusting stale UI state.
+- Stale scheduler blockers for Mythyl are ignored once resolved /
+  non-blocking; active blockers remain visible when
+  `blocking_campaign=true`.
+- The projection keeps current operator blockers visible and does not hide real
+  Instagram challenge, checkpoint or identity mismatch restrictions.
+- Production deployment:
+  `dpl_4yJbW11sJ4MwoDoz164xYrHvLmMd`, READY on
+  `www.boostmybusinesses.com`.
 
 ### Dispatcher / prod env
 
@@ -60,6 +138,9 @@ Status: INTERIM CHECKPOINT — block not fully closed yet.
 
 - `reconcileStaleDeviceLockBeforePreflight` avant enqueue CP4
 - Release RPC canonique ; migration `20260710160100_drop_ambiguous_release_device_lock_overloads.sql` (overload ambiguë supprimée)
+- Final cleanup status: **patched / tested**. The cleanup was scoped to the
+  expired lock path only; no DB/settings/caps/package mutation is implied by
+  this documentation update.
 
 ### BotApp observability read-model (deploy prod)
 
@@ -104,7 +185,7 @@ Status: INTERIM CHECKPOINT — block not fully closed yet.
 
 ## 4. Corrections BotApp — Daily Scheduler Pipeline Observability
 
-**Repo:** `BotApp-clean`  
+**Repo:** `BotApp-clean`
 **Backup installé:** `/Users/admin/phonefarm-botapp-releases/daily-scheduler-observability-20260710T145509Z.app` → `/Applications/BotApp.app`
 
 - Séparation UI **Daily Scheduler Pipeline** / **Auto Restart Engine**
@@ -132,8 +213,32 @@ La chaîne Daily Scheduler a progressé par couches de blocage successives :
 6. Package mismatch clone (`INSTAGRAM_PACKAGE`)
 7. Stale device lock (lease CP3)
 8. Keyguard / `device_locked` (Samsung swipe-to-open)
+9. Stale dashboard blockers resolved but still projected by old BotApp state
+10. Active device request/run not reflected as Busy until backend projection fix
+11. Historical `operator_review_required` action correctly classified as
+    operator/manual UI restriction, not a natural scheduler blocker
 
 **Aujourd’hui:** la chaîne tick → preflight → session est **visible** dans BotApp + tables Supabase ; diagnostics beaucoup plus actionnables qu’en début de bloc CP4.
+
+### Tracker scheduler verdict — 2026-07-12
+
+- Active dashboard action observed:
+  `operator_review_required`, `blocking_campaign=true`, `critical`, tied to
+  `scheduled_retry_not_claimed_before_deadline`.
+- Open incident preserved:
+  `scheduled_early_failure_retrying` /
+  `scheduled_retry_not_claimed_before_deadline`.
+- No real Instagram challenge, checkpoint or identity mismatch was found in the
+  traced blocker path.
+- Scheduler path: `schedule-session-cron` calls
+  `evaluateRunStartEligibility(accountId, "account_session", { trigger:
+  "scheduler" })`. The hard-block classes are credentials, checkpoint and
+  identity mismatch actions; `operator_review_required` is not one of them.
+- Verdict: **`TRACKER_NATURAL_WINDOW_ELIGIBLE`**.
+- DB before/after: no write required for this verdict; the critical incident
+  and audit remain open until runtime Welcome/session validation.
+- Start/Assign disabled in BotApp are operator/manual restrictions from the
+  UI projection, not proof that the natural scheduler window is blocked.
 
 ---
 
@@ -162,12 +267,13 @@ Runs enqueued (24h) in old view was Auto Restart only.
 
 ### Validation naturelle finale (pas encore close en prod)
 
-- [ ] `preflight_ready` réel en fenêtre active
-- [ ] `account_session` créée au tick suivant
+- [x] `preflight_ready` projeté/visible pour les comptes planifiés
+- [ ] `account_session` créée naturellement au tick suivant dans la fenêtre
+      Welcome/session attendue
 - [ ] Dispatcher claim `account_session`
-- [ ] Phone quitte idle
+- [ ] Phone quitte idle pour une session naturelle validée
 - [ ] Run terminalise proprement
-- [ ] Dashboard action résolue
+- [ ] Dashboard action historique résolue uniquement après validation runtime
 - [ ] Positive path `get_valid_scheduled_session_preflight → account_session` validé end-to-end
 
 ### Backlog technique explicite
@@ -205,7 +311,13 @@ Runs enqueued (24h) in old view was Auto Restart only.
 | Composant | ID / chemin |
 |-----------|-------------|
 | Backend Vercel prod | `dpl_2rXNt8A1eebFRdV5PSgdMudkrVF2` (Ready, 2026-07-10 ~16:55 UTC+2) |
+| Backend Vercel prod final | `dpl_4yJbW11sJ4MwoDoz164xYrHvLmMd` (Ready on `www.boostmybusinesses.com`, 2026-07-12/13) |
+| Backend final commit | `61d6ccfc334ba084ff73f57b685c7f637e948faa` — active device Busy projection + stale blocker filtering |
 | Backend git (pré-commit local) | `a97c876` — late CP4 expiry + dashboard reconcile |
+| Worker Return CT commit | `26cd04cd816c8b358397e5e9d4224360fb5ea54f` |
+| BotApp final commit | `dcbb85e9a1c9cad9f1a8a49eae9cf1f7e502206d` |
+| BotApp official app | `/Applications/BotApp.app` |
+| BotApp previous backup | `/Users/admin/phonefarm-botapp-backups/BotApp.app.20260713T000339SAST` |
 | Worker release active | `/Users/admin/phonefarm-worker-releases/b6fedca-preflight-keyguard` |
 | Worker git HEAD (repo) | `b6fedca` — late CP4 + dashboard reconcile |
 | Dispatcher worker id | `run-dispatcher:mac-admin-01` |

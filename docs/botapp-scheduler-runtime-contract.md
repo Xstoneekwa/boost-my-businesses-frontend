@@ -138,12 +138,43 @@ is then the only switch left to govern automatic starts.
 1. Cron token + technical enabled flag (`technical_disabled`)
 2. **Canonical Scheduler toggle ON** (`scheduler_disabled` otherwise; CP0)
 3. Active scheduled assignment window
-4. **BotApp scheduler runtime healthy** (`schedulerConnected=true`)
+4. BotApp scheduler runtime heartbeat healthy
 5. Physical phone + fresh `device_heartbeats`
 6. No active request/run / slot idempotency / phone busy
 7. `evaluateRunStartEligibility(trigger=scheduler)`
 8. Atomic RPC guard at insert (`scheduler_disabled` counted as
    `skipped_scheduler_disabled_count`, never fatal)
+
+## Tracker operator-review diagnostic — 2026-07-12
+
+Status: **diagnosed / deployed projection fixed**, **runtime pending**.
+
+An active dashboard action can still be operator-visible without blocking the
+natural scheduler path. The observed Tracker action was:
+
+- `operator_review_required`
+- `blocking_campaign=true`
+- severity `critical`
+- tied to `scheduled_retry_not_claimed_before_deadline`
+
+The scheduler eligibility path does not treat this action type as a hard block.
+Hard blocks remain credentials, checkpoint and identity-mismatch action classes.
+Therefore the documented verdict for the next natural window is:
+`TRACKER_NATURAL_WINDOW_ELIGIBLE`.
+
+Important distinctions:
+
+- The open critical incident remains preserved for audit and operator review.
+- The historical dashboard action can disable manual Start/Assign UI affordances
+  without proving that the natural scheduler cannot create/claim a preflight or
+  run.
+- No write is allowed if a real Instagram challenge, checkpoint or identity
+  mismatch exists.
+- Do not close the incident before Welcome/session runtime validation.
+
+Projection fix reference:
+`61d6ccfc334ba084ff73f57b685c7f637e948faa`
+(`fix(botapp): project active device runs and ignore stale blockers`).
 
 ## CP1 — Stable reasons and Scheduler observability
 
