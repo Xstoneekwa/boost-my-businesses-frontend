@@ -1,12 +1,12 @@
-import { lookupInstagramPublicProfile } from "../instagram-public-profile-lookup";
-import { createSupabaseClient } from "../supabase";
+import { lookupInstagramPublicProfile } from "../instagram-public-profile-lookup.ts";
+import { createSupabaseClient } from "../supabase.ts";
 import {
   validateFollowerSnapshotInput,
   type FollowerObservationKind,
   type FollowerSnapshotRow,
   type FollowerSnapshotSource,
-} from "../instagram-client/follower-snapshot-contract";
-import { readString } from "../instagram-client/guards";
+} from "../instagram-client/follower-snapshot-contract.ts";
+import { readString } from "../instagram-client/guards.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -32,11 +32,13 @@ function readActiveAccountStatuses(row: SupabaseRecord) {
   return lifecycle === "active";
 }
 
-export async function listActivePlatformInstagramAccountIds(): Promise<string[]> {
+export type ActivePlatformInstagramAccount = { id: string; username: string };
+
+export async function listActivePlatformInstagramAccounts(): Promise<ActivePlatformInstagramAccount[]> {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase
     .from("ig_accounts")
-    .select("id,status,admin_lifecycle_status")
+    .select("id,username,status,admin_lifecycle_status")
     .order("created_at", { ascending: true })
     .limit(5000);
 
@@ -44,8 +46,12 @@ export async function listActivePlatformInstagramAccountIds(): Promise<string[]>
 
   return (Array.isArray(data) ? data as SupabaseRecord[] : [])
     .filter(readActiveAccountStatuses)
-    .map((row) => readString(row.id))
-    .filter(Boolean);
+    .map((row) => ({ id: readString(row.id), username: readString(row.username) }))
+    .filter((row) => row.id && row.username);
+}
+
+export async function listActivePlatformInstagramAccountIds(): Promise<string[]> {
+  return (await listActivePlatformInstagramAccounts()).map((row) => row.id);
 }
 
 export async function readPlatformAccountUsername(accountId: string) {

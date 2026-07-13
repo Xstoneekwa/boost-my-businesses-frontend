@@ -60,6 +60,10 @@ test("operator review actions expose a terminal Mark reviewed control without to
   assert.match(markReviewedSource, /Mark reviewed/);
   assert.match(markReviewedSource, /dashboard-actions\/review/);
   assert.match(markReviewedSource, /review_status: "reviewed"/);
+  assert.match(markReviewedSource, /Confirm this action has been reviewed by a human operator/);
+  assert.match(markReviewedSource, /Review note \(optional\)/);
+  assert.match(markReviewedSource, /Confirm review/);
+  assert.match(markReviewedSource, /Cancel/);
   assert.doesNotMatch(markReviewedSource, /account_incidents|incidents\/action/);
 });
 

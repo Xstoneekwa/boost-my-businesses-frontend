@@ -15,6 +15,7 @@ import {
   isBusinessActionsAllowed,
   type SessionTransitionTimestamps,
 } from "./session-transition-buffer.ts";
+import { deliverOperatorReviewNotifications } from "./operator-review-notifications.ts";
 export function scheduleSessionIdempotencyKey(assignmentId: string, startsAt: string) {
   return `schedule-session:${assignmentId}:${startsAt}`;
 }
@@ -539,7 +540,7 @@ export async function upsertScheduledEarlyFailureDashboardAction(
     metadata: Record<string, unknown>;
   },
 ) {
-  const { error } = await supabase.rpc("upsert_account_dashboard_action", {
+  const { data, error } = await supabase.rpc("upsert_account_dashboard_action", {
     p_account_id: input.accountId,
     p_client_id: null,
     p_incident_id: input.incidentId,
@@ -559,6 +560,7 @@ export async function upsertScheduledEarlyFailureDashboardAction(
     p_metadata: input.metadata,
   });
   if (error) throw new Error(error.message || "scheduled_early_failure_dashboard_action_failed");
+  return (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
 }
 
 type UpdateCapableBuilder = QueryBuilder & {
@@ -941,13 +943,13 @@ export async function evaluateAndMaybeEnqueueScheduledEarlyFailureRetry(
             retry_run_id: readString(retryRequest.run_id) || null,
           },
         });
-        const notification = await sendScheduledEarlyFailureNotification({
+        await sendScheduledEarlyFailureNotification({
           incidentId: incidentId || randomUUID(),
           accountUsername: input.accountUsername,
           message: "Scheduled run failed again after controlled retry",
           severity: "critical",
         });
-        await upsertScheduledEarlyFailureDashboardAction(supabase, {
+        const operatorReviewAction = await upsertScheduledEarlyFailureDashboardAction(supabase, {
           accountId: input.accountId,
           incidentId,
           dedupeKey: dashboardDedupeKey,
@@ -959,6 +961,18 @@ export async function evaluateAndMaybeEnqueueScheduledEarlyFailureRetry(
           actionLabel: "Review scheduled retry failure",
           metadata: { ...baseMetadata, incident_id: incidentId, needs_operator_review: true },
         });
+        if (incidentId && readString(operatorReviewAction?.id)) {
+          await deliverOperatorReviewNotifications({
+            event: "created",
+            actionId: readString(operatorReviewAction?.id),
+            incidentId,
+            accountId: input.accountId,
+            accountUsername: input.accountUsername,
+            reason: reasonCode,
+            finalStatus: "pending_verification",
+            operatorId: "system",
+          }, { supabase });
+        }
         return {
           action: "blocked_already_retried",
           incidentId,
@@ -988,7 +1002,7 @@ export async function evaluateAndMaybeEnqueueScheduledEarlyFailureRetry(
         message: `Scheduled run failed — no safe retry (${eligibility.deniedReason})`,
         severity: "critical",
       });
-      await upsertScheduledEarlyFailureDashboardAction(supabase, {
+      const operatorReviewAction = await upsertScheduledEarlyFailureDashboardAction(supabase, {
         accountId: input.accountId,
         incidentId,
         dedupeKey: dashboardDedupeKey,
@@ -1000,6 +1014,18 @@ export async function evaluateAndMaybeEnqueueScheduledEarlyFailureRetry(
         actionLabel: "Review unsafe scheduled failure",
         metadata: { ...baseMetadata, incident_id: incidentId, needs_operator_review: true },
       });
+      if (incidentId && readString(operatorReviewAction?.id)) {
+          await deliverOperatorReviewNotifications({
+          event: "created",
+          actionId: readString(operatorReviewAction?.id),
+          incidentId,
+          accountId: input.accountId,
+          accountUsername: input.accountUsername,
+          reason: eligibility.deniedReason,
+          finalStatus: "pending_verification",
+            operatorId: "system",
+          }, { supabase });
+      }
       return {
         action: "blocked_unsafe",
         incidentId: incidentId || "",

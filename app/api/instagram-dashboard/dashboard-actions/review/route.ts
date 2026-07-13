@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { deliverOperatorReviewNotifications } from "@/lib/instagram-dashboard/operator-review-notifications";
 import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin } from "../../_utils";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,7 @@ type ReviewPayload = {
   account_id?: unknown;
   review_status?: unknown;
   source?: unknown;
+  note?: unknown;
   metadata_safe?: unknown;
 };
 
@@ -74,11 +76,11 @@ export async function POST(request: Request) {
 
     const supabase = createSupabaseClient();
     const actorContext = await getInstagramAdminUserContext();
-    const now = new Date().toISOString();
+    if (!actorContext?.userId) return jsonError("Authenticated operator identity is required.", 401);
 
     const { data: existingAction, error: existingError } = await supabase
       .from("account_dashboard_actions")
-      .select("id,account_id,action_type,status,blocking_campaign,metadata")
+      .select("id,account_id,incident_id,action_type,status,blocking_campaign,title,admin_message,metadata")
       .eq("id", actionId)
       .eq("account_id", accountId)
       .limit(1)
@@ -92,71 +94,75 @@ export async function POST(request: Request) {
       return jsonError("Dashboard action is not reviewable.", 409);
     }
 
-    const previousMetadata = existingAction.metadata && typeof existingAction.metadata === "object" && !Array.isArray(existingAction.metadata)
-      ? existingAction.metadata as SupabaseRecord
-      : {};
     const source = asSafeSource(payload.source);
     const terminalOperatorReview = readString(existingAction.action_type) === "operator_review_required"
       && reviewStatus === "reviewed";
-    const metadata = {
-      ...previousMetadata,
-      ...safeMetadata(payload.metadata_safe),
-      review_status: reviewStatus,
-      reviewed_by: actorContext?.userId ?? "unknown",
-      reviewed_at: now,
-      review_source: source,
-      keep_action_active_until_readiness_ok: !terminalOperatorReview,
-    };
+    const note = readString(payload.note).trim().slice(0, 500) || null;
+    const incidentId = terminalOperatorReview ? readString(existingAction.incident_id) : "";
+    if (terminalOperatorReview && !incidentId) {
+      return jsonError("Operator review action has no incident linkage.", 409);
+    }
 
-    const nextStatus = terminalOperatorReview ? "resolved" : "acknowledged";
+    let reviewedAction: SupabaseRecord | null = null;
+    if (terminalOperatorReview) {
+      const { data, error } = await supabase.rpc("review_operator_dashboard_action", {
+        p_action_id: actionId,
+        p_account_id: accountId,
+        p_actor_id: actorContext.userId,
+        p_source: source,
+        p_note: note,
+        p_metadata: safeMetadata(payload.metadata_safe),
+      });
+      if (error) return jsonError(error.message, 500);
+      reviewedAction = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
+    } else {
+      const { data, error } = await supabase.rpc("transition_account_dashboard_action", {
+        p_action_id: actionId,
+        p_new_status: "acknowledged",
+        p_actor_type: "admin",
+        p_actor_id: actorContext.userId,
+        p_reason: "credentials_action_reviewed",
+        p_metadata: {
+          ...safeMetadata(payload.metadata_safe),
+          review_status: reviewStatus,
+          review_source: source,
+          reviewed_at: new Date().toISOString(),
+          note,
+        },
+      });
+      if (error) return jsonError(error.message, 500);
+      reviewedAction = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
+    }
 
-    const { data: reviewedAction, error: updateError } = await supabase
-      .from("account_dashboard_actions")
-      .update({
-        status: nextStatus,
-        blocking_campaign: terminalOperatorReview ? false : existingAction.blocking_campaign,
-        resolved_at: terminalOperatorReview ? now : null,
-        metadata,
-        updated_at: now,
-      })
-      .eq("id", actionId)
-      .eq("account_id", accountId)
-      .in("status", [...reviewableStatuses])
-      .select("id,account_id,action_type,status,blocking_campaign,resolved_at,updated_at")
-      .maybeSingle<SupabaseRecord>();
-
-    if (updateError) return jsonError(updateError.message, 500);
     if (!reviewedAction) return jsonError("Dashboard action is no longer reviewable.", 409);
 
-    try {
-      await supabase.from("ig_action_logs").insert({
-        account_id: accountId,
-        run_id: null,
-        target_username: null,
-        action_type: "dashboard_action_reviewed",
-        status: "success",
-        message: terminalOperatorReview ? "operator_review_action_resolved" : "credentials_action_reviewed",
-        payload: {
-          actor_type: "admin",
-          actor_id: actorContext?.userId ?? null,
-          source,
-          dashboard_action_id: actionId,
-          dashboard_action_type: readString(existingAction.action_type, "unknown"),
-          review_status: reviewStatus,
-        },
-        created_at: now,
+    let notificationDeliveries: Array<{ channel: string; status: string; deliveredAt: string | null }> = [];
+    if (terminalOperatorReview) {
+      const { data: account } = await supabase
+        .from("ig_accounts")
+        .select("username")
+        .eq("id", accountId)
+        .maybeSingle<SupabaseRecord>();
+      notificationDeliveries = await deliverOperatorReviewNotifications({
+        event: "resolved",
+        actionId,
+        incidentId,
+        accountId,
+        accountUsername: readString(account?.username, "unknown"),
+        reason: readString(existingAction.admin_message, readString(existingAction.title, "operator_review_required")),
+        finalStatus: "resolved",
+        operatorId: actorContext.userId,
       });
-    } catch {
-      // The dashboard action update is authoritative; audit can be reconciled later.
     }
 
     return jsonOk({
       action_id: actionId,
       account_id: accountId,
-      status: readString(reviewedAction.status, nextStatus),
+      status: readString(reviewedAction.status, terminalOperatorReview ? "resolved" : "acknowledged"),
       blocking_campaign: reviewedAction.blocking_campaign === true,
       review_status: reviewStatus,
-      reviewed_at: now,
+      reviewed_at: readString(reviewedAction.updated_at, new Date().toISOString()),
+      notification_deliveries: notificationDeliveries,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not review dashboard action.";

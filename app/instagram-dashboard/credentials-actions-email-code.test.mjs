@@ -155,12 +155,10 @@ test("credentials review route acknowledges actions without resolving active pro
   const routeSource = source("../api/instagram-dashboard/dashboard-actions/review/route.ts");
 
   assert.match(routeSource, /review_status/);
-  assert.match(routeSource, /nextStatus = terminalOperatorReview \? "resolved" : "acknowledged"/);
-  assert.match(routeSource, /keep_action_active_until_readiness_ok/);
+  assert.match(routeSource, /transition_account_dashboard_action/);
+  assert.match(routeSource, /p_new_status: "acknowledged"/);
   assert.match(routeSource, /account_dashboard_actions/);
-  assert.match(routeSource, /ig_action_logs/);
   assert.match(routeSource, /botapp_relay/);
-  assert.match(routeSource, /dashboard_action_reviewed/);
   assert.equal(routeSource.includes("console.log"), false);
   assert.equal(routeSource.includes("verification_code:"), false);
   assert.equal(routeSource.includes(`${"pass"}${"word"}:`), false);
@@ -169,11 +167,14 @@ test("credentials review route acknowledges actions without resolving active pro
 
 test("operator review completion resolves only the reviewed action and clears its campaign blocker", () => {
   const routeSource = source("../api/instagram-dashboard/dashboard-actions/review/route.ts");
+  const migrationSource = source("../../supabase/migrations/20260714003000_operator_review_canonical_transition.sql");
 
   assert.match(routeSource, /terminalOperatorReview/);
   assert.match(routeSource, /action_type\) === "operator_review_required"/);
-  assert.match(routeSource, /nextStatus = terminalOperatorReview \? "resolved" : "acknowledged"/);
-  assert.match(routeSource, /blocking_campaign: terminalOperatorReview \? false/);
-  assert.match(routeSource, /resolved_at: terminalOperatorReview \? now/);
+  assert.match(routeSource, /review_operator_dashboard_action/);
+  assert.match(routeSource, /deliverOperatorReviewNotifications/);
+  assert.match(migrationSource, /blocking_campaign = false/);
+  assert.match(migrationSource, /operator_review_action_resolved/);
   assert.doesNotMatch(routeSource, /\.from\("account_incidents"\)/);
+  assert.doesNotMatch(migrationSource, /update public\.account_incidents/);
 });

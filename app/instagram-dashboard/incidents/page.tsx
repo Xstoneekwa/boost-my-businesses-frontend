@@ -591,6 +591,37 @@ export default async function InstagramIncidentsPage({
         }
         .ig-inc-ready-btn:disabled { opacity: .6; cursor: wait; }
         .ig-inc-ready-refusal { color: #fca5a5; font-size: 12px; }
+        .ig-inc-review-confirm {
+          display: grid;
+          gap: 10px;
+          width: min(460px, 100%);
+          padding: 12px;
+          border: 1px solid rgba(45,212,191,.35);
+          border-radius: 8px;
+          background: rgba(15,23,42,.72);
+        }
+        .ig-inc-review-confirm-copy { color: #e2e8f0; font-size: 13px; }
+        .ig-inc-review-note-label { display: grid; gap: 6px; color: #cbd5e1; font-size: 12px; }
+        .ig-inc-review-note {
+          width: 100%;
+          resize: vertical;
+          padding: 8px 10px;
+          border: 1px solid #334155;
+          border-radius: 6px;
+          background: #0f172a;
+          color: #f8fafc;
+          font: inherit;
+        }
+        .ig-inc-review-actions { display: flex; align-items: center; gap: 8px; }
+        .ig-inc-review-cancel {
+          padding: 8px 12px;
+          border: 1px solid #475569;
+          border-radius: 8px;
+          background: transparent;
+          color: #e2e8f0;
+          cursor: pointer;
+        }
+        .ig-inc-review-cancel:disabled { opacity: .6; cursor: wait; }
         .ig-inc-row-focused {
           border-color: rgba(45,212,191,.55);
           box-shadow: 0 0 0 1px rgba(45,212,191,.35);
