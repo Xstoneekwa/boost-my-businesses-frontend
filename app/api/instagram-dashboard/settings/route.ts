@@ -16,7 +16,7 @@ import {
   DEFAULT_OUTREACH_DM_DAY_CAP,
   DEFAULT_WELCOME_DM_DAY_CAP,
   readProductDefaultDayCap,
-} from "./dm/route";
+} from "@/lib/instagram-dashboard/dm-domain-service";
 import { dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireRelayOrAdmin, type SupabaseRecord } from "../_utils";
 

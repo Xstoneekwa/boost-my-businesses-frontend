@@ -86,7 +86,7 @@ export async function PATCH(request: Request) {
   }
 }
 
-export function buildClientNotificationsUnavailablePatchResponse() {
+function buildClientNotificationsUnavailablePatchResponse() {
   return {
     ok: false as const,
     featureAvailable: false as const,

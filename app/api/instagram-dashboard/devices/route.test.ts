@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { safePhoneDevice } from "./route.ts";
+import { safePhoneDevice } from "./projection.ts";
 
 test("devices route projects Samsung phones from phone_devices with app instances", () => {
   const phone = safePhoneDevice(

@@ -19,8 +19,6 @@ import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey }
 
 export const dynamic = "force-dynamic";
 
-export { safeTargetRow } from "@/lib/instagram-dashboard/targets-service";
-
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;

@@ -17,7 +17,7 @@ import {
 } from "../../_utils";
 import {
   normalizeAutoRestartPatch,
-} from "../settings/route";
+} from "../settings/normalization";
 import { rulesFromSettingsRow } from "@/app/instagram-dashboard/auto-restart-data";
 
 export const dynamic = "force-dynamic";

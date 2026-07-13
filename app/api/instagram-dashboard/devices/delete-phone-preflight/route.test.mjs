@@ -6,7 +6,7 @@ import {
   relayAuthStatus,
   verifyCompassRelayKey,
 } from "../../compass/relay-auth.ts";
-import { forwardDeletePhonePreflight } from "./route.ts";
+import { forwardDeletePhonePreflight } from "./forward.ts";
 
 const routeSource = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
 const deleteRouteSource = readFileSync(new URL("../delete-phone/route.ts", import.meta.url), "utf8");

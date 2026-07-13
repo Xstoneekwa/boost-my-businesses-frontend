@@ -18,6 +18,7 @@ import {
   validateAccountId,
 } from "../../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
+import { runStartSuccessPayload } from "./response";
 
 export const dynamic = "force-dynamic";
 
@@ -40,42 +41,12 @@ type StartBody = {
   idempotency_key?: unknown;
 };
 
-function shortRequestId(requestId: string) {
-  return requestId ? requestId.slice(0, 8) : "";
-}
-
 function normalizeRunStartSource(value: unknown) {
   return readString(value, "instagram_dashboard")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_.:-]+/g, "_")
     .slice(0, 80) || "instagram_dashboard";
-}
-
-export function runStartSuccessPayload({
-  accountId,
-  requestId,
-  requestStatus,
-  requestedRunType,
-  idempotent = false,
-}: {
-  accountId: string;
-  requestId: string;
-  requestStatus: string;
-  requestedRunType: string;
-  idempotent?: boolean;
-}) {
-  return {
-    started: !idempotent,
-    idempotent,
-    message: idempotent
-      ? `Manual run already requested (${shortRequestId(requestId)} · ${requestStatus}).`
-      : `Run request ${shortRequestId(requestId)} queued (${requestStatus}).`,
-    account_id: accountId,
-    request_id: requestId,
-    status: requestStatus,
-    requested_run_type: requestedRunType,
-  };
 }
 
 export async function POST(request: Request) {

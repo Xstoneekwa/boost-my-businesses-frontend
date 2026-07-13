@@ -1,15 +1,8 @@
 import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control";
 import {
   buildDmProjection,
-  DEFAULT_OUTREACH_DM_DAY_CAP,
-  DEFAULT_WELCOME_DM_DAY_CAP,
-  dmChangedFields,
-  projectionToValidationInput,
-  readProductDefaultDayCap,
   saveDmDomainPatch,
-  validateDmDomainInput,
   type DmDomainPatchInput,
-  type DmDomainValidationInput,
 } from "@/lib/instagram-dashboard/dm-domain-service";
 import { createSupabaseClient } from "@/lib/supabase";
 import {
@@ -25,17 +18,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export type DmDomainPatchPayload = DmDomainPatchInput & {
+type DmDomainPatchPayload = DmDomainPatchInput & {
   account_id?: unknown;
-};
-
-export type { DmDomainValidationInput };
-export {
-  DEFAULT_OUTREACH_DM_DAY_CAP,
-  DEFAULT_WELCOME_DM_DAY_CAP,
-  dmChangedFields,
-  readProductDefaultDayCap,
-  validateDmDomainInput,
 };
 
 export async function GET(request: Request) {

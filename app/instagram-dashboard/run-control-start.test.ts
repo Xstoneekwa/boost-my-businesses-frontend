@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dmClientValidationError, dmDomainPayload, getDmServiceAvailability, readApiResponse, runStartSuccessMessage, unfollowClientValidationError, unfollowDomainPayload } from "./InstagramDashboardButtons";
-import { runStartSuccessPayload } from "../api/instagram-dashboard/runs/start/route";
-import { DEFAULT_OUTREACH_DM_DAY_CAP, DEFAULT_WELCOME_DM_DAY_CAP, dmChangedFields, readProductDefaultDayCap, validateDmDomainInput, type DmDomainValidationInput } from "../api/instagram-dashboard/settings/dm/route";
-import { validateUnfollowDomainInput } from "../api/instagram-dashboard/settings/unfollow/route";
+import { runStartSuccessPayload } from "../api/instagram-dashboard/runs/start/response";
+import { DEFAULT_OUTREACH_DM_DAY_CAP, DEFAULT_WELCOME_DM_DAY_CAP, dmChangedFields, readProductDefaultDayCap, validateDmDomainInput, type DmDomainValidationInput } from "../../lib/instagram-dashboard/dm-domain-service";
+import { validateUnfollowDomainInput } from "../api/instagram-dashboard/settings/unfollow/domain";
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, normalizeDmTemplateMessage } from "../../lib/instagram-dashboard/dm-formatting";
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
