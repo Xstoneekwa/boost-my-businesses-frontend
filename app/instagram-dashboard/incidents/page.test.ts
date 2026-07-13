@@ -4,6 +4,7 @@ import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const buttonSource = readFileSync(new URL("./ReadyToResumeButton.tsx", import.meta.url), "utf8");
+const markReviewedSource = readFileSync(new URL("./MarkReviewedButton.tsx", import.meta.url), "utf8");
 
 const FORBIDDEN_FRENCH = [
   "Prêt à relancer",
@@ -50,6 +51,16 @@ test("P3.2 Admin ready-to-resume button is status-only and never creates a run",
 test("P3.2 deep-linked row is highlighted in the list", () => {
   assert.match(pageSource, /ig-inc-row-focused/);
   assert.match(pageSource, /id=\{`incident-\$\{incident\.id\}`\}/);
+});
+
+test("operator review actions expose a terminal Mark reviewed control without touching incidents", () => {
+  assert.match(pageSource, /operator_review_required/);
+  assert.match(pageSource, /MarkReviewedButton/);
+  assert.match(pageSource, /reviewActions\.has/);
+  assert.match(markReviewedSource, /Mark reviewed/);
+  assert.match(markReviewedSource, /dashboard-actions\/review/);
+  assert.match(markReviewedSource, /review_status: "reviewed"/);
+  assert.doesNotMatch(markReviewedSource, /account_incidents|incidents\/action/);
 });
 
 test("P3.2 Admin incidents UI has no forbidden French operator strings", () => {

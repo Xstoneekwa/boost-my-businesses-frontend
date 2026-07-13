@@ -14,6 +14,7 @@ import {
   type RecoveryView,
 } from "@/lib/instagram-dashboard/incident-resume-authorization";
 import { ReadyToResumeButton } from "./ReadyToResumeButton";
+import { MarkReviewedButton } from "./MarkReviewedButton";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,20 @@ interface FocusedIncident {
   recovery: RecoveryView;
 }
 
+interface ReviewableOperatorAction {
+  id: string;
+  accountId: string;
+}
+
+function readIncidentIdFromAction(row: Record<string, unknown>) {
+  for (const value of [row.metadata, row.metadata_safe]) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const incidentId = String((value as Record<string, unknown>).incident_id ?? "").trim();
+    if (incidentId) return incidentId;
+  }
+  return "";
+}
+
 /**
  * P3.1 deep-link: load ONE incident explicitly by id (Slack/Discord link),
  * even when it is metadata.test=true, with its server-evaluated recovery view.
@@ -138,6 +153,7 @@ async function loadIncidents(includeTest: boolean, focusedIncidentId: string) {
       counters: buildIncidentCounters([]),
       windows: new Map<string, { start: string | null; end: string | null }>(),
       focused: null as FocusedIncident | null,
+      reviewActions: new Map<string, ReviewableOperatorAction>(),
       error: error.message,
     };
   }
@@ -164,6 +180,20 @@ async function loadIncidents(includeTest: boolean, focusedIncidentId: string) {
     models = [focused.model, ...models];
   }
 
+  const { data: operatorActionRows } = await supabase
+    .from("account_dashboard_actions")
+    .select("id,account_id,action_type,status,metadata,metadata_safe")
+    .eq("action_type", "operator_review_required")
+    .in("status", ["pending", "acknowledged", "pending_verification", "code_submitted"])
+    .limit(1000);
+  const reviewActions = new Map<string, ReviewableOperatorAction>();
+  for (const row of operatorActionRows ?? []) {
+    const incidentId = readIncidentIdFromAction(row as Record<string, unknown>);
+    const id = String(row.id ?? "").trim();
+    const accountId = String(row.account_id ?? "").trim();
+    if (incidentId && id && accountId) reviewActions.set(incidentId, { id, accountId });
+  }
+
   // P3: resume windows per incident run (read-only recovery context).
   const runIds = models.map((m) => m.runId).filter((id): id is string => Boolean(id));
   const windows = new Map<string, { start: string | null; end: string | null }>();
@@ -181,7 +211,7 @@ async function loadIncidents(includeTest: boolean, focusedIncidentId: string) {
       });
     }
   }
-  return { models, counters, windows, focused, error: null as string | null };
+  return { models, counters, windows, focused, reviewActions, error: null as string | null };
 }
 
 export default async function InstagramIncidentsPage({
@@ -198,7 +228,7 @@ export default async function InstagramIncidentsPage({
   const includeTest = params.include_test === "1";
   const focusedIncidentId =
     typeof params.incident_id === "string" ? params.incident_id.trim() : "";
-  const { models, counters, windows, focused, error } = await loadIncidents(
+  const { models, counters, windows, focused, reviewActions, error } = await loadIncidents(
     includeTest,
     focusedIncidentId,
   );
@@ -301,6 +331,12 @@ export default async function InstagramIncidentsPage({
               </p>
             )}
           </div>
+          {reviewActions.has(focused.model.id) ? (
+            <MarkReviewedButton
+              actionId={reviewActions.get(focused.model.id)!.id}
+              accountId={reviewActions.get(focused.model.id)!.accountId}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -347,6 +383,12 @@ export default async function InstagramIncidentsPage({
                   )}</span>
                 ) : null}
               </p>
+            ) : null}
+            {reviewActions.has(incident.id) ? (
+              <MarkReviewedButton
+                actionId={reviewActions.get(incident.id)!.id}
+                accountId={reviewActions.get(incident.id)!.accountId}
+              />
             ) : null}
             <div className="ig-inc-row-meta">
               {incident.accountHref ? (

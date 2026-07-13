@@ -155,7 +155,7 @@ test("credentials review route acknowledges actions without resolving active pro
   const routeSource = source("../api/instagram-dashboard/dashboard-actions/review/route.ts");
 
   assert.match(routeSource, /review_status/);
-  assert.match(routeSource, /status: "acknowledged"/);
+  assert.match(routeSource, /nextStatus = terminalOperatorReview \? "resolved" : "acknowledged"/);
   assert.match(routeSource, /keep_action_active_until_readiness_ok/);
   assert.match(routeSource, /account_dashboard_actions/);
   assert.match(routeSource, /ig_action_logs/);
@@ -165,4 +165,15 @@ test("credentials review route acknowledges actions without resolving active pro
   assert.equal(routeSource.includes("verification_code:"), false);
   assert.equal(routeSource.includes(`${"pass"}${"word"}:`), false);
   assert.equal(routeSource.includes("secret_ref"), false);
+});
+
+test("operator review completion resolves only the reviewed action and clears its campaign blocker", () => {
+  const routeSource = source("../api/instagram-dashboard/dashboard-actions/review/route.ts");
+
+  assert.match(routeSource, /terminalOperatorReview/);
+  assert.match(routeSource, /action_type\) === "operator_review_required"/);
+  assert.match(routeSource, /nextStatus = terminalOperatorReview \? "resolved" : "acknowledged"/);
+  assert.match(routeSource, /blocking_campaign: terminalOperatorReview \? false/);
+  assert.match(routeSource, /resolved_at: terminalOperatorReview \? now/);
+  assert.doesNotMatch(routeSource, /\.from\("account_incidents"\)/);
 });

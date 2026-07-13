@@ -46,6 +46,16 @@ export type ProjectFollowerGrowthInput = {
   now?: Date;
 };
 
+export type FollowerDelta72hProjection = {
+  value: number | null;
+  currentFollowers: number | null;
+  previousFollowers: number | null;
+  from: string | null;
+  to: string | null;
+  source: "ig_account_follower_snapshots";
+  freshness: "complete" | "insufficient_history";
+};
+
 function readSnapshotTime(row: FollowerSnapshotRow) {
   const date = new Date(row.captured_at);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -84,6 +94,35 @@ function snapshotAtOrBefore(sorted: FollowerSnapshotRow[], instantIso: string) {
     match = row;
   }
   return match;
+}
+
+export function projectFollowerDelta72h(rows: FollowerSnapshotRow[]): FollowerDelta72hProjection {
+  const sorted = filterReliableFollowerSnapshots(rows);
+  const latest = sorted.at(-1) ?? null;
+  if (!latest) {
+    return {
+      value: null,
+      currentFollowers: null,
+      previousFollowers: null,
+      from: null,
+      to: null,
+      source: "ig_account_follower_snapshots",
+      freshness: "insufficient_history",
+    };
+  }
+
+  const latestAt = new Date(latest.captured_at).getTime();
+  const threshold = new Date(latestAt - (72 * 60 * 60 * 1000)).toISOString();
+  const reference = snapshotAtOrBefore(sorted, threshold);
+  return {
+    value: reference ? latest.followers_count - reference.followers_count : null,
+    currentFollowers: latest.followers_count,
+    previousFollowers: reference?.followers_count ?? null,
+    from: reference?.captured_at ?? null,
+    to: latest.captured_at,
+    source: "ig_account_follower_snapshots",
+    freshness: reference ? "complete" : "insufficient_history",
+  };
 }
 
 function snapshotsAfterClientLink(sorted: FollowerSnapshotRow[], clientLinkedAt: string | null) {

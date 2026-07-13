@@ -78,7 +78,7 @@ export async function POST(request: Request) {
 
     const { data: existingAction, error: existingError } = await supabase
       .from("account_dashboard_actions")
-      .select("id,account_id,action_type,status,metadata")
+      .select("id,account_id,action_type,status,blocking_campaign,metadata")
       .eq("id", actionId)
       .eq("account_id", accountId)
       .limit(1)
@@ -96,6 +96,8 @@ export async function POST(request: Request) {
       ? existingAction.metadata as SupabaseRecord
       : {};
     const source = asSafeSource(payload.source);
+    const terminalOperatorReview = readString(existingAction.action_type) === "operator_review_required"
+      && reviewStatus === "reviewed";
     const metadata = {
       ...previousMetadata,
       ...safeMetadata(payload.metadata_safe),
@@ -103,20 +105,24 @@ export async function POST(request: Request) {
       reviewed_by: actorContext?.userId ?? "unknown",
       reviewed_at: now,
       review_source: source,
-      keep_action_active_until_readiness_ok: true,
+      keep_action_active_until_readiness_ok: !terminalOperatorReview,
     };
+
+    const nextStatus = terminalOperatorReview ? "resolved" : "acknowledged";
 
     const { data: reviewedAction, error: updateError } = await supabase
       .from("account_dashboard_actions")
       .update({
-        status: "acknowledged",
+        status: nextStatus,
+        blocking_campaign: terminalOperatorReview ? false : existingAction.blocking_campaign,
+        resolved_at: terminalOperatorReview ? now : null,
         metadata,
         updated_at: now,
       })
       .eq("id", actionId)
       .eq("account_id", accountId)
       .in("status", [...reviewableStatuses])
-      .select("id,account_id,action_type,status,updated_at")
+      .select("id,account_id,action_type,status,blocking_campaign,resolved_at,updated_at")
       .maybeSingle<SupabaseRecord>();
 
     if (updateError) return jsonError(updateError.message, 500);
@@ -129,7 +135,7 @@ export async function POST(request: Request) {
         target_username: null,
         action_type: "dashboard_action_reviewed",
         status: "success",
-        message: "credentials_action_reviewed",
+        message: terminalOperatorReview ? "operator_review_action_resolved" : "credentials_action_reviewed",
         payload: {
           actor_type: "admin",
           actor_id: actorContext?.userId ?? null,
@@ -147,7 +153,8 @@ export async function POST(request: Request) {
     return jsonOk({
       action_id: actionId,
       account_id: accountId,
-      status: readString(reviewedAction.status, "acknowledged"),
+      status: readString(reviewedAction.status, nextStatus),
+      blocking_campaign: reviewedAction.blocking_campaign === true,
       review_status: reviewStatus,
       reviewed_at: now,
     });
