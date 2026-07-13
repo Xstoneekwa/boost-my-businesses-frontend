@@ -115,9 +115,9 @@ function activeRunId(activeRequest: RecordValue | undefined, activeRun: RecordVa
 }
 
 function runScopedCounters(
+  accountIdValue: string,
   runId: string,
   logs: RecordValue[],
-  runs: RecordValue[],
   interactionEvents: RecordValue[],
   canonicalDailyCount: ReturnType<typeof interactionEventCounters>,
 ) {
@@ -139,18 +139,12 @@ function runScopedCounters(
       lastProgressAt: null,
     };
   }
-  const scopedLogs = logs.filter((row) => readString(row.run_id, "") === runId);
-  const scopedRuns = runs.filter((row) => readString(row.id, readString(row.run_id, "")) === runId);
-  const scopedEvents = interactionEvents.filter((row) => readString(row.run_id, "") === runId);
-  const canonicalRunCount = reconcileSocialCounters(
-    actionCountersFromLogs(scopedLogs),
-    runTotalsCounters(scopedRuns),
-  );
   return projectVerifiedRunCounters({
+    accountId: accountIdValue,
     runId,
     canonicalDailyCount,
-    canonicalRunCount,
-    interactionEvents: scopedEvents,
+    canonicalActions: logs,
+    interactionEvents,
   });
 }
 
@@ -329,7 +323,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     const since = dayStartIso();
     const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
-      supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
+      supabase.from("ig_action_logs").select("id,account_id,run_id,target_username,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,cancel_requested_at").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
@@ -384,18 +378,19 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     }
     return Promise.all(accounts.map(async (account) => {
       const id = accountId(account);
+      const activeRequest = activeRequestByAccount.get(id);
+      const activeRun = activeRunByAccount.get(id);
+      const runId = activeRunId(activeRequest, activeRun);
+      const accountEvents = interactionEventsByAccount.get(id) ?? [];
       const runtimeSummary = safeSettingsSummary(
         account,
         settingsByAccount.get(id),
         packageByAccount.get(id),
         logsByAccount.get(id) ?? [],
         accountById.get(id),
-        sessionRunsByAccount.get(id) ?? [],
-        interactionEventsByAccount.get(id) ?? [],
+        (sessionRunsByAccount.get(id) ?? []).filter((row) => readString(row.id, "") !== runId),
+        accountEvents.filter((row) => readString(row.run_id, "") !== runId),
       );
-      const activeRequest = activeRequestByAccount.get(id);
-      const activeRun = activeRunByAccount.get(id);
-      const runId = activeRunId(activeRequest, activeRun);
       let operatorStopProjection = {};
       try {
         const [cleanup, suppression] = await Promise.all([
@@ -430,10 +425,10 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
         ...account,
         ...runtimeSummary,
         currentRunCounters: runScopedCounters(
+          id,
           runId,
           logsByAccount.get(id) ?? [],
-          sessionRunsByAccount.get(id) ?? [],
-          interactionEventsByAccount.get(id) ?? [],
+          accountEvents,
           runtimeSummary.countersToday,
         ),
         runtimeIndicator,

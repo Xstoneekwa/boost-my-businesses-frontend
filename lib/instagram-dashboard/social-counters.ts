@@ -140,6 +140,58 @@ function verifiedInteractionUnits(row: RecordValue, kind: SocialCounterKind) {
   return Math.max(1, readNumber(payload?.verified_count, 1));
 }
 
+function normalizedTarget(row: RecordValue) {
+  const payload = readRecord(row.payload);
+  return readString(
+    row.target_username,
+    readString(row.username, readString(payload?.target_username, readString(payload?.username, ""))),
+  ).trim().toLowerCase();
+}
+
+function canonicalActionIdentity(row: RecordValue, kind: SocialCounterKind) {
+  const runId = readString(row.run_id, "no_run");
+  const target = normalizedTarget(row);
+  if (target) return `${runId}:${kind}:${target}`;
+  return readString(row.id, "");
+}
+
+function canonicalActionUnits(row: RecordValue, kind: SocialCounterKind) {
+  if (kind === "likes") {
+    const payload = readRecord(row.payload);
+    return Math.max(1, readNumber(payload?.liked_count, readNumber(payload?.verified_count, 1)));
+  }
+  return 1;
+}
+
+function actionUnitsByIdentity(rows: RecordValue[]) {
+  const units = new Map<string, { kind: SocialCounterKind; units: number }>();
+  for (const row of rows) {
+    if (!shouldCountSocialLog(row)) continue;
+    const kind = socialActionKindFromLog(readString(row.action_type, ""));
+    if (!kind) continue;
+    const identity = canonicalActionIdentity(row, kind);
+    if (!identity) continue;
+    const rowUnits = canonicalActionUnits(row, kind);
+    const previous = units.get(identity);
+    if (!previous || rowUnits > previous.units) units.set(identity, { kind, units: rowUnits });
+  }
+  return units;
+}
+
+function verifiedUnitsByIdentity(rows: RecordValue[]) {
+  const units = new Map<string, { kind: SocialCounterKind; units: number }>();
+  for (const row of rows) {
+    if (!shouldCountInteractionEvent(row)) continue;
+    const kind = verifiedInteractionKind(row);
+    if (!kind) continue;
+    const identity = verifiedInteractionIdentity(row, kind);
+    const rowUnits = verifiedInteractionUnits(row, kind);
+    const previous = units.get(identity);
+    if (!previous || rowUnits > previous.units) units.set(identity, { kind, units: rowUnits });
+  }
+  return units;
+}
+
 export function interactionEventCounters(eventRows: RecordValue[]): ProfileSocialCounters {
   const counters = blankSocialCounters();
   const verifiedByIdentity = new Map<string, { kind: SocialCounterKind; units: number }>();
@@ -170,23 +222,52 @@ export function lastVerifiedInteractionAt(eventRows: RecordValue[]) {
 
 export function projectVerifiedRunCounters(input: {
   runId: string;
+  accountId?: string;
+  now?: string;
   canonicalDailyCount: ProfileSocialCounters;
-  canonicalRunCount: ProfileSocialCounters;
+  canonicalActions: RecordValue[];
   interactionEvents: RecordValue[];
 }) {
-  const activeRunVerifiedCount = interactionEventCounters(input.interactionEvents);
-  const projectedDisplayCount = reconcileSocialCounters(input.canonicalRunCount, activeRunVerifiedCount);
+  const nowMs = new Date(input.now ?? new Date().toISOString()).getTime();
+  const scopedEvents = input.interactionEvents.filter((row) => {
+    if (readString(row.run_id, "") !== input.runId) return false;
+    if (input.accountId && readString(row.account_id, "") !== input.accountId) return false;
+    const eventMs = new Date(readString(row.event_at, readString(row.created_at, ""))).getTime();
+    return !Number.isFinite(eventMs) || eventMs <= nowMs;
+  });
+  const scopedCanonicalActions = input.canonicalActions.filter((row) => (
+    readString(row.run_id, "") === input.runId
+    && (!input.accountId || readString(row.account_id, "") === input.accountId)
+  ));
+  const activeRunVerifiedCount = interactionEventCounters(scopedEvents);
+  const canonicalByIdentity = actionUnitsByIdentity(scopedCanonicalActions);
+  const verifiedByIdentity = verifiedUnitsByIdentity(scopedEvents);
+  const unabsorbed = blankSocialCounters();
+  for (const [identity, live] of verifiedByIdentity) {
+    const canonicalUnits = canonicalByIdentity.get(identity)?.units ?? 0;
+    unabsorbed[live.kind] += Math.max(0, live.units - canonicalUnits);
+  }
+  const unabsorbedVerifiedCount = withInteractionsTotal(unabsorbed);
+  const projectedDisplayCount = withInteractionsTotal({
+    follows: input.canonicalDailyCount.follows + unabsorbed.follows,
+    unfollows: input.canonicalDailyCount.unfollows + unabsorbed.unfollows,
+    likes: input.canonicalDailyCount.likes + unabsorbed.likes,
+    comments: input.canonicalDailyCount.comments + unabsorbed.comments,
+    dms: input.canonicalDailyCount.dms + unabsorbed.dms,
+    stories: input.canonicalDailyCount.stories + unabsorbed.stories,
+  });
   return {
     ...projectedDisplayCount,
     source: "verified_progress+canonical_reconciliation",
     runId: input.runId,
     canonicalDailyCount: input.canonicalDailyCount,
     activeRunVerifiedCount,
+    unabsorbedVerifiedCount,
     projectedDisplayCount,
-    projectionSource: activeRunVerifiedCount.interactionsTotal > input.canonicalRunCount.interactionsTotal
+    projectionSource: unabsorbedVerifiedCount.interactionsTotal > 0
       ? "active_run_verified_events"
-      : "canonical_run",
-    lastProgressAt: lastVerifiedInteractionAt(input.interactionEvents),
+      : "canonical_daily",
+    lastProgressAt: lastVerifiedInteractionAt(scopedEvents),
   };
 }
 
