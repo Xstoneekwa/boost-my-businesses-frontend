@@ -2,6 +2,7 @@ import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
+  projectVerifiedRunCounters,
   reconcileSocialCounters,
   runTotalsCounters,
   TOTAL_INTERACTIONS_DEFINITION,
@@ -118,6 +119,7 @@ function runScopedCounters(
   logs: RecordValue[],
   runs: RecordValue[],
   interactionEvents: RecordValue[],
+  canonicalDailyCount: ReturnType<typeof interactionEventCounters>,
 ) {
   if (!runId) {
     return {
@@ -130,20 +132,26 @@ function runScopedCounters(
       interactionsTotal: 0,
       source: "pending_run_id",
       runId: null,
+      canonicalDailyCount,
+      activeRunVerifiedCount: interactionEventCounters([]),
+      projectedDisplayCount: interactionEventCounters([]),
+      projectionSource: "canonical_daily",
+      lastProgressAt: null,
     };
   }
   const scopedLogs = logs.filter((row) => readString(row.run_id, "") === runId);
   const scopedRuns = runs.filter((row) => readString(row.id, readString(row.run_id, "")) === runId);
   const scopedEvents = interactionEvents.filter((row) => readString(row.run_id, "") === runId);
-  return {
-    ...reconcileSocialCounters(
-      actionCountersFromLogs(scopedLogs),
-      runTotalsCounters(scopedRuns),
-      interactionEventCounters(scopedEvents),
-    ),
-    source: "ig_action_logs+ig_runs+ig_interaction_events",
+  const canonicalRunCount = reconcileSocialCounters(
+    actionCountersFromLogs(scopedLogs),
+    runTotalsCounters(scopedRuns),
+  );
+  return projectVerifiedRunCounters({
     runId,
-  };
+    canonicalDailyCount,
+    canonicalRunCount,
+    interactionEvents: scopedEvents,
+  });
 }
 
 function runtimeIndicatorProjection(
@@ -327,7 +335,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,cancel_requested_at").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
-      supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
+      supabase.from("ig_interaction_events").select("id,account_id,run_id,username,event_type,event_status,interaction_type,event_at,created_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -426,6 +434,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
           logsByAccount.get(id) ?? [],
           sessionRunsByAccount.get(id) ?? [],
           interactionEventsByAccount.get(id) ?? [],
+          runtimeSummary.countersToday,
         ),
         runtimeIndicator,
         phoneStatus: deviceRuntimeProjection.projectedPhoneStatus,

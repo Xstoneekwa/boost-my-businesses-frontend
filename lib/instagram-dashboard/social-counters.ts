@@ -112,17 +112,82 @@ function likedCountFromInteractionEvent(row: RecordValue) {
   return liked > 0 ? liked : 1;
 }
 
+type SocialCounterKind = Exclude<keyof ProfileSocialCounters, "interactionsTotal">;
+
+function verifiedInteractionKind(row: RecordValue): SocialCounterKind | null {
+  const eventType = readString(row.event_type, "").toLowerCase();
+  if (eventType === "follow_verified") return "follows";
+  if (eventType === "unfollow_verified" || eventType === "unfollow_success") return "unfollows";
+  if (eventType === "post_like_success" || eventType === "post_like_verified") return "likes";
+  if (["comment_verified", "comment_sent"].includes(eventType)) return "comments";
+  if (["dm_sent", "send_dm_sent", "welcome_dm_sent", "outreach_dm_sent"].includes(eventType)) return "dms";
+  if (["story_viewed", "story_reaction_sent", "watch_completed"].includes(eventType)) return "stories";
+  return null;
+}
+
+function verifiedInteractionIdentity(row: RecordValue, kind: SocialCounterKind) {
+  const payload = readRecord(row.payload);
+  const runId = readString(row.run_id, "no_run");
+  const username = readString(row.username, readString(payload?.target_username, readString(payload?.username, ""))).toLowerCase();
+  if (username) return `${runId}:${kind}:${username}`;
+  const progressKey = readString(payload?.progress_key, "");
+  return progressKey || readString(row.id, `${runId}:${kind}:${readString(row.event_at, "unknown")}`);
+}
+
+function verifiedInteractionUnits(row: RecordValue, kind: SocialCounterKind) {
+  if (kind === "likes") return likedCountFromInteractionEvent(row);
+  const payload = readRecord(row.payload);
+  return Math.max(1, readNumber(payload?.verified_count, 1));
+}
+
 export function interactionEventCounters(eventRows: RecordValue[]): ProfileSocialCounters {
   const counters = blankSocialCounters();
+  const verifiedByIdentity = new Map<string, { kind: SocialCounterKind; units: number }>();
   for (const row of eventRows) {
     if (!shouldCountInteractionEvent(row)) continue;
-    const eventType = readString(row.event_type, "").toLowerCase();
-    const interactionType = readString(row.interaction_type, "").toLowerCase();
-    if (eventType === "post_like_success" || interactionType === "like" || eventType.includes("post_like")) {
-      counters.likes += likedCountFromInteractionEvent(row);
-    }
+    const kind = verifiedInteractionKind(row);
+    if (!kind) continue;
+    const identity = verifiedInteractionIdentity(row, kind);
+    const units = verifiedInteractionUnits(row, kind);
+    const previous = verifiedByIdentity.get(identity);
+    if (!previous || units > previous.units) verifiedByIdentity.set(identity, { kind, units });
+  }
+  for (const { kind, units } of verifiedByIdentity.values()) {
+    counters[kind] += units;
   }
   return withInteractionsTotal(counters);
+}
+
+export function lastVerifiedInteractionAt(eventRows: RecordValue[]) {
+  let latest = "";
+  for (const row of eventRows) {
+    if (!shouldCountInteractionEvent(row) || !verifiedInteractionKind(row)) continue;
+    const eventAt = readString(row.event_at, readString(row.created_at, ""));
+    if (eventAt > latest) latest = eventAt;
+  }
+  return latest || null;
+}
+
+export function projectVerifiedRunCounters(input: {
+  runId: string;
+  canonicalDailyCount: ProfileSocialCounters;
+  canonicalRunCount: ProfileSocialCounters;
+  interactionEvents: RecordValue[];
+}) {
+  const activeRunVerifiedCount = interactionEventCounters(input.interactionEvents);
+  const projectedDisplayCount = reconcileSocialCounters(input.canonicalRunCount, activeRunVerifiedCount);
+  return {
+    ...projectedDisplayCount,
+    source: "verified_progress+canonical_reconciliation",
+    runId: input.runId,
+    canonicalDailyCount: input.canonicalDailyCount,
+    activeRunVerifiedCount,
+    projectedDisplayCount,
+    projectionSource: activeRunVerifiedCount.interactionsTotal > input.canonicalRunCount.interactionsTotal
+      ? "active_run_verified_events"
+      : "canonical_run",
+    lastProgressAt: lastVerifiedInteractionAt(input.interactionEvents),
+  };
 }
 
 export function reconcileSocialCounters(...sources: ProfileSocialCounters[]): ProfileSocialCounters {
