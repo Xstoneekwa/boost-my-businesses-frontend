@@ -22,9 +22,19 @@ function linkedRunId(row: Row) {
   return text(metadata.run_id) || text(metadataSafe.run_id);
 }
 
+function linkedRequestId(row: Row) {
+  const metadata = object(row.metadata);
+  const metadataSafe = object(row.metadata_safe);
+  return text(row.request_id)
+    || text(metadata.request_id)
+    || text(metadata.run_request_id)
+    || text(metadataSafe.request_id)
+    || text(metadataSafe.run_request_id);
+}
+
 export function findReviewableOperatorAction(
   rows: Row[],
-  incident: { id: string; accountId: string; runId?: string | null },
+  incident: { id: string; accountId: string; runId?: string | null; requestId?: string | null },
 ) {
   const candidates = rows.filter((row) => (
     text(row.action_type) === "operator_review_required"
@@ -36,9 +46,19 @@ export function findReviewableOperatorAction(
   if (exact) return exact;
 
   const runId = text(incident.runId);
-  if (!runId) return null;
+  if (runId) {
+    const byRun = candidates.find((row) => (
+      linkedRunId(row) === runId
+      || text(row.dedupe_key).includes(`:run:${runId}:`)
+    ));
+    if (byRun) return byRun;
+  }
+
+  const requestId = text(incident.requestId);
+  if (!requestId) return null;
   return candidates.find((row) => (
-    linkedRunId(row) === runId
-    || text(row.dedupe_key).includes(`:run:${runId}:`)
+    linkedRequestId(row) === requestId
+    || text(row.dedupe_key).includes(`:run:${requestId}:`)
+    || text(row.dedupe_key).includes(`:request:${requestId}:`)
   )) ?? null;
 }

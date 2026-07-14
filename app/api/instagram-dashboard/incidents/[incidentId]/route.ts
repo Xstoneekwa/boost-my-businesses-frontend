@@ -50,6 +50,7 @@ export async function GET(
       id,
       accountId: model.accountId ?? "",
       runId: model.runId,
+      requestId: model.runRequestId,
     });
     // P3: recovery view for the "Prêt à relancer" workflow. Read-only here;
     // failures degrade to a safe "not evaluable" state, never to a 500.

@@ -38,6 +38,15 @@ function shortId(value: string) {
   return value ? `${value.slice(0, 8)}...` : "unknown";
 }
 
+const CANONICAL_INCIDENTS_URL = "https://www.boostmybusinesses.com/instagram-dashboard/incidents";
+const ACTION_CTA_LABEL = "Open Incidents/Actions";
+
+export function operatorReviewActionUrl(input: Pick<OperatorReviewNotificationInput, "incidentId">) {
+  const url = new URL(CANONICAL_INCIDENTS_URL);
+  if (input.incidentId) url.searchParams.set("incident_id", input.incidentId);
+  return url.toString();
+}
+
 export function buildOperatorReviewNotificationText(input: OperatorReviewNotificationInput) {
   const title = input.event === "created"
     ? "Operator review required"
@@ -92,6 +101,7 @@ export async function deliverOperatorReviewNotifications(
   const recordResult = dependencies.recordResult ?? notificationSettings!.recordNotificationDeliveryResult;
   const postWebhook = dependencies.postWebhook ?? defaultPostWebhook;
   const text = buildOperatorReviewNotificationText(input);
+  const actionUrl = operatorReviewActionUrl(input);
   const results: Array<{ channel: NotificationChannel; status: string; deliveredAt: string | null }> = [];
 
   for (const channel of ["slack", "discord"] as const) {
@@ -130,6 +140,8 @@ export async function deliverOperatorReviewNotifications(
           final_status: input.finalStatus,
           operator_id: input.operatorId,
           text,
+          cta_label: ACTION_CTA_LABEL,
+          action_url: actionUrl,
         },
         metadata: {
           dispatcher: "incident_notifications",
@@ -156,7 +168,15 @@ export async function deliverOperatorReviewNotifications(
     const attemptAt = now().toISOString();
     const attemptCount = Number(existing?.attempt_count ?? 0) + 1;
     try {
-      const body = channel === "discord" ? { content: text } : { text };
+      const body = channel === "discord"
+        ? { content: `${text}\n[${ACTION_CTA_LABEL}](${actionUrl})` }
+        : {
+            text: `${text}\n<${actionUrl}|${ACTION_CTA_LABEL}>`,
+            blocks: [
+              { type: "section", text: { type: "mrkdwn", text } },
+              { type: "section", text: { type: "mrkdwn", text: `<${actionUrl}|${ACTION_CTA_LABEL}>` } },
+            ],
+          };
       const responseStatus = await postWebhook(channel, settings.webhookUrl, body);
       const deliveredAt = now().toISOString();
       await supabase.from("account_incident_notifications").update({
