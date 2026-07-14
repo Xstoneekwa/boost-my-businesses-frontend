@@ -13,6 +13,7 @@ export type NotificationDbRow = Record<string, unknown>;
 export type IncidentDisplayState =
   | "open"
   | "action_required"
+  | "reviewed"
   | "resolved"
   | "acknowledged"
   | "ignored"
@@ -44,6 +45,7 @@ export interface IncidentViewModel {
   reasonCode: string;
   operatorLabel: string;
   actionRequired: string | null;
+  operatorReviewStatus: "pending" | "reviewed" | "none";
   adminMessage: string | null;
   accountId: string | null;
   accountUsername: string | null;
@@ -82,6 +84,15 @@ const INCIDENT_TYPE_LABELS: Record<string, string> = {
   system_test_incident: "Internal verification incident (test)",
 };
 
+const LEGACY_ENGLISH_COPY: Record<string, string> = {
+  "Le worker s'est termine en erreur sans raison structuree. Verifier les logs internes du run.":
+    "The worker exited with an error and no structured reason. Review the internal run logs.",
+  "Le worker s'est terminé en erreur sans raison structurée. Vérifier les logs internes du run.":
+    "The worker exited with an error and no structured reason. Review the internal run logs.",
+  "Echec worker sans raison structuree": "Worker failed without a structured reason",
+  "Échec worker sans raison structurée": "Worker failed without a structured reason",
+};
+
 const METADATA_BLOCKED_KEY_FRAGMENTS = [
   "password",
   "secret",
@@ -98,6 +109,11 @@ const METADATA_BLOCKED_KEY_FRAGMENTS = [
 
 function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function englishCopy(value: unknown): string {
+  const text = readString(value);
+  return LEGACY_ENGLISH_COPY[text] || text;
 }
 
 function readCount(value: unknown): number {
@@ -151,12 +167,17 @@ export function incidentRecoveryState(row: IncidentDbRow): string {
   return readString((recovery as Record<string, unknown>).state);
 }
 
-export function incidentDisplayState(row: IncidentDbRow): IncidentDisplayState {
+export function incidentDisplayState(
+  row: IncidentDbRow,
+  operatorReviewStatus: "pending" | "reviewed" | "none" = "none",
+): IncidentDisplayState {
   const status = readString(row.status).toLowerCase();
   if (status === "resolved") return "resolved";
   if (status === "ignored") return "ignored";
+  if (operatorReviewStatus === "pending") return "action_required";
+  if (operatorReviewStatus === "reviewed") return "reviewed";
   // P3 recovery states take precedence over the generic action_required
-  // display while the incident is still active.
+  // display only when no human review action is linked.
   const recoveryState = incidentRecoveryState(row);
   if (recoveryState === "ready_to_resume") return "ready_to_resume";
   if (recoveryState === "resume_requested") return "resume_requested";
@@ -167,8 +188,6 @@ export function incidentDisplayState(row: IncidentDbRow): IncidentDisplayState {
     return "reintervention_required";
   }
   if (status === "acknowledged") return "acknowledged";
-  // Open + explicit operator action => action_required display state.
-  if (readString(row.action_required)) return "action_required";
   return "open";
 }
 
@@ -196,6 +215,7 @@ export function mapNotificationRow(row: NotificationDbRow): IncidentChannelDeliv
 export function mapIncidentRow(
   row: IncidentDbRow,
   notifications: NotificationDbRow[] = [],
+  operatorReviewStatus: "pending" | "reviewed" | "none" = "none",
 ): IncidentViewModel {
   const deliveries = notifications.map(mapNotificationRow);
   const accountId = readString(row.account_id) || null;
@@ -205,16 +225,17 @@ export function mapIncidentRow(
   return {
     id: readString(row.id),
     status: readString(row.status).toLowerCase() || "open",
-    displayState: incidentDisplayState(row),
+    displayState: incidentDisplayState(row, operatorReviewStatus),
     severity: readString(row.severity).toLowerCase() || "warning",
     incidentType,
     reasonCode: readString(row.reason) || readString(row.failure_reason) || incidentType,
     operatorLabel:
-      readString(metadataSafe.operator_label)
+      englishCopy(metadataSafe.operator_label)
       || INCIDENT_TYPE_LABELS[incidentType]
       || incidentType,
-    actionRequired: readString(row.action_required) || null,
-    adminMessage: readString(row.admin_message) || null,
+    actionRequired: englishCopy(row.action_required) || null,
+    operatorReviewStatus,
+    adminMessage: englishCopy(row.admin_message) || null,
     accountId,
     accountUsername: readString(row.account_username) || null,
     runId: readString(row.run_id) || null,
@@ -238,6 +259,7 @@ export function mapIncidentRow(
 export function buildIncidentList(
   incidentRows: IncidentDbRow[],
   notificationRows: NotificationDbRow[],
+  operatorActionRows: IncidentDbRow[] = [],
   options: { includeTest?: boolean } = {},
 ): IncidentViewModel[] {
   const includeTest = options.includeTest === true;
@@ -250,8 +272,23 @@ export function buildIncidentList(
     byIncident.set(incidentId, bucket);
   }
   const models: IncidentViewModel[] = [];
+  const actionByIncident = new Map<string, IncidentDbRow>();
+  for (const action of operatorActionRows) {
+    const incidentId = readString(action.incident_id);
+    if (!incidentId || actionByIncident.has(incidentId)) continue;
+    actionByIncident.set(incidentId, action);
+  }
   for (const row of incidentRows) {
-    const model = mapIncidentRow(row, byIncident.get(readString(row.id)) ?? []);
+    const linkedAction = actionByIncident.get(readString(row.id));
+    const actionStatus = readString(linkedAction?.status).toLowerCase();
+    const operatorReviewStatus = ["pending", "acknowledged", "pending_verification", "code_submitted"].includes(actionStatus)
+      ? "pending"
+      : ["resolved", "reviewed"].includes(actionStatus) ? "reviewed" : "none";
+    const model = mapIncidentRow(
+      row,
+      byIncident.get(readString(row.id)) ?? [],
+      operatorReviewStatus,
+    );
     if (model.isTest && !includeTest) continue;
     models.push(model);
   }
@@ -266,6 +303,7 @@ export function buildIncidentCounters(models: IncidentViewModel[]): IncidentCoun
     // Recovery states in flight (armed / requested) still count as open.
     open: operational.filter((m) =>
       m.displayState === "open"
+      || m.displayState === "reviewed"
       || m.displayState === "ready_to_resume"
       || m.displayState === "resume_requested").length,
     // A failed resume needs a human again: it is action_required-class.

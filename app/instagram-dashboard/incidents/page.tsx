@@ -15,6 +15,10 @@ import {
 } from "@/lib/instagram-dashboard/incident-resume-authorization";
 import { ReadyToResumeButton } from "./ReadyToResumeButton";
 import { MarkReviewedButton } from "./MarkReviewedButton";
+import {
+  findLinkedOperatorAction,
+  linkedOperatorReviewState,
+} from "@/lib/instagram-dashboard/incident-operator-review";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +36,7 @@ function formatDateTime(value: string | null) {
 
 function stateLabel(state: IncidentViewModel["displayState"]) {
   if (state === "action_required") return "Action required";
+  if (state === "reviewed") return "Reviewed";
   if (state === "resolved") return "Resolved";
   if (state === "acknowledged") return "Acknowledged";
   if (state === "ignored") return "Ignored";
@@ -94,6 +99,8 @@ interface ReviewableOperatorAction {
 }
 
 function readIncidentIdFromAction(row: Record<string, unknown>) {
+  const direct = String(row.incident_id ?? "").trim();
+  if (direct) return direct;
   for (const value of [row.metadata, row.metadata_safe]) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const incidentId = String((value as Record<string, unknown>).incident_id ?? "").trim();
@@ -120,7 +127,25 @@ async function loadFocusedIncident(
     .from("account_incident_notifications")
     .select("incident_id,channel,status,attempt_count,delivered_at,last_error")
     .eq("incident_id", incidentId);
-  const model = mapIncidentRow(incidentRow, outboxRows ?? []);
+  const { data: actionRows } = await supabase
+    .from("account_dashboard_actions")
+    .select("id,account_id,incident_id,action_type,status,blocking_campaign,dedupe_key,metadata,metadata_safe,created_at")
+    .eq("account_id", String(incidentRow.account_id ?? ""))
+    .eq("action_type", "operator_review_required")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const baseModel = mapIncidentRow(incidentRow, outboxRows ?? []);
+  const linkedAction = findLinkedOperatorAction(actionRows ?? [], {
+    id: incidentId,
+    accountId: baseModel.accountId ?? "",
+    runId: baseModel.runId,
+    requestId: baseModel.runRequestId,
+  });
+  const model = mapIncidentRow(
+    incidentRow,
+    outboxRows ?? [],
+    linkedOperatorReviewState(linkedAction),
+  );
   let recovery: RecoveryView;
   try {
     recovery = await evaluateReadyToResume(supabase, incidentRow as Record<string, unknown>);
@@ -166,9 +191,20 @@ async function loadIncidents(includeTest: boolean, focusedIncidentId: string) {
       .in("incident_id", incidentIds);
     notificationRows = outboxRows ?? [];
   }
-  let models = buildIncidentList(incidentRows ?? [], notificationRows, { includeTest });
+  let operatorActionRows: Record<string, unknown>[] = [];
+  if (incidentIds.length) {
+    const { data: actionRows } = await supabase
+      .from("account_dashboard_actions")
+      .select("id,account_id,incident_id,action_type,status,blocking_campaign,dedupe_key,metadata,metadata_safe,created_at")
+      .eq("action_type", "operator_review_required")
+      .in("incident_id", incidentIds)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    operatorActionRows = actionRows ?? [];
+  }
+  let models = buildIncidentList(incidentRows ?? [], notificationRows, operatorActionRows, { includeTest });
   const counters = buildIncidentCounters(
-    buildIncidentList(incidentRows ?? [], notificationRows, { includeTest: true }),
+    buildIncidentList(incidentRows ?? [], notificationRows, operatorActionRows, { includeTest: true }),
   );
 
   // Deep-link target: loaded explicitly, shown even when test incidents are
@@ -180,14 +216,10 @@ async function loadIncidents(includeTest: boolean, focusedIncidentId: string) {
     models = [focused.model, ...models];
   }
 
-  const { data: operatorActionRows } = await supabase
-    .from("account_dashboard_actions")
-    .select("id,account_id,action_type,status,metadata,metadata_safe")
-    .eq("action_type", "operator_review_required")
-    .in("status", ["pending", "acknowledged", "pending_verification", "code_submitted"])
-    .limit(1000);
   const reviewActions = new Map<string, ReviewableOperatorAction>();
-  for (const row of operatorActionRows ?? []) {
+  for (const row of operatorActionRows) {
+    const status = String(row.status ?? "").trim().toLowerCase();
+    if (!["pending", "acknowledged", "pending_verification", "code_submitted"].includes(status)) continue;
     const incidentId = readIncidentIdFromAction(row as Record<string, unknown>);
     const id = String(row.id ?? "").trim();
     const accountId = String(row.account_id ?? "").trim();

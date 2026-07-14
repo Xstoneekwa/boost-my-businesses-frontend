@@ -46,7 +46,7 @@ test("mapIncidentRow keeps the true reason and stable display state", () => {
   const model = mapIncidentRow(identityIncidentRow());
   assert.equal(model.reasonCode, "actual_logged_in_username_not_detected");
   assert.equal(model.incidentType, "run_identity_verification_failed");
-  assert.equal(model.displayState, "action_required");
+  assert.equal(model.displayState, "open");
   assert.equal(model.severity, "critical");
   assert.equal(model.accountUsername, "mythyl_fitness");
   assert.equal(model.runRequestId, "req-1");
@@ -54,15 +54,33 @@ test("mapIncidentRow keeps the true reason and stable display state", () => {
   assert.match(model.actionRequired ?? "", /Human review is required/);
 });
 
-test("display state derives action_required only for active incidents", () => {
-  assert.equal(incidentDisplayState(identityIncidentRow()), "action_required");
+test("display state derives review state only from the linked operator action", () => {
+  assert.equal(incidentDisplayState(identityIncidentRow(), "pending"), "action_required");
+  assert.equal(incidentDisplayState(identityIncidentRow(), "reviewed"), "reviewed");
   assert.equal(
-    incidentDisplayState(identityIncidentRow({ status: "resolved" })),
+    incidentDisplayState(identityIncidentRow({ status: "resolved" }), "pending"),
     "resolved",
   );
   assert.equal(
-    incidentDisplayState(identityIncidentRow({ action_required: null })),
+    incidentDisplayState(identityIncidentRow({ action_required: null }), "none"),
     "open",
+  );
+  assert.equal(
+    incidentDisplayState(identityIncidentRow({ metadata: { recovery: { state: "ready_to_resume" } } }), "pending"),
+    "action_required",
+  );
+});
+
+test("legacy French worker copy is projected in English without rewriting history", () => {
+  const model = mapIncidentRow(identityIncidentRow({
+    incident_type: "run_worker_failure",
+    action_required: "Le worker s'est terminé en erreur sans raison structurée. Vérifier les logs internes du run.",
+    metadata: { operator_label: "Échec worker sans raison structurée" },
+  }));
+  assert.equal(model.operatorLabel, "Worker failed without a structured reason");
+  assert.equal(
+    model.actionRequired,
+    "The worker exited with an error and no structured reason. Review the internal run logs.",
   );
 });
 
@@ -140,11 +158,11 @@ test("test incidents are flagged and excluded by default", () => {
   assert.equal(isTestIncident(testRow), true);
   assert.equal(isTestIncident(identityIncidentRow()), false);
 
-  const hidden = buildIncidentList([identityIncidentRow(), testRow], []);
+  const hidden = buildIncidentList([identityIncidentRow(), testRow], [], []);
   assert.equal(hidden.length, 1);
   assert.equal(hidden[0].id, "inc-1");
 
-  const visible = buildIncidentList([identityIncidentRow(), testRow], [], {
+  const visible = buildIncidentList([identityIncidentRow(), testRow], [], [], {
     includeTest: true,
   });
   assert.equal(visible.length, 2);
@@ -160,7 +178,8 @@ test("counters exclude test incidents and count delivery degradation", () => {
   const notifications = [
     { incident_id: "inc-3", channel: "slack", status: "failed", attempt_count: 3, last_error: "http_status_500" },
   ];
-  const models = buildIncidentList(rows, notifications, { includeTest: true });
+  const actions = [{ incident_id: "inc-1", status: "pending_verification" }];
+  const models = buildIncidentList(rows, notifications, actions, { includeTest: true });
   const counters = buildIncidentCounters(models);
   assert.equal(counters.total, 3);
   assert.equal(counters.actionRequired, 1);
@@ -177,6 +196,7 @@ test("notifications are attached to their incident", () => {
       { incident_id: "inc-1", channel: "discord", status: "sent", attempt_count: 1, delivered_at: "2026-07-06T22:06:01Z" },
       { incident_id: "other", channel: "slack", status: "failed", attempt_count: 1 },
     ],
+    [],
   );
   assert.equal(models[0].deliveries.length, 2);
   assert.equal(models[0].deliveryState, "delivered");

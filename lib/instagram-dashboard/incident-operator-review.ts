@@ -1,6 +1,7 @@
 type Row = Record<string, unknown>;
 
 const reviewableStatuses = new Set(["pending", "acknowledged", "pending_verification", "code_submitted"]);
+const reviewedStatuses = new Set(["resolved", "reviewed"]);
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -32,13 +33,12 @@ function linkedRequestId(row: Row) {
     || text(metadataSafe.run_request_id);
 }
 
-export function findReviewableOperatorAction(
+export function findLinkedOperatorAction(
   rows: Row[],
   incident: { id: string; accountId: string; runId?: string | null; requestId?: string | null },
 ) {
   const candidates = rows.filter((row) => (
     text(row.action_type) === "operator_review_required"
-    && reviewableStatuses.has(text(row.status).toLowerCase())
     && text(row.account_id) === incident.accountId
   ));
 
@@ -61,4 +61,19 @@ export function findReviewableOperatorAction(
     || text(row.dedupe_key).includes(`:run:${requestId}:`)
     || text(row.dedupe_key).includes(`:request:${requestId}:`)
   )) ?? null;
+}
+
+export function findReviewableOperatorAction(
+  rows: Row[],
+  incident: { id: string; accountId: string; runId?: string | null; requestId?: string | null },
+) {
+  const linked = findLinkedOperatorAction(rows, incident);
+  return linked && reviewableStatuses.has(text(linked.status).toLowerCase()) ? linked : null;
+}
+
+export function linkedOperatorReviewState(row: Row | null | undefined) {
+  const status = text(row?.status).toLowerCase();
+  if (reviewableStatuses.has(status)) return "pending";
+  if (reviewedStatuses.has(status)) return "reviewed";
+  return "none";
 }

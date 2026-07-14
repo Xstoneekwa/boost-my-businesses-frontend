@@ -50,6 +50,7 @@ export async function GET(request: Request) {
       .map((row) => String(row.id ?? "").trim())
       .filter(Boolean);
     let notificationRows: Record<string, unknown>[] = [];
+    let operatorActionRows: Record<string, unknown>[] = [];
     if (incidentIds.length) {
       const { data: outboxRows, error: outboxError } = await supabase
         .from("account_incident_notifications")
@@ -57,11 +58,19 @@ export async function GET(request: Request) {
         .in("incident_id", incidentIds);
       if (outboxError) return jsonError(outboxError.message, 500);
       notificationRows = outboxRows ?? [];
+      const { data: actionRows, error: actionError } = await supabase
+        .from("account_dashboard_actions")
+        .select("id,account_id,incident_id,action_type,status,blocking_campaign,created_at")
+        .eq("action_type", "operator_review_required")
+        .in("incident_id", incidentIds)
+        .order("created_at", { ascending: false });
+      if (actionError) return jsonError(actionError.message, 500);
+      operatorActionRows = actionRows ?? [];
     }
 
-    const models = buildIncidentList(incidentRows ?? [], notificationRows, { includeTest });
+    const models = buildIncidentList(incidentRows ?? [], notificationRows, operatorActionRows, { includeTest });
     const counters = buildIncidentCounters(
-      buildIncidentList(incidentRows ?? [], notificationRows, { includeTest: true }),
+      buildIncidentList(incidentRows ?? [], notificationRows, operatorActionRows, { includeTest: true }),
     );
 
     return jsonOk({
