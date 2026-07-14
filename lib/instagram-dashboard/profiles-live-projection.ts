@@ -40,11 +40,23 @@ function grouped(rows: Row[]) {
   return result;
 }
 
+function activeRuntimeProjection(activeRequest: Row | undefined, activeRun: Row | undefined) {
+  const stopping = Boolean(text(activeRequest?.cancel_requested_at))
+    || text(activeRequest?.status).toLowerCase() === "stopping"
+    || text(activeRun?.status).toLowerCase() === "stopping";
+  return {
+    stopping,
+    activeRunRequestStatus: stopping ? "stopping" : text(activeRequest?.status) || null,
+    activeRunStatus: stopping ? "stopping" : text(activeRun?.status) || null,
+  };
+}
+
 function runtimeIndicator(activeRequest: Row | undefined, activeRun: Row | undefined, latestRun: Row | undefined) {
   if (activeRequest || activeRun) {
+    const activeProjection = activeRuntimeProjection(activeRequest, activeRun);
     return {
       state: "active",
-      reason: activeRun ? "active_run" : "active_run_request",
+      reason: activeProjection.stopping ? "stopping" : activeRun ? "active_run" : "active_run_request",
       lastRunId: text(activeRun?.id) || text(activeRequest?.run_id) || null,
       lastRunStatus: text(activeRun?.status) || text(activeRequest?.status) || null,
       lastRunExitCode: null,
@@ -86,6 +98,7 @@ export function projectProfilesLive(input: {
     const events = eventsByAccount.get(id) ?? [];
     const activeRequest = newest(requests.filter((row) => activeRequestStatuses.has(text(row.status).toLowerCase())));
     const activeRun = newest(runs.filter((row) => activeRunStatuses.has(text(row.status).toLowerCase())));
+    const activeProjection = activeRuntimeProjection(activeRequest, activeRun);
     const activeRunId = text(activeRun?.id) || text(activeRequest?.run_id);
     const historicalRuns = runs.filter((row) => text(row.id) !== activeRunId);
     const historicalEvents = events.filter((row) => text(row.run_id) !== activeRunId);
@@ -126,9 +139,11 @@ export function projectProfilesLive(input: {
     return {
       accountId: id,
       activeRunRequestId: text(activeRequest?.id) || null,
-      activeRunRequestStatus: text(activeRequest?.status) || null,
+      activeRunRequestStatus: activeProjection.activeRunRequestStatus,
       activeRunId: text(activeRun?.id) || text(activeRequest?.run_id) || null,
-      activeRunStatus: text(activeRun?.status) || null,
+      activeRunStatus: activeProjection.activeRunStatus,
+      runControlPhase: activeProjection.stopping ? "stopping" : null,
+      runControlLabel: activeProjection.stopping ? "Stopping…" : null,
       runtimeIndicator: runtimeIndicator(activeRequest, activeRun, latestRun),
       currentRunCounters: counters,
       liveSupportedKinds: ["follow", "dm"],
