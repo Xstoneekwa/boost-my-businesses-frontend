@@ -23,7 +23,7 @@ function identityIncidentRow(overrides: Record<string, unknown> = {}) {
     reason: "actual_logged_in_username_not_detected",
     failure_reason: "actual_logged_in_username_not_detected",
     action_required:
-      "Impossible de confirmer le compte Instagram actif. Intervention humaine requise avant reprise.",
+      "The active Instagram account could not be confirmed. Human review is required before resuming.",
     admin_message: "Identity preflight could not prove the active username.",
     account_id: ACCOUNT_ID,
     account_username: "mythyl_fitness",
@@ -51,7 +51,7 @@ test("mapIncidentRow keeps the true reason and stable display state", () => {
   assert.equal(model.accountUsername, "mythyl_fitness");
   assert.equal(model.runRequestId, "req-1");
   assert.equal(model.accountHref, `/instagram-dashboard/accounts/${ACCOUNT_ID}`);
-  assert.match(model.actionRequired ?? "", /Intervention humaine requise/);
+  assert.match(model.actionRequired ?? "", /Human review is required/);
 });
 
 test("display state derives action_required only for active incidents", () => {

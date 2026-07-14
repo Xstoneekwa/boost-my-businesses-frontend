@@ -72,14 +72,14 @@ export interface IncidentCounters {
 
 /** Stable operator labels per canonical incident_type (fallback: type). */
 const INCIDENT_TYPE_LABELS: Record<string, string> = {
-  run_identity_verification_failed: "Identité Instagram non vérifiable",
-  active_instagram_account_mismatch: "Mauvais compte Instagram actif",
-  assigned_instagram_package_unavailable: "Package / clone Instagram assigné inutilisable",
-  account_login_required: "Compte Instagram déconnecté ou challenge",
-  run_device_unavailable: "Device indisponible pendant le run",
-  run_worker_failure: "Échec runtime du run",
-  login_package_mismatch: "Mauvais package au login",
-  system_test_incident: "Incident de vérification interne (test)",
+  run_identity_verification_failed: "Instagram identity could not be verified",
+  active_instagram_account_mismatch: "Wrong active Instagram account",
+  assigned_instagram_package_unavailable: "Assigned Instagram package or clone unavailable",
+  account_login_required: "Instagram account signed out or challenged",
+  run_device_unavailable: "Device unavailable during the run",
+  run_worker_failure: "Structured run failure",
+  login_package_mismatch: "Wrong package during login",
+  system_test_incident: "Internal verification incident (test)",
 };
 
 const METADATA_BLOCKED_KEY_FRAGMENTS = [

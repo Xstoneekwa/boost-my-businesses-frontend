@@ -93,7 +93,7 @@ export async function POST(request: Request) {
         .maybeSingle();
       if (recoveryUpdateError) return jsonError(recoveryUpdateError.message, 500);
       if (!armResult.ok) {
-        return jsonError(`Prêt à relancer indisponible: ${armResult.reason}.`, 409, {
+        return jsonError(`Ready to resume is unavailable: ${armResult.reason}.`, 409, {
           reason: armResult.reason,
           recoveryState: armResult.state,
           runCreated: false,
