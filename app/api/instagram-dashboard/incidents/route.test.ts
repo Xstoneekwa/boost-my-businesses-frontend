@@ -52,6 +52,14 @@ test("incident detail keeps the stable reason code for the drawer", () => {
   assert.match(detailSource, /mapIncidentRow/);
 });
 
+test("incident detail exposes only the linked reviewable operator action", () => {
+  assert.match(detailSource, /from\("account_dashboard_actions"\)/);
+  assert.match(detailSource, /findReviewableOperatorAction/);
+  assert.match(detailSource, /operatorReviewAction/);
+  assert.match(detailSource, /operator_review_required/);
+  assert.match(detailSource, /pending_verification/);
+});
+
 test("incident routes only expose redacted metadata through the view model", () => {
   // Raw metadata must never be returned directly: the lib maps it to
   // metadataSafe via redactIncidentMetadata.

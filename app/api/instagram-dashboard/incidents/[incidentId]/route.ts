@@ -1,5 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { mapIncidentRow } from "@/lib/instagram-dashboard/incident-operations";
+import { findReviewableOperatorAction } from "@/lib/instagram-dashboard/incident-operator-review";
 import { evaluateReadyToResume } from "@/lib/instagram-dashboard/incident-resume-authorization";
 import { jsonError, jsonOk, requireRelayOrAdmin } from "../../_utils";
 
@@ -36,6 +37,20 @@ export async function GET(
     if (outboxError) return jsonError(outboxError.message, 500);
 
     const model = mapIncidentRow(incidentRow, outboxRows ?? []);
+    const { data: operatorActionRows, error: operatorActionError } = await supabase
+      .from("account_dashboard_actions")
+      .select("id,account_id,incident_id,action_type,status,blocking_campaign,dedupe_key,metadata,metadata_safe,created_at")
+      .eq("account_id", model.accountId)
+      .eq("action_type", "operator_review_required")
+      .in("status", ["pending", "acknowledged", "pending_verification", "code_submitted"])
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (operatorActionError) return jsonError(operatorActionError.message, 500);
+    const operatorAction = findReviewableOperatorAction(operatorActionRows ?? [], {
+      id,
+      accountId: model.accountId ?? "",
+      runId: model.runId,
+    });
     // P3: recovery view for the "Prêt à relancer" workflow. Read-only here;
     // failures degrade to a safe "not evaluable" state, never to a 500.
     let recovery: Record<string, unknown> = {
@@ -64,6 +79,12 @@ export async function GET(
         recovery,
       },
       recovery,
+      operatorReviewAction: operatorAction ? {
+        id: String(operatorAction.id ?? ""),
+        accountId: String(operatorAction.account_id ?? ""),
+        status: String(operatorAction.status ?? ""),
+        blockingCampaign: operatorAction.blocking_campaign === true,
+      } : null,
       notifications: model.deliveries.map((delivery) => ({
         channel: delivery.channel,
         status: delivery.status,
