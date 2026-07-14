@@ -1,5 +1,12 @@
 # Stripe Test Foundation
 
+> **Historical implementation document.** Statements such as “create only — do
+> not apply in this phase” describe the original phase, not current production.
+> By 2026-07-14 the Stripe Test migrations and test catalog were present in
+> Supabase, with fulfilled `livemode=false` attempts. Stripe Live remains
+> unproved and unauthorized. See the canonical current matrix:
+> [STRIPE_TEST_LIVE_MATRIX.md](STRIPE_TEST_LIVE_MATRIX.md).
+
 ## Scope
 
 This phase adds **Stripe Test Mode infrastructure only**. The canonical client test path is now public Pricing → `/instagram-growth/checkout` → server-side Stripe Test Checkout; legal pages and live billing remain unchanged.

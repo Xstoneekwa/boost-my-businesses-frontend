@@ -1,5 +1,34 @@
 # BotApp scheduler runtime contract (TASK 19B)
 
+> **Current-state addendum — 2026-07-14.** This is the canonical scheduler
+> contract. Earlier phase labels below are retained as implementation history.
+> Production snapshot: global scheduler runtime and dispatcher heartbeats were
+> fresh; `0` active requests, runs and preflights; `2` scheduled/reserved
+> assignments; `0 manual_only` assignments. Source: read-only Supabase/runtime.
+
+## Current operator surfaces and exclusions
+
+| Surface | Creates work | Governing gates | `manual_only` behavior |
+|---|---|---|---|
+| Daily Scheduler | schedule-window cold start | global toggle, technical cron, BotApp heartbeat, device, preflight, eligibility, atomic insert | hard excluded |
+| Auto Restart | resume-plan restart | global toggle, dispatcher tick, resume plan, eligibility, device lock | hard excluded |
+| Manual Play | explicit operator request | auth, entitlement, identity, preflight, quota, request/run/device locks | allowed only as explicit manual trigger |
+
+`manual_only` is not a pause flag and never means “automatic when convenient”.
+It reserves device + app instance without a recurring automatic window. Daily
+Scheduler, automatic preflights and Auto Restart must all exclude it. Manual
+Play does not bypass any safety, identity, quota or lock gate.
+
+Every UI/device interaction requires the canonical device-level lock. The
+current live lock migration entry is
+`20260712232853_drop_ambiguous_acquire_device_lock_overload`; its controlled
+source file is
+`supabase/migrations/20260710160200_drop_ambiguous_acquire_device_lock_overload.sql`.
+No caller may select an obsolete overload by accident.
+
+Live state changes to Scheduler, Auto Restart or Play are outside documentation
+work and always require explicit authorization.
+
 ## Phase-1 rule
 
 Server-side `schedule-session` cron may evaluate assignment windows continuously, but it **must not enqueue** `account_session` run requests unless the **local BotApp scheduler runtime** on the operator Mac is healthy.
