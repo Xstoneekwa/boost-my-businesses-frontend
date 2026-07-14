@@ -176,6 +176,10 @@ test("operator review completion resolves only the reviewed action and clears it
   assert.match(routeSource, /readRelayKey\(request\.headers\)/);
   assert.match(routeSource, /verifyCompassRelayKey\(request\.headers\)/);
   assert.match(routeSource, /payload\.operator_id/);
+  assert.match(routeSource, /if \(!isUuid\(actionId\)\) return jsonError\("Invalid action id\."\, 400\)/);
+  assert.match(routeSource, /p_action_id: actionId/);
+  assert.doesNotMatch(routeSource, /p_action_id: existingAction/);
+  assert.doesNotMatch(routeSource, /jsonError\(error\.message, 500\)/);
   assert.match(authSource, /Authenticated operator identity is required\./);
   assert.match(routeSource, /idempotent: true/);
   assert.match(routeSource, /deliverOperatorReviewNotifications/);

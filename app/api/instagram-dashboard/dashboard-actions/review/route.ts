@@ -1,6 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { deliverOperatorReviewNotifications } from "@/lib/instagram-dashboard/operator-review-notifications";
-import { isIdempotentlyResolvedOperatorReview, resolveOperatorReviewActor } from "@/lib/instagram-dashboard/operator-review-auth";
+import { isIdempotentlyResolvedOperatorReview, isUuid, resolveOperatorReviewActor } from "@/lib/instagram-dashboard/operator-review-auth";
 import { canAccessTenantPages } from "@/lib/restaurant-analytics/session";
 import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString } from "../../_utils";
 import { readRelayKey, verifyCompassRelayKey } from "../../compass/relay-auth";
@@ -70,7 +70,8 @@ export async function POST(request: Request) {
     const accountId = readString(payload.account_id).trim();
     const reviewStatus = readString(payload.review_status, "reviewed").trim().toLowerCase();
 
-    if (!actionId || !accountId) return jsonError("Missing dashboard action review payload.", 400);
+    if (!isUuid(actionId)) return jsonError("Invalid action id.", 400);
+    if (!isUuid(accountId)) return jsonError("Invalid account id.", 400);
     if (!allowedReviewStatuses.includes(reviewStatus as (typeof allowedReviewStatuses)[number])) {
       return jsonError("Invalid review status.", 400);
     }
@@ -136,7 +137,7 @@ export async function POST(request: Request) {
         p_note: note,
         p_metadata: safeMetadata(payload.metadata_safe),
       });
-      if (error) return jsonError(error.message, 500);
+      if (error) return jsonError("Could not mark reviewed.", 500);
       reviewedAction = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
     } else {
       const { data, error } = await supabase.rpc("transition_account_dashboard_action", {
@@ -153,7 +154,7 @@ export async function POST(request: Request) {
           note,
         },
       });
-      if (error) return jsonError(error.message, 500);
+      if (error) return jsonError("Could not update review action.", 500);
       reviewedAction = (Array.isArray(data) ? data[0] : data) as SupabaseRecord | null;
     }
 
@@ -187,8 +188,7 @@ export async function POST(request: Request) {
       reviewed_at: readString(reviewedAction.updated_at, new Date().toISOString()),
       notification_deliveries: notificationDeliveries,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not review dashboard action.";
-    return jsonError(message, 500);
+  } catch {
+    return jsonError("Could not mark reviewed.", 500);
   }
 }

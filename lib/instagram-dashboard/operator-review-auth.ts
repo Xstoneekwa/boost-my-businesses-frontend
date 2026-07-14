@@ -16,6 +16,10 @@ export type OperatorReviewActorResult =
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function isUuid(value: unknown): value is string {
+  return typeof value === "string" && uuidPattern.test(value.trim());
+}
+
 export function resolveOperatorReviewActor(input: ResolveOperatorReviewActorInput): OperatorReviewActorResult {
   if (input.relayKeyProvided) {
     if (!input.relayAuth?.ok || input.relayAuth.mode !== "relay_key") {
@@ -28,7 +32,7 @@ export function resolveOperatorReviewActor(input: ResolveOperatorReviewActorInpu
       };
     }
     const actorId = typeof input.relayOperatorId === "string" ? input.relayOperatorId.trim().toLowerCase() : "";
-    if (!uuidPattern.test(actorId)) {
+    if (!isUuid(actorId)) {
       return { ok: false, status: 401, error: "Authenticated operator identity is required." };
     }
     return { ok: true, actorId, mode: "relay_key" };
