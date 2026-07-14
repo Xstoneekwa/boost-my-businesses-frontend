@@ -1,12 +1,16 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { deliverOperatorReviewNotifications } from "@/lib/instagram-dashboard/operator-review-notifications";
-import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin } from "../../_utils";
+import { isIdempotentlyResolvedOperatorReview, resolveOperatorReviewActor } from "@/lib/instagram-dashboard/operator-review-auth";
+import { canAccessTenantPages } from "@/lib/restaurant-analytics/session";
+import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString } from "../../_utils";
+import { readRelayKey, verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
 type ReviewPayload = {
   action_id?: unknown;
   account_id?: unknown;
+  operator_id?: unknown;
   review_status?: unknown;
   source?: unknown;
   note?: unknown;
@@ -61,9 +65,6 @@ function asSafeSource(value: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
-    if (unauthorizedResponse) return unauthorizedResponse;
-
     const payload = (await readJsonBody<ReviewPayload>(request)) ?? {};
     const actionId = readString(payload.action_id).trim();
     const accountId = readString(payload.account_id).trim();
@@ -74,9 +75,19 @@ export async function POST(request: Request) {
       return jsonError("Invalid review status.", 400);
     }
 
+    const providedRelayKey = readRelayKey(request.headers);
+    const actorContext = providedRelayKey ? null : await getInstagramAdminUserContext();
+    const actor = resolveOperatorReviewActor({
+      relayKeyProvided: Boolean(providedRelayKey),
+      relayAuth: providedRelayKey ? verifyCompassRelayKey(request.headers) : null,
+      relayOperatorId: payload.operator_id,
+      adminUserId: actorContext?.userId ?? null,
+      adminAuthorized: actorContext ? canAccessTenantPages(actorContext) : false,
+    });
+    if (!actor.ok) return jsonError(actor.error, actor.status, actor.reason ? { reason: actor.reason } : undefined);
+    const actorId = actor.actorId;
+
     const supabase = createSupabaseClient();
-    const actorContext = await getInstagramAdminUserContext();
-    if (!actorContext?.userId) return jsonError("Authenticated operator identity is required.", 401);
 
     const { data: existingAction, error: existingError } = await supabase
       .from("account_dashboard_actions")
@@ -90,6 +101,18 @@ export async function POST(request: Request) {
     if (!existingAction) return jsonError("Dashboard action not found.", 404);
 
     const currentStatus = readString(existingAction.status, "pending");
+    if (isIdempotentlyResolvedOperatorReview(existingAction)) {
+      return jsonOk({
+        action_id: actionId,
+        account_id: accountId,
+        status: "resolved",
+        blocking_campaign: false,
+        review_status: "reviewed",
+        reviewed_at: null,
+        notification_deliveries: [],
+        idempotent: true,
+      });
+    }
     if (!reviewableStatuses.includes(currentStatus as (typeof reviewableStatuses)[number])) {
       return jsonError("Dashboard action is not reviewable.", 409);
     }
@@ -108,7 +131,7 @@ export async function POST(request: Request) {
       const { data, error } = await supabase.rpc("review_operator_dashboard_action", {
         p_action_id: actionId,
         p_account_id: accountId,
-        p_actor_id: actorContext.userId,
+        p_actor_id: actorId,
         p_source: source,
         p_note: note,
         p_metadata: safeMetadata(payload.metadata_safe),
@@ -120,7 +143,7 @@ export async function POST(request: Request) {
         p_action_id: actionId,
         p_new_status: "acknowledged",
         p_actor_type: "admin",
-        p_actor_id: actorContext.userId,
+        p_actor_id: actorId,
         p_reason: "credentials_action_reviewed",
         p_metadata: {
           ...safeMetadata(payload.metadata_safe),
@@ -151,7 +174,7 @@ export async function POST(request: Request) {
         accountUsername: readString(account?.username, "unknown"),
         reason: readString(existingAction.admin_message, readString(existingAction.title, "operator_review_required")),
         finalStatus: "resolved",
-        operatorId: actorContext.userId,
+        operatorId: actorId,
       });
     }
 

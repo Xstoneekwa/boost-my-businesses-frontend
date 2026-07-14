@@ -167,11 +167,17 @@ test("credentials review route acknowledges actions without resolving active pro
 
 test("operator review completion resolves only the reviewed action and clears its campaign blocker", () => {
   const routeSource = source("../api/instagram-dashboard/dashboard-actions/review/route.ts");
+  const authSource = source("../../lib/instagram-dashboard/operator-review-auth.ts");
   const migrationSource = source("../../supabase/migrations/20260714003000_operator_review_canonical_transition.sql");
 
   assert.match(routeSource, /terminalOperatorReview/);
   assert.match(routeSource, /action_type\) === "operator_review_required"/);
   assert.match(routeSource, /review_operator_dashboard_action/);
+  assert.match(routeSource, /readRelayKey\(request\.headers\)/);
+  assert.match(routeSource, /verifyCompassRelayKey\(request\.headers\)/);
+  assert.match(routeSource, /payload\.operator_id/);
+  assert.match(authSource, /Authenticated operator identity is required\./);
+  assert.match(routeSource, /idempotent: true/);
   assert.match(routeSource, /deliverOperatorReviewNotifications/);
   assert.match(migrationSource, /blocking_campaign = false/);
   assert.match(migrationSource, /operator_review_action_resolved/);
