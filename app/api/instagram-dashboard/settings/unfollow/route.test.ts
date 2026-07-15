@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const routeSource = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+const domainSource = readFileSync(new URL("./domain.ts", import.meta.url), "utf8");
 
 test("unfollow settings reject unproven caps and session above day cap", () => {
-  assert.match(routeSource, /input\.unfollowEnabled && input\.unfollowPerSessionLimit < 1[\s\S]*"unfollow_cap_unproven"/);
-  assert.match(routeSource, /input\.unfollowEnabled && input\.unfollowPerDayLimit < 1[\s\S]*"unfollow_cap_unproven"/);
-  assert.match(routeSource, /input\.unfollowEnabled && input\.unfollowPerSessionLimit > input\.unfollowPerDayLimit[\s\S]*"session_cap_exceeds_day_cap"/);
+  assert.match(domainSource, /input\.unfollowEnabled && input\.unfollowPerSessionLimit < 1[\s\S]*"unfollow_cap_unproven"/);
+  assert.match(domainSource, /input\.unfollowEnabled && input\.unfollowPerDayLimit < 1[\s\S]*"unfollow_cap_unproven"/);
+  assert.match(domainSource, /input\.unfollowEnabled && input\.unfollowPerSessionLimit > input\.unfollowPerDayLimit[\s\S]*"session_cap_exceeds_day_cap"/);
 });
 
 test("unfollow settings accept coherent Pro caps in prod normal mode", () => {
