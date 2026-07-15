@@ -424,7 +424,7 @@ test("existing preflight_ready allows cold start without recreation", async () =
 });
 
 test("schedule-session-cron starts late preflight when canonical preflight missing", async () => {
-  const activeRuntimeHealth = async () => ({ schedulerConnected: true, status: "active" });
+  const activeRuntimeHealth = async () => ({ dispatcherConnected: true, status: "active" });
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
   const supabase = {
@@ -524,7 +524,7 @@ test("schedule-session-cron starts late preflight when canonical preflight missi
 });
 
 test("schedule-session-cron cold starts when late preflight already ready", async () => {
-  const activeRuntimeHealth = async () => ({ schedulerConnected: true, status: "active" });
+  const activeRuntimeHealth = async () => ({ dispatcherConnected: true, status: "active" });
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   let preflightLookupCount = 0;
 

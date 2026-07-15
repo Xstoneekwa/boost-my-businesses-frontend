@@ -29,34 +29,34 @@ No caller may select an obsolete overload by accident.
 Live state changes to Scheduler, Auto Restart or Play are outside documentation
 work and always require explicit authorization.
 
-## Phase-1 rule
+## Scheduler launch authority
 
-Server-side `schedule-session` cron may evaluate assignment windows continuously, but it **must not enqueue** `account_session` run requests unless the **local BotApp scheduler runtime** on the operator Mac is healthy.
+Server-side `schedule-session` cron may enqueue `account_session` run requests only when the durable launchd run dispatcher is launch-capable and its canonical heartbeat is fresh.
 
-This phase intentionally couples scheduled growth runs to an open BotApp session on the phone-farm Mac.
+BotApp Electron remains an operator UI and observability surface. Closing BotApp must not block a natural scheduled launch while the durable dispatcher, device and account gates remain healthy.
 
 ## Runtime components
 
 | Component | Where it runs | Heartbeat |
 |-----------|---------------|-----------|
-| BotApp scheduler runtime | Electron main while app is open | `worker_heartbeats.worker_id = botapp-scheduler-runtime:{host}` |
+| BotApp scheduler runtime | Electron main while app is open; observability only | `worker_heartbeats.worker_id = botapp-scheduler-runtime:{host}` |
 | Run-control dispatcher | launchd + `account_run_request_consumer.py` | `worker_heartbeats` dispatcher row |
 | Device heartbeat publisher | launchd + `device_heartbeat_publisher.py` | `device_heartbeats` |
-| Schedule-session cron | Vercel `*/5` | no enqueue without BotApp runtime gate |
+| Schedule-session cron | Vercel `*/5` | no enqueue without durable dispatcher health |
 
 ## BotApp open lifecycle
 
 1. Relay bootstrap succeeds.
 2. Device heartbeat autostart (existing).
 3. Dispatcher autostart (existing).
-4. **Scheduler runtime start** publishes heartbeat every 30s while BotApp is open.
+4. **Scheduler UI runtime start** publishes an observability heartbeat every 30s while BotApp is open.
 5. Each tick may call `ensureDispatcherAutostart` if dispatcher is degraded (no duplicate processes).
 
 ## BotApp voluntary close
 
-On `before-quit`, BotApp publishes `status=stopping`, `voluntary_shutdown=true`, `scheduler_available=false`.
+On `before-quit`, BotApp publishes `status=stopping`, `voluntary_shutdown=true`, `scheduler_available=false` for UI observability.
 
-Server cron then returns `botapp_runtime_unavailable` and creates **zero** new scheduled run requests.
+Server cron does not use this Electron heartbeat as a launch gate. The durable dispatcher heartbeat remains authoritative.
 
 No infinite Auto Restart loop is attempted for a voluntary shutdown.
 
@@ -167,7 +167,7 @@ is then the only switch left to govern automatic starts.
 1. Cron token + technical enabled flag (`technical_disabled`)
 2. **Canonical Scheduler toggle ON** (`scheduler_disabled` otherwise; CP0)
 3. Active scheduled assignment window
-4. BotApp scheduler runtime heartbeat healthy
+4. Durable run dispatcher heartbeat fresh, process identified, `status=idle|running`, `launch_enabled=true`, `health_only=false`
 5. Physical phone + fresh `device_heartbeats`
 6. No active request/run / slot idempotency / phone busy
 7. `evaluateRunStartEligibility(trigger=scheduler)`
@@ -313,7 +313,7 @@ Admin Dashboard remains **read-mostly** and must never spawn local processes fro
 | `GET` | `/api/instagram-dashboard/botapp/runtime-desired-state` | Admin reads desired vs observed |
 | `POST` | `/api/instagram-dashboard/botapp/runtime-ack` | BotApp relay acknowledges desired state |
 
-BotApp local process remains the only place allowed to start/maintain dispatcher + scheduler runtime.
+The launchd dispatcher is the durable scheduler launch authority. BotApp may observe or request runtime lifecycle operations, but its Electron process is not required for natural request creation.
 
 ## Stale thresholds
 

@@ -60,7 +60,7 @@ export type ScheduleSessionCronReason =
   | "invalid_caller_token"
   | "no_active_windows"
   | "no_eligible_accounts"
-  | "botapp_runtime_unavailable";
+  | "dispatcher_unavailable";
 
 /**
  * CP0 — distinct observable states of the daily cron:
@@ -100,7 +100,7 @@ export type ScheduleSessionCronSummary = {
   skipped_stale_device_count: number;
   skipped_eligibility_count: number;
   skipped_missing_assignment_target_count: number;
-  skipped_botapp_runtime_unavailable_count: number;
+  skipped_dispatcher_unavailable_count: number;
   skipped_scheduler_disabled_count: number;
   skipped_preflight_missing_count: number;
   skipped_preflight_invalid_count: number;
@@ -124,7 +124,7 @@ export type ScheduleSessionCronResult = {
   skipped: boolean;
   reason: ScheduleSessionCronReason | null;
   summary: ScheduleSessionCronSummary;
-  botapp_scheduler_runtime_status?: string | null;
+  dispatcher_runtime_status?: string | null;
 };
 
 type SupabaseLike = {
@@ -181,7 +181,7 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_stale_device_count: 0,
     skipped_eligibility_count: 0,
     skipped_missing_assignment_target_count: 0,
-    skipped_botapp_runtime_unavailable_count: 0,
+    skipped_dispatcher_unavailable_count: 0,
     skipped_scheduler_disabled_count: 0,
     skipped_preflight_missing_count: 0,
     skipped_preflight_invalid_count: 0,
@@ -536,13 +536,13 @@ export type ScheduleSessionSchedulerAuthorizationLoader = (
 
 export type ScheduleSessionRuntimeHealthLoader = (
   supabase: SupabaseLike,
-  input?: { now?: Date },
-) => Promise<{ schedulerConnected: boolean; status: string }>;
+  input?: { now?: Date; env?: Record<string, string | undefined> },
+) => Promise<{ dispatcherConnected: boolean; status: string }>;
 
 const defaultRuntimeHealthLoader: ScheduleSessionRuntimeHealthLoader = async (supabase, input) => {
-  const { loadBotAppSchedulerRuntimeHealth } = await import("./botapp-scheduler-runtime-health.ts");
-  const health = await loadBotAppSchedulerRuntimeHealth(supabase, { now: input?.now });
-  return { schedulerConnected: health.schedulerConnected, status: health.status };
+  const { loadDispatcherSchedulerRuntimeHealth } = await import("./dispatcher-scheduler-runtime-health.ts");
+  const health = await loadDispatcherSchedulerRuntimeHealth(supabase, input);
+  return { dispatcherConnected: health.dispatcherConnected, status: health.status };
 };
 
 export async function runScheduleSessionCron(
@@ -596,9 +596,9 @@ export async function runScheduleSessionCron(
     return { status: 200, result: skippedResult(env, "no_active_windows", summary, schedulerAuthorization.enabled) };
   }
 
-  const runtimeHealth = await loadRuntimeHealth(supabase, { now });
-  if (!runtimeHealth.schedulerConnected) {
-    summary.skipped_botapp_runtime_unavailable_count = assignments.length;
+  const runtimeHealth = await loadRuntimeHealth(supabase, { now, env: options.env });
+  if (!runtimeHealth.dispatcherConnected) {
+    summary.skipped_dispatcher_unavailable_count = assignments.length;
     return {
       status: 200,
       result: {
@@ -608,8 +608,8 @@ export async function runScheduleSessionCron(
         scheduler_enabled: schedulerAuthorization.enabled,
         worker_id: env.workerId,
         skipped: true,
-        reason: "botapp_runtime_unavailable",
-        botapp_scheduler_runtime_status: runtimeHealth.status,
+        reason: "dispatcher_unavailable",
+        dispatcher_runtime_status: runtimeHealth.status,
         summary,
       },
     };
@@ -892,7 +892,7 @@ export async function runScheduleSessionCron(
       worker_id: env.workerId,
       skipped: summary.eligible_count === 0,
       reason: summary.eligible_count === 0 ? "no_eligible_accounts" : null,
-      botapp_scheduler_runtime_status: runtimeHealth.status,
+      dispatcher_runtime_status: runtimeHealth.status,
       summary,
     },
   };

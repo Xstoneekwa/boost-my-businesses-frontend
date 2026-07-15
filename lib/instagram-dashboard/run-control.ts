@@ -238,8 +238,8 @@ export function resolveRunControlHealthBlockReason(health: RunControlHealth): Ru
   return null;
 }
 
-export function runControlDispatcherHealthMaxAgeSeconds() {
-  const parsed = Number(process.env.INSTAGRAM_RUN_CONTROL_DISPATCHER_HEALTH_MAX_AGE_SECONDS ?? "60");
+export function runControlDispatcherHealthMaxAgeSeconds(env: MiniRunEnv = process.env) {
+  const parsed = Number(env.INSTAGRAM_RUN_CONTROL_DISPATCHER_HEALTH_MAX_AGE_SECONDS ?? "60");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 

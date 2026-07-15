@@ -14,6 +14,7 @@ const baseEnv = {
   INSTAGRAM_SCHEDULE_SESSION_CRON_ENABLED: "true",
   INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "true",
   INSTAGRAM_SCHEDULE_SESSION_CRON_LIMIT: "5",
+  INSTAGRAM_RUN_CONTROL_DISPATCHER_WORKER_ID: "run-dispatcher:test",
 };
 
 const windowStart = "2026-06-30T04:00:00.000Z";
@@ -21,7 +22,7 @@ const windowEnd = "2026-06-30T10:00:00.000Z";
 const inWindowNow = new Date("2026-06-30T06:00:00.000Z");
 const beforeWindowNow = new Date("2026-06-30T03:00:00.000Z");
 const afterWindowNow = new Date("2026-06-30T11:00:00.000Z");
-const activeRuntimeHealth = async () => ({ schedulerConnected: true, status: "active" });
+const activeRuntimeHealth = async () => ({ dispatcherConnected: true, status: "active" });
 
 const defaultAssignment = {
   id: "assignment-1",
@@ -58,6 +59,7 @@ function makeSupabase(overrides: {
   peers?: Array<Record<string, unknown>>;
   activeRequests?: Array<Record<string, unknown>>;
   activeRuns?: Array<Record<string, unknown>>;
+  workerHeartbeat?: Record<string, unknown> | null;
   schedulerEnabled?: boolean;
   rpcError?: { message: string };
 } = {}) {
@@ -116,6 +118,22 @@ function makeSupabase(overrides: {
         }
         if (table === "ig_runs") {
           return makeQueryResult(overrides.activeRuns ?? []);
+        }
+        if (table === "worker_heartbeats") {
+          const heartbeat = overrides.workerHeartbeat === undefined
+            ? {
+                worker_id: "run-dispatcher:test",
+                status: "idle",
+                last_seen_at: inWindowNow.toISOString(),
+                process_id: "4242",
+                metadata: {
+                  component: "run_control_dispatcher",
+                  health_only: false,
+                  launch_enabled: true,
+                },
+              }
+            : overrides.workerHeartbeat;
+          return makeQueryResult(heartbeat ? [heartbeat] : []);
         }
         if (table === "auto_restart_device_locks") {
           return makeQueryResult([]);
@@ -191,7 +209,7 @@ test("account in active window queues one scheduled run", async () => {
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
-    loadRuntimeHealth: async () => ({ schedulerConnected: true, status: "active" }),
+    loadRuntimeHealth: async () => ({ dispatcherConnected: true, status: "active" }),
   });
 
   assert.equal(run.status, 200);
@@ -516,6 +534,27 @@ test("stale device heartbeat blocks launch", async () => {
   assert.equal(run.result.summary.skipped_stale_device_count, 1);
 });
 
+test("offline device heartbeat blocks launch", async () => {
+  const supabase = makeSupabase({
+    heartbeats: [{
+      device_id: "device-1",
+      status: "offline",
+      last_seen_at: inWindowNow.toISOString(),
+    }],
+  });
+
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: baseEnv,
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.result.summary.skipped_stale_device_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+});
+
 test("emulator device blocks launch", async () => {
   const supabase = makeSupabase({
     devices: [{
@@ -537,20 +576,59 @@ test("emulator device blocks launch", async () => {
   assert.equal(run.result.summary.skipped_emulator_device_count, 1);
 });
 
-test("BotApp runtime unavailable blocks enqueue despite active window", async () => {
+test("BotApp closed does not block enqueue when dispatcher and device are healthy", async () => {
   const supabase = makeSupabase();
   const run = await runScheduleSessionCron(supabase.client as never, {
-    env: baseEnv,
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
     callerToken: "cron-token",
     now: inWindowNow,
     evaluateEligibility: async () => ({ ok: true }),
-    loadRuntimeHealth: async () => ({ schedulerConnected: false, status: "unavailable" }),
   });
 
-  assert.equal(run.result.reason, "botapp_runtime_unavailable");
+  assert.equal(run.result.reason, null);
+  assert.equal(run.result.summary.queued_count, 1);
+  assert.equal(run.result.dispatcher_runtime_status, "active");
+});
+
+test("missing dispatcher heartbeat blocks enqueue despite active window", async () => {
+  const supabase = makeSupabase({ workerHeartbeat: null });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+  });
+
+  assert.equal(run.result.reason, "dispatcher_unavailable");
   assert.equal(run.result.summary.queued_count, 0);
-  assert.equal(run.result.summary.skipped_botapp_runtime_unavailable_count, 1);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(run.result.summary.skipped_dispatcher_unavailable_count, 1);
+  assert.equal(run.result.dispatcher_runtime_status, "unavailable");
+});
+
+test("stale dispatcher heartbeat blocks enqueue", async () => {
+  const supabase = makeSupabase({
+    workerHeartbeat: {
+      worker_id: "run-dispatcher:test",
+      status: "idle",
+      last_seen_at: new Date(inWindowNow.getTime() - 61_000).toISOString(),
+      process_id: "4242",
+      metadata: {
+        component: "run_control_dispatcher",
+        health_only: false,
+        launch_enabled: true,
+      },
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+  });
+
+  assert.equal(run.result.reason, "dispatcher_unavailable");
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(run.result.dispatcher_runtime_status, "stale");
 });
 
 test("login required blocks scheduled launch", async () => {
