@@ -388,7 +388,11 @@ export async function leaseRequestOrCancel(
 export async function resolveAccountDeviceLeaseBlock(
   supabase: SupabaseLike,
   accountId: string,
-  input: { requestId?: string | null; workerId?: string | null } = {},
+  input: {
+    requestId?: string | null;
+    workerId?: string | null;
+    allowSameAccountPreflight?: boolean;
+  } = {},
 ) {
   const deviceContext = await resolveAccountDeviceContext(supabase, accountId);
   if (!deviceContext?.deviceId) return null;
@@ -402,10 +406,23 @@ export async function resolveAccountDeviceLeaseBlock(
   ) {
     return null;
   }
+  if (sameAccountPreflightLeaseAllowed(activeLock, accountId, input.allowSameAccountPreflight)) {
+    return null;
+  }
   return {
     reason: DEVICE_LEASE_UNAVAILABLE,
     operatorLabel: DEVICE_LEASE_OPERATOR_LABEL,
     deviceId: deviceContext.deviceId,
     deviceContext,
   };
+}
+
+export function sameAccountPreflightLeaseAllowed(
+  activeLock: { accountId?: string | null; ownerKind?: string | null },
+  accountId: string,
+  allowed: boolean | undefined,
+) {
+  return allowed === true
+    && activeLock.accountId === accountId
+    && readString(activeLock.ownerKind).toLowerCase() === "preflight";
 }

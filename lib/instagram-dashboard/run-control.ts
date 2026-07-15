@@ -2297,7 +2297,9 @@ export async function evaluateRunStartEligibility(
   }
 
   const { resolveAccountDeviceLeaseBlock } = await import("./device-ui-lease");
-  const leaseBlock = await resolveAccountDeviceLeaseBlock(supabase, accountId);
+  const leaseBlock = await resolveAccountDeviceLeaseBlock(supabase, accountId, {
+    allowSameAccountPreflight: normalizedTrigger === "scheduler",
+  });
   if (leaseBlock) {
     return { ok: false as const, reason: leaseBlock.reason, health, deviceContext: leaseBlock.deviceContext };
   }

@@ -7,6 +7,7 @@ import {
   leaseRequestOrCancel,
   mapDeviceLockReasonToLeaseReason,
   runtimeLockFromActiveLease,
+  sameAccountPreflightLeaseAllowed,
 } from "./device-ui-lease.ts";
 import { deviceSessionLockBlocksStart } from "./device-session-lock.ts";
 
@@ -57,6 +58,17 @@ describe("device ui lease CP3", () => {
       { accountId: "acct-b" },
     );
     assert.equal(reason, "device_lease_unavailable");
+  });
+
+  it("allows only the scheduler to consume the same-account preflight lease", () => {
+    const lock = { accountId: "acct-a", ownerKind: "preflight" };
+    assert.equal(sameAccountPreflightLeaseAllowed(lock, "acct-a", true), true);
+    assert.equal(sameAccountPreflightLeaseAllowed(lock, "acct-a", false), false);
+    assert.equal(sameAccountPreflightLeaseAllowed(lock, "acct-b", true), false);
+    assert.equal(
+      sameAccountPreflightLeaseAllowed({ accountId: "acct-a", ownerKind: "scheduler" }, "acct-a", true),
+      false,
+    );
   });
 
   it("scheduled preflight lease path reconciles stale lock before acquire", async () => {
@@ -171,6 +183,7 @@ describe("device ui lease CP3", () => {
       ownerKind: "preflight",
       operationPhase: "queued",
       scheduledWindowStart: currentWindowStart,
+      now: new Date("2026-07-11T12:00:00.000Z"),
     });
 
     assert.equal(result.ok, false);
