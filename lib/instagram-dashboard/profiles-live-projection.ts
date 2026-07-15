@@ -146,7 +146,7 @@ export function projectProfilesLive(input: {
       runControlLabel: activeProjection.stopping ? "Stopping…" : null,
       runtimeIndicator: runtimeIndicator(activeRequest, activeRun, latestRun),
       currentRunCounters: counters,
-      liveSupportedKinds: ["follow", "dm"],
+      liveSupportedKinds: ["follow", "like", "dm"],
       countersToday: counters.projectedDisplayCount,
       interactionsToday: counters.projectedDisplayCount.interactionsTotal,
       currentBlocker: currentBlocker ? {
