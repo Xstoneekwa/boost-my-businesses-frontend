@@ -1,4 +1,9 @@
 import { createSupabaseClient } from "../supabase.ts";
+import {
+  buildCanonicalIncidentNotification,
+  canonicalIncidentActionUrl,
+  INCIDENT_ACTION_CTA_LABEL,
+} from "./canonical-incident-notification.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 type NotificationChannel = "slack" | "discord";
@@ -38,27 +43,24 @@ function shortId(value: string) {
   return value ? `${value.slice(0, 8)}...` : "unknown";
 }
 
-const CANONICAL_INCIDENTS_URL = "https://www.boostmybusinesses.com/instagram-dashboard/incidents";
-const ACTION_CTA_LABEL = "Open Incidents/Actions";
-
 export function operatorReviewActionUrl(input: Pick<OperatorReviewNotificationInput, "incidentId">) {
-  const url = new URL(CANONICAL_INCIDENTS_URL);
-  if (input.incidentId) url.searchParams.set("incident_id", input.incidentId);
-  return url.toString();
+  return canonicalIncidentActionUrl(input);
 }
 
 export function buildOperatorReviewNotificationText(input: OperatorReviewNotificationInput) {
   const title = input.event === "created"
     ? "Operator review required"
     : "Operator review resolved";
-  return [
+  return buildCanonicalIncidentNotification({
     title,
-    `Account: @${input.accountUsername || "unknown"} (${shortId(input.accountId)})`,
-    `Reason: ${input.reason || "operator_review_required"}`,
-    `State: ${input.finalStatus}`,
-    `Operator: ${input.operatorId || "system"}`,
-    `Action: ${shortId(input.actionId)}`,
-  ].join("\n");
+    incidentId: input.incidentId,
+    actionId: input.actionId,
+    accountId: input.accountId,
+    accountUsername: input.accountUsername,
+    reason: input.reason || "operator_review_required",
+    state: input.finalStatus,
+    operatorId: input.operatorId || "system",
+  }).text;
 }
 
 async function defaultPostWebhook(
@@ -100,8 +102,17 @@ export async function deliverOperatorReviewNotifications(
   const resolveChannel = dependencies.resolveChannel ?? notificationSettings!.resolveEffectiveNotificationChannel;
   const recordResult = dependencies.recordResult ?? notificationSettings!.recordNotificationDeliveryResult;
   const postWebhook = dependencies.postWebhook ?? defaultPostWebhook;
-  const text = buildOperatorReviewNotificationText(input);
-  const actionUrl = operatorReviewActionUrl(input);
+  const notification = buildCanonicalIncidentNotification({
+    title: input.event === "created" ? "Operator review required" : "Operator review resolved",
+    incidentId: input.incidentId,
+    actionId: input.actionId,
+    accountId: input.accountId,
+    accountUsername: input.accountUsername,
+    reason: input.reason || "operator_review_required",
+    state: input.finalStatus,
+    operatorId: input.operatorId || "system",
+  });
+  const { text, actionUrl } = notification;
   const results: Array<{ channel: NotificationChannel; status: string; deliveredAt: string | null }> = [];
 
   for (const channel of ["slack", "discord"] as const) {
@@ -140,7 +151,7 @@ export async function deliverOperatorReviewNotifications(
           final_status: input.finalStatus,
           operator_id: input.operatorId,
           text,
-          cta_label: ACTION_CTA_LABEL,
+          cta_label: INCIDENT_ACTION_CTA_LABEL,
           action_url: actionUrl,
         },
         metadata: {
@@ -168,15 +179,7 @@ export async function deliverOperatorReviewNotifications(
     const attemptAt = now().toISOString();
     const attemptCount = Number(existing?.attempt_count ?? 0) + 1;
     try {
-      const body = channel === "discord"
-        ? { content: `${text}\n[${ACTION_CTA_LABEL}](${actionUrl})` }
-        : {
-            text: `${text}\n<${actionUrl}|${ACTION_CTA_LABEL}>`,
-            blocks: [
-              { type: "section", text: { type: "mrkdwn", text } },
-              { type: "section", text: { type: "mrkdwn", text: `<${actionUrl}|${ACTION_CTA_LABEL}>` } },
-            ],
-          };
+      const body = channel === "discord" ? notification.discordBody : notification.slackBody;
       const responseStatus = await postWebhook(channel, settings.webhookUrl, body);
       const deliveredAt = now().toISOString();
       await supabase.from("account_incident_notifications").update({

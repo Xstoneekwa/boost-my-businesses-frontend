@@ -16,6 +16,7 @@ import {
   type SessionTransitionTimestamps,
 } from "./session-transition-buffer.ts";
 import { deliverOperatorReviewNotifications } from "./operator-review-notifications.ts";
+import { buildCanonicalIncidentNotification } from "./canonical-incident-notification.ts";
 export function scheduleSessionIdempotencyKey(assignmentId: string, startsAt: string) {
   return `schedule-session:${assignmentId}:${startsAt}`;
 }
@@ -360,11 +361,6 @@ export async function loadRunForEarlyFailure(
   } as Record<string, unknown>;
 }
 
-function dashboardBaseUrl() {
-  const raw = readString(process.env.NEXT_PUBLIC_APP_URL || process.env.INSTAGRAM_DASHBOARD_BASE_URL);
-  return raw.replace(/\/$/, "");
-}
-
 type NotificationChannel = "slack" | "discord";
 
 async function postWebhook(channel: NotificationChannel, webhookUrl: string, body: Record<string, unknown>) {
@@ -383,6 +379,8 @@ export async function sendScheduledEarlyFailureNotification(input: {
   accountUsername: string;
   message: string;
   severity: "warning" | "critical";
+  runId?: string | null;
+  requestId?: string | null;
 }) {
   let notificationModule: {
     integrationLocalNotificationMode: () => boolean;
@@ -413,13 +411,16 @@ export async function sendScheduledEarlyFailureNotification(input: {
     resolveEffectiveNotificationChannel,
   } = notificationModule;
 
-  const text = [
-    input.message,
-    `Account: @${input.accountUsername}`,
-    `Severity: ${input.severity}`,
-    `Incident: ${input.incidentId.slice(0, 8)}...`,
-    dashboardBaseUrl() ? `${dashboardBaseUrl()}/instagram-dashboard/incidents` : "/instagram-dashboard/incidents",
-  ].join("\n");
+  const notification = buildCanonicalIncidentNotification({
+    title: input.message,
+    incidentId: input.incidentId,
+    accountUsername: input.accountUsername,
+    reason: input.message,
+    state: "open",
+    severity: input.severity,
+    runId: input.runId,
+    requestId: input.requestId,
+  });
 
   if (integrationLocalNotificationMode()) {
     return {
@@ -438,7 +439,7 @@ export async function sendScheduledEarlyFailureNotification(input: {
       continue;
     }
     try {
-      const body = channel === "discord" ? { content: text } : { text };
+      const body = channel === "discord" ? notification.discordBody : notification.slackBody;
       await postWebhook(channel, settings.webhookUrl, body);
       await recordNotificationDeliveryResult({ channel, ok: true });
       deliveries[channel] = "sent";
