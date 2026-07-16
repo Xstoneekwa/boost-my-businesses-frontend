@@ -1,5 +1,10 @@
 # Runtime Settings Readiness Matrix
 
+> **Current production addendum - 2026-07-16.** The historical readiness audit
+> below is retained for context. Canonical Follow Settings, calendar warmup,
+> Unfollow J+3 limits and live counter projection are documented in
+> [JULY_16_PRODUCTION_BASELINE](./checkpoints/2026-07-16-production-baseline-backend.md).
+
 Date: 2026-05-30  
 Scope: Instagram dashboard frontend in `boost-ai-frontend` and Phone Farm runtime in `instagram-worker-python`.  
 Status: read-only audit report. No runtime wiring, no prod default change, no migration, no env change, no worker change.

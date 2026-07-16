@@ -1,5 +1,10 @@
 # BotApp scheduler runtime contract (TASK 19B)
 
+> **Production baseline - 2026-07-16.** The durable dispatcher heartbeat, not
+> Electron BotApp, is scheduler launch authority. First-tick launch, same-account
+> preflight lease handoff and bounded device isolation are frozen in
+> [JULY_16_PRODUCTION_BASELINE](./checkpoints/2026-07-16-production-baseline-backend.md).
+
 > **Current-state addendum — 2026-07-14.** This is the canonical scheduler
 > contract. Earlier phase labels below are retained as implementation history.
 > Production snapshot: global scheduler runtime and dispatcher heartbeats were
@@ -10,7 +15,7 @@
 
 | Surface | Creates work | Governing gates | `manual_only` behavior |
 |---|---|---|---|
-| Daily Scheduler | schedule-window cold start | global toggle, technical cron, BotApp heartbeat, device, preflight, eligibility, atomic insert | hard excluded |
+| Daily Scheduler | schedule-window cold start | global toggle, technical cron, durable dispatcher heartbeat, device, preflight, eligibility, atomic insert | hard excluded |
 | Auto Restart | resume-plan restart | global toggle, dispatcher tick, resume plan, eligibility, device lock | hard excluded |
 | Manual Play | explicit operator request | auth, entitlement, identity, preflight, quota, request/run/device locks | allowed only as explicit manual trigger |
 

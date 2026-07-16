@@ -1,5 +1,10 @@
 # Incidents and Operator Review
 
+> **Production baseline - 2026-07-16.** The generic linked-action workflow,
+> authenticated `Mark reviewed` transition, canonical state projection and
+> shared English Slack/Discord CTA are frozen in
+> [JULY_16_PRODUCTION_BASELINE](./checkpoints/2026-07-16-production-baseline-backend.md).
+
 > Canonical operational snapshot verified read-only on **2026-07-14 at
 > 12:55:56Z**. Incident history is retained; acknowledgement, review and
 > resolution are distinct states.
