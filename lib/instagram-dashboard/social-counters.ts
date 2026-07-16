@@ -85,16 +85,6 @@ function shouldCountInteractionEvent(row: RecordValue) {
   return true;
 }
 
-export function actionCountersFromLogs(logRows: RecordValue[]): ProfileSocialCounters {
-  const counters = blankSocialCounters();
-  for (const row of logRows) {
-    if (!shouldCountSocialLog(row)) continue;
-    const kind = socialActionKindFromLog(readString(row.action_type, ""));
-    if (kind) counters[kind] += 1;
-  }
-  return withInteractionsTotal(counters);
-}
-
 export function runTotalsCounters(runRows: RecordValue[]): ProfileSocialCounters {
   const counters = blankSocialCounters();
   for (const row of runRows) {
@@ -126,12 +116,13 @@ function verifiedInteractionKind(row: RecordValue): SocialCounterKind | null {
 }
 
 function verifiedInteractionIdentity(row: RecordValue, kind: SocialCounterKind) {
+  const accountId = readString(row.account_id, "no_account");
   const payload = readRecord(row.payload);
   const runId = readString(row.run_id, "no_run");
   const username = readString(row.username, readString(payload?.target_username, readString(payload?.username, ""))).toLowerCase();
-  if (username) return `${runId}:${kind}:${username}`;
+  if (username) return `${accountId}:${runId}:${kind}:${username}`;
   const progressKey = readString(payload?.progress_key, "");
-  return progressKey || readString(row.id, `${runId}:${kind}:${readString(row.event_at, "unknown")}`);
+  return progressKey || readString(row.id, `${accountId}:${runId}:${kind}:${readString(row.event_at, "unknown")}`);
 }
 
 function verifiedInteractionUnits(row: RecordValue, kind: SocialCounterKind) {
@@ -149,10 +140,11 @@ function normalizedTarget(row: RecordValue) {
 }
 
 function canonicalActionIdentity(row: RecordValue, kind: SocialCounterKind) {
+  const accountId = readString(row.account_id, "no_account");
   const runId = readString(row.run_id, "no_run");
   const target = normalizedTarget(row);
-  if (target) return `${runId}:${kind}:${target}`;
-  return readString(row.id, "");
+  if (target) return `${accountId}:${runId}:${kind}:${target}`;
+  return readString(row.id, `${accountId}:${runId}:${kind}`);
 }
 
 function canonicalActionUnits(row: RecordValue, kind: SocialCounterKind) {
@@ -176,6 +168,14 @@ function actionUnitsByIdentity(rows: RecordValue[]) {
     if (!previous || rowUnits > previous.units) units.set(identity, { kind, units: rowUnits });
   }
   return units;
+}
+
+export function actionCountersFromLogs(logRows: RecordValue[]): ProfileSocialCounters {
+  const counters = blankSocialCounters();
+  for (const { kind, units } of actionUnitsByIdentity(logRows).values()) {
+    counters[kind] += units;
+  }
+  return withInteractionsTotal(counters);
 }
 
 function verifiedUnitsByIdentity(rows: RecordValue[]) {

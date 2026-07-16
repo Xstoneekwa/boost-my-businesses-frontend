@@ -7,6 +7,7 @@ type SupportedUnfollowMode = (typeof SUPPORTED_UNFOLLOW_MODES)[number];
 
 export type UnfollowDomainPatchPayload = {
   account_id?: unknown;
+  idempotency_key?: unknown;
   unfollow_enabled?: unknown;
   unfollow_mode?: unknown;
   unfollow_per_session_limit?: unknown;

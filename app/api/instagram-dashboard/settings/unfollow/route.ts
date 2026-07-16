@@ -50,18 +50,6 @@ function normalizeUnfollowMode(value: unknown) {
   return readString(value, "unfollow").trim().toLowerCase() || "unfollow";
 }
 
-function redactedSummary(input: UnfollowDomainInput) {
-  return {
-    unfollow_enabled: input.unfollowEnabled,
-    unfollow_mode: input.unfollowMode,
-    unfollow_per_session_limit: input.unfollowPerSessionLimit,
-    unfollow_per_day_limit: input.unfollowPerDayLimit,
-    unfollow_after_days: input.unfollowAfterDays,
-    runtime_cap_mode: input.runtimeCapMode,
-    runtime_safety_cap: input.runtimeSafetyCap,
-  };
-}
-
 function entitlementActive(row: SupabaseRecord) {
   if (row.active !== true) return false;
   const validUntil = readString(row.valid_until, "").trim();
@@ -242,36 +230,6 @@ async function buildUnfollowProjection(
   };
 }
 
-async function recordAudit(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  input: {
-    accountId: string;
-    actorId: string | null;
-    fieldsChanged: string[];
-    oldSummary: Record<string, unknown>;
-    newSummary: Record<string, unknown>;
-  },
-) {
-  await supabase.from("ig_action_logs").insert({
-    account_id: input.accountId,
-    run_id: null,
-    target_username: null,
-    action_type: "unfollow_domain_settings_saved",
-    status: "success",
-    message: "Unfollow domain settings saved from admin dashboard.",
-    payload: {
-      actor_type: "admin",
-      actor_id: input.actorId,
-      source_surface: "admin_dashboard",
-      domain: "unfollow",
-      fields_changed: input.fieldsChanged,
-      old_summary: input.oldSummary,
-      new_summary: input.newSummary,
-    },
-    created_at: new Date().toISOString(),
-  });
-}
-
 export async function GET(request: Request) {
   try {
     const unauthorizedResponse = await requireRelayOrAdmin(request, "Unfollow settings");
@@ -321,30 +279,21 @@ export async function PATCH(request: Request) {
       return jsonOk({ ...(await buildUnfollowProjection(supabase, accountId)), changed_fields: [] });
     }
 
-    const { error } = await supabase.from("ig_account_unfollow_settings").upsert(
-      {
-        account_id: accountId,
-        unfollow_enabled: after.unfollowEnabled,
-        unfollow_mode: after.unfollowMode,
-        unfollow_per_session_limit: after.unfollowPerSessionLimit,
-        unfollow_per_day_limit: after.unfollowPerDayLimit,
-        unfollow_after_days: after.unfollowAfterDays,
-        runtime_cap_mode: after.runtimeCapMode,
-        runtime_safety_cap: after.runtimeSafetyCap,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "account_id" },
-    );
-    if (error) return jsonError(sanitizeRunControlReason(error.message, "Could not save Unfollow settings."), 500);
-
     const actorContext = await getInstagramAdminUserContext();
-    await recordAudit(supabase, {
-      accountId,
-      actorId: actorContext?.userId ?? null,
-      fieldsChanged,
-      oldSummary: redactedSummary(before),
-      newSummary: redactedSummary(after),
-    }).catch(() => undefined);
+    const idempotencyKey = readString(body.idempotency_key, `admin:unfollow-settings:${accountId}:${Date.now()}`);
+    const { error } = await supabase.rpc("save_account_unfollow_settings_v1", {
+      p_account_id: accountId,
+      p_actor_id: actorContext?.userId ?? null,
+      p_idempotency_key: idempotencyKey,
+      p_unfollow_enabled: after.unfollowEnabled,
+      p_unfollow_mode: after.unfollowMode,
+      p_unfollow_per_session_limit: after.unfollowPerSessionLimit,
+      p_unfollow_per_day_limit: after.unfollowPerDayLimit,
+      p_unfollow_after_days: after.unfollowAfterDays,
+      p_runtime_cap_mode: after.runtimeCapMode,
+      p_runtime_safety_cap: after.runtimeSafetyCap,
+    });
+    if (error) return jsonError(sanitizeRunControlReason(error.message, "Could not save Unfollow settings."), 500);
 
     return jsonOk({ ...(await buildUnfollowProjection(supabase, accountId)), changed_fields: fieldsChanged });
   } catch (error) {

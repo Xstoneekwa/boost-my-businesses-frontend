@@ -18,7 +18,8 @@ import {
   readProductDefaultDayCap,
 } from "@/lib/instagram-dashboard/dm-domain-service";
 import { dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
-import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireRelayOrAdmin, type SupabaseRecord } from "../_utils";
+import { projectFollowCaps } from "@/lib/instagram-dashboard/follow-cap-projection";
+import { getAccountId, getInstagramAdminUserContext, readBoolean, readJsonBody, readNumber, readString, requireRelayOrAdmin, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,7 @@ const stringDefaults = {
   warmup_profile_code: "follow_default_v1",
   package_started_at: "",
   follow_limiting_reason: "Unknown",
+  follow_cap_source: "package_default",
   admin_lifecycle_status: "unknown",
   login_status: "unknown",
   provisioning_status: "unknown",
@@ -143,7 +145,9 @@ const numberDefaults = {
   manual_follow_day_cap: 120,
   manual_follow_session_cap: 20,
   package_follow_day_cap: 0,
+  package_follow_session_cap: 0,
   effective_follow_cap_today: 0,
+  effective_follow_session_cap: 0,
   effective_warmup_cap_today: 0,
   follow_day_remaining: 0,
   warmup_day: 0,
@@ -243,12 +247,15 @@ const runtimeProjectionKeys = [
   "do_unfollow_first",
   "commercial_package_label",
   "package_follow_day_cap",
+  "package_follow_session_cap",
   "manual_follow_day_cap",
   "manual_follow_session_cap",
   "effective_follow_cap_today",
+  "effective_follow_session_cap",
   "effective_warmup_cap_today",
   "follow_day_remaining",
   "follow_limiting_reason",
+  "follow_cap_source",
   "admin_lifecycle_status",
   "login_status",
   "provisioning_status",
@@ -661,30 +668,6 @@ function resolveWarmupFollowCap({
   return Math.min(day4Plus, packageCap);
 }
 
-function followLimitingReason({
-  effective,
-  packageCap,
-  manualDayCap,
-  warmupCap,
-  remaining,
-  warmupStatus,
-}: {
-  effective: number;
-  packageCap: number;
-  manualDayCap: number;
-  warmupCap: number;
-  remaining: number;
-  warmupStatus: string;
-}) {
-  if (effective <= 0 && remaining <= 0) return "limited_by_daily_remaining";
-  if (warmupStatus === "pending_package_start") return "warmup_pending_package_start";
-  if (effective === remaining && remaining < Math.min(packageCap, manualDayCap, warmupCap)) return "limited_by_daily_remaining";
-  if (effective === warmupCap && warmupCap < Math.min(packageCap, manualDayCap)) return "limited_by_warmup";
-  if (effective === manualDayCap && manualDayCap < Math.min(packageCap, warmupCap)) return "limited_by_manual_cap";
-  if (effective === packageCap && packageCap < Math.min(manualDayCap, warmupCap)) return "limited_by_package_cap";
-  return "ready";
-}
-
 async function withFollowRuntimeStatus(
   settings: SettingsPayload,
   supabase: ReturnType<typeof createSupabaseClient>,
@@ -702,6 +685,7 @@ async function withFollowRuntimeStatus(
     ? summary.effective_caps_preview as SupabaseRecord
     : null;
   const packageFollowCap = readJsonNumber(packageCaps, "follow_day", 0);
+  const packageFollowSessionCap = readJsonNumber(packageCaps, "follow_session", packageFollowCap);
   const manualDayCap = readNumber(settings.max_actions_per_day, packageFollowCap);
   const manualSessionCap = readNumber(settings.follow_limit, Math.min(packageFollowCap || 20, 20));
   const warmupEnabled = readJsonBoolean(preview, "warmup_enabled", readBoolean(settings.warmup_mode, true));
@@ -721,32 +705,31 @@ async function withFollowRuntimeStatus(
     packageCap: packageFollowCap,
   });
   const followsDoneToday = await countSuccessfulFollowsToday(supabase, settings.account_id);
-  const remaining = followsDoneToday === null ? manualDayCap : Math.max(0, manualDayCap - followsDoneToday);
-  const effective = Math.max(0, Math.min(
-    packageFollowCap || manualDayCap,
-    manualDayCap,
-    manualSessionCap,
-    warmupCap || manualDayCap,
-    remaining,
-  ));
+  const projection = projectFollowCaps({
+    packageDayCap: packageFollowCap || manualDayCap,
+    packageSessionCap: packageFollowSessionCap || manualSessionCap,
+    adminDayCap: manualDayCap,
+    adminSessionCap: manualSessionCap,
+    warmupApplied: warmupEnabled && warmupDay !== null,
+    warmupDayCap: warmupCap || null,
+    followedToday: followsDoneToday ?? 0,
+  });
   const warmupStatus = readString(summary?.warmup_status, "pending_package_start");
 
   return {
     ...settings,
     commercial_package_label: readString(summary?.commercial_package_label, "Package pending"),
     package_follow_day_cap: packageFollowCap,
+    package_follow_session_cap: packageFollowSessionCap,
     manual_follow_day_cap: manualDayCap,
     manual_follow_session_cap: manualSessionCap,
-    effective_follow_cap_today: effective,
-    follow_day_remaining: remaining,
-    follow_limiting_reason: followLimitingReason({
-      effective,
-      packageCap: packageFollowCap || manualDayCap,
-      manualDayCap,
-      warmupCap: warmupCap || manualDayCap,
-      remaining,
-      warmupStatus,
-    }),
+    effective_follow_cap_today: projection.effectiveDayCap,
+    effective_follow_session_cap: projection.effectiveSessionCap,
+    follow_day_remaining: projection.dailyRemaining,
+    follow_limiting_reason: warmupStatus === "pending_package_start"
+      ? "warmup_pending_package_start"
+      : projection.limitingReason,
+    follow_cap_source: projection.dailySource,
     warmup_enabled: warmupEnabled,
     warmup_status: warmupStatus,
     warmup_day: warmupDay ?? 0,
@@ -773,136 +756,12 @@ function preserveProtectedSettings(settings: SettingsPayload, existing: Settings
   };
 }
 
-function withFollowManualAliases(settings: SettingsPayload) {
+function withFollowManualAliases(settings: SettingsPayload): SettingsPayload {
   return {
     ...settings,
     max_actions_per_day: readNumber(settings.manual_follow_day_cap, readNumber(settings.max_actions_per_day, 120)),
     follow_limit: readNumber(settings.manual_follow_session_cap, readNumber(settings.follow_limit, 20)),
   };
-}
-
-function warmupAuditSummary(row: SupabaseRecord | null | undefined) {
-  if (!row) return {};
-  return {
-    warmup_enabled: readBoolean(row.warmup_enabled, true),
-    package_started_at: readString(row.package_started_at, ""),
-    warmup_profile_code: readString(row.warmup_profile_code, "follow_default_v1"),
-    day_1_follow_cap: readNumber(row.day_1_follow_cap, 10),
-    day_2_follow_cap: readNumber(row.day_2_follow_cap, 20),
-    day_3_follow_cap: readNumber(row.day_3_follow_cap, 40),
-    day_4_plus_follow_cap: readNumber(row.day_4_plus_follow_cap, 0),
-    status: readString(row.status, "pending_package_start"),
-  };
-}
-
-function changedWarmupFields(oldSummary: Record<string, unknown>, newSummary: Record<string, unknown>) {
-  return Object.keys(newSummary).filter((key) => oldSummary[key] !== newSummary[key]);
-}
-
-async function recordFollowWarmupAudit(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  input: {
-    accountId: string;
-    fieldsChanged: string[];
-    oldSummary: Record<string, unknown>;
-    newSummary: Record<string, unknown>;
-  },
-) {
-  await supabase.from("ig_action_logs").insert({
-    account_id: input.accountId,
-    run_id: null,
-    target_username: null,
-    action_type: "follow_warmup_settings_saved",
-    status: "success",
-    message: "Follow warmup settings saved from admin dashboard.",
-    payload: {
-      actor_type: "admin",
-      source_surface: "admin_dashboard",
-      domain: "follow_warmup",
-      fields_changed: input.fieldsChanged,
-      old_summary: input.oldSummary,
-      new_summary: input.newSummary,
-    },
-    created_at: new Date().toISOString(),
-  });
-}
-
-async function packageFollowCapForAccount(supabase: ReturnType<typeof createSupabaseClient>, accountId: string) {
-  const { data, error } = await supabase
-    .from("account_package_summary")
-    .select("package_caps")
-    .eq("account_id", accountId)
-    .limit(1)
-    .maybeSingle<SupabaseRecord>();
-  if (error) return null;
-  const caps = data?.package_caps;
-  if (!caps || typeof caps !== "object" || Array.isArray(caps)) return null;
-  return readNumber((caps as SupabaseRecord).follow_day, Number.NaN);
-}
-
-async function saveWarmupSettings(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  settings: SettingsPayload,
-) {
-  const packageFollowCap = await packageFollowCapForAccount(supabase, settings.account_id);
-  if (packageFollowCap === null || !Number.isFinite(packageFollowCap) || packageFollowCap < 1) {
-    return "Cannot save Follow warmup: commercial package Follow cap is unavailable.";
-  }
-  const packageCap = Number(packageFollowCap);
-
-  const day1 = readNumber(settings.day_1_follow_cap, 10);
-  const day2 = readNumber(settings.day_2_follow_cap, 20);
-  const day3 = readNumber(settings.day_3_follow_cap, 40);
-  const day4 = readNumber(settings.day_4_plus_follow_cap, packageCap);
-  if (!Number.isInteger(day1) || day1 < 0 || day1 > 10) return "Day 1 Follow warmup cap must be between 0 and 10.";
-  if (!Number.isInteger(day2) || day2 < 0 || day2 > 20) return "Day 2 Follow warmup cap must be between 0 and 20.";
-  if (!Number.isInteger(day3) || day3 < 0 || day3 > 40) return "Day 3 Follow warmup cap must be between 0 and 40.";
-  if (!Number.isInteger(day4) || day4 < 0 || day4 > packageCap) {
-    return `Day 4+ Follow warmup cap cannot exceed the package Follow cap (${packageCap}).`;
-  }
-
-  const { data: existing } = await supabase
-    .from("account_warmup_settings")
-    .select("warmup_enabled,package_started_at,warmup_profile_code,day_1_follow_cap,day_2_follow_cap,day_3_follow_cap,day_4_plus_follow_cap,status")
-    .eq("account_id", settings.account_id)
-    .limit(1)
-    .maybeSingle<SupabaseRecord>();
-  const status = existing?.package_started_at ? "active" : "pending_package_start";
-  const newSummary = {
-    warmup_enabled: readBoolean(settings.warmup_enabled, true),
-    package_started_at: readString(existing?.package_started_at, ""),
-    warmup_profile_code: "follow_default_v1",
-    day_1_follow_cap: day1,
-    day_2_follow_cap: day2,
-    day_3_follow_cap: day3,
-    day_4_plus_follow_cap: day4,
-    status,
-  };
-  const { error } = await supabase
-    .from("account_warmup_settings")
-    .upsert({
-      account_id: settings.account_id,
-      warmup_enabled: readBoolean(settings.warmup_enabled, true),
-      warmup_profile_code: "follow_default_v1",
-      day_1_follow_cap: day1,
-      day_2_follow_cap: day2,
-      day_3_follow_cap: day3,
-      day_4_plus_follow_cap: day4,
-      status,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "account_id" });
-  if (error) return `Could not save Follow warmup settings: ${error.message}`;
-  const oldSummary = warmupAuditSummary(existing);
-  const fieldsChanged = changedWarmupFields(oldSummary, newSummary);
-  if (fieldsChanged.length) {
-    await recordFollowWarmupAudit(supabase, {
-      accountId: settings.account_id,
-      fieldsChanged,
-      oldSummary,
-      newSummary,
-    }).catch(() => undefined);
-  }
-  return null;
 }
 
 async function withRuntimeStatuses(
@@ -1037,13 +896,28 @@ async function saveSettings(request: Request) {
         existing,
       ),
     );
-    const warmupError = await saveWarmupSettings(supabase, settings);
-    if (warmupError) return jsonError(warmupError, 400);
+    const actorContext = await getInstagramAdminUserContext();
+    const idempotencyKey = readString((body as Record<string, unknown>).idempotency_key, `admin:follow-settings:${accountId}:${Date.now()}`);
+    const { error: followSettingsError } = await supabase.rpc("save_account_follow_settings_v1", {
+      p_account_id: accountId,
+      p_actor_id: actorContext?.userId ?? null,
+      p_idempotency_key: idempotencyKey,
+      p_warmup_enabled: readBoolean(settings.warmup_enabled, true),
+      p_day_1_follow_cap: readNumber(settings.day_1_follow_cap, 10),
+      p_day_2_follow_cap: readNumber(settings.day_2_follow_cap, 20),
+      p_day_3_follow_cap: readNumber(settings.day_3_follow_cap, 40),
+      p_day_4_plus_follow_cap: readNumber(settings.day_4_plus_follow_cap, 0),
+      p_admin_day_cap: readNumber(settings.manual_follow_day_cap, readNumber(settings.max_actions_per_day, 120)),
+      p_admin_session_cap: readNumber(settings.manual_follow_session_cap, readNumber(settings.follow_limit, 20)),
+    });
+    if (followSettingsError) return jsonError(`Could not save Follow settings: ${followSettingsError.message}`, 400);
 
     const persistable = {
       ...persistableSettings(settings),
       updated_at: new Date().toISOString(),
-    } as SettingsPayload & { updated_at: string };
+    } as Record<string, SettingsValue> & { account_id: string; updated_at: string };
+    delete persistable.max_actions_per_day;
+    delete persistable.follow_limit;
     const { data, error } = await supabase
       .from("ig_account_settings")
       .update(persistable)

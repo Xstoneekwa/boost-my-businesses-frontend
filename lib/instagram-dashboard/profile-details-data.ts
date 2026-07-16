@@ -4,6 +4,7 @@ import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import type { SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 import { runReadinessNow } from "@/lib/instagram-dashboard/readiness-now";
 import { projectProfileDetailsTargetRow } from "@/lib/instagram-dashboard/profile-details-target-projection";
+import { actionCountersFromLogs } from "@/lib/instagram-dashboard/social-counters";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value;
@@ -48,15 +49,16 @@ function safeLogRow(row: SupabaseRecord) {
 
 function safeStatsSummary(runs: SupabaseRecord[], logs: SupabaseRecord[]) {
   const latestRun = runs[0] ?? null;
+  const counters = actionCountersFromLogs(logs);
   return {
     runs_count: runs.length,
     logs_count: logs.length,
     latest_run_id: latestRun ? readString(latestRun.id, readString(latestRun.run_id, "")) : null,
     latest_run_status: latestRun ? readString(latestRun.status, "unknown") : null,
     latest_run_started_at: latestRun ? readString(latestRun.started_at, readString(latestRun.created_at, "")) : null,
-    follows_today: logs.filter((row) => /follow/i.test(readString(row.action_type, ""))).length,
-    unfollows_today: logs.filter((row) => /unfollow/i.test(readString(row.action_type, ""))).length,
-    likes_today: logs.filter((row) => /like/i.test(readString(row.action_type, ""))).length,
+    follows_today: counters.follows,
+    unfollows_today: counters.unfollows,
+    likes_today: counters.likes,
   };
 }
 
@@ -72,6 +74,7 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
+  const dayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
   const [accountResult, settingsResult, filtersResult, dmSettingsResult, dmTemplatesResult, unfollowSettingsResult, sourceSettingsResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
     supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
@@ -83,7 +86,7 @@ export async function getProfileDetailsData(accountId: string) {
     supabase.from("ig_targets").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
     supabase.from("ct_target_verification_jobs").select("target_id,status,provider_status,attempt_count,next_attempt_at,last_error_code,updated_at").eq("account_id", accountId).limit(500),
     supabase.from("ig_runs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(50),
-    supabase.from("ig_action_logs").select("*").eq("account_id", accountId).order("created_at", { ascending: false }).limit(200),
+    supabase.from("ig_action_logs").select("*").eq("account_id", accountId).gte("created_at", dayStart).order("created_at", { ascending: false }).limit(10000),
     supabase.from("account_package_summary").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     getActivityLogData().catch(() => null),
     runReadinessNow(supabase, { accountId, audience: "admin", dryRun: true }).catch((error) => ({

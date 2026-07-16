@@ -8,6 +8,7 @@ import {
   TOTAL_INTERACTIONS_DEFINITION,
 } from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
+import { projectFollowCaps } from "@/lib/instagram-dashboard/follow-cap-projection";
 import {
   getActiveOperatorStopSuppression,
   getStopCleanupState,
@@ -233,15 +234,20 @@ function safeSettingsSummary(
   const packageFollowSessionCap = readJsonNumber(packageCaps, "follow_session", fallback.followSession) ?? fallback.followSession;
   const packageUnfollowCap = readJsonNumber(packageCaps, "unfollow_day", fallback.unfollowDay) ?? fallback.unfollowDay;
   const packageUnfollowSessionCap = readJsonNumber(packageCaps, "unfollow_session", fallback.unfollowSession) ?? fallback.unfollowSession;
-  const manualFollowDayCap = readNumber(settings, ["manual_follow_day_cap"], null);
-  const manualFollowSessionCap = readNumber(settings, ["manual_follow_session_cap"], null);
+  const manualFollowDayCap = readNumber(settings, ["manual_follow_day_cap", "max_actions_per_day"], null);
+  const manualFollowSessionCap = readNumber(settings, ["manual_follow_session_cap", "follow_limit"], null);
   const warmupApplied = readJsonBoolean(preview, "warmup_applied", false);
   const warmupFollowCap = readJsonNumber(preview, "warmup_follow_day_cap", null);
-  const effectiveFollowCap = Math.max(0, Math.min(
-    packageFollowCap,
-    manualFollowDayCap ?? packageFollowCap,
-    warmupApplied && warmupFollowCap !== null ? warmupFollowCap : packageFollowCap,
-  ));
+  const followCaps = projectFollowCaps({
+    packageDayCap: packageFollowCap,
+    packageSessionCap: packageFollowSessionCap,
+    adminDayCap: manualFollowDayCap,
+    adminSessionCap: manualFollowSessionCap,
+    warmupApplied,
+    warmupDayCap: warmupFollowCap,
+    followedToday: counters.follows,
+  });
+  const effectiveFollowCap = followCaps.effectiveDayCap;
   const effectiveUnfollowCap = Math.max(0, Math.min(packageUnfollowCap, readNumber(settings, ["manual_unfollow_day_cap"], packageUnfollowCap) ?? packageUnfollowCap));
   const likeCap = readNumber(settings, ["total_likes_limit", "like_per_day"], fallback.likeDay);
   const dmCap = readNumber(settings, ["max_dm_per_run", "dm_cap", "welcome_day_cap"], null);
@@ -302,8 +308,11 @@ function safeSettingsSummary(
       },
       effective: {
         followDay: effectiveFollowCap,
-        followSession: manualFollowSessionCap ?? packageFollowSessionCap,
-        source: manualFollowDayCap !== null ? "admin_override" : warmupApplied ? "warmup" : "package_default",
+        followSession: followCaps.effectiveSessionCap,
+        dailyRemaining: followCaps.dailyRemaining,
+        source: followCaps.dailySource,
+        sessionSource: followCaps.sessionSource,
+        limitingReason: followCaps.limitingReason,
       },
     },
     capsSource: packageSummary
