@@ -16,6 +16,11 @@ import {
   operatorStopRunControlProjection,
 } from "@/lib/instagram-dashboard/operator-stop-suppression";
 import { projectDeviceRuntimeState } from "@/lib/instagram-dashboard/device-runtime-projection";
+import {
+  projectFollowerDelta72h,
+  type FollowerDelta72hProjection,
+} from "@/lib/instagram-client/client-follower-growth-projection";
+import type { FollowerSnapshotRow } from "@/lib/instagram-client/follower-snapshot-contract";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -218,7 +223,7 @@ function safeSettingsSummary(
   settings: RecordValue | undefined,
   packageSummary: RecordValue | undefined,
   logs: RecordValue[],
-  accountRow: RecordValue | undefined,
+  followerDelta3d: FollowerDelta72hProjection,
   runs: RecordValue[] = [],
   interactionEvents: RecordValue[] = [],
 ) {
@@ -265,15 +270,7 @@ function safeSettingsSummary(
     currentRunStatus: readString(settings?.current_run_status, ""),
     countersToday: counters,
     capsToday,
-    followerDelta3d: {
-      value: null,
-      currentFollowers: readNumber(accountRow, ["followers_count"], null),
-      previousFollowers: null,
-      from: null,
-      to: new Date().toISOString(),
-      source: "pending_account_follower_snapshots",
-      freshness: "no_snapshot_table",
-    },
+    followerDelta3d,
     quotas: {
       follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
       unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
@@ -331,11 +328,11 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowRowsResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, followerSnapshotsResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowRowsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
       supabase.from("ig_action_logs").select("id,account_id,run_id,target_username,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
-      supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
+      supabase.from("ig_account_follower_snapshots").select("account_id,followers_count,captured_at,source,observation_kind").in("account_id", ids).order("captured_at", { ascending: true }),
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,cancel_requested_at").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
@@ -354,9 +351,12 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
     const packageByAccount = new Map(
       ((packageResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
     );
-    const accountById = new Map(
-      ((accountResult.data ?? []) as RecordValue[]).map((row) => [readString(row.id, ""), row]),
-    );
+    const followerSnapshotsByAccount = new Map<string, FollowerSnapshotRow[]>();
+    for (const row of (followerSnapshotsResult.data ?? []) as FollowerSnapshotRow[]) {
+      const id = readString(row.account_id, "");
+      if (!id) continue;
+      followerSnapshotsByAccount.set(id, [...(followerSnapshotsByAccount.get(id) ?? []), row]);
+    }
     const activeRequestByAccount = new Map<string, RecordValue>();
     for (const row of (requestsResult.data ?? []) as RecordValue[]) {
       const id = readString(row.account_id, "");
@@ -401,7 +401,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
         settingsByAccount.get(id),
         packageByAccount.get(id),
         logsByAccount.get(id) ?? [],
-        accountById.get(id),
+        projectFollowerDelta72h(followerSnapshotsByAccount.get(id) ?? []),
         (sessionRunsByAccount.get(id) ?? []).filter((row) => readString(row.id, "") !== runId),
         accountEvents.filter((row) => readString(row.run_id, "") !== runId),
       );
