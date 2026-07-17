@@ -211,23 +211,33 @@ export function interactionEventCounters(eventRows: RecordValue[]): ProfileSocia
 }
 
 export function verifiedUnfollowRowsAsInteractionEvents(rows: RecordValue[]): RecordValue[] {
-  return rows
-    .filter((row) => row.unfollowed === true && Boolean(readString(row.unfollowed_at, "")))
-    .map((row) => ({
-      id: `unfollow:${readString(row.id, "unknown")}`,
-      account_id: row.account_id,
-      run_id: readString(row.run_id, readString(row.last_run_id, "")) || null,
-      username: row.username,
+  const verified = new Map<string, RecordValue>();
+  for (const row of rows) {
+    const accountId = readString(row.account_id, "");
+    const runId = readString(row.run_id, readString(row.last_run_id, ""));
+    const username = normalizedTarget(row);
+    const unfollowedAt = readString(row.unfollowed_at, "");
+    const result = readString(row.unfollow_result, "").toLowerCase();
+    if (!accountId || !runId || !username || !unfollowedAt || result !== "success") continue;
+    const identity = `${accountId}:${runId}:unfollows:${username}`;
+    if (verified.has(identity)) continue;
+    verified.set(identity, {
+      id: `unfollow:${readString(row.id, identity)}`,
+      account_id: accountId,
+      run_id: runId,
+      username,
       event_type: "unfollow_verified",
       event_status: "success",
       interaction_type: "unfollow",
-      event_at: row.unfollowed_at,
-      created_at: row.unfollowed_at,
+      event_at: unfollowedAt,
+      created_at: unfollowedAt,
       payload: {
-        target_username: row.username,
+        target_username: username,
         evidence_source: "ig_interacted_users.unfollowed_at",
       },
-    }));
+    });
+  }
+  return [...verified.values()];
 }
 
 export function lastVerifiedInteractionAt(eventRows: RecordValue[]) {
@@ -311,15 +321,15 @@ export function dayKeyFromIso(value: unknown) {
 }
 
 export function interactionEventCountersByDay(eventRows: RecordValue[]) {
-  const byDay = new Map<string, ProfileSocialCounters>();
+  const rowsByDay = new Map<string, RecordValue[]>();
   for (const row of eventRows) {
     const date = dayKeyFromIso(row.event_at ?? row.created_at);
     if (!date) continue;
-    const current = byDay.get(date) ?? blankSocialCounters();
-    const next = reconcileSocialCounters(current, interactionEventCounters([row]));
-    byDay.set(date, next);
+    rowsByDay.set(date, [...(rowsByDay.get(date) ?? []), row]);
   }
-  return byDay;
+  return new Map(
+    [...rowsByDay.entries()].map(([date, rows]) => [date, interactionEventCounters(rows)]),
+  );
 }
 
 export function toStatsDaySocialCounters(counters: ProfileSocialCounters) {

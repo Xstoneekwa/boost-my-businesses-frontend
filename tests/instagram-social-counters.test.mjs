@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
+  interactionEventCountersByDay,
   reconcileSocialCounters,
   runTotalsCounters,
+  verifiedUnfollowRowsAsInteractionEvents,
 } from "../lib/instagram-dashboard/social-counters.ts";
 
 test("reconcileSocialCounters keeps post-follow likes from ig_runs and interaction events", () => {
@@ -63,4 +65,60 @@ test("canonical action identities remain isolated across accounts", () => {
 
   assert.equal(counters.follows, 2);
   assert.equal(counters.interactionsTotal, 2);
+});
+
+function verifiedUnfollow(index, overrides = {}) {
+  return {
+    id: `unfollow-${index}`,
+    account_id: "account-a",
+    run_id: "run-a",
+    last_run_id: "run-a",
+    username: `target-${index}`,
+    unfollowed_at: `2026-07-16T23:54:${String(index).padStart(2, "0")}.000Z`,
+    unfollow_result: "success",
+    interaction_status: "success",
+    ...overrides,
+  };
+}
+
+test("six verified canonical unfollows remain six live and after reconciliation", () => {
+  const events = verifiedUnfollowRowsAsInteractionEvents(
+    Array.from({ length: 6 }, (_, index) => verifiedUnfollow(index + 1)),
+  );
+  assert.equal(interactionEventCounters(events).unfollows, 6);
+});
+
+test("two same-day runs with eleven and six unfollows aggregate to seventeen", () => {
+  const firstRun = Array.from({ length: 11 }, (_, index) => verifiedUnfollow(index + 1, {
+    run_id: "run-first",
+    last_run_id: "run-first",
+    username: `first-${index + 1}`,
+    unfollowed_at: `2026-07-16T16:22:${String(index).padStart(2, "0")}.000Z`,
+  }));
+  const secondRun = Array.from({ length: 6 }, (_, index) => verifiedUnfollow(index + 1, {
+    run_id: "run-second",
+    last_run_id: "run-second",
+    username: `second-${index + 1}`,
+  }));
+  const byDay = interactionEventCountersByDay(
+    verifiedUnfollowRowsAsInteractionEvents([...firstRun, ...secondRun]),
+  );
+  assert.equal(byDay.get("2026-07-16")?.unfollows, 17);
+});
+
+test("verified unfollows deduplicate the same account run and target", () => {
+  const row = verifiedUnfollow(1);
+  const events = verifiedUnfollowRowsAsInteractionEvents([row, { ...row, id: "duplicate" }]);
+  assert.equal(events.length, 1);
+  assert.equal(interactionEventCounters(events).unfollows, 1);
+});
+
+test("unverified, uncorrelated and missing unfollow rows do not become actions", () => {
+  const events = verifiedUnfollowRowsAsInteractionEvents([
+    verifiedUnfollow(1, { unfollow_result: "failed" }),
+    verifiedUnfollow(2, { run_id: null, last_run_id: null }),
+    verifiedUnfollow(3, { unfollowed_at: null }),
+    verifiedUnfollow(4, { username: null }),
+  ]);
+  assert.equal(events.length, 0);
 });

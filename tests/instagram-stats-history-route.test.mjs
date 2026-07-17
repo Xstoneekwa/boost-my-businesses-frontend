@@ -6,7 +6,7 @@ const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/[ac
 
 test("stats history uses real social action logs and excludes operational logs", () => {
   assert.match(source, /ig_action_logs/);
-  assert.match(source, /socialActionKindFromLog/);
+  assert.match(source, /actionCountersFromLogs/);
   assert.match(source, /ig_interaction_events/);
   assert.doesNotMatch(source, /login_completed/);
   assert.doesNotMatch(source, /preflight_completed/);
@@ -32,4 +32,13 @@ test("stats history reconciles post-follow likes from ig_runs totals", () => {
   assert.match(source, /ig_runs\.total_\* reconciliation for post-follow likes/);
   assert.match(source, /ig_interaction_events/);
   assert.match(source, /post_like_success/);
+});
+
+test("stats history includes verified unfollows from the canonical persistence table", () => {
+  assert.match(source, /ig_interacted_users/);
+  assert.match(source, /unfollowed_at/);
+  assert.match(source, /unfollow_result/);
+  assert.match(source, /verifiedUnfollowRowsAsInteractionEvents/);
+  assert.match(source, /account\+run\+target/);
+  assert.doesNotMatch(source, /\.eq\("unfollowed", true\)/);
 });

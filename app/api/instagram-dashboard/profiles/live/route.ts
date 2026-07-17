@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at").in("account_id", accountIds).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_action_logs").select("id,account_id,run_id,target_username,action_type,status,payload,created_at").in("account_id", accountIds).gte("created_at", since).limit(10000),
       supabase.from("ig_interaction_events").select("id,account_id,run_id,username,event_type,event_status,event_at,created_at,payload").in("account_id", accountIds).gte("event_at", since).lte("event_at", now).limit(10000),
-      supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed,unfollowed_at").in("account_id", accountIds).eq("unfollowed", true).gte("unfollowed_at", since).lte("unfollowed_at", now).limit(10000),
+      supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", accountIds).eq("unfollow_result", "success").gte("unfollowed_at", since).lte("unfollowed_at", now).limit(10000),
       supabase.from("account_dashboard_actions").select("id,account_id,action_type,status,blocking_campaign,created_at,dedupe_key,metadata,metadata_safe").in("account_id", accountIds).in("status", ["pending", "acknowledged", "pending_verification"]).limit(1000),
       supabase.from("ig_account_follower_snapshots").select("id,account_id,followers_count,captured_at,source,observation_kind,created_at").in("account_id", accountIds).order("captured_at", { ascending: false }).limit(10000),
     ]);

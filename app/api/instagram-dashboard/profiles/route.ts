@@ -340,7 +340,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_interaction_events").select("id,account_id,run_id,username,event_type,event_status,interaction_type,event_at,created_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
-      supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed,unfollowed_at").in("account_id", ids).eq("unfollowed", true).gte("unfollowed_at", since).limit(10000),
+      supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
