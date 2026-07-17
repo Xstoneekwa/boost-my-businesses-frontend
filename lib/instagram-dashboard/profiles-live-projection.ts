@@ -7,6 +7,7 @@ import {
   projectVerifiedRunCounters,
   reconcileSocialCounters,
   runTotalsCounters,
+  verifiedUnfollowRowsAsInteractionEvents,
 } from "./social-counters.ts";
 
 type Row = Record<string, unknown>;
@@ -81,13 +82,17 @@ export function projectProfilesLive(input: {
   runs: Row[];
   actionLogs: Row[];
   interactionEvents: Row[];
+  unfollowRows?: Row[];
   dashboardActions: Row[];
   followerSnapshots: FollowerSnapshotRow[];
 }) {
   const requestsByAccount = grouped(input.requests);
   const runsByAccount = grouped(input.runs);
   const logsByAccount = grouped(input.actionLogs);
-  const eventsByAccount = grouped(input.interactionEvents);
+  const eventsByAccount = grouped([
+    ...input.interactionEvents,
+    ...verifiedUnfollowRowsAsInteractionEvents(input.unfollowRows ?? []),
+  ]);
   const actionsByAccount = grouped(input.dashboardActions);
   const snapshotsByAccount = grouped(input.followerSnapshots);
 
@@ -146,7 +151,7 @@ export function projectProfilesLive(input: {
       runControlLabel: activeProjection.stopping ? "Stopping…" : null,
       runtimeIndicator: runtimeIndicator(activeRequest, activeRun, latestRun),
       currentRunCounters: counters,
-      liveSupportedKinds: ["follow", "like", "dm"],
+      liveSupportedKinds: ["follow", "unfollow", "like", "dm"],
       countersToday: counters.projectedDisplayCount,
       interactionsToday: counters.projectedDisplayCount.interactionsTotal,
       currentBlocker: currentBlocker ? {

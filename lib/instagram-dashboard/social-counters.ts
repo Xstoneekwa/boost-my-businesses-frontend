@@ -210,6 +210,26 @@ export function interactionEventCounters(eventRows: RecordValue[]): ProfileSocia
   return withInteractionsTotal(counters);
 }
 
+export function verifiedUnfollowRowsAsInteractionEvents(rows: RecordValue[]): RecordValue[] {
+  return rows
+    .filter((row) => row.unfollowed === true && Boolean(readString(row.unfollowed_at, "")))
+    .map((row) => ({
+      id: `unfollow:${readString(row.id, "unknown")}`,
+      account_id: row.account_id,
+      run_id: readString(row.run_id, readString(row.last_run_id, "")) || null,
+      username: row.username,
+      event_type: "unfollow_verified",
+      event_status: "success",
+      interaction_type: "unfollow",
+      event_at: row.unfollowed_at,
+      created_at: row.unfollowed_at,
+      payload: {
+        target_username: row.username,
+        evidence_source: "ig_interacted_users.unfollowed_at",
+      },
+    }));
+}
+
 export function lastVerifiedInteractionAt(eventRows: RecordValue[]) {
   let latest = "";
   for (const row of eventRows) {

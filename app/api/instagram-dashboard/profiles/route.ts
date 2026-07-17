@@ -5,6 +5,7 @@ import {
   projectVerifiedRunCounters,
   reconcileSocialCounters,
   runTotalsCounters,
+  verifiedUnfollowRowsAsInteractionEvents,
   TOTAL_INTERACTIONS_DEFINITION,
 } from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
@@ -330,7 +331,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowRowsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
       supabase.from("ig_action_logs").select("id,account_id,run_id,target_username,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
@@ -339,6 +340,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_interaction_events").select("id,account_id,run_id,username,event_type,event_status,interaction_type,event_at,created_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
+      supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed,unfollowed_at").in("account_id", ids).eq("unfollowed", true).gte("unfollowed_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -380,7 +382,10 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       latestRunByAccount.set(id, row);
     }
     const interactionEventsByAccount = new Map<string, RecordValue[]>();
-    for (const row of (interactionEventsResult.data ?? []) as RecordValue[]) {
+    for (const row of [
+      ...((interactionEventsResult.data ?? []) as RecordValue[]),
+      ...verifiedUnfollowRowsAsInteractionEvents((unfollowRowsResult.data ?? []) as RecordValue[]),
+    ]) {
       const id = readString(row.account_id, "");
       if (!id) continue;
       interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
