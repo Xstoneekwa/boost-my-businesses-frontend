@@ -684,8 +684,8 @@ export async function activateClientAccountEntitlementFromCheckout(
       };
     }
 
-    let scopedClientId = checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
-    let scopedAuthUserId = checkoutContext === "public_new_workspace" ? null : input.authUserId?.trim() || null;
+    const scopedClientId = checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
+    const scopedAuthUserId = checkoutContext === "public_new_workspace" ? null : input.authUserId?.trim() || null;
     let resumeClientId: string | null = null;
     let resumeExistingCheckoutSessionId: string | null = null;
     let resumeExistingEntitlementId: string | null = null;
@@ -777,9 +777,13 @@ export async function activateClientAccountEntitlementFromCheckout(
             });
           if (!authResult.ok) {
             return activationFailure(
-              authResult.code === "auth_user_exists_no_workspace" || authResult.code === "password_verification_failed"
-                ? (authResult.code === "password_verification_failed" ? 401 : 409)
-                : 503,
+              authResult.code === "password_verification_failed"
+                ? 401
+                : authResult.code === "auth_user_exists_no_workspace"
+                  || authResult.code === "existing_auth_requires_verified_access"
+                  || authResult.code === "existing_workspace_use_choose_plan"
+                  ? 409
+                  : 503,
               authResult.code,
               { messageFr: authResult.messageFr, messageEn: authResult.messageEn },
             );

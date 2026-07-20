@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logCheckoutActivation } from "./checkout-activation-log.ts";
 import { inspectSimulatedCheckoutProvisioning } from "./checkout-provisioning-state.ts";
-import { resolveIncompleteCheckoutResume } from "./checkout-orphan-resume.ts";
+import {
+  resolveIncompleteCheckoutResume,
+  verifyPurchaserPasswordControl,
+} from "./checkout-orphan-resume.ts";
 
 type Row = Record<string, unknown>;
 
@@ -23,6 +26,7 @@ export type SimulatedPublicAuthResult =
       | "auth_user_exists_no_workspace"
       | "auth_user_create_failed"
       | "checkout_storage_unavailable"
+      | "existing_auth_requires_verified_access"
       | "password_verification_failed"
       | "existing_workspace_use_choose_plan";
     messageFr: string;
@@ -101,6 +105,82 @@ const AUTH_EXISTS_WITH_WORKSPACE_MESSAGES = {
   messageEn:
     "A client workspace already exists for this email address. Sign in to access your workspace.",
 };
+
+const AUTH_EXISTS_REQUIRES_VERIFIED_ACCESS_MESSAGES = {
+  messageFr:
+    "Un compte existe déjà pour cette adresse e-mail. Connectez-vous avec son mot de passe actuel avant de continuer.",
+  messageEn:
+    "An account already exists for this email. Sign in with its current password before continuing.",
+};
+
+export async function authorizeStripeFirstPurchaseAuth(
+  supabase: SupabaseClient,
+  input: { email: string; password?: string | null },
+) {
+  const email = input.email.trim().toLowerCase();
+  const lookup = await findAuthUserIdByEmail(supabase, email);
+  if (!lookup.ok) {
+    return {
+      ok: false as const,
+      code: "checkout_storage_unavailable" as const,
+      status: 503,
+      messageEn: "Checkout identity verification is temporarily unavailable.",
+    };
+  }
+  if (!lookup.authUserId) {
+    return { ok: true as const, mode: "new_user" as const, authUserId: null };
+  }
+
+  const tenantLookup = await authUserHasTenant(supabase, lookup.authUserId);
+  if (!tenantLookup.ok) {
+    return {
+      ok: false as const,
+      code: "checkout_storage_unavailable" as const,
+      status: 503,
+      messageEn: "Checkout identity verification is temporarily unavailable.",
+    };
+  }
+  if (tenantLookup.hasTenant) {
+    return {
+      ok: false as const,
+      code: "existing_workspace_use_choose_plan" as const,
+      status: 409,
+      messageEn: AUTH_EXISTS_WITH_WORKSPACE_MESSAGES.messageEn,
+    };
+  }
+  if (!input.password) {
+    return {
+      ok: false as const,
+      code: "existing_auth_requires_verified_access" as const,
+      status: 409,
+      messageEn: AUTH_EXISTS_REQUIRES_VERIFIED_ACCESS_MESSAGES.messageEn,
+    };
+  }
+
+  const passwordProof = await verifyPurchaserPasswordControl({
+    email,
+    password: input.password,
+    expectedAuthUserId: lookup.authUserId,
+  });
+  if (!passwordProof.ok) {
+    return {
+      ok: false as const,
+      code: passwordProof.reason === "storage_error"
+        ? "checkout_storage_unavailable" as const
+        : "existing_auth_requires_verified_access" as const,
+      status: passwordProof.reason === "storage_error" ? 503 : 409,
+      messageEn: passwordProof.reason === "storage_error"
+        ? "Checkout identity verification is temporarily unavailable."
+        : AUTH_EXISTS_REQUIRES_VERIFIED_ACCESS_MESSAGES.messageEn,
+    };
+  }
+
+  return {
+    ok: true as const,
+    mode: "existing_user_verified" as const,
+    authUserId: lookup.authUserId,
+  };
+}
 
 export async function resolveSimulatedPublicAuth(
   supabase: SupabaseClient,
@@ -215,20 +295,27 @@ export async function resolveStripePaidPublicAuth(
   },
 ): Promise<SimulatedPublicAuthResult> {
   const email = input.email.trim().toLowerCase();
-  const lookup = await findAuthUserIdByEmail(supabase, email);
-  if (!lookup.ok) {
+  const authorization = await authorizeStripeFirstPurchaseAuth(supabase, {
+    email,
+    password: input.password,
+  });
+  if (!authorization.ok) {
     return {
       ok: false,
-      code: "checkout_storage_unavailable",
-      messageFr: "L'activation de test est temporairement indisponible. Réessayez dans quelques instants.",
-      messageEn: "Test activation is temporarily unavailable. Please try again shortly.",
+      code: authorization.code,
+      messageFr: authorization.code === "existing_workspace_use_choose_plan"
+        ? AUTH_EXISTS_WITH_WORKSPACE_MESSAGES.messageFr
+        : authorization.code === "existing_auth_requires_verified_access"
+          ? AUTH_EXISTS_REQUIRES_VERIFIED_ACCESS_MESSAGES.messageFr
+          : "L'activation de test est temporairement indisponible. Réessayez dans quelques instants.",
+      messageEn: authorization.messageEn,
     };
   }
 
-  if (lookup.authUserId) {
+  if (authorization.mode === "existing_user_verified") {
     return {
       ok: true,
-      authUserId: lookup.authUserId,
+      authUserId: authorization.authUserId,
       createdAuth: false,
       createdClient: false,
       resumedOrphan: false,

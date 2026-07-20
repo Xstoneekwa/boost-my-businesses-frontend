@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { buildCommercialQuote } from "../pricing.ts";
+import { authorizeStripeFirstPurchaseAuth } from "../checkout-auth.ts";
 import {
   requireCheckoutSignupCredentialSecret,
   storeCheckoutPendingSignupCredential,
@@ -362,6 +363,22 @@ export async function createStripeSubscriptionCheckoutSession(
       code: readString(simulationAccess.reason, "authorization_required"),
       messageEn: simulationAccess.messageEn ?? "Checkout authorization is required.",
     };
+  }
+
+  // Do not disclose Auth collisions until the scoped production-test email gate passes.
+  if (flowType === "first_purchase") {
+    const authAuthorization = await authorizeStripeFirstPurchaseAuth(supabase, {
+      email,
+      password: input.password,
+    });
+    if (!authAuthorization.ok) {
+      return {
+        ok: false,
+        status: authAuthorization.status,
+        code: authAuthorization.code,
+        messageEn: authAuthorization.messageEn,
+      };
+    }
   }
 
   const quote = commercialMode === "full_cycle"
