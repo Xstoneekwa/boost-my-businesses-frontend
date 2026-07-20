@@ -105,3 +105,40 @@ Parcours admin-only pour un tenant interne non facturable sur la DB prod (`zgafn
 ## Post-add-account (inchangé ce patch)
 
 Ajout CT → Check Readiness → Connect → compte prêt. Package/outreach appliqués via `account_commercial_packages` + addons depuis l’entitlement consommé.
+
+## Checkout Stripe Test physique et handoff — 2026-07-20
+
+Le troisième tenant payant Stripe Test a effectué un checkout initial Growth
+12 mois de 1 323 EUR. Le customer, la subscription et l'invoice Test ont été
+créés, le paiement a réussi et les webhooks signés ont terminé le fulfillment.
+
+L'entitlement canonique après ce premier achat est
+`entitlement_reserved` avec `account_id=null`. Aucun compte Instagram n'est
+créé par le checkout.
+
+Le défaut post-checkout venait uniquement de la projection de readiness : le
+polling attendait un entitlement activé et refusait l'état réservé pourtant
+canonique. Le prédicat partagé `hasCheckoutEntitlementReadyForLogin()` accepte
+maintenant l'état réservé lorsque le checkout, le fulfillment Test, l'Auth,
+l'ownership tenant/client et l'entitlement unique correspondent exactement.
+Toute ambiguïté, duplication, preuve Live ou incohérence continue d'échouer
+fermée.
+
+Smoke production sur la session Test existante :
+
+```text
+commercial_status=checkout_paid
+ready_for_login=true
+login_path=/instagram-login
+```
+
+Aucune nouvelle session Stripe, aucun replay webhook, aucun recovery et aucune
+mutation manuelle métier n'ont été utilisés. La redirection navigateur reste à
+valider physiquement par Liam. Stripe Live reste non implémenté et non validé
+dans ce checkpoint.
+
+Voir :
+
+- [État Frontend / Stripe](frontend-stripe-handover/01-current-state.md)
+- [Checkout et webhooks](frontend-stripe-handover/05-checkout-and-webhooks.md)
+- [Matrice de preuves](frontend-stripe-handover/09-test-evidence-matrix.md)

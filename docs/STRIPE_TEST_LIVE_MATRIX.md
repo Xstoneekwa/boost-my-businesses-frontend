@@ -1,6 +1,6 @@
 # Stripe Test / Live Matrix
 
-> Canonical billing snapshot verified on **2026-07-14** from Git, controlled
+> Canonical billing snapshot verified on **2026-07-20** from Git, controlled
 > documentation and read-only production Supabase queries. No Stripe secret,
 > customer data or private URL is recorded here.
 
@@ -10,15 +10,40 @@
 |---|---|---|
 | Server-side checkout implementation | Implemented and pushed | Code path is intentionally Test-gated |
 | Component price catalog | 20 active `environment=test` rows | **UNKNOWN / NOT CONFIGURED BY PROOF** |
-| First-purchase checkout | 2 fulfilled attempts, `livemode=false` | No live attempt proven |
-| Subscriptions | 2 active `full_cycle`, `livemode=false` | No live subscription proven |
+| First-purchase checkout | 3 fulfilled attempts, `livemode=false` | No live attempt proven |
+| Subscriptions | 3 paid Test first-purchase checkouts; current entitlement state verified per checkout | No live subscription proven |
 | Signed webhook fulfillment | Implemented and tested in Test | **NOT ENABLED OR VALIDATED** |
 | Billing portal | Test contract implemented | **NOT VALIDATED** |
 | Plan change | Test implementation documented | Live path **NOT VALIDATED** |
 | Production launch authorization | Test only | **NOT GRANTED** |
 
-Sources: commit `65c58f1` ancestry, Supabase production tables, and the linked
-Stripe documents; verified 2026-07-14.
+Sources: commit `65c58f1` ancestry, handoff commit `b0d459f3`, Supabase
+production tables, production deployment `dpl_7RgAHghWTTYDEVzFThN7mGfeZpRU`,
+and the linked Stripe documents; verified 2026-07-20.
+
+## July 20 physical Test checkout checkpoint
+
+- Growth, 12 months, EUR 1,323 was paid in Stripe Test.
+- Stripe Test customer, subscription and invoice were created.
+- Signed webhook fulfillment completed without manual replay or recovery.
+- Auth, tenant/client ownership and the uniquely linked entitlement are
+  consistent.
+- The canonical entitlement is `entitlement_reserved` with `account_id=null`.
+- No Instagram account exists yet.
+- The corrected production handoff returns `checkout_paid`,
+  `ready_for_login=true` and `/instagram-login` for the existing paid Test
+  session.
+- Automatic redirect is ready for Liam's physical check; it is not yet recorded
+  as physically observed.
+- Stripe Live remains **NOT IMPLEMENTED OR VALIDATED** by this checkpoint.
+
+| Capability | Implemented | Automated tested | Stripe Test validated | Stripe Live validated |
+|---|---|---|---|---|
+| Initial checkout | Yes | Yes | Yes | No |
+| Reserved entitlement handoff | Yes after patch | Yes | Yes after smoke | No |
+| Redirect to login | Yes | Yes | Ready for Liam / not physical yet | No |
+| Live checkout | No | No | N/A | No |
+| Server gate for 15 CT | No | No | No | No |
 
 ## Locked commercial model
 
@@ -70,3 +95,6 @@ Until every gate is proven, Live status remains **NOT ENABLED OR VALIDATED**.
 - [stripe-per-entitlement-billing.md](stripe-per-entitlement-billing.md)
 - [commercial-checkout.md](commercial-checkout.md)
 - [commercial-per-account-plan-change.md](commercial-per-account-plan-change.md)
+- [Frontend / Stripe current state](frontend-stripe-handover/01-current-state.md)
+- [Checkout and webhooks](frontend-stripe-handover/05-checkout-and-webhooks.md)
+- [Test evidence matrix](frontend-stripe-handover/09-test-evidence-matrix.md)
