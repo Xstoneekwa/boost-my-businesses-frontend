@@ -332,7 +332,7 @@ export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }
               />
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
                 <Link
-                  href="/restaurant-forgot-password?returnTo=/instagram-login"
+                  href="/instagram-forgot-password"
                   style={{
                     background: GRAD,
                     WebkitBackgroundClip: "text",
