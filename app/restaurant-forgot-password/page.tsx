@@ -4,14 +4,13 @@ import type { CSSProperties, FormEvent } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { buildClientPasswordResetRedirect, normalizeClientLoginReturnPath } from "@/lib/commercial/client-auth-recovery";
 import RestaurantLanguageToggle, { useRestaurantLanguage } from "@/components/restaurant-language/RestaurantLanguageToggle";
 import { restaurantCommonCopy } from "@/lib/restaurant-language";
 
 const AC = "#F59E0B";
 const AC_TEXT = "#FBBF24";
 const AC_BORDER = "rgba(245,158,11,0.24)";
-const PASSWORD_RESET_REDIRECT_TO = "http://localhost:3000/restaurant-reset-password";
-
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background:
@@ -70,8 +69,11 @@ export default function RestaurantForgotPasswordPage() {
 
     try {
       const supabase = createSupabaseBrowserClient();
+      const returnTo = normalizeClientLoginReturnPath(
+        new URLSearchParams(window.location.search).get("returnTo"),
+      );
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: PASSWORD_RESET_REDIRECT_TO,
+        redirectTo: buildClientPasswordResetRedirect(window.location.origin, returnTo),
       });
 
       if (error) throw new Error(error.message);

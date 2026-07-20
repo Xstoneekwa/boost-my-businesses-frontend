@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { normalizeClientLoginReturnPath } from "@/lib/commercial/client-auth-recovery";
 import RestaurantLanguageToggle, { useRestaurantLanguage } from "@/components/restaurant-language/RestaurantLanguageToggle";
 import { restaurantCommonCopy } from "@/lib/restaurant-language";
 
@@ -130,6 +131,7 @@ function RestaurantResetPasswordContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hashSearch, setHashSearch] = useState("");
   const hashParams = useMemo(() => new URLSearchParams(hashSearch), [hashSearch]);
+  const returnTo = normalizeClientLoginReturnPath(searchParams.get("returnTo"));
 
   useEffect(() => {
     setHashSearch(window.location.hash.replace(/^#/, ""));
@@ -219,7 +221,7 @@ function RestaurantResetPasswordContent() {
                 <div style={{ border: "1px solid rgba(248,113,113,0.30)", background: "rgba(248,113,113,0.08)", borderRadius: 14, padding: 14, marginBottom: 18 }}>
                   <p style={{ color: "#FCA5A5", fontSize: 14, lineHeight: 1.6 }}>{t.reset.invalid}</p>
                 </div>
-                <Link href="/restaurant-login" style={{ display: "inline-flex", width: "100%", minHeight: 52, alignItems: "center", justifyContent: "center", border: `1px solid ${AC_BORDER}`, background: AC, color: "#160b02", borderRadius: 999, fontSize: 14, fontWeight: 900, textDecoration: "none", boxShadow: "0 8px 32px rgba(245,158,11,0.28)" }}>
+                <Link href={returnTo} style={{ display: "inline-flex", width: "100%", minHeight: 52, alignItems: "center", justifyContent: "center", border: `1px solid ${AC_BORDER}`, background: AC, color: "#160b02", borderRadius: 999, fontSize: 14, fontWeight: 900, textDecoration: "none", boxShadow: "0 8px 32px rgba(245,158,11,0.28)" }}>
                   {t.backToLogin}
                 </Link>
               </>
@@ -230,7 +232,7 @@ function RestaurantResetPasswordContent() {
                 <div style={{ border: `1px solid ${AC_BORDER}`, background: "rgba(245,158,11,0.08)", borderRadius: 14, padding: 14, marginBottom: 18 }}>
                   <p style={{ color: AC_TEXT, fontSize: 14, lineHeight: 1.6 }}>{t.reset.success}</p>
                 </div>
-                <Link href="/restaurant-login" style={{ display: "inline-flex", width: "100%", minHeight: 52, alignItems: "center", justifyContent: "center", border: `1px solid ${AC_BORDER}`, background: AC, color: "#160b02", borderRadius: 999, fontSize: 14, fontWeight: 900, textDecoration: "none", boxShadow: "0 8px 32px rgba(245,158,11,0.28)" }}>
+                <Link href={returnTo} style={{ display: "inline-flex", width: "100%", minHeight: 52, alignItems: "center", justifyContent: "center", border: `1px solid ${AC_BORDER}`, background: AC, color: "#160b02", borderRadius: 999, fontSize: 14, fontWeight: 900, textDecoration: "none", boxShadow: "0 8px 32px rgba(245,158,11,0.28)" }}>
                   {t.backToLogin}
                 </Link>
               </>
