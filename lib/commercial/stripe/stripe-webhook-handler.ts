@@ -3,8 +3,10 @@ import type Stripe from "stripe";
 import { claimStripeWebhookEvent, finishStripeWebhookEvent } from "./stripe-webhook-ledger.ts";
 import {
   findStripeCheckoutAttemptByStripeSessionId,
+  findStripeCheckoutAttemptByCommercialSessionId,
   markStripeCheckoutAttemptAwaitingPayment,
   markStripeCheckoutAttemptPaymentConfirmed,
+  type StripeCheckoutAttemptRow,
 } from "./stripe-checkout-attempts.ts";
 import {
   fulfillStripeCheckoutAttempt,
@@ -50,20 +52,96 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
-async function hasActivatedCheckoutEntitlement(
+const CHECKOUT_HANDOFF_ENTITLEMENT_STATUSES = new Set([
+  "entitlement_reserved",
+  "active",
+  "entitlement_consumed",
+]);
+
+async function hasCheckoutEntitlementReadyForLogin(
   supabase: SupabaseClient,
-  checkoutSessionId: string,
-  clientId: string,
+  input: {
+    checkoutSessionId: string;
+    clientId: string;
+    authUserId: string;
+    attempt: StripeCheckoutAttemptRow;
+  },
 ) {
-  if (!checkoutSessionId || !clientId) return false;
-  const { data } = await supabase
-    .from("client_account_entitlements")
-    .select("id,status,client_id,checkout_session_id")
-    .eq("checkout_session_id", checkoutSessionId)
-    .eq("client_id", clientId)
-    .in("status", ["active", "entitlement_consumed"])
-    .limit(1);
-  return Array.isArray(data) && data.length > 0;
+  const { checkoutSessionId, clientId, authUserId, attempt } = input;
+  if (!checkoutSessionId || !clientId || !authUserId) return false;
+  if (
+    attempt.flow_type !== "first_purchase"
+    || attempt.livemode
+    || !attempt.stripe_checkout_session_id.startsWith("cs_test_")
+    || !isStripeAttemptFulfilled(attempt.status)
+    || !attempt.fulfilled_at
+    || Boolean(attempt.fulfillment_error_redacted)
+    || attempt.commercial_checkout_session_id !== checkoutSessionId
+    || (attempt.client_id && attempt.client_id !== clientId)
+    || (attempt.auth_user_id && attempt.auth_user_id !== authUserId)
+  ) {
+    return false;
+  }
+
+  const [authUser, client, tenantUser, clientUser, entitlements] = await Promise.all([
+    supabase.auth.admin.getUserById(authUserId),
+    supabase.from("clients").select("id,status").eq("id", clientId).maybeSingle<Row>(),
+    supabase
+      .from("tenant_users")
+      .select("user_id,tenant_id,role")
+      .eq("user_id", authUserId)
+      .eq("tenant_id", clientId)
+      .maybeSingle<Row>(),
+    supabase
+      .from("client_users")
+      .select("id,client_id,auth_user_id,role,status")
+      .eq("client_id", clientId)
+      .eq("auth_user_id", authUserId)
+      .maybeSingle<Row>(),
+    supabase
+      .from("client_account_entitlements")
+      .select("id,status,client_id,checkout_session_id,account_id,plan_key,billing_interval_months")
+      .eq("checkout_session_id", checkoutSessionId)
+      .eq("client_id", clientId)
+      .limit(2),
+  ]);
+
+  if (authUser.error || authUser.data.user?.id !== authUserId) return false;
+  if (client.error || client.data?.id !== clientId || readString(client.data.status) !== "active") return false;
+  if (
+    tenantUser.error
+    || tenantUser.data?.user_id !== authUserId
+    || tenantUser.data?.tenant_id !== clientId
+    || readString(tenantUser.data.role) !== "tenant"
+  ) {
+    return false;
+  }
+  if (
+    clientUser.error
+    || !clientUser.data?.id
+    || clientUser.data.client_id !== clientId
+    || clientUser.data.auth_user_id !== authUserId
+    || readString(clientUser.data.role) !== "owner"
+    || readString(clientUser.data.status) !== "active"
+  ) {
+    return false;
+  }
+  if (entitlements.error || !Array.isArray(entitlements.data) || entitlements.data.length !== 1) return false;
+
+  const entitlement = entitlements.data[0] as Row;
+  const entitlementId = readString(entitlement.id);
+  const entitlementStatus = readString(entitlement.status);
+  if (
+    !entitlementId
+    || readString(entitlement.client_id) !== clientId
+    || readString(entitlement.checkout_session_id) !== checkoutSessionId
+    || !CHECKOUT_HANDOFF_ENTITLEMENT_STATUSES.has(entitlementStatus)
+    || (attempt.client_account_entitlement_id && attempt.client_account_entitlement_id !== entitlementId)
+    || (entitlementStatus === "entitlement_reserved" && Boolean(readString(entitlement.account_id)))
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export async function verifyStripeWebhookSignature(
@@ -500,16 +578,23 @@ export async function getSafeStripeSessionStatus(
       const commercialStatus = readString(data.status);
       const authUserId = readString(data.auth_user_id);
       const clientId = readString(data.client_id);
-      const entitlementReady = await hasActivatedCheckoutEntitlement(
-        supabase,
-        readString(data.id) || input.internalCheckoutSessionId,
+      const checkoutSessionId = readString(data.id) || input.internalCheckoutSessionId;
+      const attempt = await findStripeCheckoutAttemptByCommercialSessionId(supabase, checkoutSessionId);
+      const entitlementReady = attempt.ok && await hasCheckoutEntitlementReadyForLogin(supabase, {
+        checkoutSessionId,
         clientId,
-      );
+        authUserId,
+        attempt: attempt.attempt,
+      });
       return {
         ok: true as const,
         commercialStatus,
         activatedAt: readString(data.activated_at) || null,
-        readyForLogin: commercialStatus === "checkout_paid" && Boolean(authUserId) && Boolean(clientId) && entitlementReady,
+        readyForLogin: commercialStatus === "checkout_paid"
+          && Boolean(readString(data.activated_at))
+          && Boolean(authUserId)
+          && Boolean(clientId)
+          && entitlementReady,
       };
     }
   }
@@ -517,10 +602,13 @@ export async function getSafeStripeSessionStatus(
     const attempt = await findStripeCheckoutAttemptByStripeSessionId(supabase, input.stripeCheckoutSessionId);
     if (attempt.ok) {
       const commercialStatus = mapAttemptStatusToCommercialStatus(attempt.attempt.status);
-      let authUserId = readString(attempt.attempt.auth_user_id);
-      let clientId = readString(attempt.attempt.client_id);
+      const attemptAuthUserId = readString(attempt.attempt.auth_user_id);
+      const attemptClientId = readString(attempt.attempt.client_id);
+      let authUserId = attemptAuthUserId;
+      let clientId = attemptClientId;
       let canonicalSessionActivatedAt: string | null = null;
       let canonicalSessionStatus = "";
+      let canonicalIdentityMatches = true;
       const commercialCheckoutSessionId = readString(attempt.attempt.commercial_checkout_session_id);
       if (commercialCheckoutSessionId) {
         const { data } = await supabase
@@ -530,16 +618,22 @@ export async function getSafeStripeSessionStatus(
           .maybeSingle<Row>();
         canonicalSessionStatus = readString(data?.status);
         canonicalSessionActivatedAt = readString(data?.activated_at) || null;
-        authUserId ||= readString(data?.auth_user_id);
-        clientId ||= readString(data?.client_id);
+        const checkoutAuthUserId = readString(data?.auth_user_id);
+        const checkoutClientId = readString(data?.client_id);
+        canonicalIdentityMatches = (!attemptAuthUserId || !checkoutAuthUserId || attemptAuthUserId === checkoutAuthUserId)
+          && (!attemptClientId || !checkoutClientId || attemptClientId === checkoutClientId);
+        authUserId ||= checkoutAuthUserId;
+        clientId ||= checkoutClientId;
       }
-      const entitlementReady = await hasActivatedCheckoutEntitlement(
-        supabase,
-        commercialCheckoutSessionId,
+      const entitlementReady = await hasCheckoutEntitlementReadyForLogin(supabase, {
+        checkoutSessionId: commercialCheckoutSessionId,
         clientId,
-      );
+        authUserId,
+        attempt: attempt.attempt,
+      });
       const canonicalSessionReady = canonicalSessionStatus === "checkout_paid"
         && Boolean(canonicalSessionActivatedAt)
+        && canonicalIdentityMatches
         && Boolean(authUserId)
         && Boolean(clientId)
         && entitlementReady;

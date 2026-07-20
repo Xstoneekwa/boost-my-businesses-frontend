@@ -21,6 +21,7 @@ export type StripeCheckoutAttemptRow = {
   commercial_mode: string | null;
   pricing_snapshot_fingerprint: string | null;
   checkout_mode: "subscription" | "payment";
+  livemode: boolean;
   status: string;
   client_id: string | null;
   auth_user_id: string | null;
@@ -53,6 +54,7 @@ function normalizeAttemptRow(data: Row): StripeCheckoutAttemptRow {
     commercial_mode: readString(data.commercial_mode) || null,
     pricing_snapshot_fingerprint: readString(data.pricing_snapshot_fingerprint) || null,
     checkout_mode: readString(data.checkout_mode) as "subscription" | "payment",
+    livemode: data.livemode === true,
     status: readString(data.status),
     client_id: readString(data.client_id) || null,
     auth_user_id: readString(data.auth_user_id) || null,
@@ -250,6 +252,25 @@ export async function findStripeCheckoutAttemptById(
     return { ok: false as const, code: "attempt_not_found" as const };
   }
   return { ok: true as const, attempt: normalizeAttemptRow(data) };
+}
+
+export async function findStripeCheckoutAttemptByCommercialSessionId(
+  supabase: SupabaseClient,
+  commercialCheckoutSessionId: string,
+) {
+  const { data, error } = await supabase
+    .from("commercial_stripe_checkout_attempts")
+    .select("*")
+    .eq("commercial_checkout_session_id", commercialCheckoutSessionId)
+    .limit(2);
+
+  if (error || !Array.isArray(data) || data.length === 0) {
+    return { ok: false as const, code: "attempt_not_found" as const };
+  }
+  if (data.length !== 1) {
+    return { ok: false as const, code: "attempt_ambiguous" as const };
+  }
+  return { ok: true as const, attempt: normalizeAttemptRow(data[0] as Row) };
 }
 
 export async function updateStripeCheckoutAttemptStatus(
