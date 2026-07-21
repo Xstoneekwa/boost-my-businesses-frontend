@@ -1,8 +1,10 @@
 import { detectProfileLanguage } from "./profile-language.ts";
 
 export const PROFILE_INTELLIGENCE_AI_VERSION = "profile_intelligence_v2" as const;
-export const PROFILE_INTELLIGENCE_PROMPT_VERSION_FR = "profile_intelligence_v2_prompt_v4_no_geo_fr" as const;
-export const PROFILE_INTELLIGENCE_PROMPT_VERSION_EN = "profile_intelligence_v2_prompt_v4_no_geo_en" as const;
+export const PROFILE_INTELLIGENCE_PROMPT_VERSION_FR = "profile_intelligence_v2_prompt_v5_targeting_ready_fr" as const;
+export const PROFILE_INTELLIGENCE_PROMPT_VERSION_EN = "profile_intelligence_v2_prompt_v5_targeting_ready_en" as const;
+export const PROFILE_INTELLIGENCE_LEGACY_PROMPT_VERSION_FR = "profile_intelligence_v2_prompt_v4_no_geo_fr" as const;
+export const PROFILE_INTELLIGENCE_LEGACY_PROMPT_VERSION_EN = "profile_intelligence_v2_prompt_v4_no_geo_en" as const;
 export const PROFILE_INTELLIGENCE_PROMPT_VERSION = PROFILE_INTELLIGENCE_PROMPT_VERSION_FR;
 export const PROFILE_INTELLIGENCE_FORMAT_NAME = "profile_intelligence_v2" as const;
 export const PROFILE_INTELLIGENCE_DEFAULT_MODEL = "gpt-4o-mini-2024-07-18";
@@ -14,7 +16,9 @@ export type ProfileAiConfidence = "high" | "medium" | "low";
 export type ProfileAiOutputLanguage = "fr" | "en";
 export type ProfileAiPromptVersion =
   | typeof PROFILE_INTELLIGENCE_PROMPT_VERSION_FR
-  | typeof PROFILE_INTELLIGENCE_PROMPT_VERSION_EN;
+  | typeof PROFILE_INTELLIGENCE_PROMPT_VERSION_EN
+  | typeof PROFILE_INTELLIGENCE_LEGACY_PROMPT_VERSION_FR
+  | typeof PROFILE_INTELLIGENCE_LEGACY_PROMPT_VERSION_EN;
 export type ProfileAiEvidenceField =
   | "username"
   | "display_name"
@@ -25,7 +29,6 @@ export type ProfileAiEvidenceField =
   | "following_count"
   | "posts_count"
   | "language"
-  | "public_location"
   | "external_domain"
   | "caption_samples";
 
@@ -44,6 +47,26 @@ export type ProfileAiSuggestions = {
   keywords: ProfileAiSuggestion<string[]>;
   exclusions: ProfileAiSuggestion<string[]>;
 };
+
+export type ProfileAiSuggestionKey = keyof ProfileAiSuggestions;
+export type ProfileAiFieldQualityStatus = "valid" | "insufficient" | "empty_valid" | "absent" | "rejected";
+export type ProfileAiFieldQualityReason =
+  | "suggested_category_too_generic"
+  | "niche_too_generic"
+  | "niche_absent"
+  | "probable_audience_too_generic"
+  | "probable_audience_absent"
+  | "themes_not_targeting_ready"
+  | "themes_absent"
+  | "business_description_too_short"
+  | "keywords_not_targeting_ready"
+  | "keywords_absent"
+  | "optional_field_insufficient";
+export type ProfileAiFieldQuality = {
+  status: ProfileAiFieldQualityStatus;
+  reason: ProfileAiFieldQualityReason | null;
+};
+export type ProfileAiFieldQualityMap = Record<ProfileAiSuggestionKey, ProfileAiFieldQuality>;
 
 export type ProfileAiConfirmedValues = {
   suggested_category: string | null;
@@ -71,6 +94,8 @@ export type StoredProfileAiAnalysis = {
   confirmed_at: string | null;
   suggestions: ProfileAiSuggestions | null;
   confirmed_values: ProfileAiConfirmedValues | null;
+  field_quality: ProfileAiFieldQualityMap | null;
+  targeting_quality_valid: boolean | null;
   metrics: {
     provider_duration_ms: number | null;
     total_duration_ms: number | null;
@@ -95,7 +120,6 @@ export type ProfileIntelligencePromptSnapshot = {
   followers_count?: number;
   following_count?: number;
   posts_count?: number;
-  public_location?: string;
   external_domain?: string;
   caption_samples?: string[];
 };
@@ -109,7 +133,11 @@ export type ProfileIntelligenceProviderResult = {
   outputLanguage: ProfileAiOutputLanguage;
   schemaValid: boolean;
   businessOutputValid: boolean;
+  noGeoValid: boolean;
+  targetingQualityValid: boolean;
+  fieldQuality: ProfileAiFieldQualityMap | null;
   languageValidation: ProfileAiLanguageValidation;
+  targetingQualityValidation: ProfileAiTargetingQualityValidation | null;
   metrics: StoredProfileAiAnalysis["metrics"];
   diagnostic: {
     http_status: number | null;
@@ -123,14 +151,15 @@ export type ProfileIntelligenceProviderResult = {
 
 const evidenceFields = new Set<ProfileAiEvidenceField>([
   "username", "display_name", "biography", "official_category", "is_business",
-  "followers_count", "following_count", "posts_count", "language", "public_location",
+  "followers_count", "following_count", "posts_count", "language",
   "external_domain", "caption_samples",
 ]);
 
-const suggestionKeys = [
+export const PROFILE_AI_SUGGESTION_KEYS = [
   "suggested_category", "niche", "probable_audience", "themes",
   "business_description", "keywords", "exclusions",
 ] as const;
+const suggestionKeys = PROFILE_AI_SUGGESTION_KEYS;
 
 const geographicOutputKey = /(?:^|_)(?:suggested_activity_area|suggested_location|location|city|country|region|geographic_area|geography|service_area|activity_area)(?:_|$)/i;
 
@@ -219,7 +248,6 @@ export function buildProfileIntelligencePromptSnapshot(input: {
   const followersCount = numberOrNull(input.followersCount);
   const followingCount = numberOrNull(input.followingCount);
   const postsCount = numberOrNull(input.postsCount);
-  const publicLocation = promptText(input.location, 500);
   const externalDomain = safeExternalDomain(input.externalUrl);
   const captionSamples = promptStringList(input.recentCaptionSamples, 5, 280);
   return {
@@ -233,7 +261,6 @@ export function buildProfileIntelligencePromptSnapshot(input: {
     ...(followersCount !== null ? { followers_count: followersCount } : {}),
     ...(followingCount !== null ? { following_count: followingCount } : {}),
     ...(postsCount !== null ? { posts_count: postsCount } : {}),
-    ...(publicLocation ? { public_location: publicLocation } : {}),
     ...(externalDomain ? { external_domain: externalDomain } : {}),
     ...(captionSamples.length ? { caption_samples: captionSamples } : {}),
   };
@@ -301,8 +328,15 @@ export const PROFILE_INTELLIGENCE_SYSTEM_PROMPT_FR = [
   "Valeurs client uniquement en français naturel. Garde marques, noms propres, usernames, acronymes et termes techniques intraduisibles dans leur langue d'origine ; évite le mélange français-anglais.",
   "Localisation hors analyse : aucune ville, pays, région ou zone géographique.",
   "N'invente ni statut business, visibilité, vérification, catégorie officielle ou donnée privée. Retourne null ou [] sans preuve.",
-  "Une catégorie suggérée n'est pas officielle.",
-  "Produis des valeurs concises pour rechercher des comptes cibles, avec 5 à 8 thèmes dédupliqués maximum.",
+  "Ces résultats serviront à définir le ciblage client, générer des recherches de comptes cibles, puis classer et filtrer des profils Instagram potentiels.",
+  "Privilégie précision métier, formulations naturelles, segments d'audience concrets, expressions de recherche distinctives et termes commercialement exploitables.",
+  "Catégorie suggérée : activité compréhensible, naturelle, idéalement 2 à 6 mots, distincte de la catégorie officielle et de la niche ; évite les libellés génériques comme automatisation marketing.",
+  "Niche : 4 à 12 mots décrivant domaine, plateforme ou canal si prouvé, et finalité commerciale.",
+  "Audience probable : 8 à 30 mots, 2 à 5 segments concrets si prouvés, avec leur besoin ou intention commerciale ; aucune démographie inventée.",
+  "Thèmes : 4 à 7 expressions distinctes de 2 à 5 mots, utiles au ciblage, dédupliquées sémantiquement ; évite les mots génériques isolés.",
+  "Description d'activité : phrase naturelle de 12 à 35 mots précisant service, canal et bénéfice prouvé ; null seulement si les preuves sont insuffisantes.",
+  "Mots-clés : 5 à 8 expressions distinctives de 2 à 4 mots dans la langue de sortie ; un mot seul uniquement s'il est distinctif ; déduplique variantes et quasi-synonymes.",
+  "Exclusions : [] avec confiance low et aucune preuve est un résultat valide si aucune exclusion fiable n'est justifiée ; n'en invente jamais.",
   "evidence_fields : noms de champs uniquement. Aucune longue explication ni chaîne de raisonnement.",
 ].join("\n");
 
@@ -311,8 +345,15 @@ export const PROFILE_INTELLIGENCE_SYSTEM_PROMPT_EN = [
   "Client-facing values only in natural English. Keep brands, proper nouns, usernames, acronyms, and untranslatable technical terms in their original language; avoid English-French mixing.",
   "Location outside this analysis: no city, country, region, or geographic area.",
   "Invent neither business status, visibility, verification, official category, nor private data. Return null or [] without evidence.",
-  "A suggested category is not official.",
-  "Produce concise values for target-account research, with at most 5 to 8 deduplicated themes.",
+  "These results will define client targeting, generate target-account searches, then classify and filter potential Instagram profiles.",
+  "Prioritize business precision, natural wording, concrete audience segments, distinctive search phrases, and commercially useful terms.",
+  "Suggested category: a clear natural activity label, ideally 2 to 6 words, distinct from the official category and niche; avoid generic labels such as marketing automation.",
+  "Niche: 4 to 12 words covering the domain, evidenced platform or channel, and primary commercial purpose.",
+  "Likely audience: 8 to 30 words, 2 to 5 concrete evidenced segments, and their commercial need or intent; invent no demographics.",
+  "Themes: 4 to 7 distinct 2-to-5-word phrases useful for targeting, semantically deduplicated; avoid isolated generic words.",
+  "Business description: a natural 12-to-35-word sentence covering the service, channel, and evidenced benefit; use null only when evidence is insufficient.",
+  "Keywords: 5 to 8 distinctive 2-to-4-word search phrases in the output language; allow a single word only when distinctive; deduplicate variants and near-synonyms.",
+  "Exclusions: [] with low confidence and no evidence is a valid result when no reliable exclusion is justified; never invent exclusions.",
   "evidence_fields: field names only. No long explanation or chain of thought.",
 ].join("\n");
 
@@ -398,6 +439,13 @@ export type ProfileAiLanguageValidation = {
   reason: "matched" | "clear_mismatch" | "insufficient_or_ambiguous";
 };
 
+export type ProfileAiTargetingQualityValidation = {
+  valid: boolean;
+  reasons: ProfileAiFieldQualityReason[];
+  fieldQuality: ProfileAiFieldQualityMap;
+  suggestions: ProfileAiSuggestions;
+};
+
 function suggestionBusinessStrings(suggestions: ProfileAiSuggestions) {
   return [
     suggestions.suggested_category.value,
@@ -430,6 +478,149 @@ export function validateProfileAiOutputLanguage(
   return { valid: true, detected_language: aggregate.language, reason: "matched" };
 }
 
+const genericSingleTerms = new Set([
+  "instagram", "marketing", "automatisation", "automation", "strategie", "strategy",
+  "croissance", "growth", "performance", "business", "entrepreneur", "entrepreneurs",
+  "professionnel", "professionnels", "professional", "professionals", "entreprise",
+  "entreprises", "company", "companies", "service", "services", "digital", "content",
+]);
+
+const audienceIntentTerms = new Set([
+  "souhaitant", "cherchant", "voulant", "besoin", "besoins", "objectif", "objectifs",
+  "developper", "ameliorer", "automatiser", "acquerir", "generer", "pour",
+  "seeking", "wanting", "looking", "need", "needs", "aiming", "grow", "improve",
+  "automate", "acquire", "generate", "increase", "for",
+]);
+
+function normalizedWords(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function semanticKey(value: string) {
+  return normalizedWords(value)
+    .map((word) => word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word)
+    .join(" ");
+}
+
+function isGenericSingle(value: string) {
+  const words = normalizedWords(value);
+  return words.length === 1 && genericSingleTerms.has(words[0]);
+}
+
+function usefulDistinctItems(values: string[], maxItems: number, rejectGenericSingles = true) {
+  const seen = new Set<string>();
+  return values.flatMap((value) => {
+    const key = semanticKey(value);
+    if (!key || seen.has(key) || (rejectGenericSingles && isGenericSingle(value))) return [];
+    seen.add(key);
+    return [value];
+  }).slice(0, maxItems);
+}
+
+function quality(status: ProfileAiFieldQualityStatus, reason: ProfileAiFieldQualityReason | null = null): ProfileAiFieldQuality {
+  return { status, reason };
+}
+
+export function validateProfileAiTargetingQuality(
+  suggestions: ProfileAiSuggestions,
+): ProfileAiTargetingQualityValidation {
+  const reasons: ProfileAiFieldQualityReason[] = [];
+  const category = suggestions.suggested_category.value?.trim() ?? "";
+  const categoryWords = normalizedWords(category);
+  const categoryQuality = !category
+    ? quality("empty_valid")
+    : categoryWords.length < 2 || (categoryWords.length <= 2 && categoryWords.every((word) => genericSingleTerms.has(word)))
+      ? quality("insufficient", "suggested_category_too_generic")
+      : quality("valid");
+  if (categoryQuality.reason) {
+    reasons.push("suggested_category_too_generic");
+  }
+
+  const niche = suggestions.niche.value?.trim() ?? "";
+  const nicheQuality = !niche
+    ? quality("absent", "niche_absent")
+    : normalizedWords(niche).length < 4 || isGenericSingle(niche)
+      ? quality("insufficient", "niche_too_generic")
+      : quality("valid");
+  if (nicheQuality.reason) reasons.push(nicheQuality.reason);
+
+  const audience = suggestions.probable_audience.value?.trim() ?? "";
+  const audienceWords = normalizedWords(audience);
+  const audienceQuality = !audience
+    ? quality("absent", "probable_audience_absent")
+    : audienceWords.length < 8 || !audienceWords.some((word) => audienceIntentTerms.has(word))
+      ? quality("insufficient", "probable_audience_too_generic")
+      : quality("valid");
+  if (audienceQuality.reason) reasons.push(audienceQuality.reason);
+
+  const rawThemes = suggestions.themes.value ?? [];
+  const themes = usefulDistinctItems(rawThemes, 7);
+  const themesQuality = rawThemes.length === 0
+    ? quality("absent", "themes_absent")
+    : themes.length === 0
+      ? quality("rejected", "themes_not_targeting_ready")
+    : themes.length < 3
+      ? quality("insufficient", "themes_not_targeting_ready")
+      : quality("valid");
+  if (themesQuality.reason) reasons.push(themesQuality.reason);
+
+  const description = suggestions.business_description.value?.trim() ?? null;
+  const descriptionQuality = !description
+    ? quality("empty_valid")
+    : normalizedWords(description).length < 8 || description.length < 45
+      ? quality("insufficient", "business_description_too_short")
+      : quality("valid");
+  if (descriptionQuality.reason) reasons.push(descriptionQuality.reason);
+
+  const rawKeywords = suggestions.keywords.value ?? [];
+  const keywords = usefulDistinctItems(rawKeywords, 8);
+  const keywordsQuality = rawKeywords.length === 0
+    ? quality("absent", "keywords_absent")
+    : keywords.length === 0
+      ? quality("rejected", "keywords_not_targeting_ready")
+    : keywords.length < 4
+      ? quality("insufficient", "keywords_not_targeting_ready")
+      : quality("valid");
+  if (keywordsQuality.reason) reasons.push(keywordsQuality.reason);
+
+  const exclusions = usefulDistinctItems(suggestions.exclusions.value ?? [], 8, false);
+  const exclusionsQuality = exclusions.length ? quality("valid") : quality("empty_valid");
+  const fieldQuality: ProfileAiFieldQualityMap = {
+    suggested_category: categoryQuality,
+    niche: nicheQuality,
+    probable_audience: audienceQuality,
+    themes: themesQuality,
+    business_description: descriptionQuality,
+    keywords: keywordsQuality,
+    exclusions: exclusionsQuality,
+  };
+  const valid = nicheQuality.status === "valid"
+    && audienceQuality.status === "valid"
+    && themes.length >= 3
+    && keywords.length >= 4;
+  return {
+    valid,
+    reasons,
+    fieldQuality,
+    suggestions: {
+      suggested_category: { ...suggestions.suggested_category, value: categoryQuality.status === "valid" ? category : null },
+      niche: { ...suggestions.niche, value: nicheQuality.status === "valid" ? niche : null },
+      probable_audience: { ...suggestions.probable_audience, value: audienceQuality.status === "valid" ? audience : null },
+      themes: { ...suggestions.themes, value: themes },
+      business_description: { ...suggestions.business_description, value: descriptionQuality.status === "valid" ? description : null },
+      keywords: { ...suggestions.keywords, value: keywords },
+      exclusions: { ...suggestions.exclusions, value: exclusions },
+    },
+  };
+}
+
 export function emptyProfileAiAnalysis(
   model = PROFILE_INTELLIGENCE_DEFAULT_MODEL,
   outputLanguage: ProfileAiOutputLanguage = "fr",
@@ -450,6 +641,8 @@ export function emptyProfileAiAnalysis(
     confirmed_at: null,
     suggestions: null,
     confirmed_values: null,
+    field_quality: null,
+    targeting_quality_valid: null,
     metrics: {
       provider_duration_ms: null,
       total_duration_ms: null,
@@ -466,6 +659,12 @@ export function readStoredProfileAiAnalysis(value: unknown): StoredProfileAiAnal
   const row = record(value);
   const storedOutputLanguage = row.output_language === "en" ? "en" : "fr";
   const fallback = emptyProfileAiAnalysis(text(row.model, 120) ?? PROFILE_INTELLIGENCE_DEFAULT_MODEL, storedOutputLanguage);
+  const storedPromptVersion = row.prompt_version === PROFILE_INTELLIGENCE_PROMPT_VERSION_FR
+    || row.prompt_version === PROFILE_INTELLIGENCE_PROMPT_VERSION_EN
+    || row.prompt_version === PROFILE_INTELLIGENCE_LEGACY_PROMPT_VERSION_FR
+    || row.prompt_version === PROFILE_INTELLIGENCE_LEGACY_PROMPT_VERSION_EN
+    ? row.prompt_version
+    : fallback.prompt_version;
   const status = row.status;
   const suggestions = validateProfileAiStructuredOutput({
     analysis_version: PROFILE_INTELLIGENCE_AI_VERSION,
@@ -473,9 +672,29 @@ export function readStoredProfileAiAnalysis(value: unknown): StoredProfileAiAnal
     suggestions: Object.fromEntries(suggestionKeys.map((key) => [key, record(row.suggestions)[key]])),
   }, storedOutputLanguage);
   const confirmed = record(row.confirmed_values);
+  const storedFieldQuality = record(row.field_quality);
+  const validQualityStatuses = new Set<ProfileAiFieldQualityStatus>(["valid", "insufficient", "empty_valid", "absent", "rejected"]);
+  const validQualityReasons = new Set<ProfileAiFieldQualityReason>([
+    "suggested_category_too_generic", "niche_too_generic", "niche_absent",
+    "probable_audience_too_generic", "probable_audience_absent", "themes_not_targeting_ready",
+    "themes_absent", "business_description_too_short", "keywords_not_targeting_ready",
+    "keywords_absent", "optional_field_insufficient",
+  ]);
+  const fieldQuality = suggestionKeys.every((key) => {
+    const entry = record(storedFieldQuality[key]);
+    return validQualityStatuses.has(entry.status as ProfileAiFieldQualityStatus)
+      && (entry.reason === null || validQualityReasons.has(entry.reason as ProfileAiFieldQualityReason));
+  }) ? Object.fromEntries(suggestionKeys.map((key) => {
+    const entry = record(storedFieldQuality[key]);
+    return [key, {
+      status: entry.status as ProfileAiFieldQualityStatus,
+      reason: entry.reason as ProfileAiFieldQualityReason | null,
+    }];
+  })) as ProfileAiFieldQualityMap : null;
   const metrics = record(row.metrics);
   return {
     ...fallback,
+    prompt_version: storedPromptVersion,
     status: status === "running" || status === "completed" || status === "failed_retryable" ? status : "not_started",
     request_key: text(row.request_key, 80),
     requested_at: text(row.requested_at, 80),
@@ -495,6 +714,8 @@ export function readStoredProfileAiAnalysis(value: unknown): StoredProfileAiAnal
       keywords: stringList(confirmed.keywords, 20, 80),
       exclusions: stringList(confirmed.exclusions, 20, 80),
     } : null,
+    field_quality: fieldQuality,
+    targeting_quality_valid: typeof row.targeting_quality_valid === "boolean" ? row.targeting_quality_valid : null,
     metrics: {
       provider_duration_ms: numberOrNull(metrics.provider_duration_ms),
       total_duration_ms: numberOrNull(metrics.total_duration_ms),
@@ -601,7 +822,11 @@ export async function callProfileIntelligenceOpenAi(input: {
     outputLanguage,
     schemaValid: false,
     businessOutputValid: false,
+    noGeoValid: true,
+    targetingQualityValid: false,
+    fieldQuality: null,
     languageValidation: { valid: false, detected_language: null, reason: "insufficient_or_ambiguous" },
+    targetingQualityValidation: null,
     metrics: emptyMetrics,
     diagnostic: { ...emptyDiagnostic, category: "provider_key_missing" },
   };
@@ -655,7 +880,11 @@ export async function callProfileIntelligenceOpenAi(input: {
       outputLanguage,
       schemaValid: false,
       businessOutputValid: false,
+      noGeoValid: true,
+      targetingQualityValid: false,
+      fieldQuality: null,
       languageValidation: { valid: false, detected_language: null, reason: "insufficient_or_ambiguous" },
+      targetingQualityValidation: null,
       metrics: { ...emptyMetrics, provider_duration_ms: Date.now() - providerStartedAt, total_duration_ms: Date.now() - startedAt },
       diagnostic: {
         ...emptyDiagnostic,
@@ -679,7 +908,11 @@ export async function callProfileIntelligenceOpenAi(input: {
       outputLanguage,
       schemaValid: false,
       businessOutputValid: false,
+      noGeoValid: true,
+      targetingQualityValid: false,
+      fieldQuality: null,
       languageValidation: { valid: false, detected_language: null, reason: "insufficient_or_ambiguous" },
+      targetingQualityValidation: null,
       metrics: { ...emptyMetrics, provider_duration_ms: providerDuration, total_duration_ms: Date.now() - startedAt },
       diagnostic,
     };
@@ -692,13 +925,19 @@ export async function callProfileIntelligenceOpenAi(input: {
   } catch {
     parsed = null;
   }
+  const noGeoValid = !containsAiGeographicKey(parsed);
   const schemaSuggestions = validateProfileAiStructuredOutput(parsed, outputLanguage);
   const schemaValid = Boolean(schemaSuggestions);
   const languageValidation = schemaSuggestions
     ? validateProfileAiOutputLanguage(schemaSuggestions, outputLanguage)
     : { valid: false as const, detected_language: null, reason: "insufficient_or_ambiguous" as const };
   const businessOutputValid = schemaValid && languageValidation.valid;
-  const suggestions = businessOutputValid ? schemaSuggestions : null;
+  const targetingQualityValidation = businessOutputValid && schemaSuggestions
+    ? validateProfileAiTargetingQuality(schemaSuggestions)
+    : null;
+  const targetingQualityValid = targetingQualityValidation?.valid ?? false;
+  const fieldQuality = targetingQualityValidation?.fieldQuality ?? null;
+  const suggestions = businessOutputValid && targetingQualityValidation?.valid ? targetingQualityValidation.suggestions : null;
   const usage = record(record(payload).usage);
   const inputTokens = numberOrNull(usage.input_tokens);
   const outputTokens = numberOrNull(usage.output_tokens);
@@ -730,22 +969,41 @@ export async function callProfileIntelligenceOpenAi(input: {
       outputLanguage,
       schemaValid,
       businessOutputValid,
+      noGeoValid,
+      targetingQualityValid,
+      fieldQuality,
       languageValidation,
+      targetingQualityValidation,
       metrics,
       diagnostic,
     }
     : {
       ok: false,
       suggestions: null,
-      errorCode: schemaValid ? "output_language_mismatch" : "invalid_ai_output",
+      errorCode: !schemaValid
+        ? "invalid_ai_output"
+        : !languageValidation.valid
+          ? "output_language_mismatch"
+          : "output_targeting_quality_insufficient",
       providerCallAttempted: true,
       model,
       outputLanguage,
       schemaValid,
       businessOutputValid,
+      noGeoValid,
+      targetingQualityValid,
+      fieldQuality,
       languageValidation,
+      targetingQualityValidation,
       metrics,
-      diagnostic: { ...diagnostic, category: schemaValid ? "output_language_mismatch" : "invalid_ai_output" },
+      diagnostic: {
+        ...diagnostic,
+        category: !schemaValid
+          ? "invalid_ai_output"
+          : !languageValidation.valid
+            ? "output_language_mismatch"
+            : "output_targeting_quality_insufficient",
+      },
     };
 }
 

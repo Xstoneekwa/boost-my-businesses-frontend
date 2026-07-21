@@ -4,6 +4,7 @@ import {
   readStoredProfileAiAnalysis,
   type ProfileAiConfidence,
   type ProfileAiConfirmedValues,
+  type ProfileAiFieldQualityMap,
   type ProfileAiSuggestions,
   type StoredProfileAiAnalysis,
 } from "./profile-intelligence-ai.ts";
@@ -130,6 +131,8 @@ export type ClientPublicAnalysis = {
     errorCode: string | null;
     confirmationStatus: StoredProfileAiAnalysis["confirmation_status"];
     confirmedAt: string | null;
+    fieldQuality: ProfileAiFieldQualityMap | null;
+    targetingQualityValid: boolean | null;
   };
 };
 
@@ -506,6 +509,8 @@ export function projectClientPublicAnalysis(value: unknown): ClientPublicAnalysi
       errorCode: aiAnalysis.error_code,
       confirmationStatus: aiAnalysis.confirmation_status,
       confirmedAt: aiAnalysis.confirmed_at,
+      fieldQuality: aiAnalysis.field_quality,
+      targetingQualityValid: aiAnalysis.targeting_quality_valid,
     },
   };
 }
@@ -522,7 +527,7 @@ function confirmedAiValues(
   stored: StoredPublicAnalysisV1,
   confirmations: Partial<Record<ProfileIntelligenceField, ProfileFieldEnvelope>>,
 ): ProfileAiConfirmedValues | null {
-  if (!stored.ai_analysis?.suggestions) return null;
+  if (!stored.ai_analysis?.suggestions && !stored.ai_analysis?.field_quality) return null;
   const value = (field: typeof aiEditableFields[number]) => confirmations[field]?.value
     ?? aiSuggestionEnvelope(stored, field)?.value
     ?? null;
@@ -546,7 +551,7 @@ export function applyClientPublicAnalysisConfirmation(
   if (!base) throw new Error("public_analysis_required");
   const row = record(value);
   const confirmations = { ...base.confirmations };
-  const confirmingAiSuggestions = Boolean(base.ai_analysis?.suggestions);
+  const confirmingAiSuggestions = Boolean(base.ai_analysis?.suggestions || base.ai_analysis?.field_quality);
   const fieldsToConfirm = confirmingAiSuggestions ? aiEditableFields : editableFields;
   for (const field of fieldsToConfirm) {
     const clientField = field === "officialCategory" ? "category" : field;

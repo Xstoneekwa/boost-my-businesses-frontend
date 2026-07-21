@@ -39,15 +39,25 @@ Snapshot date: **2026-07-21**.
 
 ## Profile Intelligence V2 residual gaps
 
-- V2 is local only. The bounded default is `gpt-4o-mini-2024-07-18` with
-  localized `profile_intelligence_v2_prompt_v4_no_geo_fr|en` prompts and
-  deterministic post-schema language and no-geography contracts.
+- The interim field-level checkpoint is locally certified with
+  `gpt-4o-mini-2024-07-18`, the Responses endpoint, one call maximum, an
+  8-second timeout, no retry/fallback, deterministic language validation and a
+  recursive no-geography contract. Deployment readiness is not evidence of a
+  successful production reanalysis; Liam must trigger that validation manually.
+- Quality acceptance is deliberately asymmetric: niche, audience, at least
+  three useful themes and four useful keywords are required; weak optional
+  category/description values are neutralized and empty exclusions remain valid.
+  Client confirmation is always required before suggestions become criteria.
 - Confirmed V2 criteria are not connected to Target AI V2.2 and create no CT.
 - AI geography is intentionally absent. Public location remains factual and
   target geography remains client-confirmed at the Targeting step.
 - JSONB optimistic concurrency is intentionally used to avoid a migration. A
   future high-volume design could move the lease to an atomic RPC, but no such
   production migration is justified for this bounded onboarding action.
+- This known-gaps update is interim only. The final consolidated Frontend/Stripe
+  handover remains pending closure of Profile Intelligence, Target AI V2.2,
+  15-CT onboarding, the three agency-tenant accounts, plan changes/cancellation,
+  occupied-phone Auto Login and final production validations.
 
 ## Environment gap
 

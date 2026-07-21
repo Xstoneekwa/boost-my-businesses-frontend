@@ -31,6 +31,7 @@ import {
   buildProfileIntelligencePromptSnapshot,
   callProfileIntelligenceOpenAi,
   profileAiModel,
+  profileIntelligencePromptVersion,
   readStoredProfileAiAnalysis,
   resolveProfileAiOutputLanguage,
   type ProfileIntelligenceProviderResult,
@@ -491,6 +492,7 @@ export async function analyzeClientInstagramProfileWithAi(input: {
     status: "running",
     request_key: input.requestKey,
     model: profileAiModel(),
+    prompt_version: profileIntelligencePromptVersion(outputLanguage),
     output_language: outputLanguage,
     requested_at: requestedAt,
     completed_at: null,
@@ -526,18 +528,24 @@ export async function analyzeClientInstagramProfileWithAi(input: {
     ? input.provider(snapshot)
     : callProfileIntelligenceOpenAi({ snapshot }));
   const finishedAt = new Date().toISOString();
+  const targetingQualityFailure = providerResult.errorCode === "output_targeting_quality_insufficient";
+  const previousAiAnalysis = readStoredProfileAiAnalysis(claimedPublicAnalysis.ai_analysis);
   const finishedAiAnalysis = {
-    ...readStoredProfileAiAnalysis(claimedPublicAnalysis.ai_analysis),
+    ...previousAiAnalysis,
     status: providerResult.ok ? "completed" as const : "failed_retryable" as const,
     model: providerResult.model,
     completed_at: providerResult.ok ? finishedAt : null,
     failed_at: providerResult.ok ? null : finishedAt,
     lease_expires_at: null,
     error_code: providerResult.errorCode,
-    suggestions: providerResult.ok ? providerResult.suggestions : claimedPublicAnalysis.ai_analysis?.suggestions ?? null,
-    confirmation_status: providerResult.ok ? "pending" as const : claimedPublicAnalysis.ai_analysis?.confirmation_status ?? "pending" as const,
-    confirmed_at: providerResult.ok ? null : claimedPublicAnalysis.ai_analysis?.confirmed_at ?? null,
-    confirmed_values: providerResult.ok ? null : claimedPublicAnalysis.ai_analysis?.confirmed_values ?? null,
+    suggestions: providerResult.ok ? providerResult.suggestions : targetingQualityFailure ? null : previousAiAnalysis.suggestions,
+    confirmation_status: providerResult.ok || targetingQualityFailure ? "pending" as const : previousAiAnalysis.confirmation_status,
+    confirmed_at: providerResult.ok || targetingQualityFailure ? null : previousAiAnalysis.confirmed_at,
+    confirmed_values: providerResult.ok || targetingQualityFailure ? null : previousAiAnalysis.confirmed_values,
+    field_quality: providerResult.fieldQuality ?? previousAiAnalysis.field_quality,
+    targeting_quality_valid: providerResult.businessOutputValid
+      ? providerResult.targetingQualityValid
+      : previousAiAnalysis.targeting_quality_valid,
     metrics: providerResult.metrics,
   };
   const finishedPublicAnalysis = withProfileAiAnalysis(claimedPublicAnalysis, finishedAiAnalysis);
@@ -565,6 +573,10 @@ export async function analyzeClientInstagramProfileWithAi(input: {
     output_language: providerResult.outputLanguage,
     schema_valid: providerResult.schemaValid,
     business_output_valid: providerResult.businessOutputValid,
+    no_geo_valid: providerResult.noGeoValid,
+    targeting_quality_valid: providerResult.targetingQualityValid,
+    field_quality: providerResult.fieldQuality,
+    targeting_quality_reasons: providerResult.targetingQualityValidation?.reasons ?? [],
     error_code: providerResult.errorCode,
     provider_http_status: providerResult.diagnostic.http_status,
     provider_error_type: providerResult.diagnostic.error_type,

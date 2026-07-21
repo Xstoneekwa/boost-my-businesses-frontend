@@ -60,13 +60,22 @@ Ordinary avatar rendering costs no provider request; one SearchAPI request is
 made only for an explicit accepted reanalysis. No production migration was
 required.
 
-Profile Intelligence V2 is currently local only. It adds one explicit bounded
-OpenAI enrichment action for Growth, Pro and Premium onboarding, stores
-suggestions and confirmations in the existing session JSONB, and does not alter
-Stripe, entitlements or Target AI package gates. Geography is excluded from the
-AI schema and remains either an observed public fact or a value entered by the
-client during Targeting. Real canary smokes remain isolated from the onboarding
-route; no production migration or deployment is part of this checkpoint.
+Profile Intelligence V2 Safe Scope extends factual V1 with one explicit bounded
+OpenAI enrichment action for Growth, Pro and Premium onboarding. This interim
+checkpoint is locally certified with `gpt-4o-mini-2024-07-18`, the Responses
+endpoint, strict Structured Output, an 8-second timeout, one call maximum and no
+retry or fallback. Language and recursive no-geography guards run before
+field-level quality validation. `niche`, `probable_audience`, `themes` and
+`keywords` are essential; `suggested_category`, `business_description` and
+`exclusions` are optional. A weak optional value is neutralized without
+suppressing valid core fields, and empty exclusions are valid. Suggestions
+remain separate from facts and require explicit client confirmation. The final
+isolated smoke returned HTTP 200 with `targeting_quality_valid=true` in 5,399 ms
+for an estimated $0.0003465, using one provider fetch and zero business writes.
+Geography is absent from the AI contract, Stripe and entitlements are unchanged,
+and Target AI V2.2 remains disconnected. Deployment alone does not certify
+production enrichment: Liam must manually request that validation later. This
+entry is an interim factual update, not the final Frontend/Stripe handover.
 
 ## Locked commercial model
 

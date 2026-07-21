@@ -161,18 +161,29 @@ d'empêcher un contournement des étapes et du seuil serveur.
 - Profile Intelligence V2 ajoute l'action séparée **Analyser avec l'IA**. Elle
   envoie au serveur un snapshot public minimisé (aucun identifiant interne,
   secret, URL CDN ou caption complète), effectue au plus un appel OpenAI accepté
-  avec Structured Outputs, timeout strict et échec retryable, puis conserve les
-  suggestions originales dans `public_analysis.ai_analysis`.
+  via Responses avec `gpt-4o-mini-2024-07-18`, Structured Output strict, timeout
+  de 8 secondes, sans retry ni fallback. Langue et no-geo récursif sont validés
+  avant la qualité champ par champ. Les suggestions acceptées restent dans
+  `public_analysis.ai_analysis`; aucun appel n'est lancé au chargement.
 - Seuls `suggested_category`, `niche`, `probable_audience`, `themes`,
   `business_description`, `keywords` et `exclusions` peuvent être suggérés.
   Toute propriété géographique est refusée. La localisation reste soit un fait
   `public_observed`, soit une valeur `user_confirmed` saisie à l'étape Ciblage;
-  elle n'est jamais issue de l'IA. Catégorie officielle et statut business ne
-  sont jamais inventés ni écrasés.
+  elle n'est jamais issue de l'IA. Catégorie officielle, localisation publique
+  ou confirmée et statuts business, privé ou vérifié ne sont jamais inventés ni
+  écrasés.
+- `niche`, `probable_audience`, `themes` et `keywords` sont essentiels au calcul
+  `targeting_quality_valid`; il faut une niche et une audience valides, au moins
+  trois thèmes utiles et quatre mots-clés utiles. `suggested_category`,
+  `business_description` et `exclusions` sont facultatifs. Une catégorie ou une
+  description faible est neutralisée seule; des exclusions vides valent
+  `empty_valid`. Un champ essentiel insuffisant est neutralisé avant projection
+  et empêche toute suggestion active confirmable pour cette analyse.
 - Les suggestions sont éditables. La confirmation explicite conserve séparément
-  valeurs suggérées, valeurs confirmées, dates, prompt
-  `profile_intelligence_v2_prompt_v4_no_geo_fr|en` et modèle serveur configurable.
-  Le modèle par défaut est `gpt-4o-mini-2024-07-18`. La langue
+  valeurs suggérées, valeurs confirmées, qualité et reason code par champ,
+  validité globale, dates, prompt versionné et modèle. Les textes rejetés ne sont
+  ni projetés, ni journalisés comme contenu. Le modèle est
+  `gpt-4o-mini-2024-07-18`. La langue
   de sortie `fr` ou `en` est résolue séparément de la langue du profil, imposée
   par le schéma et contrôlée avant toute persistance. Aucun
   compte, entitlement, ownership, credential ou CT n'est créé par cette action.
@@ -181,7 +192,12 @@ d'empêcher un contournement des étapes et du seuil serveur.
   charge; les faits restent visibles en cas de timeout ou provider indisponible.
 - Ce checkpoint ne connecte pas encore les valeurs confirmées à Target AI V2.2.
   Profile Intelligence est disponible pendant l'onboarding Growth, Pro et
-  Premium; les gates Target AI restent inchangés.
+  Premium; les gates Target AI restent inchangés. Le checkpoint field-level est
+  certifié localement (HTTP 200, `targeting_quality_valid=true`, 5 399 ms,
+  coût estimé 0,0003465 USD, un fetch provider, zéro écriture métier). Après
+  déploiement, seule une relance manuelle de Liam pourra valider l'enrichissement
+  en production; le déploiement ne doit déclencher aucune analyse. Cette mise à
+  jour est intermédiaire et ne constitue pas le handover Frontend/Stripe final.
 
 ### 4.3 Ciblage
 

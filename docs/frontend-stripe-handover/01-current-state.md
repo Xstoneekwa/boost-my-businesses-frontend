@@ -93,13 +93,11 @@ Production deployment `dpl_AtT2a8EcjcDPS4fMww2DPbJ4EmZJ` is READY at
 `https://boost-my-businesses-ai-frontend-vercel-624e51lgs.vercel.app` and the
 canonical alias. No migration was added for V1.
 
-## Profile Intelligence V2 — local checkpoint
+## Profile Intelligence V2 — interim field-level checkpoint
 
 V2 adds one explicit, server-only **Analyze with AI** action on the Analysis
-step. The default configurable model is the stable snapshot
-`gpt-4o-mini-2024-07-18`; the localized versioned prompts are
-`profile_intelligence_v2_prompt_v4_no_geo_fr` and
-`profile_intelligence_v2_prompt_v4_no_geo_en`. The requested output language is resolved
+step. The model is the stable snapshot `gpt-4o-mini-2024-07-18`; the active
+localized prompt is Profile Intelligence V5 targeting-ready. The requested output language is resolved
 separately from the detected profile language, constrained in the strict
 Structured Output schema, and validated deterministically before persistence.
 The request uses a strict Structured Output,
@@ -112,16 +110,33 @@ Suggestions remain distinct from facts and require explicit client confirmation.
 The AI contract has no geography property. Public location remains
 `public_observed`; target geography is entered or confirmed by the client during
 Targeting and is never converted from an AI suggestion.
-Original suggestions and confirmed values are stored separately in the existing
-`public_analysis.ai_analysis` JSONB object with prompt/model/timestamps and safe
-metrics. Optimistic compare-and-swap, a short lease, idempotency key and cooldown
-protect concurrency. The action creates no account, CT, entitlement, ownership
-or credential and does not call SearchAPI, SerpApi or Target AI.
+After schema, language and recursive no-geography validation, quality is assessed
+per field. `niche`, `probable_audience`, `themes` and `keywords` are essential;
+`suggested_category`, `business_description` and `exclusions` are optional. The
+global result requires valid niche and audience, at least three useful themes and
+four useful keywords. Weak optional fields are selectively neutralized, empty
+exclusions are valid, and rejected text is neither browser-projected nor logged.
+Accepted suggestions, client-confirmed values, normalized field quality, global
+targeting quality, prompt/model/timestamps and safe metrics are stored separately
+in the existing `public_analysis.ai_analysis` JSONB object. Optimistic
+compare-and-swap, a short lease, idempotency key and cooldown protect concurrency.
+The action creates no account, CT, entitlement, ownership or credential and does
+not call SearchAPI, SerpApi or Target AI.
 
-Status: local only on baseline `cc73eb26ae99f0ca5d597d0660763742fabbdaf1`.
-No commit, push, migration, deployment, provider payload or real response
-artifact is included. Isolated canary calls do not use the onboarding route.
-Target AI V2.2 and its Growth/Pro/Premium gates remain unchanged.
+Status before release: locally certified on baseline
+`f5457a788a1ce549d038d7f205f3bfab4052452c`. The final isolated Responses smoke
+returned HTTP 200, `targeting_quality_valid=true`, 5,399 ms total latency,
+estimated cost $0.0003465 and `provider_fetch_count=1`, with zero business write.
+No provider payload, response artifact or migration is included. Isolated canary
+calls do not use the onboarding route. Target AI V2.2 and its Growth/Pro/Premium
+gates remain unchanged. Production enrichment remains unvalidated until Liam
+explicitly triggers a manual reanalysis after deployment.
+
+This is an interim factual checkpoint only. The consolidated, exhaustive final
+Frontend/Stripe handover remains deferred until Profile Intelligence, Target AI
+V2.2, the 15-CT onboarding, the three agency-tenant accounts, plan changes and
+cancellation, occupied-phone Auto Login, and final production validation are all
+closed.
 
 The deterministic cost harness uses the `gpt-4o-mini-2024-07-18` rates
 ($0.15/M input tokens and $0.60/M output tokens): 800 input + 200 output tokens
