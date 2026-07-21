@@ -48,9 +48,15 @@ Snapshot date: **2026-07-21**.
   three useful themes and four useful keywords are required; weak optional
   category/description values are neutralized and empty exclusions remain valid.
   Client confirmation is always required before suggestions become criteria.
-- Confirmed V2 criteria are not connected to Target AI V2.2 and create no CT.
+- Confirmed V2 values now hydrate the editable Targeting draft with enriched
+  description and distinct themes/keywords, but they are not connected to
+  Target AI V2.2 and create no CT. Persistence still requires the client's
+  explicit targeting-save action.
 - AI geography is intentionally absent. Public location remains factual and
   target geography remains client-confirmed at the Targeting step.
+- Production acceptance of the corrected mapping remains pending Liam's manual
+  read-only control on the existing canary session. That check must not save the
+  targeting draft, relaunch analysis or advance to target accounts.
 - JSONB optimistic concurrency is intentionally used to avoid a migration. A
   future high-volume design could move the lease to an atomic RPC, but no such
   production migration is justified for this bounded onboarding action.

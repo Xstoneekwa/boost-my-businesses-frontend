@@ -138,6 +138,22 @@ V2.2, the 15-CT onboarding, the three agency-tenant accounts, plan changes and
 cancellation, occupied-phone Auto Login, and final production validation are all
 closed.
 
+### Confirmed Profile Intelligence to Targeting projection — interim checkpoint
+
+The Targeting draft now projects confirmed audience, niche, enriched business
+description, themes and keywords without semantic aliases. Enriched
+`business_description` precedes the public biography; keywords never fall back
+to themes and niche never falls back to category. Language remains canonical
+`fr`/`en` with localized labels, while geography is populated only from a
+`user_confirmed` location.
+
+An existing session already at `targeting` rehydrates from confirmed Profile
+Intelligence values only when its stored targeting draft is empty. A non-empty
+server draft and in-browser edits in the mounted session are preserved. No
+automatic `save_targeting`, AI call, account, CT or entitlement creation is
+introduced. Production acceptance remains a manual Liam check. This note is
+interim evidence and is not the final Frontend/Stripe handover.
+
 The deterministic cost harness uses the `gpt-4o-mini-2024-07-18` rates
 ($0.15/M input tokens and $0.60/M output tokens): 800 input + 200 output tokens
 is about $0.00024. The server timeout is 8 seconds and no unbounded retry or

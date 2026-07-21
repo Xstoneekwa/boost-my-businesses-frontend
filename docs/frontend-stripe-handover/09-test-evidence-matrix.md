@@ -36,6 +36,9 @@ Snapshot date: **2026-07-21**.
 | Profile Intelligence V2 local visual check | 10 deterministic captures: five states in FR and EN; GET fixtures only, no onboarding API or OpenAI call | locally_validated |
 | Profile Intelligence V2 field-level smoke | One isolated `gpt-4o-mini-2024-07-18` Responses call: HTTP 200, schema/language/business valid, no geographic output, `targeting_quality_valid=true`, 5,399 ms total, estimated $0.0003465 and one provider fetch; no onboarding route or database write | locally_validated |
 | Profile Intelligence V2 field-level status | Interim checkpoint locally certified before deployment; no migration. Production enrichment must remain untouched until Liam manually requests reanalysis | locally_validated |
+| Confirmed Profile Intelligence to Targeting mapping | 97/97 targeted tests; enriched description before biography, keywords distinct from themes, canonical/localized language, `user_confirmed`-only geography, existing-targeting-session hydration, no automatic `save_targeting`, V1/V4/V5 compatibility | automated_tested |
+| Confirmed Targeting mapping UI | Desktop and responsive deterministic GET-only fixtures; five content-sized multiline controls, no horizontal overflow, empty geography and localized `Français`; no POST or provider call | locally_validated |
+| Confirmed Targeting mapping release status | Interim checkpoint only; production acceptance requires Liam's manual read-only control and must not save targeting or advance to CT | planned |
 
 The one failure in the combined 81-test run is the pre-existing cancellation
 projection assertion in `stripe-checkout-webhook-foundation.test.mjs`; it is
@@ -53,6 +56,10 @@ is evaluated per field: weak optional category/description values do not block
 valid core targeting fields, while insufficient essential fields are neutralized
 and make the analysis retryable rather than confirmable. This matrix update is
 interim evidence, not the final consolidated Frontend/Stripe handover.
+
+The confirmed-to-targeting mapping replay also passed targeted ESLint, scoped
+TypeScript, the Next.js 16.2.1 production build, `git diff --check` and no-leak.
+No migration, provider call or business write is part of this checkpoint.
 
 ## Predicate cases covered
 

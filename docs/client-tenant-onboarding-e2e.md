@@ -201,12 +201,29 @@ d'empêcher un contournement des étapes et du seuil serveur.
 
 ### 4.3 Ciblage
 
-- Le client confirme sa niche, son audience, ses thèmes, sa langue et sa zone.
+- Le draft reprend les valeurs Profile Intelligence confirmées: audience,
+  niche, description enrichie, thèmes et mots-clés. La description enrichie
+  prime sur la biography publique; cette dernière n'est qu'un fallback
+  explicite. Les keywords restent distincts des themes et la catégorie n'est
+  jamais utilisée comme fallback de niche.
+- La langue reste canonique (`fr`/`en`) dans la donnée et s'affiche sous forme
+  localisée. La zone géographique reste vide sauf valeur `user_confirmed`;
+  aucune géographie IA, publique ou issue de `sourceQuery` n'est injectée.
+- Une session déjà en `targeting` réhydrate ce draft si ses critères serveur
+  sont vides. Un draft serveur non vide ou une édition locale en cours dans la
+  session montée est conservé intégralement.
+- Le client confirme sa niche, son audience, ses thèmes, ses mots-clés, sa
+  langue et sa zone. Aucune sauvegarde targeting n'est lancée au chargement:
+  elle reste attachée au clic explicite sur le bouton de progression.
 - Ces critères servent uniquement à préremplir la recherche existante de
   comptes cibles. Ils ne créent ni ne valident eux-mêmes une CT.
 - Les fonctionnalités de recherche IA restent soumises au droit package
   canonique (Growth verrouillé; Pro/Premium autorisés) et au garde serveur
   existant.
+
+Ce correctif de projection est un checkpoint intermédiaire. Sa validation
+production reste soumise au contrôle manuel de Liam, sans clic de sauvegarde ni
+progression vers les comptes cibles pendant le smoke de déploiement.
 
 ### 4.4 Comptes cibles
 

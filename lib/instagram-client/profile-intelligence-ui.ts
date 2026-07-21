@@ -1,3 +1,8 @@
+import type {
+  ClientPublicAnalysis,
+  ClientTargetingCriteria,
+} from "./client-account-onboarding.ts";
+
 export type ProfileAiUiLanguage = "fr" | "en";
 export type ProfileAiUiStatus = "not_started" | "running" | "completed" | "failed_retryable";
 export type ProfileAiUiSource = "ai_suggested" | "user_confirmed" | "unknown" | undefined;
@@ -13,6 +18,39 @@ export type ProfileAiUiField =
 
 function localized(lang: ProfileAiUiLanguage, fr: string, en: string) {
   return lang === "fr" ? fr : en;
+}
+
+export function profileTargetingLanguageLabel(lang: ProfileAiUiLanguage, value: string) {
+  if (value === "fr") return localized(lang, "Français", "French");
+  if (value === "en") return localized(lang, "Anglais", "English");
+  return "";
+}
+
+export function confirmedProfileTargetingDraft(
+  analysis: ClientPublicAnalysis | null,
+): ClientTargetingCriteria {
+  const language = analysis?.language === "fr" || analysis?.language === "en"
+    ? analysis.language
+    : "";
+  const confirmedLocation = analysis?.sources.location === "user_confirmed"
+    ? analysis.location ?? ""
+    : "";
+  return {
+    idealCustomer: analysis?.probableAudience ?? "",
+    geography: confirmedLocation,
+    niche: analysis?.niche ?? "",
+    businessDescription: analysis?.businessDescription ?? analysis?.biography ?? "",
+    language,
+    themes: analysis?.themes ?? [],
+    keywords: analysis?.keywords ?? [],
+  };
+}
+
+export function hydrateProfileTargetingDraft(
+  analysis: ClientPublicAnalysis | null,
+  storedDraft: ClientTargetingCriteria | null,
+) {
+  return storedDraft ?? confirmedProfileTargetingDraft(analysis);
 }
 
 export function profileAiFieldLabel(input: {
