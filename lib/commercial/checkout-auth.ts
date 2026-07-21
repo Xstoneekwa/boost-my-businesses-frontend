@@ -5,6 +5,7 @@ import {
   resolveIncompleteCheckoutResume,
   verifyPurchaserPasswordControl,
 } from "./checkout-orphan-resume.ts";
+import { resolveAuthUserLocale } from "./auth-user-locale.ts";
 
 type Row = Record<string, unknown>;
 
@@ -188,6 +189,7 @@ export async function resolveSimulatedPublicAuth(
     email: string;
     password: string;
     idempotencyKey: string;
+    locale?: unknown;
   },
 ): Promise<SimulatedPublicAuthResult> {
   const email = input.email.trim().toLowerCase();
@@ -256,6 +258,7 @@ export async function resolveSimulatedPublicAuth(
     email,
     password: input.password,
     email_confirm: true,
+    user_metadata: { locale: resolveAuthUserLocale(input.locale) },
   });
   if (error || !data.user?.id) {
     logCheckoutActivation({
@@ -292,6 +295,7 @@ export async function resolveStripePaidPublicAuth(
     email: string;
     idempotencyKey: string;
     password?: string | null;
+    locale?: unknown;
   },
 ): Promise<SimulatedPublicAuthResult> {
   const email = input.email.trim().toLowerCase();
@@ -330,6 +334,7 @@ export async function resolveStripePaidPublicAuth(
     email,
     ...(input.password ? { password: input.password } : {}),
     email_confirm: true,
+    user_metadata: { locale: resolveAuthUserLocale(input.locale) },
   });
   if (error || !data.user?.id) {
     logCheckoutActivation({
@@ -362,11 +367,12 @@ export async function resolveStripePaidPublicAuth(
 
 export async function ensureSimulatedPublicAuthUser(
   supabase: SupabaseClient,
-  input: { email: string; password: string; idempotencyKey?: string },
+  input: { email: string; password: string; idempotencyKey?: string; locale?: unknown },
 ): Promise<SimulatedPublicAuthResult> {
   return resolveSimulatedPublicAuth(supabase, {
     email: input.email,
     password: input.password,
     idempotencyKey: input.idempotencyKey ?? "legacy",
+    locale: input.locale,
   });
 }

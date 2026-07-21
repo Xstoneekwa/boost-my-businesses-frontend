@@ -19,6 +19,7 @@ type ActivateBody = {
   password_confirmation?: unknown;
   idempotency_key?: unknown;
   flow_type?: unknown;
+  locale?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
       password: flowType === "first_purchase" ? readString(body?.password) : null,
       passwordConfirmation: flowType === "first_purchase" ? readString(body?.password_confirmation) : null,
       mode: "simulated",
+      locale: body?.locale,
     });
 
     if (!result.ok) {

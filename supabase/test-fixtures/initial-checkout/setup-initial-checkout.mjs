@@ -64,7 +64,7 @@ async function createAuthUser(admin, account, fixture, runId) {
     email: account.email,
     password: account.password,
     email_confirm: true,
-    user_metadata: { fixture, run_id: runId },
+    user_metadata: { fixture, run_id: runId, locale: "fr" },
   });
   if (error || !data.user?.id) {
     fail(`Auth user create failed for ${account.email}: ${error?.message ?? "unknown"}`);

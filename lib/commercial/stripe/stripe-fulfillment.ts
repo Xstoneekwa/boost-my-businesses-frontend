@@ -205,6 +205,7 @@ async function fulfillSubscriptionAttempt(
     commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
     password: pendingPassword,
     passwordConfirmation: pendingPassword,
+    locale: (checkoutSession.metadata as Row | null)?.auth_user_locale,
   });
 
   if (!activation.ok) {

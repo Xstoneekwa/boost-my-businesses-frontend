@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       successUrl: `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/commercial/stripe-test/cancel`,
       allowedOrigins: [origin],
+      locale: body.locale,
     });
 
     if (!result.ok) {

@@ -18,6 +18,7 @@ export type CheckoutMockAuthUser = {
   id: string;
   email: string;
   password: string;
+  user_metadata?: Record<string, unknown>;
 };
 
 export type CheckoutMockOptions = {
@@ -199,25 +200,26 @@ export function createCheckoutMockSupabase(options: CheckoutMockOptions = {}) {
       admin: {
         async listUsers() {
           return {
-            data: { users: authUsers.map((user) => ({ id: user.id, email: user.email })) },
+            data: { users: authUsers.map((user) => ({ id: user.id, email: user.email, user_metadata: user.user_metadata })) },
             error: null,
           };
         },
-        async createUser(input: { email: string; password?: string; email_confirm?: boolean }) {
+        async createUser(input: { email: string; password?: string; email_confirm?: boolean; user_metadata?: Record<string, unknown> }) {
           const existing = authUsers.find((user) => user.email === input.email.trim().toLowerCase());
           if (existing) return { data: { user: null }, error: { message: "already exists" } };
           const user = {
             id: newId("auth"),
             email: input.email.trim().toLowerCase(),
             password: input.password ?? "",
+            user_metadata: structuredClone(input.user_metadata ?? {}),
           };
           authUsers.push(user);
-          return { data: { user: { id: user.id, email: user.email } }, error: null };
+          return { data: { user: { id: user.id, email: user.email, user_metadata: user.user_metadata } }, error: null };
         },
         async getUserById(id: string) {
           const user = authUsers.find((entry) => entry.id === id);
           if (!user) return { data: { user: null }, error: { message: "missing" } };
-          return { data: { user: { id: user.id, email: user.email } }, error: null };
+          return { data: { user: { id: user.id, email: user.email, user_metadata: user.user_metadata } }, error: null };
         },
         async deleteUser(id: string) {
           const index = authUsers.findIndex((entry) => entry.id === id);

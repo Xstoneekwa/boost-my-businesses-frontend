@@ -272,6 +272,7 @@ export default function CommercialCheckoutForm(props: {
           password_confirmation: isPublicCheckout ? passwordConfirmation : undefined,
           idempotency_key: idempotencyKey,
           flow_type: props.flowType,
+          locale: lang,
         }),
       });
       const parsed = await parseCheckoutApiResponse<{

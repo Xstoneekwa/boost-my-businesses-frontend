@@ -80,7 +80,7 @@ async function main() {
     email: state.email,
     password: state.password,
     email_confirm: true,
-    user_metadata: { fixture: "plan_change_ui_test", run_id: state.runId },
+    user_metadata: { fixture: "plan_change_ui_test", run_id: state.runId, locale: "fr" },
   });
 
   if (error || !data.user?.id) {
@@ -93,7 +93,7 @@ async function main() {
     email: state.paymentProbeEmail,
     password: state.paymentProbePassword,
     email_confirm: true,
-    user_metadata: { fixture: "plan_change_ui_payment_probe", run_id: state.runId },
+    user_metadata: { fixture: "plan_change_ui_payment_probe", run_id: state.runId, locale: "fr" },
   });
 
   if (paymentProbeError || !paymentProbe.user?.id) {

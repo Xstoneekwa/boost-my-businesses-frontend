@@ -41,6 +41,7 @@ import {
   type StripeBillingComponent,
 } from "./stripe-per-entitlement-billing.ts";
 import { upsertStripeBillingProfile } from "./stripe-subscription-projection.ts";
+import { resolveAuthUserLocale } from "../auth-user-locale.ts";
 
 export type CreateStripeSubscriptionCheckoutInput = {
   commercialMode?: string | null;
@@ -58,6 +59,7 @@ export type CreateStripeSubscriptionCheckoutInput = {
   cancelUrl: string;
   allowedOrigins?: string[];
   stripe?: Stripe;
+  locale?: unknown;
 };
 
 export type CreateStripeSubscriptionCheckoutResult =
@@ -305,6 +307,7 @@ export async function createStripeSubscriptionCheckoutSession(
   const canonical = normalizeCommercialRequest(input);
   if (!canonical.ok) return canonical;
   const { commercialMode, planKey, billingIntervalMonths, outreachAddonKey } = canonical;
+  const locale = resolveAuthUserLocale(input.locale);
 
   const fallbackOrigin = (() => {
     try {
@@ -440,6 +443,7 @@ export async function createStripeSubscriptionCheckoutSession(
     metadataSafe: {
       prod_test_authorization_id: simulationAccess.prodTestAuthorizationId,
       checkout_access_source: simulationAccess.source,
+      auth_user_locale: locale,
     },
   });
   if (!pendingSession.ok) {

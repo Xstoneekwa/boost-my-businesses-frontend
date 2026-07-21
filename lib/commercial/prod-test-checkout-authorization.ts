@@ -264,12 +264,13 @@ export function buildInternalTestClientMetadata(input: {
   email: string;
   displayName: string;
   checkoutSource?: CommercialCheckoutProvenance;
+  preferredLanguage?: unknown;
 }) {
   return {
     contact_email: normalizeCheckoutEmail(input.email),
     display_name: input.displayName,
     service_page_url: "/instagram-growth",
-    preferred_language: "fr",
+    preferred_language: input.preferredLanguage === "en" ? "en" : "fr",
     checkout_source: input.checkoutSource ?? "simulated_checkout",
     internal_test_client: true,
     billing_excluded: true,

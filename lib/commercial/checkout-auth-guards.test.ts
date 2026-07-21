@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { activateClientAccountEntitlementFromCheckout } from "./activate-client-account-entitlement-from-checkout.ts";
 import { inspectSimulatedCheckoutProvisioning } from "./checkout-provisioning-state.ts";
-import { resolveSimulatedPublicAuth } from "./checkout-auth.ts";
+import { resolveSimulatedPublicAuth, resolveStripePaidPublicAuth } from "./checkout-auth.ts";
 import {
   setCheckoutPasswordProofOverrideForTests,
 } from "./checkout-orphan-resume.ts";
@@ -66,16 +66,32 @@ test("case A: no existing auth uses createUser on nominal path", async () => {
       email: "new@example.com",
       password: PASSWORD,
       idempotencyKey: "nominal-create",
+      locale: "fr",
     });
     assert.equal(authResult.ok, true);
     if (!authResult.ok) return;
     assert.equal(authResult.createdAuth, true);
     assert.equal(mockStore.authUsers.length, 1);
+    assert.equal(mockStore.authUsers[0]?.user_metadata?.locale, "fr");
     assert.equal(mockStore.getCounts().clients, 0);
   } finally {
     restoreEnv(previousEnv);
     setCheckoutPasswordProofOverrideForTests(null);
   }
+});
+
+test("new Stripe Auth user receives the selected English locale", async () => {
+  const mockStore = createCheckoutMockSupabase();
+  const authResult = await resolveStripePaidPublicAuth(mockStore.supabase, {
+    email: "english@example.invalid",
+    password: PASSWORD,
+    idempotencyKey: "stripe-en-create",
+    locale: "en",
+  });
+
+  assert.equal(authResult.ok, true);
+  assert.equal(mockStore.authUsers.length, 1);
+  assert.equal(mockStore.authUsers[0]?.user_metadata?.locale, "en");
 });
 
 test("case B: existing auth with zero simulated_checkout client blocks without mutation", async () => {

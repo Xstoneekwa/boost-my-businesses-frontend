@@ -49,6 +49,7 @@ import {
 } from "./prod-test-checkout-authorization.ts";
 import { simulatedCheckoutClientMessages } from "./simulated-checkout-guard.ts";
 import { CHECKOUT_UNAVAILABLE_EN, CHECKOUT_UNAVAILABLE_FR } from "./checkout-api-messages.ts";
+import { resolveAuthUserLocale, type AuthUserLocale } from "./auth-user-locale.ts";
 
 type Row = Record<string, unknown>;
 
@@ -69,6 +70,7 @@ export type ActivateCheckoutInput = {
   precreatedCheckoutSessionId?: string | null;
   prodTestAuthorizationId?: string | null;
   commercialMode?: "full_cycle" | "outreach_only" | null;
+  locale?: unknown;
 };
 
 type SuccessfulFullCycleActivationQuote = Exclude<ReturnType<typeof buildCommercialQuote>, { ok: false }>;
@@ -324,6 +326,7 @@ async function ensureClientWorkspace(
     tracker?: ActivationAttemptTracker;
     internalTestClient?: boolean;
     checkoutProvenance: CommercialCheckoutProvenance;
+    locale: AuthUserLocale;
   },
 ) {
   let clientId = input.resumeClientId?.trim()
@@ -341,12 +344,13 @@ async function ensureClientWorkspace(
             email: input.email,
             displayName: input.displayName,
             checkoutSource: input.checkoutProvenance,
+            preferredLanguage: input.locale,
           })
           : {
             contact_email: input.email,
             display_name: input.displayName,
             service_page_url: "/instagram-growth",
-            preferred_language: "fr",
+            preferred_language: input.locale,
             checkout_source: input.checkoutProvenance,
           },
       })
@@ -521,6 +525,7 @@ export async function activateClientAccountEntitlementFromCheckout(
   supabase: SupabaseClient,
   input: ActivateCheckoutInput,
 ): Promise<ActivateCheckoutResult> {
+  const locale = resolveAuthUserLocale(input.locale);
   const tracker: ActivationAttemptTracker = {
     idempotencyKey: input.idempotencyKey.trim(),
     authCreatedThisAttempt: false,
@@ -769,11 +774,13 @@ export async function activateClientAccountEntitlementFromCheckout(
               email,
               idempotencyKey: tracker.idempotencyKey,
               password: input.password ?? null,
+              locale,
             })
             : await resolveSimulatedPublicAuth(supabase, {
               email,
               password: input.password ?? "",
               idempotencyKey: tracker.idempotencyKey,
+              locale,
             });
           if (!authResult.ok) {
             return activationFailure(
@@ -850,6 +857,7 @@ export async function activateClientAccountEntitlementFromCheckout(
         tracker,
         internalTestClient: tracker.simulationAccessSource === "prod_test_authorization",
         checkoutProvenance,
+        locale,
       });
       clientId = workspace.clientId;
       tracker.clientId = clientId;
@@ -910,6 +918,7 @@ export async function activateClientAccountEntitlementFromCheckout(
             internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
             billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",
             prod_test_authorization_id: tracker.prodTestAuthorizationId,
+            auth_user_locale: locale,
           },
           activated_at: now,
           updated_at: now,
@@ -975,6 +984,7 @@ export async function activateClientAccountEntitlementFromCheckout(
             checkout_context: checkoutContext,
             internal_test_client: tracker.simulationAccessSource === "prod_test_authorization",
             billing_excluded: tracker.simulationAccessSource === "prod_test_authorization",
+            auth_user_locale: locale,
           },
           activated_at: now,
           updated_at: now,
