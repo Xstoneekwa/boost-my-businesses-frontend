@@ -159,7 +159,10 @@ export function projectProfilesLive(input: {
         status: text(currentBlocker.status),
         blockingCampaign: currentBlocker.blocking_campaign === true,
       } : null,
-      followerDelta3d: projectFollowerDelta72h((snapshotsByAccount.get(id) ?? []) as FollowerSnapshotRow[]),
+      followerDelta3d: projectFollowerDelta72h(
+        (snapshotsByAccount.get(id) ?? []) as FollowerSnapshotRow[],
+        new Date(input.now),
+      ),
       updatedAt,
       lastProgressAt: counters.lastProgressAt,
     };

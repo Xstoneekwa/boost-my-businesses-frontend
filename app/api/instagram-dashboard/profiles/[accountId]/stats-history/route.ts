@@ -6,6 +6,9 @@ import {
   STATS_TOTAL_INTERACTIONS_DEFINITION,
   verifiedUnfollowRowsAsInteractionEvents,
 } from "@/lib/instagram-dashboard/social-counters";
+import { businessDayKeyFromIso } from "@/lib/instagram-dashboard/business-timezone";
+import { projectStatsFollowerSnapshots } from "@/lib/instagram-dashboard/stats-follower-snapshot-projection";
+import type { FollowerSnapshotRow } from "@/lib/instagram-client/follower-snapshot-contract";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../../../_utils";
 import { verifyCompassRelayKey } from "../../../compass/relay-auth";
@@ -16,6 +19,10 @@ type DayCounters = {
   date: string;
   session_time: string | null;
   followers_count: number | null;
+  followers_snapshot_at: string | null;
+  followers_snapshot_source: string | null;
+  followers_freshness_status: "available" | "stale" | "no_data";
+  followings_freshness_status: "unavailable";
   followings_count: number | null;
   follow_count: number;
   unfollow_count: number;
@@ -60,10 +67,8 @@ function readRecord(value: unknown) {
   return isRecord(value) ? value : null;
 }
 
-function dayKey(value: unknown) {
-  const date = new Date(readString(value, ""));
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+function dayKey(value: unknown, timezone: string) {
+  return businessDayKeyFromIso(readString(value, ""), timezone);
 }
 
 function formatSessionTime(value: string | null) {
@@ -84,6 +89,10 @@ function blankDay(date: string): DayCounters {
     date,
     session_time: null,
     followers_count: null,
+    followers_snapshot_at: null,
+    followers_snapshot_source: null,
+    followers_freshness_status: "no_data",
+    followings_freshness_status: "unavailable",
     followings_count: null,
     follow_count: 0,
     unfollow_count: 0,
@@ -196,7 +205,7 @@ export async function GET(
     since.setUTCHours(0, 0, 0, 0);
 
     const supabase = createSupabaseClient();
-    const [logsResult, runsResult, interactionEventsResult, unfollowRowsResult, settingsResult, packageResult] = await Promise.all([
+    const [logsResult, runsResult, interactionEventsResult, unfollowRowsResult, followerSnapshotsResult, settingsResult, packageResult] = await Promise.all([
       supabase
         .from("ig_action_logs")
         .select("id,account_id,run_id,target_username,action_type,status,payload,created_at")
@@ -227,8 +236,15 @@ export async function GET(
         .order("unfollowed_at", { ascending: false })
         .limit(5000),
       supabase
+        .from("ig_account_follower_snapshots")
+        .select("account_id,followers_count,captured_at,source,observation_kind")
+        .eq("account_id", normalizedAccountId)
+        .gte("captured_at", since.toISOString())
+        .order("captured_at", { ascending: true })
+        .limit(5000),
+      supabase
         .from("ig_account_settings")
-        .select("total_likes_limit,max_dm_per_run")
+        .select("total_likes_limit,max_dm_per_run,timezone")
         .eq("account_id", normalizedAccountId)
         .limit(1)
         .maybeSingle<SupabaseRecord>(),
@@ -240,10 +256,14 @@ export async function GET(
         .maybeSingle<SupabaseRecord>(),
     ]);
 
-    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? unfollowRowsResult.error ?? settingsResult.error ?? packageResult.error;
+    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? unfollowRowsResult.error ?? followerSnapshotsResult.error ?? settingsResult.error ?? packageResult.error;
     if (firstError) return jsonError(firstError.message, 500);
 
     const byDay = new Map<string, DayCounters>();
+    const followerSnapshots = projectStatsFollowerSnapshots({
+      rows: (followerSnapshotsResult.data ?? []) as FollowerSnapshotRow[],
+      timezone: readString(settingsResult.data?.timezone, ""),
+    });
     const ensureDay = (date: string) => {
       const existing = byDay.get(date);
       if (existing) return existing;
@@ -254,7 +274,7 @@ export async function GET(
 
     const logRowsByDay = new Map<string, SupabaseRecord[]>();
     for (const row of (logsResult.data ?? []) as SupabaseRecord[]) {
-      const date = dayKey(row.created_at);
+      const date = dayKey(row.created_at, followerSnapshots.timezone);
       if (!date) continue;
       const day = ensureDay(date);
       day.session_time = latestIso(day.session_time, readString(row.created_at, ""));
@@ -267,7 +287,7 @@ export async function GET(
     const runTotalsByDay = new Map<string, SocialCounters>();
     for (const row of (runsResult.data ?? []) as SupabaseRecord[]) {
       const sessionAt = readString(row.started_at, readString(row.created_at, ""));
-      const date = dayKey(sessionAt);
+      const date = dayKey(sessionAt, followerSnapshots.timezone);
       if (!date) continue;
       const day = ensureDay(date);
       day.session_time = latestIso(day.session_time, sessionAt);
@@ -280,13 +300,20 @@ export async function GET(
       ...((interactionEventsResult.data ?? []) as SupabaseRecord[]),
       ...verifiedUnfollowRowsAsInteractionEvents((unfollowRowsResult.data ?? []) as SupabaseRecord[]),
     ];
-    const interactionEventsByDay = interactionEventCountersByDay(verifiedEvents);
+    const interactionEventsByDay = interactionEventCountersByDay(verifiedEvents, followerSnapshots.timezone);
     const eventTotalsByDay = new Map<string, SocialCounters>();
     for (const [date, counters] of interactionEventsByDay.entries()) {
       eventTotalsByDay.set(date, toStatsDaySocialCounters(counters));
     }
     for (const date of new Set([...runTotalsByDay.keys(), ...eventTotalsByDay.keys()])) {
       ensureDay(date);
+    }
+    for (const point of followerSnapshots.points) {
+      const day = ensureDay(point.date);
+      day.followers_count = point.followersCount;
+      day.followers_snapshot_at = point.capturedAt;
+      day.followers_snapshot_source = point.source;
+      day.followers_freshness_status = point.freshnessStatus;
     }
 
     const caps = effectiveCaps(settingsResult.data ?? null, packageResult.data ?? null);
@@ -316,10 +343,19 @@ export async function GET(
         interaction_events: "ig_interaction_events post_like_success for live post-follow likes",
         unfollows: "ig_interacted_users.unfollowed_at correlated by account+run+target",
         caps: "account_package_summary+ig_account_settings",
-        followers: "pending_account_follower_snapshots",
+        followers: "ig_account_follower_snapshots latest reliable snapshot per business day",
         followings: "pending_account_following_snapshots",
       },
-      missing_sources: ["account_follower_snapshots", "account_following_snapshots"],
+      source_status: {
+        followers: followerSnapshots.sourceStatus,
+        followings: { status: "unavailable", latestAt: null, source: "pending_account_following_snapshots", reason: "no_canonical_snapshot_source" },
+      },
+      missing_sources: [
+        ...(followerSnapshots.sourceStatus.status === "no_data" ? ["ig_account_follower_snapshots"] : []),
+        "account_following_snapshots",
+      ],
+      business_timezone: followerSnapshots.timezone,
+      generated_at: new Date().toISOString(),
       total_interactions_definition: STATS_TOTAL_INTERACTIONS_DEFINITION,
       thresholds: {
         low: "< 40",

@@ -6,6 +6,13 @@ import {
   listActivePlatformInstagramAccounts,
   type ActivePlatformInstagramAccount,
 } from "./follower-snapshot-collector.ts";
+import {
+  createFollowerCollectorTraceWriter,
+  followerCollectorRunId,
+  followerCollectorScheduledAt,
+  sanitizeFollowerCollectorFailureReason,
+  type FollowerCollectorTraceWriter,
+} from "./follower-snapshot-runtime-trace.ts";
 
 export const FOLLOWER_SNAPSHOT_BUSINESS_TIMEZONE = "Africa/Johannesburg";
 
@@ -20,6 +27,7 @@ type DailyFollowerSnapshotDependencies = {
   loadSnapshots?: (accountIds: string[]) => Promise<FollowerSnapshotRow[]>;
   collect?: typeof collectFollowerObservationViaPublicLookup;
   insert?: typeof insertFollowerSnapshot;
+  trace?: FollowerCollectorTraceWriter | null;
 };
 
 function businessDayKey(value: string | Date, timeZone = FOLLOWER_SNAPSHOT_BUSINESS_TIMEZONE) {
@@ -92,23 +100,71 @@ async function loadFollowerSnapshots(accountIds: string[]) {
 export async function runDailyFollowerSnapshotCollection(input: {
   dryRun?: boolean;
   now?: Date;
+  scheduledAt?: string;
   dependencies?: DailyFollowerSnapshotDependencies;
 }) {
   const dependencies = input.dependencies ?? {};
   const now = input.now ?? new Date();
+  const scheduledAt = input.scheduledAt ?? followerCollectorScheduledAt(now);
+  const collectorRunId = followerCollectorRunId(scheduledAt);
+  const startedAt = now.toISOString();
   const listAccounts = dependencies.listAccounts ?? listActivePlatformInstagramAccounts;
   const loadSnapshots = dependencies.loadSnapshots ?? loadFollowerSnapshots;
   const collect = dependencies.collect ?? collectFollowerObservationViaPublicLookup;
   const insert = dependencies.insert ?? insertFollowerSnapshot;
-  const accounts = await listAccounts();
-  const snapshots = await loadSnapshots(accounts.map((account) => account.id));
-  const plan = planDailyFollowerSnapshots({ accounts, snapshots, now });
+  const trace = dependencies.trace === undefined
+    ? input.dependencies ? null : createFollowerCollectorTraceWriter()
+    : dependencies.trace;
+
+  let accounts: ActivePlatformInstagramAccount[] = [];
+  let plan: DailyFollowerSnapshotPlanItem[] = [];
+
+  if (!input.dryRun && trace) {
+    await trace.writeRun({
+      collectorRunId,
+      scheduledAt,
+      startedAt,
+      completedAt: null,
+      status: "running",
+      accountsSelected: 0,
+      accountsSucceeded: 0,
+      accountsFailed: 0,
+      accountsSkipped: 0,
+      provider: "public_profile_lookup",
+      failureReason: null,
+    });
+  }
+
+  try {
+    accounts = await listAccounts();
+    const snapshots = await loadSnapshots(accounts.map((account) => account.id));
+    plan = planDailyFollowerSnapshots({ accounts, snapshots, now });
+  } catch (error) {
+    if (!input.dryRun && trace) {
+      await trace.writeRun({
+        collectorRunId,
+        scheduledAt,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        status: "failed",
+        accountsSelected: 0,
+        accountsSucceeded: 0,
+        accountsFailed: 0,
+        accountsSkipped: 0,
+        provider: "public_profile_lookup",
+        failureReason: sanitizeFollowerCollectorFailureReason(error instanceof Error ? error.message : error),
+      });
+    }
+    throw error;
+  }
 
   if (input.dryRun) {
     return {
       dryRun: true,
       businessTimezone: FOLLOWER_SNAPSHOT_BUSINESS_TIMEZONE,
       plannedAt: now.toISOString(),
+      scheduledAt,
+      collectorRunId,
       plan,
       inserted: 0,
       failed: 0,
@@ -117,14 +173,39 @@ export async function runDailyFollowerSnapshotCollection(input: {
 
   const results: Array<Record<string, unknown>> = [];
   for (const item of plan) {
+    const attemptedAt = new Date().toISOString();
     if (item.action === "skip") {
-      results.push({ ...item, status: "skipped" });
+      const result = { ...item, status: "skipped" };
+      results.push(result);
+      await trace?.writeAccount(collectorRunId, {
+        accountId: item.id,
+        accountUsername: item.username,
+        attemptedAt,
+        status: "skipped",
+        followersCount: null,
+        provider: null,
+        failureReason: item.reason,
+        snapshotWritten: false,
+        snapshotTimestamp: null,
+      });
       continue;
     }
 
     const observation = await collect(item.username);
     if (!observation.ok) {
-      results.push({ ...item, status: "failed", failureReason: observation.reason });
+      const result = { ...item, status: "failed", failureReason: observation.reason };
+      results.push(result);
+      await trace?.writeAccount(collectorRunId, {
+        accountId: item.id,
+        accountUsername: item.username,
+        attemptedAt,
+        status: "failed",
+        followersCount: null,
+        provider: observation.sourceAttempted,
+        failureReason: observation.reason,
+        snapshotWritten: false,
+        snapshotTimestamp: null,
+      });
       continue;
     }
 
@@ -136,18 +217,68 @@ export async function runDailyFollowerSnapshotCollection(input: {
       observationKind: item.action,
       mirrorToIgAccounts: true,
     });
-    results.push(inserted.ok
-      ? { ...item, status: "inserted", snapshotId: inserted.row.id, capturedAt: inserted.row.captured_at }
-      : { ...item, status: "failed", failureReason: inserted.reason });
+    if (inserted.ok) {
+      results.push({ ...item, status: "inserted", snapshotId: inserted.row.id, capturedAt: inserted.row.captured_at });
+      await trace?.writeAccount(collectorRunId, {
+        accountId: item.id,
+        accountUsername: item.username,
+        attemptedAt,
+        status: "succeeded",
+        followersCount: observation.followersCount,
+        provider: observation.source,
+        failureReason: null,
+        snapshotWritten: true,
+        snapshotTimestamp: inserted.row.captured_at,
+      });
+    } else {
+      results.push({ ...item, status: "failed", failureReason: inserted.reason });
+      await trace?.writeAccount(collectorRunId, {
+        accountId: item.id,
+        accountUsername: item.username,
+        attemptedAt,
+        status: "failed",
+        followersCount: observation.followersCount,
+        provider: observation.source,
+        failureReason: inserted.reason,
+        snapshotWritten: false,
+        snapshotTimestamp: observation.capturedAt,
+      });
+    }
   }
+
+  const insertedCount = results.filter((row) => row.status === "inserted").length;
+  const failedCount = results.filter((row) => row.status === "failed").length;
+  const skippedCount = results.filter((row) => row.status === "skipped").length;
+  const status = failedCount === 0 ? "succeeded" : insertedCount > 0 || skippedCount > 0 ? "partial" : "failed";
+  const failureReasons = [...new Set(results
+    .filter((row) => row.status === "failed")
+    .map((row) => sanitizeFollowerCollectorFailureReason(row.failureReason))
+  )];
+  await trace?.writeRun({
+    collectorRunId,
+    scheduledAt,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    status,
+    accountsSelected: plan.length,
+    accountsSucceeded: insertedCount,
+    accountsFailed: failedCount,
+    accountsSkipped: skippedCount,
+    provider: "public_profile_lookup",
+    failureReason: failureReasons.join(",") || null,
+  });
 
   return {
     dryRun: false,
     businessTimezone: FOLLOWER_SNAPSHOT_BUSINESS_TIMEZONE,
     plannedAt: now.toISOString(),
+    scheduledAt,
+    collectorRunId,
     plan,
     results,
-    inserted: results.filter((row) => row.status === "inserted").length,
-    failed: results.filter((row) => row.status === "failed").length,
+    inserted: insertedCount,
+    failed: failedCount,
+    skipped: skippedCount,
+    status,
   };
 }

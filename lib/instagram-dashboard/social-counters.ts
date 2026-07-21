@@ -1,3 +1,5 @@
+import { businessDayKeyFromIso } from "./business-timezone.ts";
+
 type RecordValue = Record<string, unknown>;
 
 export type ProfileSocialCounters = {
@@ -314,16 +316,14 @@ export function reconcileSocialCounters(...sources: ProfileSocialCounters[]): Pr
   return withInteractionsTotal(counters);
 }
 
-export function dayKeyFromIso(value: unknown) {
-  const date = new Date(readString(value, ""));
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+export function dayKeyFromIso(value: unknown, timezone = "UTC") {
+  return businessDayKeyFromIso(readString(value, ""), timezone);
 }
 
-export function interactionEventCountersByDay(eventRows: RecordValue[]) {
+export function interactionEventCountersByDay(eventRows: RecordValue[], timezone = "UTC") {
   const rowsByDay = new Map<string, RecordValue[]>();
   for (const row of eventRows) {
-    const date = dayKeyFromIso(row.event_at ?? row.created_at);
+    const date = dayKeyFromIso(row.event_at ?? row.created_at, timezone);
     if (!date) continue;
     rowsByDay.set(date, [...(rowsByDay.get(date) ?? []), row]);
   }

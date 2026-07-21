@@ -47,13 +47,21 @@ export type ProjectFollowerGrowthInput = {
 };
 
 export type FollowerDelta72hProjection = {
+  window: "rolling_72h";
+  periodHours: 72;
   value: number | null;
   currentFollowers: number | null;
   previousFollowers: number | null;
   from: string | null;
   to: string | null;
   source: "ig_account_follower_snapshots";
-  freshness: "complete" | "insufficient_history";
+  windowCoverage: "complete" | "partial" | "insufficient_data";
+  dataFreshness: "fresh" | "stale" | "unknown";
+  latestSnapshotAt: string | null;
+  baselineSnapshotAt: string | null;
+  deltaFrom: string | null;
+  deltaTo: string | null;
+  staleAfterHours: number;
 };
 
 function readSnapshotTime(row: FollowerSnapshotRow) {
@@ -96,32 +104,59 @@ function snapshotAtOrBefore(sorted: FollowerSnapshotRow[], instantIso: string) {
   return match;
 }
 
-export function projectFollowerDelta72h(rows: FollowerSnapshotRow[]): FollowerDelta72hProjection {
+export function projectFollowerDelta72h(
+  rows: FollowerSnapshotRow[],
+  now: Date = new Date(),
+  staleAfterHours = 36,
+): FollowerDelta72hProjection {
   const sorted = filterReliableFollowerSnapshots(rows);
   const latest = sorted.at(-1) ?? null;
   if (!latest) {
     return {
+      window: "rolling_72h",
+      periodHours: 72,
       value: null,
       currentFollowers: null,
       previousFollowers: null,
       from: null,
       to: null,
       source: "ig_account_follower_snapshots",
-      freshness: "insufficient_history",
+      windowCoverage: "insufficient_data",
+      dataFreshness: "unknown",
+      latestSnapshotAt: null,
+      baselineSnapshotAt: null,
+      deltaFrom: null,
+      deltaTo: null,
+      staleAfterHours,
     };
   }
 
   const latestAt = new Date(latest.captured_at).getTime();
   const threshold = new Date(latestAt - (72 * 60 * 60 * 1000)).toISOString();
   const reference = snapshotAtOrBefore(sorted, threshold);
+  const latestAgeMs = now.getTime() - latestAt;
+  const dataFreshness = latestAgeMs > staleAfterHours * 60 * 60 * 1000 ? "stale" : "fresh";
+  const windowCoverage = reference
+    ? "complete"
+    : sorted.length > 1
+      ? "partial"
+      : "insufficient_data";
   return {
+    window: "rolling_72h",
+    periodHours: 72,
     value: reference ? latest.followers_count - reference.followers_count : null,
     currentFollowers: latest.followers_count,
     previousFollowers: reference?.followers_count ?? null,
     from: reference?.captured_at ?? null,
     to: latest.captured_at,
     source: "ig_account_follower_snapshots",
-    freshness: reference ? "complete" : "insufficient_history",
+    windowCoverage,
+    dataFreshness,
+    latestSnapshotAt: latest.captured_at,
+    baselineSnapshotAt: reference?.captured_at ?? null,
+    deltaFrom: reference?.captured_at ?? null,
+    deltaTo: latest.captured_at,
+    staleAfterHours,
   };
 }
 

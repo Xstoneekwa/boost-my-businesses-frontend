@@ -21,6 +21,7 @@ import {
   type FollowerDelta72hProjection,
 } from "@/lib/instagram-client/client-follower-growth-projection";
 import type { FollowerSnapshotRow } from "@/lib/instagram-client/follower-snapshot-contract";
+import { projectUnfollowTruthfulness } from "@/lib/instagram-dashboard/unfollow-truthfulness-contract";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -271,6 +272,11 @@ function safeSettingsSummary(
     countersToday: counters,
     capsToday,
     followerDelta3d,
+    unfollowTruthfulness: projectUnfollowTruthfulness(
+      counters.unfollows,
+      effectiveUnfollowCap,
+      runs,
+    ),
     quotas: {
       follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
       unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
