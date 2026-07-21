@@ -14,7 +14,19 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const dryRun = url.searchParams.get("dry_run") === "1";
-    const result = await runDailyFollowerSnapshotCollection({ dryRun });
+    const manualValidation = url.searchParams.get("trigger_source") === "manual_validation";
+    const requestedSha = url.searchParams.get("deployment_sha");
+    const requestedDeploymentSha = requestedSha && /^[0-9a-f]{40}$/i.test(requestedSha)
+      ? requestedSha.toLowerCase()
+      : null;
+    const result = await runDailyFollowerSnapshotCollection({
+      dryRun,
+      triggerContext: {
+        triggerSource: manualValidation ? "manual_validation" : "scheduled_cron",
+        requestedBy: manualValidation ? "controlled_review" : "vercel_cron",
+        requestedDeploymentSha,
+      },
+    });
     return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "follower_snapshot_cron_failed";

@@ -11,6 +11,7 @@ import {
   followerCollectorRunId,
   followerCollectorScheduledAt,
   sanitizeFollowerCollectorFailureReason,
+  type FollowerCollectorTriggerContext,
   type FollowerCollectorTraceWriter,
 } from "./follower-snapshot-runtime-trace.ts";
 
@@ -101,6 +102,7 @@ export async function runDailyFollowerSnapshotCollection(input: {
   dryRun?: boolean;
   now?: Date;
   scheduledAt?: string;
+  triggerContext?: FollowerCollectorTriggerContext;
   dependencies?: DailyFollowerSnapshotDependencies;
 }) {
   const dependencies = input.dependencies ?? {};
@@ -113,7 +115,7 @@ export async function runDailyFollowerSnapshotCollection(input: {
   const collect = dependencies.collect ?? collectFollowerObservationViaPublicLookup;
   const insert = dependencies.insert ?? insertFollowerSnapshot;
   const trace = dependencies.trace === undefined
-    ? input.dependencies ? null : createFollowerCollectorTraceWriter()
+    ? input.dependencies ? null : createFollowerCollectorTraceWriter(undefined, input.triggerContext)
     : dependencies.trace;
 
   let accounts: ActivePlatformInstagramAccount[] = [];
@@ -218,16 +220,23 @@ export async function runDailyFollowerSnapshotCollection(input: {
       mirrorToIgAccounts: true,
     });
     if (inserted.ok) {
-      results.push({ ...item, status: "inserted", snapshotId: inserted.row.id, capturedAt: inserted.row.captured_at });
+      const created = inserted.created !== false;
+      results.push({
+        ...item,
+        status: created ? "inserted" : "skipped",
+        reason: created ? item.reason : "snapshot_already_exists",
+        snapshotId: inserted.row.id,
+        capturedAt: inserted.row.captured_at,
+      });
       await trace?.writeAccount(collectorRunId, {
         accountId: item.id,
         accountUsername: item.username,
         attemptedAt,
-        status: "succeeded",
-        followersCount: observation.followersCount,
+        status: created ? "succeeded" : "skipped",
+        followersCount: inserted.row.followers_count,
         provider: observation.source,
-        failureReason: null,
-        snapshotWritten: true,
+        failureReason: created ? null : "snapshot_already_exists",
+        snapshotWritten: created,
         snapshotTimestamp: inserted.row.captured_at,
       });
     } else {

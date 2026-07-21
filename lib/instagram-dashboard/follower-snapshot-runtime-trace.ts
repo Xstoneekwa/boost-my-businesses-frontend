@@ -35,6 +35,12 @@ export type FollowerCollectorTraceWriter = {
   writeAccount(collectorRunId: string, input: FollowerCollectorAccountTrace): Promise<void>;
 };
 
+export type FollowerCollectorTriggerContext = {
+  triggerSource: "scheduled_cron" | "manual_validation";
+  requestedBy: "vercel_cron" | "controlled_review";
+  requestedDeploymentSha: string | null;
+};
+
 function stableUuid(seed: string) {
   const chars = createHash("sha256").update(seed).digest("hex").slice(0, 32).split("");
   chars[12] = "5";
@@ -74,6 +80,11 @@ async function upsertRuntimeEvent(supabase: SupabaseClient, row: Record<string, 
 
 export function createFollowerCollectorTraceWriter(
   supabase: SupabaseClient = createSupabaseClient(),
+  context: FollowerCollectorTriggerContext = {
+    triggerSource: "scheduled_cron",
+    requestedBy: "vercel_cron",
+    requestedDeploymentSha: null,
+  },
 ): FollowerCollectorTraceWriter {
   return {
     async writeRun(input) {
@@ -102,6 +113,9 @@ export function createFollowerCollectorTraceWriter(
           accounts_skipped: input.accountsSkipped,
           provider: input.provider,
           failure_reason: failureReason,
+          trigger_source: context.triggerSource,
+          requested_by: context.requestedBy,
+          requested_deployment_sha: context.requestedDeploymentSha,
           ...deploymentMetadata(),
         },
       });
@@ -133,6 +147,9 @@ export function createFollowerCollectorTraceWriter(
           provider_status: input.providerStatus ?? null,
           snapshot_written: input.snapshotWritten,
           snapshot_timestamp: input.snapshotTimestamp,
+          trigger_source: context.triggerSource,
+          requested_by: context.requestedBy,
+          requested_deployment_sha: context.requestedDeploymentSha,
           ...deploymentMetadata(),
         },
       });

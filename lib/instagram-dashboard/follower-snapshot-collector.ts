@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lookupInstagramPublicProfile } from "../instagram-public-profile-lookup.ts";
 import { createSupabaseClient } from "../supabase.ts";
 import {
@@ -24,8 +25,33 @@ export type FollowerCollectionAttemptResult =
   | { ok: false; reason: string; sourceAttempted: FollowerSnapshotSource | "none" };
 
 export type FollowerSnapshotInsertResult =
-  | { ok: true; row: FollowerSnapshotRow }
+  | { ok: true; row: FollowerSnapshotRow; created: boolean }
   | { ok: false; reason: string };
+
+function businessDayKey(value: string, timeZone = "Africa/Johannesburg") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
+function stableUuid(seed: string) {
+  const chars = createHash("sha256").update(seed).digest("hex").slice(0, 32).split("");
+  chars[12] = "5";
+  chars[16] = ((Number.parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+  const hex = chars.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function followerSnapshotId(accountId: string, capturedAt: string) {
+  return stableUuid(`account-follower-snapshot:${accountId}:${businessDayKey(capturedAt)}`);
+}
 
 function readActiveAccountStatuses(row: SupabaseRecord) {
   const lifecycle = readString(row.admin_lifecycle_status, readString(row.status, "")).toLowerCase();
@@ -127,9 +153,13 @@ export async function insertFollowerSnapshot(input: {
   if (!validated.ok) return validated;
 
   const supabase = createSupabaseClient();
+  const row = {
+    id: followerSnapshotId(input.accountId, input.capturedAt),
+    ...validated.row,
+  };
   const { data, error } = await supabase
     .from("ig_account_follower_snapshots")
-    .insert(validated.row)
+    .upsert(row, { onConflict: "id", ignoreDuplicates: true })
     .select("id,account_id,followers_count,captured_at,source,observation_kind,created_at")
     .maybeSingle();
 
@@ -137,14 +167,29 @@ export async function insertFollowerSnapshot(input: {
     return { ok: false, reason: error.message };
   }
 
+  let persisted = data as FollowerSnapshotRow | null;
+  let created = Boolean(persisted);
+  if (!persisted) {
+    const existing = await supabase
+      .from("ig_account_follower_snapshots")
+      .select("id,account_id,followers_count,captured_at,source,observation_kind,created_at")
+      .eq("id", row.id)
+      .maybeSingle();
+    if (existing.error || !existing.data) {
+      return { ok: false, reason: existing.error?.message || "snapshot_idempotency_read_failed" };
+    }
+    persisted = existing.data as FollowerSnapshotRow;
+    created = false;
+  }
+
   if (input.mirrorToIgAccounts) {
     await supabase
       .from("ig_accounts")
-      .update({ followers_count: validated.row.followers_count })
+      .update({ followers_count: persisted.followers_count })
       .eq("id", input.accountId);
   }
 
-  return { ok: true, row: data as FollowerSnapshotRow };
+  return { ok: true, row: persisted, created };
 }
 
 export function describeFollowerCollectorPlan() {
