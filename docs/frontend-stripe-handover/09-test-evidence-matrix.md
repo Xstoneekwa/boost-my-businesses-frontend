@@ -20,7 +20,8 @@ Snapshot date: **2026-07-21**.
 | Stripe Live checkout | Not exercised | blocked |
 | Add-account onboarding targeted suite | 132/132 passed, including ephemeral PostgreSQL concurrency | automated_tested |
 | Server-side 15 CT gate | 0 and 14 rejected; 15 accepted | automated_tested |
-| Add-account production deployment | Not performed | blocked pending GO |
+| Add-account production deployment | `dpl_GWNdmXkZE1vacaHtHajFMTFAukbo` READY; canonical alias active | production_validated |
+| Add-account schema migration | Applied; server-only RPC privileges verified | production_validated |
 | Add-account physical onboarding | Not performed; no real account was created | planned |
 
 The one failure in the combined 81-test run is the pre-existing cancellation

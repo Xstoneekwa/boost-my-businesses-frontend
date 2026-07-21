@@ -267,6 +267,7 @@ Pas de polling infini. Pas de succès UI avant confirmation backend.
 - `app/api/instagram-client/onboarding/route.ts` — session et transitions serveur
 - `lib/instagram-client/client-account-onboarding.ts` — orchestration idempotente et projections sûres
 - `supabase/migrations/20260721120000_client_instagram_onboarding_sessions.sql` — session RLS + RPC finale 15 CT
+- `supabase/migrations/20260721143000_restrict_client_instagram_onboarding_rpc_privileges.sql` — RPC d'orchestration réservées au rôle serveur
 - `app/instagram-client/ClientInstagramOnboardingWizard.tsx` — cinq étapes client
 - `app/instagram-client/ClientAccountsSection.tsx` — ouverture et reprise du wizard
 - `lib/instagram-client/client-account-onboarding.test.mjs` — seuils, reprise et non-régression
@@ -274,4 +275,4 @@ Pas de polling infini. Pas de succès UI avant confirmation backend.
 
 ---
 
-*Dernière mise à jour : parcours ciblage implémenté et testé localement — 21 juillet 2026. Migration, déploiement et validation physique encore en attente.*
+*Dernière mise à jour : parcours ciblage implémenté, testé et déployé — 21 juillet 2026. Les migrations sont appliquées au projet canonique et le déploiement production `dpl_GWNdmXkZE1vacaHtHajFMTFAukbo` est READY. La validation physique avec un vrai compte Instagram reste en attente.*

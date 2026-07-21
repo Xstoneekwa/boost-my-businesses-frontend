@@ -14,9 +14,9 @@ Snapshot date: **2026-07-21**.
 
 - Stripe Live is not implemented, enabled or validated by this checkpoint.
 - The server-side minimum-15-eligible-CT gate and the five-step Add Instagram
-  account flow exist only in the current local patch. The migration has not
-  been applied and the code has not been committed, deployed or physically
-  validated.
+  account flow are deployed. The additive migrations are applied and the
+  orchestration RPCs are restricted to the server role. The flow has not yet
+  been physically validated with a real Instagram account.
 - No maximum CT rule was introduced. The value 15 is the minimum required for
   onboarding completion.
 - `additional_account` remains non-secured and must not be used.
