@@ -1,6 +1,6 @@
 # Frontend / Stripe current state
 
-Snapshot date: **2026-07-20**.
+Snapshot date: **2026-07-21**.
 
 This document records the current commercial handoff after the third paid
 Stripe Test tenant checkout. It complements the canonical checkout and Stripe
@@ -57,13 +57,20 @@ request or run was created by deployment or smoke validation.
 | Reserved entitlement handoff | Yes after patch | Yes | Yes after smoke | No |
 | Redirect to login | Yes | Yes | Ready for Liam / not physical yet | No |
 | Live checkout | No | No | N/A | No |
-| Server gate for 15 CT | No | No | No | No |
+| Server gate for 15 CT | Local patch | Yes (0/14 rejected, 15 accepted) | No | No |
 
 ## Next phase
 
-The next phase is **Add Instagram account**, preceded by the server-side gate
-for a maximum of 15 CT. Until that work is complete, Liam must not add an
-Instagram account, use `additional_account`, or start Connect / Auto Login.
+The **Add Instagram account** targeting flow is implemented and automated-tested
+in a clean local worktree. It has five server-resumable steps: Connection,
+Public analysis, Targeting, Target accounts and Complete. The completion RPC
+requires a minimum of 15 validated and eligible CTs; it does not impose a
+maximum. Credentials use the existing server-side Vault path and no phone
+assignment, Connect, Auto Login or worker run is started.
+
+This work is not committed, migrated, deployed or physically validated yet.
+Until those operations receive a separate GO, Liam must not use the production
+Add Instagram account flow, `additional_account`, Connect or Auto Login.
 
 Documentation handover updated: yes
 

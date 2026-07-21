@@ -27,6 +27,7 @@ type ClientAiTargetSearchWizardProps = {
   onClose: () => void;
   lang: TargetAiLang;
   accountId: string;
+  initialCriteria?: { niche?: string; location?: string };
   onValidated: (message: string) => Promise<void>;
 };
 
@@ -89,6 +90,7 @@ export default function ClientAiTargetSearchWizard({
   onClose,
   lang,
   accountId,
+  initialCriteria,
   onValidated,
 }: ClientAiTargetSearchWizardProps) {
   const copy = useMemo(() => targetAiCopy(lang), [lang]);
@@ -110,8 +112,8 @@ export default function ClientAiTargetSearchWizard({
   useEffect(() => {
     if (!open) return;
     setStep(1);
-    setNiche("");
-    setLocationQuery("");
+    setNiche(initialCriteria?.niche?.trim() ?? "");
+    setLocationQuery(initialCriteria?.location?.trim() ?? "");
     setLocationSuggestions([]);
     setSelectedLocation(null);
     setSearching(false);
@@ -122,7 +124,7 @@ export default function ClientAiTargetSearchWizard({
     setSessionId("");
     setCandidates([]);
     enrichStartedRef.current = false;
-  }, [open]);
+  }, [initialCriteria?.location, initialCriteria?.niche, open]);
 
   useEffect(() => {
     if (!open || step !== 2) return;

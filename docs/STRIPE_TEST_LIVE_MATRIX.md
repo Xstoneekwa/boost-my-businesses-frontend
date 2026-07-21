@@ -1,6 +1,6 @@
 # Stripe Test / Live Matrix
 
-> Canonical billing snapshot verified on **2026-07-20** from Git, controlled
+> Canonical billing snapshot verified on **2026-07-21** from Git, controlled
 > documentation and read-only production Supabase queries. No Stripe secret,
 > customer data or private URL is recorded here.
 
@@ -43,7 +43,13 @@ and the linked Stripe documents; verified 2026-07-20.
 | Reserved entitlement handoff | Yes after patch | Yes | Yes after smoke | No |
 | Redirect to login | Yes | Yes | Ready for Liam / not physical yet | No |
 | Live checkout | No | No | N/A | No |
-| Server gate for 15 CT | No | No | No | No |
+| Server minimum gate for 15 eligible CT | Local patch | Yes (0/14 rejected, 15 accepted) | No | No |
+
+The local Add Instagram account patch does not change Stripe billing or consume
+another checkout authorization. It preserves the reserved entitlement and
+creates the Instagram account only inside a resumable server-owned onboarding
+session. This row is not production evidence: migration, deployment and a
+physical tenant validation remain pending.
 
 ## Locked commercial model
 

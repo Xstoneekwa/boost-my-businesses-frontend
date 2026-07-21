@@ -50,9 +50,11 @@ account capacity.
 
 ## Next ownership gate
 
-Before any Instagram account is added, implement and validate the server-side
-maximum-15-CT gate. `additional_account` remains out of scope and blocked until
-its ownership and billing path are secured.
+The current local onboarding patch preserves the reserved entitlement and adds
+a server-side minimum of 15 validated and eligible CTs before completion. It
+does not change tenant capacity or define a maximum. Migration, deployment and
+physical validation remain pending. `additional_account` remains out of scope
+and blocked until its ownership and billing path are secured.
 
 References:
 

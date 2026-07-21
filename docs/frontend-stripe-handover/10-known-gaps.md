@@ -1,6 +1,6 @@
 # Known gaps
 
-Snapshot date: **2026-07-20**.
+Snapshot date: **2026-07-21**.
 
 ## Immediate validation gap
 
@@ -13,9 +13,12 @@ Snapshot date: **2026-07-20**.
 ## Commercial gaps
 
 - Stripe Live is not implemented, enabled or validated by this checkpoint.
-- The server-side maximum-15-CT gate is absent.
-- Add Instagram account onboarding is the next phase and must not begin before
-  that gate is in place.
+- The server-side minimum-15-eligible-CT gate and the five-step Add Instagram
+  account flow exist only in the current local patch. The migration has not
+  been applied and the code has not been committed, deployed or physically
+  validated.
+- No maximum CT rule was introduced. The value 15 is the minimum required for
+  onboarding completion.
 - `additional_account` remains non-secured and must not be used.
 - No Instagram account exists for this tenant yet; the entitlement is correctly
   reserved with `account_id=null`.

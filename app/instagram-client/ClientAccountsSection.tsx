@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ClientAccountProcessModal from "./ClientAccountProcessModal";
 import ClientVerificationModal from "./ClientVerificationModal";
+import ClientInstagramOnboardingWizard from "./ClientInstagramOnboardingWizard";
 import { resolveClientAccountConnectionUi } from "@/lib/instagram-client/client-account-connection-ui";
 import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
 import { operationPendingFromConnectResult, operationPendingFromReadinessResult } from "@/lib/instagram-client/client-account-state";
@@ -38,7 +39,7 @@ type Props = {
   accounts: ClientInstagramAccountView[];
 };
 
-type ActionKind = "readiness" | "connect" | "create" | "refresh" | "cancel" | null;
+type ActionKind = "readiness" | "connect" | "refresh" | "cancel" | null;
 
 type AddPhase = "submitting" | "creating" | "refreshing" | "complete" | "error";
 type ConnectPhase = "starting" | "submitting" | "polling" | "complete" | "error" | "long_running";
@@ -96,11 +97,6 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
   const [formOpen, setFormOpen] = useState(false);
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showInstagramPassword, setShowInstagramPassword] = useState(false);
-  const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [actionKind, setActionKind] = useState<ActionKind>(null);
@@ -109,6 +105,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const [processRefreshing, setProcessRefreshing] = useState(false);
   const [verificationDismissed, setVerificationDismissed] = useState(false);
   const [entitlementReady, setEntitlementReady] = useState<boolean | null>(null);
+  const [onboardingResumable, setOnboardingResumable] = useState(false);
   const [cancelConfirmAccount, setCancelConfirmAccount] = useState<ClientInstagramAccountView | null>(null);
   const pollAttemptsRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
@@ -142,11 +139,36 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     return () => { cancelled = true; };
   }, [items.length]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadOnboardingResume() {
+      try {
+        const response = await fetch("/api/instagram-client/onboarding", {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        const payload = await response.json() as {
+          ok?: boolean;
+          data?: { onboarding?: { status?: string; currentStep?: string } | null };
+        };
+        const onboarding = payload.ok ? payload.data?.onboarding : null;
+        const resumable = Boolean(onboarding && onboarding.status !== "completed");
+        if (cancelled) return;
+        setOnboardingResumable(resumable);
+        if (resumable) setFormOpen(true);
+      } catch {
+        if (!cancelled) setOnboardingResumable(false);
+      }
+    }
+    void loadOnboardingResume();
+    return () => { cancelled = true; };
+  }, []);
+
   const actionBusy = actionKind !== null;
   const isEmpty = items.length === 0;
 
   function handleAddAccountClick() {
-    if (entitlementReady) {
+    if (entitlementReady || onboardingResumable) {
       setFormOpen(true);
       return;
     }
@@ -491,82 +513,6 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     }
   }
 
-  async function handleCreateAccount(event: React.FormEvent) {
-    event.preventDefault();
-    if (actionBusy || processModal) return;
-
-    const draftUsername = username.trim();
-    setFormOpen(false);
-    setActionKind("create");
-    setActionAccountId("new");
-    setMessage("");
-    setProcessModal({
-      mode: "add_account",
-      username: draftUsername.replace(/^@+/, ""),
-      addPhase: "submitting",
-    });
-
-    try {
-      setProcessModal((current) => current ? { ...current, addPhase: "creating" } : current);
-      const response = await fetch("/api/instagram-client/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ username: draftUsername, email, password, notes }),
-      });
-      const payload = await response.json() as {
-        ok?: boolean;
-        error?: string;
-        code?: string;
-        data?: { account?: ClientInstagramAccountView };
-      };
-
-      if (!response.ok || payload.ok === false) {
-        const safeMessage = clientSafeProcessErrorMessage(lang, payload.code, payload.error);
-        setProcessModal((current) => current ? {
-          ...current,
-          addPhase: "error",
-          errorMessage: safeMessage,
-          errorCode: payload.code,
-        } : current);
-        return;
-      }
-
-      setProcessModal((current) => current ? { ...current, addPhase: "refreshing", accountId: payload.data?.account?.accountId } : current);
-      const refreshed = await refreshFromServer();
-      const account = refreshed.find((row) => row.accountId === payload.data?.account?.accountId) ?? payload.data?.account ?? null;
-      if (!account?.accountId) {
-        setProcessModal((current) => current ? {
-          ...current,
-          addPhase: "error",
-          errorMessage: labelFor(lang, "Le compte n'apparaît pas encore dans votre espace. Actualisez dans un instant.", "The account is not visible yet. Refresh in a moment."),
-        } : current);
-        return;
-      }
-
-      setUsername("");
-      setEmail("");
-      setPassword("");
-      setShowInstagramPassword(false);
-      setNotes("");
-      setProcessModal({
-        mode: "add_account",
-        username: account.username,
-        accountId: account.accountId,
-        addPhase: "complete",
-        account,
-      });
-    } catch (error) {
-      setProcessModal((current) => current ? {
-        ...current,
-        addPhase: "error",
-        errorMessage: error instanceof Error ? error.message : labelFor(lang, "Impossible d'ajouter le compte.", "Could not add account."),
-      } : current);
-    } finally {
-      setActionKind(null);
-      setActionAccountId(null);
-    }
-  }
-
   async function requestAssistedConnect(account: ClientInstagramAccountView, reservationId?: string) {
     if (actionBusy) return;
     setActionKind("connect");
@@ -905,79 +851,16 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         {message ? <p className={`cd-accounts-message ${messageTone}`}>{message}</p> : null}
       </section>
 
-      {formOpen ? (
-        <div className="cd-progress-overlay" role="presentation" onMouseDown={() => !actionBusy && setFormOpen(false)}>
-          <section
-            className="cd-progress-modal cd-add-account-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="cd-s-title">{labelFor(lang, "Nouveau compte", "New account")}</div>
-            <h3>{labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}</h3>
-            <p className="cd-connect-copy">
-              {labelFor(
-                lang,
-                "Ajoutez votre compte Instagram. Nous préparons ensuite la connexion automatiquement — aucune configuration technique de votre côté.",
-                "Add your Instagram account. We then prepare the connection automatically — no technical setup on your side.",
-              )}
-            </p>
-            <form className="cd-add-account-form" onSubmit={(event) => void handleCreateAccount(event)}>
-              <label className="cd-fg">
-                <span className="cd-fl">{labelFor(lang, "Nom d'utilisateur Instagram", "Instagram username")}</span>
-                <input className="cd-fi-in" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="@username" required />
-              </label>
-              <label className="cd-fg">
-                <span className="cd-fl">{labelFor(lang, "Email Instagram (optionnel)", "Instagram email (optional)")}</span>
-                <input className="cd-fi-in" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" />
-              </label>
-              <label className="cd-fg">
-                <span className="cd-fl">{labelFor(lang, "Mot de passe Instagram", "Instagram password")}</span>
-                <div className="cd-password-field">
-                  <input
-                    className="cd-fi-in"
-                    type={showInstagramPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="cd-password-toggle"
-                    aria-pressed={showInstagramPassword}
-                    aria-label={
-                      showInstagramPassword
-                        ? labelFor(lang, "Masquer le mot de passe Instagram", "Hide Instagram password")
-                        : labelFor(lang, "Afficher le mot de passe Instagram", "Show Instagram password")
-                    }
-                    onClick={() => setShowInstagramPassword((current) => !current)}
-                  >
-                    {showInstagramPassword
-                      ? labelFor(lang, "Masquer", "Hide")
-                      : labelFor(lang, "Afficher", "Show")}
-                  </button>
-                </div>
-              </label>
-              <label className="cd-fg">
-                <span className="cd-fl">{labelFor(lang, "Notes (optionnel)", "Notes (optional)")}</span>
-                <input className="cd-fi-in" value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </label>
-              <div className="cd-add-account-actions">
-                <button type="button" className="cd-btn cd-btn-soft" disabled={actionBusy} onClick={() => setFormOpen(false)}>
-                  {labelFor(lang, "Annuler", "Cancel")}
-                </button>
-                <button type="submit" className="cd-btn cd-btn-primary" disabled={actionBusy}>
-                  {actionKind === "create"
-                    ? labelFor(lang, "Ajout…", "Adding…")
-                    : labelFor(lang, "Ajouter le compte", "Add account")}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
+      <ClientInstagramOnboardingWizard
+        open={formOpen}
+        lang={lang}
+        onClose={() => setFormOpen(false)}
+        onCompleted={async () => {
+          setOnboardingResumable(false);
+          await refreshFromServer();
+          pushMessage(labelFor(lang, "Ciblage enregistré. La connexion Instagram reste à effectuer.", "Targeting saved. Instagram connection is still pending."));
+        }}
+      />
 
       <ClientAccountProcessModal
         open={Boolean(processModal)}

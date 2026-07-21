@@ -1,6 +1,6 @@
 # Test evidence matrix
 
-Snapshot date: **2026-07-20**.
+Snapshot date: **2026-07-21**.
 
 ## Handoff evidence
 
@@ -18,7 +18,10 @@ Snapshot date: **2026-07-20**.
 | `/instagram-login` route | HTTP 200 | production_validated |
 | Automatic browser redirect | Ready, not yet physically observed by Liam | partial |
 | Stripe Live checkout | Not exercised | blocked |
-| Server-side 15 CT gate | Not implemented | planned |
+| Add-account onboarding targeted suite | 132/132 passed, including ephemeral PostgreSQL concurrency | automated_tested |
+| Server-side 15 CT gate | 0 and 14 rejected; 15 accepted | automated_tested |
+| Add-account production deployment | Not performed | blocked pending GO |
+| Add-account physical onboarding | Not performed; no real account was created | planned |
 
 The one failure in the combined 81-test run is the pre-existing cancellation
 projection assertion in `stripe-checkout-webhook-foundation.test.mjs`; it is
