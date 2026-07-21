@@ -27,7 +27,15 @@ Snapshot date: **2026-07-21**.
 | Profile Intelligence V1 targeted ESLint | Passed on 10 affected TS/TSX files | automated_tested |
 | Profile Intelligence V1 Next.js production build | Passed with Next.js 16.2.1, including TypeScript and `/api/instagram-client/onboarding/avatar` | automated_tested |
 | Profile Intelligence V1 local visual check | Passed with an isolated mocked GET; no Supabase write or provider call | locally_validated |
-| Profile Intelligence V1 production status | Not committed, not deployed, no migration | planned |
+| Profile Intelligence V1 production status | `cc73eb26ae99f0ca5d597d0660763742fabbdaf1`; `dpl_AtT2a8EcjcDPS4fMww2DPbJ4EmZJ` READY; no migration | production_validated |
+| Profile Intelligence V2 targeted suite | 73/73 passed, including V4 FR/EN prompts, no-geography schema/runtime/legacy guards, language validation, invalid output, timeout, one-call rule, idempotence, concurrency, cooldown, legacy/V1 refresh and confirmation | automated_tested |
+| Profile Intelligence V2 prompt/no-leak | Snapshot limited to approved public fields, domain-only external link and 5 x 280-character captions; forbidden secrets/UUIDs/CDN URLs excluded | automated_tested |
+| Profile Intelligence V2 targeted ESLint | Passed on 8 affected source and test files | automated_tested |
+| Profile Intelligence V2 scoped TypeScript | Passed with isolated no-emit config | automated_tested |
+| Profile Intelligence V2 Next.js production build | Passed with Next.js 16.2.1 | automated_tested |
+| Profile Intelligence V2 local visual check | 10 deterministic captures: five states in FR and EN; GET fixtures only, no onboarding API or OpenAI call | locally_validated |
+| Profile Intelligence V2 safe-scope smoke | One isolated `gpt-4o-mini-2024-07-18` Responses call: HTTP 200, schema/language/business valid, no geographic output key, 4,740 ms total; no onboarding route or database write | locally_validated |
+| Profile Intelligence V2 production status | Local only; no commit, migration or deployment | locally_validated |
 
 The one failure in the combined 81-test run is the pre-existing cancellation
 projection assertion in `stripe-checkout-webhook-foundation.test.mjs`; it is
@@ -37,6 +45,10 @@ all newly affected paths are green.
 Profile Intelligence V1 also passed `git diff --check` and a no-leak source
 scan. The single live schema-confirmation request was not repeated by tests;
 provider calls in the suite use injected fixtures only.
+
+Profile Intelligence V2 uses injected provider responses for automated and
+visual validation. The separately authorized safe-scope canary smoke was
+isolated from onboarding and persisted no payload or response artifact.
 
 ## Predicate cases covered
 

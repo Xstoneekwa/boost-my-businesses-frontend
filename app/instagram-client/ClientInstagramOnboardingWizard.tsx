@@ -112,18 +112,21 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   const [session, setSession] = useState<ClientOnboardingSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [analysis, setAnalysis] = useState<ClientPublicAnalysis | null>(null);
+  const [editedAiFields, setEditedAiFields] = useState<Set<string>>(new Set());
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [criteria, setCriteria] = useState<ClientTargetingCriteria>(emptyCriteria(null));
   const [targets, setTargets] = useState<TargetsOverview | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const idempotencyKeyRef = useRef("");
   const reanalysisKeyRef = useRef("");
+  const aiAnalysisKeyRef = useRef("");
   const targetDrawerAutoOpenedRef = useRef("");
 
   const step = session?.canRestart ? null : (session?.currentStep ?? "connection");
@@ -152,6 +155,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
     idempotencyKeyRef.current = next.idempotencyKey;
     setUsername(next.requestedUsername);
     setAnalysis(next.publicAnalysis);
+    setEditedAiFields(new Set());
     setAvatarFailed(false);
     setCriteria(next.targetingCriteria ?? emptyCriteria(next.publicAnalysis));
     if (next.accountId && (next.currentStep === "targets" || next.currentStep === "complete")) {
@@ -187,6 +191,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
       setDrawerOpen(false);
       targetDrawerAutoOpenedRef.current = "";
       reanalysisKeyRef.current = "";
+      aiAnalysisKeyRef.current = "";
     }
   }, [open]);
 
@@ -198,12 +203,24 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   }, [open, session?.accountId, session?.id, step]);
 
   const sourceLabel = useCallback((field: string) => {
+    if (editedAiFields.has(field)) return text(lang, "Confirmé par vous", "Confirmed by you");
     const source = analysis?.sources?.[field];
     if (source === "public_observed") return text(lang, "Donnée publique observée", "Observed public data");
     if (source === "deterministic_derived") return text(lang, "Déduit automatiquement", "Automatically derived");
+    if (source === "ai_suggested") return text(lang, "Suggéré par l'analyse", "Suggested by the analysis");
     if (source === "user_confirmed") return text(lang, "Confirmé par vous", "Confirmed by you");
-    return text(lang, "Non détecté", "Not detected");
-  }, [analysis?.sources, lang]);
+    if (["niche", "probableAudience", "themes", "suggestedCategory", "businessDescription", "keywords", "exclusions"].includes(field)) {
+      return text(lang, "À analyser", "To analyze");
+    }
+    if (field === "category") return text(lang, "Non fournie par le profil", "Not provided by the profile");
+    if (field === "location") return text(lang, "Non fournie par le profil", "Not provided by the profile");
+    return text(lang, "Non fourni par le profil", "Not provided by the profile");
+  }, [analysis?.sources, editedAiFields, lang]);
+
+  const updateAiField = useCallback((field: keyof ClientPublicAnalysis, value: unknown) => {
+    setAnalysis((current) => current ? { ...current, [field]: value } : current);
+    setEditedAiFields((current) => new Set(current).add(field));
+  }, []);
 
   async function startOnboarding(event: React.FormEvent) {
     event.preventDefault();
@@ -283,7 +300,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   }
 
   async function reanalyzePublicProfile() {
-    if (!session || saving) return;
+    if (!session || saving || aiSaving) return;
     if (!reanalysisKeyRef.current) reanalysisKeyRef.current = crypto.randomUUID();
     setSaving(true);
     setError("");
@@ -313,6 +330,52 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
     }
   }
 
+  async function analyzeProfileWithAi() {
+    if (!session || saving || aiSaving) return;
+    if (analysis?.aiAnalysis.confirmationStatus === "confirmed") {
+      const confirmed = window.confirm(text(
+        lang,
+        "Relancer l'analyse IA remplacera les suggestions affichées. Vos faits publics restent inchangés. Continuer ?",
+        "Rerunning AI analysis will replace the displayed suggestions. Your public facts remain unchanged. Continue?",
+      ));
+      if (!confirmed) return;
+    }
+    if (!aiAnalysisKeyRef.current) aiAnalysisKeyRef.current = crypto.randomUUID();
+    setAiSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/instagram-client/onboarding", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          session_id: session.id,
+          action: "analyze_ai",
+          request_key: aiAnalysisKeyRef.current,
+        }),
+      });
+      const payload = await readEnvelope(response);
+      if (!response.ok || !payload.ok || !payload.data?.onboarding) {
+        throw new Error(payload.error || text(lang, "L'analyse IA est temporairement indisponible.", "AI analysis is temporarily unavailable."));
+      }
+      aiAnalysisKeyRef.current = "";
+      hydrate(payload.data.onboarding);
+      if (payload.data.onboarding.publicAnalysis?.aiAnalysis.status === "failed_retryable") {
+        setError(text(
+          lang,
+          "L'analyse IA est temporairement indisponible. Les faits publics restent disponibles et tu peux réessayer.",
+          "AI analysis is temporarily unavailable. Public facts remain available and you can retry.",
+        ));
+      }
+    } catch (aiError) {
+      if (!(aiError instanceof Error && /already running|déjà en cours/i.test(aiError.message))) aiAnalysisKeyRef.current = "";
+      setError(aiError instanceof Error
+        ? aiError.message
+        : text(lang, "L'analyse IA est temporairement indisponible.", "AI analysis is temporarily unavailable."));
+    } finally {
+      setAiSaving(false);
+    }
+  }
+
   const progressLabels = useMemo(() => [
     text(lang, "Connexion", "Connection"), text(lang, "Analyse", "Analysis"), text(lang, "Ciblage", "Targeting"),
     text(lang, "Comptes cibles", "Target accounts"), text(lang, "Terminé", "Complete"),
@@ -321,6 +384,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   const packageLabel = session?.packageCode
     ? session.packageCode.charAt(0).toUpperCase() + session.packageCode.slice(1)
     : text(lang, "Package à confirmer", "Package pending");
+  const aiStatus = aiSaving ? "running" : analysis?.aiAnalysis.status ?? "not_started";
 
   if (!open) return null;
 
@@ -335,8 +399,8 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
           </div>
           <div className="cio-header-meta">
             <span className="cio-package">{packageLabel}</span>
-            {session ? <span className={`cio-ai-state ${aiEnabled ? "active" : "locked"}`}><Sparkles size={13} />{aiEnabled ? text(lang, "Recherche IA active", "AI search active") : text(lang, "IA verrouillée", "AI locked")}</span> : null}
-            <button type="button" className="cio-icon-btn" onClick={onClose} disabled={saving} aria-label={text(lang, "Fermer", "Close")}><X size={18} /></button>
+            {session ? <span className={`cio-ai-state ${aiEnabled ? "active" : "locked"}`}><Sparkles size={13} />{aiEnabled ? text(lang, "Recherche CT par IA active", "Target AI search active") : text(lang, "Recherche CT par IA verrouillée", "Target AI search locked")}</span> : null}
+            <button type="button" className="cio-icon-btn" onClick={onClose} disabled={saving || aiSaving} aria-label={text(lang, "Fermer", "Close")}><X size={18} /></button>
           </div>
         </header>
         <ol className="cio-progress" aria-label={text(lang, "Progression", "Progress")}>{progressLabels.map((label, index) => <li key={label} className={index < stepIndex ? "done" : index === stepIndex ? "active" : ""}><span>{index + 1}</span>{label}</li>)}</ol>
@@ -349,7 +413,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
             <div className="cio-form">
               <div className="cio-intro">
                 <h3>{text(lang, "Vérifier le profil public", "Review the public profile")}</h3>
-                <p>{text(lang, "Les faits publics et les déductions locales sont identifiés séparément. Les champs non détectés restent vides.", "Public facts and local deterministic results are labelled separately. Undetected fields remain empty.")}</p>
+                <p>{text(lang, "Les faits publics s'affichent immédiatement. L'analyse IA reste séparée, facultative et doit être confirmée par toi.", "Public facts appear immediately. AI analysis remains separate, optional, and must be confirmed by you.")}</p>
               </div>
               <div className="cio-profile">
                 {analysis.avatarAvailable && !avatarFailed ? (
@@ -364,27 +428,60 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
                 ) : <span className="cio-avatar">{analysis.username.slice(0, 1).toUpperCase() || "@"}</span>}
                 <div>
                   <strong>@{analysis.username}</strong>
-                  <p>{analysis.displayName || text(lang, "Nom non détecté", "Name not detected")}</p>
-                  <small>{analysis.followersCount == null ? text(lang, "Abonnés non détectés", "Followers not detected") : `${analysis.followersCount.toLocaleString()} ${text(lang, "abonnés", "followers")}`}</small>
+                  <p>{analysis.displayName || text(lang, "Nom non fourni par le profil", "Name not provided by the profile")}</p>
+                  <small>{analysis.followersCount == null ? text(lang, "Abonnés non fournis par le profil", "Followers not provided by the profile") : `${analysis.followersCount.toLocaleString()} ${text(lang, "abonnés", "followers")}`}</small>
                 </div>
               </div>
               <div className="cio-facts" aria-label={text(lang, "Faits publics", "Public facts")}>
-                <span><small>{text(lang, "Abonnements", "Following")}</small><strong>{analysis.followingCount?.toLocaleString() ?? text(lang, "Non détecté", "Not detected")}</strong></span>
-                <span><small>{text(lang, "Publications", "Posts")}</small><strong>{analysis.postsCount?.toLocaleString() ?? text(lang, "Non détecté", "Not detected")}</strong></span>
-                <span><small>{text(lang, "Visibilité", "Visibility")}</small><strong>{analysis.isPrivate == null ? text(lang, "Non détecté", "Not detected") : analysis.isPrivate ? text(lang, "Privé", "Private") : text(lang, "Public", "Public")}</strong></span>
-                <span><small>{text(lang, "Vérification", "Verification")}</small><strong>{analysis.isVerified == null ? text(lang, "Non détecté", "Not detected") : analysis.isVerified ? text(lang, "Vérifié", "Verified") : text(lang, "Non vérifié", "Not verified")}</strong></span>
-                <span><small>{text(lang, "Compte business", "Business account")}</small><strong>{analysis.isBusiness == null ? text(lang, "Non détecté", "Not detected") : analysis.isBusiness ? text(lang, "Oui", "Yes") : text(lang, "Non", "No")}</strong></span>
+                <span><small>{text(lang, "Abonnements", "Following")}</small><strong>{analysis.followingCount?.toLocaleString() ?? text(lang, "Non fourni par le profil", "Not provided by the profile")}</strong></span>
+                <span><small>{text(lang, "Publications", "Posts")}</small><strong>{analysis.postsCount?.toLocaleString() ?? text(lang, "Non fourni par le profil", "Not provided by the profile")}</strong></span>
+                <span><small>{text(lang, "Visibilité", "Visibility")}</small><strong>{analysis.isPrivate == null ? text(lang, "Non fournie par le profil", "Not provided by the profile") : analysis.isPrivate ? text(lang, "Privé", "Private") : text(lang, "Public", "Public")}</strong></span>
+                <span><small>{text(lang, "Vérification", "Verification")}</small><strong>{analysis.isVerified == null ? text(lang, "Non fournie par le profil", "Not provided by the profile") : analysis.isVerified ? text(lang, "Vérifié", "Verified") : text(lang, "Non vérifié", "Not verified")}</strong></span>
+                <span><small>{text(lang, "Compte business", "Business account")}</small><strong>{analysis.isBusiness == null ? text(lang, "Non fourni par le profil", "Not provided by the profile") : analysis.isBusiness ? text(lang, "Oui", "Yes") : text(lang, "Non", "No")}</strong></span>
                 <span><small>{text(lang, "Captions utilisées", "Captions used")}</small><strong>{analysis.recentCaptionSampleCount}</strong></span>
               </div>
               {analysis.externalUrl ? <a className="cio-public-link" href={analysis.externalUrl} target="_blank" rel="noreferrer">{text(lang, "Ouvrir le lien public du profil", "Open the profile public link")}</a> : null}
-              <label><span>{text(lang, "Nom public", "Public name")} · {sourceLabel("displayName")}</span><input value={analysis.displayName ?? ""} placeholder={text(lang, "Non détecté", "Not detected")} onChange={(event) => setAnalysis({ ...analysis, displayName: event.target.value })} /></label>
-              <label><span>Bio · {sourceLabel("biography")}</span><textarea value={analysis.biography ?? ""} placeholder={text(lang, "Non détecté", "Not detected")} onChange={(event) => setAnalysis({ ...analysis, biography: event.target.value })} rows={3} /></label>
-              <div className="cio-grid">{(["category", "niche", "location", "language"] as const).map((field) => <label key={field}><span>{text(lang, field === "category" ? "Catégorie officielle" : field === "niche" ? "Niche / secteur" : field === "location" ? "Localisation" : "Langue", field === "category" ? "Official category" : field === "niche" ? "Niche / industry" : field === "location" ? "Location" : "Language")} · {sourceLabel(field)}</span><input value={analysis[field] ?? ""} placeholder={text(lang, "Non détecté", "Not detected")} onChange={(event) => setAnalysis({ ...analysis, [field]: event.target.value })} /></label>)}</div>
-              <label><span>{text(lang, "Audience probable", "Likely audience")} · {sourceLabel("probableAudience")}</span><input value={analysis.probableAudience ?? ""} placeholder={text(lang, "Non détecté", "Not detected")} onChange={(event) => setAnalysis({ ...analysis, probableAudience: event.target.value })} /></label>
-              <label><span>{text(lang, "Thèmes (séparés par des virgules)", "Themes (comma-separated)")} · {sourceLabel("themes")}</span><input value={listInput(analysis.themes)} placeholder={text(lang, "Non détecté", "Not detected")} onChange={(event) => setAnalysis({ ...analysis, themes: parseList(event.target.value) })} /></label>
+              <div className="cio-observed-fields">
+                <label><span>{text(lang, "Nom public", "Public name")} · {sourceLabel("displayName")}</span><input value={analysis.displayName ?? ""} placeholder={text(lang, "Non fourni par le profil", "Not provided by the profile")} readOnly /></label>
+                <label><span>Bio · {sourceLabel("biography")}</span><textarea value={analysis.biography ?? ""} placeholder={text(lang, "Non fournie par le profil", "Not provided by the profile")} readOnly rows={3} /></label>
+                <div className="cio-grid">
+                  <label><span>{text(lang, "Catégorie officielle", "Official category")} · {sourceLabel("category")}</span><input value={analysis.category ?? ""} placeholder={text(lang, "Non fournie par le profil", "Not provided by the profile")} readOnly /></label>
+                  <label><span>{text(lang, "Localisation publique", "Public location")} · {sourceLabel("location")}</span><input value={analysis.location ?? ""} placeholder={text(lang, "Non fournie par le profil", "Not provided by the profile")} readOnly /></label>
+                  <label><span>{text(lang, "Langue", "Language")} · {sourceLabel("language")}</span><input value={analysis.language ?? ""} placeholder={text(lang, "Non fournie par le profil", "Not provided by the profile")} readOnly /></label>
+                </div>
+              </div>
+              <section className={`cio-ai-panel ${aiStatus}`} aria-busy={aiStatus === "running"}>
+                <div className="cio-ai-heading">
+                  <div><span className="cio-kicker"><Sparkles size={14} />PROFILE INTELLIGENCE V2</span><h4>{text(lang, "Suggestions contrôlées", "Controlled suggestions")}</h4></div>
+                  {aiStatus === "running" ? <span className="cio-ai-spinner" aria-label={text(lang, "Analyse IA en cours", "AI analysis in progress")} /> : null}
+                </div>
+                {aiStatus === "running" ? <p className="cio-ai-message">{text(lang, "Analyse IA en cours… Les faits publics restent disponibles.", "AI analysis in progress… Public facts remain available.")}</p> : null}
+                {aiStatus === "failed_retryable" ? <p className="cio-ai-message error">{text(lang, "Analyse temporairement indisponible. Tu peux réessayer sans perdre les faits publics.", "Analysis is temporarily unavailable. You can retry without losing public facts.")}</p> : null}
+                <div className="cio-grid">
+                  <label><span>{text(lang, "Catégorie suggérée", "Suggested category")} · {sourceLabel("suggestedCategory")}</span><input value={analysis.suggestedCategory ?? ""} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("suggestedCategory", event.target.value)} /></label>
+                  <label><span>{text(lang, "Niche / secteur", "Niche / industry")} · {sourceLabel("niche")}</span><input value={analysis.niche ?? ""} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("niche", event.target.value)} /></label>
+                </div>
+                <label><span>{text(lang, "Audience probable", "Likely audience")} · {sourceLabel("probableAudience")}</span><input value={analysis.probableAudience ?? ""} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("probableAudience", event.target.value)} /></label>
+                <label><span>{text(lang, "Thèmes (séparés par des virgules)", "Themes (comma-separated)")} · {sourceLabel("themes")}</span><input value={listInput(analysis.themes)} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("themes", parseList(event.target.value))} /></label>
+                <label><span>{text(lang, "Description de l'activité", "Business description")} · {sourceLabel("businessDescription")}</span><textarea rows={3} value={analysis.businessDescription ?? ""} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("businessDescription", event.target.value)} /></label>
+                <div className="cio-grid">
+                  <label><span>{text(lang, "Mots-clés", "Keywords")} · {sourceLabel("keywords")}</span><input value={listInput(analysis.keywords)} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("keywords", parseList(event.target.value))} /></label>
+                  <label><span>{text(lang, "Exclusions", "Exclusions")} · {sourceLabel("exclusions")}</span><input value={listInput(analysis.exclusions)} placeholder={text(lang, "À analyser", "To analyze")} disabled={aiStatus === "running"} onChange={(event) => updateAiField("exclusions", parseList(event.target.value))} /></label>
+                </div>
+                <div className="cio-ai-actions">
+                  <button className="cio-primary" type="button" disabled={aiSaving || saving} onClick={() => void analyzeProfileWithAi()}>
+                    <Sparkles size={15} />
+                    {aiStatus === "running"
+                      ? text(lang, "Analyse avec l'IA…", "Analyzing with AI…")
+                      : analysis.aiAnalysis.status === "completed"
+                        ? text(lang, "Relancer l'analyse IA", "Rerun AI analysis")
+                        : text(lang, "Analyser avec l'IA", "Analyze with AI")}
+                  </button>
+                </div>
+              </section>
               <div className="cio-actions split">
-                <button className="cio-secondary" type="button" disabled={saving} onClick={() => void reanalyzePublicProfile()}>{saving ? text(lang, "Réanalyse…", "Reanalyzing…") : text(lang, "Réanalyser les données publiques", "Reanalyze public data")}</button>
-                <button className="cd-btn cd-btn-primary" type="button" disabled={saving} onClick={() => void patchSession("save_analysis", analysis)}>{text(lang, "Confirmer l'analyse", "Confirm analysis")}</button>
+                <button className="cio-secondary" type="button" disabled={saving || aiSaving} onClick={() => void reanalyzePublicProfile()}>{saving ? text(lang, "Réanalyse…", "Reanalyzing…") : text(lang, "Réanalyser les données publiques", "Reanalyze public data")}</button>
+                <button className="cd-btn cd-btn-primary" type="button" disabled={saving || aiSaving} onClick={() => void patchSession("save_analysis", analysis)}>{text(lang, "Confirmer l'analyse", "Confirm analysis")}</button>
               </div>
             </div>
           ) : null}
@@ -400,9 +497,9 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
         .cio-header{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:22px 26px;border-bottom:1px solid var(--cio-border);background:rgba(9,13,30,.96)}
         .cio-brand{display:flex;align-items:center;gap:13px}.cio-brand-icon{width:40px;height:40px;display:grid;place-items:center;border:1px solid rgba(217,92,255,.48);border-radius:8px;color:#fff;background:linear-gradient(145deg,rgba(217,92,255,.28),rgba(255,157,87,.16))}.cio-header p{margin:0 0 5px;color:#bd86df;font-size:.7rem;font-weight:800;letter-spacing:.08em}.cio-header h2{margin:0;font-size:1.25rem;letter-spacing:0}.cio-header-meta{display:flex;align-items:center;gap:8px}.cio-package,.cio-ai-state{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border:1px solid var(--cio-border);border-radius:6px;color:#d7dced;background:#131a30;font-size:.72rem;font-weight:750}.cio-ai-state.active{border-color:rgba(78,226,160,.35);color:#7ff2b9;background:rgba(78,226,160,.08)}.cio-ai-state.locked{border-color:rgba(255,184,92,.3);color:#ffc478;background:rgba(255,157,87,.08)}.cio-icon-btn{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--cio-border);border-radius:6px;background:#11172a;color:#d7dced;cursor:pointer}.cio-icon-btn:hover{border-color:#59627e;color:#fff}
         .cio-progress{list-style:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:0;padding:18px 26px;border-bottom:1px solid var(--cio-border);background:#0d1225}.cio-progress li{position:relative;display:flex;align-items:center;gap:8px;color:#747f9c;font-size:.72rem;font-weight:700;min-width:0}.cio-progress li:not(:last-child)::after{content:"";position:absolute;height:1px;background:#29324c;left:calc(100% - 2px);width:16px}.cio-progress li span{display:grid;place-items:center;width:25px;height:25px;border:1px solid #3b4563;border-radius:50%;flex:0 0 auto;color:#8993ae;background:#11172a}.cio-progress li.active{color:#fff}.cio-progress li.active span{border-color:#e56ccb;background:linear-gradient(135deg,#bf4ee8,#ef8a75);color:#fff;box-shadow:0 0 18px rgba(217,92,255,.24)}.cio-progress li.done{color:#74dcae}.cio-progress li.done span{background:rgba(78,226,160,.12);border-color:rgba(78,226,160,.55);color:#76efb5}
-        .cio-body{padding:26px;background:radial-gradient(circle at 80% 0,rgba(151,71,214,.08),transparent 34%)}.cio-form{display:grid;gap:16px;padding:22px;border:1px solid var(--cio-border);border-radius:8px;background:linear-gradient(180deg,rgba(21,29,52,.98),rgba(15,21,40,.98))}.cio-intro h3{margin:0 0 7px;font-size:1.22rem}.cio-intro p,.cio-note{margin:0;color:var(--cio-muted);line-height:1.55}.cio-kicker{display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;color:#df7cd7;font-size:.7rem;font-weight:800;letter-spacing:.08em}.cio-form label{display:grid;gap:7px}.cio-form label>span{font-size:.76rem;font-weight:750;color:#c1c9db}.cio-form input,.cio-form textarea{width:100%;box-sizing:border-box;border:1px solid #36405d;border-radius:6px;background:#0c1123;color:#f7f8fc;padding:11px 12px;font:inherit;letter-spacing:0;outline:none}.cio-form input:focus,.cio-form textarea:focus{border-color:#c65bdd;box-shadow:0 0 0 3px rgba(198,91,221,.12)}.cio-form textarea{resize:vertical}.cio-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+        .cio-body{padding:26px;background:radial-gradient(circle at 80% 0,rgba(151,71,214,.08),transparent 34%)}.cio-form{display:grid;gap:16px;padding:22px;border:1px solid var(--cio-border);border-radius:8px;background:linear-gradient(180deg,rgba(21,29,52,.98),rgba(15,21,40,.98))}.cio-intro h3{margin:0 0 7px;font-size:1.22rem}.cio-intro p,.cio-note{margin:0;color:var(--cio-muted);line-height:1.55}.cio-kicker{display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;color:#df7cd7;font-size:.7rem;font-weight:800;letter-spacing:.08em}.cio-form label{display:grid;gap:7px}.cio-form label>span{font-size:.76rem;font-weight:750;color:#c1c9db}.cio-form input,.cio-form textarea{width:100%;box-sizing:border-box;border:1px solid #36405d;border-radius:6px;background:#0c1123;color:#f7f8fc;padding:11px 12px;font:inherit;letter-spacing:0;outline:none}.cio-form input:focus,.cio-form textarea:focus{border-color:#c65bdd;box-shadow:0 0 0 3px rgba(198,91,221,.12)}.cio-form input[readonly],.cio-form textarea[readonly]{color:#d2d8e7;background:#10162a;cursor:default}.cio-form textarea{resize:vertical}.cio-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.cio-observed-fields{display:grid;gap:14px;padding:16px;border:1px solid #303a57;border-radius:7px;background:#0f1528}
         .cio-password{display:grid;grid-template-columns:1fr auto}.cio-password input{border-radius:6px 0 0 6px}.cio-password button{border:1px solid #36405d;border-left:0;border-radius:0 6px 6px 0;background:#171e35;color:#cdd4e5;padding:0 13px;font-weight:700}.cio-actions{display:flex;justify-content:flex-end;margin-top:4px}.cio-actions.split{justify-content:space-between;gap:12px}.cio-primary,.cio-secondary{min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:6px;padding:0 16px;font:inherit;font-size:.83rem;font-weight:800;cursor:pointer}.cio-primary{border:0;color:#fff;background:linear-gradient(95deg,#b64ee7,#ed6f9f 52%,#f39a54);box-shadow:0 8px 25px rgba(211,84,184,.18)}.cio-primary:disabled{opacity:.45;cursor:not-allowed}.cio-secondary{border:1px solid #414c6a;color:#e4e7f0;background:#171e34}.cio-error{padding:11px 13px;border:1px solid rgba(255,106,116,.4);border-radius:6px;background:rgba(255,71,87,.09);color:#ff9ca3}.cio-state{text-align:center;color:var(--cio-muted);padding:30px}
-        .cio-profile{display:flex;gap:13px;align-items:center;padding:14px;border:1px solid var(--cio-border);border-radius:7px;background:#10162a}.cio-profile img,.cio-avatar{width:56px;height:56px;border-radius:50%;object-fit:cover;background:#1d263d;display:grid;place-items:center;font-weight:800}.cio-profile p,.cio-profile small{margin:3px 0 0;color:var(--cio-muted)}.cio-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.cio-facts>span{display:grid;gap:4px;padding:10px;border:1px solid #303a57;border-radius:6px;background:#10162a}.cio-facts small{color:var(--cio-muted);font-size:.68rem}.cio-facts strong{font-size:.78rem}.cio-public-link{width:max-content;color:#df8be6;font-size:.78rem;font-weight:750;text-decoration:none}.cio-public-link:hover{text-decoration:underline}.cio-target-count{display:flex;gap:10px;align-items:baseline;padding:20px;border:1px solid rgba(255,157,87,.35);border-radius:7px;background:rgba(255,157,87,.07)}.cio-target-count.ready{border-color:rgba(78,226,160,.42);background:rgba(78,226,160,.07)}.cio-target-count strong{font-size:1.75rem;color:#fff}.cio-target-count span{color:var(--cio-muted)}.cio-target-summary{display:flex;gap:10px;flex-wrap:wrap;color:#aeb7ca;font-size:.78rem}.cio-target-summary span{padding:6px 9px;border:1px solid #313b57;border-radius:6px;background:#10162a}
+        .cio-profile{display:flex;gap:13px;align-items:center;padding:14px;border:1px solid var(--cio-border);border-radius:7px;background:#10162a}.cio-profile img,.cio-avatar{width:56px;height:56px;border-radius:50%;object-fit:cover;background:#1d263d;display:grid;place-items:center;font-weight:800}.cio-profile p,.cio-profile small{margin:3px 0 0;color:var(--cio-muted)}.cio-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.cio-facts>span{display:grid;gap:4px;padding:10px;border:1px solid #303a57;border-radius:6px;background:#10162a}.cio-facts small{color:var(--cio-muted);font-size:.68rem}.cio-facts strong{font-size:.78rem}.cio-public-link{width:max-content;color:#df8be6;font-size:.78rem;font-weight:750;text-decoration:none}.cio-public-link:hover{text-decoration:underline}.cio-ai-panel{display:grid;gap:14px;padding:17px;border:1px solid rgba(217,92,255,.34);border-radius:8px;background:linear-gradient(180deg,rgba(31,21,54,.72),rgba(15,21,40,.98))}.cio-ai-panel.running{border-color:rgba(217,92,255,.58)}.cio-ai-panel.failed_retryable{border-color:rgba(255,157,87,.5)}.cio-ai-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.cio-ai-heading h4{margin:0;font-size:1rem}.cio-ai-message{margin:0;padding:10px 12px;border-radius:6px;color:#c9b9dc;background:rgba(217,92,255,.08);font-size:.8rem}.cio-ai-message.error{color:#ffc28f;background:rgba(255,157,87,.09)}.cio-ai-spinner{width:22px;height:22px;border:2px solid rgba(217,92,255,.25);border-top-color:#e38cff;border-radius:50%;animation:cio-spin .8s linear infinite}.cio-ai-actions{display:flex;justify-content:flex-start}.cio-ai-actions button{min-width:190px}@keyframes cio-spin{to{transform:rotate(360deg)}}.cio-target-count{display:flex;gap:10px;align-items:baseline;padding:20px;border:1px solid rgba(255,157,87,.35);border-radius:7px;background:rgba(255,157,87,.07)}.cio-target-count.ready{border-color:rgba(78,226,160,.42);background:rgba(78,226,160,.07)}.cio-target-count strong{font-size:1.75rem;color:#fff}.cio-target-count span{color:var(--cio-muted)}.cio-target-summary{display:flex;gap:10px;flex-wrap:wrap;color:#aeb7ca;font-size:.78rem}.cio-target-summary span{padding:6px 9px;border:1px solid #313b57;border-radius:6px;background:#10162a}
         .cio-complete{text-align:center;display:grid;justify-items:center;gap:13px;padding:34px 20px;border:1px solid var(--cio-border);border-radius:8px;background:linear-gradient(180deg,#151d34,#0f1528)}.cio-complete>span{display:grid;place-items:center;width:58px;height:58px;border-radius:50%;background:linear-gradient(145deg,#31d99a,#8d72ed);color:#fff;font-size:1.8rem;box-shadow:0 0 30px rgba(78,226,160,.18)}.cio-complete h3,.cio-complete p{margin:0}.cio-complete p{max-width:620px;line-height:1.55;color:var(--cio-muted)}
         @media(max-width:760px){.cio-shell{width:calc(100vw - 16px);max-height:calc(100vh - 16px)}.cio-header{padding:16px}.cio-header-meta{align-items:flex-end}.cio-package,.cio-ai-state{display:none}.cio-progress{grid-template-columns:1fr;padding:14px 18px;gap:7px}.cio-progress li:not(.active):not(.done){display:none}.cio-progress li::after{display:none}.cio-grid,.cio-facts{grid-template-columns:1fr}.cio-body{padding:16px}.cio-form{padding:17px}.cio-actions.split{flex-direction:column}.cio-actions.split button{width:100%}}
       `}</style>

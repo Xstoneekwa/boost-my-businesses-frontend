@@ -51,13 +51,22 @@ creates the Instagram account only inside a resumable server-owned onboarding
 session. This row is not production evidence: migration, deployment and a
 physical tenant validation remain pending.
 
-Profile Intelligence V1 remains a separate local-only checkpoint. Its factual
+Profile Intelligence V1 is a separate production checkpoint at
+`cc73eb26ae99f0ca5d597d0660763742fabbdaf1`. Its factual
 reanalysis updates only the existing onboarding session snapshot and preserves
 the prepared account, ownership, credentials and entitlement. It does not call
 Stripe, alter package gates, consume another authorization or activate runtime.
 Ordinary avatar rendering costs no provider request; one SearchAPI request is
-made only for an explicit accepted reanalysis. No production migration or
-deployment is included.
+made only for an explicit accepted reanalysis. No production migration was
+required.
+
+Profile Intelligence V2 is currently local only. It adds one explicit bounded
+OpenAI enrichment action for Growth, Pro and Premium onboarding, stores
+suggestions and confirmations in the existing session JSONB, and does not alter
+Stripe, entitlements or Target AI package gates. Geography is excluded from the
+AI schema and remains either an observed public fact or a value entered by the
+client during Targeting. Real canary smokes remain isolated from the onboarding
+route; no production migration or deployment is part of this checkpoint.
 
 ## Locked commercial model
 

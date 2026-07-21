@@ -1,9 +1,17 @@
 import type { ClientPublicProfileProjection } from "./create-account.ts";
 import { detectProfileLanguage } from "./profile-language.ts";
+import {
+  readStoredProfileAiAnalysis,
+  type ProfileAiConfidence,
+  type ProfileAiConfirmedValues,
+  type ProfileAiSuggestions,
+  type StoredProfileAiAnalysis,
+} from "./profile-intelligence-ai.ts";
 
 export type ProfileSourceType =
   | "public_observed"
   | "deterministic_derived"
+  | "ai_suggested"
   | "user_confirmed"
   | "unknown";
 
@@ -40,7 +48,11 @@ export type ProfileIntelligenceField =
   | "location"
   | "niche"
   | "themes"
-  | "probableAudience";
+  | "probableAudience"
+  | "suggestedCategory"
+  | "businessDescription"
+  | "keywords"
+  | "exclusions";
 
 export type StoredPublicAnalysisV1 = {
   version: 1;
@@ -65,6 +77,10 @@ export type StoredPublicAnalysisV1 = {
   niche: string | null;
   themes: string[];
   probableAudience: string | null;
+  suggestedCategory: string | null;
+  businessDescription: string | null;
+  keywords: string[];
+  exclusions: string[];
   recentCaptionSamples: string[];
   sources: Record<string, ProfileSourceType>;
   fields: Record<ProfileIntelligenceField, ProfileFieldEnvelope>;
@@ -76,6 +92,7 @@ export type StoredPublicAnalysisV1 = {
     completed_at: string | null;
     error_code: string | null;
   };
+  ai_analysis?: StoredProfileAiAnalysis;
 };
 
 export type ClientPublicAnalysis = {
@@ -100,8 +117,20 @@ export type ClientPublicAnalysis = {
   niche: string | null;
   themes: string[];
   probableAudience: string | null;
+  suggestedCategory: string | null;
+  businessDescription: string | null;
+  keywords: string[];
+  exclusions: string[];
   recentCaptionSampleCount: number;
   sources: Record<string, ProfileSourceType>;
+  aiAnalysis: {
+    status: StoredProfileAiAnalysis["status"];
+    requestedAt: string | null;
+    completedAt: string | null;
+    errorCode: string | null;
+    confirmationStatus: StoredProfileAiAnalysis["confirmation_status"];
+    confirmedAt: string | null;
+  };
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -116,6 +145,26 @@ const editableFields = [
   "themes",
   "probableAudience",
 ] as const satisfies readonly ProfileIntelligenceField[];
+
+const aiEditableFields = [
+  "suggestedCategory",
+  "niche",
+  "probableAudience",
+  "themes",
+  "businessDescription",
+  "keywords",
+  "exclusions",
+] as const satisfies readonly ProfileIntelligenceField[];
+
+const aiSuggestionField = {
+  suggestedCategory: "suggested_category",
+  niche: "niche",
+  probableAudience: "probable_audience",
+  themes: "themes",
+  businessDescription: "business_description",
+  keywords: "keywords",
+  exclusions: "exclusions",
+} as const satisfies Record<typeof aiEditableFields[number], keyof ProfileAiSuggestions>;
 
 function record(value: unknown): UnknownRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
@@ -192,11 +241,33 @@ function sameValue(left: unknown, right: unknown) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function confidenceNumber(value: ProfileAiConfidence) {
+  return value === "high" ? 0.9 : value === "medium" ? 0.65 : 0.35;
+}
+
+function aiSuggestionEnvelope(
+  stored: StoredPublicAnalysisV1,
+  field: ProfileIntelligenceField,
+): ProfileFieldEnvelope | null {
+  if (!stored.ai_analysis?.suggestions || !(field in aiSuggestionField)) return null;
+  const key = aiSuggestionField[field as keyof typeof aiSuggestionField];
+  const suggestion = stored.ai_analysis.suggestions[key];
+  return {
+    value: suggestion.value,
+    source_type: "ai_suggested",
+    source_field: suggestion.evidence_fields.join(",") || null,
+    source_provider: "openai",
+    confidence: confidenceNumber(suggestion.confidence),
+    observed_at: stored.ai_analysis.completed_at,
+    confirmed_at: null,
+  };
+}
+
 function effectiveEnvelope(
   stored: StoredPublicAnalysisV1,
   field: ProfileIntelligenceField,
 ) {
-  return stored.confirmations[field] ?? stored.fields[field];
+  return stored.confirmations[field] ?? aiSuggestionEnvelope(stored, field) ?? stored.fields[field];
 }
 
 function rebuildCompatibilityFields(stored: StoredPublicAnalysisV1): StoredPublicAnalysisV1 {
@@ -228,6 +299,10 @@ function rebuildCompatibilityFields(stored: StoredPublicAnalysisV1): StoredPubli
     niche: text(value("niche"), 500),
     themes: stringList(value("themes"), 12, 80),
     probableAudience: text(value("probableAudience"), 500),
+    suggestedCategory: text(value("suggestedCategory"), 500),
+    businessDescription: text(value("businessDescription"), 1_000),
+    keywords: stringList(value("keywords"), 20, 80),
+    exclusions: stringList(value("exclusions"), 20, 80),
     recentCaptionSamples: stringList(stored.fields.recentCaptionSamples.value, 5, 280),
     sources,
   };
@@ -270,6 +345,10 @@ export function buildStoredPublicAnalysis(profile: ClientPublicProfileProjection
     niche: unknownEnvelope<string>(),
     themes: unknownEnvelope<string[]>(),
     probableAudience: unknownEnvelope<string>(),
+    suggestedCategory: unknownEnvelope<string>(),
+    businessDescription: unknownEnvelope<string>(),
+    keywords: unknownEnvelope<string[]>(),
+    exclusions: unknownEnvelope<string[]>(),
   } satisfies Record<ProfileIntelligenceField, ProfileFieldEnvelope>;
 
   return rebuildCompatibilityFields({
@@ -295,6 +374,10 @@ export function buildStoredPublicAnalysis(profile: ClientPublicProfileProjection
     niche: null,
     themes: [],
     probableAudience: null,
+    suggestedCategory: null,
+    businessDescription: null,
+    keywords: [],
+    exclusions: [],
     recentCaptionSamples: profile.recentCaptionSamples,
     sources: {},
     fields,
@@ -332,7 +415,7 @@ function sanitizeEnvelope(value: unknown, fallback: ProfileFieldEnvelope): Profi
   const sourceType = row.source_type;
   return {
     value: Object.prototype.hasOwnProperty.call(row, "value") ? row.value : fallback.value,
-    source_type: sourceType === "public_observed" || sourceType === "deterministic_derived" || sourceType === "user_confirmed" || sourceType === "unknown"
+    source_type: sourceType === "public_observed" || sourceType === "deterministic_derived" || sourceType === "ai_suggested" || sourceType === "user_confirmed" || sourceType === "unknown"
       ? sourceType
       : fallback.source_type,
     source_field: text(row.source_field, 160),
@@ -369,6 +452,8 @@ export function readStoredPublicAnalysis(value: unknown): StoredPublicAnalysisV1
       error_code: text(reanalysisRow.error_code, 120),
     }
     : undefined;
+  const aiAnalysisRow = record(row.ai_analysis);
+  const aiAnalysis = Object.keys(aiAnalysisRow).length ? readStoredProfileAiAnalysis(aiAnalysisRow) : undefined;
 
   return rebuildCompatibilityFields({
     ...fallback,
@@ -378,12 +463,14 @@ export function readStoredPublicAnalysis(value: unknown): StoredPublicAnalysisV1
     fields,
     confirmations,
     ...(reanalysis ? { reanalysis } : {}),
+    ...(aiAnalysis ? { ai_analysis: aiAnalysis } : {}),
   });
 }
 
 export function projectClientPublicAnalysis(value: unknown): ClientPublicAnalysis | null {
   const stored = readStoredPublicAnalysis(value);
   if (!stored) return null;
+  const aiAnalysis = readStoredProfileAiAnalysis(stored.ai_analysis);
   return {
     version: 1,
     lookupStatus: stored.lookupStatus,
@@ -406,15 +493,48 @@ export function projectClientPublicAnalysis(value: unknown): ClientPublicAnalysi
     niche: stored.niche,
     themes: stored.themes,
     probableAudience: stored.probableAudience,
+    suggestedCategory: stored.suggestedCategory,
+    businessDescription: stored.businessDescription,
+    keywords: stored.keywords,
+    exclusions: stored.exclusions,
     recentCaptionSampleCount: stored.recentCaptionSamples.length,
     sources: { ...stored.sources },
+    aiAnalysis: {
+      status: aiAnalysis.status,
+      requestedAt: aiAnalysis.requested_at,
+      completedAt: aiAnalysis.completed_at,
+      errorCode: aiAnalysis.error_code,
+      confirmationStatus: aiAnalysis.confirmation_status,
+      confirmedAt: aiAnalysis.confirmed_at,
+    },
   };
 }
 
-function clientEditableValue(row: UnknownRecord, field: typeof editableFields[number]) {
+function clientEditableValue(row: UnknownRecord, field: ProfileIntelligenceField) {
   if (field === "officialCategory") return text(row.category, 500);
-  if (field === "themes") return stringList(row.themes, 12, 80);
-  return text(row[field], field === "biography" ? 2000 : 500);
+  if (field === "themes" || field === "keywords" || field === "exclusions") {
+    return stringList(row[field], field === "themes" ? 8 : 20, 80);
+  }
+  return text(row[field], field === "biography" ? 2000 : field === "businessDescription" ? 1_000 : 500);
+}
+
+function confirmedAiValues(
+  stored: StoredPublicAnalysisV1,
+  confirmations: Partial<Record<ProfileIntelligenceField, ProfileFieldEnvelope>>,
+): ProfileAiConfirmedValues | null {
+  if (!stored.ai_analysis?.suggestions) return null;
+  const value = (field: typeof aiEditableFields[number]) => confirmations[field]?.value
+    ?? aiSuggestionEnvelope(stored, field)?.value
+    ?? null;
+  return {
+    suggested_category: text(value("suggestedCategory"), 500),
+    niche: text(value("niche"), 500),
+    probable_audience: text(value("probableAudience"), 500),
+    themes: stringList(value("themes"), 8, 80),
+    business_description: text(value("businessDescription"), 1_000),
+    keywords: stringList(value("keywords"), 20, 80),
+    exclusions: stringList(value("exclusions"), 20, 80),
+  };
 }
 
 export function applyClientPublicAnalysisConfirmation(
@@ -426,10 +546,16 @@ export function applyClientPublicAnalysisConfirmation(
   if (!base) throw new Error("public_analysis_required");
   const row = record(value);
   const confirmations = { ...base.confirmations };
-  for (const field of editableFields) {
+  const confirmingAiSuggestions = Boolean(base.ai_analysis?.suggestions);
+  const fieldsToConfirm = confirmingAiSuggestions ? aiEditableFields : editableFields;
+  for (const field of fieldsToConfirm) {
     const clientField = field === "officialCategory" ? "category" : field;
     if (!Object.prototype.hasOwnProperty.call(row, clientField)) continue;
     const next = clientEditableValue(row, field);
+    if (confirmingAiSuggestions) {
+      confirmations[field] = confirmation(next, field, confirmedAt);
+      continue;
+    }
     const observedValue = base.fields[field].value;
     if (sameValue(next, observedValue) || (field === "themes" && Array.isArray(next) && next.length === 0 && Array.isArray(observedValue) && observedValue.length === 0)) {
       delete confirmations[field];
@@ -441,7 +567,14 @@ export function applyClientPublicAnalysisConfirmation(
     }
     confirmations[field] = confirmation(next, field, confirmedAt);
   }
-  return rebuildCompatibilityFields({ ...base, confirmations });
+  const confirmedValues = confirmedAiValues(base, confirmations);
+  const aiAnalysis = base.ai_analysis && confirmedValues ? {
+    ...base.ai_analysis,
+    confirmation_status: "confirmed" as const,
+    confirmed_at: confirmedAt,
+    confirmed_values: confirmedValues,
+  } : base.ai_analysis;
+  return rebuildCompatibilityFields({ ...base, confirmations, ...(aiAnalysis ? { ai_analysis: aiAnalysis } : {}) });
 }
 
 export function mergeReanalysisPreservingConfirmations(
@@ -452,7 +585,14 @@ export function mergeReanalysisPreservingConfirmations(
   return rebuildCompatibilityFields({
     ...fresh,
     confirmations: previous?.confirmations ?? {},
+    ...(previous?.ai_analysis ? { ai_analysis: previous.ai_analysis } : {}),
   });
+}
+
+export function withProfileAiAnalysis(value: unknown, aiAnalysis: StoredProfileAiAnalysis) {
+  const stored = readStoredPublicAnalysis(value);
+  if (!stored) throw new Error("public_analysis_required");
+  return rebuildCompatibilityFields({ ...stored, ai_analysis: readStoredProfileAiAnalysis(aiAnalysis) });
 }
 
 export function withReanalysisState(

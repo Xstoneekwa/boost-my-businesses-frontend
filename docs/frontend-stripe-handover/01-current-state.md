@@ -72,10 +72,10 @@ This work is not committed, migrated, deployed or physically validated yet.
 Until those operations receive a separate GO, Liam must not use the production
 Add Instagram account flow, `additional_account`, Connect or Auto Login.
 
-## Profile Intelligence V1 — local checkpoint
+## Profile Intelligence V1 — production checkpoint
 
-The factual public-analysis patch is validated locally on baseline
-`7b7285bcf347dc7158356e049eef4172dadbda89`. One authorized SearchAPI
+The factual public-analysis patch is committed as
+`cc73eb26ae99f0ca5d597d0660763742fabbdaf1` and deployed in production. One authorized SearchAPI
 `instagram_profile` lookup observed `username`, `name`, `bio`, `avatar`,
 `avatar_hd`, numeric `followers`, `following`, `posts`, and one recent caption.
 No stable Instagram ID semantics, privacy, verification, business, category,
@@ -89,9 +89,44 @@ lookup only after the explicit user action; normal rendering and avatar fallback
 perform none. The measured schema-confirmation lookup took 1,166 ms, so explicit
 reanalysis adds roughly one provider round trip to the UI latency.
 
-Status: local only. No commit, deployment, production migration, account
-creation, analysis completion, password rewrite or second entitlement
-consumption is part of this checkpoint. No AI suggestion is active.
+Production deployment `dpl_AtT2a8EcjcDPS4fMww2DPbJ4EmZJ` is READY at
+`https://boost-my-businesses-ai-frontend-vercel-624e51lgs.vercel.app` and the
+canonical alias. No migration was added for V1.
+
+## Profile Intelligence V2 — local checkpoint
+
+V2 adds one explicit, server-only **Analyze with AI** action on the Analysis
+step. The default configurable model is the stable snapshot
+`gpt-4o-mini-2024-07-18`; the localized versioned prompts are
+`profile_intelligence_v2_prompt_v4_no_geo_fr` and
+`profile_intelligence_v2_prompt_v4_no_geo_en`. The requested output language is resolved
+separately from the detected profile language, constrained in the strict
+Structured Output schema, and validated deterministically before persistence.
+The request uses a strict Structured Output,
+an 8-second timeout, one provider call maximum, no automatic retry, and a
+minimized public snapshot capped at five 280-character captions. No CDN URL,
+credential, internal UUID, tenant, entitlement, Stripe, device or private data
+is sent.
+
+Suggestions remain distinct from facts and require explicit client confirmation.
+The AI contract has no geography property. Public location remains
+`public_observed`; target geography is entered or confirmed by the client during
+Targeting and is never converted from an AI suggestion.
+Original suggestions and confirmed values are stored separately in the existing
+`public_analysis.ai_analysis` JSONB object with prompt/model/timestamps and safe
+metrics. Optimistic compare-and-swap, a short lease, idempotency key and cooldown
+protect concurrency. The action creates no account, CT, entitlement, ownership
+or credential and does not call SearchAPI, SerpApi or Target AI.
+
+Status: local only on baseline `cc73eb26ae99f0ca5d597d0660763742fabbdaf1`.
+No commit, push, migration, deployment, provider payload or real response
+artifact is included. Isolated canary calls do not use the onboarding route.
+Target AI V2.2 and its Growth/Pro/Premium gates remain unchanged.
+
+The deterministic cost harness uses the `gpt-4o-mini-2024-07-18` rates
+($0.15/M input tokens and $0.60/M output tokens): 800 input + 200 output tokens
+is about $0.00024. The server timeout is 8 seconds and no unbounded retry or
+automatic model fallback exists.
 
 Documentation handover updated: yes
 

@@ -23,8 +23,19 @@ import {
   projectClientPublicAnalysis,
   readStoredPublicAnalysis,
   withReanalysisState,
+  withProfileAiAnalysis,
   type ClientPublicAnalysis,
 } from "./profile-intelligence";
+import {
+  PROFILE_INTELLIGENCE_LEASE_MS,
+  buildProfileIntelligencePromptSnapshot,
+  callProfileIntelligenceOpenAi,
+  profileAiModel,
+  readStoredProfileAiAnalysis,
+  resolveProfileAiOutputLanguage,
+  type ProfileIntelligenceProviderResult,
+} from "./profile-intelligence-ai";
+import { evaluateProfileAiAnalysis } from "./profile-intelligence-ai-policy";
 import { evaluateProfileReanalysis } from "./profile-reanalysis-policy";
 
 type Row = Record<string, unknown>;
@@ -93,6 +104,18 @@ function readStringList(value: unknown, limit = 12) {
 function optionalText(value: unknown, limit = 500) {
   const text = readString(value).slice(0, limit);
   return text || null;
+}
+
+async function loadClientPreferredLanguage(supabase: Supabase, clientId: string) {
+  const { data, error } = await supabase
+    .from("clients")
+    .select("metadata")
+    .eq("id", clientId)
+    .limit(1)
+    .maybeSingle<Row>();
+  if (error || !data) return null;
+  const preferredLanguage = readString(readObject(data.metadata).preferred_language);
+  return preferredLanguage === "fr" || preferredLanguage === "en" ? preferredLanguage : null;
 }
 
 export function sanitizeTargetingCriteria(value: unknown): ClientTargetingCriteria {
@@ -434,6 +457,123 @@ export async function reanalyzeClientInstagramOnboarding(input: {
     .maybeSingle<Row>();
   if (completed.error) throw reanalysisError("profile_reanalysis_save_failed", 503);
   if (!completed.data?.id) throw reanalysisError("profile_reanalysis_conflict", 409);
+  return projectSession(supabase, completed.data);
+}
+
+export async function analyzeClientInstagramProfileWithAi(input: {
+  clientId: string;
+  userId: string;
+  sessionId: string;
+  requestKey: string;
+  provider?: (snapshot: ReturnType<typeof buildProfileIntelligencePromptSnapshot>) => Promise<ProfileIntelligenceProviderResult>;
+}) {
+  const supabase = createSupabaseClient();
+  const row = await loadSessionRow(supabase, input.clientId, input.sessionId);
+  if (!row) throw reanalysisError("onboarding_not_found", 404);
+  const publicAnalysis = readStoredPublicAnalysis(row.public_analysis);
+  if (!publicAnalysis) throw reanalysisError("public_analysis_required", 409);
+  const currentAiAnalysis = readStoredProfileAiAnalysis(publicAnalysis.ai_analysis);
+  const decision = evaluateProfileAiAnalysis({
+    sessionStatus: readString(row.status),
+    currentStep: readString(row.current_step),
+    expiresAt: readString(row.expires_at),
+    requestKey: input.requestKey,
+    aiAnalysis: currentAiAnalysis,
+  });
+  if (decision.action === "return_existing") return projectSession(supabase, row);
+  if (decision.action === "reject") throw reanalysisError(decision.code, decision.status);
+
+  const preferredLanguage = await loadClientPreferredLanguage(supabase, input.clientId);
+  const outputLanguage = resolveProfileAiOutputLanguage(preferredLanguage, publicAnalysis.language);
+  const requestedAt = new Date().toISOString();
+  const claimAnalysis = withProfileAiAnalysis(publicAnalysis, {
+    ...currentAiAnalysis,
+    status: "running",
+    request_key: input.requestKey,
+    model: profileAiModel(),
+    output_language: outputLanguage,
+    requested_at: requestedAt,
+    completed_at: null,
+    failed_at: null,
+    lease_expires_at: new Date(Date.now() + PROFILE_INTELLIGENCE_LEASE_MS).toISOString(),
+    error_code: null,
+  });
+  const claimUpdatedAt = new Date().toISOString();
+  const claim = await supabase
+    .from("client_instagram_onboarding_sessions")
+    .update({ public_analysis: claimAnalysis, updated_at: claimUpdatedAt })
+    .eq("id", input.sessionId)
+    .eq("client_id", input.clientId)
+    .eq("status", "active")
+    .eq("current_step", "analysis")
+    .eq("updated_at", readString(row.updated_at))
+    .select(ONBOARDING_SELECT)
+    .maybeSingle<Row>();
+  if (claim.error) throw reanalysisError("profile_ai_claim_failed", 503);
+  if (!claim.data?.id) {
+    const concurrent = await loadSessionRow(supabase, input.clientId, input.sessionId);
+    if (concurrent) {
+      const concurrentAnalysis = readStoredPublicAnalysis(concurrent.public_analysis);
+      if (concurrentAnalysis?.ai_analysis?.request_key === input.requestKey) return projectSession(supabase, concurrent);
+    }
+    throw reanalysisError("profile_ai_in_progress", 409);
+  }
+
+  const claimedPublicAnalysis = readStoredPublicAnalysis(claim.data.public_analysis);
+  if (!claimedPublicAnalysis) throw reanalysisError("public_analysis_required", 409);
+  const snapshot = buildProfileIntelligencePromptSnapshot({ ...claimedPublicAnalysis, outputLanguage });
+  const providerResult = await (input.provider
+    ? input.provider(snapshot)
+    : callProfileIntelligenceOpenAi({ snapshot }));
+  const finishedAt = new Date().toISOString();
+  const finishedAiAnalysis = {
+    ...readStoredProfileAiAnalysis(claimedPublicAnalysis.ai_analysis),
+    status: providerResult.ok ? "completed" as const : "failed_retryable" as const,
+    model: providerResult.model,
+    completed_at: providerResult.ok ? finishedAt : null,
+    failed_at: providerResult.ok ? null : finishedAt,
+    lease_expires_at: null,
+    error_code: providerResult.errorCode,
+    suggestions: providerResult.ok ? providerResult.suggestions : claimedPublicAnalysis.ai_analysis?.suggestions ?? null,
+    confirmation_status: providerResult.ok ? "pending" as const : claimedPublicAnalysis.ai_analysis?.confirmation_status ?? "pending" as const,
+    confirmed_at: providerResult.ok ? null : claimedPublicAnalysis.ai_analysis?.confirmed_at ?? null,
+    confirmed_values: providerResult.ok ? null : claimedPublicAnalysis.ai_analysis?.confirmed_values ?? null,
+    metrics: providerResult.metrics,
+  };
+  const finishedPublicAnalysis = withProfileAiAnalysis(claimedPublicAnalysis, finishedAiAnalysis);
+  const completed = await supabase
+    .from("client_instagram_onboarding_sessions")
+    .update({
+      public_analysis: finishedPublicAnalysis,
+      last_progress_at: finishedAt,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: finishedAt,
+    })
+    .eq("id", input.sessionId)
+    .eq("client_id", input.clientId)
+    .eq("status", "active")
+    .eq("current_step", "analysis")
+    .eq("updated_at", readString(claim.data.updated_at))
+    .select(ONBOARDING_SELECT)
+    .maybeSingle<Row>();
+  if (completed.error) throw reanalysisError("profile_ai_save_failed", 503);
+  if (!completed.data?.id) throw reanalysisError("profile_ai_conflict", 409);
+  console.info("[Profile Intelligence V2]", {
+    event: providerResult.ok ? "analysis_completed" : "analysis_failed_retryable",
+    model: providerResult.model,
+    provider_call_attempted: providerResult.providerCallAttempted,
+    output_language: providerResult.outputLanguage,
+    schema_valid: providerResult.schemaValid,
+    business_output_valid: providerResult.businessOutputValid,
+    error_code: providerResult.errorCode,
+    provider_http_status: providerResult.diagnostic.http_status,
+    provider_error_type: providerResult.diagnostic.error_type,
+    provider_error_code: providerResult.diagnostic.error_code,
+    provider_error_param: providerResult.diagnostic.error_param,
+    provider_request_id: providerResult.diagnostic.request_id,
+    provider_error_category: providerResult.diagnostic.category,
+    ...providerResult.metrics,
+  });
   return projectSession(supabase, completed.data);
 }
 

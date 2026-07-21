@@ -1,5 +1,6 @@
 import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_utils";
 import {
+  analyzeClientInstagramProfileWithAi,
   beginClientInstagramOnboarding,
   loadLatestClientOnboardingSession,
   reanalyzeClientInstagramOnboarding,
@@ -16,7 +17,7 @@ import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-
 export const dynamic = "force-dynamic";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const UPDATE_ACTIONS = new Set(["save_analysis", "save_targeting", "open_targets", "complete", "abandon", "reanalyze_public"]);
+const UPDATE_ACTIONS = new Set(["save_analysis", "save_targeting", "open_targets", "complete", "abandon", "reanalyze_public", "analyze_ai"]);
 
 type StartBody = {
   idempotency_key?: unknown;
@@ -138,6 +139,31 @@ export async function PATCH(request: Request) {
           : safe.code === "profile_reanalysis_in_progress"
             ? "Public profile analysis is already running."
             : "Could not refresh public profile data.",
+        safe.status,
+        { code: safe.code },
+      );
+    }
+  }
+
+  if (action === "analyze_ai") {
+    const requestKey = readString(body.request_key);
+    if (!UUID_PATTERN.test(requestKey)) return jsonError("Invalid AI analysis request.", 400, { code: "profile_ai_key_invalid" });
+    try {
+      const onboarding = await analyzeClientInstagramProfileWithAi({
+        clientId: auth.clientId,
+        userId: auth.userId,
+        sessionId,
+        requestKey,
+      });
+      return jsonOk({ onboarding });
+    } catch (error) {
+      const safe = safeError(error);
+      return jsonError(
+        safe.code === "profile_ai_cooldown"
+          ? "AI analysis was run recently."
+          : safe.code === "profile_ai_in_progress"
+            ? "AI analysis is already running."
+            : "AI analysis is temporarily unavailable.",
         safe.status,
         { code: safe.code },
       );

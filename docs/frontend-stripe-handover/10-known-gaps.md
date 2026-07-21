@@ -34,12 +34,20 @@ Snapshot date: **2026-07-21**.
 - An expired provider avatar falls back to an initial during ordinary rendering.
   Refreshing the CDN URL requires the explicit same-session reanalysis action;
   the avatar route never performs a hidden paid lookup.
-- The patch is local only and has not been committed, deployed or physically
-  exercised on the canary. Its future deployment will keep the canary on the
-  same Analysis step and enable an explicit refresh without creating a second
-  account or consuming another entitlement.
-- Niche, probable audience, themes, business description and unproven location
-  remain deliberately unknown. No Profile Intelligence AI suggestion is active.
+- V1 is deployed at commit `cc73eb26ae99f0ca5d597d0660763742fabbdaf1`.
+  Its factual limitations remain deliberate: absent provider facts stay unknown.
+
+## Profile Intelligence V2 residual gaps
+
+- V2 is local only. The bounded default is `gpt-4o-mini-2024-07-18` with
+  localized `profile_intelligence_v2_prompt_v4_no_geo_fr|en` prompts and
+  deterministic post-schema language and no-geography contracts.
+- Confirmed V2 criteria are not connected to Target AI V2.2 and create no CT.
+- AI geography is intentionally absent. Public location remains factual and
+  target geography remains client-confirmed at the Targeting step.
+- JSONB optimistic concurrency is intentionally used to avoid a migration. A
+  future high-volume design could move the lease to an atomic RPC, but no such
+  production migration is justified for this bounded onboarding action.
 
 ## Environment gap
 
