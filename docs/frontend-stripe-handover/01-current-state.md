@@ -72,6 +72,27 @@ This work is not committed, migrated, deployed or physically validated yet.
 Until those operations receive a separate GO, Liam must not use the production
 Add Instagram account flow, `additional_account`, Connect or Auto Login.
 
+## Profile Intelligence V1 — local checkpoint
+
+The factual public-analysis patch is validated locally on baseline
+`7b7285bcf347dc7158356e049eef4172dadbda89`. One authorized SearchAPI
+`instagram_profile` lookup observed `username`, `name`, `bio`, `avatar`,
+`avatar_hd`, numeric `followers`, `following`, `posts`, and one recent caption.
+No stable Instagram ID semantics, privacy, verification, business, category,
+external link, bio links, contact or location field was present on that canary;
+those values remain unknown unless a later response actually supplies them.
+
+The patch adds per-field provenance, bounded caption minimization, conservative
+deterministic FR/EN detection, a same-origin authenticated avatar proxy and an
+idempotent same-session public reanalysis. Reanalysis performs one paid provider
+lookup only after the explicit user action; normal rendering and avatar fallback
+perform none. The measured schema-confirmation lookup took 1,166 ms, so explicit
+reanalysis adds roughly one provider round trip to the UI latency.
+
+Status: local only. No commit, deployment, production migration, account
+creation, analysis completion, password rewrite or second entitlement
+consumption is part of this checkpoint. No AI suggestion is active.
+
 Documentation handover updated: yes
 
 Updated handover files:

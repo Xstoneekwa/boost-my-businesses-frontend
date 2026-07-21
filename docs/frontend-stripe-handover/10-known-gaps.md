@@ -23,6 +23,24 @@ Snapshot date: **2026-07-21**.
 - No Instagram account exists for this tenant yet; the entitlement is correctly
   reserved with `account_id=null`.
 
+## Profile Intelligence V1 residual gaps
+
+- The provider schema is account-dependent. The canary did not prove a stable
+  Instagram user ID or expose privacy, verification, business, category,
+  external-link, contact or location facts; the implementation keeps them
+  unknown when absent.
+- Language support is intentionally limited to conservative deterministic FR/EN
+  detection. It is not an AI classification and ambiguous text remains unknown.
+- An expired provider avatar falls back to an initial during ordinary rendering.
+  Refreshing the CDN URL requires the explicit same-session reanalysis action;
+  the avatar route never performs a hidden paid lookup.
+- The patch is local only and has not been committed, deployed or physically
+  exercised on the canary. Its future deployment will keep the canary on the
+  same Analysis step and enable an explicit refresh without creating a second
+  account or consuming another entitlement.
+- Niche, probable audience, themes, business description and unproven location
+  remain deliberately unknown. No Profile Intelligence AI suggestion is active.
+
 ## Environment gap
 
 Preview builds successfully, but the polling route cannot be smoked there

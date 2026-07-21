@@ -51,6 +51,14 @@ creates the Instagram account only inside a resumable server-owned onboarding
 session. This row is not production evidence: migration, deployment and a
 physical tenant validation remain pending.
 
+Profile Intelligence V1 remains a separate local-only checkpoint. Its factual
+reanalysis updates only the existing onboarding session snapshot and preserves
+the prepared account, ownership, credentials and entitlement. It does not call
+Stripe, alter package gates, consume another authorization or activate runtime.
+Ordinary avatar rendering costs no provider request; one SearchAPI request is
+made only for an explicit accepted reanalysis. No production migration or
+deployment is included.
+
 ## Locked commercial model
 
 - `full_cycle`: exactly one package component plus optional Outreach component.

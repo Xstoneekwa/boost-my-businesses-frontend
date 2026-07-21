@@ -2,6 +2,7 @@ import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_
 import {
   beginClientInstagramOnboarding,
   loadLatestClientOnboardingSession,
+  reanalyzeClientInstagramOnboarding,
   restartClientInstagramOnboarding,
   updateClientInstagramOnboarding,
 } from "@/lib/instagram-client/client-account-onboarding";
@@ -15,7 +16,7 @@ import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-
 export const dynamic = "force-dynamic";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const UPDATE_ACTIONS = new Set(["save_analysis", "save_targeting", "open_targets", "complete", "abandon"]);
+const UPDATE_ACTIONS = new Set(["save_analysis", "save_targeting", "open_targets", "complete", "abandon", "reanalyze_public"]);
 
 type StartBody = {
   idempotency_key?: unknown;
@@ -28,6 +29,7 @@ type StartBody = {
 type UpdateBody = {
   session_id?: unknown;
   action?: unknown;
+  request_key?: unknown;
   value?: unknown;
 };
 
@@ -116,6 +118,31 @@ export async function PATCH(request: Request) {
   const action = readString(body.action);
   if (!UUID_PATTERN.test(sessionId)) return jsonError("Invalid onboarding session.", 400, { code: "session_id_invalid" });
   if (!UPDATE_ACTIONS.has(action)) return jsonError("Invalid onboarding action.", 400, { code: "onboarding_action_invalid" });
+
+  if (action === "reanalyze_public") {
+    const requestKey = readString(body.request_key);
+    if (!UUID_PATTERN.test(requestKey)) return jsonError("Invalid reanalysis request.", 400, { code: "reanalysis_key_invalid" });
+    try {
+      const onboarding = await reanalyzeClientInstagramOnboarding({
+        clientId: auth.clientId,
+        userId: auth.userId,
+        sessionId,
+        requestKey,
+      });
+      return jsonOk({ onboarding });
+    } catch (error) {
+      const safe = safeError(error);
+      return jsonError(
+        safe.code === "profile_reanalysis_cooldown"
+          ? "Public profile data was refreshed recently."
+          : safe.code === "profile_reanalysis_in_progress"
+            ? "Public profile analysis is already running."
+            : "Could not refresh public profile data.",
+        safe.status,
+        { code: safe.code },
+      );
+    }
+  }
 
   try {
     const onboarding = await updateClientInstagramOnboarding({

@@ -151,7 +151,8 @@ test("searchapi provider returns safe found profile", async () => {
     assert.equal(result.ok, true);
     assert.equal(result.status, "found");
     assert.equal(result.canonical_username, "cinema_catchup");
-    assert.equal(result.external_profile_id, "12345");
+    assert.equal(result.provider_profile_id, "12345");
+    assert.equal(result.external_profile_id, null);
     assert.equal(result.avatar_url, "https://cdn.example.test/avatar.jpg");
     assert.equal(result.followers_count, 4321);
     assert.equal(result.is_private, false);
@@ -160,12 +161,63 @@ test("searchapi provider returns safe found profile", async () => {
       provider_mode: "searchapi",
       provider_status: "found",
       provider_engine: "instagram_profile",
+      profile_name: null,
+      biography: null,
       cache_hit: false,
       throttle_hit: false,
       rate_limited: false,
       latency_ms: result.metadata.latency_ms,
     });
     assert.equal(typeof result.metadata.latency_ms, "number");
+  });
+});
+
+test("searchapi profile intelligence maps documented optional facts and minimizes captions", async () => {
+  await withEnv({
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_PROVIDER: "searchapi",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_URL: "https://searchapi.example.test/api/v1/search",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_API_KEY: "test-provider-key",
+    INSTAGRAM_PUBLIC_PROFILE_LOOKUP_MIN_INTERVAL_MS: "0",
+  }, async () => {
+    const result = await lookupInstagramPublicProfile("factual_profile", {
+      now: fixedNow,
+      fetcher: async () => jsonResponse({
+        profile: {
+          id: "provider-123",
+          username: "factual_profile",
+          name: "Factual Profile",
+          bio: "We help small businesses grow online with clear marketing systems.",
+          avatar: "https://cdn.example.test/avatar.jpg",
+          avatar_hd: "https://cdn.example.test/avatar-hd.jpg",
+          followers: 100,
+          following: 40,
+          posts: 12,
+          is_private: false,
+          is_verified: true,
+          is_business: true,
+          category: "Entrepreneur",
+          external_link: "https://example.test/profile",
+          bio_links: [{ title: "Website", url: "https://example.test" }],
+        },
+        posts: Array.from({ length: 6 }, (_, index) => ({
+          caption: `Caption ${index} with public text https://cdn.example.test/media/${index}`,
+          id: `media-${index}`,
+          link: `https://cdn.example.test/${index}.jpg`,
+        })),
+      }),
+    });
+
+    assert.equal(result.provider_profile_id, "provider-123");
+    assert.equal(result.avatar_hd_url, "https://cdn.example.test/avatar-hd.jpg");
+    assert.equal(result.following_count, 40);
+    assert.equal(result.posts_count, 12);
+    assert.equal(result.is_business, true);
+    assert.equal(result.official_category, "Entrepreneur");
+    assert.equal(result.external_url, "https://example.test/profile");
+    assert.deepEqual(result.bio_links, [{ title: "Website", url: "https://example.test/" }]);
+    assert.equal(result.recent_post_captions?.length, 5);
+    assert.doesNotMatch(result.recent_post_captions?.[0] ?? "", /https?:\/\//);
+    assert.equal(JSON.stringify(result).includes("media-0"), false);
   });
 });
 

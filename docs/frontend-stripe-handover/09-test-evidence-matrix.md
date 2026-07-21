@@ -23,11 +23,20 @@ Snapshot date: **2026-07-21**.
 | Add-account production deployment | `dpl_GWNdmXkZE1vacaHtHajFMTFAukbo` READY; canonical alias active | production_validated |
 | Add-account schema migration | Applied; server-only RPC privileges verified | production_validated |
 | Add-account physical onboarding | Not performed; no real account was created | planned |
+| Profile Intelligence V1 targeted suite | 59/59 passed: lookup/mapping, legacy/V1 compatibility, provenance, language, avatar bounds/fallback, reanalysis policy and no duplication | automated_tested |
+| Profile Intelligence V1 targeted ESLint | Passed on 10 affected TS/TSX files | automated_tested |
+| Profile Intelligence V1 Next.js production build | Passed with Next.js 16.2.1, including TypeScript and `/api/instagram-client/onboarding/avatar` | automated_tested |
+| Profile Intelligence V1 local visual check | Passed with an isolated mocked GET; no Supabase write or provider call | locally_validated |
+| Profile Intelligence V1 production status | Not committed, not deployed, no migration | planned |
 
 The one failure in the combined 81-test run is the pre-existing cancellation
 projection assertion in `stripe-checkout-webhook-foundation.test.mjs`; it is
 outside the reserved-entitlement handoff scope. The dedicated handoff suite and
 all newly affected paths are green.
+
+Profile Intelligence V1 also passed `git diff --check` and a no-leak source
+scan. The single live schema-confirmation request was not repeated by tests;
+provider calls in the suite use injected fixtures only.
 
 ## Predicate cases covered
 

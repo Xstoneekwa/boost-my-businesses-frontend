@@ -4,6 +4,7 @@ import {
   isPlausibleInstagramPublicUsername,
   lookupInstagramPublicProfile,
   normalizeInstagramPublicUsername,
+  type InstagramPublicProfileLookupResult,
 } from "@/lib/instagram-public-profile-lookup";
 import {
   isAddProfileCommercialPackage,
@@ -43,13 +44,22 @@ export type ClientCreateAccountInput = {
 
 export type ClientPublicProfileProjection = {
   lookupStatus: string;
+  providerProfileId: string | null;
   username: string;
   displayName: string | null;
   biography: string | null;
   avatarUrl: string | null;
+  avatarHdUrl: string | null;
   followersCount: number | null;
+  followingCount: number | null;
+  postsCount: number | null;
   isPrivate: boolean | null;
   isVerified: boolean | null;
+  isBusiness: boolean | null;
+  officialCategory: string | null;
+  externalUrl: string | null;
+  bioLinks: Array<{ title: string | null; url: string }>;
+  recentCaptionSamples: string[];
   checkedAt: string;
 };
 
@@ -65,6 +75,32 @@ export type ClientCreateAccountResult =
   | { ok: false; status: number; error: string; code?: string };
 
 const credentialsTimeoutMs = 9000;
+
+export function projectClientPublicProfileLookup(
+  profileLookup: InstagramPublicProfileLookupResult,
+  accountUsername: string,
+): ClientPublicProfileProjection {
+  return {
+    lookupStatus: profileLookup.status,
+    providerProfileId: profileLookup.provider_profile_id ?? null,
+    username: accountUsername,
+    displayName: readString(profileLookup.metadata.profile_name) || null,
+    biography: readString(profileLookup.metadata.biography) || null,
+    avatarUrl: profileLookup.avatar_url,
+    avatarHdUrl: profileLookup.avatar_hd_url ?? null,
+    followersCount: profileLookup.followers_count,
+    followingCount: profileLookup.following_count ?? null,
+    postsCount: profileLookup.posts_count ?? null,
+    isPrivate: profileLookup.is_private,
+    isVerified: profileLookup.is_verified,
+    isBusiness: profileLookup.is_business ?? null,
+    officialCategory: profileLookup.official_category ?? null,
+    externalUrl: profileLookup.external_url ?? null,
+    bioLinks: profileLookup.bio_links ?? [],
+    recentCaptionSamples: profileLookup.recent_post_captions ?? [],
+    checkedAt: profileLookup.checked_at,
+  };
+}
 
 async function submitClientCredentials(input: {
   accountId: string;
@@ -233,17 +269,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     runtimeMode: "safe_setup",
     addons: entitlementSelection.addons,
   });
-  const publicProfile: ClientPublicProfileProjection = {
-    lookupStatus: profileLookup.status,
-    username: accountUsername,
-    displayName: readString(profileLookup.metadata.profile_name) || null,
-    biography: readString(profileLookup.metadata.biography) || null,
-    avatarUrl: profileLookup.avatar_url,
-    followersCount: profileLookup.followers_count,
-    isPrivate: profileLookup.is_private,
-    isVerified: profileLookup.is_verified,
-    checkedAt: profileLookup.checked_at,
-  };
+  const publicProfile = projectClientPublicProfileLookup(profileLookup, accountUsername);
 
   if (dryRun) {
     return {

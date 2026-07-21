@@ -136,12 +136,29 @@ d'empêcher un contournement des étapes et du seuil serveur.
 
 ### 4.2 Analyse publique
 
-- Source: projection publique réellement disponible au moment de la création
-  (username, nom, biographie, avatar, followers et signaux publics supportés).
-- Toute donnée indisponible est affichée **Non détecté**, jamais inventée.
-- Les valeurs inchangées gardent la source `public`; les corrections du client
-  sont persistées avec la source `user_confirmed`.
-- Cette étape est éditable et reprise depuis la session serveur.
+- Source: projection publique SearchAPI réellement disponible au moment de la
+  création. Le schéma observé le 21 juillet 2026 contenait `username`, `name`,
+  `bio`, `avatar`, `avatar_hd`, `followers`, `following`, `posts` et une caption
+  récente. Les champs facultatifs absents restent inconnus.
+- `public_analysis.version=1` conserve chaque fait dans une enveloppe légère:
+  `public_observed`, `deterministic_derived`, `user_confirmed` ou `unknown`, avec
+  le champ source et les timestamps utiles. Les sessions historiques restent
+  lisibles sans migration destructive.
+- Les captions ne déclenchent aucun appel additionnel: au plus cinq chaînes de
+  280 caractères, URLs supprimées, sans id ni métadonnée média, restent dans la
+  session et leur contenu n'est pas projeté vers le navigateur.
+- La langue FR/EN est déduite localement seulement si la quantité de texte, le
+  score et la marge sont suffisants. Texte court, ambigu, multilingue ou absent
+  reste **Non détecté**. Niche, audience, thèmes et localisation ne sont jamais
+  inventés.
+- Les corrections client sont séparées de l'observation originale. Le bouton
+  **Réanalyser les données publiques** conserve la session, le compte préparé,
+  les credentials, l'ownership et l'entitlement; cooldown, clé d'idempotence et
+  claim optimiste empêchent la duplication et les courses concurrentes.
+- L'avatar est servi par la route authentifiée same-origin
+  `/api/instagram-client/onboarding/avatar`, sans URL CDN dans le DTO ou le DOM,
+  avec timeout, type image obligatoire, limite 2 MiB et fallback initiale.
+- Ce checkpoint ne produit aucune suggestion IA.
 
 ### 4.3 Ciblage
 

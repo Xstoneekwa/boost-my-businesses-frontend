@@ -8,12 +8,24 @@ import {
   type AddProfileCommercialPackage,
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import { loadTargetEligibilityCountsForAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
-import { createClientInstagramAccount, type ClientPublicProfileProjection } from "./create-account";
+import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
+import { createClientInstagramAccount, projectClientPublicProfileLookup } from "./create-account";
 import {
   CLIENT_ONBOARDING_TARGET_MINIMUM,
   hasClientOnboardingTargetMinimum,
 } from "./client-account-onboarding-policy";
 import { readString } from "./guards";
+import {
+  applyClientPublicAnalysisConfirmation,
+  buildStoredPublicAnalysis,
+  mergeReanalysisPreservingConfirmations,
+  onboardingAvatarSource,
+  projectClientPublicAnalysis,
+  readStoredPublicAnalysis,
+  withReanalysisState,
+  type ClientPublicAnalysis,
+} from "./profile-intelligence";
+import { evaluateProfileReanalysis } from "./profile-reanalysis-policy";
 
 type Row = Record<string, unknown>;
 type Supabase = ReturnType<typeof createSupabaseClient>;
@@ -29,15 +41,7 @@ export type ClientOnboardingStatus =
   | "expired"
   | "abandoned";
 
-export type ClientPublicAnalysis = ClientPublicProfileProjection & {
-  category: string | null;
-  language: string | null;
-  location: string | null;
-  niche: string | null;
-  themes: string[];
-  probableAudience: string | null;
-  sources: Record<string, "public" | "suggested" | "user_confirmed" | "not_detected">;
-};
+export type { ClientPublicAnalysis } from "./profile-intelligence";
 
 export type ClientTargetingCriteria = {
   idealCustomer: string;
@@ -91,54 +95,6 @@ function optionalText(value: unknown, limit = 500) {
   return text || null;
 }
 
-export function sanitizePublicAnalysis(value: unknown, base?: ClientPublicAnalysis | null): ClientPublicAnalysis {
-  const row = readObject(value);
-  const current = base ?? {
-    lookupStatus: "unknown",
-    username: "",
-    displayName: null,
-    biography: null,
-    avatarUrl: null,
-    followersCount: null,
-    isPrivate: null,
-    isVerified: null,
-    checkedAt: new Date(0).toISOString(),
-    category: null,
-    language: null,
-    location: null,
-    niche: null,
-    themes: [],
-    probableAudience: null,
-    sources: {},
-  };
-  const editableKeys = ["displayName", "biography", "category", "language", "location", "niche", "probableAudience"] as const;
-  const sources = { ...current.sources };
-  for (const key of editableKeys) {
-    const next = optionalText(row[key], key === "biography" ? 2000 : 500);
-    sources[key] = next
-      ? next === current[key] ? current.sources[key] ?? "public" : "user_confirmed"
-      : "not_detected";
-  }
-  const themes = readStringList(row.themes);
-  sources.themes = themes.length
-    ? JSON.stringify(themes) === JSON.stringify(current.themes)
-      ? current.sources.themes ?? "suggested"
-      : "user_confirmed"
-    : "not_detected";
-  return {
-    ...current,
-    displayName: optionalText(row.displayName),
-    biography: optionalText(row.biography, 2000),
-    category: optionalText(row.category),
-    language: optionalText(row.language),
-    location: optionalText(row.location),
-    niche: optionalText(row.niche),
-    themes,
-    probableAudience: optionalText(row.probableAudience),
-    sources,
-  };
-}
-
 export function sanitizeTargetingCriteria(value: unknown): ClientTargetingCriteria {
   const row = readObject(value);
   return {
@@ -152,52 +108,8 @@ export function sanitizeTargetingCriteria(value: unknown): ClientTargetingCriter
   };
 }
 
-function publicAnalysisFromProfile(profile: ClientPublicProfileProjection): ClientPublicAnalysis {
-  return {
-    ...profile,
-    category: null,
-    language: null,
-    location: null,
-    niche: null,
-    themes: [],
-    probableAudience: null,
-    sources: {
-      username: "public",
-      displayName: profile.displayName ? "public" : "not_detected",
-      biography: profile.biography ? "public" : "not_detected",
-      avatarUrl: profile.avatarUrl ? "public" : "not_detected",
-      followersCount: profile.followersCount != null ? "public" : "not_detected",
-      category: "not_detected",
-      language: "not_detected",
-      location: "not_detected",
-      niche: "not_detected",
-      themes: "not_detected",
-      probableAudience: "not_detected",
-    },
-  };
-}
-
 function mapAnalysis(value: unknown): ClientPublicAnalysis | null {
-  const row = readObject(value);
-  if (!readString(row.username)) return null;
-  return {
-    lookupStatus: readString(row.lookupStatus, "unknown"),
-    username: readString(row.username),
-    displayName: optionalText(row.displayName),
-    biography: optionalText(row.biography, 2000),
-    avatarUrl: optionalText(row.avatarUrl, 2000),
-    followersCount: Number.isFinite(Number(row.followersCount)) ? Number(row.followersCount) : null,
-    isPrivate: typeof row.isPrivate === "boolean" ? row.isPrivate : null,
-    isVerified: typeof row.isVerified === "boolean" ? row.isVerified : null,
-    checkedAt: readString(row.checkedAt),
-    category: optionalText(row.category),
-    language: optionalText(row.language),
-    location: optionalText(row.location),
-    niche: optionalText(row.niche),
-    themes: readStringList(row.themes),
-    probableAudience: optionalText(row.probableAudience),
-    sources: readObject(row.sources) as ClientPublicAnalysis["sources"],
-  };
+  return projectClientPublicAnalysis(value);
 }
 
 function mapCriteria(value: unknown): ClientTargetingCriteria | null {
@@ -332,7 +244,7 @@ export async function beginClientInstagramOnboarding(input: {
     throw Object.assign(new Error("entitlement_package_mismatch"), { status: 409 });
   }
 
-  const analysis = publicAnalysisFromProfile(validation.publicProfile);
+  const analysis = buildStoredPublicAnalysis(validation.publicProfile);
   const attemptId = crypto.randomUUID();
   const { data, error } = await supabase.rpc("begin_client_instagram_onboarding", {
     p_client_id: input.clientId,
@@ -388,7 +300,7 @@ export async function updateClientInstagramOnboarding(input: {
   if (readString(row.status) === "completed") return projectSession(supabase, row);
 
   const value = input.action === "save_analysis"
-    ? sanitizePublicAnalysis(input.value, mapAnalysis(row.public_analysis))
+    ? applyClientPublicAnalysisConfirmation(input.value, row.public_analysis)
     : input.action === "save_targeting"
       ? sanitizeTargetingCriteria(input.value)
       : {};
@@ -405,4 +317,131 @@ export async function updateClientInstagramOnboarding(input: {
   const updated = await loadSessionRow(supabase, input.clientId, input.sessionId);
   if (!updated) throw Object.assign(new Error("onboarding_not_found"), { status: 404 });
   return projectSession(supabase, updated);
+}
+
+function reanalysisError(code: string, status: number) {
+  return Object.assign(new Error(code), { status });
+}
+
+async function markReanalysisFailed(
+  supabase: Supabase,
+  row: Row,
+  clientId: string,
+  requestKey: string,
+  errorCode: string,
+) {
+  const startedAt = readString(readObject(readObject(row.public_analysis).reanalysis).started_at) || new Date().toISOString();
+  const failed = withReanalysisState(row.public_analysis, {
+    request_key: requestKey,
+    status: "failed",
+    started_at: startedAt,
+    completed_at: new Date().toISOString(),
+    error_code: errorCode,
+  });
+  await supabase
+    .from("client_instagram_onboarding_sessions")
+    .update({ public_analysis: failed, updated_at: new Date().toISOString() })
+    .eq("id", readString(row.id))
+    .eq("client_id", clientId)
+    .eq("updated_at", readString(row.updated_at));
+}
+
+export async function reanalyzeClientInstagramOnboarding(input: {
+  clientId: string;
+  userId: string;
+  sessionId: string;
+  requestKey: string;
+}) {
+  const supabase = createSupabaseClient();
+  const row = await loadSessionRow(supabase, input.clientId, input.sessionId);
+  if (!row) throw reanalysisError("onboarding_not_found", 404);
+  const analysis = readStoredPublicAnalysis(row.public_analysis);
+  if (!analysis) throw reanalysisError("public_analysis_required", 409);
+  const decision = evaluateProfileReanalysis({
+    status: readString(row.status),
+    currentStep: readString(row.current_step),
+    expiresAt: readString(row.expires_at),
+    analysis,
+    requestKey: input.requestKey,
+  });
+  if (decision.action === "return_existing") return projectSession(supabase, row);
+  if (decision.action === "reject") throw reanalysisError(decision.code, decision.status);
+
+  const startedAt = new Date().toISOString();
+  const claimedAnalysis = withReanalysisState(row.public_analysis, {
+    request_key: input.requestKey,
+    status: "running",
+    started_at: startedAt,
+    completed_at: null,
+    error_code: null,
+  });
+  const claimUpdatedAt = new Date().toISOString();
+  const claim = await supabase
+    .from("client_instagram_onboarding_sessions")
+    .update({ public_analysis: claimedAnalysis, updated_at: claimUpdatedAt })
+    .eq("id", input.sessionId)
+    .eq("client_id", input.clientId)
+    .eq("updated_at", readString(row.updated_at))
+    .select(ONBOARDING_SELECT)
+    .maybeSingle<Row>();
+  if (claim.error) throw reanalysisError("profile_reanalysis_claim_failed", 503);
+  if (!claim.data?.id) {
+    const concurrent = await loadSessionRow(supabase, input.clientId, input.sessionId);
+    if (concurrent) {
+      const concurrentAnalysis = readStoredPublicAnalysis(concurrent.public_analysis);
+      if (concurrentAnalysis?.reanalysis?.request_key === input.requestKey) {
+        return projectSession(supabase, concurrent);
+      }
+    }
+    throw reanalysisError("profile_reanalysis_in_progress", 409);
+  }
+
+  const lookup = await lookupInstagramPublicProfile(analysis.username, { disableCache: true });
+  if (lookup.status !== "found") {
+    await markReanalysisFailed(supabase, claim.data, input.clientId, input.requestKey, lookup.reason || lookup.status);
+    throw reanalysisError("profile_reanalysis_provider_unavailable", 503);
+  }
+
+  const canonicalUsername = lookup.canonical_username || analysis.username;
+  if (canonicalUsername !== analysis.username) {
+    await markReanalysisFailed(supabase, claim.data, input.clientId, input.requestKey, "canonical_username_changed");
+    throw reanalysisError("profile_reanalysis_identity_mismatch", 409);
+  }
+  const fresh = buildStoredPublicAnalysis(projectClientPublicProfileLookup(lookup, canonicalUsername));
+  const completedAt = new Date().toISOString();
+  const merged = withReanalysisState(
+    mergeReanalysisPreservingConfirmations(fresh, analysis),
+    {
+      request_key: input.requestKey,
+      status: "completed",
+      started_at: startedAt,
+      completed_at: completedAt,
+      error_code: null,
+    },
+  );
+  const completed = await supabase
+    .from("client_instagram_onboarding_sessions")
+    .update({
+      public_analysis: merged,
+      last_progress_at: completedAt,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: completedAt,
+    })
+    .eq("id", input.sessionId)
+    .eq("client_id", input.clientId)
+    .eq("updated_at", readString(claim.data.updated_at))
+    .select(ONBOARDING_SELECT)
+    .maybeSingle<Row>();
+  if (completed.error) throw reanalysisError("profile_reanalysis_save_failed", 503);
+  if (!completed.data?.id) throw reanalysisError("profile_reanalysis_conflict", 409);
+  return projectSession(supabase, completed.data);
+}
+
+export async function loadClientOnboardingAvatarSource(clientId: string, sessionId: string) {
+  const supabase = createSupabaseClient();
+  const row = await loadSessionRow(supabase, clientId, sessionId);
+  if (!row || !readString(row.account_id)) return null;
+  const source = onboardingAvatarSource(row.public_analysis);
+  if (!source?.username || !source.avatarUrl) return null;
+  return source;
 }
