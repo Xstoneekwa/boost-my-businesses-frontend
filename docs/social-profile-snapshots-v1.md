@@ -1,0 +1,111 @@
+# SOCIAL_PROFILE_SNAPSHOTS_V1
+
+Local candidate only. No remote migration, deployment, provider call, device action, Worker change, or production write is part of this checkpoint.
+
+Production rollout gate update: the cron now requires the server-only `SOCIAL_PROFILE_SNAPSHOTS_ENABLED=true` switch and defaults to `skipped_disabled`. The original schema migration did not import the 14 reliable legacy follower rows, so the rollout is blocked before commit/application pending explicit approval of the locally prepared complementary migration `20260722121000_social_profile_snapshots_legacy_followers.sql`.
+
+## Verified current state (2026-07-22)
+
+- Production has 6 active `ig_accounts`; all are selected by the current daily collector.
+- 3 accounts have historical follower rows and 3 have none.
+- `ig_account_follower_snapshots` contains 14 real rows for 3 accounts, from 2026-06-19 through 2026-07-21.
+- The last observable collector run selected 6 accounts, succeeded for 2 and failed for 4 (`provider_invalid_response`, `not_found`, two throttles).
+- The legacy table stores followers only. Followings and posts have no persistent historical source.
+- The Stats route asks for `ig_account_settings.timezone`, but that production column does not exist.
+- The deployed legacy cron is `/api/cron/instagram-follower-snapshots` at `30 0 * * *`; the candidate changes it to an hourly queue scan at minute 17.
+
+Current account coverage:
+
+| Username | Client linked | Existing follower snapshots | Latest |
+|---|---:|---:|---|
+| `i_m_your_traker` | yes | 6 | 2026-07-18 00:30:47 UTC |
+| `j_automatise_pour_toi` | yes | 1 | 2026-07-21 20:55:42 UTC |
+| `mythyl_fitness` | yes | 7 | 2026-07-21 20:55:39 UTC |
+| `p3_2_admin_recovery_test` | no | 0 | — |
+| `p3_2_botapp_recovery_test` | no | 0 | — |
+| `p3_internal_recovery_test` | no | 0 | — |
+
+## Canonical pipeline
+
+```text
+existing public lookup
+  -> reuse immediately during onboarding or explicit reanalysis
+  -> otherwise an hourly DB-only scan enqueues at most one account/day job
+       session_end if a completed run exists that local day
+       daily_fallback otherwise
+  -> atomic claim (FOR UPDATE SKIP LOCKED, lease, max 3 attempts)
+  -> one SearchAPI lookup, rate-limited and cached by the existing adapter
+  -> append-only ig_account_social_profile_snapshots
+  -> authenticated Stats API / server-rendered Client Dashboard
+  -> existing BotApp relay
+  -> Stats drawer (persisted values only)
+```
+
+The drawer and Client Dashboard never invoke the provider. Manual admin refresh only enqueues a job and has a six-hour cooldown. Rate limiting stops the current batch after the first provider 429 and retries later with bounded backoff.
+
+## Data contract and time
+
+- Counts are nullable non-negative integers. `0` is valid and is never mapped to missing.
+- A row is rejected if all three counts are missing.
+- `observed_at` is UTC `timestamptz`.
+- `snapshot_local_date` is computed once and persisted with `account_timezone`.
+- Timezone order in the contract: non-UTC assigned phone timezone, schedule timezone when a future account-scoped source exists, then `Africa/Johannesburg` platform fallback.
+- Production schema audit on 2026-07-22 found no account-, schedule-, or tenant-scoped timezone column joinable by `account_id`. The only current account-resolvable source is `phone_devices.timezone` through `account_assignments`; unassigned accounts therefore use the explicit platform fallback. `phone_rest_windows.timezone` is device-rest configuration, not an account schedule source, and is not reused here.
+- Successful daily fallback has a partial unique index per account/local date.
+- General idempotency is `(account_id, idempotency_key)`.
+- Snapshot UPDATE and DELETE are rejected; job rows remain mutable operational state.
+
+Session matching order:
+
+1. exact `source_run_id` or `source_business_session_id`;
+2. successful same-account and same-local-date snapshot within 18 hours;
+3. no match (`—`), with no reuse of an old current value.
+
+## Trigger policy
+
+- Onboarding lookup: reuse the result already paid for after the account ID exists.
+- Explicit reanalysis: reuse that explicit result; no second call.
+- Session end: the daily scheduler detects the latest completed/stopped run and enqueues a run-linked job.
+- Daily fallback: only from 23:00 account-local time when no completed run exists for that local day.
+- Manual admin refresh: queue only, six-hour cooldown.
+- Future accounts: every active `ig_accounts` row is discovered automatically; client ownership is not required for collection.
+
+## Provider budget
+
+The hard application cap is 10 successful attempts per cron batch. At most one scheduled observation is enqueued per active account/local day; onboarding and reanalysis reuse their existing lookup.
+
+For the 6 current accounts:
+
+- theoretical baseline: 6 searches/day;
+- approximately 180 searches per 30-day month;
+- no additional scheduled search relative to the already deployed one-search/account/day collector;
+- at the public Developer rate of USD 4 per 1,000 successful searches, 180 successes represent USD 0.72 of plan value per month (the plan itself is USD 40/month for 10,000 searches; failed requests are not billed).
+
+The scheduler must not be enabled above the purchased allowance without an explicit budget decision. Pricing source: https://www.searchapi.io/pricing
+
+## Compatibility and surfaces
+
+- Existing reliable follower rows remain readable as a legacy fallback and are not copied or fabricated.
+- New social snapshots take precedence for matching dates.
+- Client Dashboard shows current followers/followings/posts and a persisted history; its existing follower chart merges real legacy follower history with new rows.
+- Admin/BotApp Stats API exposes all three metrics, timestamps, sources and freshness states.
+- BotApp relay remains a transparent authenticated projection. The Stats drawer displays `—`/Pending when no persisted value exists.
+- Follow/Unfollow action counters remain separate and are never used to derive public profile totals.
+
+## Migration and rollout order
+
+1. Review and apply `20260722120000_social_profile_snapshots_v1.sql` in a controlled database checkpoint.
+2. Verify RLS and effective grants for `public`, `anon`, `authenticated`, and `service_role`.
+3. Deploy the backend with queue processing disabled at the cron platform until schema availability is confirmed.
+4. Run a dry-run cron request (zero provider calls and zero writes).
+5. Enable the existing daily cron, observe one bounded batch, and verify job/snapshot telemetry.
+6. Deploy BotApp UI projection after the backend response contract is live.
+
+Rollback: disable the cron first, roll back application readers to the legacy follower projection, keep append-only rows intact, and do not drop data during the operational rollback.
+
+## Known gaps before production approval
+
+- The candidate migration has not been applied remotely.
+- No production provider call or real current-value snapshot was intentionally triggered in this checkpoint.
+- Production environment allowance/remaining SearchAPI credits were not queried; only public plan pricing and the application call budget are documented.
+- Visual captures are local fixtures only and cannot prove live provider freshness.

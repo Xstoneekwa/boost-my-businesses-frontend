@@ -9,6 +9,11 @@ import {
 import { businessDayKeyFromIso } from "@/lib/instagram-dashboard/business-timezone";
 import { projectStatsFollowerSnapshots } from "@/lib/instagram-dashboard/stats-follower-snapshot-projection";
 import type { FollowerSnapshotRow } from "@/lib/instagram-client/follower-snapshot-contract";
+import {
+  projectSocialProfileSnapshots,
+  selectSnapshotForSession,
+  type SocialProfileSnapshotRow,
+} from "@/lib/instagram-dashboard/social-profile-snapshot-contract";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../../../_utils";
 import { verifyCompassRelayKey } from "../../../compass/relay-auth";
@@ -22,8 +27,14 @@ type DayCounters = {
   followers_snapshot_at: string | null;
   followers_snapshot_source: string | null;
   followers_freshness_status: "available" | "stale" | "no_data";
-  followings_freshness_status: "unavailable";
+  followings_freshness_status: "unavailable" | "available" | "stale" | "no_data";
   followings_count: number | null;
+  followings_snapshot_at: string | null;
+  followings_snapshot_source: string | null;
+  posts_count: number | null;
+  posts_snapshot_at: string | null;
+  posts_snapshot_source: string | null;
+  posts_freshness_status: "available" | "stale" | "no_data";
   follow_count: number;
   unfollow_count: number;
   like_count: number;
@@ -94,6 +105,12 @@ function blankDay(date: string): DayCounters {
     followers_freshness_status: "no_data",
     followings_freshness_status: "unavailable",
     followings_count: null,
+    followings_snapshot_at: null,
+    followings_snapshot_source: null,
+    posts_count: null,
+    posts_snapshot_at: null,
+    posts_snapshot_source: null,
+    posts_freshness_status: "no_data",
     follow_count: 0,
     unfollow_count: 0,
     like_count: 0,
@@ -205,7 +222,7 @@ export async function GET(
     since.setUTCHours(0, 0, 0, 0);
 
     const supabase = createSupabaseClient();
-    const [logsResult, runsResult, interactionEventsResult, unfollowRowsResult, followerSnapshotsResult, settingsResult, packageResult] = await Promise.all([
+    const [logsResult, runsResult, interactionEventsResult, unfollowRowsResult, followerSnapshotsResult, socialSnapshotsResult, latestJobResult, latestManualJobResult, settingsResult, packageResult] = await Promise.all([
       supabase
         .from("ig_action_logs")
         .select("id,account_id,run_id,target_username,action_type,status,payload,created_at")
@@ -243,8 +260,30 @@ export async function GET(
         .order("captured_at", { ascending: true })
         .limit(5000),
       supabase
+        .from("ig_account_social_profile_snapshots")
+        .select("account_id,username_normalized,followers_count,following_count,posts_count,observed_at,snapshot_local_date,account_timezone,timezone_source,source_provider,source_trigger,source_event_id,source_run_id,source_business_session_id,lookup_status,freshness_status,idempotency_key")
+        .eq("account_id", normalizedAccountId)
+        .gte("observed_at", since.toISOString())
+        .order("observed_at", { ascending: true })
+        .limit(5000),
+      supabase
+        .from("ig_social_profile_snapshot_jobs")
+        .select("status,source_trigger,last_error_code,created_at,updated_at")
+        .eq("account_id", normalizedAccountId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<SupabaseRecord>(),
+      supabase
+        .from("ig_social_profile_snapshot_jobs")
+        .select("status,created_at")
+        .eq("account_id", normalizedAccountId)
+        .eq("source_trigger", "admin_manual_refresh")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<SupabaseRecord>(),
+      supabase
         .from("ig_account_settings")
-        .select("total_likes_limit,max_dm_per_run,timezone")
+        .select("total_likes_limit,max_dm_per_run")
         .eq("account_id", normalizedAccountId)
         .limit(1)
         .maybeSingle<SupabaseRecord>(),
@@ -256,13 +295,16 @@ export async function GET(
         .maybeSingle<SupabaseRecord>(),
     ]);
 
-    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? unfollowRowsResult.error ?? followerSnapshotsResult.error ?? settingsResult.error ?? packageResult.error;
+    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? unfollowRowsResult.error ?? followerSnapshotsResult.error ?? socialSnapshotsResult.error ?? latestJobResult.error ?? latestManualJobResult.error ?? settingsResult.error ?? packageResult.error;
     if (firstError) return jsonError(firstError.message, 500);
 
     const byDay = new Map<string, DayCounters>();
+    const socialSnapshots = projectSocialProfileSnapshots({
+      rows: (socialSnapshotsResult.data ?? []) as SocialProfileSnapshotRow[],
+    });
     const followerSnapshots = projectStatsFollowerSnapshots({
       rows: (followerSnapshotsResult.data ?? []) as FollowerSnapshotRow[],
-      timezone: readString(settingsResult.data?.timezone, ""),
+      timezone: socialSnapshots.timezone,
     });
     const ensureDay = (date: string) => {
       const existing = byDay.get(date);
@@ -294,6 +336,23 @@ export async function GET(
       const totals = runTotalsByDay.get(date) ?? blankSocialCounters();
       mergeRunTotals(totals, row);
       runTotalsByDay.set(date, totals);
+      const matched = selectSnapshotForSession({
+        snapshots: (socialSnapshotsResult.data ?? []) as SocialProfileSnapshotRow[],
+        runId: readString(row.id, "") || null,
+        sessionAt,
+        timezone: socialSnapshots.timezone,
+      });
+      if (matched.row) {
+        day.followers_count = matched.row.followers_count;
+        day.followings_count = matched.row.following_count;
+        day.posts_count = matched.row.posts_count;
+        day.followers_snapshot_at = matched.row.observed_at;
+        day.followings_snapshot_at = matched.row.observed_at;
+        day.posts_snapshot_at = matched.row.observed_at;
+        day.posts_snapshot_source = `${matched.row.source_provider}:${matched.match}`;
+        day.followers_snapshot_source = `${matched.row.source_provider}:${matched.match}`;
+        day.followings_snapshot_source = `${matched.row.source_provider}:${matched.match}`;
+      }
     }
 
     const verifiedEvents = [
@@ -310,10 +369,35 @@ export async function GET(
     }
     for (const point of followerSnapshots.points) {
       const day = ensureDay(point.date);
+      if (day.followers_count !== null) continue;
       day.followers_count = point.followersCount;
       day.followers_snapshot_at = point.capturedAt;
       day.followers_snapshot_source = point.source;
       day.followers_freshness_status = point.freshnessStatus;
+    }
+    for (const point of socialSnapshots.points) {
+      const day = ensureDay(point.date);
+      const status = point.row === socialSnapshots.points.at(-1)?.row
+        ? socialSnapshots.sourceStatus.followers.status
+        : "available";
+      if (point.row.followers_count !== null && !day.followers_snapshot_source?.endsWith(":explicit")) {
+        day.followers_count = point.row.followers_count;
+        day.followers_snapshot_at = point.row.observed_at;
+        day.followers_snapshot_source = point.row.source_provider;
+        day.followers_freshness_status = status;
+      }
+      if (point.row.following_count !== null && !day.followings_snapshot_source?.endsWith(":explicit")) {
+        day.followings_count = point.row.following_count;
+        day.followings_snapshot_at = point.row.observed_at;
+        day.followings_snapshot_source = point.row.source_provider;
+        day.followings_freshness_status = socialSnapshots.sourceStatus.followings.status;
+      }
+      if (point.row.posts_count !== null && !day.posts_snapshot_source?.endsWith(":explicit")) {
+        day.posts_count = point.row.posts_count;
+        day.posts_snapshot_at = point.row.observed_at;
+        day.posts_snapshot_source = point.row.source_provider;
+        day.posts_freshness_status = socialSnapshots.sourceStatus.posts.status;
+      }
     }
 
     const caps = effectiveCaps(settingsResult.data ?? null, packageResult.data ?? null);
@@ -334,27 +418,45 @@ export async function GET(
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, days);
 
+    const latestManualCreatedAt = readString(latestManualJobResult.data?.created_at, "");
+    const nextManualRefreshAt = latestManualCreatedAt
+      ? new Date(Date.parse(latestManualCreatedAt) + 6 * 60 * 60 * 1000).toISOString()
+      : null;
     return jsonOk({
       account_id: normalizedAccountId,
       days: rows,
+      snapshot_count: (socialSnapshotsResult.data ?? []).length,
+      latest_snapshot_job: latestJobResult.data ? {
+        status: readString(latestJobResult.data.status, "unknown"),
+        source_trigger: readString(latestJobResult.data.source_trigger, "unknown"),
+        last_error_code: readString(latestJobResult.data.last_error_code, "") || null,
+        updated_at: readString(latestJobResult.data.updated_at, readString(latestJobResult.data.created_at, "")) || null,
+      } : null,
+      manual_refresh: {
+        allowed: !nextManualRefreshAt || Date.parse(nextManualRefreshAt) <= Date.now(),
+        next_allowed_at: nextManualRefreshAt,
+      },
       source: {
         actions: "ig_action_logs",
         runs: "ig_runs.total_* reconciliation for post-follow likes",
         interaction_events: "ig_interaction_events post_like_success for live post-follow likes",
         unfollows: "ig_interacted_users.unfollowed_at correlated by account+run+target",
         caps: "account_package_summary+ig_account_settings",
-        followers: "ig_account_follower_snapshots latest reliable snapshot per business day",
-        followings: "pending_account_following_snapshots",
+        followers: "ig_account_social_profile_snapshots with legacy follower fallback",
+        followings: "ig_account_social_profile_snapshots",
+        posts: "ig_account_social_profile_snapshots",
       },
       source_status: {
-        followers: followerSnapshots.sourceStatus,
-        followings: { status: "unavailable", latestAt: null, source: "pending_account_following_snapshots", reason: "no_canonical_snapshot_source" },
+        followers: socialSnapshots.sourceStatus.followers.status === "no_data" ? followerSnapshots.sourceStatus : socialSnapshots.sourceStatus.followers,
+        followings: socialSnapshots.sourceStatus.followings,
+        posts: socialSnapshots.sourceStatus.posts,
       },
       missing_sources: [
-        ...(followerSnapshots.sourceStatus.status === "no_data" ? ["ig_account_follower_snapshots"] : []),
-        "account_following_snapshots",
+        ...(socialSnapshots.sourceStatus.followers.status === "no_data" && followerSnapshots.sourceStatus.status === "no_data" ? ["followers_snapshot"] : []),
+        ...(socialSnapshots.sourceStatus.followings.status === "no_data" ? ["followings_snapshot"] : []),
+        ...(socialSnapshots.sourceStatus.posts.status === "no_data" ? ["posts_snapshot"] : []),
       ],
-      business_timezone: followerSnapshots.timezone,
+      business_timezone: socialSnapshots.timezone,
       generated_at: new Date().toISOString(),
       total_interactions_definition: STATS_TOTAL_INTERACTIONS_DEFINITION,
       thresholds: {

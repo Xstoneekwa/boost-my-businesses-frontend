@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { runDailyFollowerSnapshotCollection } from "@/lib/instagram-dashboard/follower-snapshot-daily";
+import {
+  enqueueDailySocialProfileSnapshotJobs,
+  processSocialProfileSnapshotJobs,
+} from "@/lib/instagram-dashboard/social-profile-snapshot-service";
+import { socialProfileSnapshotsEnabled } from "@/lib/instagram-dashboard/social-profile-snapshot-rollout";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,22 +15,27 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!socialProfileSnapshotsEnabled(process.env.SOCIAL_PROFILE_SNAPSHOTS_ENABLED)) {
+    return NextResponse.json({
+      ok: true,
+      data: {
+        status: "skipped_disabled",
+        providerCalls: 0,
+        jobsCreated: 0,
+        jobsProcessed: 0,
+      },
+    });
+  }
+
   try {
     const url = new URL(request.url);
     const dryRun = url.searchParams.get("dry_run") === "1";
-    const manualValidation = url.searchParams.get("trigger_source") === "manual_validation";
-    const requestedSha = url.searchParams.get("deployment_sha");
-    const requestedDeploymentSha = requestedSha && /^[0-9a-f]{40}$/i.test(requestedSha)
-      ? requestedSha.toLowerCase()
-      : null;
-    const result = await runDailyFollowerSnapshotCollection({
-      dryRun,
-      triggerContext: {
-        triggerSource: manualValidation ? "manual_validation" : "scheduled_cron",
-        requestedBy: manualValidation ? "controlled_review" : "vercel_cron",
-        requestedDeploymentSha,
-      },
-    });
+    if (dryRun) {
+      return NextResponse.json({ ok: true, data: { dryRun: true, providerCalls: 0, writes: 0 } });
+    }
+    const enqueue = await enqueueDailySocialProfileSnapshotJobs({});
+    const processing = await processSocialProfileSnapshotJobs({});
+    const result = { enqueue, processing };
     return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "follower_snapshot_cron_failed";

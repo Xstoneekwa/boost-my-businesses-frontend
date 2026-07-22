@@ -28,6 +28,7 @@ import {
 } from "@/lib/instagram-accounts/profile-verification-payload";
 import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
 import { clientMaxAccountsLimit, projectClientAccountRow, readString } from "./guards";
+import { persistSocialProfileLookup } from "@/lib/instagram-dashboard/social-profile-snapshot-service";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -357,6 +358,15 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     await supabase.from("ig_accounts").delete().eq("id", accountId);
     return { ok: false, status: 500, error: "Could not finish account setup.", code: "profile_setup_failed" };
   }
+
+  await persistSocialProfileLookup({
+    accountId,
+    username: accountUsername,
+    lookup: profileLookup,
+    trigger: "onboarding_lookup",
+    sourceEventId: externalRequestId,
+    supabase,
+  }).catch(() => ({ ok: false as const, reason: "snapshot_persist_failed" }));
 
   if (email) {
     const emailPersisted = await persistAccountLoginEmail(supabase, accountId, email, "client_add_account");

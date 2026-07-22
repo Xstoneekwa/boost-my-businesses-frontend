@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { persistSocialProfileObservation } from "@/lib/instagram-dashboard/social-profile-snapshot-service";
 import {
   entitlementToAddProfileInput,
   getReservedEntitlementForClient,
@@ -263,6 +264,19 @@ export async function beginClientInstagramOnboarding(input: {
   if (result.ok !== true) throw rpcFailure(result, "onboarding_atomic_create_failed");
   const row = await loadSessionRow(supabase, input.clientId, readString(result.session_id));
   if (!row) throw Object.assign(new Error("onboarding_lookup_failed"), { status: 500 });
+  await persistSocialProfileObservation({
+    accountId: readString(row.account_id),
+    username: validation.publicProfile.username,
+    followersCount: validation.publicProfile.followersCount,
+    followingCount: validation.publicProfile.followingCount,
+    postsCount: validation.publicProfile.postsCount,
+    observedAt: validation.publicProfile.checkedAt,
+    lookupStatus: validation.publicProfile.lookupStatus,
+    provider: "searchapi",
+    trigger: "onboarding_lookup",
+    sourceEventId: attemptId,
+    supabase,
+  }).catch(() => ({ ok: false as const, reason: "snapshot_persist_failed" }));
   return projectSession(supabase, row);
 }
 
@@ -434,6 +448,19 @@ export async function reanalyzeClientInstagramOnboarding(input: {
     .maybeSingle<Row>();
   if (completed.error) throw reanalysisError("profile_reanalysis_save_failed", 503);
   if (!completed.data?.id) throw reanalysisError("profile_reanalysis_conflict", 409);
+  await persistSocialProfileObservation({
+    accountId: readString(completed.data.account_id),
+    username: canonicalUsername,
+    followersCount: fresh.followersCount,
+    followingCount: fresh.followingCount,
+    postsCount: fresh.postsCount,
+    observedAt: fresh.checkedAt,
+    lookupStatus: fresh.lookupStatus,
+    provider: "searchapi",
+    trigger: "explicit_reanalysis",
+    sourceEventId: input.requestKey,
+    supabase,
+  }).catch(() => ({ ok: false as const, reason: "snapshot_persist_failed" }));
   return projectSession(supabase, completed.data);
 }
 

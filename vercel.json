@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/instagram-follower-snapshots",
-      "schedule": "30 0 * * *"
+      "schedule": "17 * * * *"
     }
   ]
 }

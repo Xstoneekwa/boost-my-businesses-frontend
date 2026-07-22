@@ -253,6 +253,24 @@ type StatsRow = {
   exit_code?: string;
 };
 
+type SocialProfileStatsDay = {
+  date: string;
+  session_time: string | null;
+  followers_count: number | null;
+  followings_count: number | null;
+  posts_count: number | null;
+  followers_snapshot_at: string | null;
+  followers_snapshot_source: string | null;
+  followers_freshness_status: "available" | "stale" | "no_data";
+};
+
+type SocialProfileStatsPayload = {
+  days: SocialProfileStatsDay[];
+  snapshot_count: number;
+  latest_snapshot_job: { status: string; source_trigger: string; last_error_code: string | null; updated_at: string | null } | null;
+  manual_refresh: { allowed: boolean; next_allowed_at: string | null };
+};
+
 type LogRow = {
   id: string;
   account_id: string;
@@ -1487,6 +1505,7 @@ export default function InstagramDashboardButtons({
   const [templates, setTemplates] = useState<AccountTemplate[]>([]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("General");
   const [statsRows, setStatsRows] = useState<StatsRow[]>([]);
+  const [socialProfileStats, setSocialProfileStats] = useState<SocialProfileStatsPayload | null>(null);
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -1676,6 +1695,24 @@ export default function InstagramDashboardButtons({
     }, "Stats exported successfully");
   }
 
+  async function requestSocialProfileRefresh() {
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      await readApiResponse(
+        await fetch(`/api/instagram-dashboard/profiles/${encodeURIComponent(accountId)}/social-profile-refresh`, { method: "POST", headers: { Accept: "application/json" } }),
+        "Could not queue the public profile refresh."
+      );
+      await loadPanel("stats");
+      setSuccess("Public profile refresh queued. No provider call was started from the browser.");
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "Could not queue the public profile refresh.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function copyLogs() {
     void runExport(async () => {
       if (!navigator.clipboard) throw new Error("Clipboard is unavailable in this browser.");
@@ -1743,11 +1780,18 @@ export default function InstagramDashboardButtons({
       }
 
       if (nextPanel === "stats") {
-        const rows = await readApiResponse<StatsRow[]>(
-          await fetch(`/api/instagram-dashboard/stats?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
-          "Could not load account statistics."
-        );
+        const [rows, socialHistory] = await Promise.all([
+          readApiResponse<StatsRow[]>(
+            await fetch(`/api/instagram-dashboard/stats?account_id=${encodeURIComponent(accountId)}`, { headers: { Accept: "application/json" } }),
+            "Could not load account statistics."
+          ),
+          readApiResponse<SocialProfileStatsPayload>(
+            await fetch(`/api/instagram-dashboard/profiles/${encodeURIComponent(accountId)}/stats-history?days=30`, { headers: { Accept: "application/json" } }),
+            "Could not load public profile history."
+          ),
+        ]);
         setStatsRows(rows ?? []);
+        setSocialProfileStats(socialHistory);
       }
 
       if (nextPanel === "logs") {
@@ -2624,12 +2668,15 @@ export default function InstagramDashboardButtons({
               : null}
             {!isLoading && panel === "stats" ? renderStats({
               rows: statsRows,
+              socialProfile: socialProfileStats,
               error,
               success,
               isExporting,
               isMenuOpen: exportMenu === "stats",
               toggleMenu: () => setExportMenu((current) => current === "stats" ? null : "stats"),
               exportStats,
+              requestSocialProfileRefresh,
+              isRefreshingSocialProfile: isSaving,
             }) : null}
             {!isLoading && panel === "logs" ? renderLogs({
               logs,
@@ -5278,26 +5325,50 @@ function DomainTargetActions({
 
 function renderStats({
   rows,
+  socialProfile,
   error,
   success,
   isExporting,
   isMenuOpen,
   toggleMenu,
   exportStats,
+  requestSocialProfileRefresh,
+  isRefreshingSocialProfile,
 }: {
   rows: StatsRow[];
+  socialProfile: SocialProfileStatsPayload | null;
   error: string;
   success: string;
   isExporting: boolean;
   isMenuOpen: boolean;
   toggleMenu: () => void;
   exportStats: (format: "csv" | "json") => void;
+  requestSocialProfileRefresh: () => Promise<void>;
+  isRefreshingSocialProfile: boolean;
 }) {
   if (error) return <p className="ig-settings-message ig-settings-error">{error}</p>;
   const latestPythonRun = rows.find((row) => row.worker_type === "python_uiautomator");
 
   return (
     <>
+      <section className="ig-python-live-grid" aria-label="Persisted public profile snapshots">
+        <div className="ig-python-live-item"><span>Persisted snapshots (30 days)</span><strong>{socialProfile?.snapshot_count ?? 0}</strong></div>
+        <div className="ig-python-live-item"><span>Latest collection job</span><strong>{socialProfile?.latest_snapshot_job?.status ?? "No job"}</strong></div>
+        <div className="ig-python-live-item"><span>Latest trigger</span><strong>{socialProfile?.latest_snapshot_job?.source_trigger ?? "—"}</strong></div>
+        <div className="ig-python-live-item"><span>Latest collection error</span><strong>{socialProfile?.latest_snapshot_job?.last_error_code ?? "—"}</strong></div>
+        <div className="ig-python-live-item"><span>Latest observed at</span><strong>{socialProfile?.days.find((day) => day.followers_snapshot_at)?.followers_snapshot_at ?? "Pending"}</strong></div>
+        <div className="ig-python-live-item"><span>Freshness</span><strong>{socialProfile?.days.find((day) => day.followers_snapshot_at)?.followers_freshness_status ?? "no_data"}</strong></div>
+        <button type="button" className="ig-settings-secondary" disabled={isRefreshingSocialProfile || !socialProfile?.manual_refresh.allowed} onClick={() => void requestSocialProfileRefresh()}>
+          {isRefreshingSocialProfile ? "Queueing…" : socialProfile?.manual_refresh.allowed ? "Queue public profile refresh" : `Refresh available ${socialProfile?.manual_refresh.next_allowed_at ?? "later"}`}
+        </button>
+      </section>
+      {socialProfile?.days.length ? (
+        <div className="ig-panel-table-wrap">
+          <table className="ig-panel-table"><thead><tr>{["Snapshot/session", "Followers", "Followings", "Posts", "Observed at", "Source"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+            <tbody>{socialProfile.days.map((day) => <tr key={day.date}><td>{day.session_time || day.date}</td><td>{day.followers_count ?? "—"}</td><td>{day.followings_count ?? "—"}</td><td>{day.posts_count ?? "—"}</td><td>{day.followers_snapshot_at ?? "—"}</td><td>{day.followers_snapshot_source ?? "Pending"}</td></tr>)}</tbody>
+          </table>
+        </div>
+      ) : <div className="ig-panel-empty">Public profile snapshot pending. No historical value is fabricated.</div>}
       <ExportBar
         label="Export Stats"
         isExporting={isExporting}

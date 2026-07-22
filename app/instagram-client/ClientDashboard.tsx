@@ -329,6 +329,8 @@ function FollowerChart({ period, lang, onPeriodChange, title, views }: {
   }, []);
 
   useEffect(() => {
+    // Reset interaction state when the selected persisted series changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHoverIdx(null);
   }, [period, view.points.length]);
 
@@ -906,6 +908,7 @@ export default function ClientDashboard({
       : (targetingUsername || accountInsights?.username || followerGrowth?.username || null))
     : (primaryAccount?.username || accountInsights?.username || initialFollowerGrowth?.username || null);
   const followerChartTitle = buildFollowerChartTitle(followerChartUsername, lang);
+  const socialProfileGrowth = (followerGrowth ?? initialFollowerGrowth)?.socialProfile;
   const followerChartViews = useMemo(() => {
     const growth = followerGrowth ?? initialFollowerGrowth;
     if (!growth?.bundle) {
@@ -1230,6 +1233,32 @@ export default function ClientDashboard({
                       title={followerChartTitle}
                       views={followerChartViews}
                     />
+
+                    <div className="cd-card" aria-label={lang === "fr" ? "Historique du profil public" : "Public profile history"}>
+                      <div className="cd-card-hd">
+                        <h3>{lang === "fr" ? "Profil public" : "Public profile"}</h3>
+                        <span>{socialProfileGrowth?.current.observedAt
+                          ? new Date(socialProfileGrowth.current.observedAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-US")
+                          : (lang === "fr" ? "Snapshot en attente" : "Snapshot pending")}</span>
+                      </div>
+                      <div className="cd-stats-row">
+                        {[
+                          [lang === "fr" ? "Abonnés" : "Followers", socialProfileGrowth?.current.followersCount],
+                          [lang === "fr" ? "Abonnements" : "Following", socialProfileGrowth?.current.followingCount],
+                          [lang === "fr" ? "Publications" : "Posts", socialProfileGrowth?.current.postsCount],
+                        ].map(([label, value]) => (
+                          <div className="cd-sc" key={String(label)}><div className="cd-sc-lbl">{label}</div><div className="cd-sc-val">{typeof value === "number" ? value.toLocaleString() : "—"}</div></div>
+                        ))}
+                      </div>
+                      {socialProfileGrowth?.history.length ? (
+                        <details>
+                          <summary>{lang === "fr" ? "Voir l’historique réel" : "View real history"}</summary>
+                          <div className="cd-table-wrap"><table className="cd-table"><thead><tr><th>{lang === "fr" ? "Date" : "Date"}</th><th>{lang === "fr" ? "Abonnés" : "Followers"}</th><th>{lang === "fr" ? "Abonnements" : "Following"}</th><th>{lang === "fr" ? "Publications" : "Posts"}</th></tr></thead><tbody>
+                            {socialProfileGrowth.history.slice(-30).reverse().map((row) => <tr key={row.observedAt}><td>{row.date}</td><td>{row.followersCount ?? "—"}</td><td>{row.followingCount ?? "—"}</td><td>{row.postsCount ?? "—"}</td></tr>)}
+                          </tbody></table></div>
+                        </details>
+                      ) : null}
+                    </div>
 
                     <div className="cd-two-col">
                       <div className="cd-card">
