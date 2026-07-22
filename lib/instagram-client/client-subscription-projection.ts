@@ -154,8 +154,7 @@ export function resolveSubscriptionPeriodEnd(input: {
     const explicit = new Date(input.explicitPeriodEndAt);
     if (!Number.isNaN(explicit.getTime())) return explicit.toISOString();
   }
-  if (!input.periodStartAt || !input.billingIntervalMonths) return null;
-  return addCalendarMonthsUtc(input.periodStartAt, input.billingIntervalMonths);
+  return null;
 }
 
 export function formatClientMonthlyPrice(planKey: string | null, monthlyPriceCents: number | null, lang: "fr" | "en") {

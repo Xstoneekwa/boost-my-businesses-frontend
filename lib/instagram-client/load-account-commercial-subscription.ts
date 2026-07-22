@@ -1,13 +1,13 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
 import { COMMERCIAL_PLANS, type PlanKey } from "@/lib/commercial/catalog";
+import { loadClientBillingAccountSummary } from "@/lib/commercial/stripe/client-billing-service";
 import {
   formatClientMonthlyPrice,
   isKnownCommercialPlanKey,
   projectClientSubscriptionDisplay,
   resolveClientCommercialPlanKey,
   resolveClientPlanLabel,
-  resolveSubscriptionPeriodEnd,
   type ClientBillingDisplayMode,
 } from "./client-subscription-projection";
 import { readString } from "./guards";
@@ -24,6 +24,8 @@ export type AccountCommercialSubscriptionDisplay = {
   supportLabel: string;
   billingDisplayMode: ClientBillingDisplayMode;
   billingDateIso: string;
+  billingDateLabel?: string;
+  billingDateValueLabel?: string;
 };
 
 function readMetadataString(metadata: unknown, key: string, fallback = "") {
@@ -156,15 +158,23 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
 
   const supportLabel = readMetadataString(entitlementMetadata, "support_label") || pendingLabel(input.lang);
 
-  const periodEndAt = resolveSubscriptionPeriodEnd({
-    periodStartAt: commercial?.periodStartAt ?? (readString(subscriptionRow?.starts_at) || null),
-    billingIntervalMonths: commercial?.billingIntervalMonths ?? null,
-    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at"),
-  });
+  let billingDate = null;
+  try {
+    billingDate = (await loadClientBillingAccountSummary({
+      supabase,
+      clientId,
+      accountId,
+      lang: input.lang,
+      packageSummaries,
+    }))?.billingDate ?? null;
+  } catch {
+    // Keep a client-safe unavailable state when Stripe cannot be reached.
+  }
 
-  const billingDateIso = projection.billingDisplayMode === "next_billing"
-    ? (readMetadataString(subscriptionMetadata, "next_billing_at") || periodEndAt || "")
-    : (periodEndAt || "");
+  const billingDisplayMode: ClientBillingDisplayMode = billingDate?.kind === "next_payment"
+    ? "next_billing"
+    : "period_end";
+  const billingDateIso = billingDate?.dateIso || "";
 
   const statusLabel = readString(subscriptionRow?.status, "active") === "active"
     ? (input.lang === "fr" ? "Actif" : "Active")
@@ -178,7 +188,9 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
     priceLabel,
     growthLabel,
     supportLabel,
-    billingDisplayMode: projection.billingDisplayMode,
+    billingDisplayMode,
     billingDateIso,
+    billingDateLabel: billingDate?.label || (input.lang === "fr" ? "Prochain prélèvement" : "Next payment"),
+    billingDateValueLabel: billingDate?.valueLabel || "",
   };
 }

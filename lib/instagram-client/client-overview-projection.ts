@@ -130,8 +130,8 @@ export function buildSubscriptionOverviewCard(
   const pending = pendingLabel(lang);
   const toConfigure = lang === "fr" ? "À configurer" : "To be configured";
   const billingDateLabel = workspace?.billingDisplayMode === "next_billing"
-    ? (lang === "fr" ? "Prochain prélèvement" : "Next billing")
-    : (lang === "fr" ? "Échéance de l'abonnement" : "Subscription end date");
+    ? (lang === "fr" ? "Prochain prélèvement" : "Next payment")
+    : (workspace?.billing?.dateLabel || (lang === "fr" ? "Prochain prélèvement" : "Next payment"));
 
   const billingIso = workspace?.billing?.nextBillingLabel
     || workspace?.subscriptionPeriodEnd
@@ -139,7 +139,7 @@ export function buildSubscriptionOverviewCard(
     || "";
   const nextBilling = billingIso
     ? formatBillingDate(billingIso, lang)
-    : toConfigure;
+    : (workspace?.billing?.valueLabel || toConfigure);
 
   return {
     planName: workspace?.clientPlanLabel || packageLabel || dashValue(),
@@ -201,12 +201,11 @@ export function buildAccountScopedSubscriptionCard(
   lang: "fr" | "en",
 ): OverviewSubscriptionCard {
   const pending = pendingLabel(lang);
-  const billingDateLabel = display.billingDisplayMode === "next_billing"
-    ? (lang === "fr" ? "Prochain prélèvement" : "Next billing")
-    : (lang === "fr" ? "Échéance de l'abonnement" : "Subscription end date");
+  const billingDateLabel = display.billingDateLabel
+    || (lang === "fr" ? "Prochain prélèvement" : "Next payment");
   const nextBilling = display.billingDateIso
     ? formatBillingDate(display.billingDateIso, lang)
-    : pending;
+    : (display.billingDateValueLabel || pending);
   const handle = display.username.replace(/^@+/, "");
   const hasPrice = /€|\d/.test(display.priceLabel);
 
@@ -250,4 +249,3 @@ export function buildAccountManagerOverview(
     bookingHref: manager?.bookingUrl || null,
   };
 }
-

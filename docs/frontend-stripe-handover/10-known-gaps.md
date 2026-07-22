@@ -73,6 +73,23 @@ variable. Production has the required server environment and passed the same
 existing-session smoke. No secret should be copied merely to make Preview mimic
 Production.
 
+## Canary billing-display residual gaps
+
+- Authenticated production acceptance of the next-payment label remains pending;
+  the release checkpoint uses only unauthenticated read-only smokes.
+- The Stripe database projection for the canary does not currently carry a
+  populated current-period end. The client uses the live server-side Stripe
+  subscription item first and fails to an explicit unavailable state rather
+  than inventing a date.
+- `Campagne active` remains misleading for a commercially active but runtime-idle
+  account. It is diagnosed and deliberately excluded from this billing-only
+  correction.
+- No authenticated client/admin button was clicked, no Auto Login was requested,
+  and no physical-phone validation was performed.
+- This section is interim only; final consolidated Frontend/Stripe documentation
+  remains deferred until the previously listed workstreams and production
+  validations are closed.
+
 ## Existing test baseline
 
 One unrelated cancellation-projection assertion remains red in the broader

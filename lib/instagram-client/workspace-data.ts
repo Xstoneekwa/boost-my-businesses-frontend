@@ -26,6 +26,8 @@ export type ClientBillingSummary = {
   invoicesAvailable: boolean;
   displayMode: ClientBillingDisplayMode;
   periodEndLabel: string;
+  dateLabel?: string;
+  valueLabel?: string;
 };
 
 export type ClientAccountManagerView = {
@@ -80,6 +82,8 @@ function billingSummary(metadata: SupabaseRecord | null, subscription: {
   billingDisplayMode: ClientBillingDisplayMode;
   paymentMethodDisplay: string;
   subscriptionPeriodEnd: string | null;
+  dateLabel?: string;
+  valueLabel?: string;
 }): ClientBillingSummary {
   const paymentMethod = readMetadataString(metadata, "payment_method_label");
   const nextBillingAt = readMetadataString(metadata, "next_billing_at");
@@ -94,6 +98,8 @@ function billingSummary(metadata: SupabaseRecord | null, subscription: {
     invoicesAvailable: readMetadataString(metadata, "billing_invoices_enabled") === "true",
     displayMode: subscription.billingDisplayMode,
     periodEndLabel: subscription.subscriptionPeriodEnd || "",
+    dateLabel: subscription.dateLabel,
+    valueLabel: subscription.valueLabel,
   };
 }
 
@@ -246,6 +252,7 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
   };
 
   let paymentMethodDisplay = subscriptionProjection.paymentMethodDisplay;
+  let canonicalBillingDate: Awaited<ReturnType<typeof loadClientBillingPaymentSummary>>["billingDate"] | null = null;
   try {
     const paymentSummary = await loadClientBillingPaymentSummary({
       supabase,
@@ -253,13 +260,22 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
       lang: preferredLanguage,
     });
     paymentMethodDisplay = paymentSummary.displayLabel;
+    canonicalBillingDate = paymentSummary.billingDate;
   } catch {
     // Keep metadata projection fallback when Stripe billing is unavailable.
   }
 
+  const billingDisplayMode: ClientBillingDisplayMode = canonicalBillingDate?.kind === "next_payment"
+    ? "next_billing"
+    : "period_end";
+  const subscriptionPeriodEnd = canonicalBillingDate?.dateIso ?? null;
+
   const billing = billingSummary(metadata, {
-    ...subscriptionProjection,
+    billingDisplayMode,
+    subscriptionPeriodEnd,
     paymentMethodDisplay,
+    dateLabel: canonicalBillingDate?.label,
+    valueLabel: canonicalBillingDate?.valueLabel,
   });
 
   return {
@@ -275,8 +291,8 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     preferredLanguage,
     clientPlanLabel: subscriptionProjection.clientPlanLabel,
     memberSince: subscriptionProjection.memberSince,
-    subscriptionPeriodEnd: subscriptionProjection.subscriptionPeriodEnd,
-    billingDisplayMode: subscriptionProjection.billingDisplayMode,
+    subscriptionPeriodEnd,
+    billingDisplayMode,
     paymentMethodDisplay,
     subscriptionLabel: subscriptionProjection.clientPlanLabel,
     subscriptionStatus: readString(subscription?.status, subscriptionProjection.subscriptionStatus),

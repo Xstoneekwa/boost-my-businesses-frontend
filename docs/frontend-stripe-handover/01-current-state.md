@@ -177,3 +177,26 @@ Canonical references:
 - [Stripe Test / Live matrix](../STRIPE_TEST_LIVE_MATRIX.md)
 - [Stripe per-entitlement billing](../stripe-per-entitlement-billing.md)
 - [Stripe provisioning](../stripe-provisioning.md)
+
+## Canary account and next-payment projection — interim checkpoint
+
+Read-only cross-system evidence on 2026-07-22 certifies the existing Growth
+canary as a single owned account with completed onboarding, 15 eligible targets
+out of 25, one consumed entitlement, one reserved device assignment and no run,
+run request, active lock or incident. Stripe Test reports an active renewable
+annual subscription whose current item period ends on 2027-07-20; a non-persistent
+invoice preview independently reports the same renewal day. No Stripe, Supabase,
+BotApp, worker, phone or Instagram mutation was performed.
+
+The client billing projection now labels an active renewable subscription
+`Prochain prélèvement` in French and `Next payment` in English. It trusts, in
+order, an upcoming invoice date supplied by the gateway, the live Stripe
+subscription period, then the canonical synchronized projection. It never
+synthesizes a date from account creation, entitlement duration, card expiry or a
+frontend constant. Cancellation-at-period-end, canceled, past-due, unpaid and
+missing-date states use explicit client-safe copy.
+
+The global `Campagne active` badge remains a diagnosed display-only gap: it can
+be driven by commercial package or admin lifecycle state and does not certify an
+active Instagram run. This section is interim checkpoint evidence, not the final
+Frontend/Stripe handover.

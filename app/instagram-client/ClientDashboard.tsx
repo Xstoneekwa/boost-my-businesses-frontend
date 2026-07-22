@@ -110,7 +110,7 @@ const T = {
     ],
     chart: { title:"Abonnés", all:"Tout", d30:"30 jours", daily:"Quotidien" },
     feed: { title:"Activité récente", seeAll:"Tout voir →" },
-    plan: { name:"Pro", price:"197€", period:"/mois", growth:"Croissance estimée", growthVal:"300–500 / mois", nextBill:"Prochain prélèvement", nextBillVal:"3 juil. 2026", support:"Support", supportVal:"7j / 7", manage:"Gérer mon abonnement" },
+    plan: { name:"Pro", price:"197€", period:"/mois", growth:"Croissance estimée", growthVal:"300–500 / mois", nextBill:"Prochain prélèvement", support:"Support", supportVal:"7j / 7", manage:"Gérer mon abonnement" },
     mgr: { name:"Mythyl E.", sub:"Votre account manager", text:"Votre manager dédié surveille votre campagne chaque jour, ajuste le paramétrage chaque semaine et est disponible pour répondre à vos questions 7j/7.", email:"Envoyer un email", call:"Prendre RDV" },
     activity: {
       title:"Journal complet · 30 derniers jours",
@@ -141,8 +141,8 @@ const T = {
       save:"Enregistrer les modifications",
       planLabel:"Formule active", planVal:"Pro — 197€/mois",
       since:"Membre depuis", sinceVal:"15 janvier 2026",
-      next:"Prochain prélèvement", nextVal:"3 juillet 2026 — 197€",
-      periodEnd:"Échéance de l'abonnement",
+      next:"Prochain prélèvement",
+      periodEnd:"Fin de l'abonnement",
       pay:"Moyen de paiement", payVal:"•••• •••• •••• 4242",
       changePlan:"Changer de formule",
       connectTitle:"Connexion Instagram",
@@ -189,7 +189,7 @@ const T = {
     ],
     chart: { title:"Followers", all:"All time", d30:"30 days", daily:"Daily" },
     feed: { title:"Recent activity", seeAll:"View all →" },
-    plan: { name:"Pro", price:"€197", period:"/mo", growth:"Estimated growth", growthVal:"300–500 / mo", nextBill:"Next billing", nextBillVal:"Jul 3, 2026", support:"Support", supportVal:"7 days / week", manage:"Manage plan" },
+    plan: { name:"Pro", price:"€197", period:"/mo", growth:"Estimated growth", growthVal:"300–500 / mo", nextBill:"Next payment", support:"Support", supportVal:"7 days / week", manage:"Manage plan" },
     mgr: { name:"Mythyl E.", sub:"Your account manager", text:"Your dedicated manager monitors your campaign daily, fine-tunes settings weekly, and is available to answer your questions 7 days a week.", email:"Send email", call:"Book a call" },
     activity: {
       title:"Full activity log · last 30 days",
@@ -220,8 +220,8 @@ const T = {
       save:"Save changes",
       planLabel:"Active plan", planVal:"Pro — €197/mo",
       since:"Member since", sinceVal:"January 15, 2026",
-      next:"Next billing", nextVal:"July 3, 2026 — €197",
-      periodEnd:"Subscription end date",
+      next:"Next payment",
+      periodEnd:"Subscription end",
       pay:"Billing method", payVal:"•••• •••• •••• 4242",
       changePlan:"Change plan",
       connectTitle:"Instagram connection",
@@ -947,13 +947,12 @@ export default function ClientDashboard({
   const memberSinceValue = workspace?.memberSince
     ? new Date(workspace.memberSince).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
     : "";
-  const billingDateLabel = workspace?.billingDisplayMode === "next_billing"
-    ? t.account.next
-    : t.account.periodEnd;
+  const billingDateLabel = workspace?.billing?.dateLabel
+    || (workspace?.billingDisplayMode === "next_billing" ? t.account.next : t.account.periodEnd);
   const billingDateIso = workspace?.billing?.nextBillingLabel || workspace?.subscriptionPeriodEnd || "";
   const billingDateValue = billingDateIso
     ? new Date(billingDateIso).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { year: "numeric", month: "long", day: "numeric" })
-    : t.account.nextPending;
+    : (workspace?.billing?.valueLabel || t.account.nextPending);
   const paymentMethodValue = canonicalPaymentMethodDisplay
     ?? workspace?.paymentMethodDisplay
     ?? t.account.billingNoMethod;

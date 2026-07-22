@@ -39,6 +39,13 @@ Snapshot date: **2026-07-21**.
 | Confirmed Profile Intelligence to Targeting mapping | 97/97 targeted tests; enriched description before biography, keywords distinct from themes, canonical/localized language, `user_confirmed`-only geography, existing-targeting-session hydration, no automatic `save_targeting`, V1/V4/V5 compatibility | automated_tested |
 | Confirmed Targeting mapping UI | Desktop and responsive deterministic GET-only fixtures; five content-sized multiline controls, no horizontal overflow, empty geography and localized `Français`; no POST or provider call | locally_validated |
 | Confirmed Targeting mapping release status | Interim checkpoint only; production acceptance requires Liam's manual read-only control and must not save targeting or advance to CT | planned |
+| Canary cross-system read-only audit | Identity, ownership, onboarding, 25/15/10/0 CT, Growth entitlement, Stripe Test renewal, assignment, readiness, queues, worker and BotApp projections checked without mutation | locally_validated |
+| Next-payment contract suite | 14/14 scenarios passed: live period, source priority, no card-expiry derivation, cancel/canceled, past_due/unpaid, missing date, FR/EN labels and date formats | automated_tested |
+| Billing affected regression suite | 70/70 passed across billing service, subscription projection, overview and account-scoped display, including no future-date fallback for payment-issue states | automated_tested |
+| Billing targeted ESLint | Affected libraries passed with zero errors; two pre-existing test warnings remain. ClientDashboard retains a pre-existing React effect error also reproduced on HEAD | automated_tested |
+| Billing scoped TypeScript | Affected billing and projection libraries passed with isolated no-emit config; repository-wide historical test errors remain outside scope | automated_tested |
+| Billing Next.js production build | Passed with Next.js 16.2.1, including production TypeScript and all client billing routes | automated_tested |
+| Billing local visual check | FR and EN deterministic local states reviewed; no authenticated route, Stripe mutation or business write | locally_validated |
 
 The one failure in the combined 81-test run is the pre-existing cancellation
 projection assertion in `stripe-checkout-webhook-foundation.test.mjs`; it is
@@ -60,6 +67,10 @@ interim evidence, not the final consolidated Frontend/Stripe handover.
 The confirmed-to-targeting mapping replay also passed targeted ESLint, scoped
 TypeScript, the Next.js 16.2.1 production build, `git diff --check` and no-leak.
 No migration, provider call or business write is part of this checkpoint.
+
+The billing-label checkpoint is a scoped release checkpoint. Its documentation
+entries remain intermediate facts and evidence only, not the final consolidated
+Frontend/Stripe handover.
 
 ## Predicate cases covered
 

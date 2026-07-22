@@ -41,6 +41,7 @@ export type ClientBillingAccountRow = {
   priceLabel: string;
   billingCadenceLabel: string;
   nextBillingLabel: string | null;
+  billingDate: import("./client-billing-date.ts").ClientBillingDate;
   paymentMethod: ClientSafePaymentMethod;
   invoices: ClientSafeInvoice[];
 };

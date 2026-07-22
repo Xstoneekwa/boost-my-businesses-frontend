@@ -22,6 +22,7 @@ import type {
 } from "./client-billing-types.ts";
 import { readStripeTestConfig } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
+import { resolveClientBillingDate } from "./client-billing-date.ts";
 
 type Row = Record<string, unknown>;
 
@@ -87,6 +88,11 @@ export type ClientBillingStripeGateway = {
     id: string;
     default_payment_method?: StripePaymentMethodLike | string | null;
     status?: string;
+    cancel_at_period_end?: boolean | null;
+    canceled_at?: string | null;
+    ended_at?: string | null;
+    current_period_end?: string | null;
+    upcoming_invoice_date?: string | null;
   }>>;
   listInvoices: (customerId: string, createdGte: number) => Promise<StripeInvoiceLike[]>;
   retrieveInvoice: (invoiceId: string) => Promise<StripeInvoiceLike>;
@@ -100,6 +106,23 @@ function readString(value: unknown, fallback = "") {
 function readNullableString(value: unknown) {
   const normalized = readString(value);
   return normalized || null;
+}
+
+function isoFromUnix(value: unknown) {
+  const unix = Number(value);
+  if (!Number.isFinite(unix) || unix <= 0) return null;
+  return new Date(unix * 1000).toISOString();
+}
+
+export function stripeSubscriptionPeriodEnd(subscription: unknown) {
+  const row = subscription && typeof subscription === "object" ? subscription as Row : {};
+  const items = row.items && typeof row.items === "object" ? row.items as Row : {};
+  const itemData = Array.isArray(items.data) ? items.data : [];
+  const itemEnds = itemData
+    .map((item) => Number(item && typeof item === "object" ? (item as Row).current_period_end : null))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (itemEnds.length) return isoFromUnix(Math.min(...itemEnds));
+  return isoFromUnix(row.current_period_end);
 }
 
 function capitalizeBrand(value: string) {
@@ -470,6 +493,10 @@ export function createStripeGatewayFromClient(stripe: Stripe): ClientBillingStri
         id: sub.id,
         default_payment_method: sub.default_payment_method as StripePaymentMethodLike | string | null,
         status: sub.status,
+        cancel_at_period_end: sub.cancel_at_period_end,
+        canceled_at: isoFromUnix(sub.canceled_at),
+        ended_at: isoFromUnix(sub.ended_at),
+        current_period_end: stripeSubscriptionPeriodEnd(sub),
       }));
     },
     async listInvoices(customerId, createdGte) {
@@ -642,6 +669,7 @@ export async function buildClientBillingView(input: {
   let defaultPaymentMethod = emptyPaymentMethod;
   let stripeInvoices: StripeInvoiceLike[] = [];
   const subscriptionDefaultById = new Map<string, StripePaymentMethodLike | string | null | undefined>();
+  const liveSubscriptionById = new Map<string, Awaited<ReturnType<ClientBillingStripeGateway["listSubscriptions"]>>[number]>();
   let customerDefaultPm: StripePaymentMethodLike | string | null | undefined = null;
 
   const gateway = input.stripeGateway ?? (customerId && readStripeTestConfig(env)
@@ -656,6 +684,7 @@ export async function buildClientBillingView(input: {
     customerDefaultPm = customer.invoice_settings?.default_payment_method;
     for (const sub of subscriptions) {
       subscriptionDefaultById.set(sub.id, sub.default_payment_method);
+      liveSubscriptionById.set(sub.id, sub);
     }
     stripeInvoices = await gateway.listInvoices(customerId, threeMonthsAgoUnix());
     stripeInvoices.sort((a, b) => b.created - a.created);
@@ -714,6 +743,17 @@ export async function buildClientBillingView(input: {
       : null;
     const packageLabel = readString(packageSummaries.get(account.accountId)?.commercialPackageLabel);
     const subscriptionId = primaryProjection?.stripeSubscriptionId ?? null;
+    const liveSubscription = subscriptionId ? liveSubscriptionById.get(subscriptionId) ?? null : null;
+    const billingDate = resolveClientBillingDate({
+      lang,
+      status: liveSubscription?.status || primaryProjection?.status || null,
+      cancelAtPeriodEnd: liveSubscription?.cancel_at_period_end ?? null,
+      canceledAt: liveSubscription?.canceled_at ?? null,
+      endedAt: liveSubscription?.ended_at ?? null,
+      upcomingInvoiceDate: liveSubscription?.upcoming_invoice_date ?? null,
+      stripePeriodEnd: liveSubscription?.current_period_end ?? null,
+      projectedPeriodEnd: primaryProjection?.currentPeriodEnd ?? null,
+    });
     return {
       accountId: account.accountId,
       username: account.username,
@@ -728,9 +768,10 @@ export async function buildClientBillingView(input: {
         : (lang === "fr" ? "Non facturé" : "Not billed"),
       priceLabel: priceLabelFromEntitlement(entitlement, lang),
       billingCadenceLabel: billingCadenceLabel(entitlement?.billingIntervalMonths ?? null, lang),
-      nextBillingLabel: primaryProjection?.currentPeriodEnd
-        ? formatDateLabel(primaryProjection.currentPeriodEnd, lang)
+      nextBillingLabel: billingDate.dateIso
+        ? formatDateLabel(billingDate.dateIso, lang)
         : null,
+      billingDate,
       paymentMethod: resolveEffectivePaymentMethod({
         mode,
         subscriptionId,
@@ -776,7 +817,23 @@ export async function loadClientBillingPaymentSummary(input: {
     displayLabel: view.defaultPaymentMethod.displayLabel,
     available: view.defaultPaymentMethod.available,
     scope: view.defaultPaymentMethod.scope,
+    billingDate: view.accounts.length === 1
+      ? view.accounts[0].billingDate
+      : resolveClientBillingDate({ lang: input.lang }),
   };
+}
+
+export async function loadClientBillingAccountSummary(input: {
+  supabase: SupabaseClient;
+  clientId: string;
+  accountId: string;
+  lang: ClientBillingLang;
+  env?: NodeJS.ProcessEnv;
+  stripeGateway?: ClientBillingStripeGateway | null;
+  packageSummaries?: Map<string, PackageSummaryRow>;
+}) {
+  const view = await buildClientBillingView(input);
+  return view.accounts.find((account) => account.accountId === input.accountId) ?? null;
 }
 
 export async function resolveAuthorizedClientInvoiceDocument(input: {
