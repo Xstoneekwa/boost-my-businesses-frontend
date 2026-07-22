@@ -1,8 +1,17 @@
 # SOCIAL_PROFILE_SNAPSHOTS_V1
 
-Local candidate only. No remote migration, deployment, provider call, device action, Worker change, or production write is part of this checkpoint.
+Intermediate rollout documentation only; this is not the final Frontend/Stripe handover.
 
-Production rollout gate update: the cron now requires the server-only `SOCIAL_PROFILE_SNAPSHOTS_ENABLED=true` switch and defaults to `skipped_disabled`. The original schema migration did not import the 14 reliable legacy follower rows, so the rollout is blocked before commit/application pending explicit approval of the locally prepared complementary migration `20260722121000_social_profile_snapshots_legacy_followers.sql`.
+Production status on 2026-07-22: both migrations and the ACL correction are applied, backend deployment `dpl_5nf1Snafg1FEE9vZzCvznhSV4KW3` is READY, and the 14 reliable legacy follower observations are imported. `SOCIAL_PROFILE_SNAPSHOTS_ENABLED` remains absent, so the collection pipeline is functionally disabled.
+
+## Read-only cron resume (2026-07-22)
+
+- Vercel scheduler invocation observed at `2026-07-22T10:17:16.243Z` on `/api/cron/instagram-follower-snapshots`: `GET`, HTTP `200`, deployment `dpl_5nf1Snafg1FEE9vZzCvznhSV4KW3`.
+- With the flag absent, the deployed route returns `skipped_disabled` with `providerCalls=0`, `jobsCreated=0`, and `jobsProcessed=0` before database or provider work.
+- Post-invocation database state: 14 snapshots total, all 14 legacy, 0 modern snapshots, and 0 jobs. Legacy Following and Posts remain `NULL`.
+- Dynamic read-only inventory found 6 active accounts: 3 `snapshot_stale` because they only have legacy Followers, and 3 `no_snapshot`.
+- Maximum baseline budget: 6 lookups, USD 0.024 at USD 4 per 1,000 successful searches. No lookup was consumed during this resume.
+- Baseline collection remains blocked: the only deployed call to `processSocialProfileSnapshotJobs` is after the global flag gate in the cron route. Enabling that flag before baseline, Stats, dashboards, and BotApp validation would violate the approved rollout order. No job was enqueued and no provider call was made.
 
 ## Verified current state (2026-07-22)
 
@@ -94,18 +103,21 @@ The scheduler must not be enabled above the purchased allowance without an expli
 
 ## Migration and rollout order
 
-1. Review and apply `20260722120000_social_profile_snapshots_v1.sql` in a controlled database checkpoint.
-2. Verify RLS and effective grants for `public`, `anon`, `authenticated`, and `service_role`.
-3. Deploy the backend with queue processing disabled at the cron platform until schema availability is confirmed.
-4. Run a dry-run cron request (zero provider calls and zero writes).
-5. Enable the existing daily cron, observe one bounded batch, and verify job/snapshot telemetry.
-6. Deploy BotApp UI projection after the backend response contract is live.
+1. Applied `20260722120000_social_profile_snapshots_v1.sql` and the complementary legacy/ACL migration.
+2. Verified RLS and exact effective grants for `public`, `anon`, `authenticated`, and `service_role`.
+3. Deployed the backend with queue processing disabled by the absent feature flag.
+4. Certified one scheduler-owned inert cron invocation and completed the global read-only inventory and budget.
+5. Resolve the one-shot baseline processing gate without enabling the recurring collector early.
+6. Run the bounded baseline, then validate Stats and dashboards.
+7. Deploy BotApp UI projection only after the real Followers + Followings Stats gate passes.
+8. Enable the recurring collector last and observe one bounded invocation.
 
 Rollback: disable the cron first, roll back application readers to the legacy follower projection, keep append-only rows intact, and do not drop data during the operational rollback.
 
 ## Known gaps before production approval
 
-- The candidate migration has not been applied remotely.
-- No production provider call or real current-value snapshot was intentionally triggered in this checkpoint.
+- Both migrations are applied remotely and the effective ACL matrix is certified.
+- No production provider call or real current-value snapshot has been triggered; the current state remains 14 legacy snapshots and 0 jobs.
+- Baseline processing has no approved execution path while the global feature flag must remain disabled; this is the active rollout blocker.
 - Production environment allowance/remaining SearchAPI credits were not queried; only public plan pricing and the application call budget are documented.
 - Visual captures are local fixtures only and cannot prove live provider freshness.
