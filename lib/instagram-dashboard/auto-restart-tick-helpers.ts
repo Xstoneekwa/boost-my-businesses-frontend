@@ -52,32 +52,71 @@ export function autoRestartTickIdempotencyKey(workerId: string, bucketStartIso: 
 export function autoRestartEnqueueIdempotencyKey(input: {
   accountId: string;
   businessSessionId: string;
-  tickBucketIso: string;
+  retryIndex: number;
 }) {
-  return `auto-restart:${input.accountId}:${input.businessSessionId}:${input.tickBucketIso}`;
+  return `auto-restart:${input.accountId}:${input.businessSessionId}:retry:${input.retryIndex}`;
 }
 
 type ResumeCandidate = {
+  [key: string]: unknown;
   reliability: {
     restartAllowed: boolean | null;
     restartBlockReason: string;
     sessionTerminationClass: string;
     unsafeMarkers: string[];
+    businessSessionId?: string;
+    retryIndex?: string;
+    nextRetryIndex?: string;
+    failureCategory?: string;
+    failureSignature?: string;
+    rootFailureCode?: string;
+    cleanupCompleted?: boolean | null;
+    lockReleased?: boolean | null;
+    businessDaySast?: string;
+    currentAttempt?: string;
+    nextAttempt?: string;
+    nextRestartAt?: string | null;
+    lastRestartError?: string;
+    lastRunId?: string;
+    lastRunStatus?: string;
+    sourceLabel?: string;
   };
   blockReason: string;
   gateStatus: string;
   quotas: {
-    follow: { plannedNextRunQuota: number; remaining: number };
-    unfollow: { plannedNextRunQuota: number; remaining: number };
-    welcome: { plannedNextRunQuota: number; remaining: number };
-    outreach: { plannedNextRunQuota: number; remaining: number };
+    follow: ResumeCandidateQuota;
+    unfollow: ResumeCandidateQuota;
+    welcome: ResumeCandidateQuota;
+    outreach: ResumeCandidateQuota;
   };
+};
+
+type ResumeCandidateQuota = {
+  plannedNextRunQuota: number;
+  remaining: number;
+  doneToday?: number;
+  capDay?: number;
+  enabled?: boolean;
+  sourceLabel?: string;
 };
 
 export function resumePlanRuntimeSupported(candidate: ResumeCandidate) {
   const reliability = candidate.reliability;
   if (reliability.restartAllowed !== true) {
     return { ok: false as const, reason: reliability.restartBlockReason || "restart_not_allowed" };
+  }
+  if (reliability.failureCategory === "recoverable_python_runtime_failure") {
+    const nextRetryIndex = Number.parseInt(String(reliability.nextRetryIndex || ""), 10);
+    if (
+      !reliability.businessSessionId
+      || ![1, 2].includes(nextRetryIndex)
+      || reliability.cleanupCompleted !== true
+      || reliability.lockReleased !== true
+      || reliability.rootFailureCode !== "unfollow_runtime_exception"
+      || reliability.failureSignature !== "python:unfollow:duplicate_stop_reason"
+    ) {
+      return { ok: false as const, reason: "resume_plan_invalid" };
+    }
   }
   const sessionClass = reliability.sessionTerminationClass.toLowerCase();
   if (!sessionClass || sessionClass === "unknown") {
@@ -101,11 +140,23 @@ export function resumePlanRuntimeSupported(candidate: ResumeCandidate) {
 
 export function accountRiskTier(candidate: Pick<ResumeCandidate, "reliability" | "blockReason" | "gateStatus">) {
   const markers = candidate.reliability.unsafeMarkers.join(" ").toLowerCase();
-  const block = candidate.blockReason.toLowerCase();
-  const combined = `${markers} ${block} ${candidate.gateStatus}`;
-  if (/(critical|high|problem|blocked|failed)/.test(combined)) return "red";
+  if (/(challenge|checkpoint|restriction|action_block|account_mismatch|device_offline|cleanup_uncertain|critical_action_result_unknown|device_lock_incoherent)/.test(markers)) return "red";
+  const combined = `${candidate.blockReason} ${candidate.gateStatus}`.toLowerCase();
   if (/(watch|warning|medium|yellow)/.test(combined)) return "yellow";
   return "green";
+}
+
+export function sastBusinessDay(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+export function sameSastBusinessDay(expected: string, now: Date) {
+  return Boolean(expected && expected === sastBusinessDay(now));
 }
 
 export function passesRiskPolicy(

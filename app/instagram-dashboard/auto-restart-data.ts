@@ -16,6 +16,7 @@ export type AutoRestartRulePreview = {
   mode: AutoRestartMode;
   checkEveryMinutes: number;
   restartDelayMinutes: number;
+  maxRetriesAfterInitialFailure: number;
   maxAttemptsPerSession: number;
   maxRestartsPerDayPerAccount: number;
   maxRestartsPerWindowPerAccount: number;
@@ -76,6 +77,19 @@ export type AutoRestartCandidate = {
     nextRestartAt: string | null;
     lastRestartError: string;
     sessionTerminationClass: string;
+    businessSessionId: string;
+    attemptId: string;
+    retryIndex: string;
+    nextRetryIndex: string;
+    previousRunId: string;
+    rootFailureCode: string;
+    failureSignature: string;
+    failureCategory: string;
+    cleanupCompleted: boolean | null;
+    lockReleased: boolean | null;
+    businessDaySast: string;
+    phasesToRun: { welcome: boolean; follow: boolean; unfollow: boolean } | null;
+    quotaRemaining: Record<string, number>;
     lastRunId: string;
     lastRunStatus: string;
     sourceLabel: string;
@@ -184,7 +198,8 @@ export function defaultAutoRestartRules(): AutoRestartRulePreview {
     mode: "production",
     checkEveryMinutes: 20,
     restartDelayMinutes: 20,
-    maxAttemptsPerSession: 2,
+    maxRetriesAfterInitialFailure: 2,
+    maxAttemptsPerSession: 3,
     maxRestartsPerDayPerAccount: 3,
     maxRestartsPerWindowPerAccount: 2,
     restartYellowAccounts: false,
@@ -215,13 +230,21 @@ function rulesFromSettings(row: SupabaseRecord | null | undefined): AutoRestartR
 export function rulesFromSettingsRow(row: SupabaseRecord | null | undefined): AutoRestartRulePreview {
   const fallback = defaultAutoRestartRules();
   if (!row) return fallback;
+  const maxRetriesAfterInitialFailure = Math.max(
+    0,
+    readNumber(
+      row.max_retries_after_initial_failure,
+      fallback.maxRetriesAfterInitialFailure,
+    ),
+  );
   return {
     ...fallback,
     enabled: readBoolean(row.auto_restart_enabled, fallback.enabled),
     mode: "production",
     checkEveryMinutes: Math.max(1, readNumber(row.check_every_minutes, fallback.checkEveryMinutes)),
     restartDelayMinutes: Math.max(1, readNumber(row.restart_delay_minutes, fallback.restartDelayMinutes)),
-    maxAttemptsPerSession: Math.max(0, readNumber(row.max_attempts_per_session, fallback.maxAttemptsPerSession)),
+    maxRetriesAfterInitialFailure,
+    maxAttemptsPerSession: maxRetriesAfterInitialFailure + 1,
     maxRestartsPerDayPerAccount: Math.max(0, readNumber(row.max_restarts_per_day_per_account, fallback.maxRestartsPerDayPerAccount)),
     maxRestartsPerWindowPerAccount: Math.max(0, readNumber(row.max_restarts_per_window_per_account, fallback.maxRestartsPerWindowPerAccount)),
     restartYellowAccounts: readBoolean(row.restart_yellow_accounts, fallback.restartYellowAccounts),
@@ -312,6 +335,7 @@ function latestSessionRunByAccount(rows: SupabaseRecord[]) {
 
 function reliabilityFromLatestRun(
   latestRun: SupabaseRecord | undefined,
+  canonicalPlanRow: SupabaseRecord | undefined,
   rules: AutoRestartRulePreview,
 ): AutoRestartCandidate["reliability"] {
   if (!latestRun) {
@@ -324,6 +348,19 @@ function reliabilityFromLatestRun(
       nextRestartAt: null,
       lastRestartError: "",
       sessionTerminationClass: "",
+      businessSessionId: "",
+      attemptId: "—",
+      retryIndex: "—",
+      nextRetryIndex: "—",
+      previousRunId: "",
+      rootFailureCode: "",
+      failureSignature: "",
+      failureCategory: "",
+      cleanupCompleted: null,
+      lockReleased: null,
+      businessDaySast: "",
+      phasesToRun: null,
+      quotaRemaining: {},
       lastRunId: "",
       lastRunStatus: "",
       sourceLabel: "no_recent_run",
@@ -331,14 +368,19 @@ function reliabilityFromLatestRun(
   }
 
   const performance = readRecord(latestRun.performance_summary);
-  const resumePlan = readRecord(performance?.auto_restart_resume_plan)
+  const canonicalPlan = readRecord(canonicalPlanRow?.plan);
+  const resumePlan = canonicalPlan
+    ?? readRecord(performance?.auto_restart_resume_plan)
     ?? readRecord(performance?.admin_reliability_snapshot);
+  const persistedPhases = readRecord(resumePlan?.phases_to_run);
   const unsafeRaw = resumePlan?.unsafe_markers ?? performance?.unsafe_markers;
   const unsafeMarkers = Array.isArray(unsafeRaw)
     ? unsafeRaw.map((marker) => readString(marker)).filter(Boolean)
     : readString(unsafeRaw).split(",").map((marker) => marker.trim()).filter(Boolean);
 
-  const restartAllowedRaw = resumePlan?.restart_allowed ?? performance?.auto_restart_restart_allowed;
+  const restartAllowedRaw = canonicalPlanRow?.restart_allowed
+    ?? resumePlan?.restart_allowed
+    ?? performance?.auto_restart_restart_allowed;
   const restartAllowed = typeof restartAllowedRaw === "boolean" ? restartAllowedRaw : null;
   const finishedAt = readString(latestRun.finished_at) || readString(latestRun.updated_at);
   const nextRestartAt = finishedAt && rules.restartDelayMinutes > 0
@@ -351,7 +393,7 @@ function reliabilityFromLatestRun(
     // (the worker never produced a restart decision for it) — expose the
     // stable canonical reason instead of the former literal "unknown".
     restartBlockReason: readString(
-      resumePlan?.restart_block_reason,
+      canonicalPlanRow?.restart_block_reason ?? resumePlan?.restart_block_reason,
       readString(performance?.auto_restart_restart_block_reason, "resume_plan_missing"),
     ),
     unsafeMarkers,
@@ -363,9 +405,36 @@ function reliabilityFromLatestRun(
       resumePlan?.session_termination_class,
       readString(performance?.session_termination_class, ""),
     ),
+    businessSessionId: readString(resumePlan?.business_session_id, ""),
+    attemptId: readString(resumePlan?.attempt_id, readString(resumePlan?.current_attempt_id, "—")) || "—",
+    retryIndex: readString(resumePlan?.retry_index, "—") || "—",
+    nextRetryIndex: readString(resumePlan?.next_retry_index, "—") || "—",
+    previousRunId: readString(resumePlan?.previous_run_id, ""),
+    rootFailureCode: readString(resumePlan?.root_failure_code, readString(performance?.root_failure_code, "")),
+    failureSignature: readString(resumePlan?.failure_signature, readString(performance?.failure_signature, "")),
+    failureCategory: readString(resumePlan?.failure_category, readString(performance?.failure_category, "")),
+    cleanupCompleted: typeof resumePlan?.cleanup_completed === "boolean" ? resumePlan.cleanup_completed : null,
+    lockReleased: typeof resumePlan?.lock_released === "boolean" ? resumePlan.lock_released : null,
+    businessDaySast: readString(resumePlan?.business_day_sast, ""),
+    phasesToRun: persistedPhases
+      ? {
+        welcome: readBoolean(persistedPhases.welcome, false),
+        follow: readBoolean(persistedPhases.follow, false),
+        unfollow: readBoolean(persistedPhases.unfollow, false),
+      }
+      : null,
+    quotaRemaining: Object.fromEntries(
+      Object.entries(readRecord(resumePlan?.quota_remaining) ?? {})
+        .filter(([, value]) => Number.isFinite(readNumber(value, Number.NaN)))
+        .map(([key, value]) => [key, readNumber(value, 0)]),
+    ),
     lastRunId: readString(latestRun.id),
     lastRunStatus: readString(latestRun.status),
-    sourceLabel: resumePlan ? "ig_runs.performance_summary.resume_plan" : "ig_runs.performance_summary",
+    sourceLabel: canonicalPlan
+      ? "account_session_resume_plans.plan"
+      : resumePlan
+        ? "ig_runs.performance_summary.resume_plan"
+        : "ig_runs.performance_summary",
   };
 }
 
@@ -396,7 +465,15 @@ function accountHasUnsafeMarker(account: ManageAccount, marker: string) {
 
 function isBlockingAccount(account: ManageAccount) {
   const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`.toLowerCase();
-  return ["checkpoint", "challenge", "reauth", "missing", "blocked", "problem", "failed"].some((term) => combined.includes(term)) || account.pendingActionsCount > 0 || account.blockingCampaign;
+  return [
+    "checkpoint",
+    "challenge",
+    "reauth",
+    "login required",
+    "signed out",
+    "credentials missing",
+    "credentials invalid",
+  ].some((term) => combined.includes(term)) || account.pendingActionsCount > 0 || account.blockingCampaign;
 }
 
 function applySafetyBlocks({
@@ -726,6 +803,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceLocksResult,
     openIncidentsResult,
     latestCompletedTickResult,
+    resumePlansResult,
   ] = await Promise.all([
     supabase.from("auto_restart_settings").select("*").eq("id", "global").limit(1).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
@@ -771,6 +849,14 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .order("tick_completed_at", { ascending: false })
       .limit(1)
       .maybeSingle<SupabaseRecord>(),
+    accountIds.length > 0
+      ? supabase
+        .from("account_session_resume_plans")
+        .select("run_id,account_id,restart_allowed,restart_block_reason,resume_state,attempts_in_window,plan,last_updated_at")
+        .in("account_id", accountIds)
+        .order("last_updated_at", { ascending: false })
+        .limit(500)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const rules = rulesFromSettings(autoRestartSettingsResult.data as SupabaseRecord | null | undefined);
 
@@ -796,6 +882,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceLocksResult.error,
     openIncidentsResult.error,
     latestCompletedTickResult.error,
+    resumePlansResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -806,6 +893,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const interactionsByAccount = groupByAccount((interactionsResult.data ?? []) as SupabaseRecord[]);
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
   const latestSessionRunsByAccount = latestSessionRunByAccount((sessionRunsResult.data ?? []) as SupabaseRecord[]);
+  const latestResumePlansByAccount = latestSessionRunByAccount((resumePlansResult.data ?? []) as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
@@ -868,7 +956,11 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         deviceLockActive: activeDeviceLocks.has(deviceId),
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         rules,
-        reliability: reliabilityFromLatestRun(latestSessionRunsByAccount.get(account.accountId), rules),
+        reliability: reliabilityFromLatestRun(
+          latestSessionRunsByAccount.get(account.accountId),
+          latestResumePlansByAccount.get(account.accountId),
+          rules,
+        ),
         hasOpenIncident: openIncidentsByAccount.has(account.accountId),
       });
     })

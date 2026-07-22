@@ -10,6 +10,7 @@ import {
 import {
   computeAutoRestartOperationalState,
   maxAttemptsBlockReason,
+  maxRetriesBlockReason,
   restartDelayBlockReason,
 } from "../lib/instagram-dashboard/auto-restart-operational.ts";
 
@@ -23,7 +24,8 @@ test("Auto Restart defaults remain OFF in production mode", () => {
   assert.match(source, /enabled: false,/);
   assert.match(source, /mode: "production"/);
   assert.match(source, /checkEveryMinutes: 20/);
-  assert.match(source, /maxAttemptsPerSession: 2/);
+  assert.match(source, /maxRetriesAfterInitialFailure: 2/);
+  assert.match(source, /maxAttemptsPerSession: 3/);
   assert.match(migration, /default 'production'/);
   assert.match(migration, /default 20/);
 });
@@ -152,6 +154,9 @@ test("active run, request, incident and missing assignment/device exclude candid
 test("runtime limits are enforced from settings values", () => {
   assert.equal(restartDelayBlockReason("2026-07-02T12:30:00.000Z", NOW), "restart_delay_not_elapsed");
   assert.equal(maxAttemptsBlockReason("2", 2), "max_attempts_per_session");
+  assert.equal(maxRetriesBlockReason("0", 2), null);
+  assert.equal(maxRetriesBlockReason("1", 2), null);
+  assert.equal(maxRetriesBlockReason("2", 2), "auto_restart_retries_exhausted");
 });
 
 test("operational state distinguishes disabled, blocked, ready, and active without pilot", () => {
@@ -188,7 +193,8 @@ test("tick route enforces runtime limits without pilot allowlist", () => {
   const source = readFileSync(new URL("../lib/instagram-dashboard/auto-restart-tick.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /pilotAllowlistMismatchReason/);
   assert.doesNotMatch(source, /pilot_account_id/);
-  assert.match(source, /maxAttemptsBlockReason/);
+  assert.match(source, /maxRetriesBlockReason/);
+  assert.doesNotMatch(source, /maxAttemptsBlockReason/);
   assert.match(source, /restartDelayBlockReason/);
 });
 

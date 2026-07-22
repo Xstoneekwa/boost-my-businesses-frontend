@@ -7,7 +7,9 @@ import {
   autoRestartTickIdempotencyKey,
   passesRiskPolicy,
   resumePlanRuntimeSupported,
+  sastBusinessDay,
   sanitizeTickFailureReason,
+  sameSastBusinessDay,
   schedulerTickGate,
 } from "./auto-restart-tick-helpers";
 import {
@@ -31,10 +33,7 @@ export {
 
 export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
 import { buildAutoRestartResumePlanMetadata } from "./auto-restart-resume-metadata";
-import {
-  maxAttemptsBlockReason,
-  restartDelayBlockReason,
-} from "./auto-restart-operational";
+import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
 
 export async function getAutoRestartTickStatus(supabase: SupabaseLike) {
   const settingsRow = await loadSettingsRow(supabase);
@@ -127,7 +126,9 @@ function tickBucketStart(now: Date, checkEveryMinutes: number) {
 }
 
 function todayStartIso(now = new Date()) {
-  return `${now.toISOString().slice(0, 10)}T00:00:00.000Z`;
+  // South Africa has no DST. Count the daily restart budget from the actual
+  // SAST business-day boundary rather than UTC midnight.
+  return `${sastBusinessDay(now)}T00:00:00.000+02:00`;
 }
 
 async function loadSettingsRow(supabase: SupabaseLike) {
@@ -146,6 +147,21 @@ async function countRestartsToday(supabase: SupabaseLike, accountId: string, sin
     .eq("decision", "enqueued")
     .gte("created_at", sinceIso)
     .limit(100);
+  if (result.error) throw new Error(result.error.message || "auto_restart_decisions_unavailable");
+  return readRows(result.data).length;
+}
+
+async function countRestartsForBusinessSession(
+  supabase: SupabaseLike,
+  accountId: string,
+  businessSessionId: string,
+) {
+  const result = await query(supabase, "auto_restart_decisions")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("business_session_id", businessSessionId)
+    .eq("decision", "enqueued")
+    .limit(10);
   if (result.error) throw new Error(result.error.message || "auto_restart_decisions_unavailable");
   return readRows(result.data).length;
 }
@@ -236,6 +252,8 @@ async function writeDecision(
     priorRunId?: string | null;
     newRequestId?: string | null;
     restartCountDay?: number;
+    restartCountWindow?: number;
+    businessSessionId?: string | null;
   },
 ) {
   const insert = await query(supabase, "auto_restart_decisions").insert({
@@ -249,8 +267,10 @@ async function writeDecision(
     reason: input.reason,
     mode: input.mode,
     prior_run_id: input.priorRunId ?? null,
+    business_session_id: input.businessSessionId ?? null,
     new_request_id: input.newRequestId ?? null,
     restart_count_day: input.restartCountDay ?? 0,
+    restart_count_window: input.restartCountWindow ?? 0,
     metadata_safe: input.metadata ?? {},
   });
   if (insert.error && !insert.error.message?.toLowerCase().includes("duplicate")) {
@@ -342,6 +362,10 @@ export async function runAutoRestartTick(
     manual?: boolean;
     internal?: boolean;
     overview?: { candidates: Array<Record<string, unknown>> };
+    evaluateEligibility?: (
+      accountId: string,
+      runType: "account_session" | "outreach_session",
+    ) => Promise<{ ok: boolean; reason: string }>;
   },
 ): Promise<{ status: 200 | 401 | 403 | 503; result: AutoRestartTickSummary }> {
   const manualActorOnly = options.manual === true && !isRunDispatcherWorkerId(options.workerId);
@@ -376,7 +400,13 @@ export async function runAutoRestartTick(
     restartRedAccounts: readBoolean(settingsRow?.restart_red_accounts, false),
     maxRestartsPerDay: Math.max(0, readNumber(settingsRow?.max_restarts_per_day_per_account, 3)),
     maxRestartsPerWindow: Math.max(0, readNumber(settingsRow?.max_restarts_per_window_per_account, 2)),
-    maxAttemptsPerSession: Math.max(0, readNumber(settingsRow?.max_attempts_per_session, rules.maxAttemptsPerSession || 2)),
+    maxRetriesAfterInitialFailure: Math.max(
+      0,
+      readNumber(
+        settingsRow?.max_retries_after_initial_failure,
+        rules.maxRetriesAfterInitialFailure,
+      ),
+    ),
     restartDelayMinutes: Math.max(1, readNumber(settingsRow?.restart_delay_minutes, rules.restartDelayMinutes || 20)),
   };
 
@@ -451,17 +481,29 @@ export async function runAutoRestartTick(
       const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
       if (delayReason) blockReasons.push(delayReason);
 
-      const attemptsReason = maxAttemptsBlockReason(
-        candidate.reliability.currentAttempt,
-        extendedRules.maxAttemptsPerSession,
+      const attemptsReason = maxRetriesBlockReason(
+        candidate.reliability.retryIndex,
+        extendedRules.maxRetriesAfterInitialFailure,
       );
       if (attemptsReason) blockReasons.push(attemptsReason);
 
+      if (
+        candidate.reliability.businessDaySast
+        && !sameSastBusinessDay(candidate.reliability.businessDaySast, now)
+      ) {
+        blockReasons.push("business_day_sast_changed");
+      }
+
       const restartsToday = await countRestartsToday(supabase, candidate.accountId, since);
+      const businessSessionId = candidate.reliability.businessSessionId;
+      const restartsInBusinessSession = businessSessionId
+        ? await countRestartsForBusinessSession(supabase, candidate.accountId, businessSessionId)
+        : 0;
+      if (!businessSessionId) blockReasons.push("business_session_id_missing");
       if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_day");
       }
-      if (extendedRules.maxRestartsPerWindow > 0 && restartsToday >= extendedRules.maxRestartsPerWindow) {
+      if (extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
         blockReasons.push("max_restarts_window");
       }
 
@@ -482,6 +524,8 @@ export async function runAutoRestartTick(
           metadata: { username: candidate.username },
           priorRunId: candidate.reliability.lastRunId || null,
           restartCountDay: restartsToday,
+          restartCountWindow: restartsInBusinessSession,
+          businessSessionId: businessSessionId || null,
         });
         continue;
       }
@@ -492,21 +536,26 @@ export async function runAutoRestartTick(
         continue;
       }
 
-      const businessSessionId = candidate.reliability.lastRunId || candidate.accountId;
+      const nextRetryIndex = Number.parseInt(candidate.reliability.nextRetryIndex, 10);
       const enqueueKey = autoRestartEnqueueIdempotencyKey({
         accountId: candidate.accountId,
         businessSessionId,
-        tickBucketIso: tickBucket,
+        retryIndex: nextRetryIndex,
       });
 
       let deviceId: string | null = null;
       try {
-        const { evaluateRunStartEligibility } = await import("./run-control.ts");
-        const eligibility = await evaluateRunStartEligibility(
-          candidate.accountId,
-          candidate.plannedRunType === "outreach_session" ? "outreach_session" : "account_session",
-          { trigger: "scheduler" },
-        );
+        const runType = candidate.plannedRunType === "outreach_session"
+          ? "outreach_session"
+          : "account_session";
+        const eligibility = options.evaluateEligibility
+          ? await options.evaluateEligibility(candidate.accountId, runType)
+          : await (async () => {
+            const { evaluateRunStartEligibility } = await import("./run-control.ts");
+            return evaluateRunStartEligibility(candidate.accountId, runType, {
+              trigger: "scheduler",
+            });
+          })();
         if (!eligibility.ok) {
           summary.blocked_count += 1;
           summary.blocked.push({
@@ -526,6 +575,8 @@ export async function runAutoRestartTick(
             mode: extendedRules.mode,
             priorRunId: candidate.reliability.lastRunId || null,
             restartCountDay: restartsToday,
+            restartCountWindow: restartsInBusinessSession,
+            businessSessionId,
           });
           continue;
         }
@@ -585,7 +636,7 @@ export async function runAutoRestartTick(
           }
         }
 
-        const resumeMetadata = buildAutoRestartResumePlanMetadata(candidate);
+        const resumeMetadata = buildAutoRestartResumePlanMetadata(candidate, now);
         const requestedByActor = options.requestedByActor
           || (options.manual ? MANUAL_RESTART_AUDIT_ACTOR : options.actor || "system");
         const requestData = await enqueueAutoRestartRequest(supabase, {
@@ -648,7 +699,47 @@ export async function runAutoRestartTick(
           priorRunId: candidate.reliability.lastRunId || null,
           newRequestId,
           restartCountDay: restartsToday + 1,
+          restartCountWindow: restartsInBusinessSession + 1,
+          businessSessionId,
+          metadata: {
+            username: candidate.username,
+            attempt_id: nextRetryIndex + 1,
+            retry_index: nextRetryIndex,
+            previous_run_id: candidate.reliability.lastRunId || null,
+            root_failure_code: candidate.reliability.rootFailureCode || null,
+            failure_signature: candidate.reliability.failureSignature || null,
+            failure_category: candidate.reliability.failureCategory || null,
+            quota_remaining: candidate.reliability.quotaRemaining,
+            phases_to_run: candidate.reliability.phasesToRun,
+            scheduled_at: now.toISOString(),
+            claimed_at: null,
+            completed_at: null,
+            result: "scheduled",
+          },
         });
+        if (candidate.reliability.failureCategory === "recoverable_python_runtime_failure") try {
+          await query(supabase, "runtime_events").insert({
+            event_type: `recoverable_python_failure_restart_${nextRetryIndex}_scheduled`,
+            severity: "info",
+            visibility: "admin_only",
+            account_id: candidate.accountId,
+            run_id: candidate.reliability.lastRunId || null,
+            job_id: newRequestId,
+            source: AUTO_RESTART_TICK_SOURCE,
+            reason: "recoverable_python_runtime_failure",
+            message: `Recoverable Python failure restart ${nextRetryIndex} scheduled.`,
+            metadata: {
+              business_session_id: businessSessionId,
+              attempt_id: nextRetryIndex + 1,
+              retry_index: nextRetryIndex,
+              root_failure_code: candidate.reliability.rootFailureCode || null,
+              failure_signature: candidate.reliability.failureSignature || null,
+            },
+          });
+        } catch {
+          // The request + canonical decision are authoritative; event delivery
+          // is an internal best-effort projection only.
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : "auto_restart_enqueue_failed";
         summary.blocked_count += 1;
@@ -665,6 +756,8 @@ export async function runAutoRestartTick(
           mode: extendedRules.mode,
           priorRunId: candidate.reliability.lastRunId || null,
           restartCountDay: restartsToday,
+          restartCountWindow: restartsInBusinessSession,
+          businessSessionId,
         });
         if (deviceId) {
           await releaseDeviceLock(supabase, deviceId, options.workerId);

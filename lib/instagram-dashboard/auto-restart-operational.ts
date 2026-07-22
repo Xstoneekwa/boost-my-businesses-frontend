@@ -62,3 +62,11 @@ export function maxAttemptsBlockReason(currentAttempt: string, maxAttemptsPerSes
   if (parsed >= maxAttemptsPerSession) return "max_attempts_per_session";
   return null;
 }
+
+export function maxRetriesBlockReason(retryIndex: string, maxRetriesAfterInitialFailure: number) {
+  if (maxRetriesAfterInitialFailure <= 0) return "auto_restart_retries_exhausted";
+  const parsed = Number.parseInt(String(retryIndex || "").replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed >= maxRetriesAfterInitialFailure) return "auto_restart_retries_exhausted";
+  return null;
+}

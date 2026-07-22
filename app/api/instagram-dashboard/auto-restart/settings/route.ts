@@ -29,6 +29,7 @@ export type AutoRestartSettingsPatch = {
   check_every_minutes?: unknown;
   restart_delay_minutes?: unknown;
   max_attempts_per_session?: unknown;
+  max_retries_after_initial_failure?: unknown;
   max_restarts_per_day_per_account?: unknown;
   max_restarts_per_window_per_account?: unknown;
   restart_yellow_accounts?: unknown;
@@ -69,6 +70,12 @@ export function normalizeAutoRestartPatch(
     check_every_minutes: readPositiveInt(body.check_every_minutes, current.checkEveryMinutes, 1, 1440),
     restart_delay_minutes: readPositiveInt(body.restart_delay_minutes, current.restartDelayMinutes, 1, 1440),
     max_attempts_per_session: readPositiveInt(body.max_attempts_per_session, current.maxAttemptsPerSession, 0, 20),
+    max_retries_after_initial_failure: readPositiveInt(
+      body.max_retries_after_initial_failure,
+      current.maxRetriesAfterInitialFailure,
+      0,
+      20,
+    ),
     max_restarts_per_day_per_account: readPositiveInt(body.max_restarts_per_day_per_account, 3, 0, 50),
     max_restarts_per_window_per_account: readPositiveInt(body.max_restarts_per_window_per_account, 2, 0, 50),
     restart_yellow_accounts: readBoolean(body.restart_yellow_accounts, false),
