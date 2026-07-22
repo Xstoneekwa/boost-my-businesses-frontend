@@ -323,6 +323,9 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
   }
 
   const accountId = readString(insertedAccount.id);
+  // Follow Limit Provenance V1: these settings remain legacy/runtime compatibility
+  // values. Provisioning must not create ig_account_follow_limit_overrides; absence
+  // of that row is the canonical "use package limits" state.
   const settings = {
     ...defaultInstagramSettings,
     account_id: accountId,
