@@ -16,6 +16,19 @@ type Supabase = ReturnType<typeof createSupabaseClient>;
 export const SOCIAL_PROFILE_SNAPSHOT_DAILY_BUDGET = 10;
 export const SOCIAL_PROFILE_SNAPSHOT_MAX_ATTEMPTS = 3;
 
+export type SocialProfileSnapshotJobProcessResult = {
+  accountId: string;
+  username: string;
+  jobId: string;
+  status: "succeeded" | "failed_retryable" | "failed_terminal";
+  lookupStatus: string;
+  snapshotCreated: boolean;
+  followers: number | null;
+  followings: number | null;
+  posts: number | null;
+  observedAt: string | null;
+};
+
 function lookupProvider(lookup: InstagramPublicProfileLookupResult) {
   const provider = readString(lookup.metadata.provider_mode, "searchapi");
   return provider === "http" ? "http" : "searchapi";
@@ -194,12 +207,39 @@ export async function processSocialProfileSnapshotJobs(input: {
   });
   if (claim.error) throw new Error(claim.error.message);
   const jobs = (claim.data ?? []) as SupabaseRecord[];
-  const results: Array<Record<string, unknown>> = [];
+  return processClaimedSocialProfileSnapshotJobs({
+    jobs,
+    maxProviderCalls: limit,
+    supabase,
+    lookup: input.lookup,
+    pause: input.pause,
+  });
+}
+
+export async function processClaimedSocialProfileSnapshotJobs(input: {
+  jobs: SupabaseRecord[];
+  maxProviderCalls: number;
+  supabase?: Supabase;
+  lookup?: typeof lookupInstagramPublicProfile;
+  persist?: typeof persistSocialProfileLookup;
+  pause?: (milliseconds: number) => Promise<void>;
+}) {
+  const supabase = input.supabase ?? createSupabaseClient();
+  const limit = Math.max(0, Math.min(input.maxProviderCalls, SOCIAL_PROFILE_SNAPSHOT_DAILY_BUDGET));
+  const jobs = input.jobs.slice(0, limit);
+  const results: SocialProfileSnapshotJobProcessResult[] = [];
   const pause = input.pause ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let providerCalls = 0;
+  let stopAfterIndex: number | null = null;
   for (const [index, job] of jobs.entries()) {
     if (index > 0) await pause(1100);
+    if (providerCalls >= limit) {
+      stopAfterIndex = index;
+      break;
+    }
+    providerCalls += 1;
     const lookup = await (input.lookup ?? lookupInstagramPublicProfile)(readString(job.username_normalized, ""));
-    const persisted = await persistSocialProfileLookup({
+    const persisted = await (input.persist ?? persistSocialProfileLookup)({
       accountId: readString(job.account_id, ""),
       username: readString(job.username_normalized, ""),
       lookup,
@@ -211,9 +251,9 @@ export async function processSocialProfileSnapshotJobs(input: {
     });
     const attempts = Number(job.attempts ?? 1);
     const retryable = ["rate_limited", "unavailable", "provider_error"].includes(lookup.status) && attempts < SOCIAL_PROFILE_SNAPSHOT_MAX_ATTEMPTS;
-    const status = persisted.ok ? "succeeded" : retryable ? "queued" : "failed";
+    const jobStatus = persisted.ok ? "succeeded" : retryable ? "queued" : "failed";
     const update = await supabase.from("ig_social_profile_snapshot_jobs").update({
-      status,
+      status: jobStatus,
       available_at: retryable ? new Date(Date.now() + attempts * 15 * 60 * 1000).toISOString() : new Date().toISOString(),
       lease_owner: null,
       lease_expires_at: null,
@@ -221,8 +261,46 @@ export async function processSocialProfileSnapshotJobs(input: {
       updated_at: new Date().toISOString(),
     }).eq("id", readString(job.id, ""));
     if (update.error) throw new Error(update.error.message);
-    results.push({ jobId: readString(job.id, ""), status, lookupStatus: lookup.status, snapshotCreated: persisted.ok && persisted.created });
-    if (lookup.status === "rate_limited") break;
+    results.push({
+      accountId: readString(job.account_id, ""),
+      username: readString(job.username_normalized, ""),
+      jobId: readString(job.id, ""),
+      status: persisted.ok ? "succeeded" : retryable ? "failed_retryable" : "failed_terminal",
+      lookupStatus: lookup.status,
+      snapshotCreated: persisted.ok && persisted.created,
+      followers: persisted.ok ? persisted.row.followers_count : null,
+      followings: persisted.ok ? persisted.row.following_count : null,
+      posts: persisted.ok ? persisted.row.posts_count : null,
+      observedAt: persisted.ok ? persisted.row.observed_at : null,
+    });
+    if (lookup.status === "rate_limited") {
+      stopAfterIndex = index + 1;
+      break;
+    }
   }
-  return { claimed: jobs.length, processed: results.length, results };
+
+  const unprocessed = input.jobs.slice(stopAfterIndex ?? jobs.length);
+  const unprocessedIds = unprocessed.map((job) => readString(job.id, "")).filter(Boolean);
+  if (unprocessedIds.length > 0) {
+    const release = await supabase.from("ig_social_profile_snapshot_jobs").update({
+      status: "queued",
+      available_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      lease_owner: null,
+      lease_expires_at: null,
+      last_error_code: providerCalls >= limit ? "provider_budget_exhausted" : "batch_paused_after_rate_limit",
+      updated_at: new Date().toISOString(),
+    }).in("id", unprocessedIds);
+    if (release.error) throw new Error(release.error.message);
+  }
+
+  return {
+    claimed: input.jobs.length,
+    processed: results.length,
+    providerCalls,
+    succeeded: results.filter((result) => result.status === "succeeded").length,
+    failedRetryable: results.filter((result) => result.status === "failed_retryable").length,
+    failedTerminal: results.filter((result) => result.status === "failed_terminal").length,
+    budgetExhausted: unprocessedIds.length > 0 && providerCalls >= limit,
+    results,
+  };
 }

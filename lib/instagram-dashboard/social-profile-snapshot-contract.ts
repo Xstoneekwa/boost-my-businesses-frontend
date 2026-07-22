@@ -6,7 +6,8 @@ export type SocialProfileSnapshotTrigger =
   | "explicit_reanalysis"
   | "session_end"
   | "daily_fallback"
-  | "admin_manual_refresh";
+  | "admin_manual_refresh"
+  | "baseline_one_shot";
 
 export type SocialProfileSnapshotRow = {
   id?: string;
@@ -97,7 +98,9 @@ export function socialProfileSnapshotIdempotencyKey(input: {
   sourceRunId?: string | null;
   sourceBusinessSessionId?: string | null;
 }) {
-  const eventIdentity = input.sourceEventId || input.sourceRunId || input.sourceBusinessSessionId;
+  const eventIdentity = input.trigger === "baseline_one_shot"
+    ? null
+    : input.sourceEventId || input.sourceRunId || input.sourceBusinessSessionId;
   const timeIdentity = eventIdentity || businessDayKeyFromIso(input.observedAt, input.timezone);
   return hashKey(["social-profile-v1", input.accountId, input.trigger, timeIdentity].join(":"));
 }

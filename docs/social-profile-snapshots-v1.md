@@ -4,6 +4,51 @@ Intermediate rollout documentation only; this is not the final Frontend/Stripe h
 
 Production status on 2026-07-22: both migrations and the ACL correction are applied, backend deployment `dpl_5nf1Snafg1FEE9vZzCvznhSV4KW3` is READY, and the 14 reliable legacy follower observations are imported. `SOCIAL_PROFILE_SNAPSHOTS_ENABLED` remains absent, so the collection pipeline is functionally disabled.
 
+The one-shot baseline processor described below is an undeployed candidate checkpoint. Its migration, route, and `SOCIAL_PROFILE_SNAPSHOTS_BASELINE_ENABLED` flag have not been applied or configured in production.
+
+## Controlled one-shot baseline candidate
+
+The candidate endpoint is server-only:
+
+`POST /api/instagram-dashboard/internal/social-profile-snapshots/baseline`
+
+It requires the existing Instagram admin session and tenant authorization before reading the baseline flag or database. It does not accept the BotApp relay key and has no client UI entry point. The independent `SOCIAL_PROFILE_SNAPSHOTS_BASELINE_ENABLED=true` flag is required; it neither reads nor activates the recurring `SOCIAL_PROFILE_SNAPSHOTS_ENABLED` flag.
+
+Dry run request:
+
+```json
+{ "mode": "dry_run", "max_accounts": 10 }
+```
+
+Dry run dynamically classifies every account as current, stale, missing, invalid, lifecycle-excluded, or ambiguous. It returns the eligible count, maximum calls, and maximum estimated cost, with zero job write and zero provider call.
+
+Execution additionally requires exact operator gates:
+
+```json
+{
+  "mode": "execute",
+  "max_accounts": 6,
+  "expected_account_count": 6,
+  "max_provider_calls": 6,
+  "idempotency_key": "operator-supplied-unique-value",
+  "confirmation": "RUN_BASELINE"
+}
+```
+
+- The dynamic eligible count must exactly match `expected_account_count`.
+- Both account and provider-call limits are hard-capped at 10.
+- An account with a non-legacy snapshot less than 36 hours old is skipped.
+- Invalid usernames, inactive lifecycles, and multiple active assignments are excluded.
+- The operator key is SHA-256 hashed before persistence; only the hash identifies the batch.
+- Job idempotency is stable per account, local date, and `baseline_one_shot`, independently of the operator key.
+- A second inventory check occurs after job insertion. Newly ineligible jobs are discarded before claim.
+- The dedicated SQL claim function selects only `baseline_one_shot` jobs from the exact hashed batch. It cannot drain the recurring or historical queue.
+- Atomic `FOR UPDATE SKIP LOCKED` claiming, the unique daily baseline index, and the stable job key bound concurrent attempts.
+- The normal append-only persistence contract is reused. Missing Following or Posts remain `NULL`; no old snapshot is updated or fabricated.
+- Logs contain only a batch-hash prefix and aggregate counts. Provider payloads, usernames, credentials, and the raw idempotency key are excluded.
+
+Candidate rollback is code/config only: keep the separate baseline flag absent or false, remove the route in a later application rollback if needed, and retain append-only observations and operational jobs. The candidate does not enable the recurring scheduler.
+
 ## Read-only cron resume (2026-07-22)
 
 - Vercel scheduler invocation observed at `2026-07-22T10:17:16.243Z` on `/api/cron/instagram-follower-snapshots`: `GET`, HTTP `200`, deployment `dpl_5nf1Snafg1FEE9vZzCvznhSV4KW3`.
@@ -107,7 +152,7 @@ The scheduler must not be enabled above the purchased allowance without an expli
 2. Verified RLS and exact effective grants for `public`, `anon`, `authenticated`, and `service_role`.
 3. Deployed the backend with queue processing disabled by the absent feature flag.
 4. Certified one scheduler-owned inert cron invocation and completed the global read-only inventory and budget.
-5. Resolve the one-shot baseline processing gate without enabling the recurring collector early.
+5. Review and deploy the separately gated one-shot baseline processor without enabling the recurring collector early.
 6. Run the bounded baseline, then validate Stats and dashboards.
 7. Deploy BotApp UI projection only after the real Followers + Followings Stats gate passes.
 8. Enable the recurring collector last and observe one bounded invocation.
@@ -118,6 +163,6 @@ Rollback: disable the cron first, roll back application readers to the legacy fo
 
 - Both migrations are applied remotely and the effective ACL matrix is certified.
 - No production provider call or real current-value snapshot has been triggered; the current state remains 14 legacy snapshots and 0 jobs.
-- Baseline processing has no approved execution path while the global feature flag must remain disabled; this is the active rollout blocker.
+- A separately gated baseline processor is implemented locally but is not yet deployed, migrated, enabled, or exercised against the provider; production therefore still has no approved execution path.
 - Production environment allowance/remaining SearchAPI credits were not queried; only public plan pricing and the application call budget are documented.
 - Visual captures are local fixtures only and cannot prove live provider freshness.
