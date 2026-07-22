@@ -1,6 +1,9 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { requireInstagramAdmin, jsonError, jsonOk, readString } from "../../../_utils";
-import { resolveAccountSnapshotTimezone } from "@/lib/instagram-dashboard/social-profile-snapshot-service";
+import {
+  guardSocialProfileSnapshotJob,
+  resolveAccountSnapshotTimezone,
+} from "@/lib/instagram-dashboard/social-profile-snapshot-service";
 import { businessDayKeyFromIso } from "@/lib/instagram-dashboard/business-timezone";
 import { socialProfileSnapshotIdempotencyKey } from "@/lib/instagram-dashboard/social-profile-snapshot-contract";
 
@@ -26,25 +29,39 @@ export async function POST(_request: Request, context: { params: Promise<{ accou
     .limit(1)
     .maybeSingle();
   if (recent.data?.id) return jsonError("Refresh cooldown active.", 429, { retry_after_seconds: 21600 });
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
   const resolved = await resolveAccountSnapshotTimezone(supabase, normalizedAccountId);
   const sourceEventId = crypto.randomUUID();
-  const insert = await supabase.from("ig_social_profile_snapshot_jobs").insert({
-    account_id: normalizedAccountId,
-    username_normalized: readString(account.data.username, "").trim().toLowerCase(),
-    snapshot_local_date: businessDayKeyFromIso(now, resolved.timezone),
-    account_timezone: resolved.timezone,
-    timezone_source: resolved.source,
-    source_trigger: "admin_manual_refresh",
-    source_event_id: sourceEventId,
-    idempotency_key: socialProfileSnapshotIdempotencyKey({
+  const idempotencyKey = socialProfileSnapshotIdempotencyKey({
       accountId: normalizedAccountId,
       trigger: "admin_manual_refresh",
-      observedAt: now,
+      observedAt: nowIso,
       timezone: resolved.timezone,
       sourceEventId,
-    }),
-  }).select("id,status,created_at").single();
-  if (insert.error) return jsonError(insert.error.message, 500);
-  return jsonOk({ job: insert.data, provider_call_started: false });
+    });
+  const guarded = await guardSocialProfileSnapshotJob({
+    accountId: normalizedAccountId,
+    username: readString(account.data.username, ""),
+    snapshotLocalDate: businessDayKeyFromIso(nowIso, resolved.timezone),
+    accountTimezone: resolved.timezone,
+    timezoneSource: resolved.source,
+    trigger: "admin_manual_refresh",
+    idempotencyKey,
+    sourceEventId,
+    explicitAdminRefresh: true,
+    now,
+    supabase,
+  });
+  if (guarded.reason === "admin_refresh_cooldown") {
+    return jsonError("Refresh cooldown active.", 429, { retry_after_seconds: 21600 });
+  }
+  if (guarded.classification === "terminal_suppressed") {
+    return jsonError("Refresh could not be queued.", 409, { reason: guarded.reason });
+  }
+  return jsonOk({
+    job: { id: guarded.jobId, status: guarded.jobStatus, created: guarded.created },
+    classification: guarded.classification,
+    provider_call_started: false,
+  });
 }

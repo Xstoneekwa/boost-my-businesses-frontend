@@ -2,9 +2,26 @@
 
 Intermediate rollout documentation only; this is not the final Frontend/Stripe handover.
 
-Production status on 2026-07-22: both migrations and the ACL correction are applied, backend deployment `dpl_5nf1Snafg1FEE9vZzCvznhSV4KW3` is READY, and the 14 reliable legacy follower observations are imported. `SOCIAL_PROFILE_SNAPSHOTS_ENABLED` remains absent, so the collection pipeline is functionally disabled.
+Production status on 2026-07-22 before the cost-guard rollout: the snapshot, legacy/ACL, and baseline migrations are applied. Production contains 16 snapshots (14 legacy and 2 modern) and 6 baseline jobs. Three jobs are terminal `not_found`, one retryable job is queued after `provider_invalid_response`, and two jobs succeeded. `SOCIAL_PROFILE_SNAPSHOTS_ENABLED` and `SOCIAL_PROFILE_SNAPSHOTS_BASELINE_ENABLED` remain absent, so automatic collection and baseline execution are disabled.
 
-The one-shot baseline processor described below is an undeployed candidate checkpoint. Its migration, route, and `SOCIAL_PROFILE_SNAPSHOTS_BASELINE_ENABLED` flag have not been applied or configured in production.
+The one-shot baseline processor described below was deployed and used for one controlled batch. Its flag was then removed again. The cost guard described next is an intermediate checkpoint, not the final Frontend/Stripe handover.
+
+## Enqueue cost guard candidate
+
+`SOCIAL_PROFILE_SNAPSHOT_ENQUEUE_COST_GUARD_V1` adds one canonical server-only decision before every recurring, baseline, or admin-refresh job insertion:
+
+1. a successful non-legacy snapshot for the current normalized username within 36 hours returns `skipped_fresh`;
+2. an existing `queued` or `processing` job for the same account and username returns `existing_job_pending` or `retryable_backoff`;
+3. a later suppressible terminal result for the current username returns `terminal_suppressed`;
+4. a changed username is treated as a new public identity;
+5. an authenticated admin refresh may bypass freshness and terminal history, but not an active job or the six-hour cooldown;
+6. otherwise the RPC inserts one job and returns `enqueued`.
+
+The database serializes enqueue decisions per account and normalized username, then enforces a partial unique index over `queued` and `processing`. This protects concurrency across recurring, baseline, and manual triggers while leaving historical terminal jobs intact. The RPC is denied to `public`, `anon`, and `authenticated`; only `service_role` receives execute permission.
+
+The authenticated cron dry-run remains available while the recurring flag is disabled. It performs classification only and reports new-job provider budget separately from an already queued retry. It performs no provider call and no job or snapshot write.
+
+Retryable provider results retain the same job with linear 15-minute backoff and a maximum of three claims. A third transient failure becomes `failed` with a `retry_exhausted:` error code, which suppresses immediate automatic daily recollection. No account ID or username is embedded in the guard.
 
 ## Controlled one-shot baseline candidate
 
@@ -126,9 +143,9 @@ Session matching order:
 
 ## Provider budget
 
-The hard application cap is 10 successful attempts per cron batch. At most one scheduled observation is enqueued per active account/local day; onboarding and reanalysis reuse their existing lookup.
+The hard application cap is 10 successful attempts per cron batch. The cost guard must reduce the current production new-job budget to zero: two fresh accounts skipped, three terminal identities suppressed, and the existing retry reported separately at zero or one call depending on its backoff. At most one scheduled observation is enqueued per eligible account/local day; onboarding and reanalysis reuse their existing lookup.
 
-For the 6 current accounts:
+The following figures describe the pre-guard theoretical ceiling for the 6 current accounts, not the post-guard expected spend:
 
 - theoretical baseline: 6 searches/day;
 - approximately 180 searches per 30-day month;
@@ -166,3 +183,5 @@ Rollback: disable the cron first, roll back application readers to the legacy fo
 - A separately gated baseline processor is implemented locally but is not yet deployed, migrated, enabled, or exercised against the provider; production therefore still has no approved execution path.
 - Production environment allowance/remaining SearchAPI credits were not queried; only public plan pricing and the application call budget are documented.
 - Visual captures are local fixtures only and cannot prove live provider freshness.
+- The BotApp Overview can report relay/dispatcher disconnected while Profiles and Stats still read correctly from the Shared backend API. This is tracked separately and is not part of the enqueue cost guard.
+- The tenant-scoped Client Dashboard for the second modern account still needs a read-only UI recertification when its own authorized client session is available. Authentication must not be bypassed.

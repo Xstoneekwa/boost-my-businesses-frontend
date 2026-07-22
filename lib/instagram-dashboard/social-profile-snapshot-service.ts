@@ -1,8 +1,14 @@
 import { lookupInstagramPublicProfile, type InstagramPublicProfileLookupResult } from "../instagram-public-profile-lookup.ts";
 import { createSupabaseClient } from "../supabase.ts";
 import { readString } from "../instagram-client/guards.ts";
+import { businessDayKeyFromIso } from "./business-timezone.ts";
+import {
+  socialProfileSnapshotGuardResultFromRpc,
+  type SocialProfileSnapshotGuardResult,
+} from "./social-profile-snapshot-cost-guard.ts";
 import {
   buildSocialProfileSnapshot,
+  normalizeSocialProfileUsername,
   planSocialProfileScheduledTrigger,
   resolveSocialProfileTimezone,
   socialProfileSnapshotIdempotencyKey,
@@ -15,6 +21,23 @@ type Supabase = ReturnType<typeof createSupabaseClient>;
 
 export const SOCIAL_PROFILE_SNAPSHOT_DAILY_BUDGET = 10;
 export const SOCIAL_PROFILE_SNAPSHOT_MAX_ATTEMPTS = 3;
+
+export type GuardSocialProfileSnapshotJobInput = {
+  accountId: string;
+  username: string;
+  snapshotLocalDate: string;
+  accountTimezone: string;
+  timezoneSource: "device_assignment" | "schedule" | "platform_default";
+  trigger: Extract<SocialProfileSnapshotTrigger, "session_end" | "daily_fallback" | "admin_manual_refresh" | "baseline_one_shot">;
+  idempotencyKey: string;
+  sourceEventId?: string | null;
+  sourceRunId?: string | null;
+  sourceBusinessSessionId?: string | null;
+  explicitAdminRefresh?: boolean;
+  dryRun?: boolean;
+  now?: Date;
+  supabase?: Supabase;
+};
 
 export type SocialProfileSnapshotJobProcessResult = {
   accountId: string;
@@ -135,24 +158,96 @@ export async function persistSocialProfileObservation(input: {
     : { ok: false as const, reason: existing.error?.message || "snapshot_idempotency_read_failed" };
 }
 
-export async function enqueueDailySocialProfileSnapshotJobs(input: {
-  now?: Date;
-  supabase?: Supabase;
-}) {
+export async function guardSocialProfileSnapshotJob(input: GuardSocialProfileSnapshotJobInput): Promise<SocialProfileSnapshotGuardResult> {
   const supabase = input.supabase ?? createSupabaseClient();
-  const now = input.now ?? new Date();
+  const response = await supabase.rpc("enqueue_ig_social_profile_snapshot_job_guarded", {
+    p_account_id: input.accountId,
+    p_username_normalized: normalizeSocialProfileUsername(input.username),
+    p_snapshot_local_date: input.snapshotLocalDate,
+    p_account_timezone: input.accountTimezone,
+    p_timezone_source: input.timezoneSource,
+    p_source_trigger: input.trigger,
+    p_idempotency_key: input.idempotencyKey,
+    p_source_event_id: input.sourceEventId || null,
+    p_source_run_id: input.sourceRunId || null,
+    p_source_business_session_id: input.sourceBusinessSessionId || null,
+    p_explicit_admin_refresh: input.explicitAdminRefresh === true,
+    p_dry_run: input.dryRun === true,
+    p_now: (input.now ?? new Date()).toISOString(),
+  });
+  if (response.error) throw new Error(response.error.message);
+  const raw = Array.isArray(response.data) ? response.data[0] : response.data;
+  if (!raw || typeof raw !== "object") throw new Error("social_profile_snapshot_guard_empty_response");
+  return socialProfileSnapshotGuardResultFromRpc(raw as SupabaseRecord);
+}
+
+async function loadActiveSocialProfileAccounts(supabase: Supabase) {
   const accountsResult = await supabase
     .from("ig_accounts")
     .select("id,username,status,admin_lifecycle_status")
     .order("created_at", { ascending: true })
     .limit(5000);
   if (accountsResult.error) throw new Error(accountsResult.error.message);
-  const active = ((accountsResult.data ?? []) as SupabaseRecord[])
+  return ((accountsResult.data ?? []) as SupabaseRecord[])
     .filter((row) => readString(row.admin_lifecycle_status, readString(row.status, "")).toLowerCase() === "active")
-    .filter((row) => readString(row.id, "") && readString(row.username, ""));
+    .filter((row) => readString(row.id, "") && normalizeSocialProfileUsername(row.username));
+}
+
+export async function classifyAutomaticSocialProfileSnapshotJobs(input: {
+  now?: Date;
+  supabase?: Supabase;
+}) {
+  const supabase = input.supabase ?? createSupabaseClient();
+  const now = input.now ?? new Date();
+  const accounts = await loadActiveSocialProfileAccounts(supabase);
+  const results = [];
+  for (const account of accounts) {
+    const accountId = readString(account.id, "");
+    const username = normalizeSocialProfileUsername(account.username);
+    const resolved = await resolveAccountSnapshotTimezone(supabase, accountId);
+    const observedAt = now.toISOString();
+    const trigger = "daily_fallback" as const;
+    const classification = await guardSocialProfileSnapshotJob({
+      accountId,
+      username,
+      snapshotLocalDate: businessDayKeyFromIso(observedAt, resolved.timezone),
+      accountTimezone: resolved.timezone,
+      timezoneSource: resolved.source,
+      trigger,
+      idempotencyKey: socialProfileSnapshotIdempotencyKey({
+        accountId,
+        trigger,
+        observedAt,
+        timezone: resolved.timezone,
+      }),
+      dryRun: true,
+      now,
+      supabase,
+    });
+    results.push({ accountId, username, ...classification });
+  }
+  return {
+    selected: accounts.length,
+    newJobs: 0,
+    providerCallsNewJobsMax: results.reduce((sum, row) => sum + row.providerCallsNewJobMax, 0),
+    existingRetryProviderCallsMax: results.reduce((sum, row) => sum + row.existingRetryProviderCallsMax, 0),
+    accounts: results,
+  };
+}
+
+export async function enqueueDailySocialProfileSnapshotJobs(input: {
+  now?: Date;
+  supabase?: Supabase;
+}) {
+  const supabase = input.supabase ?? createSupabaseClient();
+  const now = input.now ?? new Date();
+  const active = await loadActiveSocialProfileAccounts(supabase);
   let enqueued = 0;
+  let planned = 0;
+  const results = [];
   for (const account of active) {
     const accountId = readString(account.id, "");
+    const username = normalizeSocialProfileUsername(account.username);
     const resolved = await resolveAccountSnapshotTimezone(supabase, accountId);
     const observedAt = now.toISOString();
     const latestRun = await supabase.from("ig_runs")
@@ -165,7 +260,8 @@ export async function enqueueDailySocialProfileSnapshotJobs(input: {
     const runFinishedAt = readString(latestRun.data?.finished_at, "");
     const plan = planSocialProfileScheduledTrigger({ now, timezone: resolved.timezone, latestRunFinishedAt: runFinishedAt });
     if (!plan) continue;
-    const trigger: SocialProfileSnapshotTrigger = plan.trigger;
+    planned += 1;
+    const trigger = plan.trigger;
     const sourceRunId = trigger === "session_end" ? readString(latestRun.data?.id, "") : "";
     const idempotencyKey = socialProfileSnapshotIdempotencyKey({
       accountId,
@@ -174,21 +270,29 @@ export async function enqueueDailySocialProfileSnapshotJobs(input: {
       timezone: resolved.timezone,
     });
     const localDate = plan.localDate;
-    const insert = await supabase.from("ig_social_profile_snapshot_jobs").upsert({
-      account_id: accountId,
-      username_normalized: readString(account.username, "").trim().toLowerCase(),
-      snapshot_local_date: localDate,
-      account_timezone: resolved.timezone,
-      timezone_source: resolved.source,
-      source_trigger: trigger,
-      source_run_id: sourceRunId || null,
-      idempotency_key: idempotencyKey,
-      status: "queued",
-    }, { onConflict: "account_id,idempotency_key", ignoreDuplicates: true }).select("id").maybeSingle();
-    if (insert.error) throw new Error(insert.error.message);
-    if (insert.data?.id) enqueued += 1;
+    const guarded = await guardSocialProfileSnapshotJob({
+      accountId,
+      username,
+      snapshotLocalDate: localDate,
+      accountTimezone: resolved.timezone,
+      timezoneSource: resolved.source,
+      trigger,
+      idempotencyKey,
+      sourceRunId: sourceRunId || null,
+      now,
+      supabase,
+    });
+    if (guarded.created) enqueued += 1;
+    results.push({ accountId, username, ...guarded });
   }
-  return { selected: active.length, enqueued };
+  return {
+    selected: active.length,
+    planned,
+    enqueued,
+    providerCallsNewJobsMax: results.reduce((sum, row) => sum + row.providerCallsNewJobMax, 0),
+    existingRetryProviderCallsMax: results.reduce((sum, row) => sum + row.existingRetryProviderCallsMax, 0),
+    accounts: results,
+  };
 }
 
 export async function processSocialProfileSnapshotJobs(input: {
@@ -250,14 +354,20 @@ export async function processClaimedSocialProfileSnapshotJobs(input: {
       supabase,
     });
     const attempts = Number(job.attempts ?? 1);
-    const retryable = ["rate_limited", "unavailable", "provider_error"].includes(lookup.status) && attempts < SOCIAL_PROFILE_SNAPSHOT_MAX_ATTEMPTS;
+    const retryableStatus = ["rate_limited", "unavailable", "provider_error"].includes(lookup.status);
+    const retryable = retryableStatus && attempts < SOCIAL_PROFILE_SNAPSHOT_MAX_ATTEMPTS;
     const jobStatus = persisted.ok ? "succeeded" : retryable ? "queued" : "failed";
+    const errorCode = persisted.ok
+      ? null
+      : retryableStatus && attempts >= SOCIAL_PROFILE_SNAPSHOT_MAX_ATTEMPTS
+        ? `retry_exhausted:${String(persisted.reason).slice(0, 100)}`
+        : String(persisted.reason).slice(0, 120);
     const update = await supabase.from("ig_social_profile_snapshot_jobs").update({
       status: jobStatus,
       available_at: retryable ? new Date(Date.now() + attempts * 15 * 60 * 1000).toISOString() : new Date().toISOString(),
       lease_owner: null,
       lease_expires_at: null,
-      last_error_code: persisted.ok ? null : String(persisted.reason).slice(0, 120),
+      last_error_code: errorCode,
       updated_at: new Date().toISOString(),
     }).eq("id", readString(job.id, ""));
     if (update.error) throw new Error(update.error.message);

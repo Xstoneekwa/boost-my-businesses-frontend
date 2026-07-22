@@ -10,6 +10,7 @@ import {
   socialProfileSnapshotIdempotencyKey,
 } from "./social-profile-snapshot-contract.ts";
 import {
+  guardSocialProfileSnapshotJob,
   processClaimedSocialProfileSnapshotJobs,
   type SocialProfileSnapshotJobProcessResult,
 } from "./social-profile-snapshot-service.ts";
@@ -395,26 +396,29 @@ export function createSocialProfileBaselineDependencies(supabase: Supabase = cre
     },
     createJobs: async (accounts, batchId, now) => {
       if (accounts.length === 0) return 0;
-      const rows = accounts.map((account) => ({
-        account_id: account.accountId,
-        username_normalized: account.username,
-        snapshot_local_date: businessDayKeyFromIso(now.toISOString(), account.timezone),
-        account_timezone: account.timezone,
-        timezone_source: account.timezoneSource,
-        source_trigger: "baseline_one_shot",
-        source_event_id: batchId,
-        idempotency_key: socialProfileSnapshotIdempotencyKey({
+      let created = 0;
+      for (const account of accounts) {
+        const idempotencyKey = socialProfileSnapshotIdempotencyKey({
           accountId: account.accountId,
           trigger: "baseline_one_shot",
           observedAt: now.toISOString(),
           timezone: account.timezone,
-        }),
-        status: "queued",
-      }));
-      const result = await supabase.from("ig_social_profile_snapshot_jobs")
-        .upsert(rows, { onConflict: "account_id,idempotency_key", ignoreDuplicates: true }).select("id");
-      if (result.error) throw new Error(result.error.message);
-      return (result.data ?? []).length;
+        });
+        const guarded = await guardSocialProfileSnapshotJob({
+          accountId: account.accountId,
+          username: account.username,
+          snapshotLocalDate: businessDayKeyFromIso(now.toISOString(), account.timezone),
+          accountTimezone: account.timezone,
+          timezoneSource: account.timezoneSource,
+          trigger: "baseline_one_shot",
+          sourceEventId: batchId,
+          idempotencyKey,
+          now,
+          supabase,
+        });
+        if (guarded.created) created += 1;
+      }
+      return created;
     },
     discardJobs: async (batchId, accountIds) => {
       if (accountIds.length === 0) return 0;
