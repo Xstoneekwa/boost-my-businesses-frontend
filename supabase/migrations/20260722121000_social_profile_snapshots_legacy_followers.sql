@@ -1,6 +1,22 @@
 -- SOCIAL_PROFILE_SNAPSHOTS_V1
 -- Complementary candidate only. Idempotently preserves reliable legacy follower observations.
 
+revoke all privileges
+on table public.ig_account_social_profile_snapshots
+from public, anon, authenticated, service_role;
+
+grant select, insert
+on table public.ig_account_social_profile_snapshots
+to service_role;
+
+revoke all privileges
+on table public.ig_social_profile_snapshot_jobs
+from public, anon, authenticated, service_role;
+
+grant select, insert, update
+on table public.ig_social_profile_snapshot_jobs
+to service_role;
+
 alter table public.ig_account_social_profile_snapshots
   drop constraint if exists ig_account_social_profile_snapshots_source_provider_check;
 alter table public.ig_account_social_profile_snapshots
