@@ -190,6 +190,8 @@ export async function PATCH(request: Request) {
     return jsonError(
       safe.code === "target_minimum_not_met"
         ? "At least 15 validated and eligible target accounts are required."
+        : safe.code === "onboarding_login_pending_projection_failed"
+          ? "Instagram onboarding was completed, but login preparation is still pending. Refresh to resume."
         : "Could not update Instagram onboarding.",
       safe.status,
       {

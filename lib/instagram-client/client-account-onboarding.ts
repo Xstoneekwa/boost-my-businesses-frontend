@@ -224,7 +224,7 @@ async function finalizeCompletedOnboardingAssignment(
     .update({
       onboarding_status: "configured",
       provisioning_status: "login_pending",
-      login_status: "pending_login",
+      login_status: "pending",
       updated_at: new Date().toISOString(),
     })
     .eq("client_id", readString(row.client_id))
