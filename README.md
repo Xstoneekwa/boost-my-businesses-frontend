@@ -39,3 +39,10 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 The current package-bounded Follow warmup contract is documented in
 [`docs/follow-warmup-active-sast-days-v1.md`](docs/follow-warmup-active-sast-days-v1.md).
+
+## Phone Farm Targets metrics
+
+The canonical cross-surface null/zero, Added, Sent, Perf and FBR contract is in
+[`docs/target-metrics-contract.md`](docs/target-metrics-contract.md). Client
+Targeting labels and tenant-scoped display behavior are documented in
+[`docs/instagram-client-targeting.md`](docs/instagram-client-targeting.md).

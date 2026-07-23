@@ -115,6 +115,16 @@ Compte théorique `@tenant_next` tracé après `POST /api/instagram-client/accou
 | Remplacement client | Aucun — le client ne voit jamais ce champ ; dashboard comptes utilise phases `resolveClientAccountState` |
 | Rafraîchissement | Targets : sync jobs / FBR pipeline ; Comptes : GET accounts + champs `client_instagram_accounts` |
 
+### 3.9 Metrics Targets visibles côté client
+
+La surface Client Targeting conserve la sémantique serveur et ne transforme
+jamais une absence de donnée en zéro. Added vient de `ig_targets.created_at`,
+Sent `null` affiche `—`, et Perf distingue `pending` de `insufficient_data`.
+La couverture FBR est certifiée uniquement par
+`followbacks_metrics_reliable_at`. Voir
+[`target-metrics-contract.md`](./target-metrics-contract.md) et
+[`instagram-client-targeting.md`](./instagram-client-targeting.md).
+
 ---
 
 ## 4. Étapes fonctionnelles

@@ -521,6 +521,7 @@ Source de donnees:
 - API `/api/instagram-dashboard/targets`
 - Table legacy: `ig_targets`
 - Helpers: `app/instagram-dashboard/targets-data.ts`
+- Contrat canonique partage: [`target-metrics-contract.md`](./target-metrics-contract.md)
 
 Etat actuel:
 
@@ -530,9 +531,14 @@ Etat actuel:
 - KPI: Total, Deleted, Archived.
 - Add / Import en jaune-orange.
 - Table scrollable avec header sticky.
-- `followers_count` est le nombre de followers du CT. FBR est une metrique future
-  de performance apres usage du CT: followers gagnes / follows envoyes depuis ce CT.
-  FBR peut rester `pending source` sans bloquer CT quality V1.
+- `followers_count` est le nombre de followers du CT.
+- Added vient toujours de `ig_targets.created_at`; `updated_at` reste un timestamp
+  technique et ne doit jamais remplacer la date d'ajout.
+- Sent vient de `follows_sent_count`: `null` reste inconnu (`—`), un vrai zero reste `0`.
+- FBR est affiche seulement comme mesure quand `followbacks_metrics_reliable_at`
+  certifie la couverture; un zero brut non certifie reste `Non mesure`.
+- Perf est insuffisant entre 1 et 99 follows. Le verdict devient evaluable a
+  partir de 100 follows; `insufficient_data` n'est pas une mauvaise performance.
 - Add single passe par la verification publique safe si le provider est active
   local/staging. `not_found` clair devient `rejected_not_found`; les limites ou
   erreurs provider restent `review_provider_unavailable` et ne rejettent jamais
@@ -556,11 +562,9 @@ Pending:
 
 - Backend Target Discovery Service.
 - Cache durable provider / quota tracking long terme.
-- FBR <= 8% apres volume suffisant, uniquement comme metrique performance future.
 - No followable profiles after X scrolls.
 - Auto-archive avec raison.
-- Source quality/FBR future.
-- Sync admin/client/BotApp/backend.
+- Couverture FBR nominative a etendre compte par compte.
 - Recherche CT Pro/Premium.
 
 Ne pas casser:
@@ -1294,8 +1298,9 @@ Regles V1:
   deviennent jamais `rejected_not_found`; ils restent pending/review puis
   `review_provider_unavailable` apres max attempts.
 - Avatar manquant est un warning seulement; pas un rejet V1.
-- FBR reste hors scope: performance future apres usage reel du CT, distincte de
-  `followers_count`.
+- Perf/FBR restent distincts de `followers_count`; leurs semantiques partagees
+  et le seuil produit de 100 follows sont decrits dans
+  [`target-metrics-contract.md`](./target-metrics-contract.md).
 
 Sync surfaces:
 
@@ -1577,8 +1582,9 @@ Etat actuel:
 - KPI: Total, Valid/eligible, Archived.
 - Add / Import en jaune-orange.
 - Table scrollable avec header sticky.
-- `followers_count` peut etre connu via verification provider. FBR reste pending source
-  tant que les follows envoyes et followers gagnes depuis ce CT ne sont pas connectes.
+- `followers_count` peut etre connu via verification provider. Sent, Perf et FBR
+  suivent le contrat partage; FBR reste non mesure tant que sa couverture n'est
+  pas certifiee.
 - Bulk import cree des jobs durables `ct_target_verification_jobs`; la verification
   est traitee ensuite par `verify-batch` en petits lots ou par `verify-cron`
   (disabled-by-default, token-protege).
@@ -1606,8 +1612,8 @@ Roadmap:
 - `followers_count`.
 - Regle CT quality V1: not_found, followers_count < 500, verified, private.
 - Restore/unarchive CT et reconciliation archived/deleted.
-- FBR future comme metrique de performance, pas comme equivalent de followers_count.
-- Sync admin/client/BotApp/backend.
+- Parite semantique Admin/Client/BotApp selon
+  [`target-metrics-contract.md`](./target-metrics-contract.md).
 - Activity Log pour add/import/delete/archive/restore.
 
 ## 9. Growth Settings runtime proof
