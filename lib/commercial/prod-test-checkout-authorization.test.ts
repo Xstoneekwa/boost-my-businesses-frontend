@@ -54,7 +54,7 @@ function createMockSupabase(initialRows: AuthRow[] = []) {
               id: `auth-${rows.length + 1}`,
               ...state.insertPayload,
               entitlements_created_count: 0,
-              client_id: null,
+              client_id: state.insertPayload.client_id ?? null,
               first_checkout_used_at: null,
               add_account_used_at: null,
               status: "active",
@@ -76,6 +76,10 @@ function createMockSupabase(initialRows: AuthRow[] = []) {
           return api;
         },
         then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          const matches = rows.filter((row) => state.filters.every((filter) => filter(row)));
+          if (!state.patch) {
+            return Promise.resolve({ data: matches, error: null }).then(onFulfilled, onRejected);
+          }
           const matchIndex = rows.findIndex((row) => state.filters.every((filter) => filter(row)));
           if (matchIndex >= 0 && state.patch) {
             rows[matchIndex] = { ...rows[matchIndex], ...state.patch };
@@ -280,6 +284,149 @@ test("admin create stores hash and redacted hint only", async () => {
   assert.match(created.emailHint, /^\w\*{3}@/);
   assert.equal(supabase._rows[0].email_hash, hashProdTestCheckoutEmail("liam.real@company.com"));
   assert.equal("email" in (supabase._rows[0] as object), false);
+  assert.deepEqual(supabase._rows[0].authorized_flows, ["first_purchase"]);
+  assert.equal(supabase._rows[0].client_id, null);
+});
+
+test("admin create never authorizes new_account without a proven client scope", async () => {
+  const supabase = createMockSupabase();
+  await assert.rejects(
+    createProdTestCheckoutAuthorization({
+      supabase,
+      email: "unscoped.workspace@company.com",
+      createdByAuthUserId: "admin-user",
+      expiresAt: new Date(Date.now() + 60_000),
+      adminConfirmationAcknowledged: true,
+      authorizedFlows: ["new_account"],
+      maxAccounts: 1,
+      env: PROD_ENV,
+    }),
+    /prod_test_authorization_client_scope_required/,
+  );
+  assert.equal(supabase._rows.length, 0);
+});
+
+test("admin create carries forward one proven client workspace for add-account", async () => {
+  const email = "existing.workspace@company.com";
+  const supabase = createMockSupabase([{
+    id: "auth-consumed",
+    email_hash: hashProdTestCheckoutEmail(email),
+    email_hint: redactEmailHint(email),
+    client_id: "client-existing",
+    status: "consumed",
+    created_at: new Date(Date.now() - 60_000).toISOString(),
+  }]);
+
+  await createProdTestCheckoutAuthorization({
+    supabase,
+    email,
+    createdByAuthUserId: "admin-user",
+    expiresAt: new Date(Date.now() + 60_000),
+    adminConfirmationAcknowledged: true,
+    maxAccounts: 1,
+    env: PROD_ENV,
+  });
+
+  const created = supabase._rows[1];
+  assert.equal(created.client_id, "client-existing");
+  assert.deepEqual(created.metadata, {
+    purpose: "agency_tenant_internal_test",
+    client_scope_source: "prior_authorization",
+  });
+  const validation = validateProdTestCheckoutAuthorization({
+    authorization: created as never,
+    flowType: "additional_account",
+    clientId: "client-existing",
+  });
+  assert.equal(validation.ok, true);
+
+  const proMonthlyAccess = await evaluateCheckoutSimulationAccess({
+    supabase,
+    email,
+    flowType: "additional_account",
+    clientId: "client-existing",
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    env: PROD_ENV,
+  });
+  assert.equal(proMonthlyAccess.allowed, true);
+
+  const wrongWorkspaceAccess = await evaluateCheckoutSimulationAccess({
+    supabase,
+    email,
+    flowType: "additional_account",
+    clientId: "client-other",
+    planKey: "pro",
+    billingIntervalMonths: 1,
+    env: PROD_ENV,
+  });
+  assert.equal(wrongWorkspaceAccess.allowed, false);
+  assert.equal(wrongWorkspaceAccess.reason, "workspace_mismatch");
+});
+
+test("consumed authorization is rejected explicitly", () => {
+  const validation = validateProdTestCheckoutAuthorization({
+    authorization: {
+      id: "auth-consumed",
+      email_hash: hashProdTestCheckoutEmail("consumed@company.com"),
+      email_hint: redactEmailHint("consumed@company.com"),
+      authorized_flows: ["first_purchase", "new_account"],
+      max_accounts: 1,
+      plan_key: "pro",
+      billing_interval_months: 1,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      status: "consumed",
+      client_id: "client-existing",
+      entitlements_created_count: 1,
+      first_checkout_used_at: null,
+      add_account_used_at: new Date().toISOString(),
+      created_by_auth_user_id: "admin-user",
+      admin_confirmation_acknowledged: true,
+      metadata: {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    flowType: "additional_account",
+    clientId: "client-existing",
+    planKey: "pro",
+    billingIntervalMonths: 1,
+  });
+  assert.equal(validation.ok, false);
+  assert.equal(validation.reason, "authorization_consumed");
+});
+
+test("admin create refuses ambiguous historical client workspaces", async () => {
+  const email = "ambiguous.workspace@company.com";
+  const supabase = createMockSupabase([
+    {
+      id: "auth-client-1",
+      email_hash: hashProdTestCheckoutEmail(email),
+      client_id: "client-1",
+      status: "consumed",
+      created_at: new Date(Date.now() - 120_000).toISOString(),
+    },
+    {
+      id: "auth-client-2",
+      email_hash: hashProdTestCheckoutEmail(email),
+      client_id: "client-2",
+      status: "consumed",
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+    },
+  ]);
+
+  await assert.rejects(
+    createProdTestCheckoutAuthorization({
+      supabase,
+      email,
+      createdByAuthUserId: "admin-user",
+      expiresAt: new Date(Date.now() + 60_000),
+      adminConfirmationAcknowledged: true,
+      maxAccounts: 1,
+      env: PROD_ENV,
+    }),
+    /prod_test_authorization_client_scope_ambiguous/,
+  );
+  assert.equal(supabase._rows.length, 2);
 });
 
 test("evaluateProdTestCheckoutAuthorization hides not found as generic path", async () => {

@@ -100,6 +100,33 @@ function normalizeFlow(flowType: "first_purchase" | "additional_account"): ProdT
   return flowType === "additional_account" ? "new_account" : "first_purchase";
 }
 
+async function resolveUniquePriorClientId(
+  supabase: SupabaseClient,
+  emailHash: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("commercial_prod_test_checkout_authorizations")
+    .select("client_id")
+    .eq("email_hash", emailHash)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    throw new Error("prod_test_authorization_client_scope_read_failed");
+  }
+
+  const clientIds = [...new Set(
+    (Array.isArray(data) ? data : [])
+      .map((row) => readString((row as { client_id?: unknown }).client_id))
+      .filter(Boolean),
+  )];
+
+  if (clientIds.length > 1) {
+    throw new Error("prod_test_authorization_client_scope_ambiguous");
+  }
+  return clientIds[0] ?? null;
+}
+
 export async function findActiveProdTestCheckoutAuthorization(
   supabase: SupabaseClient,
   email: string,
@@ -350,19 +377,29 @@ export async function createProdTestCheckoutAuthorization(input: {
     throw new Error("invalid_email");
   }
 
+  const emailHash = hashProdTestCheckoutEmail(normalizedEmail);
+  const priorClientId = await resolveUniquePriorClientId(input.supabase, emailHash);
+  const authorizedFlows = input.authorizedFlows
+    ?? (priorClientId ? ["first_purchase", "new_account"] : ["first_purchase"]);
+  if (authorizedFlows.includes("new_account") && !priorClientId) {
+    throw new Error("prod_test_authorization_client_scope_required");
+  }
+
   const payload = {
-    email_hash: hashProdTestCheckoutEmail(normalizedEmail),
+    email_hash: emailHash,
     email_hint: redactEmailHint(normalizedEmail),
-    authorized_flows: input.authorizedFlows ?? ["first_purchase", "new_account"],
+    authorized_flows: authorizedFlows,
     max_accounts: input.maxAccounts ?? 2,
     plan_key: input.planKey ?? null,
     billing_interval_months: input.billingIntervalMonths ?? null,
     expires_at: input.expiresAt.toISOString(),
     status: "active",
+    client_id: priorClientId,
     created_by_auth_user_id: input.createdByAuthUserId,
     admin_confirmation_acknowledged: true,
     metadata: {
       purpose: "agency_tenant_internal_test",
+      client_scope_source: priorClientId ? "prior_authorization" : "unbound_first_purchase",
     },
   };
 

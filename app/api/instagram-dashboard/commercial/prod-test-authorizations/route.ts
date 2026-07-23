@@ -109,6 +109,12 @@ export async function POST(request: Request) {
     if (message === "prod_test_authorization_create_failed") {
       return jsonError("Impossible de créer l'autorisation (email déjà actif ?).", 409, { code: message });
     }
+    if (message === "prod_test_authorization_client_scope_ambiguous") {
+      return jsonError("Plusieurs espaces clients historiques correspondent à cette adresse. Le rattachement doit être vérifié avant autorisation.", 409, { code: message });
+    }
+    if (message === "prod_test_authorization_client_scope_required") {
+      return jsonError("Le flow nouveau compte exige un espace client explicitement rattaché.", 409, { code: message });
+    }
     return jsonError("Impossible de créer l'autorisation de test.", 500, { code: message });
   }
 }

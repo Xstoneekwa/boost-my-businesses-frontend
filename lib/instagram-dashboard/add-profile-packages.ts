@@ -195,7 +195,7 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultOutreachDayCap: null,
     advancedCtEnabled: true,
     aiCommentEnabled: false,
-    aiTargetingEnabled: false,
+    aiTargetingEnabled: true,
   },
   premium: {
     commercialPackageCode: "premium",

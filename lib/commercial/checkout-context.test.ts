@@ -110,10 +110,10 @@ test("public checkout success uses email login handoff", () => {
   assert.equal(handoff.loginPath, "/instagram-login");
 });
 
-test("add-account checkout success returns dashboard handoff", () => {
+test("add-account checkout success returns the canonical onboarding handoff", () => {
   const handoff = resolveCheckoutHandoff("existing_workspace_add_account");
   assert.equal(handoff.type, "dashboard");
-  assert.equal(handoff.redirectPath, "/instagram-client");
+  assert.equal(handoff.redirectPath, "/instagram-client?onboarding=1");
 });
 
 test("plan change checkout returns dashboard handoff", () => {

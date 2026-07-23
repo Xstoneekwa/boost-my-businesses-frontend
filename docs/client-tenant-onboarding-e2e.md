@@ -36,7 +36,10 @@ Implémentation : `lib/instagram-client/client-account-state.ts` (`resolveClient
 
 ## 3. Parcours add-account → surfaces
 
-Compte théorique `@tenant_next` tracé après `POST /api/instagram-client/accounts`.
+Le nouveau parcours passe exclusivement par `GET|POST|PATCH
+/api/instagram-client/onboarding`. L'ancien `POST
+/api/instagram-client/accounts` répond `instagram_onboarding_required` afin
+d'empêcher un contournement des étapes et du seuil serveur.
 
 ### 3.1 Dashboard client
 
@@ -54,17 +57,17 @@ Compte théorique `@tenant_next` tracé après `POST /api/instagram-client/accou
 
 | Attribut | Valeur |
 |----------|--------|
-| Source | Insert via `createClientInstagramAccount` |
+| Source | Validation publique via `createClientInstagramAccount(..., dryRun: true, flowMode: "targeting_setup")`, puis insert atomique via `begin_client_instagram_onboarding` |
 | Champs clés | `onboarding_status`, `provisioning_status`, `login_status` |
 | Refresh | Lecture directe Supabase à chaque load/GET |
-| État initial typique | onboarding=pending, provisioning=not_started, login=unknown |
+| État initial typique | onboarding=targeting_pending, provisioning=not_started, login=unknown |
 | Divergence | Worker met à jour login/provisioning sans notifier le client → polling + Actualiser |
 
 ### 3.3 `client_subscription_accounts` + `account_commercial_packages`
 
 | Attribut | Valeur |
 |----------|--------|
-| Source | `ensureAddProfileOwnership` dans create-account |
+| Source | RPC atomique `begin_client_instagram_onboarding` après verrouillage de l'entitlement réservé |
 | Refresh | Inclus dans `loadClientInstagramAccounts` (package label) |
 | Condition | Abonnement actif du tenant |
 | Divergence | Rare ; package label peut lag si changement admin seul |
@@ -81,10 +84,10 @@ Compte théorique `@tenant_next` tracé après `POST /api/instagram-client/accou
 
 | Attribut | Valeur |
 |----------|--------|
-| Source | `tryAutoAssignOnboardingSchedule` → RPC `assign_account_slot` |
+| Source | Aucune assignment avant le gate 15/15 ; réservation idempotente via `tryAutoAssignOnboardingSchedule` uniquement après finalisation serveur |
 | Usage client | **Interne** — détermine faisabilité prep, jamais affiché |
 | Refresh | `assignmentStatusByAccount` dans loader |
-| Divergence | pending_assignment côté backend pendant que client voit « Préparation en cours » après connect |
+| Divergence | Sans capacité physique, l'état reste `pending_assignment`; check-readiness peut réessayer sans lancer Auto Login |
 
 ### 3.6 Admin — client-accounts / manage
 
@@ -129,39 +132,87 @@ La couverture FBR est certifiée uniquement par
 
 ## 4. Étapes fonctionnelles
 
-### 4.1 Ajout compte (client)
+### 4.1 Connexion
 
-1. `POST /api/instagram-client/accounts` — username, password, email optionnel  
-2. Crée `ig_accounts`, lien `client_instagram_accounts`, ownership subscription/package  
-3. Credentials → Vault (Edge API) si configuré  
-4. Auto-assignment tenté (non bloquant)  
-5. UI : refresh GET → badge **Compte ajouté**
+1. `POST /api/instagram-client/onboarding` reçoit username, mot de passe,
+   email optionnel et clé d'idempotence.
+2. Le serveur résout l'entitlement réservé du tenant, crée les liens
+   commerciaux canoniques et transmet les identifiants au Vault existant.
+3. Le mot de passe n'est jamais stocké dans la session onboarding, relu ou
+   renvoyé au navigateur.
+4. L'état reste `targeting_pending`; aucune assignment, connexion téléphone,
+   Auto Login ou exécution worker n'est lancée.
+5. La confirmation signifie uniquement **Identifiants reçus**.
 
-### 4.2 Connecter
+### 4.2 Analyse publique
+
+- Source: projection publique réellement disponible au moment de la création
+  (username, nom, biographie, avatar, followers et signaux publics supportés).
+- Toute donnée indisponible est affichée **Non détecté**, jamais inventée.
+- Les valeurs inchangées gardent la source `public`; les corrections du client
+  sont persistées avec la source `user_confirmed`.
+- Cette étape est éditable et reprise depuis la session serveur.
+
+### 4.3 Ciblage
+
+- Le client confirme sa niche, son audience, ses thèmes, sa langue et sa zone.
+- Ces critères servent uniquement à préremplir la recherche existante de
+  comptes cibles. Ils ne créent ni ne valident eux-mêmes une CT.
+- Les fonctionnalités de recherche IA restent soumises au droit package
+  canonique (Growth verrouillé; Pro/Premium autorisés) et au garde serveur
+  existant.
+
+### 4.4 Comptes cibles
+
+- Le drawer et les routes CT existants restent la seule architecture de
+  création, validation, archivage et restauration.
+- Le compteur onboarding inclut seulement les CT actives, validées et
+  éligibles. Pending, rejected, duplicate, archived, deleted ou inéligibles
+  sont exclus.
+- La transition `advance_client_instagram_onboarding(..., 'complete')` recompte
+  directement en base et refuse 0, 14 et toute valeur inférieure à 15; 15
+  permet la finalisation.
+
+### 4.5 Terminé
+
+- Le serveur marque la session onboarding comme terminée, puis tente une
+  assignment physique idempotente seulement après le recomptage 15/15.
+- Si une capacité est réservée, le lien passe à `provisioning_status=login_pending`
+  et `login_status=pending_login`. Sans capacité, il reste honnêtement en
+  `pending_assignment` et sera réessayé par check-readiness.
+- La page confirme l'assignment seulement lorsqu'elle est prouvée. Elle
+  n'affirme jamais que le compte est connecté, actif ou prêt à exécuter des
+  actions.
+- Auto Login reste une action ultérieure déclenchée par un clic explicite ; la
+  finalisation ne crée aucun run et n'enqueue aucune connexion.
+- Le parcours est idempotent et reprenable; une reprise ne redemande pas au
+  serveur de relire des identifiants déjà transmis.
+
+### 4.6 Connecter (phase ultérieure, hors parcours ciblage)
 
 1. `POST .../connect` → `runReadinessNow` + `connectNowFromReadiness`  
 2. Peut queue login preflight worker  
 3. Réponse inclut `account` snapshot + `operationPending` si async  
 4. UI : **Préparation en cours** + polling borné + **Actualiser**
 
-### 4.3 Vérifier la préparation
+### 4.7 Vérifier la préparation
 
 1. `POST .../check-readiness` → `runReadinessNow` audience client  
 2. Met à jour perception connected/readiness  
 3. UI : **Compte connecté** ou **Préparation vérifiée** selon `onboarding_status`
 
-### 4.4 Credentials / action requise
+### 4.8 Credentials / action requise
 
 - Challenge 2FA, checkpoint, password → `login_status` action set  
 - UI : **Action requise** + **Connexion à vérifier**  
 - Reprise via reconnect / assistance admin (hors scope client copy)
 
-### 4.5 Login / provisioning worker
+### 4.9 Login / provisioning worker
 
 - Worker `instagram_login_provisioner_orchestrator.py` met à jour DB  
 - Client ne voit que phases client-safe ; refresh/polling rattrape les changements
 
-### 4.6 Readiness
+### 4.10 Readiness
 
 - `onboarding_status=ready` + login connected → **Préparation vérifiée**  
 - Source : readiness-now + champs link table
@@ -172,7 +223,7 @@ La couverture FBR est certifiée uniquement par
 
 | Action | Refresh |
 |--------|---------|
-| Add account | GET accounts immédiat après POST OK |
+| Add account | GET onboarding; session serveur persistée et reprenable |
 | Connect | GET accounts + snapshot dans réponse POST |
 | Check readiness | idem |
 | Async en cours | Poll 8s, max 12 tentatives (~96s), puis stop |
@@ -194,7 +245,13 @@ Pas de polling infini. Pas de succès UI avant confirmation backend.
 
 - [ ] Ops : client + auth user + abonnement actif  
 - [ ] Client login → empty state « Aucun compte Instagram ajouté »  
-- [ ] Add account → badge « Compte ajouté », pas de termes techniques  
+- [ ] Connexion → « Identifiants reçus », aucun Auto Login ni assignment
+- [ ] Analyse → uniquement données publiques réelles; champs absents = « Non détecté »
+- [ ] Ciblage → critères persistés et préremplissage recherche CT
+- [ ] Compteur CT refuse 0 et 14, accepte exactement 15 éligibles
+- [ ] Rechargement navigateur reprend l'étape sans doublon commercial
+- [ ] Terminé → assignment seulement après 15/15; login pending si assignment prouvée
+- [ ] Terminé → aucun Auto Login, aucune action Instagram, aucun run
 - [ ] Connect → « Préparation en cours », Actualiser fonctionne  
 - [ ] Worker login termine → refresh → « Compte connecté »  
 - [ ] Check readiness → « Préparation vérifiée » si onboarding ready  
@@ -209,24 +266,28 @@ Pas de polling infini. Pas de succès UI avant confirmation backend.
 
 | Erreur | Comportement client |
 |--------|---------------------|
-| Pas d’abonnement actif | POST add-account 403 |
+| Pas d'entitlement réservé | POST onboarding 403 |
 | Username invalide / pris | Message erreur générique |
-| Credentials API down | Add peut réussir ; connect/action required plus tard |
-| Assignment indisponible | « Préparation en cours » après connect ; pas d’exposition assignment |
+| Écriture Vault/credentials en échec | La sous-transaction métier est annulée; la session reste `failed_retryable` sans compte, ownership ni entitlement consommé |
+| Moins de 15 CT éligibles | Finalisation refusée avec le compteur serveur exact |
 | Worker timeout | Polling expire → Actualiser manuel |
 | RPC ownership fail | 403 sur actions compte |
 
 ---
 
-## 9. Fichiers Phase 1
+## 9. Fichiers du parcours ciblage
 
 - `lib/instagram-client/client-account-state.ts` — machine d’états client-safe  
 - `lib/instagram-client/load-client-instagram-accounts.ts` — loader partagé SSR/API  
 - `lib/instagram-client/client-account-refresh.ts` — snapshot post-action  
 - `lib/instagram-client/connect-account.ts` — retourne account complet  
-- `app/api/instagram-client/accounts/route.ts` — GET liste  
-- `app/instagram-client/ClientAccountsSection.tsx` — refresh + polling borné  
-- `lib/instagram-client/client-account-state.test.mjs` — tests états  
+- `app/api/instagram-client/onboarding/route.ts` — session et transitions serveur
+- `lib/instagram-client/client-account-onboarding.ts` — orchestration idempotente et projections sûres
+- `supabase/migrations/20260721120000_client_instagram_onboarding_sessions.sql` — session RLS + RPC finale 15 CT
+- `app/instagram-client/ClientInstagramOnboardingWizard.tsx` — cinq étapes client
+- `app/instagram-client/ClientAccountsSection.tsx` — ouverture et reprise du wizard
+- `lib/instagram-client/client-account-onboarding.test.mjs` — seuils, reprise et non-régression
+- `lib/instagram-client/client-account-onboarding-postgres.test.mjs` — concurrence réelle, rollback Vault, lease, expiration et finalisation atomique
 
 ---
 
