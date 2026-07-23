@@ -1,10 +1,11 @@
-import { safeExternalImageUrl } from "@/lib/instagram-dashboard/safe-external-url";
-import { lookupInstagramPublicProfile, normalizeInstagramPublicUsername } from "@/lib/instagram-public-profile-lookup";
+import { safeExternalImageUrl } from "../instagram-dashboard/safe-external-url.ts";
+import { lookupInstagramPublicProfile, normalizeInstagramPublicUsername } from "../instagram-public-profile-lookup.ts";
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const avatarUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
 const AVATAR_URL_CACHE_TTL_MS = 10 * 60 * 1000;
 const AVATAR_FETCH_TIMEOUT_MS = 8_000;
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
 const upstreamHeaders = {
   Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
@@ -13,10 +14,15 @@ const upstreamHeaders = {
 };
 
 export type TargetAvatarUpstreamResult = {
-  body: ReadableStream<Uint8Array> | null;
+  body: Uint8Array<ArrayBuffer> | null;
   contentType: string;
   resolvedAvatarUrl: string;
   refreshedFromProvider: boolean;
+};
+
+type TargetAvatarProxyDependencies = {
+  fetcher?: typeof fetch;
+  lookup?: typeof lookupInstagramPublicProfile;
 };
 
 function readCachedAvatarUrl(username: string) {
@@ -53,9 +59,37 @@ function isExpectedAvatarFetchFailure(error: unknown) {
     || message.includes("certificate");
 }
 
-async function fetchAvatarBytes(avatarUrl: string) {
+async function readBoundedImageBody(body: ReadableStream<Uint8Array> | null) {
+  if (!body) return null;
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
-    const upstream = await fetch(avatarUrl, {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > AVATAR_MAX_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+async function fetchAvatarBytes(avatarUrl: string, dependencies: TargetAvatarProxyDependencies = {}) {
+  try {
+    const upstream = await (dependencies.fetcher ?? fetch)(avatarUrl, {
       headers: upstreamHeaders,
       cache: "no-store",
       signal: AbortSignal.timeout(AVATAR_FETCH_TIMEOUT_MS),
@@ -64,9 +98,13 @@ async function fetchAvatarBytes(avatarUrl: string) {
 
     const contentType = upstream.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
     if (!allowedImageTypes.has(contentType)) return null;
+    const contentLength = Number(upstream.headers.get("content-length") ?? 0);
+    if (Number.isFinite(contentLength) && contentLength > AVATAR_MAX_BYTES) return null;
+    const body = await readBoundedImageBody(upstream.body);
+    if (!body) return null;
 
     return {
-      body: upstream.body,
+      body,
       contentType,
       resolvedAvatarUrl: avatarUrl,
     };
@@ -81,7 +119,7 @@ export async function resolveTargetAvatarUpstream(input: {
   username: string;
   storedAvatarUrl?: string | null;
   allowProviderRefresh?: boolean;
-}): Promise<TargetAvatarUpstreamResult | null> {
+}, dependencies: TargetAvatarProxyDependencies = {}): Promise<TargetAvatarUpstreamResult | null> {
   try {
     const username = normalizeInstagramPublicUsername(input.username);
     const candidates: string[] = [];
@@ -97,7 +135,7 @@ export async function resolveTargetAvatarUpstream(input: {
       && candidates.every((url) => !url.includes("scontent-"));
 
     if (shouldRefresh || candidates.length === 0) {
-      const lookup = await lookupInstagramPublicProfile(username);
+      const lookup = await (dependencies.lookup ?? lookupInstagramPublicProfile)(username);
       fresh = lookup.status === "found" ? safeExternalImageUrl(lookup.avatar_url ?? "") : null;
       if (fresh) {
         cacheResolvedAvatarUrl(username, fresh);
@@ -106,7 +144,7 @@ export async function resolveTargetAvatarUpstream(input: {
     }
 
     for (const avatarUrl of candidates) {
-      const fetched = await fetchAvatarBytes(avatarUrl);
+      const fetched = await fetchAvatarBytes(avatarUrl, dependencies);
       if (!fetched) continue;
       cacheResolvedAvatarUrl(username, avatarUrl);
       return {
@@ -116,11 +154,11 @@ export async function resolveTargetAvatarUpstream(input: {
     }
 
     if (fresh) return null;
-    if (!shouldRefresh && candidates.length > 0) {
-      const lookup = await lookupInstagramPublicProfile(username);
+    if (input.allowProviderRefresh !== false && !shouldRefresh && candidates.length > 0) {
+      const lookup = await (dependencies.lookup ?? lookupInstagramPublicProfile)(username);
       const retryFresh = lookup.status === "found" ? safeExternalImageUrl(lookup.avatar_url ?? "") : null;
       if (retryFresh && !candidates.includes(retryFresh)) {
-        const fetched = await fetchAvatarBytes(retryFresh);
+        const fetched = await fetchAvatarBytes(retryFresh, dependencies);
         if (fetched) {
           cacheResolvedAvatarUrl(username, retryFresh);
           return {
@@ -137,4 +175,7 @@ export async function resolveTargetAvatarUpstream(input: {
   }
 }
 
-export { allowedImageTypes as targetAvatarAllowedImageTypes };
+export {
+  AVATAR_MAX_BYTES as targetAvatarMaxBytes,
+  allowedImageTypes as targetAvatarAllowedImageTypes,
+};
