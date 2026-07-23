@@ -23,8 +23,11 @@ import {
   zonedLocalDateTimeToUtc,
 } from "@/lib/instagram-dashboard/business-timezone";
 import {
+  defaultConfiguredWarmupCaps,
+  mergeConfiguredWarmupCapFields,
   resolvePackageFollowPolicy,
   validateConfiguredFollowCaps,
+  validateConfiguredWarmupCaps,
   type PackageFollowPolicy,
 } from "@/lib/instagram-dashboard/follow-cap-policy";
 import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireRelayOrAdmin, type SupabaseRecord } from "../_utils";
@@ -737,7 +740,7 @@ async function withFollowRuntimeStatus(
   const day1 = readJsonNumber(preview, "day_1_follow_cap", 10);
   const day2 = readJsonNumber(preview, "day_2_follow_cap", 20);
   const day3 = readJsonNumber(preview, "day_3_follow_cap", 40);
-  const day4Plus = packageFollowCap;
+  const day4Plus = readJsonNumber(preview, "day_4_plus_follow_cap", packageFollowCap);
   const rawWarmupDay = readNumber(summary?.warmup_day, 0);
   const warmupDay = rawWarmupDay > 0 ? rawWarmupDay : null;
   const warmupCap = resolveWarmupFollowCap({
@@ -908,49 +911,50 @@ async function packageFollowPolicyForAccount(
 
 async function saveWarmupSettings(
   supabase: ReturnType<typeof createSupabaseClient>,
-  settings: SettingsPayload,
-  packagePolicy: PackageFollowPolicy,
+  accountId: string,
+  body: Partial<SettingsPayload>,
+  packagePolicy: PackageFollowPolicy | null,
 ) {
-  const packageCap = packagePolicy.maxDayCap;
-
-  const day1 = readNumber(settings.day_1_follow_cap, 10);
-  const day2 = readNumber(settings.day_2_follow_cap, 20);
-  const day3 = readNumber(settings.day_3_follow_cap, 40);
-  const day4 = packageCap;
-  if (!Number.isInteger(day1) || day1 < 1 || day1 > 10) return "Day 1 Follow warmup cap must be between 1 and 10.";
-  if (!Number.isInteger(day2) || day2 < 1 || day2 > 20) return "Day 2 Follow warmup cap must be between 1 and 20.";
-  if (!Number.isInteger(day3) || day3 < 1 || day3 > 40) return "Day 3 Follow warmup cap must be between 1 and 40.";
-  if (!Number.isInteger(day4) || day4 < 1 || day4 > packageCap) {
-    return `Day 4+ Follow warmup cap cannot exceed the package Follow cap (${packageCap}).`;
-  }
-
   const { data: existing } = await supabase
     .from("account_warmup_settings")
     .select("warmup_enabled,package_started_at,warmup_profile_code,day_1_follow_cap,day_2_follow_cap,day_3_follow_cap,day_4_plus_follow_cap,status")
-    .eq("account_id", settings.account_id)
+    .eq("account_id", accountId)
     .limit(1)
     .maybeSingle<SupabaseRecord>();
-  const status = "active";
+  if (!packagePolicy) {
+    return "Cannot save Follow warmup limits: the account has no active package Follow policy.";
+  }
+  const defaults = defaultConfiguredWarmupCaps(packagePolicy);
+  const merged = mergeConfiguredWarmupCapFields({ patch: body, existing, defaults });
+  const validation = validateConfiguredWarmupCaps({
+    ...merged,
+    packagePolicy,
+  });
+  if (!validation.ok) return validation.message;
+  const warmupEnabled = Object.prototype.hasOwnProperty.call(body, "warmup_enabled")
+    ? readBoolean(body.warmup_enabled, readBoolean(existing?.warmup_enabled, true))
+    : readBoolean(existing?.warmup_enabled, true);
+  const status = readString(existing?.status, "active") || "active";
   const newSummary = {
-    warmup_enabled: readBoolean(settings.warmup_enabled, true),
+    warmup_enabled: warmupEnabled,
     package_started_at: readString(existing?.package_started_at, ""),
-    warmup_profile_code: "follow_default_v1",
-    day_1_follow_cap: day1,
-    day_2_follow_cap: day2,
-    day_3_follow_cap: day3,
-    day_4_plus_follow_cap: day4,
+    warmup_profile_code: readString(existing?.warmup_profile_code, "follow_default_v1"),
+    day_1_follow_cap: validation.day1,
+    day_2_follow_cap: validation.day2,
+    day_3_follow_cap: validation.day3,
+    day_4_plus_follow_cap: validation.day4Plus,
     status,
   };
   const { error } = await supabase
     .from("account_warmup_settings")
     .upsert({
-      account_id: settings.account_id,
-      warmup_enabled: readBoolean(settings.warmup_enabled, true),
-      warmup_profile_code: "follow_default_v1",
-      day_1_follow_cap: day1,
-      day_2_follow_cap: day2,
-      day_3_follow_cap: day3,
-      day_4_plus_follow_cap: day4,
+      account_id: accountId,
+      warmup_enabled: warmupEnabled,
+      warmup_profile_code: newSummary.warmup_profile_code,
+      day_1_follow_cap: validation.day1,
+      day_2_follow_cap: validation.day2,
+      day_3_follow_cap: validation.day3,
+      day_4_plus_follow_cap: validation.day4Plus,
       status,
       updated_at: new Date().toISOString(),
     }, { onConflict: "account_id" });
@@ -959,7 +963,7 @@ async function saveWarmupSettings(
   const fieldsChanged = changedWarmupFields(oldSummary, newSummary);
   if (fieldsChanged.length) {
     await recordFollowWarmupAudit(supabase, {
-      accountId: settings.account_id,
+      accountId,
       fieldsChanged,
       oldSummary,
       newSummary,
@@ -1120,7 +1124,7 @@ async function saveSettings(request: Request) {
     settings.max_actions_per_day = followCapValidation.configuredDayCap;
     settings.follow_limit = followCapValidation.configuredSessionCap;
     if (includesWarmupWrite(body)) {
-      const warmupError = await saveWarmupSettings(supabase, settings, packagePolicy as PackageFollowPolicy);
+      const warmupError = await saveWarmupSettings(supabase, accountId, body, packagePolicy);
       if (warmupError) return jsonError(warmupError, 400);
     }
 
