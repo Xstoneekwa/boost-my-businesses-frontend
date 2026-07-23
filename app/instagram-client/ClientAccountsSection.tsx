@@ -37,6 +37,7 @@ export type ClientInstagramAccountView = {
 type Props = {
   lang: "fr" | "en";
   accounts: ClientInstagramAccountView[];
+  renderPanel?: boolean;
 };
 
 type ActionKind = "readiness" | "connect" | "refresh" | "cancel" | null;
@@ -93,7 +94,7 @@ function isTerminalProcessAccount(
   return false;
 }
 
-export default function ClientAccountsSection({ lang, accounts }: Props) {
+export default function ClientAccountsSection({ lang, accounts, renderPanel = true }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
   const [formOpen, setFormOpen] = useState(false);
@@ -687,7 +688,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
 
   return (
     <>
-      <section className="cd-card cd-accounts-panel">
+      {renderPanel ? <section className="cd-card cd-accounts-panel">
         <div className="cd-card-hd">
           <h3>{labelFor(lang, "Mes comptes Instagram", "My Instagram accounts")}</h3>
           <div className="cd-accounts-header-actions">
@@ -825,7 +826,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         )}
 
         {message ? <p className={`cd-accounts-message ${messageTone}`}>{message}</p> : null}
-      </section>
+      </section> : null}
 
       <ClientInstagramOnboardingWizard
         open={formOpen}

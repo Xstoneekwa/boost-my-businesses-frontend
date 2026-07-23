@@ -1191,9 +1191,11 @@ export default function ClientDashboard({
         {activeView === "overview" && (
           <div className="cd-view">
             <ClientAgencyModeBanner lang={lang} />
-            {!agencyModeActive ? (
-              <ClientAccountsSection lang={lang} accounts={hasLinkedInstagramAccount ? initialAccounts : []} />
-            ) : null}
+            <ClientAccountsSection
+              lang={lang}
+              accounts={hasLinkedInstagramAccount ? initialAccounts : []}
+              renderPanel={!agencyModeActive}
+            />
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
             ) : null}
