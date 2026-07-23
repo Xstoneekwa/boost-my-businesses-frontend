@@ -150,7 +150,8 @@ test("ready_to_connect dashboard card exposes durable UX labels", () => {
   assert.match(ui.subtext || "", /prêt à être connecté/i);
   assert.equal(ui.readinessLabel, "Préparation vérifiée");
   assert.equal(ui.readinessDisabled, true);
-  assert.equal(ui.showRecheckReadiness, true);
+  assert.equal(ui.showRecheckReadiness, false);
+  assert.equal(ui.connectLabel, "Vérifier et connecter");
   assert.equal(ui.connectDisabled, false);
   assert.equal(ui.connectPrimary, true);
 });

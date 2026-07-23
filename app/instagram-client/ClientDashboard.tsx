@@ -35,6 +35,7 @@ import {
   type FollowerChartPeriod,
   type FollowerChartView,
 } from "@/lib/instagram-client/client-follower-chart-projection";
+import { resolveClientConnectionActionPanel } from "@/lib/instagram-client/client-connection-action-scope";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -548,6 +549,11 @@ export default function ClientDashboard({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const t = T[lang];
+  const connectionActionPanel = resolveClientConnectionActionPanel({
+    accounts: initialAccounts,
+    agencyModeActive,
+    overviewScope,
+  });
   const linkedAccountsForAccountTab: ClientLinkedInstagramAccount[] = workspace?.linkedInstagramAccounts?.length
     ? workspace.linkedInstagramAccounts
     : initialAccounts.map((account) => ({
@@ -1193,8 +1199,10 @@ export default function ClientDashboard({
             <ClientAgencyModeBanner lang={lang} />
             <ClientAccountsSection
               lang={lang}
-              accounts={hasLinkedInstagramAccount ? initialAccounts : []}
-              renderPanel={!agencyModeActive}
+              accounts={hasLinkedInstagramAccount ? connectionActionPanel.accounts : []}
+              renderPanel={connectionActionPanel.visible}
+              allowAddAccount={!agencyModeActive}
+              accountScopeId={connectionActionPanel.accountScopeId}
             />
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>

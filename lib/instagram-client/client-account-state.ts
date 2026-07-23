@@ -351,9 +351,9 @@ export function resolveClientAccountState(
       readinessLabel: label(lang, "Préparation vérifiée", "Readiness verified"),
       readinessTone: "success",
       readinessDisabled: true,
-      showRecheckReadiness: true,
+      showRecheckReadiness: false,
       recheckReadinessLabel: label(lang, "Revérifier", "Check again"),
-      connectLabel: label(lang, "Connecter le compte", "Connect account"),
+      connectLabel: label(lang, "Vérifier et connecter", "Verify and connect"),
       connectTone: "primary",
       connectDisabled: false,
       connectPrimary: true,
@@ -374,7 +374,9 @@ export function resolveClientAccountState(
       : label(lang, "Vérifier la préparation", "Check readiness"),
     readinessTone: readinessChecked ? "warning" : "neutral",
     readinessDisabled: false,
-    connectLabel: label(lang, "Connecter le compte", "Connect account"),
+    connectLabel: normalize(input.assignmentStatus) === "assigned"
+      ? label(lang, "Vérifier et connecter", "Verify and connect")
+      : label(lang, "Affectation en cours", "Assignment in progress"),
     connectTone: "primary",
     connectDisabled: true,
     showRefresh: automaticPreparationInProgress,
