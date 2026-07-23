@@ -492,3 +492,19 @@ Secret-like names are mentioned only as redaction categories or field names.
 Reason: The dashboard still has many visible editable legacy fields whose values are saved in DB but not read by the runtime. Freezing prod defaults now would create false confidence and potential pricing/runtime divergence.
 
 **GO for next block:** a targeted **Settings API domain wiring plan** or a second cleanup that hides/makes read-only the remaining db-only fields before any prod defaults are frozen.
+
+## Follow domain addendum — 2026-07-23
+
+The Follow domain now separates configured values from effective values:
+
+| Concern | Canonical source | Write status |
+|---|---|---|
+| Account cap/day | `ig_account_settings.max_actions_per_day` | editable below package max |
+| Account cap/session | `ig_account_settings.follow_limit` | editable below package max |
+| Package defaults | `commercial_packages.default_follow_*` | package administration only |
+| Package maxima | `commercial_packages.max_follow_*` | package administration only |
+| Warmup day/cap | verified SAST activity projection | read-only |
+| Effective cap | backend/Worker minimum | read-only |
+
+This addendum certifies only Follow. The document's NO-GO for freezing every
+legacy domain remains unchanged.

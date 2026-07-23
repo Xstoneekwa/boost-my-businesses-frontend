@@ -245,3 +245,12 @@ Structures verified on main production before filename reconciliation:
 
 **Status:** authored in repo; apply on main production (`zgafnshkjywfltxgbtzg`) when ready. Do **not** apply on test DB `nxntngkhkoynljcagmkq`.
 
+## FOLLOW_WARMUP_ACTIVE_SAST_DAYS_V1 — pending controlled production apply
+
+| Local filename | Role |
+|---|---|
+| `20260723110000_follow_warmup_active_sast_days_v1.sql` | Add package Follow maxima, backfill from defaults, add constraints/index, and expose active-SAST-day warmup through the security-invoker package summary |
+
+**Status at docs commit:** code pushed; production history must still show this
+migration absent before the controlled apply. Application and post-apply grants,
+constraints and projection evidence belong to the rollout report.

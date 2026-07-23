@@ -114,3 +114,16 @@ Every future domain API must include:
 ## 8. No-Leak Confirmation
 
 This plan contains table names, field names, and architecture notes only. It does not include API keys, SearchApi keys, cron tokens, service role values, complete Authorization headers, cookies/sessions, passwords, full secret references, Vault UUIDs, provider responses, raw metadata, env secret values, or webhook URLs.
+
+## Implemented Follow slice — Active SAST Days V1
+
+The package/cap resolver and Follow write boundary are implemented by code
+checkpoint `9a472903d4d6d3202e1489347a42b06df425f244`:
+
+- package defaults and maxima are distinct;
+- configured caps are validated server-side;
+- temporary warmup fields are rejected from writes;
+- effective values remain a read-only projection;
+- missing Follow policy fails closed.
+
+Other domains in this plan remain at their previous status.

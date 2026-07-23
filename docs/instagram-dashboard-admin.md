@@ -1752,3 +1752,10 @@ Ne pas faire:
 - Username verification/avatar backend est pending.
 - BotApp/backend/client/admin sync est pending.
 
+## Settings Follow — configured versus effective
+
+Le dashboard admin doit afficher séparément les caps configurés persistés et les
+limites effectives du jour. `Refresh` ne remplace pas les champs configurés.
+`Save` envoie uniquement les valeurs configurées et le serveur refuse les
+entiers non positifs ou supérieurs aux maxima du package. Le warmup est dérivé
+des journées SAST avec Follow vérifié, jamais de l'âge du compte.

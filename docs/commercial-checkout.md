@@ -104,4 +104,12 @@ Parcours admin-only pour un tenant interne non facturable sur la DB prod (`zgafn
 
 ## Post-add-account (inchangé ce patch)
 
-Ajout CT → Check Readiness → Connect → compte prêt. Package/outreach appliqués via `account_commercial_packages` + addons depuis l’entitlement consommé.
+Ajout CT → Check Readiness → Connect → compte prêt. Package/outreach appliqués via `account_commercial_packages` + addons depuis l'entitlement consommé.
+
+## Matrice commerciale Follow
+
+La source commerciale canonique distingue désormais defaults et maxima Follow
+jour/session. Le checkout ou un changement de formule associe un package ; il
+ne doit pas écrire une limite effective de warmup. Les caps configurés du compte
+sont initialisés depuis les defaults et restent bornés par les maxima pendant
+toute évolution de formule.

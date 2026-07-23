@@ -23,3 +23,11 @@ Plan-change and initial-checkout harnesses live under `test-fixtures/`. They tar
 ## Postmark provider (TASK 6A)
 
 See [`docs/client-email-postmark.md`](../docs/client-email-postmark.md) for provider setup, webhook route, and Vercel secret names.
+
+## Follow Warmup — Active SAST Days V1
+
+Migration `20260723110000_follow_warmup_active_sast_days_v1.sql` is additive.
+It separates package defaults from maxima and recreates
+`account_package_summary` with `security_invoker = true`. Before application,
+compare local/remote history. After application, verify constraints, grants,
+view options and package rows; never infer success from CLI exit alone.

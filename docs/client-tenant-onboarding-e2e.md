@@ -221,3 +221,11 @@ Pas de polling infini. Pas de succès UI avant confirmation backend.
 ---
 
 *Dernière mise à jour : Phase 1 onboarding tenant — juin 2026.*
+
+## Addendum package Follow — 2026-07-23
+
+Lors de la création d'un compte, les caps Follow configurés sont initialisés
+depuis `default_follow_day_cap` et `default_follow_session_cap` du package lié.
+Ils peuvent ensuite être abaissés, mais jamais dépasser les maxima du package.
+Le warmup n'est pas persisté dans ces champs et l'onboarding ne consomme aucune
+journée active sans événement `follow_verified` réel.
