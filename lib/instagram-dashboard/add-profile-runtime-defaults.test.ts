@@ -57,6 +57,9 @@ test("applyAddProfileRuntimeDefaults writes domain rows without device ids or se
   });
 
   assert.equal(result.ok, true);
+  const settingsPayload = supabase.calls.find((call) => call.table === "ig_account_settings")?.payload as Record<string, unknown>;
+  assert.equal(settingsPayload.max_actions_per_day, preset.defaultFollowDayCap);
+  assert.equal(settingsPayload.follow_limit, preset.defaultFollowSessionCap);
   assert.deepEqual(supabase.calls.map((call) => call.table), [
     "ig_account_settings",
     "ig_account_follow_settings",

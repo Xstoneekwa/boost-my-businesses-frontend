@@ -114,6 +114,8 @@ export type AddProfilePackagePreset = {
   defaultUnfollowDayCap: number;
   defaultFollowSessionCap: number;
   defaultUnfollowSessionCap: number;
+  maxFollowDayCap: number;
+  maxFollowSessionCap: number;
   defaultWelcomeEnabled: boolean;
   defaultOutreachEnabled: boolean;
   defaultWelcomeDayCap: number | null;
@@ -151,6 +153,8 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
   | "defaultUnfollowDayCap"
   | "defaultFollowSessionCap"
   | "defaultUnfollowSessionCap"
+  | "maxFollowDayCap"
+  | "maxFollowSessionCap"
   | "defaultWelcomeEnabled"
   | "defaultOutreachEnabled"
   | "defaultWelcomeDayCap"
@@ -166,6 +170,8 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultUnfollowDayCap: 80,
     defaultFollowSessionCap: 80,
     defaultUnfollowSessionCap: 80,
+    maxFollowDayCap: 80,
+    maxFollowSessionCap: 80,
     defaultWelcomeEnabled: false,
     defaultOutreachEnabled: false,
     defaultWelcomeDayCap: null,
@@ -181,6 +187,8 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultUnfollowDayCap: 120,
     defaultFollowSessionCap: 120,
     defaultUnfollowSessionCap: 120,
+    maxFollowDayCap: 120,
+    maxFollowSessionCap: 120,
     defaultWelcomeEnabled: true,
     defaultOutreachEnabled: false,
     defaultWelcomeDayCap: 10,
@@ -196,6 +204,8 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultUnfollowDayCap: 120,
     defaultFollowSessionCap: 120,
     defaultUnfollowSessionCap: 120,
+    maxFollowDayCap: 120,
+    maxFollowSessionCap: 120,
     defaultWelcomeEnabled: true,
     defaultOutreachEnabled: false,
     defaultWelcomeDayCap: 10,
@@ -211,6 +221,8 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultUnfollowDayCap: 20,
     defaultFollowSessionCap: 20,
     defaultUnfollowSessionCap: 20,
+    maxFollowDayCap: 20,
+    maxFollowSessionCap: 20,
     defaultWelcomeEnabled: false,
     defaultOutreachEnabled: false,
     defaultWelcomeDayCap: null,

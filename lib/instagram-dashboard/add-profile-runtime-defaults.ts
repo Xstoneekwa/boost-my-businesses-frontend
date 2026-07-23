@@ -54,6 +54,8 @@ export async function applyAddProfileRuntimeDefaults(
         welcome_dm_enabled: input.preset.welcomeEnabled,
         cold_dm_enabled: input.preset.outreachEnabled,
         unfollow_enabled: input.preset.unfollowEnabled,
+        max_actions_per_day: input.preset.defaultFollowDayCap,
+        follow_limit: input.preset.defaultFollowSessionCap,
       })
       .eq("account_id", input.accountId),
     supabase

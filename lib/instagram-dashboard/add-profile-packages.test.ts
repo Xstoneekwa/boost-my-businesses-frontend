@@ -53,6 +53,8 @@ test("Pro preset enables Follow Unfollow Welcome with coherent caps but no Outre
   assert.equal(preset.outreachEnabled, false);
   assert.equal(preset.defaultFollowSessionCap, 120);
   assert.equal(preset.defaultFollowDayCap, 120);
+  assert.equal(preset.maxFollowSessionCap, 120);
+  assert.equal(preset.maxFollowDayCap, 120);
   assert.equal(preset.defaultUnfollowSessionCap, 120);
   assert.equal(preset.defaultUnfollowDayCap, 120);
   assert.equal(preset.defaultUnfollowSessionCap <= preset.defaultUnfollowDayCap, true);

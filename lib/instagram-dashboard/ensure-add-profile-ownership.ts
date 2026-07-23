@@ -71,6 +71,8 @@ async function ensureCommercialPackagePreset(
       default_unfollow_day_cap: preset.defaultUnfollowDayCap,
       default_follow_session_cap: preset.defaultFollowSessionCap,
       default_unfollow_session_cap: preset.defaultUnfollowSessionCap,
+      max_follow_day_cap: preset.maxFollowDayCap,
+      max_follow_session_cap: preset.maxFollowSessionCap,
       default_welcome_enabled: preset.defaultWelcomeEnabled,
       default_outreach_enabled: preset.defaultOutreachEnabled,
       default_welcome_day_cap: preset.defaultWelcomeDayCap,
