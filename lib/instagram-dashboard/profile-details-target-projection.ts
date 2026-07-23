@@ -2,6 +2,7 @@ import type { SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 import { safeInstagramPublicAvatarUrl } from "@/lib/instagram-public-profile-lookup";
 import { targetFbrBotAppLabel } from "@/lib/instagram-dashboard/target-fbr-metrics";
 import { safeTargetRow as projectSharedTargetRow } from "@/lib/instagram-dashboard/targets-service";
+import { resolveTargetAddedAt } from "@/lib/instagram-dashboard/target-added-date";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value;
@@ -27,6 +28,7 @@ export function projectProfileDetailsTargetRow(row: SupabaseRecord, job: Supabas
   const followsSentCount = metrics.follows_sent_count ?? metrics.followsSent ?? null;
   const fbrPercent = metrics.fbrPercent ?? metrics.followback_ratio ?? null;
   const followbackRatioDb = readStoredFollowbackRatio(row.followback_ratio);
+  const addedAt = resolveTargetAddedAt(row);
 
   return {
     id,
@@ -56,6 +58,8 @@ export function projectProfileDetailsTargetRow(row: SupabaseRecord, job: Supabas
     followsSentCount,
     fbrLabel: targetFbrBotAppLabel(fbrPercent, followsSentCount, fbrMetricsReliable),
     performance_status: metrics.performance_status ?? (readString(row.performance_status, "") || null),
+    created_at: addedAt,
+    added_at: addedAt,
     archived_at: readString(row.archived_at, "") || null,
     deleted_at: readString(row.deleted_at, "") || null,
     last_used_at: readString(row.last_used_at, "") || null,

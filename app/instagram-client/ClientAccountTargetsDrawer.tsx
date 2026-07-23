@@ -11,13 +11,17 @@ import {
   safeTargetExportRows,
   targetHealthLabel,
   targetMatchesListFilter,
-  targetPerformanceLabel,
   type TargetAccountItem,
   type TargetListFilter,
   type TargetSafeRow,
   type TargetsOverview,
 } from "@/app/instagram-dashboard/targets-data";
 import { targetFbrClientLabel } from "@/lib/instagram-dashboard/target-fbr-metrics";
+import {
+  clientTargetPerformanceHelp,
+  clientTargetPerformanceLabel,
+  formatClientTargetSent,
+} from "@/lib/instagram-client/client-target-display";
 import ClientAiTargetSearchWizard from "./ClientAiTargetSearchWizard";
 import {
   clientAiTargetingButtonLabel,
@@ -503,10 +507,10 @@ export default function ClientAccountTargetsDrawer({
                 const foll = fmtK(r.followersCount, lang);
                 const verTxt = r.verificationStatus === "found" ? td.found : td.notFound;
                 const fbr = targetFbrClientLabel(r.fbrPercent, r.followsSent, r.fbrMetricsReliable, lang);
-                const perfLabel = targetPerformanceLabel(r.performanceStatus);
-                const perfTxt = r.performanceStatus === "pending" || r.performanceStatus === "insufficient_data"
-                  ? td.perf.pending
-                  : perfLabel !== "—" ? perfLabel : null;
+                const perfTxt = clientTargetPerformanceLabel(r.performanceStatus, lang);
+                const perfHelp = r.performanceStatus === "pending" || r.performanceStatus === "insufficient_data"
+                  ? clientTargetPerformanceHelp(lang)
+                  : undefined;
                 const addedDisplay = formatAddedDate(r.createdAt, lang);
                 const srcDisplay = r.sourceLabel;
                 const isSelected = !!selected[r.id];
@@ -533,9 +537,9 @@ export default function ClientAccountTargetsDrawer({
                     <span className={`cd-dwr-ver${r.verificationStatus === "not_found" ? " cd-nf" : ""}`}>{verTxt}</span>
                     <span><span className={`cd-dwr-pill ${e.cls}`}>{targetHealthLabel(r.qualityStatus)}</span></span>
                     <span className="cd-dwr-num">{foll}</span>
-                    <span>{perfTxt ? <span className="cd-dwr-tag">{perfTxt}</span> : <span className="cd-dwr-dash">—</span>}</span>
+                    <span><span className="cd-dwr-tag" title={perfHelp}>{perfTxt}</span></span>
                     <span className="cd-dwr-num">{fbr}</span>
-                    <span className="cd-dwr-num">{r.followsSent ?? 0}</span>
+                    <span className="cd-dwr-num">{formatClientTargetSent(r.followsSent, lang)}</span>
                     <span><span className="cd-dwr-last">{r.lastUsedAt ? formatAddedDate(r.lastUsedAt, lang) : "—"}</span></span>
                     <span>
                       <span className="cd-dwr-added">{addedDisplay}</span>
