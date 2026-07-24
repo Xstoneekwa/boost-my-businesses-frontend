@@ -254,3 +254,16 @@ Structures verified on main production before filename reconciliation:
 **Status at docs commit:** code pushed; production history must still show this
 migration absent before the controlled apply. Application and post-apply grants,
 constraints and projection evidence belong to the rollout report.
+
+## TARGET_FOLLOWERS_PROGRESSIVE_RESUME_V2 — controlled production rollout
+
+| Local version | Filename | Role |
+|---|---|---|
+| `20260724215200` | `20260724215200_target_followers_progressive_resume_v2.sql` | Server-only checkpoint/event storage and five CAS/lease RPCs for passive Followers resume shadow |
+
+This migration is based on active Backend `b8892bc`; historical candidate
+`20260722100000` must not be applied. It creates no rows and performs no
+backfill. RLS is enabled, client roles have zero privileges, service role has
+read plus RPC execution only, and event rows are append-only. The authoritative
+production application version and post-apply row count are recorded from the
+Supabase migration registry in the rollout report.
