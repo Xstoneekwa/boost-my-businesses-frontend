@@ -1,46 +1,33 @@
 import { createSupabaseClient } from "@/lib/supabase";
-import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString, requireInstagramAdmin } from "../../_utils";
+import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString, requireRelayOrAdmin } from "../../_utils";
+import { verifyCompassRelayKey } from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
 type ReviewPayload = {
   action_id?: unknown;
   account_id?: unknown;
-  review_status?: unknown;
+  operator_id?: unknown;
   source?: unknown;
+  note?: unknown;
   metadata_safe?: unknown;
 };
 
-type SupabaseRecord = Record<string, unknown>;
-
-const reviewableStatuses = ["pending", "acknowledged", "pending_verification", "code_submitted"] as const;
-const allowedReviewStatuses = ["reviewed", "acknowledged"] as const;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const forbiddenMetadataTerms = [
-  "password",
-  "credential_value",
-  "secret",
-  "token",
-  "authorization",
-  ["service", "role"].join("_"),
-  "verification_code",
-  ["raw", "xml"].join("_"),
-  "xml",
-  "serial",
-  "udid",
-  "vault",
+  "password", "credential", "secret", "token", "authorization", "service_role",
+  "verification_code", "raw_xml", "xml", "serial", "udid", "vault", "webhook", "cookie",
 ];
 
 function safeMetadata(value: unknown): Record<string, string | number | boolean> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const safe: Record<string, string | number | boolean> = {};
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.toLowerCase();
-    if (forbiddenMetadataTerms.some((term) => normalizedKey.includes(term))) continue;
-
+    const loweredKey = key.toLowerCase();
+    if (forbiddenMetadataTerms.some((term) => loweredKey.includes(term))) continue;
     if (typeof raw === "string") {
       const trimmed = raw.trim();
-      const normalizedValue = trimmed.toLowerCase();
-      if (!trimmed || forbiddenMetadataTerms.some((term) => normalizedValue.includes(term))) continue;
+      if (!trimmed || forbiddenMetadataTerms.some((term) => trimmed.toLowerCase().includes(term))) continue;
       safe[key] = trimmed.slice(0, 240);
     } else if (typeof raw === "number" && Number.isFinite(raw)) {
       safe[key] = raw;
@@ -51,108 +38,60 @@ function safeMetadata(value: unknown): Record<string, string | number | boolean>
   return safe;
 }
 
-function asSafeSource(value: unknown) {
-  const source = readString(value, "admin_dashboard").trim().toLowerCase();
-  if (source === "botapp_relay") return "botapp_relay";
-  return "admin_dashboard";
-}
-
 export async function POST(request: Request) {
+  const unauthorized = await requireRelayOrAdmin(request, "Dashboard action review");
+  if (unauthorized) return unauthorized;
+
+  const payload = (await readJsonBody<ReviewPayload>(request)) ?? {};
+  const actionId = readString(payload.action_id).trim();
+  const accountId = readString(payload.account_id).trim();
+  const relayAuth = verifyCompassRelayKey(request.headers);
+  const adminContext = relayAuth.ok ? null : await getInstagramAdminUserContext();
+  const operatorId = relayAuth.ok ? readString(payload.operator_id).trim() : (adminContext?.userId ?? "");
+  const note = readString(payload.note).trim() || null;
+  if (!UUID.test(actionId) || !UUID.test(accountId) || !UUID.test(operatorId)) {
+    return jsonError("Invalid dashboard action review payload.", 400, { code: "DASHBOARD_ACTION_REVIEW_INVALID" });
+  }
+  if (note && note.length > 500) {
+    return jsonError("Review note is too long.", 400, { code: "DASHBOARD_ACTION_REVIEW_NOTE_TOO_LONG" });
+  }
+
   try {
-    const unauthorizedResponse = await requireInstagramAdmin();
-    if (unauthorizedResponse) return unauthorizedResponse;
-
-    const payload = (await readJsonBody<ReviewPayload>(request)) ?? {};
-    const actionId = readString(payload.action_id).trim();
-    const accountId = readString(payload.account_id).trim();
-    const reviewStatus = readString(payload.review_status, "reviewed").trim().toLowerCase();
-
-    if (!actionId || !accountId) return jsonError("Missing dashboard action review payload.", 400);
-    if (!allowedReviewStatuses.includes(reviewStatus as (typeof allowedReviewStatuses)[number])) {
-      return jsonError("Invalid review status.", 400);
-    }
-
     const supabase = createSupabaseClient();
-    const actorContext = await getInstagramAdminUserContext();
-    const now = new Date().toISOString();
-
-    const { data: existingAction, error: existingError } = await supabase
-      .from("account_dashboard_actions")
-      .select("id,account_id,action_type,status,metadata")
-      .eq("id", actionId)
-      .eq("account_id", accountId)
-      .limit(1)
-      .maybeSingle<SupabaseRecord>();
-
-    if (existingError) return jsonError(existingError.message, 500);
-    if (!existingAction) return jsonError("Dashboard action not found.", 404);
-
-    const currentStatus = readString(existingAction.status, "pending");
-    if (!reviewableStatuses.includes(currentStatus as (typeof reviewableStatuses)[number])) {
-      return jsonError("Dashboard action is not reviewable.", 409);
-    }
-
-    const previousMetadata = existingAction.metadata && typeof existingAction.metadata === "object" && !Array.isArray(existingAction.metadata)
-      ? existingAction.metadata as SupabaseRecord
-      : {};
-    const source = asSafeSource(payload.source);
-    const metadata = {
-      ...previousMetadata,
-      ...safeMetadata(payload.metadata_safe),
-      review_status: reviewStatus,
-      reviewed_by: actorContext?.userId ?? "unknown",
-      reviewed_at: now,
-      review_source: source,
-      keep_action_active_until_readiness_ok: true,
-    };
-
-    const { data: reviewedAction, error: updateError } = await supabase
-      .from("account_dashboard_actions")
-      .update({
-        status: "acknowledged",
-        metadata,
-        updated_at: now,
-      })
-      .eq("id", actionId)
-      .eq("account_id", accountId)
-      .in("status", [...reviewableStatuses])
-      .select("id,account_id,action_type,status,updated_at")
-      .maybeSingle<SupabaseRecord>();
-
-    if (updateError) return jsonError(updateError.message, 500);
-    if (!reviewedAction) return jsonError("Dashboard action is no longer reviewable.", 409);
-
-    try {
-      await supabase.from("ig_action_logs").insert({
-        account_id: accountId,
-        run_id: null,
-        target_username: null,
-        action_type: "dashboard_action_reviewed",
-        status: "success",
-        message: "credentials_action_reviewed",
-        payload: {
-          actor_type: "admin",
-          actor_id: actorContext?.userId ?? null,
-          source,
-          dashboard_action_id: actionId,
-          dashboard_action_type: readString(existingAction.action_type, "unknown"),
-          review_status: reviewStatus,
-        },
-        created_at: now,
-      });
-    } catch {
-      // The dashboard action update is authoritative; audit can be reconciled later.
-    }
-
-    return jsonOk({
-      action_id: actionId,
-      account_id: accountId,
-      status: readString(reviewedAction.status, "acknowledged"),
-      review_status: reviewStatus,
-      reviewed_at: now,
+    const source = relayAuth.ok ? "botapp_relay" : "admin_dashboard";
+    const { data, error } = await supabase.rpc("review_operator_dashboard_action", {
+      p_action_id: actionId,
+      p_account_id: accountId,
+      p_actor_id: operatorId,
+      p_source: source,
+      p_note: note,
+      p_metadata: {
+        ...safeMetadata(payload.metadata_safe),
+        review_surface: "incident_detail_v1",
+        operator_review_completed: true,
+      },
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not review dashboard action.";
-    return jsonError(message, 500);
+    if (error) {
+      const normalized = `${error.code || ""}:${error.message}`.toLowerCase();
+      if (normalized.includes("not_found") || error.code === "P0002") {
+        return jsonError("Dashboard action not found.", 404, { code: "DASHBOARD_ACTION_NOT_FOUND" });
+      }
+      if (normalized.includes("not_reviewable") || normalized.includes("transition")) {
+        return jsonError("Dashboard action is no longer reviewable.", 409, { code: "DASHBOARD_ACTION_REVIEW_CONFLICT" });
+      }
+      return jsonError("Could not review dashboard action.", 500, { code: "DASHBOARD_ACTION_REVIEW_FAILED" });
+    }
+
+    const row = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
+    return jsonOk({
+      contractVersion: "dashboard_action_review_v1",
+      actionId,
+      accountId,
+      status: readString(row.status, "resolved"),
+      reviewedAt: readString(row.updated_at, new Date().toISOString()),
+      source,
+    });
+  } catch {
+    return jsonError("Could not review dashboard action.", 500, { code: "DASHBOARD_ACTION_REVIEW_FAILED" });
   }
 }

@@ -12,9 +12,19 @@ valid relay credential or an authenticated admin, calls
 and returns `incidents_overview_v2`.
 
 The source of truth is `account_incidents`. Human work is stored in
-`account_dashboard_actions`; Slack/Discord delivery evidence is stored in
+`account_dashboard_actions` and the append-only
+`account_incident_review_events`; Slack/Discord delivery evidence is stored in
 `account_incident_notifications`. The string `incidents_overview` is the
 BotApp endpoint identifier, not the name of the production RPC.
+
+Overview and detail are separate versioned contracts. Overview remains
+`incidents_overview_v2`. A selected incident is loaded by authenticated
+`GET /api/instagram-dashboard/incidents/:incidentId` and returns
+`incident_detail_v1`. The detail loader uses explicit columns and safe
+references; a missing run, request, action, assignment, archived account or
+partial delivery history renders as an unavailable field rather than making
+the whole detail fail. Metadata goes through the incident redactor before it
+crosses the route.
 
 ## Read contract
 
@@ -42,14 +52,23 @@ Only active action statuses (`pending`, `acknowledged`,
 Resolved, dismissed, or ignored actions cannot block Profiles.
 
 Resolving an incident does not infer a later success. The canonical transition
-must be explicit and audited. `sync_account_incident_dashboard_action` closes a
-supported linked action when the incident is resolved/ignored. Historical
+must be explicit and audited. `transition_account_incident_human_review_v1`
+supports acknowledge, note, resolve, and retry of one failed notification.
+`acknowledged` is the existing schema's investigating/accepted state; no new
+`investigating` status is invented. Reopen is not supported by this lifecycle.
+Every transition has an idempotency key, expected lifecycle version, actor,
+source, timestamp, and review event. Resolution requires a reason and closes
+active linked dashboard actions in the same database transaction. Historical
 open incidents whose action is already resolved are visible under All, but are
 not blockers; they require object-by-object evidence before incident closure.
 
-Notification delivery keys are unique. A sent key is not sent twice. A failed
-key can be attempted again when the delivery function is explicitly invoked;
-there is no independent automatic retry queue in this checkpoint.
+Acknowledgment and notes do not notify, avoiding review spam. A resolution
+prepares one unique event-scoped delivery key per enabled/configured channel.
+The database commits before provider delivery, so a Slack success and Discord
+failure never undo the resolution. Each channel retains its own sent/failed,
+attempt, timestamp and safe error state. Only the failed channel may be retried
+explicitly, with a maximum of three attempts. A reload or idempotent action
+cannot create or resend a duplicate delivery.
 
 ## Retention policy
 
@@ -87,6 +106,31 @@ state, and policy version. `pg_cron` invokes it daily at 03:17 UTC.
 6. `502` with `INCIDENTS_PAYLOAD_INVALID`: compare route/RPC contract versions.
 7. HTTP 200 with `incidents: []`: this is a normal empty state, not an outage.
 8. Confirm `anon` and `authenticated` cannot execute either incident RPC.
+
+## Runbook: incident detail unavailable
+
+1. Capture the requested incident UUID and `GET` path without copying relay
+   credentials.
+2. `404` with `x-matched-path: /404` means the dynamic detail route is absent
+   from the deployed backend; it is not a parser failure.
+3. `400` means the UUID failed strict validation; `401` means relay/admin auth
+   is missing; `403` means the authenticated caller is not allowed; `404` with
+   `INCIDENT_NOT_FOUND` means the object is absent.
+4. `503 INCIDENT_DETAIL_STORAGE_MISSING` means the review migration was not
+   applied; `500 INCIDENT_DETAIL_QUERY_FAILED` is a server-side query failure.
+5. A successful response must declare `incident_detail_v1`. BotApp reports a
+   distinct contract error for unsupported/malformed payloads.
+6. Closing or switching the drawer cancels/invalidates the old request. Retry
+   detail is read-only. Do not use an incident action to test availability.
+
+## Operator resolution procedure
+
+Load detail, verify current reason plus linked run/request and later evidence,
+then add a note or acknowledge if investigation is still in progress. Resolve
+only with an explicit proof-backed reason. The result is reread from the
+backend. Slack and Discord are inspected separately; retry only a failed
+channel. Never treat a provider delivery as proof that the incident itself is
+resolved, and never close historical incidents in bulk.
 
 ## Obsolete blocker procedure
 
