@@ -14,7 +14,9 @@ type Props = {
   projection: ClientProcessProjection | null;
   connectProgress?: ClientConnectProgressSnapshot | null;
   refreshing?: boolean;
+  confirming?: boolean;
   onRefresh?: () => void;
+  onConfirmConnect?: () => void;
   onClose: () => void;
   onOpenVerification?: () => void;
 };
@@ -37,7 +39,9 @@ export default function ClientAccountProcessModal({
   projection,
   connectProgress = null,
   refreshing = false,
+  confirming = false,
   onRefresh,
+  onConfirmConnect,
   onClose,
   onOpenVerification,
 }: Props) {
@@ -130,6 +134,13 @@ export default function ClientAccountProcessModal({
         ) : null}
 
         <div className="cd-connect-actions">
+          {projection.outcome === "success" && onConfirmConnect ? (
+            <button type="button" className="cd-btn cd-btn-primary" disabled={confirming} onClick={onConfirmConnect}>
+              {confirming
+                ? labelFor(lang, "Connexion…", "Connecting…")
+                : labelFor(lang, "Connecter maintenant", "Connect now")}
+            </button>
+          ) : null}
           {connectProgress?.connect_status === "verification_required" && onOpenVerification ? (
             <button type="button" className="cd-btn cd-btn-primary" onClick={onOpenVerification}>
               {labelFor(lang, "Saisir le code", "Enter code")}

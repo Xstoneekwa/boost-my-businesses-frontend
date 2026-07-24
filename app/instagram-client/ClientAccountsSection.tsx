@@ -36,6 +36,9 @@ export type ClientInstagramAccountView = {
 type Props = {
   lang: "fr" | "en";
   accounts: ClientInstagramAccountView[];
+  renderPanel?: boolean;
+  allowAddAccount?: boolean;
+  accountScopeId?: string | null;
 };
 
 type ActionKind = "readiness" | "connect" | "create" | "refresh" | "cancel" | null;
@@ -92,7 +95,13 @@ function isTerminalProcessAccount(
   return false;
 }
 
-export default function ClientAccountsSection({ lang, accounts }: Props) {
+export default function ClientAccountsSection({
+  lang,
+  accounts,
+  renderPanel = true,
+  allowAddAccount = true,
+  accountScopeId = null,
+}: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
   const [formOpen, setFormOpen] = useState(false);
@@ -113,6 +122,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
   const pollAttemptsRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
   const connectHydratedRef = useRef(false);
+  const connectSubmissionRef = useRef(false);
 
   useEffect(() => {
     setItems(accounts);
@@ -172,10 +182,13 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     if (!response.ok || payload.ok === false || !Array.isArray(payload.data?.accounts)) {
       throw new Error(payload.error || labelFor(lang, "Impossible d'actualiser les comptes.", "Could not refresh accounts."));
     }
-    setItems(payload.data.accounts);
+    const scopedAccounts = accountScopeId
+      ? payload.data.accounts.filter((account) => account.accountId === accountScopeId)
+      : payload.data.accounts;
+    setItems(scopedAccounts);
     router.refresh();
-    return payload.data.accounts;
-  }, [lang, router]);
+    return scopedAccounts;
+  }, [accountScopeId, lang, router]);
 
   async function confirmCancelRestart() {
     if (!cancelConfirmAccount) return;
@@ -567,19 +580,15 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
     }
   }
 
-  async function runConnectProcess(account: ClientInstagramAccountView, mode: "connect" | "check_readiness") {
-    if (actionBusy || processModal) return;
-
-    if (mode === "connect") {
-      const confirmed = window.confirm(
-        labelFor(
-          lang,
-          "Vous allez lancer la connexion Instagram sur le téléphone déjà préparé pour votre compte. Cette étape démarre la connexion réelle. Continuer ?",
-          "You are about to start the real Instagram connection on the phone already prepared for your account. Continue?",
-        ),
-      );
-      if (!confirmed) return;
-    }
+  async function runConnectProcess(
+    account: ClientInstagramAccountView,
+    mode: "connect" | "check_readiness",
+    options: { confirmed?: boolean; replaceProcessModal?: boolean } = {},
+  ) {
+    if (actionBusy || (processModal && !options.replaceProcessModal)) return;
+    if (mode === "connect" && !options.confirmed) return;
+    if (mode === "connect" && connectSubmissionRef.current) return;
+    if (mode === "connect") connectSubmissionRef.current = true;
 
     setActionKind(mode === "connect" ? "connect" : "readiness");
     setActionAccountId(account.accountId);
@@ -716,9 +725,24 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         errorMessage: labelFor(lang, "La connexion n'a pas pu être lancée pour le moment.", "Connection could not be started right now."),
       } : current);
     } finally {
+      if (mode === "connect") connectSubmissionRef.current = false;
       setActionKind(null);
       setActionAccountId(null);
     }
+  }
+
+  function confirmVerifiedConnection() {
+    const account = processModal?.account;
+    if (
+      processModal?.mode !== "check_readiness"
+      || account?.clientReadinessStatus !== "ready_to_connect"
+    ) {
+      return;
+    }
+    void runConnectProcess(account, "connect", {
+      confirmed: true,
+      replaceProcessModal: true,
+    });
   }
 
   const showGlobalRefresh = useMemo(
@@ -728,7 +752,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
 
   return (
     <>
-      <section className="cd-card cd-accounts-panel">
+      {renderPanel ? <section className="cd-card cd-accounts-panel">
         <div className="cd-card-hd">
           <h3>{labelFor(lang, "Mes comptes Instagram", "My Instagram accounts")}</h3>
           <div className="cd-accounts-header-actions">
@@ -744,7 +768,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                   : labelFor(lang, "Actualiser", "Refresh")}
               </button>
             ) : null}
-            {!isEmpty ? (
+            {!isEmpty && allowAddAccount ? (
               <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
                 {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
               </button>
@@ -755,9 +779,11 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         {isEmpty ? (
           <div className="cd-accounts-empty">
             <p>{labelFor(lang, "Aucun compte Instagram ajouté.", "No Instagram account added yet.")}</p>
-            <button type="button" className="cd-btn cd-btn-primary" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
-              {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
-            </button>
+            {allowAddAccount ? (
+              <button type="button" className="cd-btn cd-btn-primary" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
+                {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
+              </button>
+            ) : null}
           </div>
         ) : (
           <div className="cd-accounts-list">
@@ -805,7 +831,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                         type="button"
                         className={`cd-btn cd-btn-primary cd-account-state cd-account-state-${ui.connectTone}`}
                         disabled={busy || ui.connectDisabled || Boolean(processModal)}
-                        onClick={() => void runConnectProcess(account, "connect")}
+                        onClick={() => void runConnectProcess(account, "check_readiness")}
                       >
                         {busy && actionKind === "connect"
                           ? labelFor(lang, "Connexion…", "Connecting…")
@@ -839,7 +865,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                         type="button"
                         className={`cd-btn cd-account-state cd-account-state-${ui.connectTone}`}
                         disabled={busy || ui.connectDisabled || Boolean(processModal)}
-                        onClick={() => void runConnectProcess(account, "connect")}
+                        onClick={() => void runConnectProcess(account, "check_readiness")}
                       >
                         {busy && actionKind === "connect"
                           ? labelFor(lang, "Connexion…", "Connecting…")
@@ -866,7 +892,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         )}
 
         {message ? <p className={`cd-accounts-message ${messageTone}`}>{message}</p> : null}
-      </section>
+      </section> : null}
 
       {formOpen ? (
         <div className="cd-progress-overlay" role="presentation" onMouseDown={() => !actionBusy && setFormOpen(false)}>
@@ -949,7 +975,14 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         projection={processProjection}
         connectProgress={processModal?.mode === "connect" ? processModal.connectProgress ?? null : null}
         refreshing={processRefreshing}
+        confirming={actionKind === "connect"}
         onRefresh={() => void handleProcessRefresh()}
+        onConfirmConnect={
+          processModal?.mode === "check_readiness"
+          && processModal.account?.clientReadinessStatus === "ready_to_connect"
+            ? confirmVerifiedConnection
+            : undefined
+        }
         onClose={closeProcessModal}
         onOpenVerification={() => setVerificationDismissed(false)}
       />
