@@ -117,7 +117,7 @@ export function readLoginPreflightCronEnv(env: Record<string, string | undefined
   return {
     enabled: readEnvBoolean(env.INSTAGRAM_LOGIN_PREFLIGHT_CRON_ENABLED, false),
     dryRun: readEnvBoolean(env.INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN, true),
-    configuredToken: env.INSTAGRAM_LOGIN_PREFLIGHT_CRON_TOKEN?.trim() || null,
+    configuredToken: env.CRON_SECRET?.trim() || null,
     workerId: safeWorkerId(env.INSTAGRAM_LOGIN_PREFLIGHT_CRON_WORKER_ID),
     limit: readEnvInteger(env.INSTAGRAM_LOGIN_PREFLIGHT_CRON_LIMIT, 10, 1, 50),
     t10WindowMinutes: readEnvInteger(env.INSTAGRAM_LOGIN_PREFLIGHT_T10_WINDOW_MINUTES, 10, 6, 20),

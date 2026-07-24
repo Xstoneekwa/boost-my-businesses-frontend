@@ -8,7 +8,7 @@ import {
 } from "./login-preflight-cron.ts";
 
 const baseEnv = {
-  INSTAGRAM_LOGIN_PREFLIGHT_CRON_TOKEN: "cron-token",
+  CRON_SECRET: "cron-token",
   INSTAGRAM_LOGIN_PREFLIGHT_CRON_ENABLED: "true",
   INSTAGRAM_LOGIN_PREFLIGHT_CRON_DRY_RUN: "true",
   INSTAGRAM_LOGIN_PREFLIGHT_CRON_LIMIT: "5",
@@ -74,10 +74,13 @@ function makeSupabase(overrides: {
   activeRuns?: Array<Record<string, unknown>>;
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const fromCalls: string[] = [];
   return {
     rpcCalls,
+    fromCalls,
     client: {
       from(table: string) {
+        fromCalls.push(table);
         if (table === "account_assignments") {
           return makeQueryResult(overrides.assignments ?? defaultAssignments);
         }
@@ -115,15 +118,80 @@ test("extractLoginPreflightCronToken reads bearer and custom header", () => {
   );
 });
 
+test("extractLoginPreflightCronToken preserves custom header priority", () => {
+  assert.equal(
+    extractLoginPreflightCronToken(makeRequest({
+      Authorization: "Bearer bearer-token",
+      "x-instagram-login-preflight-cron-token": "header-token",
+    })),
+    "header-token",
+  );
+});
+
 test("runLoginPreflightCron blocks missing configured token", async () => {
   const supabase = makeSupabase();
   const run = await runLoginPreflightCron(supabase.client as never, {
-    env: {},
+    env: { INSTAGRAM_LOGIN_PREFLIGHT_CRON_TOKEN: "legacy-token" },
     callerToken: "anything",
   });
 
   assert.equal(run.status, 503);
   assert.equal(run.result.reason, "cron_token_not_configured");
+  assert.equal(supabase.fromCalls.length, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron blocks missing caller token before business access", async () => {
+  const supabase = makeSupabase();
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: baseEnv,
+  });
+
+  assert.equal(run.status, 401);
+  assert.equal(run.result.reason, "missing_caller_token");
+  assert.equal(supabase.fromCalls.length, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron blocks invalid caller token before business access", async () => {
+  const supabase = makeSupabase();
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: baseEnv,
+    callerToken: "wrong-token",
+  });
+
+  assert.equal(run.status, 403);
+  assert.equal(run.result.reason, "invalid_caller_token");
+  assert.equal(supabase.fromCalls.length, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron accepts bearer token equal to CRON_SECRET", async () => {
+  const supabase = makeSupabase();
+  const request = makeRequest({ Authorization: "Bearer cron-token" });
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_ENABLED: "false" },
+    callerToken: extractLoginPreflightCronToken(request),
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.reason, "cron_disabled");
+  assert.equal(supabase.fromCalls.length, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
+test("runLoginPreflightCron accepts custom header token equal to CRON_SECRET", async () => {
+  const supabase = makeSupabase();
+  const request = makeRequest({ "x-instagram-login-preflight-cron-token": "cron-token" });
+  const run = await runLoginPreflightCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_LOGIN_PREFLIGHT_CRON_ENABLED: "false" },
+    callerToken: extractLoginPreflightCronToken(request),
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.reason, "cron_disabled");
+  assert.equal(supabase.fromCalls.length, 0);
+  assert.equal(supabase.rpcCalls.length, 0);
 });
 
 test("runLoginPreflightCron skips when disabled", async () => {
@@ -136,6 +204,7 @@ test("runLoginPreflightCron skips when disabled", async () => {
   assert.equal(run.status, 200);
   assert.equal(run.result.skipped, true);
   assert.equal(run.result.reason, "cron_disabled");
+  assert.equal(supabase.fromCalls.length, 0);
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
