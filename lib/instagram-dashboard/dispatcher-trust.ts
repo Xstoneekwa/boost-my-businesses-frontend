@@ -81,18 +81,19 @@ export function phoneDeviceAuthorizedForDispatcher(
   }
 
   const deviceHost = readString(phoneDevice.host_machine).toLowerCase();
-  if (!deviceHost || deviceHost !== normalizedDispatcherHost) {
+  if (!deviceHost) {
     return false;
   }
 
   const heartbeatHost = readString(heartbeatHostMachine).toLowerCase();
-  if (heartbeatHost && heartbeatHost !== normalizedDispatcherHost) {
+  const authoritativeHost = heartbeatHost || normalizedDispatcherHost;
+  if (deviceHost !== authoritativeHost) {
     return false;
   }
 
   const metadata = readRecord(phoneDevice.metadata);
   const metadataHost = readString(metadata.dispatcher_host).toLowerCase();
-  if (metadataHost && metadataHost !== normalizedDispatcherHost) {
+  if (metadataHost && metadataHost !== authoritativeHost) {
     return false;
   }
 

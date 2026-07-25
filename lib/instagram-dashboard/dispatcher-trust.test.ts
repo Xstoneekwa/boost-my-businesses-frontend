@@ -238,6 +238,49 @@ test("authenticated manual path resolves fresh dispatcher from phone_devices hos
   assert.ok(result.verifiedAt);
 });
 
+test("dispatcher worker alias is authorized by its fresh heartbeat host", async () => {
+  const supabase = makeSupabase({
+    heartbeat: freshHeartbeat({
+      worker_id: "run-dispatcher:mac-admin-01",
+      host_machine: "Ekwas-MacBook-Pro-M1-Pro.local",
+    }),
+    phoneDevices: [{
+      id: "phone-1",
+      host_machine: "Ekwas-MacBook-Pro-M1-Pro.local",
+      status: "active",
+      metadata: {},
+    }],
+  });
+  const result = await assertTrustedDispatcherIdentity(
+    supabase as never,
+    "run-dispatcher:mac-admin-01",
+    { deviceIds: ["phone-1"] },
+  );
+  assert.equal(result.ok, true);
+});
+
+test("dispatcher worker alias still rejects a phone outside its heartbeat host", async () => {
+  const supabase = makeSupabase({
+    heartbeat: freshHeartbeat({
+      worker_id: "run-dispatcher:mac-admin-01",
+      host_machine: "Ekwas-MacBook-Pro-M1-Pro.local",
+    }),
+    phoneDevices: [{
+      id: "phone-1",
+      host_machine: "other-host.local",
+      status: "active",
+      metadata: {},
+    }],
+  });
+  const result = await assertTrustedDispatcherIdentity(
+    supabase as never,
+    "run-dispatcher:mac-admin-01",
+    { deviceIds: ["phone-1"] },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, DISPATCHER_TRUST_FAILURE);
+});
+
 test("authenticated manual path rejects when no fresh dispatcher exists", async () => {
   const supabase = makeSupabase({
     heartbeat: null,
