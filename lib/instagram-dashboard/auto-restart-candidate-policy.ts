@@ -1,0 +1,194 @@
+export type SafeRestartStrategy =
+  | "exact_checkpoint_resume"
+  | "next_target"
+  | "same_target_from_top_with_dedup"
+  | "rebuilt_safe_target_plan"
+  | "none";
+
+export type SafeBoundaryTarget = {
+  id: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
+export type RestartNeedInput = {
+  lastRunId: string;
+  sessionTerminationClass: string;
+  restartAllowed: boolean | null;
+  restartBlockReason: string;
+  totalRemainingQuota: number;
+};
+
+export type SafeRestartStrategyInput = {
+  restartNeeded: boolean;
+  followRemaining: number;
+  exactViewportResumeAvailable: boolean;
+  priorTargetId: string | null;
+  eligibleTargets: SafeBoundaryTarget[];
+  workerPlanExplicitlySafe: boolean;
+};
+
+const HISTORICAL_SAFE_BOUNDARY_FALLBACK_REASONS = new Set([
+  "resume_plan_missing",
+  "unsafe_follow_resume_checkpoint",
+]);
+
+function normalized(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function isPartialResumeClass(value: string) {
+  return ["partial_resumable", "partial_safe_stopped"].includes(normalized(value));
+}
+
+export function resolveAccountRestartEligibility(blockingReasons: string[]) {
+  const reasons = blockingReasons.map((reason) => reason.trim()).filter(Boolean);
+  return {
+    eligible: reasons.length === 0,
+    reason: reasons[0] || "eligible",
+  } as const;
+}
+
+/**
+ * Separates the business fact "a partial session still needs work" from the
+ * lower-level cursor evidence used to choose where the next run starts.
+ * Legacy runs missing a newly introduced viewport checkpoint remain resumable
+ * only through a safe business boundary, never through an invented cursor.
+ */
+export function resolveRestartNeed(input: RestartNeedInput) {
+  if (!input.lastRunId) {
+    return {
+      needed: false,
+      reason: "no_partial_run_to_resume",
+      historicalSafeBoundaryFallback: false,
+    } as const;
+  }
+
+  if (input.totalRemainingQuota <= 0) {
+    return {
+      needed: false,
+      reason: "quota_exhausted",
+      historicalSafeBoundaryFallback: false,
+    } as const;
+  }
+
+  const partial = isPartialResumeClass(input.sessionTerminationClass);
+  const blockReason = normalized(input.restartBlockReason);
+  const historicalSafeBoundaryFallback = partial
+    && HISTORICAL_SAFE_BOUNDARY_FALLBACK_REASONS.has(blockReason);
+
+  if (partial && (input.restartAllowed === true || historicalSafeBoundaryFallback)) {
+    return {
+      needed: true,
+      reason: historicalSafeBoundaryFallback
+        ? "historical_partial_run_requires_safe_boundary"
+        : "partial_run_resume_needed",
+      historicalSafeBoundaryFallback,
+    } as const;
+  }
+
+  if (blockReason === "run_in_progress") {
+    return {
+      needed: false,
+      reason: "run_in_progress",
+      historicalSafeBoundaryFallback: false,
+    } as const;
+  }
+
+  if (["session_completed", "restart_not_needed", "restart_not_allowed_for_termination_class"].includes(blockReason)) {
+    return {
+      needed: false,
+      reason: "no_partial_run_to_resume",
+      historicalSafeBoundaryFallback: false,
+    } as const;
+  }
+
+  return {
+    needed: false,
+    reason: blockReason || "no_partial_run_to_resume",
+    historicalSafeBoundaryFallback: false,
+  } as const;
+}
+
+/** Mirrors the Worker source planner: unused CT first, then oldest use. */
+export function sortSafeBoundaryTargets(targets: SafeBoundaryTarget[]) {
+  return [...targets].sort((left, right) => {
+    const leftUsed = left.lastUsedAt ? 1 : 0;
+    const rightUsed = right.lastUsedAt ? 1 : 0;
+    if (leftUsed !== rightUsed) return leftUsed - rightUsed;
+    const usedOrder = String(left.lastUsedAt || "").localeCompare(String(right.lastUsedAt || ""));
+    if (usedOrder) return usedOrder;
+    const createdOrder = left.createdAt.localeCompare(right.createdAt);
+    return createdOrder || left.id.localeCompare(right.id);
+  });
+}
+
+export function resolveSafeRestartStrategy(input: SafeRestartStrategyInput) {
+  if (!input.restartNeeded) {
+    return {
+      strategy: "none" as SafeRestartStrategy,
+      reason: "no_partial_run_to_resume",
+      nextTargetId: null,
+    };
+  }
+
+  if (input.followRemaining <= 0 && input.workerPlanExplicitlySafe) {
+    return {
+      strategy: "exact_checkpoint_resume" as SafeRestartStrategy,
+      reason: "non_follow_phase_resume_plan",
+      nextTargetId: null,
+    };
+  }
+
+  if (input.exactViewportResumeAvailable) {
+    return {
+      strategy: "exact_checkpoint_resume" as SafeRestartStrategy,
+      reason: "certified_exact_checkpoint",
+      nextTargetId: input.priorTargetId,
+    };
+  }
+
+  const orderedTargets = sortSafeBoundaryTargets(input.eligibleTargets);
+  const firstTarget = orderedTargets[0];
+  if (!firstTarget) {
+    return {
+      strategy: "none" as SafeRestartStrategy,
+      reason: "no_safe_target_plan_available",
+      nextTargetId: null,
+    };
+  }
+
+  if (input.priorTargetId && firstTarget.id !== input.priorTargetId) {
+    return {
+      strategy: "next_target" as SafeRestartStrategy,
+      reason: "next_eligible_target_identified",
+      nextTargetId: firstTarget.id,
+    };
+  }
+
+  if (input.priorTargetId && firstTarget.id === input.priorTargetId) {
+    return {
+      strategy: "same_target_from_top_with_dedup" as SafeRestartStrategy,
+      reason: "same_target_reopened_from_top_with_social_memory",
+      nextTargetId: firstTarget.id,
+    };
+  }
+
+  return {
+    strategy: "rebuilt_safe_target_plan" as SafeRestartStrategy,
+    reason: "eligible_target_plan_rebuilt_without_historical_cursor",
+    nextTargetId: firstTarget.id,
+  };
+}
+
+export function exactViewportResumeEvidence(input: {
+  safeCheckpointAvailable: boolean;
+  targetRotationSafeAfterScrollFailure: boolean;
+  scrollFailureSurfaceAmbiguous: boolean;
+}) {
+  return input.safeCheckpointAvailable
+    || (
+      input.targetRotationSafeAfterScrollFailure
+      && !input.scrollFailureSurfaceAmbiguous
+    );
+}

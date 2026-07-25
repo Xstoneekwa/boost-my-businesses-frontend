@@ -114,7 +114,23 @@ test("buildSchedulerStatus projects canonical facts without inventing values", a
         decision: "blocked",
         reason: "manual_only_requires_manual_trigger",
         created_at: "2026-07-05T10:00:03Z",
-        metadata_safe: { username: "fallback_name" },
+        metadata_safe: {
+          username: "fallback_name",
+          account_eligible: true,
+          account_eligibility_reason: "eligible",
+          restart_needed: true,
+          restart_need_reason: "partial_run_resume_needed",
+          exact_viewport_resume_available: false,
+          safe_restart_strategy: "next_target",
+          safe_restart_reason: "next_eligible_target_identified",
+          historical_safe_boundary_fallback: false,
+          remaining_follow_quota: 23,
+          source_run_id: "a00e0582-ebf6-421b-aade-8508760c08d5",
+          prior_target_id: "target-1",
+          next_target_id: "target-2",
+          enqueue_allowed: true,
+          evaluated_at: "2026-07-05T10:00:03Z",
+        },
       },
     ],
     ig_accounts: [{ id: "acc-1", username: "client_account" }],
@@ -141,6 +157,14 @@ test("buildSchedulerStatus projects canonical facts without inventing values", a
   assert.equal(status.recent_decisions[0].reason_code, "manual_only_requires_manual_trigger");
   assert.equal(status.recent_decisions[0].reason_kind, "business");
   assert.equal(status.recent_decisions[0].event, "account_decision");
+  assert.equal(status.recent_decisions[0].account_eligible, true);
+  assert.equal(status.recent_decisions[0].account_eligibility_reason, "eligible");
+  assert.equal(status.recent_decisions[0].restart_needed, true);
+  assert.equal(status.recent_decisions[0].restart_need_reason, "partial_run_resume_needed");
+  assert.equal(status.recent_decisions[0].safe_restart_strategy, "next_target");
+  assert.equal(status.recent_decisions[0].remaining_follow_quota, 23);
+  assert.equal(status.recent_decisions[0].source_run_id, "a00e0582-ebf6-421b-aade-8508760c08d5");
+  assert.equal(status.recent_decisions[0].enqueue_allowed, true);
   assert.equal(status.daily_engine, null);
 });
 

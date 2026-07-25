@@ -3,6 +3,14 @@ import { firstAutomationBlockingIncident } from "@/lib/instagram-dashboard/incid
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
 import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-restart-scheduler-state";
+import {
+  exactViewportResumeEvidence,
+  resolveAccountRestartEligibility,
+  resolveRestartNeed,
+  resolveSafeRestartStrategy,
+  type SafeBoundaryTarget,
+  type SafeRestartStrategy,
+} from "@/lib/instagram-dashboard/auto-restart-candidate-policy";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
@@ -66,6 +74,22 @@ export type AutoRestartCandidate = {
   sessionWindowStatus: string;
   assignmentStatus: string;
   gateStatus: string;
+  accountEligible: boolean;
+  accountEligibilityReason: string;
+  restartNeeded: boolean;
+  restartNeedReason: string;
+  exactViewportResumeAvailable: boolean;
+  safeRestartStrategy: SafeRestartStrategy;
+  safeRestartReason: string;
+  historicalSafeBoundaryFallback: boolean;
+  enqueueAllowed: boolean;
+  sourceRunId: string;
+  sourceBusinessSessionId: string;
+  priorTargetId: string | null;
+  nextTargetId: string | null;
+  nextRetryIndex: number;
+  remainingFollowQuota: number;
+  decisionOutcome: "eligible" | "not_needed" | "blocked";
   restartEligible: boolean;
   blockReason: string;
   plannedRunType: "account_session" | "outreach_session" | "none";
@@ -91,6 +115,9 @@ export type AutoRestartCandidate = {
     businessDaySast: string;
     phasesToRun: { welcome: boolean; follow: boolean; unfollow: boolean } | null;
     quotaRemaining: Record<string, number>;
+    safeCheckpointAvailable: boolean;
+    targetRotationSafeAfterScrollFailure: boolean;
+    scrollFailureSurfaceAmbiguous: boolean;
     lastRunId: string;
     lastRunStatus: string;
     sourceLabel: string;
@@ -362,6 +389,9 @@ function reliabilityFromLatestRun(
       businessDaySast: "",
       phasesToRun: null,
       quotaRemaining: {},
+      safeCheckpointAvailable: false,
+      targetRotationSafeAfterScrollFailure: false,
+      scrollFailureSurfaceAmbiguous: false,
       lastRunId: "",
       lastRunStatus: "",
       sourceLabel: "no_recent_run",
@@ -429,6 +459,23 @@ function reliabilityFromLatestRun(
         .filter(([, value]) => Number.isFinite(readNumber(value, Number.NaN)))
         .map(([key, value]) => [key, readNumber(value, 0)]),
     ),
+    safeCheckpointAvailable: Boolean(
+      readRecord(resumePlan?.safe_checkpoint)
+      || readRecord(resumePlan?.checkpoint)
+      || readRecord(performance?.safe_checkpoint)
+      || readString(resumePlan?.safe_checkpoint_id, "")
+      || readString(performance?.safe_checkpoint_id, ""),
+    ),
+    targetRotationSafeAfterScrollFailure: readBoolean(
+      resumePlan?.target_rotation_safe_after_scroll_failure
+        ?? performance?.target_rotation_safe_after_scroll_failure,
+      false,
+    ),
+    scrollFailureSurfaceAmbiguous: readBoolean(
+      resumePlan?.scroll_failure_surface_ambiguous
+        ?? performance?.scroll_failure_surface_ambiguous,
+      false,
+    ),
     lastRunId: readString(latestRun.id),
     lastRunStatus: readString(latestRun.status),
     sourceLabel: canonicalPlan
@@ -454,7 +501,9 @@ function accountHasPersistedAccountMismatch(reliability: AutoRestartCandidate["r
 }
 
 function accountHasUnsafeMarker(account: ManageAccount, marker: string) {
-  const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`.toLowerCase();
+  // Incident state is evaluated separately by firstAutomationBlockingIncident.
+  // A historical severity label must never become a second incident gate.
+  const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus}`.toLowerCase();
   const patterns: Record<string, string[]> = {
     challenge: ["checkpoint", "challenge", "2fa"],
     restriction: ["restricted", "restriction", "action block", "action_block"],
@@ -465,7 +514,7 @@ function accountHasUnsafeMarker(account: ManageAccount, marker: string) {
 }
 
 function isBlockingAccount(account: ManageAccount) {
-  const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus} ${account.latestIncidentSeverity}`.toLowerCase();
+  const combined = `${account.adminStatus} ${account.loginStatus} ${account.credentialsStatus}`.toLowerCase();
   return [
     "checkpoint",
     "challenge",
@@ -474,7 +523,7 @@ function isBlockingAccount(account: ManageAccount) {
     "signed out",
     "credentials missing",
     "credentials invalid",
-  ].some((term) => combined.includes(term)) || account.pendingActionsCount > 0 || account.blockingCampaign;
+  ].some((term) => combined.includes(term)) || account.blockingCampaign;
 }
 
 function applySafetyBlocks({
@@ -523,9 +572,6 @@ function applySafetyBlocks({
   if (otherUnsafeMarkers.length) {
     blockingReasons.push(`unsafe_markers:${otherUnsafeMarkers.join(",")}`);
   }
-  if (reliability.restartAllowed === false && reliability.restartBlockReason) {
-    blockingReasons.push(`worker_plan:${reliability.restartBlockReason}`);
-  }
 }
 
 function followFiltersLabel(settings: SupabaseRecord | undefined) {
@@ -562,6 +608,37 @@ function eligibleFollowTargetCounts(rows: SupabaseRecord[]) {
   return counts;
 }
 
+function safeBoundaryTargetsByAccount(rows: SupabaseRecord[]) {
+  const grouped = new Map<string, SafeBoundaryTarget[]>();
+  for (const row of rows) {
+    if (!isEligibleFollowTarget(row)) continue;
+    const accountId = readString(row.account_id, "");
+    const id = readString(row.id, "");
+    if (!accountId || !id) continue;
+    grouped.set(accountId, [
+      ...(grouped.get(accountId) ?? []),
+      {
+        id,
+        createdAt: readString(row.created_at, ""),
+        lastUsedAt: readString(row.last_used_at, "") || null,
+      },
+    ]);
+  }
+  return grouped;
+}
+
+function latestTargetSelectionByRun(rows: SupabaseRecord[]) {
+  const selections = new Map<string, string>();
+  for (const row of rows) {
+    const runId = readString(row.run_id, "");
+    if (!runId || selections.has(runId)) continue;
+    const payload = readRecord(row.payload);
+    const targetId = readString(payload?.target_id, "");
+    if (targetId) selections.set(runId, targetId);
+  }
+  return selections;
+}
+
 function planCandidate({
   account,
   settings,
@@ -577,6 +654,8 @@ function planCandidate({
   phoneRestOverride,
   deviceLockActive,
   eligibleFollowTargetCount,
+  eligibleFollowTargets,
+  priorTargetId,
   rules,
   reliability,
   incidentBlockReason = null,
@@ -595,6 +674,8 @@ function planCandidate({
   phoneRestOverride?: PhoneRestOverride;
   deviceLockActive?: boolean;
   eligibleFollowTargetCount: number;
+  eligibleFollowTargets: SafeBoundaryTarget[];
+  priorTargetId: string | null;
   rules: AutoRestartRulePreview;
   reliability: AutoRestartCandidate["reliability"];
   incidentBlockReason?: string | null;
@@ -677,12 +758,16 @@ function planCandidate({
   const scheduleMode = readString(assignment?.schedule_mode, "").toLowerCase();
   if (incidentBlockReason) blockingReasons.push(incidentBlockReason);
   if (!rules.enabled) blockingReasons.push("scheduler_disabled");
-  if (scheduleMode === "manual_only") blockingReasons.push("manual_only_requires_manual_trigger");
+  if (scheduleMode === "manual_only") blockingReasons.push("manual_only");
+  if (readBoolean(settings?.manual_stop_requested, false)) blockingReasons.push("manual_stop_requested");
   if (activeRun) blockingReasons.push("active_run_exists");
   if (activeRequest) blockingReasons.push("active_run_request_exists");
   if (isBlockingAccount(account) && !incidentBlockReason) blockingReasons.push("account_blocking_action_or_credentials");
   if (!assignment) blockingReasons.push("assignment_missing");
-  if (rules.respectSixHourWindow && assignment && !windowActive) blockingReasons.push("assignment_window_closed");
+  if (rules.respectSixHourWindow && assignment && !windowActive) {
+    const assignmentStartsInFuture = startsAt && Date.parse(startsAt) > Date.now();
+    blockingReasons.push(assignmentStartsInFuture ? "planned_future_window" : "current_window_closed");
+  }
   if (rules.respectPhoneRest && phoneRestActive) blockingReasons.push("phone_rest_active");
   if (deviceLockActive) blockingReasons.push("device_lock_held");
   const assignmentDevice = assignment?.phone_devices;
@@ -705,13 +790,72 @@ function planCandidate({
   const outreachRemaining = outreach.remaining;
   if (accountSessionRemaining < 1 && outreachRemaining < 1) blockingReasons.push("no_quota_remaining");
 
-  const restartEligible = blockingReasons.length === 0;
+  const accountEligibility = resolveAccountRestartEligibility(blockingReasons);
+  const accountEligible = accountEligibility.eligible;
+  const accountEligibilityReason = accountEligibility.reason;
+  const totalRemainingQuota = accountSessionRemaining + outreachRemaining;
+  const restartNeed = resolveRestartNeed({
+    lastRunId: reliability.lastRunId,
+    sessionTerminationClass: reliability.sessionTerminationClass,
+    restartAllowed: reliability.restartAllowed,
+    restartBlockReason: reliability.restartBlockReason,
+    totalRemainingQuota,
+  });
+  const exactViewportResumeAvailable = exactViewportResumeEvidence({
+    safeCheckpointAvailable: reliability.safeCheckpointAvailable,
+    targetRotationSafeAfterScrollFailure: reliability.targetRotationSafeAfterScrollFailure,
+    scrollFailureSurfaceAmbiguous: reliability.scrollFailureSurfaceAmbiguous,
+  });
+  const safeRestart = resolveSafeRestartStrategy({
+    restartNeeded: restartNeed.needed,
+    followRemaining: follow.remaining,
+    exactViewportResumeAvailable,
+    priorTargetId,
+    eligibleTargets: eligibleFollowTargets,
+    workerPlanExplicitlySafe: reliability.restartAllowed === true,
+  });
+  const enqueueAllowed = accountEligible
+    && restartNeed.needed
+    && safeRestart.strategy !== "none";
+  const restartEligible = enqueueAllowed;
+  const decisionReason = !accountEligible
+    ? accountEligibilityReason
+    : !restartNeed.needed
+      ? restartNeed.reason
+      : safeRestart.strategy === "none"
+        ? safeRestart.reason
+        : "eligible_safe_boundary_restart";
+  const notNeededReasons = new Set([
+    "manual_only",
+    "planned_future_window",
+    "current_window_closed",
+    "active_run_exists",
+    "active_run_request_exists",
+    "no_partial_run_to_resume",
+    "run_in_progress",
+    "quota_exhausted",
+    "no_quota_remaining",
+  ]);
+  const decisionOutcome = enqueueAllowed
+    ? "eligible"
+    : notNeededReasons.has(decisionReason)
+      ? "not_needed"
+      : "blocked";
   const plannedRunType =
-    restartEligible && accountSessionRemaining >= 1
+    enqueueAllowed && accountSessionRemaining >= 1
       ? "account_session"
-      : restartEligible && outreachRemaining >= 1
+      : enqueueAllowed && outreachRemaining >= 1
         ? "outreach_session"
         : "none";
+
+  const parsedRetryIndex = Number.parseInt(reliability.retryIndex, 10);
+  const parsedNextRetryIndex = Number.parseInt(reliability.nextRetryIndex, 10);
+  const nextRetryIndex = Number.isFinite(parsedNextRetryIndex)
+    ? parsedNextRetryIndex
+    : Number.isFinite(parsedRetryIndex)
+      ? parsedRetryIndex + 1
+      : 1;
+  const sourceBusinessSessionId = reliability.businessSessionId || reliability.lastRunId;
 
   return {
     accountId: account.accountId,
@@ -733,9 +877,25 @@ function planCandidate({
     phoneRestStatus,
     sessionWindowStatus,
     assignmentStatus: assignment ? readString(assignment.status, "assigned") : "pending",
-    gateStatus: restartEligible ? "eligible_preview" : "blocked",
+    gateStatus: enqueueAllowed ? "eligible_preview" : accountEligible ? "not_needed" : "blocked",
+    accountEligible,
+    accountEligibilityReason,
+    restartNeeded: restartNeed.needed,
+    restartNeedReason: restartNeed.reason,
+    exactViewportResumeAvailable,
+    safeRestartStrategy: safeRestart.strategy,
+    safeRestartReason: safeRestart.reason,
+    historicalSafeBoundaryFallback: restartNeed.historicalSafeBoundaryFallback,
+    enqueueAllowed,
+    sourceRunId: reliability.lastRunId,
+    sourceBusinessSessionId,
+    priorTargetId,
+    nextTargetId: safeRestart.nextTargetId,
+    nextRetryIndex,
+    remainingFollowQuota: follow.remaining,
+    decisionOutcome,
     restartEligible,
-    blockReason: blockingReasons.join(",") || "eligible_preview",
+    blockReason: decisionReason,
     plannedRunType,
     reliability,
     quotas: { follow, unfollow, welcome, outreach },
@@ -819,7 +979,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
     supabase.from("account_package_summary").select("account_id,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(500),
-    supabase.from("ig_targets").select("account_id,status,quality_status,verification_status,archived_at,deleted_at").in("account_id", accountIds).in("status", ["valid", "active"]).limit(5000),
+    supabase.from("ig_targets").select("*").in("account_id", accountIds).in("status", ["valid", "active"]).limit(5000),
     supabase
       .from("account_assignments")
       .select("account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,app_instance_id,schedule_mode,phone_devices(name,timezone,status)")
@@ -869,6 +1029,21 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   ]);
   const rules = rulesFromSettings(autoRestartSettingsResult.data as SupabaseRecord | null | undefined);
 
+  const sessionRunRows = (sessionRunsResult.data ?? []) as SupabaseRecord[];
+  const latestSessionRuns = latestSessionRunByAccount(sessionRunRows);
+  const latestRunIds = [...latestSessionRuns.values()]
+    .map((row) => readString(row.id, ""))
+    .filter(Boolean);
+  const targetSelectionsResult = latestRunIds.length > 0
+    ? await supabase
+      .from("ig_action_logs")
+      .select("run_id,created_at,payload")
+      .in("run_id", latestRunIds)
+      .eq("action_type", "follow_target_selected")
+      .order("created_at", { ascending: false })
+      .limit(500)
+    : { data: [], error: null };
+
   const errors = [
     autoRestartSettingsResult.error,
     settingsResult.error,
@@ -893,6 +1068,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     incidentActionsResult.error,
     latestCompletedTickResult.error,
     resumePlansResult.error,
+    targetSelectionsResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -902,12 +1078,14 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const dmByAccount = mapByAccount((dmResult.data ?? []) as SupabaseRecord[]);
   const interactionsByAccount = groupByAccount((interactionsResult.data ?? []) as SupabaseRecord[]);
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
-  const latestSessionRunsByAccount = latestSessionRunByAccount((sessionRunsResult.data ?? []) as SupabaseRecord[]);
+  const latestSessionRunsByAccount = latestSessionRuns;
   const latestResumePlansByAccount = latestSessionRunByAccount((resumePlansResult.data ?? []) as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
   const eligibleTargetsByAccount = eligibleFollowTargetCounts((targetsResult.data ?? []) as SupabaseRecord[]);
+  const safeTargetsByAccount = safeBoundaryTargetsByAccount((targetsResult.data ?? []) as SupabaseRecord[]);
+  const priorTargetByRun = latestTargetSelectionByRun((targetSelectionsResult.data ?? []) as SupabaseRecord[]);
   const assignmentsByAccount = mapByAccount((assignmentsResult.data ?? []) as SupabaseRecord[]);
   const restWindowsByDevice = groupByAccount((restWindowsResult.data ?? []) as SupabaseRecord[], "device_id");
   const phoneRestOverridesByDevice = new Map<string, PhoneRestOverride>();
@@ -962,6 +1140,10 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         phoneRestOverride: phoneRestOverridesByDevice.get(deviceId),
         deviceLockActive: activeDeviceLocks.has(deviceId),
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
+        eligibleFollowTargets: safeTargetsByAccount.get(account.accountId) ?? [],
+        priorTargetId: priorTargetByRun.get(
+          readString(latestSessionRunsByAccount.get(account.accountId)?.id, ""),
+        ) ?? null,
         rules,
         reliability: reliabilityFromLatestRun(
           latestSessionRunsByAccount.get(account.accountId),

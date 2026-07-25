@@ -9,8 +9,13 @@ type Row = Record<string, unknown>;
 class Query {
   private filters: Array<[string, unknown]> = [];
   private since: Array<[string, string]> = [];
+  private db: FakeSupabase;
+  private table: string;
 
-  constructor(private db: FakeSupabase, private table: string) {}
+  constructor(db: FakeSupabase, table: string) {
+    this.db = db;
+    this.table = table;
+  }
 
   select() { return this; }
   eq(column: string, value: unknown) { this.filters.push([column, value]); return this; }
@@ -107,6 +112,22 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
     sessionWindowStatus: "open",
     assignmentStatus: "active",
     gateStatus: "eligible_preview",
+    accountEligible: true,
+    accountEligibilityReason: "eligible",
+    restartNeeded: true,
+    restartNeedReason: "partial_run_resume_needed",
+    exactViewportResumeAvailable: false,
+    safeRestartStrategy: "exact_checkpoint_resume",
+    safeRestartReason: "non_follow_phase_resume_plan",
+    historicalSafeBoundaryFallback: false,
+    enqueueAllowed: true,
+    sourceRunId: lastRunId,
+    sourceBusinessSessionId: "business-session-1",
+    priorTargetId: null,
+    nextTargetId: null,
+    nextRetryIndex,
+    remainingFollowQuota: 0,
+    decisionOutcome: "eligible",
     restartEligible: true,
     blockReason: "",
     plannedRunType: "account_session",
@@ -132,6 +153,9 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
       businessDaySast: "2026-07-22",
       phasesToRun: { welcome: false, follow: false, unfollow: true },
       quotaRemaining: { follow: 0, unfollow: 120, total: 120 },
+      safeCheckpointAvailable: false,
+      targetRotationSafeAfterScrollFailure: false,
+      scrollFailureSurfaceAmbiguous: false,
       lastRunId,
       lastRunStatus: "failed",
       sourceLabel: "test",
@@ -190,5 +214,52 @@ test("actual tick creates exactly retry requests 1 and 2, then no third request"
       "recoverable_python_failure_restart_1_scheduled",
       "recoverable_python_failure_restart_2_scheduled",
     ],
+  );
+  const enqueuedDecisions = supabase.rows("auto_restart_decisions")
+    .filter((row) => row.decision === "enqueued");
+  assert.equal(enqueuedDecisions.length, 2);
+  assert.deepEqual(
+    enqueuedDecisions.map((row) => (row.metadata_safe as Row).safe_restart_strategy),
+    ["exact_checkpoint_resume", "exact_checkpoint_resume"],
+  );
+  assert.ok(supabase.rows("auto_restart_decisions").every((row) => {
+    const metadata = row.metadata_safe as Row;
+    return typeof metadata.account_eligible === "boolean"
+      && typeof metadata.restart_needed === "boolean"
+      && typeof metadata.enqueue_allowed === "boolean";
+  }));
+});
+
+test("the natural tick persists a not-needed decision without creating a request", async () => {
+  const supabase = new FakeSupabase();
+  const complete = candidate(0);
+  complete.restartEligible = false;
+  complete.enqueueAllowed = false;
+  complete.restartNeeded = false;
+  complete.restartNeedReason = "no_partial_run_to_resume";
+  complete.safeRestartStrategy = "none";
+  complete.safeRestartReason = "no_partial_run_to_resume";
+  complete.decisionOutcome = "not_needed";
+  complete.blockReason = "no_partial_run_to_resume";
+  complete.plannedRunType = "none";
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [complete as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.not_needed_count, 1);
+  assert.equal(result.result.enqueued_count, 0);
+  assert.equal(supabase.requests.length, 0);
+  assert.equal(supabase.rows("auto_restart_decisions").length, 1);
+  assert.equal(supabase.rows("auto_restart_decisions")[0].decision, "not_needed");
+  assert.equal(
+    (supabase.rows("auto_restart_decisions")[0].metadata_safe as Row).safe_restart_strategy,
+    "none",
   );
 });

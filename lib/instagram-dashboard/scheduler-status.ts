@@ -44,6 +44,20 @@ export type SchedulerRecentDecision = {
   reason_kind: SchedulerReasonKind;
   event: "account_decision" | "scheduler_config";
   config_enabled: boolean | null;
+  account_eligible: boolean | null;
+  account_eligibility_reason: string | null;
+  restart_needed: boolean | null;
+  restart_need_reason: string | null;
+  exact_viewport_resume_available: boolean | null;
+  safe_restart_strategy: string | null;
+  safe_restart_reason: string | null;
+  historical_safe_boundary_fallback: boolean | null;
+  remaining_follow_quota: number | null;
+  source_run_id: string | null;
+  prior_target_id: string | null;
+  next_target_id: string | null;
+  enqueue_allowed: boolean | null;
+  evaluated_at: string | null;
   created_at: string;
 };
 
@@ -348,6 +362,15 @@ function readBooleanOrNull(value: unknown): boolean | null {
   return null;
 }
 
+function readNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 export function projectRecentDecision(usernames: Map<string, string>) {
   return (row: Record<string, unknown>): SchedulerRecentDecision => {
     const accountId = readString(row.account_id) || null;
@@ -368,6 +391,20 @@ export function projectRecentDecision(usernames: Map<string, string>) {
       reason_kind: isConfigEvent ? "config" : normalizedReason.kind,
       event: isConfigEvent ? "scheduler_config" : "account_decision",
       config_enabled: isConfigEvent ? readBooleanOrNull(metadata.auto_restart_enabled) : null,
+      account_eligible: isConfigEvent ? null : readBooleanOrNull(metadata.account_eligible),
+      account_eligibility_reason: isConfigEvent ? null : readString(metadata.account_eligibility_reason) || null,
+      restart_needed: isConfigEvent ? null : readBooleanOrNull(metadata.restart_needed),
+      restart_need_reason: isConfigEvent ? null : readString(metadata.restart_need_reason) || null,
+      exact_viewport_resume_available: isConfigEvent ? null : readBooleanOrNull(metadata.exact_viewport_resume_available),
+      safe_restart_strategy: isConfigEvent ? null : readString(metadata.safe_restart_strategy) || null,
+      safe_restart_reason: isConfigEvent ? null : readString(metadata.safe_restart_reason) || null,
+      historical_safe_boundary_fallback: isConfigEvent ? null : readBooleanOrNull(metadata.historical_safe_boundary_fallback),
+      remaining_follow_quota: isConfigEvent ? null : readNumberOrNull(metadata.remaining_follow_quota),
+      source_run_id: isConfigEvent ? null : readString(metadata.source_run_id) || null,
+      prior_target_id: isConfigEvent ? null : readString(metadata.prior_target_id) || null,
+      next_target_id: isConfigEvent ? null : readString(metadata.next_target_id) || null,
+      enqueue_allowed: isConfigEvent ? null : readBooleanOrNull(metadata.enqueue_allowed),
+      evaluated_at: isConfigEvent ? null : readString(metadata.evaluated_at) || null,
       created_at: readString(row.created_at),
     };
   };

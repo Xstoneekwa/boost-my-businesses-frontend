@@ -59,6 +59,11 @@ export function autoRestartEnqueueIdempotencyKey(input: {
 
 type ResumeCandidate = {
   [key: string]: unknown;
+  restartNeeded?: boolean;
+  historicalSafeBoundaryFallback?: boolean;
+  safeRestartStrategy?: string;
+  sourceBusinessSessionId?: string;
+  nextRetryIndex?: number;
   reliability: {
     restartAllowed: boolean | null;
     restartBlockReason: string;
@@ -102,8 +107,17 @@ type ResumeCandidateQuota = {
 
 export function resumePlanRuntimeSupported(candidate: ResumeCandidate) {
   const reliability = candidate.reliability;
-  if (reliability.restartAllowed !== true) {
+  const safeBoundaryFallback = candidate.historicalSafeBoundaryFallback === true
+    && candidate.restartNeeded === true
+    && Boolean(candidate.safeRestartStrategy && candidate.safeRestartStrategy !== "none");
+  if (reliability.restartAllowed !== true && !safeBoundaryFallback) {
     return { ok: false as const, reason: reliability.restartBlockReason || "restart_not_allowed" };
+  }
+  if (candidate.restartNeeded === false) {
+    return { ok: false as const, reason: "no_partial_run_to_resume" };
+  }
+  if (candidate.safeRestartStrategy === "none") {
+    return { ok: false as const, reason: "no_safe_restart_strategy" };
   }
   if (reliability.failureCategory === "recoverable_python_runtime_failure") {
     const nextRetryIndex = Number.parseInt(String(reliability.nextRetryIndex || ""), 10);

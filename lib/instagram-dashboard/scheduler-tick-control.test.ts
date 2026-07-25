@@ -65,10 +65,10 @@ test("non-executable mode never enqueues even when enabled", () => {
 });
 
 test("manual_only stays a hard canonical exclusion", () => {
-  assert.match(dataSource, /manual_only_requires_manual_trigger/);
-  assert.match(dataSource, /if \(scheduleMode === "manual_only"\) blockingReasons\.push/);
-  // Tick counts non-eligible candidates as blocked with their canonical reason.
-  assert.match(tickSource, /reason: candidate\.blockReason \|\| "blocked"/);
+  assert.match(dataSource, /if \(scheduleMode === "manual_only"\) blockingReasons\.push\("manual_only"\)/);
+  // The natural tick persists the exclusion as a normal evaluated outcome.
+  assert.match(tickSource, /decision = candidate\.decisionOutcome === "not_needed"/);
+  assert.match(tickSource, /reason: candidate\.blockReason \|\| decision/);
 });
 
 test("ON/OFF mutations go only through the relay/admin protected settings endpoint", () => {
