@@ -1,6 +1,6 @@
 # Instagram Dashboard Admin - Base de connaissance frontend
 
-Derniere mise a jour: 2026-05-29
+Derniere mise a jour: 2026-07-25
 
 Ce document decrit l'etat frontend du dashboard admin Instagram dans `boost-ai-frontend`. Il sert de reference projet pour les vues, routes, contrats no-leak, dependances backend Phone Farm, limites connues et prochaines etapes.
 
@@ -73,6 +73,19 @@ Ne pas casser:
 - Le fallback Admin API -> legacy tables.
 - Les tabs Active / Archives / Trash.
 - Add Profile Patch 2B.
+
+### Profiles / Stats — snapshots de profil publics V1
+
+`/api/instagram-dashboard/profiles/live` et le drawer Stats lisent désormais
+uniquement `ig_account_social_profile_snapshots` pour Followers, Followings et
+Posts. Profiles expose un delta net approximatif sur 72 h avec baseline,
+snapshot courant, timestamps, âge, couverture réelle, statut de fraîcheur et
+provider. Les données Manual restent des métriques publiques organiques et ne
+sont pas attribuées au Worker.
+
+La collecte quotidienne backend est documentée dans
+[Social profile snapshot contract V1](./social-profile-snapshot-contract-v1.md).
+Elle est indépendante des runs et ne déclenche aucune action téléphone.
 
 ### Client Accounts / Accounts
 

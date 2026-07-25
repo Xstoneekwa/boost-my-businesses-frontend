@@ -18,6 +18,8 @@ export type InstagramPublicProfileLookupResult = {
   is_private: boolean | null;
   is_verified: boolean | null;
   followers_count: number | null;
+  following_count?: number | null;
+  posts_count?: number | null;
   reason: string;
   checked_at: string;
   metadata: Record<string, string | number | boolean | null>;
@@ -332,6 +334,12 @@ function readFollowersCount(row: Record<string, unknown>) {
   return null;
 }
 
+function readPublicCount(value: unknown) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
 function result(
   inputUsername: string,
   status: InstagramPublicProfileLookupStatus,
@@ -349,6 +357,8 @@ function result(
     is_private: patch.is_private ?? null,
     is_verified: patch.is_verified ?? null,
     followers_count: patch.followers_count ?? null,
+    following_count: patch.following_count ?? null,
+    posts_count: patch.posts_count ?? null,
     reason: patch.reason ?? status,
     checked_at: patch.checked_at ?? safeNow(options),
     metadata: safeInstagramPublicMetadata(patch.metadata),
@@ -391,6 +401,8 @@ function fromProviderPayload(
     is_private: readBoolean(payload, ["is_private", "private"]),
     is_verified: readBoolean(payload, ["is_verified", "verified"]),
     followers_count: readFollowersCount(payload),
+    following_count: readPublicCount(payload.following_count ?? payload.following),
+    posts_count: readPublicCount(payload.posts_count ?? payload.posts),
     reason: safeReason(payload.reason, status),
     metadata: {
       provider_mode: providerMode(options),
@@ -449,6 +461,8 @@ function fromSearchApiPayload(
     is_private: readBoolean(profile, ["is_private", "private"]),
     is_verified: readBoolean(profile, ["is_verified", "verified"]),
     followers_count: followersCount,
+    following_count: readPublicCount(profile.following_count ?? profile.following),
+    posts_count: readPublicCount(profile.posts_count ?? profile.posts),
     reason: "found",
     metadata: {
       provider_mode: "searchapi",

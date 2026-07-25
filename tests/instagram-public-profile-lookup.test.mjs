@@ -141,6 +141,8 @@ test("searchapi provider returns safe found profile", async () => {
             id: "12345",
             avatar: "https://cdn.example.test/avatar.jpg",
             followers: 4321,
+            following: 321,
+            posts: 42,
             is_private: false,
             is_verified: true,
           },
@@ -154,12 +156,16 @@ test("searchapi provider returns safe found profile", async () => {
     assert.equal(result.external_profile_id, "12345");
     assert.equal(result.avatar_url, "https://cdn.example.test/avatar.jpg");
     assert.equal(result.followers_count, 4321);
+    assert.equal(result.following_count, 321);
+    assert.equal(result.posts_count, 42);
     assert.equal(result.is_private, false);
     assert.equal(result.is_verified, true);
     assert.deepEqual(result.metadata, {
       provider_mode: "searchapi",
       provider_status: "found",
       provider_engine: "instagram_profile",
+      profile_name: null,
+      biography: null,
       cache_hit: false,
       throttle_hit: false,
       rate_limited: false,

@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/instagram-follower-snapshots",
+      "schedule": "15 2 * * *"
+    },
+    {
       "path": "/api/instagram-dashboard/targets/auto-archive-low-fbr-cron",
       "schedule": "0 3 * * *"
     },

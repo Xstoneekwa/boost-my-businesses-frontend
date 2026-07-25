@@ -12,12 +12,16 @@ test("stats history uses real social action logs and excludes operational logs",
   assert.doesNotMatch(source, /preflight_completed/);
 });
 
-test("stats history exposes 30-day rows with pending snapshot sources", () => {
+test("stats history exposes canonical social profile snapshots with explicit freshness", () => {
   assert.match(source, /days/);
   assert.match(source, /followers_count: null/);
   assert.match(source, /followings_count: null/);
-  assert.match(source, /pending_account_follower_snapshots/);
-  assert.match(source, /account_following_snapshots/);
+  assert.match(source, /ig_account_social_profile_snapshots/);
+  assert.match(source, /followers_freshness_status/);
+  assert.match(source, /followings_freshness_status/);
+  assert.match(source, /source_status/);
+  assert.doesNotMatch(source, /pending_account_follower_snapshots/);
+  assert.doesNotMatch(source, /account_following_snapshots/);
 });
 
 test("stats history keeps total interactions aligned with profile row definition", () => {

@@ -1,6 +1,6 @@
 import { isCurrentBlockingDashboardAction } from "./dashboard-action-blockers.ts";
-import { projectFollowerDelta72h } from "../instagram-client/client-follower-growth-projection.ts";
-import type { FollowerSnapshotRow } from "../instagram-client/follower-snapshot-contract.ts";
+import { projectSocialProfileFollowerDelta3d } from "./social-profile-growth-projection.ts";
+import type { SocialProfileSnapshotRow } from "./social-profile-snapshot-contract.ts";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
@@ -84,7 +84,7 @@ export function projectProfilesLive(input: {
   interactionEvents: Row[];
   unfollowRows?: Row[];
   dashboardActions: Row[];
-  followerSnapshots: FollowerSnapshotRow[];
+  socialProfileSnapshots: SocialProfileSnapshotRow[];
 }) {
   const requestsByAccount = grouped(input.requests);
   const runsByAccount = grouped(input.runs);
@@ -94,7 +94,7 @@ export function projectProfilesLive(input: {
     ...verifiedUnfollowRowsAsInteractionEvents(input.unfollowRows ?? []),
   ]);
   const actionsByAccount = grouped(input.dashboardActions);
-  const snapshotsByAccount = grouped(input.followerSnapshots);
+  const snapshotsByAccount = grouped(input.socialProfileSnapshots);
 
   return input.accountIds.map((id) => {
     const requests = requestsByAccount.get(id) ?? [];
@@ -159,7 +159,10 @@ export function projectProfilesLive(input: {
         status: text(currentBlocker.status),
         blockingCampaign: currentBlocker.blocking_campaign === true,
       } : null,
-      followerDelta3d: projectFollowerDelta72h((snapshotsByAccount.get(id) ?? []) as FollowerSnapshotRow[]),
+      followerDelta3d: projectSocialProfileFollowerDelta3d({
+        rows: (snapshotsByAccount.get(id) ?? []) as SocialProfileSnapshotRow[],
+        now: input.now,
+      }),
       updatedAt,
       lastProgressAt: counters.lastProgressAt,
     };
