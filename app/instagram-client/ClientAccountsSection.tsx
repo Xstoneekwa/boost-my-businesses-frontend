@@ -36,6 +36,7 @@ export type ClientInstagramAccountView = {
 type Props = {
   lang: "fr" | "en";
   accounts: ClientInstagramAccountView[];
+  displayMode?: "accounts" | "add_only";
 };
 
 type ActionKind = "readiness" | "connect" | "create" | "refresh" | "cancel" | null;
@@ -92,7 +93,7 @@ function isTerminalProcessAccount(
   return false;
 }
 
-export default function ClientAccountsSection({ lang, accounts }: Props) {
+export default function ClientAccountsSection({ lang, accounts, displayMode = "accounts" }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
   const [formOpen, setFormOpen] = useState(false);
@@ -144,6 +145,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
 
   const actionBusy = actionKind !== null;
   const isEmpty = items.length === 0;
+  const addOnly = displayMode === "add_only";
 
   function handleAddAccountClick() {
     if (entitlementReady) {
@@ -732,7 +734,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
         <div className="cd-card-hd">
           <h3>{labelFor(lang, "Mes comptes Instagram", "My Instagram accounts")}</h3>
           <div className="cd-accounts-header-actions">
-            {showGlobalRefresh ? (
+            {!addOnly && showGlobalRefresh ? (
               <button
                 type="button"
                 className="cd-btn cd-btn-soft cd-btn-compact"
@@ -744,7 +746,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
                   : labelFor(lang, "Actualiser", "Refresh")}
               </button>
             ) : null}
-            {!isEmpty ? (
+            {addOnly || !isEmpty ? (
               <button type="button" className="cd-btn cd-btn-primary cd-btn-compact" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
                 {labelFor(lang, "Ajouter un compte Instagram", "Add Instagram account")}
               </button>
@@ -752,7 +754,7 @@ export default function ClientAccountsSection({ lang, accounts }: Props) {
           </div>
         </div>
 
-        {isEmpty ? (
+        {addOnly ? null : isEmpty ? (
           <div className="cd-accounts-empty">
             <p>{labelFor(lang, "Aucun compte Instagram ajouté.", "No Instagram account added yet.")}</p>
             <button type="button" className="cd-btn cd-btn-primary" disabled={Boolean(processModal) || entitlementReady === null} onClick={handleAddAccountClick}>
