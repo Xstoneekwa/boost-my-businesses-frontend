@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { firstAutomationBlockingIncident } from "@/lib/instagram-dashboard/incident-automation-blocking";
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
 import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-restart-scheduler-state";
@@ -578,7 +579,7 @@ function planCandidate({
   eligibleFollowTargetCount,
   rules,
   reliability,
-  hasOpenIncident = false,
+  incidentBlockReason = null,
 }: {
   account: ManageAccount;
   settings: SupabaseRecord | undefined;
@@ -596,7 +597,7 @@ function planCandidate({
   eligibleFollowTargetCount: number;
   rules: AutoRestartRulePreview;
   reliability: AutoRestartCandidate["reliability"];
-  hasOpenIncident?: boolean;
+  incidentBlockReason?: string | null;
 }): AutoRestartCandidate {
   const packageDefaults = inferPackageDefaults(account);
   const followEnabled = readBoolean(settings?.follow_enabled, false);
@@ -674,12 +675,12 @@ function planCandidate({
           : "no_rest_configured";
 
   const scheduleMode = readString(assignment?.schedule_mode, "").toLowerCase();
-  if (hasOpenIncident) blockingReasons.push("open_incident_blocked");
+  if (incidentBlockReason) blockingReasons.push(incidentBlockReason);
   if (!rules.enabled) blockingReasons.push("scheduler_disabled");
   if (scheduleMode === "manual_only") blockingReasons.push("manual_only_requires_manual_trigger");
   if (activeRun) blockingReasons.push("active_run_exists");
   if (activeRequest) blockingReasons.push("active_run_request_exists");
-  if (isBlockingAccount(account) && !hasOpenIncident) blockingReasons.push("account_blocking_action_or_credentials");
+  if (isBlockingAccount(account) && !incidentBlockReason) blockingReasons.push("account_blocking_action_or_credentials");
   if (!assignment) blockingReasons.push("assignment_missing");
   if (rules.respectSixHourWindow && assignment && !windowActive) blockingReasons.push("assignment_window_closed");
   if (rules.respectPhoneRest && phoneRestActive) blockingReasons.push("phone_rest_active");
@@ -704,7 +705,7 @@ function planCandidate({
   const outreachRemaining = outreach.remaining;
   if (accountSessionRemaining < 1 && outreachRemaining < 1) blockingReasons.push("no_quota_remaining");
 
-  const restartEligible = hasOpenIncident ? false : blockingReasons.length === 0;
+  const restartEligible = blockingReasons.length === 0;
   const plannedRunType =
     restartEligible && accountSessionRemaining >= 1
       ? "account_session"
@@ -734,9 +735,7 @@ function planCandidate({
     assignmentStatus: assignment ? readString(assignment.status, "assigned") : "pending",
     gateStatus: restartEligible ? "eligible_preview" : "blocked",
     restartEligible,
-    blockReason: hasOpenIncident
-      ? "open_incident_blocked"
-      : blockingReasons.join(",") || "eligible_preview",
+    blockReason: blockingReasons.join(",") || "eligible_preview",
     plannedRunType,
     reliability,
     quotas: { follow, unfollow, welcome, outreach },
@@ -802,6 +801,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     phoneRestOverridesResult,
     deviceLocksResult,
     openIncidentsResult,
+    incidentActionsResult,
     latestCompletedTickResult,
     resumePlansResult,
   ] = await Promise.all([
@@ -836,10 +836,19 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     accountIds.length > 0
       ? supabase
         .from("account_incidents")
-        .select("account_id,status")
+        .select("id,account_id,status,incident_type,reason,failure_reason,resolved_at,archived_at,last_seen_at,metadata")
         .in("account_id", accountIds)
-        .in("status", ["open", "acknowledged"])
+        .in("status", ["open", "acknowledged", "investigating"])
         .limit(500)
+      : Promise.resolve({ data: [], error: null }),
+    accountIds.length > 0
+      ? supabase
+        .from("account_dashboard_actions")
+        .select("id,incident_id,account_id,action_type,status,blocking_campaign,requires_client_action,resolved_at,created_at,updated_at,metadata_safe")
+        .in("account_id", accountIds)
+        .not("incident_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1000)
       : Promise.resolve({ data: [], error: null }),
     supabase
       .from("auto_restart_tick_locks")
@@ -881,6 +890,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     phoneRestOverridesResult.error,
     deviceLocksResult.error,
     openIncidentsResult.error,
+    incidentActionsResult.error,
     latestCompletedTickResult.error,
     resumePlansResult.error,
     ...manageData.errors.map((message) => ({ message })),
@@ -921,11 +931,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .map((row) => readString(row.device_id))
       .filter(Boolean),
   );
-  const openIncidentsByAccount = new Set(
-    ((openIncidentsResult.data ?? []) as SupabaseRecord[])
-      .map((row) => readString(row.account_id, ""))
-      .filter(Boolean),
-  );
+  const incidentsByAccount = groupByAccount((openIncidentsResult.data ?? []) as SupabaseRecord[]);
+  const incidentActions = (incidentActionsResult.data ?? []) as SupabaseRecord[];
 
   const candidates = manageData.activeAccounts
     .map((account) => {
@@ -961,7 +968,10 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
           latestResumePlansByAccount.get(account.accountId),
           rules,
         ),
-        hasOpenIncident: openIncidentsByAccount.has(account.accountId),
+        incidentBlockReason: firstAutomationBlockingIncident(
+          incidentsByAccount.get(account.accountId) ?? [],
+          incidentActions,
+        )?.reason ?? null,
       });
     })
     .sort((a, b) => Number(b.restartEligible) - Number(a.restartEligible) || b.quotas.follow.remaining + b.quotas.unfollow.remaining - (a.quotas.follow.remaining + a.quotas.unfollow.remaining))

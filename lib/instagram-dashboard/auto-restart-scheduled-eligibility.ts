@@ -14,7 +14,7 @@ export type AutoRestartScheduleGateInput = {
   hasAssignment?: boolean;
   hasActiveRun?: boolean;
   hasActiveRequest?: boolean;
-  hasOpenIncident?: boolean;
+  incidentBlockReason?: string | null;
   deviceId?: string;
   appInstanceId?: string;
   now?: Date;
@@ -60,7 +60,7 @@ export function evaluateAutoRestartScheduleGate(input: AutoRestartScheduleGateIn
   if (!String(input.deviceId || "").trim() || !String(input.appInstanceId || "").trim()) {
     return "assignment_or_device_pending";
   }
-  if (input.hasOpenIncident) return "open_incident_blocked";
+  if (input.incidentBlockReason) return input.incidentBlockReason;
   if (input.hasActiveRun) return "active_run_exists";
   if (input.hasActiveRequest) return "active_run_request_exists";
 

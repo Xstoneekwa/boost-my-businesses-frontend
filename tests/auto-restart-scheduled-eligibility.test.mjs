@@ -101,7 +101,7 @@ test("moving from manual_only to active scheduled slot becomes eligible on next 
   );
 });
 
-test("active run, request, incident and missing assignment/device exclude candidates", () => {
+test("active run, request, blocking incident and missing assignment/device exclude candidates", () => {
   assert.equal(
     evaluateAutoRestartScheduleGate({
       scheduleMode: "scheduled",
@@ -131,12 +131,12 @@ test("active run, request, incident and missing assignment/device exclude candid
       scheduleMode: "scheduled",
       startsAt: ACTIVE_START,
       endsAt: ACTIVE_END,
-      hasOpenIncident: true,
+      incidentBlockReason: "operator_review_required",
       deviceId: "device-1",
       appInstanceId: "instance-1",
       now: NOW,
     }),
-    "open_incident_blocked",
+    "operator_review_required",
   );
   assert.equal(
     evaluateAutoRestartScheduleGate({
