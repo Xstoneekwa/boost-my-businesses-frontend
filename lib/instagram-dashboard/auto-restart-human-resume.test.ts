@@ -40,6 +40,17 @@ test("resume request creation stays on the canonical CP0 path", () => {
   assert.match(humanSection, /trigger: "scheduler_tick"/);
 });
 
+test("human-confirmed resume rebuilds explicit phases before consuming authorization", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  const planIndex = humanSection.indexOf("buildAutoRestartResumePlanMetadata(");
+  const claimIndex = humanSection.indexOf("claimAuthorizationAtomically(supabase, authorizationId, now)");
+  assert.ok(planIndex > 0, "canonical current resume plan is rebuilt");
+  assert.ok(claimIndex > planIndex, "phase plan is certified before atomic consumption");
+  assert.match(humanSection, /resume_candidate_unavailable/);
+  assert.match(humanSection, /resume_phase_plan_not_actionable/);
+  assert.match(humanSection, /\.\.\.resumeMetadata/);
+});
+
 test("expired window expires the authorization with a stable reason", () => {
   assert.match(tickSource, /markAuthorizationExpired\(supabase, authorizationId, now\)/);
   assert.match(tickSource, /resume_authorization_expired/);

@@ -914,6 +914,7 @@ export async function runAutoRestartTick(
     if (!forceDryRun) {
       await processHumanConfirmedResumes(supabase, {
         summary,
+        candidates: overview.candidates,
         requestId,
         actor: options.actor || "system",
         mode: extendedRules.mode,
@@ -979,6 +980,7 @@ async function processHumanConfirmedResumes(
   supabase: SupabaseLike,
   input: {
     summary: AutoRestartTickSummary;
+    candidates: AutoRestartCandidate[];
     requestId: string;
     actor: string;
     mode: AutoRestartMode;
@@ -1040,6 +1042,27 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
+      // A human authorization removes the human-review blocker; it does not
+      // invent an execution plan. Rebuild the canonical current candidate so
+      // the request carries explicit phases and quotas. If the account is no
+      // longer present in the overview, leave the authorization armed for a
+      // later tick instead of consuming it into a phase_plan_unknown run.
+      const candidate = input.candidates.find((row) => row.accountId === accountId);
+      if (!candidate) {
+        await blockResume("resume_candidate_unavailable");
+        continue;
+      }
+      const resumeMetadata = buildAutoRestartResumePlanMetadata(
+        { ...candidate, enqueueAllowed: true } as AutoRestartCandidate,
+        now,
+      );
+      const actionablePhases = Object.values(resumeMetadata.resume_plan.phases_to_run)
+        .some((enabled) => enabled === true);
+      if (!actionablePhases) {
+        await blockResume("resume_phase_plan_not_actionable");
+        continue;
+      }
+
       // Canonical run-start gates: manual_only excluded, no active run or
       // request, assignment window still active for a scheduler trigger.
       const { evaluateRunStartEligibility } = await import("./run-control.ts");
@@ -1061,7 +1084,7 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_plan_not_recoverable");
           continue;
         }
-        deviceId = readString(plan.device_id) || null;
+        deviceId = readString(plan.device_id) || candidate.deviceId || null;
       }
 
       // Atomic consumption BEFORE request creation: 1 click -> max 1 resume.
@@ -1107,6 +1130,7 @@ async function processHumanConfirmedResumes(
             execution_worker_id: input.workerId,
             worker_id: input.workerId,
             auto_restart: true,
+            ...resumeMetadata,
             recovery_mode: "human_confirmed_resume",
             incident_id: incidentId,
             original_run_id: originalRunId || null,
