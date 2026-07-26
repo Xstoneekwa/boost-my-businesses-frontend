@@ -35,6 +35,7 @@ import {
   type FollowerChartPeriod,
   type FollowerChartView,
 } from "@/lib/instagram-client/client-follower-chart-projection";
+import { resolveClientConnectionActionPanel } from "@/lib/instagram-client/client-connection-action-scope";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -548,6 +549,11 @@ export default function ClientDashboard({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const t = T[lang];
+  const connectionActionPanel = resolveClientConnectionActionPanel({
+    accounts: initialAccounts,
+    agencyModeActive,
+    overviewScope,
+  });
   const linkedAccountsForAccountTab: ClientLinkedInstagramAccount[] = workspace?.linkedInstagramAccounts?.length
     ? workspace.linkedInstagramAccounts
     : initialAccounts.map((account) => ({
@@ -1193,8 +1199,9 @@ export default function ClientDashboard({
             <ClientAgencyModeBanner lang={lang} />
             <ClientAccountsSection
               lang={lang}
-              accounts={hasLinkedInstagramAccount ? initialAccounts : []}
-              displayMode={agencyModeActive ? "add_only" : "accounts"}
+              accounts={hasLinkedInstagramAccount ? connectionActionPanel.accounts : []}
+              displayMode={connectionActionPanel.showAccountActions ? "accounts" : "add_only"}
+              accountScopeId={connectionActionPanel.accountScopeId}
             />
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
@@ -2251,5 +2258,10 @@ const CSS = `
   .cd-shell{grid-template-columns:1fr}
   .cd-sidebar{display:none}
   .cd-acc-grid{grid-template-columns:1fr}
+  .cd-accounts-panel .cd-card-hd{align-items:stretch;flex-direction:column}
+  .cd-accounts-header-actions{justify-content:flex-start}
+  .cd-account-row{align-items:stretch;flex-direction:column}
+  .cd-account-actions{justify-content:flex-start}
+  .cd-account-actions .cd-btn{width:100%}
 }
 `;

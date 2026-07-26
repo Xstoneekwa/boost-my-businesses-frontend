@@ -239,7 +239,10 @@ test("client UI sends explicit passive payload for readiness check", () => {
   );
   assert.match(ui, /dry_run: true, mode: "readiness_only"/);
   assert.match(ui, /dry_run: false, mode: "connect_enqueue"/);
-  assert.match(ui, /window\.confirm/);
+  assert.doesNotMatch(ui, /window\.confirm/);
+  assert.match(ui, /if \(mode === "connect" && !options\.confirmed\) return/);
+  assert.match(ui, /onConfirmConnect=/);
+  assert.match(ui, /confirmed: true/);
 });
 
 test("dm welcome non-regression helpers remain wired", () => {
