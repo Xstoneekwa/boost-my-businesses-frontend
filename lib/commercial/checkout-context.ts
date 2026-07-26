@@ -27,7 +27,7 @@ export type PublicCheckoutConflict =
 
 export type CheckoutHandoff =
   | { type: "email_login"; loginPath: "/instagram-login" }
-  | { type: "dashboard"; redirectPath: "/instagram-client" }
+  | { type: "dashboard"; redirectPath: "/instagram-client" | "/instagram-client?onboarding=1" }
   | { type: "choose_plan"; redirectPath: "/instagram-client/choose-plan" };
 
 export function resolveCheckoutContext(input: {
@@ -107,7 +107,7 @@ export function resolveCheckoutHandoff(checkoutContext: CheckoutContext): Checko
   if (checkoutContext === "existing_workspace_plan_change") {
     return { type: "dashboard", redirectPath: "/instagram-client" };
   }
-  return { type: "dashboard", redirectPath: "/instagram-client" };
+  return { type: "dashboard", redirectPath: "/instagram-client?onboarding=1" };
 }
 
 export function handoffToRedirectPath(handoff: CheckoutHandoff): string | null {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildOpenStreetMapEmbedUrl } from "@/lib/geocoding/osm-embed";
 import {
   type AiTargetEligibilityReasonCode,
@@ -27,6 +27,7 @@ type ClientAiTargetSearchWizardProps = {
   onClose: () => void;
   lang: TargetAiLang;
   accountId: string;
+  initialCriteria?: { niche?: string; location?: string };
   onValidated: (message: string) => Promise<void>;
 };
 
@@ -89,6 +90,7 @@ export default function ClientAiTargetSearchWizard({
   onClose,
   lang,
   accountId,
+  initialCriteria,
   onValidated,
 }: ClientAiTargetSearchWizardProps) {
   const copy = useMemo(() => targetAiCopy(lang), [lang]);
@@ -110,8 +112,8 @@ export default function ClientAiTargetSearchWizard({
   useEffect(() => {
     if (!open) return;
     setStep(1);
-    setNiche("");
-    setLocationQuery("");
+    setNiche(initialCriteria?.niche?.trim() ?? "");
+    setLocationQuery(initialCriteria?.location?.trim() ?? "");
     setLocationSuggestions([]);
     setSelectedLocation(null);
     setSearching(false);
@@ -122,7 +124,7 @@ export default function ClientAiTargetSearchWizard({
     setSessionId("");
     setCandidates([]);
     enrichStartedRef.current = false;
-  }, [open]);
+  }, [initialCriteria?.location, initialCriteria?.niche, open]);
 
   useEffect(() => {
     if (!open || step !== 2) return;
@@ -151,7 +153,7 @@ export default function ClientAiTargetSearchWizard({
     return () => window.clearTimeout(timer);
   }, [accountId, lang, locationQuery, open, step]);
 
-  async function enrichCandidates(usernames: string[]) {
+  const enrichCandidates = useCallback(async (usernames: string[]) => {
     if (!sessionId || usernames.length === 0) return;
     setEnriching(true);
     try {
@@ -175,14 +177,14 @@ export default function ClientAiTargetSearchWizard({
     } finally {
       setEnriching(false);
     }
-  }
+  }, [accountId, lang, niche, selectedLocation, sessionId]);
 
   useEffect(() => {
     if (!open || searching || !sessionId || candidates.length === 0 || enrichStartedRef.current) return;
     enrichStartedRef.current = true;
     const pendingUsernames = candidates.filter(isPendingCandidate).map((row) => row.username);
     if (pendingUsernames.length > 0) void enrichCandidates(pendingUsernames);
-  }, [open, searching, sessionId, candidates]);
+  }, [candidates, enrichCandidates, open, searching, sessionId]);
 
   const selectedCandidates = useMemo(
     () => sortCandidatesForDisplay(candidates),

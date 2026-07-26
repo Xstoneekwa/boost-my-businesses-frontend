@@ -493,13 +493,14 @@ export async function getSafeStripeSessionStatus(
   if (input.internalCheckoutSessionId) {
     const { data } = await supabase
       .from("commercial_checkout_sessions")
-      .select("id,status,activated_at,auth_user_id,client_id")
+      .select("id,status,activated_at,auth_user_id,client_id,flow_type")
       .eq("id", input.internalCheckoutSessionId)
       .maybeSingle<Row>();
     if (data?.status) {
       const commercialStatus = readString(data.status);
       const authUserId = readString(data.auth_user_id);
       const clientId = readString(data.client_id);
+      const flowType = readString(data.flow_type) === "additional_account" ? "additional_account" : "first_purchase";
       const entitlementReady = await hasActivatedCheckoutEntitlement(
         supabase,
         readString(data.id) || input.internalCheckoutSessionId,
@@ -510,6 +511,8 @@ export async function getSafeStripeSessionStatus(
         commercialStatus,
         activatedAt: readString(data.activated_at) || null,
         readyForLogin: commercialStatus === "checkout_paid" && Boolean(authUserId) && Boolean(clientId) && entitlementReady,
+        readyForOnboarding: flowType === "additional_account" && commercialStatus === "checkout_paid" && Boolean(clientId) && entitlementReady,
+        flowType,
       };
     }
   }
@@ -548,6 +551,13 @@ export async function getSafeStripeSessionStatus(
         commercialStatus,
         activatedAt: attempt.attempt.fulfilled_at || canonicalSessionActivatedAt,
         readyForLogin: isStripeAttemptFulfilled(attempt.attempt.status) && canonicalSessionReady,
+        readyForOnboarding: attempt.attempt.flow_type === "additional_account"
+          && isStripeAttemptFulfilled(attempt.attempt.status)
+          && canonicalSessionStatus === "checkout_paid"
+          && Boolean(canonicalSessionActivatedAt)
+          && Boolean(clientId)
+          && entitlementReady,
+        flowType: attempt.attempt.flow_type,
       };
     }
   }

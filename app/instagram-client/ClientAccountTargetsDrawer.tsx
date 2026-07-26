@@ -2,6 +2,7 @@
 
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download, LockKeyhole, Plus, RefreshCw, Search, Sparkles, Trash2, Users, X } from "lucide-react";
 import {
   buildTargetsOverview,
   isArchivedOrDeletedTarget,
@@ -32,7 +33,7 @@ import TargetAvatar from "./TargetAvatar";
 
 type Lang = "fr" | "en";
 
-type DrawerCopy = {
+export type DrawerCopy = {
   kicker: string;
   total: string;
   valid: string;
@@ -140,6 +141,7 @@ function clientFilterToAdmin(filter: string): TargetListFilter {
 }
 
 export type ClientAccountTargetsDrawerProps = {
+  variant?: "dashboard" | "onboarding";
   open: boolean;
   onClose: () => void;
   lang: Lang;
@@ -150,9 +152,11 @@ export type ClientAccountTargetsDrawerProps = {
   overview: TargetsOverview | null;
   onOverviewChange: (overview: TargetsOverview) => void;
   onReload: () => Promise<void>;
+  aiInitialCriteria?: { niche?: string; location?: string };
 };
 
 export default function ClientAccountTargetsDrawer({
+  variant = "dashboard",
   open,
   onClose,
   lang,
@@ -163,6 +167,7 @@ export default function ClientAccountTargetsDrawer({
   overview,
   onOverviewChange,
   onReload,
+  aiInitialCriteria,
 }: ClientAccountTargetsDrawerProps) {
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -179,6 +184,7 @@ export default function ClientAccountTargetsDrawer({
   const filterKeys = ["all", "eligible", "pending", "rejected", "archived"];
   const aiEnabled = isClientAiTargetingEnabled(packageCode);
   const drawerTitle = `@${accountUsername.replace(/^@+/, "")}`;
+  const packageLabel = packageCode.charAt(0).toUpperCase() + packageCode.slice(1);
 
   const loadTargets = useCallback(async () => {
     setLoading(true);
@@ -217,7 +223,7 @@ export default function ClientAccountTargetsDrawer({
     if (!overview) void loadTargets();
   }, [open, overview, loadTargets]);
 
-  const rows = overview?.items ?? [];
+  const rows = useMemo(() => overview?.items ?? [], [overview?.items]);
   const counts = overview?.summary ?? { total: 0, validEligible: 0, archivedCount: 0 };
   const listFilter = clientFilterToAdmin(filter);
 
@@ -402,20 +408,22 @@ export default function ClientAccountTargetsDrawer({
   return (
     <>
       <div className={`cd-dwr-scrim${open ? " open" : ""}`} onClick={onClose} />
-      <aside className={`cd-dwr${open ? " open" : ""}`} aria-hidden={!open}>
+      <aside className={`cd-dwr${variant === "onboarding" ? " cd-dwr-onboarding" : ""}${open ? " open" : ""}`} aria-hidden={!open}>
         <header className="cd-dwr-hd">
           <div className="cd-dwr-hd-l">
             <span className="cd-dwr-hd-ic">
-              <svg viewBox="0 0 24 24" width={20} height={20} stroke="var(--accent)" fill="none" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+              <Users size={20} />
             </span>
             <div>
               <div className="cd-dwr-kicker">{td.kicker}</div>
               <div className="cd-dwr-title" style={{ color: "var(--accent)" }}>{drawerTitle}</div>
             </div>
           </div>
-          <button type="button" className="cd-dwr-x" onClick={onClose}>
-            <svg viewBox="0 0 24 24" width={17} height={17} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-          </button>
+          <div className="cd-dwr-head-meta">
+            <span className="cd-dwr-package">{packageLabel}</span>
+            <span className={`cd-dwr-ai-badge${aiEnabled ? " active" : " locked"}`}><Sparkles size={13} />{aiEnabled ? (lang === "fr" ? "IA active" : "AI active") : (lang === "fr" ? "IA verrouillée" : "AI locked")}</span>
+            <button type="button" className="cd-dwr-x" onClick={onClose} aria-label={lang === "fr" ? "Fermer" : "Close"}><X size={17} /></button>
+          </div>
         </header>
 
         {open ? (
@@ -435,7 +443,7 @@ export default function ClientAccountTargetsDrawer({
 
           <div className="cd-dwr-controls">
             <div className="cd-dwr-search">
-              <svg viewBox="0 0 24 24" width={15} height={15} stroke="var(--ink-mute)" fill="none" strokeWidth={2} strokeLinecap="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <Search size={15} />
               <input type="text" placeholder={td.searchPh} value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
             <div className="cd-dwr-chips">
@@ -447,15 +455,15 @@ export default function ClientAccountTargetsDrawer({
 
           <div className="cd-dwr-actions">
             <button type="button" className="cd-dwr-act" onClick={() => void refreshAll()} disabled={!canRefresh}>
-              <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+              <RefreshCw size={14} />
               {td.refresh}
             </button>
             <button type="button" className="cd-dwr-act" onClick={exportCsv} disabled={!canExport}>
-              <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+              <Download size={14} />
               {td.export}
             </button>
             <button type="button" className="cd-dwr-act" style={{ color: "var(--bad)" }} disabled={!canArchiveSelection} onClick={() => void archiveSelected()}>
-              <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+              <Trash2 size={14} />
               {td.del}
             </button>
           </div>
@@ -466,7 +474,7 @@ export default function ClientAccountTargetsDrawer({
               <div className="cd-dwr-add-row">
                 <input type="text" className="cd-dwr-in" placeholder={td.addPh} value={singleInput} onChange={(e) => setSingleInput(e.target.value)} />
                 <button type="submit" className="cd-dwr-add-btn" disabled={!canSubmitAdd}>
-                  <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={2.2} strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  <Plus size={14} />
                   {td.addBtn}
                 </button>
               </div>
@@ -478,8 +486,9 @@ export default function ClientAccountTargetsDrawer({
             </form>
           </div>
 
-          <div className="cd-dwr-add-card" style={{ textAlign: "center" }}>
-            <div className="cd-dwr-add-lbl" style={{ marginBottom: 12 }}>{td.aiLbl}</div>
+          <div className={`cd-dwr-add-card cd-dwr-ai-card${aiEnabled ? " active" : " locked"}`}>
+            <span className="cd-dwr-ai-icon">{aiEnabled ? <Sparkles size={20} /> : <LockKeyhole size={20} />}</span>
+            <div className="cd-dwr-ai-copy"><div className="cd-dwr-add-lbl">{td.aiLbl}</div><p>{aiEnabled ? (lang === "fr" ? "Recherche guidée par ton analyse publique et tes critères confirmés." : "Search guided by your public analysis and confirmed criteria.") : (lang === "fr" ? "Disponible avec Pro et Premium. Les ajouts manuels restent accessibles." : "Available with Pro and Premium. Manual additions remain available.")}</p></div>
             {aiEnabled ? (
               <>
                 <button type="button" className="cd-dwr-import" onClick={handleAiClick}>{clientAiTargetingButtonLabel(lang)}</button>
@@ -563,12 +572,40 @@ export default function ClientAccountTargetsDrawer({
         onClose={() => setAiWizardOpen(false)}
         lang={lang}
         accountId={accountId}
+        initialCriteria={aiInitialCriteria}
         onValidated={async (message) => {
           setSuccess(message);
           await loadTargets();
           await onReload();
         }}
       />
+      <style jsx global>{`
+        .cd-dwr-onboarding{--bg:#080b1b;--surface:#11172a;--surface-2:#0c1123;--line:#2a3350;--line-2:#202943;--ink:#f7f8fc;--ink-dim:#bdc6d9;--ink-mute:#7f8aa5;--accent:#d95cff;--accent-2:#9656f2;--a-soft:rgba(217,92,255,.1);--a-ring:rgba(217,92,255,.42);--a-tint:rgba(217,92,255,.05);--good:#4ee2a0;--bad:#ff7c87;--bad-line:rgba(255,124,135,.42);--r:8px;--r-sm:6px;--tr:.18s;width:min(1160px,96vw);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+        .cd-dwr-onboarding::before{content:"";height:3px;position:absolute;top:0;left:0;right:0;z-index:2;background:linear-gradient(90deg,#d95cff,#ee70a6 46%,#ff9d57)}
+        .cd-dwr-onboarding .cd-dwr-hd{padding-top:24px;background:rgba(9,13,30,.97)}
+        .cd-dwr-onboarding .cd-dwr-hd-ic{border-radius:8px;background:linear-gradient(145deg,rgba(217,92,255,.2),rgba(255,157,87,.1))}
+        .cd-dwr-onboarding .cd-dwr-title{font-size:1.28rem;letter-spacing:0}
+        .cd-dwr-head-meta{display:flex;align-items:center;gap:8px}
+        .cd-dwr-package,.cd-dwr-ai-badge{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;color:var(--ink-dim);background:var(--surface);font-size:.7rem;font-weight:800}
+        .cd-dwr-ai-badge.active{color:#7ff2b9;border-color:rgba(78,226,160,.35);background:rgba(78,226,160,.08)}
+        .cd-dwr-ai-badge.locked{color:#ffc478;border-color:rgba(255,157,87,.32);background:rgba(255,157,87,.08)}
+        .cd-dwr-onboarding .cd-dwr-body{background:radial-gradient(circle at 84% 2%,rgba(154,78,222,.08),transparent 31%),var(--bg)}
+        .cd-dwr-onboarding .cd-dwr-stat{background:linear-gradient(180deg,#151d34,#10162a)}
+        .cd-dwr-onboarding .cd-dwr-stat-v{color:var(--ink)}
+        .cd-dwr-onboarding .cd-dwr-add-card{background:linear-gradient(180deg,#141c33,#10162a)}
+        .cd-dwr-onboarding .cd-dwr-ai-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;padding:18px;border-color:rgba(217,92,255,.28)}
+        .cd-dwr-onboarding .cd-dwr-ai-card.locked{border-color:rgba(255,157,87,.28)}
+        .cd-dwr-onboarding .cd-dwr-ai-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:8px;color:#ed90f4;background:rgba(217,92,255,.12);border:1px solid rgba(217,92,255,.28)}
+        .cd-dwr-onboarding .cd-dwr-ai-card.locked .cd-dwr-ai-icon{color:#ffc478;background:rgba(255,157,87,.08);border-color:rgba(255,157,87,.26)}
+        .cd-dwr-onboarding .cd-dwr-ai-copy .cd-dwr-add-lbl{margin:0;color:#e8d8f0}
+        .cd-dwr-onboarding .cd-dwr-ai-copy p{margin:6px 0 0;color:var(--ink-mute);font-size:.78rem;line-height:1.45}
+        .cd-dwr-onboarding .cd-dwr-ai-card .cd-dwr-import{width:auto;min-width:210px;margin:0;padding:11px 16px}
+        .cd-dwr-onboarding .cd-dwr-import-upgrade{background:#252034!important;color:#ffc478!important;border:1px solid rgba(255,157,87,.26)!important}
+        .cd-dwr-onboarding .cd-dwr-table{background:#0f1528}
+        .cd-dwr-onboarding .cd-dwr-rrow:hover{background:rgba(217,92,255,.06)}
+        .cd-dwr-onboarding button:focus-visible,.cd-dwr-onboarding input:focus-visible,.cd-dwr-onboarding textarea:focus-visible{outline:2px solid #df6fda;outline-offset:2px}
+        @media(max-width:760px){.cd-dwr-onboarding{width:100vw}.cd-dwr-package,.cd-dwr-ai-badge{display:none}.cd-dwr-onboarding .cd-dwr-hd{padding:18px}.cd-dwr-onboarding .cd-dwr-body{padding:17px}.cd-dwr-onboarding .cd-dwr-ai-card{grid-template-columns:auto 1fr}.cd-dwr-onboarding .cd-dwr-ai-card .cd-dwr-import{grid-column:1/-1;width:100%;min-width:0}.cd-dwr-head-meta{gap:4px}}
+      `}</style>
     </>
   );
 }

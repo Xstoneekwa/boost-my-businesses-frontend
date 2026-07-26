@@ -41,8 +41,8 @@ export function isTargetRowCanonicallyEligible(row: TargetEligibilityRow) {
   const quality = normalizeEligibilityToken(row.quality_status);
   const verification = normalizeEligibilityToken(row.verification_status);
   return ["valid", "active"].includes(status)
-    && (!quality || quality === "eligible")
-    && (!verification || verification === "found");
+    && quality === "eligible"
+    && verification === "found";
 }
 
 export function summarizeTargetEligibilityRows(rows: TargetEligibilityRow[]): TargetEligibilityCounts {
@@ -55,14 +55,18 @@ export function summarizeTargetEligibilityRows(rows: TargetEligibilityRow[]): Ta
     pending: activeRows.filter((row) => {
       const status = normalizeEligibilityToken(row.status);
       const quality = normalizeEligibilityToken(row.quality_status);
+      const verification = normalizeEligibilityToken(row.verification_status);
       return ["pending", "pending_verification", "review"].includes(status)
         || quality === "unknown"
-        || quality.startsWith("review_");
+        || quality.startsWith("review_")
+        || ["pending", "pending_verification", "review"].includes(verification);
     }).length,
     rejected: activeRows.filter((row) => {
       const status = normalizeEligibilityToken(row.status);
       const quality = normalizeEligibilityToken(row.quality_status);
-      return status === "rejected" || quality.startsWith("rejected_");
+      return ["rejected", "duplicate", "ineligible"].includes(status)
+        || quality.startsWith("rejected_")
+        || quality === "ineligible";
     }).length,
     archived: rows.length - activeRows.length,
   };

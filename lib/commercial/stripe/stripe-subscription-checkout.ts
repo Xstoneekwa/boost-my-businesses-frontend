@@ -51,6 +51,7 @@ export type CreateStripeSubscriptionCheckoutInput = {
   flowType: CheckoutFlowType;
   idempotencyKey: string;
   clientId?: string | null;
+  authUserId?: string | null;
   password?: string | null;
   passwordConfirmation?: string | null;
   successUrl: string;
@@ -400,7 +401,7 @@ export async function createStripeSubscriptionCheckoutSession(
   }
 
   let clientId = input.clientId ?? null;
-  const authUserId: string | null = null;
+  const authUserId = flowType === "additional_account" ? input.authUserId ?? null : null;
   if (flowType === "first_purchase") {
     clientId = null;
   }

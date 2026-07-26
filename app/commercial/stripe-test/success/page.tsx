@@ -6,7 +6,6 @@ import { publicCheckoutCopy } from "@/lib/commercial/public-checkout-copy";
 import {
   publicCheckoutLoginPath,
   resolvePublicCheckoutLang,
-  type PublicCheckoutLang,
 } from "@/lib/commercial/public-checkout-lang";
 
 const POLL_INTERVAL_MS = 4000;
@@ -22,6 +21,8 @@ type SessionStatusPayload = {
     activated_at?: string | null;
     ready_for_login?: boolean;
     login_path?: string | null;
+    ready_for_handoff?: boolean;
+    redirect_path?: string | null;
   };
 };
 
@@ -61,13 +62,9 @@ function StripeCheckoutSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id") || "";
-  const [lang, setLang] = useState<PublicCheckoutLang>("fr");
+  const lang = resolvePublicCheckoutLang({ searchParam: searchParams.get("lang") });
   const [pollState, setPollState] = useState<PollState>("waiting");
   const [retryNonce, setRetryNonce] = useState(0);
-
-  useEffect(() => {
-    setLang(resolvePublicCheckoutLang({ searchParam: searchParams.get("lang") }));
-  }, [searchParams]);
 
   const copy = useMemo(() => ({
     title: publicCheckoutCopy(lang, "successTitle"),
@@ -84,11 +81,11 @@ function StripeCheckoutSuccessContent() {
     const result = await fetchSessionStatus(sessionId);
     if (!result.ok) return false;
     const data = result.payload.data;
-    if (data?.ready_for_login) {
+    if (data?.ready_for_handoff && data.redirect_path) {
       setPollState("ready");
-      return true;
+      return data.redirect_path;
     }
-    return false;
+    return null;
   }, [sessionId]);
 
   useEffect(() => {
@@ -103,12 +100,12 @@ function StripeCheckoutSuccessContent() {
       }, SLOW_CONFIRMATION_MS);
 
       const poll = async () => {
-        const ready = await checkStatus();
-        if (cancelled || !ready) return;
+        const destination = await checkStatus();
+        if (cancelled || !destination) return;
         window.clearInterval(interval);
         window.clearTimeout(slowTimer);
         redirectTimer = window.setTimeout(() => {
-          router.replace(loginPath);
+          router.replace(destination || loginPath);
         }, REDIRECT_DELAY_MS);
       };
 

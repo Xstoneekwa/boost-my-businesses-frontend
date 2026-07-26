@@ -14,12 +14,19 @@ export type InstagramPublicProfileLookupResult = {
   canonical_username: string | null;
   instagram_user_id: string | null;
   external_profile_id: string | null;
+  provider_profile_id?: string | null;
   avatar_url: string | null;
+  avatar_hd_url?: string | null;
   is_private: boolean | null;
   is_verified: boolean | null;
+  is_business?: boolean | null;
   followers_count: number | null;
   following_count?: number | null;
   posts_count?: number | null;
+  official_category?: string | null;
+  external_url?: string | null;
+  bio_links?: Array<{ title: string | null; url: string }>;
+  recent_post_captions?: string[];
   reason: string;
   checked_at: string;
   metadata: Record<string, string | number | boolean | null>;
@@ -275,6 +282,17 @@ export function safeInstagramPublicAvatarUrl(value: unknown) {
   }
 }
 
+export function safeInstagramPublicExternalUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.length > 2048) return null;
+  try {
+    const url = new URL(value.trim());
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function safeInstagramPublicMetadata(input: unknown) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   const safe: Record<string, string | number | boolean | null> = {};
@@ -340,6 +358,39 @@ function readPublicCount(value: unknown) {
   return null;
 }
 
+function safePublicCaption(value: unknown) {
+  if (typeof value !== "string") return null;
+  const caption = value
+    .normalize("NFKC")
+    .replace(/https?:\/\/\S+/giu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 280);
+  return caption || null;
+}
+
+function readRecentPostCaptions(payload: Record<string, unknown>) {
+  if (!Array.isArray(payload.posts)) return [];
+  return payload.posts
+    .slice(0, 5)
+    .map((item) => item && typeof item === "object" && !Array.isArray(item)
+      ? safePublicCaption((item as Record<string, unknown>).caption)
+      : null)
+    .filter((caption): caption is string => Boolean(caption));
+}
+
+function readBioLinks(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const row = item as Record<string, unknown>;
+    const url = safeInstagramPublicExternalUrl(row.url ?? row.link);
+    if (!url) return [];
+    const title = readString(row, ["title", "label", "name"]).slice(0, 120) || null;
+    return [{ title, url }];
+  });
+}
+
 function result(
   inputUsername: string,
   status: InstagramPublicProfileLookupStatus,
@@ -353,12 +404,19 @@ function result(
     canonical_username: patch.canonical_username ?? null,
     instagram_user_id: patch.instagram_user_id ?? null,
     external_profile_id: patch.external_profile_id ?? null,
+    provider_profile_id: patch.provider_profile_id ?? null,
     avatar_url: patch.avatar_url ?? null,
+    avatar_hd_url: patch.avatar_hd_url ?? null,
     is_private: patch.is_private ?? null,
     is_verified: patch.is_verified ?? null,
+    is_business: patch.is_business ?? null,
     followers_count: patch.followers_count ?? null,
     following_count: patch.following_count ?? null,
     posts_count: patch.posts_count ?? null,
+    official_category: patch.official_category ?? null,
+    external_url: patch.external_url ?? null,
+    bio_links: patch.bio_links ?? [],
+    recent_post_captions: patch.recent_post_captions ?? [],
     reason: patch.reason ?? status,
     checked_at: patch.checked_at ?? safeNow(options),
     metadata: safeInstagramPublicMetadata(patch.metadata),
@@ -397,12 +455,21 @@ function fromProviderPayload(
     canonical_username: canonicalUsername || null,
     instagram_user_id: readString(payload, ["instagram_user_id", "instagram_id"]) || null,
     external_profile_id: readString(payload, ["external_profile_id", "id"]) || null,
+    provider_profile_id: readString(payload, ["provider_profile_id"]) || null,
     avatar_url: avatarUrl,
+    avatar_hd_url: safeInstagramPublicAvatarUrl(payload.avatar_hd_url ?? payload.avatar_hd),
     is_private: readBoolean(payload, ["is_private", "private"]),
     is_verified: readBoolean(payload, ["is_verified", "verified"]),
+    is_business: readBoolean(payload, ["is_business", "business"]),
     followers_count: readFollowersCount(payload),
     following_count: readPublicCount(payload.following_count ?? payload.following),
     posts_count: readPublicCount(payload.posts_count ?? payload.posts),
+    official_category: readString(payload, ["official_category", "category"]).slice(0, 160) || null,
+    external_url: safeInstagramPublicExternalUrl(payload.external_url ?? payload.external_link),
+    bio_links: readBioLinks(payload.bio_links),
+    recent_post_captions: Array.isArray(payload.recent_post_captions)
+      ? payload.recent_post_captions.map(safePublicCaption).filter((caption): caption is string => Boolean(caption)).slice(0, 5)
+      : [],
     reason: safeReason(payload.reason, status),
     metadata: {
       provider_mode: providerMode(options),
@@ -437,15 +504,18 @@ function fromSearchApiPayload(
   const id = readString(profile, ["id", "user_id", "instagram_user_id", "pk"]);
   const avatarUrl = safeInstagramPublicAvatarUrl(
     profile.avatar_url ??
-      profile.avatar_hd ??
       profile.avatar ??
       profile.profile_pic_url ??
       profile.profile_picture_url ??
+      profile.avatar_hd ??
       profile.thumbnail,
   );
+  const avatarHdUrl = safeInstagramPublicAvatarUrl(profile.avatar_hd_url ?? profile.avatar_hd);
   const followersCount = readFollowersCount({
     followers_count: profile.followers_count ?? profile.followers ?? profile.follower_count,
   });
+  const profileName = readString(profile, ["full_name", "name", "fullName"]).slice(0, 120);
+  const biography = readString(profile, ["biography", "bio", "description"]).slice(0, 160);
 
   if (!username && followersCount === null && !avatarUrl && !id) {
     return result(inputUsername, "provider_error", options, {
@@ -456,20 +526,29 @@ function fromSearchApiPayload(
 
   return result(inputUsername, "found", options, {
     canonical_username: normalizeInstagramPublicUsername(username || inputUsername),
+    provider_profile_id: id || null,
     external_profile_id: id || null,
     avatar_url: avatarUrl,
+    avatar_hd_url: avatarHdUrl,
     is_private: readBoolean(profile, ["is_private", "private"]),
     is_verified: readBoolean(profile, ["is_verified", "verified"]),
+    is_business: readBoolean(profile, ["is_business", "business"]),
     followers_count: followersCount,
     following_count: readPublicCount(profile.following_count ?? profile.following),
     posts_count: readPublicCount(profile.posts_count ?? profile.posts),
+    official_category: readString(profile, ["official_category", "category"]).slice(0, 160) || null,
+    external_url: safeInstagramPublicExternalUrl(
+      profile.external_url ?? profile.external_link ?? profile.link ?? profile.website,
+    ),
+    bio_links: readBioLinks(profile.bio_links),
+    recent_post_captions: readRecentPostCaptions(payload),
     reason: "found",
     metadata: {
       provider_mode: "searchapi",
       provider_status: "found",
       provider_engine: "instagram_profile",
-      profile_name: readString(profile, ["full_name", "name", "fullName"]).slice(0, 120) || null,
-      biography: readString(profile, ["biography", "bio", "description"]).slice(0, 160) || null,
+      profile_name: profileName || null,
+      biography: biography || null,
     },
   });
 }

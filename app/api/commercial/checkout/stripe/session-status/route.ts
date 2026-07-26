@@ -7,6 +7,7 @@ import {
 import { getInstagramUserContext } from "@/lib/restaurant-analytics/session";
 import { requireInstagramAdmin } from "@/app/api/instagram-dashboard/_utils";
 import { publicCheckoutLoginPath } from "@/lib/commercial/public-checkout-lang.ts";
+import { resolveCheckoutContext, resolveCheckoutHandoff } from "@/lib/commercial/checkout-context.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -65,10 +66,17 @@ export async function GET(request: Request) {
     return jsonError("Checkout session was not found.", 404, { code: status.code });
   }
 
+  const flowType = status.flowType === "additional_account" ? "additional_account" : "first_purchase";
+  const handoff = resolveCheckoutHandoff(resolveCheckoutContext({ flowType }));
+  const readyForHandoff = status.readyForLogin || status.readyForOnboarding;
   return jsonOk({
     commercial_status: status.commercialStatus,
     activated_at: status.activatedAt,
     ready_for_login: status.readyForLogin,
     login_path: status.readyForLogin ? publicCheckoutLoginPath("fr") : null,
+    ready_for_handoff: readyForHandoff,
+    redirect_path: readyForHandoff
+      ? (handoff.type === "email_login" ? publicCheckoutLoginPath("fr") : handoff.redirectPath)
+      : null,
   });
 }

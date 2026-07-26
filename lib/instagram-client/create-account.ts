@@ -4,6 +4,7 @@ import {
   isPlausibleInstagramPublicUsername,
   lookupInstagramPublicProfile,
   normalizeInstagramPublicUsername,
+  type InstagramPublicProfileLookupResult,
 } from "@/lib/instagram-public-profile-lookup";
 import {
   isAddProfileCommercialPackage,
@@ -26,7 +27,7 @@ import {
   profileVerificationPayloadForInsert,
 } from "@/lib/instagram-accounts/profile-verification-payload";
 import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
-import { clientMaxAccountsLimit, projectClientAccountRow, readBoolean, readString } from "./guards";
+import { clientMaxAccountsLimit, projectClientAccountRow, readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -38,13 +39,68 @@ export type ClientCreateAccountInput = {
   email?: string;
   notes?: string;
   dryRun?: boolean;
+  flowMode?: "legacy_auto_assign" | "targeting_setup";
+};
+
+export type ClientPublicProfileProjection = {
+  lookupStatus: string;
+  providerProfileId: string | null;
+  username: string;
+  displayName: string | null;
+  biography: string | null;
+  avatarUrl: string | null;
+  avatarHdUrl: string | null;
+  followersCount: number | null;
+  followingCount: number | null;
+  postsCount: number | null;
+  isPrivate: boolean | null;
+  isVerified: boolean | null;
+  isBusiness: boolean | null;
+  officialCategory: string | null;
+  externalUrl: string | null;
+  bioLinks: Array<{ title: string | null; url: string }>;
+  recentCaptionSamples: string[];
+  checkedAt: string;
 };
 
 export type ClientCreateAccountResult =
-  | { ok: true; dryRun?: boolean; account: ReturnType<typeof projectClientAccountRow>; assignment: { status: string; reason: string } }
+  | {
+    ok: true;
+    dryRun?: boolean;
+    account: ReturnType<typeof projectClientAccountRow>;
+    assignment: { status: string; reason: string };
+    commercialPackage: AddProfileCommercialPackage;
+    publicProfile: ClientPublicProfileProjection;
+  }
   | { ok: false; status: number; error: string; code?: string };
 
 const credentialsTimeoutMs = 9000;
+
+export function projectClientPublicProfileLookup(
+  profileLookup: InstagramPublicProfileLookupResult,
+  accountUsername: string,
+): ClientPublicProfileProjection {
+  return {
+    lookupStatus: profileLookup.status,
+    providerProfileId: profileLookup.provider_profile_id ?? null,
+    username: accountUsername,
+    displayName: readString(profileLookup.metadata.profile_name) || null,
+    biography: readString(profileLookup.metadata.biography) || null,
+    avatarUrl: profileLookup.avatar_url,
+    avatarHdUrl: profileLookup.avatar_hd_url ?? null,
+    followersCount: profileLookup.followers_count,
+    followingCount: profileLookup.following_count ?? null,
+    postsCount: profileLookup.posts_count ?? null,
+    isPrivate: profileLookup.is_private,
+    isVerified: profileLookup.is_verified,
+    isBusiness: profileLookup.is_business ?? null,
+    officialCategory: profileLookup.official_category ?? null,
+    externalUrl: profileLookup.external_url ?? null,
+    bioLinks: profileLookup.bio_links ?? [],
+    recentCaptionSamples: profileLookup.recent_post_captions ?? [],
+    checkedAt: profileLookup.checked_at,
+  };
+}
 
 async function submitClientCredentials(input: {
   accountId: string;
@@ -139,6 +195,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
   const email = emailParsed.email ?? "";
   const notes = readString(input.notes);
   const dryRun = input.dryRun === true;
+  const targetingSetup = input.flowMode === "targeting_setup";
 
   if (!username) return { ok: false, status: 400, error: "Instagram username is required.", code: "username_required" };
   if (emailParsed.present && emailParsed.invalid) {
@@ -212,6 +269,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     runtimeMode: "safe_setup",
     addons: entitlementSelection.addons,
   });
+  const publicProfile = projectClientPublicProfileLookup(profileLookup, accountUsername);
 
   if (dryRun) {
     return {
@@ -221,13 +279,18 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
         accountId: "dry-run-account",
         username: accountUsername,
         packageLabel: packagePreset.label,
-        accountStatus: "active",
+        accountStatus: targetingSetup ? "inactive" : "active",
         onboardingStatus: "pending",
         provisioningStatus: "not_started",
         loginStatus: "unknown",
-        assignmentStatus: "pending_assignment",
+        assignmentStatus: targetingSetup ? "onboarding_targeting_pending" : "pending_assignment",
       }),
-      assignment: { status: "pending_assignment", reason: "dry_run" },
+      assignment: {
+        status: targetingSetup ? "onboarding_targeting_pending" : "pending_assignment",
+        reason: "dry_run",
+      },
+      commercialPackage,
+      publicProfile,
     };
   }
 
@@ -235,7 +298,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
   const accountPayload = {
     username: accountUsername,
     display_name: "",
-    status: "active",
+    status: targetingSetup ? "inactive" : "active",
     device_id: null,
     device_name: "",
     device_udid: "",
@@ -269,7 +332,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     device_udid: "",
     email: "",
     password: "",
-    account_status: "active",
+    account_status: targetingSetup ? "inactive" : "active",
     cloned_app_mode: false,
     dry_run_enabled: true,
   };
@@ -336,8 +399,12 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     preset: packagePreset,
   });
 
-  const assignment = await tryAutoAssignOnboardingSchedule(accountId);
-  const assignmentStatus = assignment.assigned ? "assigned" : "pending_assignment";
+  const assignment = targetingSetup
+    ? { assigned: false, reason: "targeting_setup_incomplete" }
+    : await tryAutoAssignOnboardingSchedule(accountId);
+  const assignmentStatus = targetingSetup
+    ? "onboarding_targeting_pending"
+    : assignment.assigned ? "assigned" : "pending_assignment";
 
   const { data: clientLink } = await supabase
     .from("client_instagram_accounts")
@@ -352,7 +419,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
       accountId,
       username: accountUsername,
       packageLabel: packagePreset.label,
-      accountStatus: "active",
+      accountStatus: targetingSetup ? "inactive" : "active",
       onboardingStatus: readString(clientLink?.onboarding_status, "pending"),
       provisioningStatus: readString(clientLink?.provisioning_status, "not_started"),
       loginStatus: readString(clientLink?.login_status, "unknown"),
@@ -362,5 +429,7 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
       status: assignmentStatus,
       reason: assignment.assigned ? "auto_assigned" : readString(assignment.reason, "pending_setup"),
     },
+    commercialPackage,
+    publicProfile,
   };
 }
