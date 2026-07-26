@@ -17,7 +17,7 @@ import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-
 export const dynamic = "force-dynamic";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const UPDATE_ACTIONS = new Set(["save_analysis", "save_targeting", "open_targets", "complete", "abandon", "reanalyze_public", "analyze_ai"]);
+const UPDATE_ACTIONS = new Set(["save_analysis", "save_protection_lists", "save_targeting", "open_targets", "complete", "abandon", "reanalyze_public", "analyze_ai"]);
 
 type StartBody = {
   idempotency_key?: unknown;
@@ -181,7 +181,7 @@ export async function PATCH(request: Request) {
       clientId: auth.clientId,
       userId: auth.userId,
       sessionId,
-      action: action as "save_analysis" | "save_targeting" | "open_targets" | "complete" | "abandon",
+      action: action as "save_analysis" | "save_protection_lists" | "save_targeting" | "open_targets" | "complete" | "abandon",
       value: body.value,
     });
     return jsonOk({ onboarding });

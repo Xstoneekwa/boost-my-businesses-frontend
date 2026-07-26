@@ -2,9 +2,15 @@
 
 ## Canonical semantics
 
-`interaction_blacklist` prevents interaction workflows from targeting a normalized Instagram username. `unfollow_whitelist` protects a normalized Instagram username from unfollow selection. The canonical source is `public.account_protection_list_entries`, scoped by `account_id` and `list_kind`.
+`interaction_blacklist` blocks automated Follow, Like, Comment, Welcome DM, Outreach DM, Story Watch, and future automated interactions for a normalized Instagram username. It never blocks Unfollow. `unfollow_whitelist` blocks automatic Unfollow only; other interactions remain allowed unless the username is also in `interaction_blacklist`. The canonical source is `public.account_protection_list_entries`, scoped by `account_id` and `list_kind`.
 
-The legacy fields `ig_account_filters.blacklist_accounts`, `ig_account_filters.whitelist_words`, and `ig_interacted_users.whitelist_protected` are not read, copied, merged, changed, or deleted by this migration. In particular, no Rex value is backfilled: both new canonical Rex lists start empty.
+The legacy fields `ig_account_filters.blacklist_accounts`, `ig_account_filters.whitelist_words`, and `ig_interacted_users.whitelist_protected` are no longer active sources. The old Client filters endpoint returns HTTP 410, the generic Admin filters API neither exposes nor overwrites the two retired values, and the Worker ignores `ig_interacted_users.whitelist_protected`.
+
+### Legacy inventory and explicit Rex exclusion
+
+The read-only production inventory found exactly one account with non-empty retired protection fields: inactive `@rex_gen_boost_ai` (`df707a97-bfb1-4286-bf09-25090a7b3207`). Its retired whitelist contained `bricosympa.official` and `vincentfavrephotographe`; its retired blacklist contained `eric_fankh`, `unefemmeautiste`, `andy.deleu`, `fhore_pilates`, and `bonheurdechine`. No other account had non-empty legacy protection values, and the canonical tables were empty at inventory time.
+
+Rex is explicitly excluded from import because it is inactive and scheduled for separate cleanup. Nothing in this release deletes or rewrites those seven historical values. They remain preserved only for cleanup evidence; all canonical Rex lists start empty. New and active accounts use canonical lists only. Cleanup must remain a separate authorized task.
 
 ## Schema and versioning
 
@@ -33,6 +39,8 @@ Client:
 
 Admin uses the same suffix below `/api/instagram-dashboard/accounts/`.
 
+BotApp uses the same service through relay-authenticated routes below `/api/instagram-dashboard/botapp/accounts/`; the renderer has no Supabase key or local list source of truth.
+
 GET returns `{ items, size, version, updatedAt, status }`, where status is `loaded_empty` or `loaded_with_items`, and includes ETag plus `Cache-Control: private, no-store`. PUT accepts `{ items: [] }`. PATCH accepts `{ add: [], remove: [] }`. DELETE normalizes the path username and is logically idempotent.
 
 Normalization trims whitespace, removes leading `@`, lowercases, rejects empty values and URLs, validates the Instagram username shape, and deduplicates. Invalid input is never silently discarded. HTTP 422 returns `entryErrors` with `invalid_username`, `instagram_url_not_allowed`, `duplicate_input`, or `empty_username`.
@@ -41,10 +49,17 @@ Normalization trims whitespace, removes leading `@`, lowercases, rejects empty v
 
 An event contains the operation, counts, changed flag, request fingerprint, source surface, actor, request/idempotency identifiers, and previous/new versions. It never stores a complete list, credentials, secrets, or a raw request body. Single-entry add/remove/delete events may include the normalized username; multi-entry events leave it null.
 
-## Rollout roadmap
+## Product surfaces and runtime
 
-This release supplies only DB, backend service, Client API, Admin API, tests, and documentation. Client UI, Admin UI, BotApp integration, and once-per-run Worker loading remain future work and must consume these APIs/canonical tables. This release does not change Auto Login, runs, phones, ADB, Worker code, or legacy values.
+- Client targeting keeps the existing three-column layout and maps “Liste blanche” to `unfollow_whitelist` and “Liste noire” to `interaction_blacklist`. Add, multi-add, remove, search, counts, no-store refresh, ETag conflict reload, and active-campaign editing use the canonical API.
+- Client onboarding is credentials → analysis → optional protection lists → targeting criteria → 15 eligible target accounts → completion. Saving an empty list still creates its version marker, making the optional step resumable and explicit.
+- Admin Settings → Sources shows the same two account-scoped lists below Target accounts / Sources.
+- BotApp Settings → Sources shows the same two lists in English through the secure relay.
+- The Worker dispatcher calls `get_account_protection_lists_for_run` exactly once for an account or outreach session before device access. It serializes the immutable snapshot into the subprocess environment. Active runs never refresh it; a new/resumed request reloads it.
+- If the snapshot is unavailable, malformed, or account-mismatched, the dispatcher blocks before device access. No per-candidate or per-action database query exists.
+
+No real run, login, ADB, phone, Stripe, cap, or Rex cleanup action is part of deployment verification.
 
 ## Rollback
 
-Routes can be disabled immediately with `ACCOUNT_PROTECTION_LISTS_V1_ENABLED=false` or by reverting the backend commit. The explicit down script is `supabase/rollback/20260726041500_account_protection_lists_v1.down.sql`. It refuses to drop anything if canonical entries, version rows, or audit events exist. When all three are empty, it drops only the canonical RPC and three new tables. It has no effect on `ig_account_filters`, `ig_interacted_users`, Worker code, or legacy data.
+Routes can be disabled immediately with `ACCOUNT_PROTECTION_LISTS_V1_ENABLED=false` or by reverting the web release. Worker rollback is an atomic symlink switch to the previous release plus one dispatcher restart; BotApp rollback restores its pre-release app bundle. The foundation down script is `supabase/rollback/20260726041500_account_protection_lists_v1.down.sql`; it refuses to drop non-empty canonical data. Before schema rollback, remove the later onboarding/snapshot RPC migration through its release rollback procedure. No rollback deletes the retired Rex values.

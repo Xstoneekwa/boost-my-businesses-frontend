@@ -21,7 +21,7 @@ type AuthorizedRoute = {
   accountId: string;
   listKind: AccountProtectionListKind;
   actorAuthUserId: string | null;
-  sourceSurface: "client_dashboard" | "admin_dashboard";
+  sourceSurface: "client_dashboard" | "admin_dashboard" | "botapp";
 };
 
 function responseForSnapshot(accountId: string, listKind: AccountProtectionListKind, data: AccountProtectionListSnapshot) {

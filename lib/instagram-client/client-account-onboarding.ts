@@ -46,7 +46,7 @@ type Supabase = ReturnType<typeof createSupabaseClient>;
 
 export { CLIENT_ONBOARDING_TARGET_MINIMUM, hasClientOnboardingTargetMinimum };
 
-export type ClientOnboardingStep = "connection" | "analysis" | "targeting" | "targets" | "complete";
+export type ClientOnboardingStep = "connection" | "analysis" | "protection_lists" | "targeting" | "targets" | "complete";
 export type ClientOnboardingStatus =
   | "active"
   | "creating"
@@ -364,7 +364,7 @@ export async function updateClientInstagramOnboarding(input: {
   clientId: string;
   userId: string;
   sessionId: string;
-  action: "save_analysis" | "save_targeting" | "open_targets" | "complete" | "abandon";
+  action: "save_analysis" | "save_protection_lists" | "save_targeting" | "open_targets" | "complete" | "abandon";
   value?: unknown;
 }) {
   const supabase = createSupabaseClient();

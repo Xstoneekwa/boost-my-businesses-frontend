@@ -2589,6 +2589,7 @@ export default function InstagramDashboardButtons({
             {isLoading ? <div className="ig-settings-loading">Loading account data...</div> : null}
             {!isLoading && (panel === "settings" || panel === "filters") && settings && followFilters && followSources && schedule
               ? renderSettingsTabs({
+                  accountId,
                   settings,
                   settingsBaseline,
                   followFilters,
@@ -4176,6 +4177,7 @@ function ExportBar({
 }
 
 function renderSettingsTabs({
+  accountId,
   settings,
   settingsBaseline,
   followFilters,
@@ -4208,6 +4210,7 @@ function renderSettingsTabs({
   packageLabel,
   entitlementSummary,
 }: {
+  accountId: string;
   settings: InstagramSettings;
   settingsBaseline: InstagramSettings | null;
   followFilters: FollowFiltersProjection;
@@ -4354,6 +4357,7 @@ function renderSettingsTabs({
         <>
           {followSourcesError ? <p className="ig-settings-message ig-settings-error">{followSourcesError}</p> : null}
           <SourcesPolicyPanel
+            accountId={accountId}
             targetsOverview={targetsOverview}
             followSources={followSources}
             updateFollowSourceSetting={updateFollowSourceSetting}
@@ -4718,12 +4722,201 @@ function sourceMetricCount(value: number, singular: string, plural: string) {
   return `${value} ${value === 1 ? singular : plural}`;
 }
 
+type ProtectionListKind = "unfollow_whitelist" | "interaction_blacklist";
+type ProtectionListView = {
+  items: string[];
+  version: number;
+  updatedAt: string | null;
+  status: "loaded_empty" | "loaded_with_items";
+};
+
+const EMPTY_PROTECTION_LIST: ProtectionListView = {
+  items: [],
+  version: 0,
+  updatedAt: null,
+  status: "loaded_empty",
+};
+
+function AccountProtectionListsPanel({ accountId }: { accountId: string }) {
+  const [lists, setLists] = useState<Record<ProtectionListKind, ProtectionListView>>({
+    unfollow_whitelist: EMPTY_PROTECTION_LIST,
+    interaction_blacklist: EMPTY_PROTECTION_LIST,
+  });
+  const [etags, setEtags] = useState<Record<ProtectionListKind, string>>({
+    unfollow_whitelist: "",
+    interaction_blacklist: "",
+  });
+  const [drafts, setDrafts] = useState<Record<ProtectionListKind, string>>({
+    unfollow_whitelist: "",
+    interaction_blacklist: "",
+  });
+  const [searches, setSearches] = useState<Record<ProtectionListKind, string>>({
+    unfollow_whitelist: "",
+    interaction_blacklist: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<ProtectionListKind | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function loadLists() {
+    setLoading(true);
+    setMessage("");
+    try {
+      const load = async (kind: ProtectionListKind) => {
+        const response = await fetch(`/api/instagram-dashboard/accounts/${encodeURIComponent(accountId)}/protection-lists/${kind}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json() as { ok?: boolean; data?: ProtectionListView; error?: string };
+        if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || "protection_list_load_failed");
+        return { kind, data: payload.data, etag: response.headers.get("etag") ?? "" };
+      };
+      const loaded = await Promise.all([load("unfollow_whitelist"), load("interaction_blacklist")]);
+      setLists(Object.fromEntries(loaded.map((item) => [item.kind, item.data])) as Record<ProtectionListKind, ProtectionListView>);
+      setEtags(Object.fromEntries(loaded.map((item) => [item.kind, item.etag])) as Record<ProtectionListKind, string>);
+    } catch (loadError) {
+      setMessage(loadError instanceof Error ? loadError.message : "Protection lists could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadLists();
+    // loadLists is intentionally account-scoped and reruns only when the selected account changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
+  async function mutate(kind: ProtectionListKind, add: string[] = [], remove: string[] = []) {
+    if (busy || !etags[kind]) return;
+    setBusy(kind);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/instagram-dashboard/accounts/${encodeURIComponent(accountId)}/protection-lists/${kind}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "If-Match": etags[kind],
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ add, remove }),
+      });
+      const payload = await response.json() as { ok?: boolean; data?: ProtectionListView; error?: string };
+      if (response.status === 409) {
+        await loadLists();
+        throw new Error("This list changed elsewhere. The latest version has been reloaded; retry your change.");
+      }
+      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || "protection_list_update_failed");
+      setLists((current) => ({ ...current, [kind]: payload.data! }));
+      setEtags((current) => ({ ...current, [kind]: response.headers.get("etag") ?? current[kind] }));
+      setDrafts((current) => ({ ...current, [kind]: "" }));
+      setMessage("Saved. Changes apply to the next session.");
+    } catch (mutationError) {
+      setMessage(mutationError instanceof Error ? mutationError.message : "Protection list update failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const cards: Array<{ kind: ProtectionListKind; title: string; description: string }> = [
+    {
+      kind: "unfollow_whitelist",
+      title: "Unfollow whitelist",
+      description: "These accounts are never automatically unfollowed. Other interactions remain allowed unless they are also blacklisted.",
+    },
+    {
+      kind: "interaction_blacklist",
+      title: "Interaction blacklist",
+      description: "Blocks automated Follow, Like, Comment, Welcome DM, Outreach DM, and Story Watch. It does not block Unfollow.",
+    },
+  ];
+
+  return (
+    <section className="ig-filters-section">
+      <div className="ig-filters-section-head">
+        <div className="ig-filters-section-title-row">
+          <h3>Account protection lists</h3>
+          <span className="ig-filters-badge ig-filters-badge-active">Canonical</span>
+        </div>
+        <p>Account-scoped protections. Active runs keep their starting snapshot; changes apply to the next session.</p>
+      </div>
+      {loading ? <p className="ig-settings-message">Loading protection lists...</p> : null}
+      {!loading ? cards.map(({ kind, title, description }) => {
+        const search = searches[kind].trim().toLowerCase().replace(/^@/, "");
+        const visible = lists[kind].items.filter((item) => !search || item.includes(search));
+        const updated = lists[kind].updatedAt ? new Date(lists[kind].updatedAt).toLocaleString() : "Never";
+        return (
+          <div className="ig-filters-planned-card" key={kind}>
+            <div className="ig-filters-section-title-row">
+              <strong>{title}</strong>
+              <span className="ig-filters-badge ig-filters-badge-readonly">{lists[kind].items.length}</span>
+            </div>
+            <p>{description}</p>
+            <div className="ig-settings-grid">
+              <label className="ig-settings-field">
+                <span>Add usernames</span>
+                <input
+                  value={drafts[kind]}
+                  placeholder="username1, @username2"
+                  onChange={(event) => setDrafts((current) => ({ ...current, [kind]: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    const items = drafts[kind].split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean);
+                    if (items.length) void mutate(kind, items, []);
+                  }}
+                />
+              </label>
+              <label className="ig-settings-field">
+                <span>Search</span>
+                <input
+                  value={searches[kind]}
+                  placeholder="Search username"
+                  onChange={(event) => setSearches((current) => ({ ...current, [kind]: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="ig-settings-actions">
+              <button
+                type="button"
+                className="ig-settings-secondary"
+                disabled={busy !== null || !drafts[kind].trim()}
+                onClick={() => {
+                  const items = drafts[kind].split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean);
+                  if (items.length) void mutate(kind, items, []);
+                }}
+              >
+                {busy === kind ? "Saving..." : "Add"}
+              </button>
+            </div>
+            {visible.length ? (
+              <ul className="ig-source-policy-list">
+                {visible.map((item) => (
+                  <li key={item}>
+                    <span>@{item}</span>{" "}
+                    <button type="button" className="ig-settings-secondary" disabled={busy !== null} onClick={() => void mutate(kind, [], [item])}>Remove</button>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="ig-settings-message">{search ? "No matching username." : "No usernames saved."}</p>}
+            <small>Source: account_protection_list_entries · version {lists[kind].version} · updated {updated}</small>
+          </div>
+        );
+      }) : null}
+      {message ? <p className="ig-settings-message">{message}</p> : null}
+    </section>
+  );
+}
+
 function SourcesPolicyPanel({
+  accountId,
   targetsOverview,
   followSources,
   updateFollowSourceSetting,
   openTargetsPanel,
 }: {
+  accountId: string;
   targetsOverview: TargetsOverview | null;
   followSources: FollowSourcesProjection;
   updateFollowSourceSetting: (
@@ -4849,6 +5042,8 @@ function SourcesPolicyPanel({
           </button>
         </div>
       </section>
+
+      <AccountProtectionListsPanel accountId={accountId} />
 
       <section className="ig-filters-section">
         <div className="ig-filters-section-head">

@@ -6,7 +6,7 @@ Status: implemented and deployed candidate; final product validation remains pen
 
 Every client entry point uses the same path for a standard or agency tenant, for the first or any later account, and for an existing or newly purchased entitlement:
 
-`Add Instagram account` → plan choice when needed → checkout activation → reserved entitlement → `/instagram-client?onboarding=1` → credentials → public analysis → account protection and targeting → target accounts → server gate of 15 eligible targets → onboarding complete.
+`Add Instagram account` → plan choice when needed → checkout activation → reserved entitlement → `/instagram-client?onboarding=1` → credentials → public analysis → optional account protection lists → targeting criteria → target accounts → server gate of 15 eligible targets → onboarding complete.
 
 The client `POST /api/instagram-client/accounts` endpoint is deliberately closed with `instagram_onboarding_required`. It cannot create an account or reopen the historical direct-create modal. Admin account-creation tooling is separate and unchanged.
 
@@ -26,12 +26,12 @@ The `begin_client_instagram_onboarding` RPC atomically creates the account, defa
 
 ## Account-scoped protection lists
 
-The Protection & targeting screen reads and writes the existing `ig_account_filters` row through `/api/instagram-client/accounts/{accountId}/filters`:
+The dedicated optional step reads and writes `account_protection_list_entries` through the versioned canonical API:
 
-- whitelist: Instagram usernames protected from unfollow;
-- blacklist: Instagram usernames excluded from interaction.
+- `unfollow_whitelist`: never automatically unfollow; other interactions remain allowed unless also blacklisted;
+- `interaction_blacklist`: blocks automated Follow, Like, Comment, Welcome DM, Outreach DM and Story Watch, but not Unfollow.
 
-Both lists are optional, normalized, deduplicated, ownership-checked, and isolated by `account_id`. They remain editable later from the account targeting UI. The onboarding UI saves them before advancing the targeting session. This change does not alter Worker behavior or claim new runtime-enforcement evidence.
+Both lists are normalized, deduplicated, ownership-checked, isolated by `account_id`, protected by ETag/If-Match and idempotency keys, and resumable after refresh. Saving or skipping records explicit empty canonical versions before targeting can continue. They remain editable later from the Client three-column targeting screen, Admin Settings → Sources, and BotApp Settings → Sources. Changes to an active campaign apply to the next Worker session because the current run keeps its immutable start snapshot.
 
 ## Target accounts and readiness gate
 
@@ -58,7 +58,7 @@ Client responses expose stable, non-secret errors such as `session_required`, `e
 
 Automated verification covers routing, old-flow exclusion, authentication, entitlement idempotency, transaction rollback, tenant/account isolation, protection-list persistence, target qualification and the 15-target gate. The production build must include `/api/instagram-client/onboarding` and `/api/instagram-client/onboarding/avatar`.
 
-Rollback is application-only because this delivery creates no new database schema. Reverting the delivery commit restores the previous frontend/backend behavior, but doing so would also restore the deprecated client path and therefore requires an explicit product decision. The two checked-in migrations document schema already present in production; they are not newly applied by this delivery.
+Rollback must be coordinated across web, BotApp, Worker and the later onboarding/snapshot migration. Do not re-enable the legacy Client filters endpoint as a fallback. The canonical foundation down migration refuses to remove non-empty data. A rollback never starts a run or touches a phone.
 
 ## Pending final acceptance
 

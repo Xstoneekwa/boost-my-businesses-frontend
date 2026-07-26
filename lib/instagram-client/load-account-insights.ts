@@ -134,12 +134,6 @@ function actionLabels(actionType: string) {
   return { fr: "Activité campagne", en: "Campaign activity", type: "fo" as const };
 }
 
-function parseListField(value: unknown) {
-  const raw = readString(value, "");
-  if (!raw) return [];
-  return raw.split(/[\n,;]+/).map((item) => item.trim().replace(/^@+/, "")).filter(Boolean);
-}
-
 function isActiveTarget(row: SupabaseRecord) {
   const status = readString(row.status, "").toLowerCase();
   return !status.includes("archived") && !status.includes("deleted");
@@ -170,7 +164,11 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     supabase.from("ig_runs").select("id,status,created_at,started_at,total_follow,total_like,total_dm,total_story").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(1000),
     supabase.from("ig_interaction_events").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(5000),
     supabase.from("ig_targets").select("id,normalized_username,target_username,input_username,status,verification_status,quality_status,followers_count,created_at").eq("account_id", accountId).order("created_at", { ascending: false }).limit(500),
-    supabase.from("ig_account_filters").select("whitelist_words,blacklist_accounts").eq("account_id", accountId).maybeSingle(),
+    supabase
+      .from("account_protection_list_entries")
+      .select("list_kind,normalized_username")
+      .eq("account_id", accountId)
+      .eq("active", true),
     supabase.rpc("get_activity_log_interaction_evidence_admin", {
       p_account_id: accountId,
       p_search: null,
@@ -310,7 +308,15 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     activity,
     recentFeed,
     targets,
-    whitelist: parseListField(filters?.whitelist_words),
-    blacklist: parseListField(filters?.blacklist_accounts),
+    whitelist: ((filtersResult.data ?? []) as SupabaseRecord[])
+      .filter((row) => readString(row.list_kind) === "unfollow_whitelist")
+      .map((row) => readString(row.normalized_username))
+      .filter(Boolean)
+      .sort(),
+    blacklist: ((filtersResult.data ?? []) as SupabaseRecord[])
+      .filter((row) => readString(row.list_kind) === "interaction_blacklist")
+      .map((row) => readString(row.normalized_username))
+      .filter(Boolean)
+      .sort(),
   };
 }

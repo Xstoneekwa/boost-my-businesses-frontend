@@ -41,7 +41,7 @@ type ApiEnvelope = {
   data?: { onboarding?: ClientOnboardingSession | null };
 };
 
-const STEPS = ["connection", "analysis", "targeting", "targets", "complete"] as const;
+const STEPS = ["connection", "analysis", "protection_lists", "targeting", "targets", "complete"] as const;
 const AI_FIELDS = new Set<ProfileAiUiField>([
   "suggestedCategory", "niche", "probableAudience", "themes", "businessDescription", "keywords", "exclusions",
 ]);
@@ -136,6 +136,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   const [protectedAccounts, setProtectedAccounts] = useState<string[]>([]);
   const [blockedAccounts, setBlockedAccounts] = useState<string[]>([]);
   const [filtersLoading, setFiltersLoading] = useState(false);
+  const [protectionEtags, setProtectionEtags] = useState({ interaction_blacklist: "", unfollow_whitelist: "" });
   const [targets, setTargets] = useState<TargetsOverview | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const idempotencyKeyRef = useRef("");
@@ -228,26 +229,30 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   }, [open]);
 
   useEffect(() => {
-    if (!open || step !== "targeting" || !session?.accountId) return;
+    if (!open || step !== "protection_lists" || !session?.accountId) return;
     if (filtersHydratedAccountRef.current === session.accountId) return;
     let cancelled = false;
     setFiltersLoading(true);
     setError("");
-    void fetch(`/api/instagram-client/accounts/${encodeURIComponent(session.accountId)}/filters`, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    }).then(async (response) => {
-      const payload = await response.json() as {
-        ok?: boolean;
-        data?: { whitelist?: string[]; blacklist?: string[] };
-        error?: string;
-      };
-      if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(payload.error || text(lang, "Impossible de charger les protections du compte.", "Could not load account protections."));
+    void Promise.all([
+      fetch(`/api/instagram-client/accounts/${encodeURIComponent(session.accountId)}/protection-lists/unfollow_whitelist`, { headers: { Accept: "application/json" }, cache: "no-store" }),
+      fetch(`/api/instagram-client/accounts/${encodeURIComponent(session.accountId)}/protection-lists/interaction_blacklist`, { headers: { Accept: "application/json" }, cache: "no-store" }),
+    ]).then(async ([whitelistResponse, blacklistResponse]) => {
+      const whitelistPayload = await whitelistResponse.json() as { ok?: boolean; data?: { items?: string[] }; error?: string };
+      const blacklistPayload = await blacklistResponse.json() as { ok?: boolean; data?: { items?: string[] }; error?: string };
+      if (!whitelistResponse.ok || !whitelistPayload.ok || !whitelistPayload.data) {
+        throw new Error(whitelistPayload.error || text(lang, "Impossible de charger la liste blanche Unfollow.", "Could not load the Unfollow Whitelist."));
+      }
+      if (!blacklistResponse.ok || !blacklistPayload.ok || !blacklistPayload.data) {
+        throw new Error(blacklistPayload.error || text(lang, "Impossible de charger la liste noire.", "Could not load the Interaction Blacklist."));
       }
       if (cancelled) return;
-      setProtectedAccounts(payload.data.whitelist ?? []);
-      setBlockedAccounts(payload.data.blacklist ?? []);
+      setProtectedAccounts(whitelistPayload.data.items ?? []);
+      setBlockedAccounts(blacklistPayload.data.items ?? []);
+      setProtectionEtags({
+        unfollow_whitelist: whitelistResponse.headers.get("etag") ?? "",
+        interaction_blacklist: blacklistResponse.headers.get("etag") ?? "",
+      });
       filtersHydratedAccountRef.current = session.accountId!;
     }).catch((loadError) => {
       if (!cancelled) setError(loadError instanceof Error ? loadError.message : text(lang, "Chargement indisponible.", "Loading unavailable."));
@@ -348,7 +353,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
     }
   }
 
-  async function patchSession(action: "save_analysis" | "save_targeting" | "complete", value?: unknown) {
+  async function patchSession(action: "save_analysis" | "save_protection_lists" | "save_targeting" | "complete", value?: unknown) {
     if (!session || saving) return;
     setSaving(true);
     setError("");
@@ -374,37 +379,41 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
     }
   }
 
-  async function saveProtectionAndTargeting() {
+  async function saveProtectionLists() {
     if (!session?.accountId || saving || filtersLoading) return;
     setSaving(true);
     setError("");
     try {
-      const filtersResponse = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(session.accountId)}/filters`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ whitelist: protectedAccounts, blacklist: blockedAccounts }),
-      });
-      const filtersPayload = await filtersResponse.json() as {
-        ok?: boolean;
-        data?: { whitelist?: string[]; blacklist?: string[] };
-        error?: string;
+      const save = async (kind: "unfollow_whitelist" | "interaction_blacklist", items: string[]) => {
+        const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(session.accountId!)}/protection-lists/${kind}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json", Accept: "application/json",
+            "If-Match": protectionEtags[kind], "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({ items }),
+        });
+        const payload = await response.json() as { ok?: boolean; data?: { items?: string[] }; error?: string };
+        if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || "protection_list_save_failed");
+        return { items: payload.data.items ?? [], etag: response.headers.get("etag") ?? protectionEtags[kind] };
       };
-      if (!filtersResponse.ok || !filtersPayload.ok || !filtersPayload.data) {
-        throw new Error(filtersPayload.error || text(lang, "Les protections du compte n'ont pas pu être enregistrées.", "Account protections could not be saved."));
-      }
-      setProtectedAccounts(filtersPayload.data.whitelist ?? protectedAccounts);
-      setBlockedAccounts(filtersPayload.data.blacklist ?? blockedAccounts);
-
-      const response = await fetch("/api/instagram-client/onboarding", {
+      const [whitelist, blacklist] = await Promise.all([
+        save("unfollow_whitelist", protectedAccounts),
+        save("interaction_blacklist", blockedAccounts),
+      ]);
+      setProtectedAccounts(whitelist.items);
+      setBlockedAccounts(blacklist.items);
+      setProtectionEtags({ unfollow_whitelist: whitelist.etag, interaction_blacklist: blacklist.etag });
+      const stepResponse = await fetch("/api/instagram-client/onboarding", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ session_id: session.id, action: "save_targeting", value: criteria }),
+        body: JSON.stringify({ session_id: session.id, action: "save_protection_lists" }),
       });
-      const payload = await readEnvelope(response);
-      if (!response.ok || !payload.ok || !payload.data?.onboarding) {
-        throw new Error(payload.error || text(lang, "Le ciblage n'a pas pu être enregistré.", "Targeting could not be saved."));
+      const stepPayload = await readEnvelope(stepResponse);
+      if (!stepResponse.ok || !stepPayload.ok || !stepPayload.data?.onboarding) {
+        throw new Error(stepPayload.error || text(lang, "Cette étape n'a pas pu être enregistrée.", "This step could not be saved."));
       }
-      hydrate(payload.data.onboarding);
+      hydrate(stepPayload.data.onboarding);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : text(lang, "Enregistrement indisponible.", "Saving unavailable."));
     } finally {
@@ -598,21 +607,35 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
               {!canConfirmAnalysis ? <p className="cio-analysis-warning">{text(lang, "Aucune donnée exploitable n'est encore disponible. Réanalyse ou complète au moins un champ avant de confirmer.", "No usable data is available yet. Reanalyze or complete at least one field before confirming.")}</p> : null}
             </div>
           ) : null}
-          {!loading && step === "targeting" ? (
+          {!loading && step === "protection_lists" ? (
             <div className="cio-form">
               <div className="cio-intro">
-                <h3>{text(lang, "Protéger le compte et définir le ciblage", "Protect the account and define targeting")}</h3>
-                <p>{text(lang, "Ces listes sont propres à ce compte. Les critères préparent ensuite la recherche sans créer de cible validée.", "These lists belong only to this account. The criteria then prepare search without creating a validated target.")}</p>
+                <h3>{text(lang, "Configurer les listes de protection", "Configure protection lists")}</h3>
+                <p>{text(lang, "Cette étape est optionnelle. Tu peux la compléter, l'ignorer, puis la modifier plus tard.", "This step is optional. You can complete it, skip it, and edit it later.")}</p>
               </div>
               <div className="cio-grid cio-protection-lists">
                 <label>
-                  <span>{text(lang, "Whitelist — comptes à protéger (un pseudo par ligne)", "Whitelist — accounts to protect (one username per line)")}</span>
-                  <textarea className="cio-targeting-multiline" rows={3} disabled={filtersLoading} value={protectedAccounts.join("\n")} onChange={(event) => setProtectedAccounts(parseList(event.target.value))} />
+                  <span>{text(lang, "Liste noire", "Interaction Blacklist")}</span>
+                  <small>{text(lang, "Les comptes ajoutés ici seront exclus de toutes les interactions automatisées.", "Accounts added here are excluded from all automated interactions.")}</small>
+                  <textarea className="cio-targeting-multiline" rows={4} disabled={filtersLoading} value={blockedAccounts.join("\n")} onChange={(event) => setBlockedAccounts(parseList(event.target.value))} />
                 </label>
                 <label>
-                  <span>{text(lang, "Blacklist — comptes à exclure (un pseudo par ligne)", "Blacklist — accounts to exclude (one username per line)")}</span>
-                  <textarea className="cio-targeting-multiline" rows={3} disabled={filtersLoading} value={blockedAccounts.join("\n")} onChange={(event) => setBlockedAccounts(parseList(event.target.value))} />
+                  <span>{text(lang, "Liste blanche Unfollow", "Unfollow Whitelist")}</span>
+                  <small>{text(lang, "Les comptes ajoutés ici ne seront jamais désabonnés automatiquement.", "Accounts added here are always protected from automated unfollow.")}</small>
+                  <textarea className="cio-targeting-multiline" rows={4} disabled={filtersLoading} value={protectedAccounts.join("\n")} onChange={(event) => setProtectedAccounts(parseList(event.target.value))} />
                 </label>
+              </div>
+              <div className="cio-actions split">
+                <button className="cio-secondary" type="button" disabled={saving || filtersLoading} onClick={() => void saveProtectionLists()}>{text(lang, "Ignorer pour l'instant", "Skip for now")}</button>
+                <button className="cd-btn cd-btn-primary" type="button" disabled={saving || filtersLoading} onClick={() => void saveProtectionLists()}>{text(lang, "Enregistrer et continuer", "Save and continue")}</button>
+              </div>
+            </div>
+          ) : null}
+          {!loading && step === "targeting" ? (
+            <div className="cio-form">
+              <div className="cio-intro">
+                <h3>{text(lang, "Définir le ciblage", "Define targeting")}</h3>
+                <p>{text(lang, "Les critères préparent la recherche sans créer de cible validée.", "The criteria prepare search without creating a validated target.")}</p>
               </div>
               <label>
                 <span>{text(lang, "Client idéal / audience recherchée", "Ideal customer / target audience")}</span>
@@ -649,7 +672,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
                 <textarea className="cio-targeting-multiline" rows={3} value={listInput(criteria.keywords)} onChange={(event) => updateTargetingCriteria({ ...criteria, keywords: parseList(event.target.value) })} />
               </label>
               <div className="cio-actions">
-                <button className="cd-btn cd-btn-primary" type="button" disabled={saving || filtersLoading} onClick={() => void saveProtectionAndTargeting()}>{text(lang, "Enregistrer et choisir les cibles", "Save and choose targets")}</button>
+                <button className="cd-btn cd-btn-primary" type="button" disabled={saving} onClick={() => void patchSession("save_targeting", criteria)}>{text(lang, "Enregistrer et choisir les cibles", "Save and choose targets")}</button>
               </div>
             </div>
           ) : null}

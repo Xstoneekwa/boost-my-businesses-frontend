@@ -76,8 +76,10 @@ function normalizeFilters(row: FiltersRecord | null | undefined, accountId: stri
     min_posts: readInteger(row?.min_posts, DEFAULT_FILTERS.min_posts),
     blacklisted_words: readString(row?.blacklisted_words, DEFAULT_FILTERS.blacklisted_words),
     mandatory_words: readString(row?.mandatory_words, DEFAULT_FILTERS.mandatory_words),
-    whitelist_words: readString(row?.whitelist_words, DEFAULT_FILTERS.whitelist_words),
-    blacklist_accounts: readString(row?.blacklist_accounts, DEFAULT_FILTERS.blacklist_accounts),
+    // Retired compatibility fields: canonical account protection lists are exposed only
+    // through the versioned protection-list APIs. Never disclose legacy values here.
+    whitelist_words: "",
+    blacklist_accounts: "",
   };
 }
 
@@ -142,10 +144,11 @@ async function saveFilters(request: Request) {
     if (accountIdError) return accountIdError;
 
     const filters = normalizeFilters(body, accountId);
+    const { whitelist_words: _retiredWhitelist, blacklist_accounts: _retiredBlacklist, ...activeFilters } = filters;
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
       .from("ig_account_filters")
-      .update({ ...filters, updated_at: new Date().toISOString() })
+      .update({ ...activeFilters, updated_at: new Date().toISOString() })
       .eq("account_id", accountId)
       .select("*")
       .maybeSingle<FiltersRecord>();

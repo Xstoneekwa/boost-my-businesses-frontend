@@ -85,7 +85,7 @@ export async function mutateAccountProtectionList(input: {
   items?: string[];
   add?: string[];
   remove?: string[];
-  sourceSurface: "client_dashboard" | "admin_dashboard";
+  sourceSurface: "client_dashboard" | "admin_dashboard" | "botapp";
   actorAuthUserId: string | null;
   idempotencyKey: string;
   expectedVersion: number;

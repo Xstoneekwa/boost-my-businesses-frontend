@@ -41,6 +41,14 @@ import { resolveClientConnectionActionPanel } from "@/lib/instagram-client/clien
 type Lang = "fr" | "en";
 type Theme = "dark" | "light";
 type View = "overview" | "activity" | "targeting" | "dm-templates" | "account";
+type ProtectionListKind = "interaction_blacklist" | "unfollow_whitelist";
+type ProtectionListSnapshot = {
+  items: string[];
+  size: number;
+  version: number;
+  updatedAt: string | null;
+  status: "loaded_empty" | "loaded_with_items";
+};
 
 type ClientDashboardActionNotification = {
   id: string;
@@ -545,6 +553,12 @@ export default function ClientDashboard({
   const [targetingLoading, setTargetingLoading] = useState(false);
   const [targetingMessage, setTargetingMessage] = useState<string | null>(null);
   const [targetSearchQuery, setTargetSearchQuery] = useState("");
+  const [whitelistSearchQuery, setWhitelistSearchQuery] = useState("");
+  const [blacklistSearchQuery, setBlacklistSearchQuery] = useState("");
+  const [protectionEtags, setProtectionEtags] = useState<Record<ProtectionListKind, string>>({
+    interaction_blacklist: "",
+    unfollow_whitelist: "",
+  });
   const [accountNotifications, setAccountNotifications] = useState(initialAccountNotifications);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
@@ -606,31 +620,53 @@ export default function ClientDashboard({
     [targetingItems, targetSearchQuery],
   );
   const targets = targetingItems.map((item) => item.targetUsername);
+  const filteredWhitelist = useMemo(
+    () => whitelist.filter((username) => username.includes(whitelistSearchQuery.trim().replace(/^@+/, "").toLowerCase())),
+    [whitelist, whitelistSearchQuery],
+  );
+  const filteredBlacklist = useMemo(
+    () => blacklist.filter((username) => username.includes(blacklistSearchQuery.trim().replace(/^@+/, "").toLowerCase())),
+    [blacklist, blacklistSearchQuery],
+  );
 
   const reloadTargeting = useCallback(async () => {
     if (!targetingAccountId || !useLiveData) return;
     setTargetingLoading(true);
     setTargetingMessage(null);
     try {
-      const [targetsResponse, filtersResponse] = await Promise.all([
+      const [targetsResponse, whitelistResponse, blacklistResponse] = await Promise.all([
         fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/targets`, {
           headers: { Accept: "application/json" },
+          cache: "no-store",
         }),
-        fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/filters`, {
+        fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/protection-lists/unfollow_whitelist`, {
           headers: { Accept: "application/json" },
+          cache: "no-store",
+        }),
+        fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/protection-lists/interaction_blacklist`, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
         }),
       ]);
       const targetsPayload = await targetsResponse.json() as { ok?: boolean; data?: TargetSafeRow[]; error?: string };
-      const filtersPayload = await filtersResponse.json() as { ok?: boolean; data?: { whitelist?: string[]; blacklist?: string[] }; error?: string };
+      const whitelistPayload = await whitelistResponse.json() as { ok?: boolean; data?: ProtectionListSnapshot; error?: string };
+      const blacklistPayload = await blacklistResponse.json() as { ok?: boolean; data?: ProtectionListSnapshot; error?: string };
       if (!targetsResponse.ok || !targetsPayload.ok || !Array.isArray(targetsPayload.data)) {
         throw new Error(targetsPayload.error || "Could not load targets.");
       }
-      if (!filtersResponse.ok || !filtersPayload.ok || !filtersPayload.data) {
-        throw new Error(filtersPayload.error || "Could not load filters.");
+      if (!whitelistResponse.ok || !whitelistPayload.ok || !whitelistPayload.data) {
+        throw new Error(whitelistPayload.error || "Could not load the Unfollow Whitelist.");
+      }
+      if (!blacklistResponse.ok || !blacklistPayload.ok || !blacklistPayload.data) {
+        throw new Error(blacklistPayload.error || "Could not load the Interaction Blacklist.");
       }
       setTargetingOverview(buildTargetsOverview(targetsPayload.data));
-      setWhitelist(filtersPayload.data.whitelist ?? []);
-      setBlacklist(filtersPayload.data.blacklist ?? []);
+      setWhitelist(whitelistPayload.data.items ?? []);
+      setBlacklist(blacklistPayload.data.items ?? []);
+      setProtectionEtags({
+        unfollow_whitelist: whitelistResponse.headers.get("etag") ?? "",
+        interaction_blacklist: blacklistResponse.headers.get("etag") ?? "",
+      });
     } catch (error) {
       setTargetingMessage(error instanceof Error ? error.message : "Could not load targeting data.");
     } finally {
@@ -731,19 +767,38 @@ export default function ClientDashboard({
     };
   }, [agencyModeActive, overviewScope, lang]);
 
-  async function persistFilterLists(nextWhitelist: string[], nextBlacklist: string[]) {
+  async function mutateProtectionList(kind: ProtectionListKind, change: { add?: string[]; remove?: string[] }) {
     if (!targetingAccountId || !useLiveData) return;
-    const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/filters`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ whitelist: nextWhitelist, blacklist: nextBlacklist }),
-    });
-    const payload = await response.json() as { ok?: boolean; data?: { whitelist?: string[]; blacklist?: string[] }; error?: string };
-    if (!response.ok || !payload.ok || !payload.data) {
-      throw new Error(payload.error || "Could not save filters.");
+    let etag = protectionEtags[kind];
+    if (!etag) {
+      const current = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/protection-lists/${kind}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!current.ok) throw new Error("Could not refresh the protection list version.");
+      etag = current.headers.get("etag") ?? "";
     }
-    setWhitelist(payload.data.whitelist ?? nextWhitelist);
-    setBlacklist(payload.data.blacklist ?? nextBlacklist);
+    const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/protection-lists/${kind}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "If-Match": etag,
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify({ add: change.add ?? [], remove: change.remove ?? [] }),
+    });
+    const payload = await response.json() as { ok?: boolean; data?: ProtectionListSnapshot; error?: string; version?: number };
+    if (response.status === 409) {
+      await reloadTargeting();
+      throw new Error(lang === "fr" ? "La liste a changé ailleurs. Elle vient d’être actualisée ; réessaie." : "The list changed elsewhere. It was refreshed; try again.");
+    }
+    if (!response.ok || !payload.ok || !payload.data) {
+      throw new Error(payload.error || "Could not save the protection list.");
+    }
+    if (kind === "unfollow_whitelist") setWhitelist(payload.data.items ?? []);
+    else setBlacklist(payload.data.items ?? []);
+    setProtectionEtags((current) => ({ ...current, [kind]: response.headers.get("etag") ?? current[kind] }));
   }
 
   async function archiveTargetByUsername(username: string) {
@@ -1014,21 +1069,21 @@ export default function ClientDashboard({
   function tgClean(v: string) { return v.trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase(); }
 
   function addToList(list: "white"|"black", value: string) {
-    const h = tgClean(value);
-    if (!h) return;
+    const handles = [...new Set(value.split(/[\n,;]+/).map(tgClean).filter(Boolean))];
+    if (!handles.length) return;
     void (async () => {
       try {
         if (list === "white") {
-          if (whitelist.includes(h)) return;
-          const next = [h, ...whitelist];
-          if (useLiveData) await persistFilterLists(next, blacklist);
-          else setWhitelist(next);
+          const add = handles.filter((handle) => !whitelist.includes(handle));
+          if (!add.length) return;
+          if (useLiveData) await mutateProtectionList("unfollow_whitelist", { add });
+          else setWhitelist([...add, ...whitelist]);
           setAddW("");
         } else {
-          if (blacklist.includes(h)) return;
-          const next = [h, ...blacklist];
-          if (useLiveData) await persistFilterLists(whitelist, next);
-          else setBlacklist(next);
+          const add = handles.filter((handle) => !blacklist.includes(handle));
+          if (!add.length) return;
+          if (useLiveData) await mutateProtectionList("interaction_blacklist", { add });
+          else setBlacklist([...add, ...blacklist]);
           setAddB("");
         }
       } catch (error) {
@@ -1040,13 +1095,11 @@ export default function ClientDashboard({
   async function removeFromFilterList(list: "white"|"black", username: string) {
     try {
       if (list === "white") {
-        const next = whitelist.filter((row) => row !== username);
-        if (useLiveData) await persistFilterLists(next, blacklist);
-        else setWhitelist(next);
+        if (useLiveData) await mutateProtectionList("unfollow_whitelist", { remove: [username] });
+        else setWhitelist(whitelist.filter((row) => row !== username));
       } else {
-        const next = blacklist.filter((row) => row !== username);
-        if (useLiveData) await persistFilterLists(whitelist, next);
-        else setBlacklist(next);
+        if (useLiveData) await mutateProtectionList("interaction_blacklist", { remove: [username] });
+        else setBlacklist(blacklist.filter((row) => row !== username));
       }
     } catch (error) {
       setTargetingMessage(error instanceof Error ? error.message : "Could not update filters.");
@@ -1421,6 +1474,9 @@ export default function ClientDashboard({
               </div>
             </div>
             {targetingMessage ? <p className="cd-setup-note" role="status">{targetingMessage}</p> : null}
+            <p className="cd-setup-note">
+              {lang === "fr" ? "Les modifications seront appliquées à la prochaine session." : "Changes will apply from the next session."}
+            </p>
             {targetingLoading && useLiveData ? (
               <p className="cd-setup-note">{lang === "fr" ? "Chargement du ciblage…" : "Loading targeting…"}</p>
             ) : null}
@@ -1464,11 +1520,14 @@ export default function ClientDashboard({
                   <span className="cd-tg2-col-ct">{whitelist.length}</span>
                 </div>
                 <div className="cd-tg2-col-add">
-                  <input type="text" placeholder={t.targeting.placeholderW} value={addW} onChange={e => setAddW(e.target.value)} onKeyDown={e => e.key === "Enter" && addToList("white", addW)}/>
+                  <input type="text" placeholder={t.targeting.placeholderW} value={addW} onChange={e => setAddW(e.target.value)} onKeyDown={e => e.key === "Enter" && addToList("white", addW)} aria-label={lang === "fr" ? "Ajouter à la liste blanche Unfollow" : "Add to Unfollow Whitelist"}/>
                   <button onClick={() => addToList("white", addW)}>+</button>
                 </div>
+                <div className="cd-tg2-col-add">
+                  <input type="search" placeholder={lang === "fr" ? "Rechercher un username…" : "Search usernames…"} value={whitelistSearchQuery} onChange={e => setWhitelistSearchQuery(e.target.value)}/>
+                </div>
                 <div className="cd-tg2-col-rows">
-                  {whitelist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyW}</div> : whitelist.map(h => (
+                  {whitelist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyW}</div> : filteredWhitelist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.searchEmpty}</div> : filteredWhitelist.map(h => (
                     <div key={h} className="cd-tg2-li">
                       <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
                       <span className="cd-tg2-handle">@{h}</span>
@@ -1488,11 +1547,14 @@ export default function ClientDashboard({
                   <span className="cd-tg2-col-ct">{blacklist.length}</span>
                 </div>
                 <div className="cd-tg2-col-add">
-                  <input type="text" placeholder={t.targeting.placeholderB} value={addB} onChange={e => setAddB(e.target.value)} onKeyDown={e => e.key === "Enter" && addToList("black", addB)}/>
+                  <input type="text" placeholder={t.targeting.placeholderB} value={addB} onChange={e => setAddB(e.target.value)} onKeyDown={e => e.key === "Enter" && addToList("black", addB)} aria-label={lang === "fr" ? "Ajouter à la liste noire" : "Add to Interaction Blacklist"}/>
                   <button onClick={() => addToList("black", addB)}>+</button>
                 </div>
+                <div className="cd-tg2-col-add">
+                  <input type="search" placeholder={lang === "fr" ? "Rechercher un username…" : "Search usernames…"} value={blacklistSearchQuery} onChange={e => setBlacklistSearchQuery(e.target.value)}/>
+                </div>
                 <div className="cd-tg2-col-rows">
-                  {blacklist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyB}</div> : blacklist.map(h => (
+                  {blacklist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.emptyB}</div> : filteredBlacklist.length === 0 ? <div className="cd-tg2-col-empty">{t.targeting.searchEmpty}</div> : filteredBlacklist.map(h => (
                     <div key={h} className="cd-tg2-li">
                       <span className="cd-tg2-av" style={{background:`linear-gradient(135deg,${avPal(h)[0]},${avPal(h)[1]})`}}><i>{h.charAt(0).toUpperCase()}</i></span>
                       <span className="cd-tg2-handle">@{h}</span>
