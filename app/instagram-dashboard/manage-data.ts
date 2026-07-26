@@ -421,11 +421,17 @@ function lifecycleStatus(account: ManageAccount) {
   return "active";
 }
 
+function isRolledBackOnboardingAccount(account: ManageAccount) {
+  const lifecycle = account.accountLifecycleStatus.trim().toLowerCase();
+  return lifecycle === "rolled_back_test_onboarding" || lifecycle === "onboarding_rollback";
+}
+
 function overviewWithAccounts(
   overview: ManageOverview,
   accounts: ManageAccount[],
   errors = overview.errors,
 ): ManageOverview {
+  accounts = accounts.filter((account) => !isRolledBackOnboardingAccount(account));
   return {
     ...overview,
     activeAccounts: accounts.filter((account) => lifecycleStatus(account) === "active"),
@@ -1044,10 +1050,7 @@ function buildSummary(accounts: ManageAccount[], sourceStatus: ManageSummary["so
 }
 
 function assembleOverview(accounts: ManageAccount[], errors: string[], sourceStatus: ManageSummary["sourceStatus"]): ManageOverview {
-  accounts = accounts.filter((account) => {
-    const lifecycle = account.accountLifecycleStatus.trim().toLowerCase();
-    return lifecycle !== "rolled_back_test_onboarding" && lifecycle !== "onboarding_rollback";
-  });
+  accounts = accounts.filter((account) => !isRolledBackOnboardingAccount(account));
   const activeAccounts = accounts.filter((account) => lifecycleStatus(account) === "active");
   const archivedAccounts = accounts.filter((account) => lifecycleStatus(account) === "archived");
   const trashedAccounts = accounts.filter((account) => lifecycleStatus(account) === "trashed");
