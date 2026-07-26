@@ -7,6 +7,8 @@ import {
   readScheduleSessionCronEnv,
   runScheduleSessionCron,
   scheduleSessionIdempotencyKey,
+  scheduleSessionRetryIdempotencyKey,
+  SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT,
 } from "./schedule-session-cron.ts";
 
 const baseEnv = {
@@ -58,6 +60,8 @@ function makeSupabase(overrides: {
   activeRuns?: Array<Record<string, unknown>>;
   schedulerEnabled?: boolean;
   rpcError?: { message: string };
+  baseRequest?: Record<string, unknown>;
+  retryDecision?: Record<string, unknown>;
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const assignmentUpdates: Array<Record<string, unknown>> = [];
@@ -122,6 +126,15 @@ function makeSupabase(overrides: {
         if (overrides.rpcError) {
           return Promise.resolve({ data: null, error: overrides.rpcError });
         }
+        if (name === "create_account_run_request" && overrides.baseRequest) {
+          return Promise.resolve({ data: overrides.baseRequest, error: null });
+        }
+        if (name === "create_schedule_session_pre_run_retry_v1") {
+          return Promise.resolve({
+            data: overrides.retryDecision ?? { created: false, reason: "scheduled_retry_not_needed" },
+            error: null,
+          });
+        }
         return Promise.resolve({ data: { id: "request-1", status: "queued" }, error: null });
       },
     },
@@ -141,6 +154,12 @@ test("scheduleSessionIdempotencyKey is stable per assignment window", () => {
     scheduleSessionIdempotencyKey("assignment-1", windowStart),
     `schedule-session:assignment-1:${windowStart}`,
   );
+});
+
+test("scheduleSessionRetryIdempotencyKey is stable and versioned", () => {
+  const base = scheduleSessionIdempotencyKey("assignment-1", windowStart);
+  assert.equal(scheduleSessionRetryIdempotencyKey(base, 1), `${base}:retry:v1:1`);
+  assert.equal(SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT, 1);
 });
 
 test("auth rejects missing and invalid tokens", async () => {
@@ -173,6 +192,147 @@ test("account in active window queues one scheduled run", async () => {
   assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "account_session");
   assert.equal((supabase.rpcCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
 });
+
+test("blocked pre-run package contract creates exactly one bounded retry request", async () => {
+  const baseKey = scheduleSessionIdempotencyKey("assignment-1", windowStart);
+  const retryKey = scheduleSessionRetryIdempotencyKey(baseKey, 1);
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "blocked-request-1",
+      status: "blocked",
+      error_code: "package_settings_incomplete",
+      idempotency_key: baseKey,
+      run_id: null,
+    },
+    retryDecision: {
+      created: true,
+      reason: "scheduled_retry_created",
+      request_id: "retry-request-1",
+      idempotency_key: retryKey,
+      retry_of_request_id: "blocked-request-1",
+      retry_ordinal: 1,
+      retry_limit: 1,
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.queued_count, 1);
+  assert.equal(run.result.summary.retryable_pre_run_block_count, 1);
+  assert.equal(run.result.summary.scheduled_retry_created_count, 1);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), [
+    "create_account_run_request",
+    "create_schedule_session_pre_run_retry_v1",
+  ]);
+  const retryArgs = supabase.rpcCalls[1]?.args;
+  assert.equal(retryArgs?.p_base_idempotency_key, baseKey);
+  assert.equal(retryArgs?.p_retry_limit, 1);
+  assert.equal(retryArgs?.p_assignment_id, "assignment-1");
+});
+
+test("runtime_contract_not_ready is the only other retryable pre-run contract reason", async () => {
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "blocked-request-2",
+      status: "blocked",
+      error_code: "runtime_contract_not_ready",
+      idempotency_key: scheduleSessionIdempotencyKey("assignment-1", windowStart),
+      run_id: null,
+    },
+    retryDecision: { created: false, reason: "package_runtime_contract_blocked" },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+  assert.equal(run.result.summary.retryable_pre_run_block_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(run.result.summary.scheduled_retry_not_needed_count, 1);
+});
+
+for (const eligibilityReason of [
+  "follow_day_quota_exhausted",
+  "unfollow_day_quota_exhausted",
+  "manual_stop_requested",
+  "operator_review_required",
+] as const) {
+  test(`${eligibilityReason} is rechecked before retry and creates no request`, async () => {
+    const supabase = makeSupabase({
+      baseRequest: {
+        id: "blocked-request-before-eligibility",
+        status: "blocked",
+        error_code: "package_settings_incomplete",
+        idempotency_key: scheduleSessionIdempotencyKey("assignment-1", windowStart),
+        run_id: null,
+      },
+    });
+    const run = await runScheduleSessionCron(supabase.client as never, {
+      env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+      callerToken: "cron-token",
+      now: inWindowNow,
+      evaluateEligibility: async () => ({ ok: false, reason: eligibilityReason }),
+      loadRuntimeHealth: activeRuntimeHealth,
+    });
+    assert.equal(run.result.summary.skipped_eligibility_count, 1);
+    assert.equal(run.result.summary.queued_count, 0);
+    assert.equal(supabase.rpcCalls.length, 0);
+  });
+}
+
+test("unrelated terminal errors never enter the scheduled retry RPC", async () => {
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "blocked-request-3",
+      status: "blocked",
+      error_code: "identity_mismatch_review_required",
+      idempotency_key: scheduleSessionIdempotencyKey("assignment-1", windowStart),
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(run.result.summary.scheduled_retry_not_needed_count, 1);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["create_account_run_request"]);
+});
+
+for (const reason of ["scheduled_retry_window_closed", "scheduled_retry_limit_reached", "scheduled_retry_not_needed"] as const) {
+  test(`${reason} is observable and creates no request`, async () => {
+    const supabase = makeSupabase({
+      baseRequest: {
+        id: "blocked-request-observable",
+        status: "blocked",
+        error_code: "package_settings_incomplete",
+        idempotency_key: scheduleSessionIdempotencyKey("assignment-1", windowStart),
+      },
+      retryDecision: { created: false, reason },
+    });
+    const run = await runScheduleSessionCron(supabase.client as never, {
+      env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+      callerToken: "cron-token",
+      now: inWindowNow,
+      evaluateEligibility: async () => ({ ok: true }),
+      loadRuntimeHealth: activeRuntimeHealth,
+    });
+    assert.equal(run.result.summary.queued_count, 0);
+    if (reason === "scheduled_retry_window_closed") assert.equal(run.result.summary.scheduled_retry_window_closed_count, 1);
+    else if (reason === "scheduled_retry_limit_reached") assert.equal(run.result.summary.scheduled_retry_limit_reached_count, 1);
+    else assert.equal(run.result.summary.scheduled_retry_not_needed_count, 1);
+  });
+}
 
 test("technical disable is reported as technical_disabled without any read", async () => {
   const supabase = makeSupabase();

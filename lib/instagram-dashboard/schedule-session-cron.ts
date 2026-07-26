@@ -14,6 +14,12 @@ import {
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
 const EMULATOR_DEVICE_KIND = "emulator";
+const SCHEDULE_PRE_RUN_RETRY_LIMIT = 1;
+const SCHEDULE_PRE_RUN_RETRY_MIN_REMAINING_SECONDS = 10 * 60;
+const RETRYABLE_PRE_RUN_BLOCK_REASONS = new Set([
+  "package_settings_incomplete",
+  "runtime_contract_not_ready",
+]);
 
 function readString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() || fallback : fallback;
@@ -93,6 +99,11 @@ export type ScheduleSessionCronSummary = {
   skipped_missing_assignment_target_count: number;
   skipped_botapp_runtime_unavailable_count: number;
   skipped_scheduler_disabled_count: number;
+  retryable_pre_run_block_count: number;
+  scheduled_retry_created_count: number;
+  scheduled_retry_not_needed_count: number;
+  scheduled_retry_window_closed_count: number;
+  scheduled_retry_limit_reached_count: number;
   /** CP2 — expired scheduled windows rolled forward to the derived daily occurrence. */
   rolled_forward_count: number;
   roll_forward_failed_count: number;
@@ -165,6 +176,11 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_missing_assignment_target_count: 0,
     skipped_botapp_runtime_unavailable_count: 0,
     skipped_scheduler_disabled_count: 0,
+    retryable_pre_run_block_count: 0,
+    scheduled_retry_created_count: 0,
+    scheduled_retry_not_needed_count: 0,
+    scheduled_retry_window_closed_count: 0,
+    scheduled_retry_limit_reached_count: 0,
     rolled_forward_count: 0,
     roll_forward_failed_count: 0,
   };
@@ -239,6 +255,10 @@ export function assignmentWindowActive(startsAt: string, endsAt: string, now: Da
 
 export function scheduleSessionIdempotencyKey(assignmentId: string, startsAt: string) {
   return `schedule-session:${assignmentId}:${startsAt}`;
+}
+
+export function scheduleSessionRetryIdempotencyKey(baseKey: string, ordinal: number) {
+  return `${baseKey}:retry:v1:${Math.max(1, Math.trunc(ordinal))}`;
 }
 
 type UpdateCapableBuilder = QueryBuilder & {
@@ -425,13 +445,14 @@ async function queueScheduledSession(
     deviceTimezone: string | null;
   },
 ) {
+  const baseIdempotencyKey = scheduleSessionIdempotencyKey(input.assignmentId, input.startsAt);
   const { data, error } = await supabase.rpc("create_account_run_request", {
     p_account_id: input.accountId,
     p_requested_by: null,
     p_actor_type: "system",
     p_source_surface: "instagram_schedule_session_cron",
     p_requested_run_type: "account_session",
-    p_idempotency_key: scheduleSessionIdempotencyKey(input.assignmentId, input.startsAt),
+    p_idempotency_key: baseIdempotencyKey,
     p_priority: 0,
     p_metadata_safe: {
       source: "schedule_session_cron",
@@ -444,7 +465,43 @@ async function queueScheduledSession(
     },
   });
   if (error) throw new Error(error.message || "schedule_session_enqueue_failed");
-  return data;
+  const request = data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  const status = readString(request.status).toLowerCase();
+  const errorCode = readString(request.error_code).toLowerCase();
+  if (status !== "blocked" || !RETRYABLE_PRE_RUN_BLOCK_REASONS.has(errorCode)) {
+    return {
+      created: status === "queued",
+      reason: status === "queued" ? "scheduled_request_created" : "scheduled_retry_not_needed",
+      request,
+      idempotencyKey: readString(request.idempotency_key, baseIdempotencyKey),
+      retryablePreRunBlock: false,
+    };
+  }
+
+  const retryResult = await supabase.rpc("create_schedule_session_pre_run_retry_v1", {
+    p_account_id: input.accountId,
+    p_assignment_id: input.assignmentId,
+    p_window_starts_at: input.startsAt,
+    p_window_ends_at: input.endsAt,
+    p_base_idempotency_key: baseIdempotencyKey,
+    p_worker_id: input.workerId,
+    p_device_timezone: input.deviceTimezone,
+    p_retry_limit: SCHEDULE_PRE_RUN_RETRY_LIMIT,
+    p_min_remaining_seconds: SCHEDULE_PRE_RUN_RETRY_MIN_REMAINING_SECONDS,
+  });
+  if (retryResult.error) throw new Error(retryResult.error.message || "schedule_session_retry_failed");
+  const retry = retryResult.data && typeof retryResult.data === "object" && !Array.isArray(retryResult.data)
+    ? retryResult.data as Record<string, unknown>
+    : {};
+  return {
+    created: retry.created === true,
+    reason: readString(retry.reason, "scheduled_retry_not_needed"),
+    request: retry,
+    idempotencyKey: readString(retry.idempotency_key, scheduleSessionRetryIdempotencyKey(baseIdempotencyKey, 1)),
+    retryablePreRunBlock: true,
+  };
 }
 
 export type ScheduleSessionEligibilityEvaluator = (
@@ -626,7 +683,7 @@ export async function runScheduleSessionCron(
     summary.eligible_count += 1;
     if (!env.dryRun) {
       try {
-        await queueScheduledSession(supabase, {
+        const enqueue = await queueScheduledSession(supabase, {
           accountId,
           assignmentId,
           startsAt,
@@ -634,6 +691,17 @@ export async function runScheduleSessionCron(
           workerId: env.workerId,
           deviceTimezone: readString(device.timezone, "") || null,
         });
+        if (enqueue.retryablePreRunBlock) summary.retryable_pre_run_block_count += 1;
+        if (!enqueue.created) {
+          if (enqueue.reason === "scheduled_retry_window_closed") summary.scheduled_retry_window_closed_count += 1;
+          else if (enqueue.reason === "scheduled_retry_limit_reached") summary.scheduled_retry_limit_reached_count += 1;
+          else summary.scheduled_retry_not_needed_count += 1;
+          continue;
+        }
+        if (enqueue.reason === "scheduled_retry_created") summary.scheduled_retry_created_count += 1;
+        summary.queued_count += 1;
+        activeRequestKeys.add(enqueue.idempotencyKey);
+        activeRequestAccounts.add(accountId);
       } catch (error) {
         // Atomic RPC guard: a concurrent Scheduler OFF rejects the insert with
         // a stable reason instead of failing the whole cron pass.
@@ -643,9 +711,6 @@ export async function runScheduleSessionCron(
         }
         throw error;
       }
-      summary.queued_count += 1;
-      activeRequestKeys.add(idempotencyKey);
-      activeRequestAccounts.add(accountId);
     }
   }
 
@@ -666,3 +731,5 @@ export async function runScheduleSessionCron(
 }
 
 export const SCHEDULE_SESSION_CRON_HEARTBEAT_STALE_MS = ASSIGNMENT_HEARTBEAT_STALE_MS;
+export const SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT = SCHEDULE_PRE_RUN_RETRY_LIMIT;
+export const SCHEDULE_SESSION_PRE_RUN_RETRY_MIN_REMAINING_SECONDS = SCHEDULE_PRE_RUN_RETRY_MIN_REMAINING_SECONDS;
