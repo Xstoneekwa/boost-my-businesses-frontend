@@ -962,8 +962,54 @@ async function accountHasOutreachEntitlement(accountId: string) {
   return data === true;
 }
 
+export function packageProjectionHasFeatureEntitlement(
+  row: SupabaseRecord | null | undefined,
+  featureCode: "follow" | "unfollow",
+) {
+  const packageCode = readString(row?.commercial_package_code, "");
+  if (!packageCode) return null;
+
+  const packageCaps = row?.package_caps && typeof row.package_caps === "object" && !Array.isArray(row.package_caps)
+    ? row.package_caps as SupabaseRecord
+    : null;
+  const runtimeProfiles = Array.isArray(row?.runtime_profiles)
+    ? row.runtime_profiles.map((value) => readString(value, "").toLowerCase()).filter(Boolean)
+    : [];
+  const fullCycle = runtimeProfiles.includes("full_cycle");
+  const followRuntime = fullCycle || runtimeProfiles.includes("follow_only_test");
+  const hasPositiveCap = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0;
+  };
+
+  if (featureCode === "follow") {
+    return followRuntime
+      && hasPositiveCap(packageCaps?.follow_day)
+      && hasPositiveCap(packageCaps?.follow_session);
+  }
+
+  return fullCycle
+    && hasPositiveCap(packageCaps?.unfollow_day)
+    && hasPositiveCap(packageCaps?.unfollow_session);
+}
+
 async function accountHasFeatureEntitlement(accountId: string, featureCode: "follow" | "unfollow") {
   const supabase = createSupabaseClient();
+  const { data: packageSummary, error: packageSummaryError } = await supabase
+    .from("account_package_summary")
+    .select("commercial_package_code,runtime_profiles,package_caps")
+    .eq("account_id", accountId)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (packageSummaryError) {
+    throw new Error(`Could not verify ${featureCode} package entitlement.`);
+  }
+  const packageDecision = packageProjectionHasFeatureEntitlement(packageSummary, featureCode);
+  if (packageDecision !== null) return packageDecision;
+
+  // Backward-compatible fallback for accounts that have not entered the
+  // canonical per-account commercial package projection yet. A present but
+  // invalid package projection fails closed above and never falls back.
   const { data: links, error: linkError } = await supabase
     .from("client_instagram_accounts")
     .select("client_id")

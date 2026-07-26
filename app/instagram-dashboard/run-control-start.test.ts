@@ -12,6 +12,7 @@ import {
   evaluateDmStartGate,
   evaluateMiniRunCapsPreflight,
   evaluateUnfollowStartGate,
+  packageProjectionHasFeatureEntitlement,
   evaluateUnfollowAnyStartGate,
   isEligibleFollowTarget,
   outreachSessionBlockedByOutreachRealSendDisabled,
@@ -37,6 +38,34 @@ import {
   scheduleValidationError,
 } from "./InstagramDashboardButtons";
 import type { ScheduleProjection } from "../../lib/instagram-dashboard/schedule";
+
+test("canonical package projection grants full-cycle Follow and Unfollow features", () => {
+  const projection = {
+    commercial_package_code: "growth",
+    runtime_profiles: ["full_cycle"],
+    package_caps: { follow_day: 80, follow_session: 80, unfollow_day: 80, unfollow_session: 80 },
+  };
+  assert.equal(packageProjectionHasFeatureEntitlement(projection, "follow"), true);
+  assert.equal(packageProjectionHasFeatureEntitlement(projection, "unfollow"), true);
+});
+
+test("canonical package projection remains fail-closed for missing or zero feature caps", () => {
+  assert.equal(packageProjectionHasFeatureEntitlement({
+    commercial_package_code: "growth",
+    runtime_profiles: ["full_cycle"],
+    package_caps: { follow_day: 80, follow_session: 80, unfollow_day: 0, unfollow_session: 80 },
+  }, "unfollow"), false);
+  assert.equal(packageProjectionHasFeatureEntitlement({
+    commercial_package_code: "growth",
+    runtime_profiles: ["outreach_only"],
+    package_caps: { follow_day: 80, follow_session: 80, unfollow_day: 80, unfollow_session: 80 },
+  }, "follow"), false);
+});
+
+test("legacy feature entitlement fallback is used only without a package projection", () => {
+  assert.equal(packageProjectionHasFeatureEntitlement(null, "unfollow"), null);
+  assert.equal(packageProjectionHasFeatureEntitlement({ commercial_package_code: "growth" }, "unfollow"), false);
+});
 
 test("run start 401 is surfaced as an error", async () => {
   await assert.rejects(
