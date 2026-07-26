@@ -65,11 +65,22 @@ function makeSupabase(overrides: {
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const assignmentUpdates: Array<Record<string, unknown>> = [];
+  const cronRuns: Array<Record<string, unknown>> = [];
   return {
     rpcCalls,
     assignmentUpdates,
+    cronRuns,
     client: {
       from(table: string) {
+        if (table === "schedule_session_cron_runs") {
+          return {
+            ...makeQueryResult([]),
+            insert(row: Record<string, unknown>) {
+              cronRuns.push(row);
+              return Promise.resolve({ data: [row], error: null });
+            },
+          };
+        }
         if (table === "auto_restart_settings") {
           return makeQueryResult([{ auto_restart_enabled: overrides.schedulerEnabled ?? true }]);
         }
@@ -689,6 +700,31 @@ test("login required blocks scheduled launch", async () => {
 
   assert.equal(run.result.summary.skipped_eligibility_count, 1);
   assert.equal(run.result.summary.queued_count, 0);
+});
+
+test("welcome_template_missing persists one account rejection and upserts the canonical incident without a run", async () => {
+  const supabase = makeSupabase();
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: false, reason: "welcome_template_missing" }),
+    syncConfigurationIncidents: true,
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(run.result.evaluated_accounts?.[0]?.stage, "configuration");
+  assert.equal(run.result.evaluated_accounts?.[0]?.stable_reason, "welcome_template_missing");
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), [
+    "upsert_account_incident",
+    "upsert_account_dashboard_action",
+  ]);
+  assert.equal(supabase.cronRuns.length, 1);
+  const persisted = supabase.cronRuns[0]?.evaluated_accounts as Array<Record<string, unknown>>;
+  assert.equal(persisted[0]?.eligible, false);
+  assert.equal(persisted[0]?.stable_reason, "welcome_template_missing");
 });
 
 test("manual_only assignment is excluded by active window query", async () => {

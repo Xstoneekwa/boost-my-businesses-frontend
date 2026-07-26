@@ -133,6 +133,18 @@ test("buildSchedulerStatus projects canonical facts without inventing values", a
         },
       },
     ],
+    schedule_session_cron_runs: [{
+      created_at: "2026-07-06T09:59:59Z",
+      evaluated_accounts: [{
+        account_id: "acc-1",
+        assignment_id: "assignment-1",
+        eligible: false,
+        queued: false,
+        stage: "configuration",
+        stable_reason: "welcome_template_missing",
+        evaluated_at: "2026-07-06T09:59:59Z",
+      }],
+    }],
     ig_accounts: [{ id: "acc-1", username: "client_account" }],
   });
 
@@ -165,6 +177,16 @@ test("buildSchedulerStatus projects canonical facts without inventing values", a
   assert.equal(status.recent_decisions[0].remaining_follow_quota, 23);
   assert.equal(status.recent_decisions[0].source_run_id, "a00e0582-ebf6-421b-aade-8508760c08d5");
   assert.equal(status.recent_decisions[0].enqueue_allowed, true);
+  assert.deepEqual(status.latest_schedule_evaluations, [{
+    account_id: "acc-1",
+    username: "client_account",
+    assignment_id: "assignment-1",
+    eligible: false,
+    queued: false,
+    stage: "configuration",
+    stable_reason: "welcome_template_missing",
+    evaluated_at: "2026-07-06T09:59:59Z",
+  }]);
   assert.equal(status.daily_engine, null);
 });
 

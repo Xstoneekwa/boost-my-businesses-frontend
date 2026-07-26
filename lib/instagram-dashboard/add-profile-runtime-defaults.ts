@@ -35,12 +35,29 @@ function packageSnapshot(preset: AddProfilePackagePreset) {
   };
 }
 
+async function hasValidActiveWelcomeTemplate(supabase: SupabaseClient, accountId: string) {
+  const { data, error } = await supabase
+    .from("ig_dm_templates")
+    .select("id,body")
+    .eq("account_id", accountId)
+    .eq("template_type", "welcome")
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle<{ id: string; body: string | null }>();
+  return !error && Boolean(data?.body?.trim());
+}
+
 export async function applyAddProfileRuntimeDefaults(
   supabase: SupabaseClient,
   input: ApplyAddProfileRuntimeDefaultsInput,
 ): Promise<ApplyAddProfileRuntimeDefaultsResult> {
   const snapshot = packageSnapshot(input.preset);
   const metadataSafe = input.preset.metadataSafe;
+  // Package eligibility is not permission to enable an unusable domain. New
+  // accounts therefore start Welcome disabled until an active non-empty
+  // template exists; later settings changes remain explicit and audited.
+  const welcomeEnabled = input.preset.welcomeEnabled
+    && await hasValidActiveWelcomeTemplate(supabase, input.accountId);
 
   const [settingsResult, followResult, dmResult, unfollowResult] = await Promise.all([
     supabase
@@ -51,11 +68,14 @@ export async function applyAddProfileRuntimeDefaults(
         like_enabled: input.preset.likeEnabled,
         mute_posts_after_follow: input.preset.muteAfterFollowEnabled,
         mute_stories_after_follow: input.preset.muteAfterFollowEnabled,
-        welcome_dm_enabled: input.preset.welcomeEnabled,
+        welcome_dm_enabled: welcomeEnabled,
         cold_dm_enabled: input.preset.outreachEnabled,
         unfollow_enabled: input.preset.unfollowEnabled,
         max_actions_per_day: input.preset.defaultFollowDayCap,
         follow_limit: input.preset.defaultFollowSessionCap,
+        // Legacy Worker compatibility only.  New accounts inherit the package
+        // session maximum; warmup is resolved separately at run time.
+        max_follow_per_run: input.preset.defaultFollowSessionCap,
       })
       .eq("account_id", input.accountId),
     supabase
@@ -71,7 +91,7 @@ export async function applyAddProfileRuntimeDefaults(
       .from("ig_account_dm_settings")
       .upsert({
         account_id: input.accountId,
-        welcome_enabled: input.preset.welcomeEnabled,
+        welcome_enabled: welcomeEnabled,
         outreach_enabled: input.preset.outreachEnabled,
         welcome_per_session_limit: input.preset.welcomePerSessionLimit,
         welcome_per_day_limit: input.preset.welcomePerDayLimit,
@@ -114,7 +134,7 @@ export async function applyAddProfileRuntimeDefaults(
         follow_enabled: input.preset.followEnabled,
         like_enabled: input.preset.likeEnabled,
         mute_after_follow_enabled: input.preset.muteAfterFollowEnabled,
-        welcome_enabled: input.preset.welcomeEnabled,
+        welcome_enabled: welcomeEnabled,
         outreach_enabled: input.preset.outreachEnabled,
         unfollow_enabled: input.preset.unfollowEnabled,
       },
@@ -126,7 +146,7 @@ export async function applyAddProfileRuntimeDefaults(
   return {
     ok: true,
     commercial_package_code: input.preset.commercialPackageCode,
-    welcome_enabled: input.preset.welcomeEnabled,
+    welcome_enabled: welcomeEnabled,
     outreach_enabled: input.preset.outreachEnabled,
     follow_enabled: input.preset.followEnabled,
     unfollow_enabled: input.preset.unfollowEnabled,

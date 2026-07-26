@@ -86,6 +86,8 @@ const stringDefaults = {
   warmup_profile_code: "follow_default_v1",
   package_started_at: "",
   follow_limiting_reason: "Unknown",
+  follow_account_override_status: "legacy_unclassified",
+  follow_account_override_source: "",
   admin_lifecycle_status: "unknown",
   login_status: "unknown",
   provisioning_status: "unknown",
@@ -711,12 +713,20 @@ async function withFollowRuntimeStatus(
   settings: SettingsPayload,
   supabase: ReturnType<typeof createSupabaseClient>,
 ) {
-  const { data: summary } = await supabase
-    .from("account_package_summary")
-    .select("commercial_package_label,warmup_status,warmup_day,package_started_at,package_defaults,package_caps,effective_caps_preview")
-    .eq("account_id", settings.account_id)
-    .limit(1)
-    .maybeSingle<SupabaseRecord>();
+  const [{ data: summary }, { data: explicitOverride }] = await Promise.all([
+    supabase
+      .from("account_package_summary")
+      .select("commercial_package_label,warmup_status,warmup_day,package_started_at,package_defaults,package_caps,effective_caps_preview")
+      .eq("account_id", settings.account_id)
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
+    supabase
+      .from("ig_account_follow_limit_overrides")
+      .select("classification,follow_day_cap_override,follow_session_cap_override,max_follow_per_run_legacy,source,source_surface,updated_at")
+      .eq("account_id", settings.account_id)
+      .limit(1)
+      .maybeSingle<SupabaseRecord>(),
+  ]);
   const packageCaps = (summary?.package_caps && typeof summary.package_caps === "object" && !Array.isArray(summary.package_caps))
     ? summary.package_caps as SupabaseRecord
     : null;
@@ -731,8 +741,19 @@ async function withFollowRuntimeStatus(
   const packageFollowSessionCap = packagePolicy?.maxSessionCap ?? 0;
   const packageDefaultFollowCap = packagePolicy?.defaultDayCap ?? 0;
   const packageDefaultFollowSessionCap = packagePolicy?.defaultSessionCap ?? 0;
-  const manualDayCap = readNumber(settings.max_actions_per_day, packageDefaultFollowCap);
-  const manualSessionCap = readNumber(settings.follow_limit, packageDefaultFollowSessionCap);
+  const legacyDayCap = readNumber(settings.max_actions_per_day, packageDefaultFollowCap);
+  const legacySessionCap = readNumber(settings.follow_limit, packageDefaultFollowSessionCap);
+  const overrideClassification = readString(explicitOverride?.classification, "");
+  const hasExplicitOverride = overrideClassification === "explicit";
+  const hasUnclassifiedLegacyValue = overrideClassification === "legacy_unclassified";
+  const legacyDiffersFromPackage = legacyDayCap !== packageDefaultFollowCap
+    || legacySessionCap !== packageDefaultFollowSessionCap;
+  const manualDayCap = hasExplicitOverride
+    ? readNumber(explicitOverride?.follow_day_cap_override, packageDefaultFollowCap)
+    : hasUnclassifiedLegacyValue || legacyDiffersFromPackage ? legacyDayCap : packageDefaultFollowCap;
+  const manualSessionCap = hasExplicitOverride
+    ? readNumber(explicitOverride?.follow_session_cap_override, packageDefaultFollowSessionCap)
+    : hasUnclassifiedLegacyValue || legacyDiffersFromPackage ? legacySessionCap : packageDefaultFollowSessionCap;
   const warmupEnabled = readJsonBoolean(preview, "warmup_enabled", readBoolean(settings.warmup_mode, true));
   const day1 = readJsonNumber(preview, "day_1_follow_cap", 10);
   const day2 = readJsonNumber(preview, "day_2_follow_cap", 20);
@@ -775,6 +796,10 @@ async function withFollowRuntimeStatus(
     package_default_follow_session_cap: packageDefaultFollowSessionCap,
     manual_follow_day_cap: manualDayCap,
     manual_follow_session_cap: manualSessionCap,
+    follow_account_override_status: hasExplicitOverride
+      ? "explicit"
+      : hasUnclassifiedLegacyValue || legacyDiffersFromPackage ? "legacy_unclassified" : "none_inherits_package",
+    follow_account_override_source: explicitOverride ? readString(explicitOverride.source, "") : "",
     effective_follow_cap_today: effectiveDayCap,
     effective_follow_session_cap: effectiveSessionCap,
     follow_day_remaining: remaining,
@@ -1119,6 +1144,23 @@ async function saveSettings(request: Request) {
     if (!followCapValidation.ok) return jsonError(followCapValidation.message, 400);
     settings.max_actions_per_day = followCapValidation.configuredDayCap;
     settings.follow_limit = followCapValidation.configuredSessionCap;
+    const explicitFollowCapWrite = [
+      "max_actions_per_day",
+      "follow_limit",
+      "manual_follow_day_cap",
+      "manual_follow_session_cap",
+    ].some((key) => Object.prototype.hasOwnProperty.call(body, key));
+    if (explicitFollowCapWrite) {
+      const { error: overrideError } = await supabase.rpc("set_account_follow_limit_override_v1", {
+        p_account_id: accountId,
+        p_follow_day_cap: followCapValidation.configuredDayCap,
+        p_follow_session_cap: followCapValidation.configuredSessionCap,
+        p_source: "admin",
+        p_source_surface: "instagram_dashboard_settings",
+        p_reason: "explicit_settings_save",
+      });
+      if (overrideError) return migrationError(overrideError.message);
+    }
     if (includesWarmupWrite(body)) {
       const warmupError = await saveWarmupSettings(supabase, settings, packagePolicy as PackageFollowPolicy);
       if (warmupError) return jsonError(warmupError, 400);

@@ -10,6 +10,11 @@ import {
   deriveCurrentDailyWindow,
   extractDailySlot,
 } from "./schedule-recurrence.ts";
+import {
+  reportWelcomeTemplateMissingIncident,
+  resolveWelcomeTemplateMissingIncidents,
+  WELCOME_TEMPLATE_MISSING_REASON,
+} from "./schedule-session-configuration-incidents.ts";
 
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
@@ -119,6 +124,19 @@ export type ScheduleSessionCronResult = {
   reason: ScheduleSessionCronReason | null;
   summary: ScheduleSessionCronSummary;
   botapp_scheduler_runtime_status?: string | null;
+  evaluated_accounts?: ScheduleSessionCronEvaluatedAccount[];
+  observability_persisted?: boolean;
+  observability_error?: string | null;
+};
+
+export type ScheduleSessionCronEvaluatedAccount = {
+  account_id: string;
+  assignment_id: string;
+  eligible: boolean;
+  queued: boolean;
+  stage: "configuration" | "runtime";
+  stable_reason: string | null;
+  evaluated_at: string;
 };
 
 type SupabaseLike = {
@@ -537,6 +555,7 @@ export async function runScheduleSessionCron(
     env?: Record<string, string | undefined>;
     now?: Date;
     evaluateEligibility?: ScheduleSessionEligibilityEvaluator;
+    syncConfigurationIncidents?: boolean;
     loadRuntimeHealth?: ScheduleSessionRuntimeHealthLoader;
     loadSchedulerAuthorization?: ScheduleSessionSchedulerAuthorizationLoader;
   } = {},
@@ -550,6 +569,7 @@ export async function runScheduleSessionCron(
 
   const now = options.now ?? new Date();
   const summary = emptySummary();
+  const evaluatedAccounts: ScheduleSessionCronEvaluatedAccount[] = [];
 
   // CP2 — daily recurrence: roll expired `scheduled` windows forward to the
   // derived daily occurrence BEFORE any run gate. This is a state derivation
@@ -574,6 +594,7 @@ export async function runScheduleSessionCron(
   }
 
   const evaluateEligibility = options.evaluateEligibility ?? defaultEligibilityEvaluator;
+  const syncConfigurationIncidents = options.syncConfigurationIncidents ?? options.evaluateEligibility == null;
   const loadRuntimeHealth = options.loadRuntimeHealth ?? defaultRuntimeHealthLoader;
   const assignments = await listActiveWindowAssignments(supabase, now, env.limit);
   summary.scanned_assignments_count = assignments.length;
@@ -677,10 +698,40 @@ export async function runScheduleSessionCron(
     const eligibility = await evaluateEligibility(accountId);
     if (!eligibility.ok) {
       summary.skipped_eligibility_count += 1;
+      evaluatedAccounts.push({
+        account_id: accountId,
+        assignment_id: assignmentId,
+        eligible: false,
+        queued: false,
+        stage: eligibility.reason === WELCOME_TEMPLATE_MISSING_REASON ? "configuration" : "runtime",
+        stable_reason: eligibility.reason,
+        evaluated_at: now.toISOString(),
+      });
+      if (syncConfigurationIncidents && eligibility.reason === WELCOME_TEMPLATE_MISSING_REASON) {
+        // Observability is fail-open: reporting must never create a run and a
+        // notification outage must not fail the whole Scheduler pass.
+        await reportWelcomeTemplateMissingIncident(supabase, {
+          accountId,
+          assignmentId,
+          startsAt,
+          endsAt,
+        });
+      }
       continue;
     }
 
     summary.eligible_count += 1;
+    if (syncConfigurationIncidents) await resolveWelcomeTemplateMissingIncidents(supabase, accountId);
+    const evaluation = {
+      account_id: accountId,
+      assignment_id: assignmentId,
+      eligible: true,
+      queued: false,
+      stage: "runtime" as const,
+      stable_reason: null,
+      evaluated_at: now.toISOString(),
+    };
+    evaluatedAccounts.push(evaluation);
     if (!env.dryRun) {
       try {
         const enqueue = await queueScheduledSession(supabase, {
@@ -700,6 +751,7 @@ export async function runScheduleSessionCron(
         }
         if (enqueue.reason === "scheduled_retry_created") summary.scheduled_retry_created_count += 1;
         summary.queued_count += 1;
+        evaluation.queued = true;
         activeRequestKeys.add(enqueue.idempotencyKey);
         activeRequestAccounts.add(accountId);
       } catch (error) {
@@ -714,6 +766,27 @@ export async function runScheduleSessionCron(
     }
   }
 
+  let observabilityPersisted = env.dryRun;
+  let observabilityError: string | null = null;
+  if (!env.dryRun) {
+    const writer = supabase.from("schedule_session_cron_runs") as {
+      insert?: (row: Record<string, unknown>) => Promise<{ error?: { message?: string } | null }>;
+    };
+    if (typeof writer.insert === "function") {
+      const persisted = await writer.insert({
+        worker_id: env.workerId,
+        dry_run: false,
+        state: cronState(env, schedulerAuthorization.enabled),
+        evaluated_accounts: evaluatedAccounts,
+        summary,
+      });
+      observabilityPersisted = !persisted.error;
+      observabilityError = persisted.error ? "schedule_session_observability_persist_failed" : null;
+    } else {
+      observabilityError = "schedule_session_observability_unavailable";
+    }
+  }
+
   return {
     status: 200,
     result: {
@@ -725,6 +798,9 @@ export async function runScheduleSessionCron(
       skipped: summary.eligible_count === 0,
       reason: summary.eligible_count === 0 ? "no_eligible_accounts" : null,
       botapp_scheduler_runtime_status: runtimeHealth.status,
+      evaluated_accounts: evaluatedAccounts,
+      observability_persisted: observabilityPersisted,
+      observability_error: observabilityError,
       summary,
     },
   };

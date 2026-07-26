@@ -110,6 +110,18 @@ export type SchedulerStatus = {
   daily_engine: SchedulerDailyEngine | null;
   windows_horizon_hours: number;
   upcoming_windows: SchedulerUpcomingWindow[];
+  latest_schedule_evaluations: SchedulerDailyAccountEvaluation[];
+};
+
+export type SchedulerDailyAccountEvaluation = {
+  account_id: string;
+  username: string | null;
+  assignment_id: string;
+  eligible: boolean;
+  queued: boolean;
+  stage: string;
+  stable_reason: string | null;
+  evaluated_at: string;
 };
 
 type QueryResult = { data?: unknown; error?: { message?: string } | null };
@@ -215,6 +227,16 @@ async function loadOpenScheduledAssignments(supabase: SchedulerStatusSupabase) {
     .limit(50);
   if (result.error) throw new Error(result.error.message || "account_assignments_unavailable");
   return readRows(result.data).filter((row) => readString(row.assignment_type, "full_cycle") === "full_cycle");
+}
+
+async function loadLatestScheduleEvaluations(supabase: SchedulerStatusSupabase) {
+  const result = await query(supabase, "schedule_session_cron_runs")
+    .select("created_at,evaluated_accounts")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (result.error) return [];
+  const row = readRows(result.data)[0];
+  return readRows(row?.evaluated_accounts);
 }
 
 async function loadDeviceNames(supabase: SchedulerStatusSupabase, deviceIds: string[]) {
@@ -430,10 +452,11 @@ export async function buildSchedulerStatus(
   const sinceIso = new Date(now.getTime() - windowHours * 3_600_000).toISOString();
 
   const settingsRow = await loadSettingsRow(supabase);
-  const [tickLocks, decisions, scheduledAssignments] = await Promise.all([
+  const [tickLocks, decisions, scheduledAssignments, rawScheduleEvaluations] = await Promise.all([
     loadRecentTickLocks(supabase),
     loadRecentDecisions(supabase, sinceIso),
     loadOpenScheduledAssignments(supabase),
+    loadLatestScheduleEvaluations(supabase),
   ]);
 
   const tickSummary = summarizeTickLocks(tickLocks);
@@ -443,6 +466,7 @@ export async function buildSchedulerStatus(
     new Set([
       ...decisions.map((row) => readString(row.account_id)).filter(Boolean),
       ...scheduledAssignments.map((row) => readString(row.account_id)).filter(Boolean),
+      ...rawScheduleEvaluations.map((row) => readString(row.account_id)).filter(Boolean),
     ]),
   );
   const deviceIds = Array.from(
@@ -453,6 +477,16 @@ export async function buildSchedulerStatus(
     loadDeviceNames(supabase, deviceIds),
   ]);
   const upcomingWindows = projectUpcomingWindows(scheduledAssignments, usernames, deviceNames, now);
+  const latestScheduleEvaluations: SchedulerDailyAccountEvaluation[] = rawScheduleEvaluations.map((row) => ({
+    account_id: readString(row.account_id),
+    username: usernames.get(readString(row.account_id)) || null,
+    assignment_id: readString(row.assignment_id),
+    eligible: readBooleanStrict(row.eligible),
+    queued: readBooleanStrict(row.queued),
+    stage: readString(row.stage, "runtime"),
+    stable_reason: readString(row.stable_reason) || null,
+    evaluated_at: readString(row.evaluated_at),
+  })).filter((row) => row.account_id && row.assignment_id);
 
   const recentDecisions: SchedulerRecentDecision[] = decisions.slice(0, recentLimit).map(projectRecentDecision(usernames));
 
@@ -492,5 +526,6 @@ export async function buildSchedulerStatus(
     daily_engine: dailyEngine,
     windows_horizon_hours: SCHEDULE_PROJECTION_HORIZON_HOURS,
     upcoming_windows: upcomingWindows,
+    latest_schedule_evaluations: latestScheduleEvaluations,
   };
 }
