@@ -293,6 +293,18 @@ Pas de polling infini. Pas de succès UI avant confirmation backend.
 
 *Dernière mise à jour : Phase 1 onboarding tenant — juin 2026.*
 
+## Test onboarding logical rollback
+
+A completed Test onboarding may be reset only through the service-role RPC
+`rollback_test_instagram_onboarding_v1`. The old account UUID is retained as a
+logical tombstone and its username is moved to a deterministic internal audit
+handle. The entitlement returns to `entitlement_reserved` with no `account_id`
+or `consumed_at`. The next client action remains manual: **Ajouter un compte
+Instagram** starts a new canonical session and creates a new account UUID.
+
+The rollback never restarts an onboarding session and never invokes Connect,
+Auto Login, Worker, scheduler, ADB, or a phone.
+
 ## Addendum package Follow — 2026-07-23
 
 Lors de la création d'un compte, les caps Follow configurés sont initialisés

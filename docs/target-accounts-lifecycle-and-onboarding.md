@@ -63,3 +63,16 @@ Rollback is application-only because this delivery creates no new database schem
 ## Pending final acceptance
 
 The implementation must not be marked fully validated until a separate GO authorizes a real third agency account test through credentials, protection lists, CT validation and readiness. The current smoke is intentionally limited to displaying the credentials screen, with zero account creation and zero entitlement consumption.
+
+## Logical rollback isolation
+
+`rollback_test_instagram_onboarding_v1` archives only non-terminal targets of
+the exact rolled-back account and removes only its pending/processing/retry CT
+verification jobs. Successful/failed/skipped verification rows and all
+`ct_target_audit_events` remain historical evidence. Canonical protection-list
+entries for that account are disabled, list versions advance once, and one
+redacted `clear` event is appended per affected list kind. Other account IDs are
+never selected by the cleanup statements.
+
+Because the next onboarding creates a new account UUID, neither legacy filter
+columns nor canonical protection-list rows can be inherited automatically.

@@ -6,7 +6,7 @@ import { createSupabaseClient } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const archivedStatuses = new Set(["archived", "trashed", "deleted"]);
+const archivedStatuses = new Set(["archived", "trashed", "deleted", "rolled_back_test_onboarding", "onboarding_rollback"]);
 
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
@@ -57,6 +57,7 @@ export async function GET(request: Request) {
 
     const accountRows = accounts.data ?? [];
     const existingAccountIds = accountRows
+      .filter((row) => !archivedStatuses.has(String(row.admin_lifecycle_status ?? row.status ?? "").trim().toLowerCase()))
       .map((row) => typeof row.id === "string" ? row.id : "")
       .filter(Boolean);
     const existingAccountIdSet = new Set(existingAccountIds);

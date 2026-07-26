@@ -90,7 +90,8 @@ export async function countLinkedInstagramAccountsForClient(supabase: SupabaseCl
   const { count, error } = await supabase
     .from("client_instagram_accounts")
     .select("id", { count: "exact", head: true })
-    .eq("client_id", clientId);
+    .eq("client_id", clientId)
+    .eq("active", true);
   if (error) throw new Error("client_account_count_failed");
   return count ?? 0;
 }

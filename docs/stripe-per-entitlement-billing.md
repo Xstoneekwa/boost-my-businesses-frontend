@@ -97,3 +97,13 @@ Stripe projection carries `commercial_mode`, but phone/runtime routing remains i
 - scheduler/run-control eligibility.
 
 Stripe must never assign phones or override runtime package state directly.
+
+## Test onboarding entitlement rollback
+
+For an exact `checkout_activated_test` session only, the transactional rollback
+may return its consumed per-account entitlement to `entitlement_reserved`.
+`client_id`, checkout, package, term, pricing snapshots, and Test commercial
+history are unchanged. Active state becomes `account_id = NULL` and
+`consumed_at = NULL`; the prior consumption is retained in the commercial audit
+event and append-only rollback audit. A conflicting reserved entitlement causes
+the whole operation to fail before mutation.

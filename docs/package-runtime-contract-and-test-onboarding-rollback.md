@@ -62,7 +62,26 @@ through the canonical credential helper; release assignment/instance occupancy;
 remove account-scoped live projections; return the entitlement to `reserved`
 with null account/consumption timestamps; and preserve diagnostic history.
 
-No such canonical transactional rollback existed at this checkpoint. Per the
-operator contract, implementation or execution of cleanup remains blocked until
-the preview and dedicated RPC design receive explicit validation. No onboarding
-is restarted automatically.
+The canonical contract is now `rollback_test_instagram_onboarding_v1`, delivered
+by migration `20260726030119_rollback_test_instagram_onboarding_v1.sql`. It is
+`SECURITY DEFINER`, has a fixed `public, extensions` search path, and is
+executable only by `service_role`. `anon` and `authenticated` have no execute
+privilege; the append-only audit table has RLS and no browser policies.
+
+The default mode is `p_dry_run = true`. A successful preview takes locks and
+evaluates every guard but performs no write and creates no audit event. Real
+execution uses the same input fingerprint and idempotency key. A replay returns
+`already_rolled_back`; reusing the key with different inputs returns
+`idempotency_fingerprint_mismatch`.
+
+The logical tombstone keeps `ig_accounts` and all diagnostic history. It frees
+the canonical username through a deterministic internal rename, sets
+`status=rolled_back_test_onboarding`, cancels the admin lifecycle, and marks the
+tenant ownership projection inactive. Active Client and BotApp projections
+explicitly exclude this state. The next manual onboarding therefore creates a
+new account UUID and cannot inherit settings, targets, protection entries,
+credentials, assignment, or runtime state from the tombstone.
+
+No onboarding, Auto Login, run, ADB command, or device action is triggered by
+this RPC. See `docs/account-cleanup-runbook.md` for the exact guard, retention,
+and down/compensation procedures.

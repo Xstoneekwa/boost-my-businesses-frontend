@@ -1044,6 +1044,10 @@ function buildSummary(accounts: ManageAccount[], sourceStatus: ManageSummary["so
 }
 
 function assembleOverview(accounts: ManageAccount[], errors: string[], sourceStatus: ManageSummary["sourceStatus"]): ManageOverview {
+  accounts = accounts.filter((account) => {
+    const lifecycle = account.accountLifecycleStatus.trim().toLowerCase();
+    return lifecycle !== "rolled_back_test_onboarding" && lifecycle !== "onboarding_rollback";
+  });
   const activeAccounts = accounts.filter((account) => lifecycleStatus(account) === "active");
   const archivedAccounts = accounts.filter((account) => lifecycleStatus(account) === "archived");
   const trashedAccounts = accounts.filter((account) => lifecycleStatus(account) === "trashed");

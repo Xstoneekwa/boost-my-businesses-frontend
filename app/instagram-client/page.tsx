@@ -54,6 +54,7 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
     .from("client_instagram_accounts")
     .select("account_id")
     .eq("client_id", clientId)
+    .eq("active", true)
     .limit(100);
 
   if (linkError || !Array.isArray(links) || links.length === 0) return [];
@@ -86,7 +87,8 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
     supabase
       .from("client_instagram_accounts")
       .select("account_id,login_status,provisioning_status")
-      .in("account_id", accountIds),
+      .in("account_id", accountIds)
+      .eq("active", true),
   ]);
 
   const verificationBlockedAccountIds = new Set<string>();

@@ -110,6 +110,7 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
     .from("client_instagram_accounts")
     .select("account_id,onboarding_status,provisioning_status,login_status")
     .eq("client_id", clientId)
+    .eq("active", true)
     .limit(100);
 
   if (linkError || !Array.isArray(links) || links.length === 0) return [];

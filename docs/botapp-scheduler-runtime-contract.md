@@ -277,3 +277,13 @@ BotApp local process remains the only place allowed to start/maintain dispatcher
 ```
 
 Manual Play remains `trigger=manual` and is never written by this cron.
+
+## Test onboarding rollback capacity contract
+
+The Test onboarding rollback refuses any active request, run, device lock, Auto
+Login, live view, processing job, or device heartbeat occupancy. It then calls
+`release_account_schedule_capacity` for the exact account. The normal assignment
+trigger terminalizes the assignment and releases only its exact
+`phone_app_instances` occupant. `rolled_back_test_onboarding` is excluded from
+BotApp active profiles and has no open assignment, so scheduler/readiness cannot
+select it. No Worker or BotApp release is required for this DB/frontend contract.

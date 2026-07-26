@@ -1778,3 +1778,11 @@ limites effectives du jour. `Refresh` ne remplace pas les champs configurés.
 `Save` envoie uniquement les valeurs configurées et le serveur refuse les
 entiers non positifs ou supérieurs aux maxima du package. Le warmup est dérivé
 des journées SAST avec Follow vérifié, jamais de l'âge du compte.
+
+## Logical Test onboarding tombstones
+
+Manage and `/api/instagram-dashboard/profiles` exclude accounts whose lifecycle
+status is `rolled_back_test_onboarding`. `/profiles/live` reports those IDs as
+removed/archived rather than projecting live counters. Historical account detail
+remains available through direct internal audit sources; the tombstone is not an
+active BotApp profile.

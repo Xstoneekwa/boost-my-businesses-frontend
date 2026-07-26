@@ -148,7 +148,8 @@ async function countClientAccounts(supabase: ReturnType<typeof createSupabaseCli
   const { count, error } = await supabase
     .from("client_instagram_accounts")
     .select("id", { count: "exact", head: true })
-    .eq("client_id", clientId);
+    .eq("client_id", clientId)
+    .eq("active", true);
   if (error) throw new Error("client_account_count_failed");
   return count ?? 0;
 }
@@ -174,7 +175,8 @@ async function usernameLinkedToClient(
   const { data: links, error } = await supabase
     .from("client_instagram_accounts")
     .select("account_id")
-    .eq("client_id", clientId);
+    .eq("client_id", clientId)
+    .eq("active", true);
   if (error) throw new Error("client_account_lookup_failed");
   const accountIds = (Array.isArray(links) ? links : [])
     .map((row) => readString((row as SupabaseRecord).account_id))
