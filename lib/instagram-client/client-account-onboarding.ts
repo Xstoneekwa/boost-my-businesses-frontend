@@ -40,6 +40,7 @@ import {
 } from "./profile-intelligence-ai";
 import { evaluateProfileAiAnalysis } from "./profile-intelligence-ai-policy";
 import { evaluateProfileReanalysis } from "./profile-reanalysis-policy";
+import { isClientOnboardingResumeCandidate } from "./client-onboarding-render-contract";
 
 type Row = Record<string, unknown>;
 type Supabase = ReturnType<typeof createSupabaseClient>;
@@ -94,7 +95,7 @@ export type ClientOnboardingSession = {
 const ONBOARDING_SELECT = [
   "id", "client_id", "entitlement_id", "account_id", "idempotency_key",
   "requested_username", "package_code", "status", "current_step",
-  "public_analysis", "targeting_criteria", "last_error_code", "completed_at",
+  "public_analysis", "targeting_criteria", "last_error_code", "failure_reason", "completed_at",
   "expires_at", "last_progress_at", "updated_at",
 ].join(",");
 
@@ -271,10 +272,11 @@ export async function loadLatestClientOnboardingSession(clientId: string, userId
     .eq("client_id", clientId)
     .neq("status", "completed")
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<Row>();
+    .limit(20)
+    .returns<Row[]>();
   if (error) throw new Error("onboarding_lookup_failed");
-  return data?.id ? projectSession(supabase, data) : null;
+  const row = (Array.isArray(data) ? data : []).find(isClientOnboardingResumeCandidate);
+  return row?.id ? projectSession(supabase, row) : null;
 }
 
 export async function beginClientInstagramOnboarding(input: {

@@ -21,6 +21,10 @@ import {
   publicAnalysisUiState,
   type ProfileAiUiField,
 } from "@/lib/instagram-client/profile-intelligence-ui";
+import {
+  clientOnboardingProgressIndex,
+  resolveClientOnboardingRenderIssue,
+} from "@/lib/instagram-client/client-onboarding-render-contract";
 import ClientAccountTargetsDrawer, { type DrawerCopy } from "./ClientAccountTargetsDrawer";
 
 type Lang = "fr" | "en";
@@ -41,7 +45,7 @@ type ApiEnvelope = {
   data?: { onboarding?: ClientOnboardingSession | null };
 };
 
-const STEPS = ["connection", "analysis", "protection_lists", "targeting", "targets", "complete"] as const;
+const ONBOARDING_INIT_TIMEOUT_MS = 15_000;
 const AI_FIELDS = new Set<ProfileAiUiField>([
   "suggestedCategory", "niche", "probableAudience", "themes", "businessDescription", "keywords", "exclusions",
 ]);
@@ -122,6 +126,8 @@ async function readEnvelope(response: Response): Promise<ApiEnvelope> {
 export default function ClientInstagramOnboardingWizard({ open, lang, onClose, onCompleted }: Props) {
   const [session, setSession] = useState<ClientOnboardingSession | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [initializationError, setInitializationError] = useState("");
   const [saving, setSaving] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
   const [error, setError] = useState("");
@@ -147,8 +153,10 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   const targetingDraftEditedRef = useRef(false);
   const filtersHydratedAccountRef = useRef("");
 
-  const step = session?.canRestart ? null : (session?.currentStep ?? "connection");
-  const stepIndex = Math.max(0, STEPS.indexOf(step ?? "connection"));
+  const renderIssue = resolveClientOnboardingRenderIssue(session);
+  const renderBlocked = Boolean(initializationError || renderIssue);
+  const step = renderBlocked || session?.canRestart ? null : (session?.currentStep ?? "connection");
+  const stepIndex = clientOnboardingProgressIndex(step);
   const eligibleCount = targets?.summary.validEligible ?? session?.eligibleTargetCount ?? 0;
   const requiredCount = session?.requiredTargetCount ?? 15;
   const aiStatus = aiSaving ? "running" : analysis?.aiAnalysis.status ?? "not_started";
@@ -201,21 +209,44 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), ONBOARDING_INIT_TIMEOUT_MS);
     setLoading(true);
     setError("");
-    void fetch("/api/instagram-client/onboarding", { headers: { Accept: "application/json" }, cache: "no-store" })
+    setInitializationError("");
+    setSession(null);
+    void fetch("/api/instagram-client/onboarding", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then(readEnvelope)
       .then((payload) => {
         if (cancelled) return;
         if (!payload.ok) throw new Error(payload.error || text(lang, "Impossible de reprendre l'onboarding.", "Could not resume onboarding."));
+        if (!payload.data || !Object.prototype.hasOwnProperty.call(payload.data, "onboarding")) {
+          throw Object.assign(new Error("onboarding_payload_incomplete"), { reasonCode: "onboarding_payload_incomplete" });
+        }
         hydrate(payload.data?.onboarding ?? null);
       })
       .catch((loadError) => {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : text(lang, "Chargement indisponible.", "Loading unavailable."));
+        if (cancelled) return;
+        const reasonCode = loadError && typeof loadError === "object" && "reasonCode" in loadError
+          ? String((loadError as { reasonCode?: unknown }).reasonCode || "onboarding_session_init_failed")
+          : "onboarding_session_init_failed";
+        console.error("[Client Instagram Onboarding]", { event: "session_init_failed", reason_code: reasonCode });
+        setInitializationError(reasonCode);
       })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [hydrate, lang, open]);
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [hydrate, lang, loadAttempt, open]);
 
   useEffect(() => {
     if (!open) {
@@ -527,9 +558,10 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
         <div className="cio-body">
           {loading ? <p className="cio-state">{text(lang, "Chargement de votre progression…", "Loading your progress…")}</p> : null}
           {error ? <p className="cio-error" role="alert">{error}</p> : null}
-          {!loading && session?.canRestart ? <div className="cio-complete"><span aria-hidden="true">↻</span><h3>{text(lang, "Onboarding à reprendre", "Onboarding needs to be restarted")}</h3><p>{session.status === "expired" ? text(lang, "Cette session a expiré. Tu peux reprendre à partir de la dernière étape enregistrée sans recréer le compte ni ressaisir les identifiants.", "This session expired. You can resume from the last saved step without recreating the account or entering credentials again.") : text(lang, "Cette session a été abandonnée. Tu peux la reprendre sans recréer le compte ni ressaisir les identifiants.", "This session was abandoned. You can restart it without recreating the account or entering credentials again.")}</p><button className="cd-btn cd-btn-primary" type="button" disabled={saving} onClick={() => void restartOnboarding()}>{saving ? text(lang, "Reprise…", "Restarting…") : text(lang, "Reprendre l'onboarding", "Restart onboarding")}</button></div> : null}
-          {!loading && !session?.canRestart && step === "connection" ? <form className="cio-form" onSubmit={(event) => void startOnboarding(event)}><div className="cio-intro"><h3>{text(lang, "Enregistrer les identifiants", "Record credentials")}</h3><p>{text(lang, "Vos identifiants sont transmis au coffre sécurisé existant. Cette étape ne connecte pas encore le compte à un téléphone.", "Your credentials are sent to the existing secure vault. This step does not connect the account to a phone yet.")}</p></div><label><span>{text(lang, "Identifiant Instagram", "Instagram username")}</span><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="@username" required /></label><label><span>{text(lang, "Email Instagram (optionnel)", "Instagram email (optional)")}</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" /></label><label><span>{text(lang, "Mot de passe Instagram", "Instagram password")}</span><div className="cio-password"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required /><button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? text(lang, "Masquer", "Hide") : text(lang, "Afficher", "Show")}</button></div></label><div className="cio-actions"><button className="cd-btn cd-btn-primary" type="submit" disabled={saving}>{saving ? text(lang, "Enregistrement…", "Saving…") : text(lang, "Enregistrer les identifiants", "Save credentials")}</button></div></form> : null}
-          {!loading && !session?.canRestart && step === "analysis" && analysis ? (
+          {!loading && renderBlocked ? <div className="cio-complete" role="alert"><span aria-hidden="true">!</span><h3>{text(lang, "Impossible d'initialiser l'onboarding", "Could not initialize onboarding")}</h3><p>{text(lang, "Aucune donnée n'a été créée. Réessaie le chargement ou ferme cette fenêtre.", "No data was created. Retry loading or close this window.")}</p><small>{initializationError || renderIssue}</small><div className="cio-actions split"><button className="cio-secondary" type="button" onClick={onClose}>{text(lang, "Fermer", "Close")}</button><button className="cd-btn cd-btn-primary" type="button" onClick={() => setLoadAttempt((value) => value + 1)}>{text(lang, "Réessayer", "Retry")}</button></div></div> : null}
+          {!loading && !renderBlocked && session?.canRestart ? <div className="cio-complete"><span aria-hidden="true">↻</span><h3>{text(lang, "Onboarding à reprendre", "Onboarding needs to be restarted")}</h3><p>{session.status === "expired" ? text(lang, "Cette session a expiré. Tu peux reprendre à partir de la dernière étape enregistrée sans recréer le compte ni ressaisir les identifiants.", "This session expired. You can resume from the last saved step without recreating the account or entering credentials again.") : text(lang, "Cette session a été abandonnée. Tu peux la reprendre sans recréer le compte ni ressaisir les identifiants.", "This session was abandoned. You can restart it without recreating the account or entering credentials again.")}</p><button className="cd-btn cd-btn-primary" type="button" disabled={saving} onClick={() => void restartOnboarding()}>{saving ? text(lang, "Reprise…", "Restarting…") : text(lang, "Reprendre l'onboarding", "Restart onboarding")}</button></div> : null}
+          {!loading && !renderBlocked && !session?.canRestart && step === "connection" ? <form className="cio-form" onSubmit={(event) => void startOnboarding(event)}><div className="cio-intro"><h3>{text(lang, "Enregistrer les identifiants", "Record credentials")}</h3><p>{text(lang, "Vos identifiants sont transmis au coffre sécurisé existant. Cette étape ne connecte pas encore le compte à un téléphone.", "Your credentials are sent to the existing secure vault. This step does not connect the account to a phone yet.")}</p></div><label><span>{text(lang, "Identifiant Instagram", "Instagram username")}</span><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="@username" required /></label><label><span>{text(lang, "Email Instagram (optionnel)", "Instagram email (optional)")}</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" /></label><label><span>{text(lang, "Mot de passe Instagram", "Instagram password")}</span><div className="cio-password"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required /><button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? text(lang, "Masquer", "Hide") : text(lang, "Afficher", "Show")}</button></div></label><div className="cio-actions"><button className="cd-btn cd-btn-primary" type="submit" disabled={saving}>{saving ? text(lang, "Enregistrement…", "Saving…") : text(lang, "Enregistrer les identifiants", "Save credentials")}</button></div></form> : null}
+          {!loading && !renderBlocked && !session?.canRestart && step === "analysis" && analysis ? (
             <div className="cio-form">
               <div className="cio-intro">
                 <h3>{text(lang, "Vérifier le profil public", "Review the public profile")}</h3>
