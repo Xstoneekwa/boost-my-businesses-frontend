@@ -3,6 +3,7 @@ import { jsonError, jsonOk, readJsonBody, requireInstagramAdmin, getInstagramAdm
 import {
   createProdTestCheckoutAuthorization,
   redactProdTestAuthorizationStatus,
+  resolveProdTestCheckoutClientIdByEmail,
   type ProdTestCheckoutAuthorizationRow,
 } from "@/lib/commercial/prod-test-checkout-authorization";
 import { isPlanKey, type PlanKey } from "@/lib/commercial/catalog";
@@ -50,6 +51,7 @@ type CreateBody = {
   plan_key?: unknown;
   billing_interval_months?: unknown;
   admin_confirmation_acknowledged?: unknown;
+  scope?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -64,8 +66,9 @@ export async function POST(request: Request) {
   const body = await readJsonBody<CreateBody>(request);
   const email = readString(body?.email);
   const durationHours = readDurationHours(body?.duration_hours);
-  const maxAccountsRaw = Number(body?.max_accounts ?? 2);
-  const maxAccounts = Number.isFinite(maxAccountsRaw) ? Math.max(1, Math.min(2, Math.floor(maxAccountsRaw))) : 2;
+  const maxAccountsRaw = Number(body?.max_accounts ?? 1);
+  const maxAccounts = Number.isFinite(maxAccountsRaw) ? Math.max(1, Math.min(10, Math.floor(maxAccountsRaw))) : 1;
+  const scope = readString(body?.scope, "add_account") === "first_purchase" ? "first_purchase" : "add_account";
   const planKeyRaw = readString(body?.plan_key);
   const planKey = planKeyRaw && isPlanKey(planKeyRaw) ? planKeyRaw as PlanKey : null;
   const billingIntervalMonthsRaw = Number(body?.billing_interval_months ?? 0);
@@ -85,7 +88,20 @@ export async function POST(request: Request) {
 
   const supabase = createSupabaseClient();
   try {
-    const authorization = await createProdTestCheckoutAuthorization({
+    const resolvedClientId = await resolveProdTestCheckoutClientIdByEmail(supabase, email);
+    const clientId = scope === "add_account" ? resolvedClientId : null;
+    if (scope === "add_account" && !clientId) {
+      return jsonError("Aucun tenant actif ne correspond à cette adresse e-mail.", 409, {
+        code: "authorization_tenant_not_found",
+      });
+    }
+    if (scope === "first_purchase" && resolvedClientId) {
+      return jsonError("Cette adresse e-mail appartient déjà à un tenant actif.", 409, {
+        code: "authorization_scope_mismatch",
+      });
+    }
+
+    const result = await createProdTestCheckoutAuthorization({
       supabase,
       email,
       createdByAuthUserId: adminContext.userId,
@@ -93,21 +109,42 @@ export async function POST(request: Request) {
       maxAccounts,
       planKey,
       billingIntervalMonths,
+      authorizedFlows: scope === "add_account" ? ["new_account"] : ["first_purchase"],
+      clientId,
       adminConfirmationAcknowledged,
     });
 
     return jsonOk({
-      authorization,
-      message_fr: "Autorisation de test créée. Aucun tenant ni checkout n'a été activé.",
-      message_en: "Test authorization created. No tenant or checkout was activated.",
+      authorization: result.authorization,
+      action: result.action,
+      message_fr: result.action === "created"
+        ? "Autorisation de test créée. Aucun tenant ni checkout n'a été activé."
+        : result.action === "renewed"
+          ? "Autorisation de test prolongée. Aucun checkout n'a été activé."
+          : "Autorisation active réutilisée. Aucun checkout n'a été activé.",
+      message_en: result.action === "created"
+        ? "Test authorization created. No tenant or checkout was activated."
+        : result.action === "renewed"
+          ? "Test authorization extended. No checkout was activated."
+          : "Active authorization reused. No checkout was activated.",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "create_failed";
     if (message === "production_environment_required") {
       return jsonError("Disponible uniquement sur la base de production.", 403, { code: message });
     }
+    if (["authorization_tenant_mismatch", "authorization_scope_mismatch", "authorization_tenant_ambiguous", "authorization_tenant_lookup_failed"].includes(message)) {
+      const errorFr = message === "authorization_tenant_mismatch"
+        ? "L'autorisation active appartient à un autre tenant."
+        : message === "authorization_scope_mismatch"
+          ? "L'autorisation active possède une portée incompatible."
+          : message === "authorization_tenant_ambiguous"
+            ? "Plusieurs tenants actifs correspondent à cette adresse e-mail."
+            : "La recherche du tenant a échoué.";
+      return jsonError(errorFr, 409, { code: message });
+    }
     if (message === "prod_test_authorization_create_failed") {
-      return jsonError("Impossible de créer l'autorisation (email déjà actif ?).", 409, { code: message });
+      return jsonError("Impossible de créer ou renouveler l'autorisation.", 409, { code: message });
     }
     return jsonError("Impossible de créer l'autorisation de test.", 500, { code: message });
   }

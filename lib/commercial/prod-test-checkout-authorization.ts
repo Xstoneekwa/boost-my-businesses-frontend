@@ -43,6 +43,8 @@ export type ProdTestCheckoutDenyReason =
   | "account_limit_reached"
   | "client_already_linked";
 
+export type ProdTestCheckoutAuthorizationAction = "created" | "reused" | "renewed";
+
 export function hashProdTestCheckoutEmail(email: string) {
   const normalized = normalizeCheckoutEmail(email);
   return createHash("sha256").update(normalized).digest("hex");
@@ -92,7 +94,7 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
-function isExpired(row: ProdTestCheckoutAuthorizationRow, now = new Date()) {
+export function isProdTestCheckoutAuthorizationExpired(row: ProdTestCheckoutAuthorizationRow, now = new Date()) {
   return new Date(row.expires_at).getTime() <= now.getTime();
 }
 
@@ -100,7 +102,7 @@ function normalizeFlow(flowType: "first_purchase" | "additional_account"): ProdT
   return flowType === "additional_account" ? "new_account" : "first_purchase";
 }
 
-export async function findActiveProdTestCheckoutAuthorization(
+export async function findLatestProdTestCheckoutAuthorization(
   supabase: SupabaseClient,
   email: string,
 ): Promise<ProdTestCheckoutAuthorizationRow | null> {
@@ -109,13 +111,11 @@ export async function findActiveProdTestCheckoutAuthorization(
     .from("commercial_prod_test_checkout_authorizations")
     .select("*")
     .eq("email_hash", emailHash)
-    .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<ProdTestCheckoutAuthorizationRow>();
 
   if (error || !data?.id) return null;
-  if (isExpired(data)) return null;
   return data;
 }
 
@@ -136,7 +136,7 @@ export function validateProdTestCheckoutAuthorization(input: {
     if (authorization.status === "revoked") return { ok: false, reason: "authorization_revoked" };
     return { ok: false, reason: "authorization_expired" };
   }
-  if (isExpired(authorization)) {
+  if (isProdTestCheckoutAuthorizationExpired(authorization)) {
     return { ok: false, reason: "authorization_expired" };
   }
   if (!authorization.authorized_flows.includes(flow)) {
@@ -193,7 +193,7 @@ export async function evaluateProdTestCheckoutAuthorization(input: {
     return { ok: false, reason: null };
   }
 
-  const authorization = await findActiveProdTestCheckoutAuthorization(input.supabase, normalizedEmail);
+  const authorization = await findLatestProdTestCheckoutAuthorization(input.supabase, normalizedEmail);
   if (!authorization) {
     return { ok: false, reason: "authorization_not_found" };
   }
@@ -306,15 +306,19 @@ export type RedactedProdTestAuthorizationStatus = {
   hasLinkedClient: boolean;
   nonBillable: true;
   paymentCollected: false;
+  authorizedFlows: ProdTestCheckoutFlow[];
 };
 
 export function redactProdTestAuthorizationStatus(
   row: ProdTestCheckoutAuthorizationRow,
 ): RedactedProdTestAuthorizationStatus {
+  const effectiveStatus = row.status === "active" && isProdTestCheckoutAuthorizationExpired(row)
+    ? "expired"
+    : row.status;
   return {
     id: row.id,
     emailHint: row.email_hint,
-    status: row.status,
+    status: effectiveStatus,
     expiresAt: row.expires_at,
     maxAccounts: row.max_accounts,
     entitlementsCreatedCount: row.entitlements_created_count,
@@ -323,7 +327,55 @@ export function redactProdTestAuthorizationStatus(
     hasLinkedClient: Boolean(row.client_id),
     nonBillable: true,
     paymentCollected: false,
+    authorizedFlows: row.authorized_flows.filter(
+      (flow): flow is ProdTestCheckoutFlow => flow === "first_purchase" || flow === "new_account",
+    ),
   };
+}
+
+export async function resolveProdTestCheckoutClientIdByEmail(
+  supabase: SupabaseClient,
+  email: string,
+): Promise<string | null> {
+  const normalizedEmail = normalizeCheckoutEmail(email);
+  const { data: users, error: usersError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (usersError) throw new Error("authorization_tenant_lookup_failed");
+
+  const authUser = (users.users ?? []).find(
+    (user) => normalizeCheckoutEmail(user.email ?? "") === normalizedEmail,
+  );
+  if (!authUser?.id) return null;
+
+  const { data, error } = await supabase
+    .from("client_users")
+    .select("client_id")
+    .eq("auth_user_id", authUser.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(2);
+  if (error) throw new Error("authorization_tenant_lookup_failed");
+
+  const clientIds = [...new Set((data ?? []).map((row) => readString(row.client_id)).filter(Boolean))];
+  if (clientIds.length > 1) throw new Error("authorization_tenant_ambiguous");
+  return clientIds[0] ?? null;
+}
+
+function scopesAreCompatible(existing: ProdTestCheckoutAuthorizationRow, requested: ProdTestCheckoutFlow[]) {
+  return requested.every((flow) => existing.authorized_flows.includes(flow));
+}
+
+async function terminalizeAuthorization(input: {
+  supabase: SupabaseClient;
+  authorization: ProdTestCheckoutAuthorizationRow;
+  status: "expired" | "consumed";
+  now: Date;
+}) {
+  const { error } = await input.supabase
+    .from("commercial_prod_test_checkout_authorizations")
+    .update({ status: input.status, updated_at: input.now.toISOString() })
+    .eq("id", input.authorization.id)
+    .eq("status", "active");
+  if (error) throw new Error("prod_test_authorization_terminalize_failed");
 }
 
 export async function createProdTestCheckoutAuthorization(input: {
@@ -335,9 +387,14 @@ export async function createProdTestCheckoutAuthorization(input: {
   planKey?: PlanKey | null;
   billingIntervalMonths?: BillingIntervalMonths | null;
   authorizedFlows?: ProdTestCheckoutFlow[];
+  clientId?: string | null;
   adminConfirmationAcknowledged: boolean;
   env?: NodeJS.ProcessEnv;
-}) {
+  now?: Date;
+}): Promise<{
+  authorization: RedactedProdTestAuthorizationStatus;
+  action: ProdTestCheckoutAuthorizationAction;
+}> {
   if (!input.adminConfirmationAcknowledged) {
     throw new Error("admin_confirmation_required");
   }
@@ -350,15 +407,65 @@ export async function createProdTestCheckoutAuthorization(input: {
     throw new Error("invalid_email");
   }
 
+  const now = input.now ?? new Date();
+  const requestedFlows = input.authorizedFlows ?? ["first_purchase", "new_account"];
+  const requestedClientId = readString(input.clientId) || null;
+  const existing = await findLatestProdTestCheckoutAuthorization(input.supabase, normalizedEmail);
+  if (existing?.client_id && requestedClientId && existing.client_id !== requestedClientId) {
+    throw new Error("authorization_tenant_mismatch");
+  }
+  const inheritedClientId = requestedClientId ?? existing?.client_id ?? null;
+
+  if (existing?.status === "active") {
+    if (isProdTestCheckoutAuthorizationExpired(existing, now)) {
+      await terminalizeAuthorization({ supabase: input.supabase, authorization: existing, status: "expired", now });
+    } else if (existing.entitlements_created_count >= existing.max_accounts) {
+      await terminalizeAuthorization({ supabase: input.supabase, authorization: existing, status: "consumed", now });
+    } else {
+      if (!scopesAreCompatible(existing, requestedFlows)) {
+        throw new Error("authorization_scope_mismatch");
+      }
+      if (
+        (existing.plan_key && existing.plan_key !== (input.planKey ?? null))
+        || (existing.billing_interval_months != null
+          && existing.billing_interval_months !== (input.billingIntervalMonths ?? null))
+      ) {
+        throw new Error("authorization_scope_mismatch");
+      }
+
+      const requestedExpiry = input.expiresAt.getTime();
+      const currentExpiry = new Date(existing.expires_at).getTime();
+      const patch: Record<string, unknown> = {};
+      if (requestedExpiry > currentExpiry) patch.expires_at = input.expiresAt.toISOString();
+      if (!existing.client_id && requestedClientId) patch.client_id = requestedClientId;
+
+      if (Object.keys(patch).length === 0) {
+        return { authorization: redactProdTestAuthorizationStatus(existing), action: "reused" };
+      }
+
+      patch.updated_at = now.toISOString();
+      const { data, error } = await input.supabase
+        .from("commercial_prod_test_checkout_authorizations")
+        .update(patch)
+        .eq("id", existing.id)
+        .eq("status", "active")
+        .select("*")
+        .single<ProdTestCheckoutAuthorizationRow>();
+      if (error || !data?.id) throw new Error("prod_test_authorization_renew_failed");
+      return { authorization: redactProdTestAuthorizationStatus(data), action: "renewed" };
+    }
+  }
+
   const payload = {
     email_hash: hashProdTestCheckoutEmail(normalizedEmail),
     email_hint: redactEmailHint(normalizedEmail),
-    authorized_flows: input.authorizedFlows ?? ["first_purchase", "new_account"],
-    max_accounts: input.maxAccounts ?? 2,
+    authorized_flows: requestedFlows,
+    max_accounts: input.maxAccounts ?? 1,
     plan_key: input.planKey ?? null,
     billing_interval_months: input.billingIntervalMonths ?? null,
     expires_at: input.expiresAt.toISOString(),
     status: "active",
+    client_id: inheritedClientId,
     created_by_auth_user_id: input.createdByAuthUserId,
     admin_confirmation_acknowledged: true,
     metadata: {
@@ -376,5 +483,5 @@ export async function createProdTestCheckoutAuthorization(input: {
     throw new Error("prod_test_authorization_create_failed");
   }
 
-  return redactProdTestAuthorizationStatus(data);
+  return { authorization: redactProdTestAuthorizationStatus(data), action: "created" };
 }

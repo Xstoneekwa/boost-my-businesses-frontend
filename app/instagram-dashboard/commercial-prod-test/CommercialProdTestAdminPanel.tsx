@@ -15,12 +15,14 @@ type AuthorizationStatus = {
   hasLinkedClient: boolean;
   nonBillable: true;
   paymentCollected: false;
+  authorizedFlows: Array<"first_purchase" | "new_account">;
 };
 
 export default function CommercialProdTestAdminPanel() {
   const [email, setEmail] = useState("");
   const [durationHours, setDurationHours] = useState(48);
-  const [maxAccounts, setMaxAccounts] = useState(2);
+  const [activationAllowance, setActivationAllowance] = useState(1);
+  const [scope, setScope] = useState<"add_account" | "first_purchase">("add_account");
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -59,7 +61,8 @@ export default function CommercialProdTestAdminPanel() {
         body: JSON.stringify({
           email,
           duration_hours: durationHours,
-          max_accounts: maxAccounts,
+          max_accounts: activationAllowance,
+          scope,
           admin_confirmation_acknowledged: confirmed,
         }),
       });
@@ -105,13 +108,20 @@ export default function CommercialProdTestAdminPanel() {
           />
         </label>
         <label>
-          Limite de comptes (max 2)
+          Portée de l&apos;autorisation
+          <select value={scope} onChange={(event) => setScope(event.target.value as "add_account" | "first_purchase")}>
+            <option value="add_account">Ajout de compte — tenant existant</option>
+            <option value="first_purchase">Premier achat — nouveau tenant</option>
+          </select>
+        </label>
+        <label>
+          Activations Test accordées à cette autorisation (max 10)
           <input
             type="number"
             min={1}
-            max={2}
-            value={maxAccounts}
-            onChange={(event) => setNumberInput(setMaxAccounts, event.target.value, 2)}
+            max={10}
+            value={activationAllowance}
+            onChange={(event) => setNumberInput(setActivationAllowance, event.target.value, 1)}
           />
         </label>
         <label className="commercial-prod-test-admin-confirm">
@@ -119,7 +129,7 @@ export default function CommercialProdTestAdminPanel() {
           Je confirme qu&apos;il s&apos;agit d&apos;un parcours interne non facturable (first_purchase + add-account).
         </label>
         <button type="submit" disabled={loading || !confirmed || !email.trim()}>
-          {loading ? "Création…" : "Créer l'autorisation"}
+          {loading ? "Traitement…" : "Créer ou renouveler l'autorisation"}
         </button>
       </form>
 
@@ -134,9 +144,11 @@ export default function CommercialProdTestAdminPanel() {
               <strong>{authorization.emailHint}</strong>
               {" · "}
               {authorization.status}
+              {" · portée "}
+              {authorization.authorizedFlows.includes("new_account") ? "add-account" : "first-purchase"}
               {" · expire "}
               {new Date(authorization.expiresAt).toLocaleString("fr-FR")}
-              {" · comptes "}
+              {" · activations Test "}
               {authorization.entitlementsCreatedCount}/{authorization.maxAccounts}
               {" · first "}
               {authorization.firstCheckoutUsed ? "oui" : "non"}
@@ -157,7 +169,7 @@ export default function CommercialProdTestAdminPanel() {
         .commercial-prod-test-admin-intro { line-height: 1.5; color: #44403c; }
         .commercial-prod-test-admin-form { display: grid; gap: 12px; }
         label { display: grid; gap: 6px; font-weight: 600; }
-        input[type="email"], input[type="number"] { padding: 10px 12px; border: 1px solid #d6d3d1; border-radius: 10px; }
+        input[type="email"], input[type="number"], select { padding: 10px 12px; border: 1px solid #d6d3d1; border-radius: 10px; }
         .commercial-prod-test-admin-confirm { font-weight: 500; grid-template-columns: auto 1fr; align-items: start; }
         button { justify-self: start; padding: 10px 16px; border: none; border-radius: 999px; background: #0f766e; color: white; font-weight: 700; cursor: pointer; }
         button:disabled { opacity: .55; cursor: not-allowed; }
