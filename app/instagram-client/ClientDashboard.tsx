@@ -36,6 +36,8 @@ import {
   type FollowerChartView,
 } from "@/lib/instagram-client/client-follower-chart-projection";
 import { resolveClientConnectionActionPanel } from "@/lib/instagram-client/client-connection-action-scope";
+import { readAccountProtectionListValidator } from "@/lib/instagram-dashboard/account-protection-list-http";
+import { protectionListRequestErrorMessage } from "@/lib/instagram-dashboard/account-protection-list-input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -664,8 +666,8 @@ export default function ClientDashboard({
       setWhitelist(whitelistPayload.data.items ?? []);
       setBlacklist(blacklistPayload.data.items ?? []);
       setProtectionEtags({
-        unfollow_whitelist: whitelistResponse.headers.get("etag") ?? "",
-        interaction_blacklist: blacklistResponse.headers.get("etag") ?? "",
+        unfollow_whitelist: readAccountProtectionListValidator(whitelistResponse.headers),
+        interaction_blacklist: readAccountProtectionListValidator(blacklistResponse.headers),
       });
     } catch (error) {
       setTargetingMessage(error instanceof Error ? error.message : "Could not load targeting data.");
@@ -776,7 +778,7 @@ export default function ClientDashboard({
         cache: "no-store",
       });
       if (!current.ok) throw new Error("Could not refresh the protection list version.");
-      etag = current.headers.get("etag") ?? "";
+      etag = readAccountProtectionListValidator(current.headers);
     }
     const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(targetingAccountId)}/protection-lists/${kind}`, {
       method: "PATCH",
@@ -794,11 +796,11 @@ export default function ClientDashboard({
       throw new Error(lang === "fr" ? "La liste a changé ailleurs. Elle vient d’être actualisée ; réessaie." : "The list changed elsewhere. It was refreshed; try again.");
     }
     if (!response.ok || !payload.ok || !payload.data) {
-      throw new Error(payload.error || "Could not save the protection list.");
+      throw new Error(protectionListRequestErrorMessage(payload.error || "protection_list_save_failed", lang));
     }
     if (kind === "unfollow_whitelist") setWhitelist(payload.data.items ?? []);
     else setBlacklist(payload.data.items ?? []);
-    setProtectionEtags((current) => ({ ...current, [kind]: response.headers.get("etag") ?? current[kind] }));
+    setProtectionEtags((current) => ({ ...current, [kind]: readAccountProtectionListValidator(response.headers) || current[kind] }));
   }
 
   async function archiveTargetByUsername(username: string) {

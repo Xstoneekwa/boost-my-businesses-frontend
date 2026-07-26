@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createSupabaseClient } from "@/lib/supabase";
 import {
   entitlementToAddProfileInput,
@@ -41,6 +42,10 @@ import {
 import { evaluateProfileAiAnalysis } from "./profile-intelligence-ai-policy";
 import { evaluateProfileReanalysis } from "./profile-reanalysis-policy";
 import { isClientOnboardingResumeCandidate } from "./client-onboarding-render-contract";
+import {
+  normalizeProtectionUsernameEntries,
+  readExpectedVersion,
+} from "@/lib/instagram-dashboard/account-protection-list-contract";
 
 type Row = Record<string, unknown>;
 type Supabase = ReturnType<typeof createSupabaseClient>;
@@ -398,6 +403,80 @@ export async function updateClientInstagramOnboarding(input: {
   if (input.action !== "complete" || projected.status !== "completed") return projected;
   const assignment = await finalizeCompletedOnboardingAssignment(supabase, updated);
   return { ...projected, ...assignment };
+}
+
+export async function saveClientInstagramOnboardingProtectionLists(input: {
+  clientId: string;
+  userId: string;
+  sessionId: string;
+  value: unknown;
+}) {
+  const supabase = createSupabaseClient();
+  const row = await loadSessionRow(supabase, input.clientId, input.sessionId);
+  if (!row) throw Object.assign(new Error("onboarding_not_found"), { status: 404 });
+  const accountId = readString(row.account_id);
+  if (!accountId) throw Object.assign(new Error("account_not_created"), { status: 409 });
+  const value = readObject(input.value);
+  const mode = readString(value.mode);
+  const requestKey = readString(value.request_key);
+  if (!["save", "skip"].includes(mode)) {
+    throw Object.assign(new Error("protection_lists_mode_invalid"), { status: 400 });
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestKey)) {
+    throw Object.assign(new Error("protection_lists_request_key_invalid"), { status: 400 });
+  }
+
+  let whitelistItems: string[] = [];
+  let blacklistItems: string[] = [];
+  let whitelistVersion = 0;
+  let blacklistVersion = 0;
+  if (mode === "save") {
+    const whitelist = readObject(value.unfollow_whitelist);
+    const blacklist = readObject(value.interaction_blacklist);
+    const normalizedWhitelist = normalizeProtectionUsernameEntries(whitelist.items, "items");
+    const normalizedBlacklist = normalizeProtectionUsernameEntries(blacklist.items, "items");
+    if (normalizedWhitelist.errors.length || normalizedBlacklist.errors.length) {
+      throw Object.assign(new Error("invalid_entries"), { status: 422 });
+    }
+    const whitelistExpected = readExpectedVersion(readString(whitelist.if_match), accountId, "unfollow_whitelist");
+    const blacklistExpected = readExpectedVersion(readString(blacklist.if_match), accountId, "interaction_blacklist");
+    if (!whitelistExpected.ok || !blacklistExpected.ok) {
+      const failure = !whitelistExpected.ok ? whitelistExpected : blacklistExpected;
+      throw Object.assign(new Error(failure.error), { status: failure.status });
+    }
+    whitelistItems = normalizedWhitelist.items;
+    blacklistItems = normalizedBlacklist.items;
+    whitelistVersion = whitelistExpected.version;
+    blacklistVersion = blacklistExpected.version;
+  }
+
+  const fingerprint = (kind: string, items: string[]) => createHash("sha256")
+    .update(JSON.stringify({ accountId, kind, operation: "replace", items, sourceSurface: "client_onboarding" }))
+    .digest("hex");
+  const { data, error } = await supabase.rpc("save_client_instagram_onboarding_protection_lists", {
+    p_session_id: input.sessionId,
+    p_client_id: input.clientId,
+    p_actor_id: input.userId,
+    p_mode: mode,
+    p_unfollow_items: whitelistItems,
+    p_blacklist_items: blacklistItems,
+    p_unfollow_expected_version: whitelistVersion,
+    p_blacklist_expected_version: blacklistVersion,
+    p_request_id: crypto.randomUUID(),
+    p_idempotency_key: requestKey,
+    p_unfollow_fingerprint: fingerprint("unfollow_whitelist", whitelistItems),
+    p_blacklist_fingerprint: fingerprint("interaction_blacklist", blacklistItems),
+  });
+  if (error) throw Object.assign(new Error("protection_lists_transaction_failed"), { status: 503 });
+  const result = readObject(data);
+  if (result.ok !== true) {
+    const code = readString(result.error, "protection_lists_transaction_failed");
+    const status = ["version_conflict", "idempotency_conflict"].includes(code) ? 409 : 400;
+    throw Object.assign(new Error(code), { status });
+  }
+  const updated = await loadSessionRow(supabase, input.clientId, input.sessionId);
+  if (!updated) throw Object.assign(new Error("onboarding_not_found"), { status: 404 });
+  return projectSession(supabase, updated);
 }
 
 function reanalysisError(code: string, status: number) {

@@ -37,6 +37,8 @@ import {
   shouldShowConnect,
   shouldShowCredentialsConfirm,
 } from "@/lib/instagram-dashboard/dashboard-action-button-state";
+import { readAccountProtectionListValidator } from "@/lib/instagram-dashboard/account-protection-list-http";
+import { protectionListRequestErrorMessage } from "@/lib/instagram-dashboard/account-protection-list-input";
 
 type ReadinessNowStatus =
   | "ready"
@@ -4769,7 +4771,7 @@ function AccountProtectionListsPanel({ accountId }: { accountId: string }) {
         });
         const payload = await response.json() as { ok?: boolean; data?: ProtectionListView; error?: string };
         if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || "protection_list_load_failed");
-        return { kind, data: payload.data, etag: response.headers.get("etag") ?? "" };
+        return { kind, data: payload.data, etag: readAccountProtectionListValidator(response.headers) };
       };
       const loaded = await Promise.all([load("unfollow_whitelist"), load("interaction_blacklist")]);
       setLists(Object.fromEntries(loaded.map((item) => [item.kind, item.data])) as Record<ProtectionListKind, ProtectionListView>);
@@ -4807,9 +4809,9 @@ function AccountProtectionListsPanel({ accountId }: { accountId: string }) {
         await loadLists();
         throw new Error("This list changed elsewhere. The latest version has been reloaded; retry your change.");
       }
-      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || "protection_list_update_failed");
+      if (!response.ok || !payload.ok || !payload.data) throw new Error(protectionListRequestErrorMessage(payload.error || "protection_list_update_failed", "en"));
       setLists((current) => ({ ...current, [kind]: payload.data! }));
-      setEtags((current) => ({ ...current, [kind]: response.headers.get("etag") ?? current[kind] }));
+      setEtags((current) => ({ ...current, [kind]: readAccountProtectionListValidator(response.headers) || current[kind] }));
       setDrafts((current) => ({ ...current, [kind]: "" }));
       setMessage("Saved. Changes apply to the next session.");
     } catch (mutationError) {

@@ -10,6 +10,7 @@ import {
   readExpectedVersion,
   type AccountProtectionListKind,
 } from "./account-protection-list-contract";
+import { ACCOUNT_PROTECTION_LIST_VALIDATOR_HEADER } from "./account-protection-list-http";
 import {
   AccountProtectionListServiceError,
   mutateAccountProtectionList,
@@ -25,12 +26,14 @@ type AuthorizedRoute = {
 };
 
 function responseForSnapshot(accountId: string, listKind: AccountProtectionListKind, data: AccountProtectionListSnapshot) {
+  const validator = accountProtectionListEtag(accountId, listKind, data.version);
   return NextResponse.json(
     { ok: true, data },
     {
       status: 200,
       headers: {
-        ETag: accountProtectionListEtag(accountId, listKind, data.version),
+        ETag: validator,
+        [ACCOUNT_PROTECTION_LIST_VALIDATOR_HEADER]: validator,
         "Cache-Control": "private, no-store",
       },
     },

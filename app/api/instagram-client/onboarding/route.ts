@@ -5,6 +5,7 @@ import {
   loadLatestClientOnboardingSession,
   reanalyzeClientInstagramOnboarding,
   restartClientInstagramOnboarding,
+  saveClientInstagramOnboardingProtectionLists,
   updateClientInstagramOnboarding,
 } from "@/lib/instagram-client/client-account-onboarding";
 import {
@@ -173,6 +174,21 @@ export async function PATCH(request: Request) {
         safe.status,
         { code: safe.code },
       );
+    }
+  }
+
+  if (action === "save_protection_lists") {
+    try {
+      const onboarding = await saveClientInstagramOnboardingProtectionLists({
+        clientId: auth.clientId,
+        userId: auth.userId,
+        sessionId,
+        value: body.value,
+      });
+      return jsonOk({ onboarding });
+    } catch (error) {
+      const safe = safeError(error);
+      return jsonError("Could not save Instagram protection lists.", safe.status, { code: safe.code });
     }
   }
 

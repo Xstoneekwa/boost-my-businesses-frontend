@@ -159,8 +159,30 @@ La couverture FBR est certifiée uniquement par
 - Ces critères servent uniquement à préremplir la recherche existante de
   comptes cibles. Ils ne créent ni ne valident eux-mêmes une CT.
 - Les fonctionnalités de recherche IA restent soumises au droit package
-  canonique (Growth verrouillé; Pro/Premium autorisés) et au garde serveur
-  existant.
+canonique (Growth verrouillé; Pro/Premium autorisés) et au garde serveur
+existant.
+
+### 4.3a Listes de protection optionnelles
+
+- Les deux champs sont des `textarea` : virgules, retours `\n`, retours Windows
+  `\r\n` et formats mixtes sont acceptés. Entrée et Shift+Entrée insèrent une
+  nouvelle ligne et ne soumettent jamais l’étape.
+- La normalisation retire `@`, applique la casse canonique, ignore les lignes
+  vides, déduplique en conservant la première apparition et bloque les identifiants
+  Instagram invalides avec un message client lisible.
+- GET fournit un validateur applicatif par liste dans `ETag` et
+  `X-Account-Protection-List-Validator`. Le navigateur privilégie le header
+  dédié; le backend accepte aussi la forme ETag faible standard, mais refuse
+  toujours `*`, les ressources croisées et les versions réellement obsolètes.
+- `PATCH /api/instagram-client/onboarding` avec
+  `action=save_protection_lists` sauvegarde la blacklist et la whitelist dans
+  une seule transaction. La progression vers `targeting` n’est validée qu’après
+  les deux mutations; toute erreur annule les deux listes et la progression.
+- `mode=skip` avance sans écrire de valeur, version ou événement de liste et
+  conserve donc toute représentation canonique existante.
+- La source de vérité reste `account_protection_list_entries`, isolée par
+  `account_id`. Le Worker consomme ensuite le snapshot canonique au début d’un
+  run; cette étape onboarding ne déclenche ni Worker, ni téléphone, ni run.
 
 ### 4.4 Comptes cibles
 
