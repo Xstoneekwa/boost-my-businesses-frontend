@@ -63,10 +63,10 @@ export const addProfilePackageOptions: Array<{
   {
     value: "custom",
     label: "Custom",
-    detail: "Operator-defined package; uses Pro defaults until Custom wiring ships.",
+    detail: "Operator-defined package; unavailable until its canonical package matrix ships.",
     commercialCode: "pro",
-    selectable: true,
-    planned: false,
+    selectable: false,
+    planned: true,
   },
   {
     value: "internal_test",
@@ -266,8 +266,12 @@ export function resolveAddProfilePackagePreset(input: {
   runtimeMode: AddProfileRuntimeMode;
   addons?: AddProfileAddonCode[];
 }): AddProfilePackagePreset {
+  if (input.commercialPackage === "custom") {
+    throw new Error("package_settings_incomplete");
+  }
   const commercialCode = commercialPackageCodeForSelection(input.commercialPackage) as AddProfilePackagePreset["commercialPackageCode"];
-  const base = baseCommercialPresets[commercialCode] ?? baseCommercialPresets.growth;
+  const base = baseCommercialPresets[commercialCode];
+  if (!base) throw new Error("package_settings_incomplete");
   const addonSet = new Set(input.addons ?? []);
   const fullCycleRuntime = input.runtimeMode === "full_cycle";
   const followRuntime = input.runtimeMode === "follow_only_test" || fullCycleRuntime;

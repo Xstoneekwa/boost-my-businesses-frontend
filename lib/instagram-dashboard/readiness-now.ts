@@ -1,5 +1,6 @@
 import { resolveOrphanLoginRecoveryProjection, clientSecurePreparationMessage } from "./orphan-login-recovery.ts";
 import { loadTargetEligibilityCountsForAccount } from "./account-target-eligibility.ts";
+import { loadPackageRuntimeContract } from "./package-runtime-contract.ts";
 import type { createSupabaseClient } from "../supabase.ts";
 
 export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
@@ -412,7 +413,7 @@ export async function runReadinessNow(
     !filtersRow ? "missing_filters" : null,
     blockingDashboardActionCount > 0 ? "blocking_dashboard_action" : null,
   ].filter((item): item is string => Boolean(item));
-  const checks = {
+  const checks: Record<string, unknown> = {
     account_exists: true,
     package_configured: Boolean(packageSummary),
     credentials_active: Boolean(credential && activeCredentialStatuses.has(normalize(credential.status))),
@@ -519,6 +520,27 @@ export async function runReadinessNow(
       next_action: capacityAvailable ? "wait_for_scheduler_assignment" : "try_again_later",
       reason: capacityAvailable ? "waiting_scheduled_assignment" : "capacity_unavailable",
       blockers: ["missing_assignment"],
+      checks,
+    });
+  }
+
+  const packageRuntimeContract = await loadPackageRuntimeContract(supabase, input.accountId);
+  checks.package_runtime_contract = packageRuntimeContract;
+  if (!packageRuntimeContract.ok) {
+    return safeResult({
+      audience,
+      readiness_status: "retry_later",
+      client_status: "try_again_later",
+      assignment_status: "blocked",
+      phone_available: false,
+      app_instance_available: false,
+      preflight_request_created: false,
+      idempotent: false,
+      request_id: null,
+      run_request_status: null,
+      next_action: "review_account",
+      reason: packageRuntimeContract.reason,
+      blockers: [packageRuntimeContract.reason],
       checks,
     });
   }

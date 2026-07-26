@@ -56,6 +56,9 @@ function makeSupabase(requestRows: Row[], rpcError: string | null = null) {
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
+        if (name === "account_package_runtime_contract_status") {
+          return Promise.resolve({ data: { ok: true, reason: "ready" }, error: null });
+        }
         if (name === "create_account_run_request") {
           if (rpcError) {
             return Promise.resolve({ data: null, error: { message: rpcError } });
@@ -98,8 +101,8 @@ test("terminal failed request does not block new connect enqueue", async () => {
   });
   assert.equal(result.preflight_request_created, true);
   assert.equal(result.idempotent, false);
-  assert.equal(supabase.rpcCalls.length, 1);
-  assert.match(String(supabase.rpcCalls[0]?.args.p_idempotency_key), /^login-preflight-now:assignment-1:/);
+  assert.equal(supabase.rpcCalls.length, 2);
+  assert.match(String(supabase.rpcCalls[1]?.args.p_idempotency_key), /^login-preflight-now:assignment-1:/);
 });
 
 test("active login_provisioning request is reused without second rpc", async () => {
@@ -119,7 +122,7 @@ test("active login_provisioning request is reused without second rpc", async () 
   assert.equal(result.idempotent, true);
   assert.equal(result.reason, "already_requested");
   assert.equal(result.run_request_status, "running");
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["account_package_runtime_contract_status"]);
 });
 
 test("account_run_already_requested race reloads active request", async () => {
@@ -131,6 +134,9 @@ test("account_run_already_requested race reloads active request", async () => {
       return makeQuery([]);
     },
     rpc(name: string, args: Record<string, unknown>) {
+      if (name === "account_package_runtime_contract_status") {
+        return Promise.resolve({ data: { ok: true, reason: "ready" }, error: null });
+      }
       if (name !== "create_account_run_request") {
         return Promise.resolve({ data: null, error: null });
       }

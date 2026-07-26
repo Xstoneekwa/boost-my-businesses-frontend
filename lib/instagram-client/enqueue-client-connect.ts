@@ -3,6 +3,7 @@ import {
   PreflightEnqueueError,
   type ReadinessNowSupabase,
 } from "../instagram-dashboard/readiness-now.ts";
+import { loadPackageRuntimeContract } from "../instagram-dashboard/package-runtime-contract.ts";
 
 type Row = Record<string, unknown>;
 
@@ -129,6 +130,20 @@ export async function enqueueClientConnectRequest(
       request_id: null,
       connect_attempt_id: null,
       blockers: ["enqueue_rejected"],
+    };
+  }
+
+  const packageRuntimeContract = await loadPackageRuntimeContract(supabase, accountId);
+  if (!packageRuntimeContract.ok) {
+    return {
+      request: null,
+      preflight_request_created: false,
+      idempotent: false,
+      reason: packageRuntimeContract.reason,
+      run_request_status: null,
+      request_id: null,
+      connect_attempt_id: null,
+      blockers: [packageRuntimeContract.reason],
     };
   }
 

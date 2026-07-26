@@ -4,6 +4,7 @@ import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import type { SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 import { runReadinessNow } from "@/lib/instagram-dashboard/readiness-now";
 import { projectProfileDetailsTargetRow } from "@/lib/instagram-dashboard/profile-details-target-projection";
+import { loadPackageRuntimeContract } from "@/lib/instagram-dashboard/package-runtime-contract";
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value;
@@ -72,7 +73,7 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [accountResult, settingsResult, filtersResult, dmSettingsResult, dmTemplatesResult, unfollowSettingsResult, sourceSettingsResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult] = await Promise.all([
+  const [accountResult, settingsResult, filtersResult, dmSettingsResult, dmTemplatesResult, unfollowSettingsResult, sourceSettingsResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult, packageRuntimeContract] = await Promise.all([
     supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
@@ -101,6 +102,7 @@ export async function getProfileDetailsData(accountId: string) {
       request_id: null,
       run_request_status: null,
     })),
+    loadPackageRuntimeContract(supabase, accountId),
   ]);
 
   const activityItems = activityResult?.items?.filter((item) => item.accountId === accountId || item.username === account.username) ?? [];
@@ -125,20 +127,20 @@ export async function getProfileDetailsData(accountId: string) {
     outreach_message: readString(outreachTemplate?.body, ""),
     cold_dm_body: readString(outreachTemplate?.body, ""),
     welcome_session_cap: dmSettingsResult.data?.welcome_per_session_limit ?? 0,
-    welcome_day_cap: dmSettingsResult.data?.welcome_per_day_limit ?? 10,
+    welcome_day_cap: dmSettingsResult.data?.welcome_per_day_limit ?? null,
     outreach_session_cap: dmSettingsResult.data?.outreach_per_session_limit ?? 0,
-    outreach_day_cap: dmSettingsResult.data?.outreach_per_day_limit ?? 30,
+    outreach_day_cap: dmSettingsResult.data?.outreach_per_day_limit ?? null,
     welcome_template_status: welcomeTemplate ? "Configured" : "Missing",
     outreach_template_status: outreachTemplate ? "Configured" : "Missing",
     unfollow_settings_status: unfollowSettingsResult.error ? "backend_pending" : "connected",
     unfollow_enabled: unfollowSettingsResult.data?.unfollow_enabled === true,
-    unfollow_mode: readString(unfollowSettingsResult.data?.unfollow_mode, "unfollow"),
+    unfollow_mode: readString(unfollowSettingsResult.data?.unfollow_mode, ""),
     unfollow_per_session_limit: unfollowSettingsResult.data?.unfollow_per_session_limit ?? null,
     unfollow_per_day_limit: unfollowSettingsResult.data?.unfollow_per_day_limit ?? null,
-    unfollow_after_days: unfollowSettingsResult.data?.unfollow_after_days ?? 3,
-    runtime_cap_mode: readString(unfollowSettingsResult.data?.runtime_cap_mode, "prod_normal"),
+    unfollow_after_days: unfollowSettingsResult.data?.unfollow_after_days ?? null,
+    runtime_cap_mode: readString(unfollowSettingsResult.data?.runtime_cap_mode, ""),
     runtime_safety_cap: unfollowSettingsResult.data?.runtime_safety_cap ?? null,
-    follow_source_settings_status: sourceSettingsResult.error ? "backend_pending" : sourceSettingsResult.data ? "connected" : "default",
+    follow_source_settings_status: sourceSettingsResult.error ? "backend_pending" : sourceSettingsResult.data ? "connected" : "configuration_incomplete",
     max_follows_per_target_per_run: sourceSettingsResult.data?.max_follows_per_target_per_run ?? null,
     max_targets_per_run: sourceSettingsResult.data?.max_targets_per_run ?? null,
   };
@@ -198,6 +200,7 @@ export async function getProfileDetailsData(accountId: string) {
       status: packageResult.error ? "backend_pending" : packageResult.data ? "connected" : "not_available",
       error: packageResult.error?.message ?? null,
     },
+    packageRuntimeContract,
     filters: {
       data: filtersResult.data
         ? {

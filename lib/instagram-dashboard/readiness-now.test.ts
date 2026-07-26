@@ -78,6 +78,9 @@ function makeSupabase(rows = baseRows(), slotAvailable = false) {
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
+        if (name === "account_package_runtime_contract_status") {
+          return Promise.resolve({ data: { ok: true, reason: "ready" }, error: null });
+        }
         if (name === "list_available_assignment_slots") {
           return Promise.resolve({
             data: {
@@ -145,7 +148,7 @@ test("readiness now dry-run returns ready_to_connect when active credentials awa
   assert.equal(result.reason, "credentials_saved_pending_verification");
   assert.equal(result.preflight_request_created, false);
   assert.equal(result.checks?.credentials_pending_verification, true);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["account_package_runtime_contract_status"]);
 });
 
 test("readiness now dry-run is not blocked by missing CT targets during login verification", async () => {
@@ -185,8 +188,8 @@ test("readiness now creates login preflight when credentials await verification 
   assert.equal(result.readiness_status, "checking_connection");
   assert.equal(result.client_status, "checking_connection");
   assert.equal(result.preflight_request_created, true);
-  assert.equal(supabase.rpcCalls.length, 1);
-  assert.equal(supabase.rpcCalls[0].args.p_requested_run_type, "login_provisioning");
+  assert.equal(supabase.rpcCalls.length, 2);
+  assert.equal(supabase.rpcCalls[1].args.p_requested_run_type, "login_provisioning");
 });
 
 test("readiness now returns action required for 2FA", async () => {
@@ -234,7 +237,7 @@ test("readiness now returns retry_later when assigned phone or app is busy", asy
   assert.equal(result.reason, "skipped_phone_busy");
   assert.equal(result.client_status, "try_again_later");
   assert.equal(result.preflight_request_created, false);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["account_package_runtime_contract_status"]);
 });
 
 test("readiness now creates login preflight request when assignment is free", async () => {
@@ -250,10 +253,10 @@ test("readiness now creates login preflight request when assignment is free", as
   assert.equal(result.client_status, "checking_connection");
   assert.equal(result.preflight_request_created, true);
   assert.equal(result.request_id, "request-safe-1");
-  assert.equal(supabase.rpcCalls.length, 1);
-  assert.equal(supabase.rpcCalls[0].name, "create_account_run_request");
-  assert.equal(supabase.rpcCalls[0].args.p_requested_run_type, "login_provisioning");
-  assert.equal(supabase.rpcCalls[0].args.p_idempotency_key, "login-preflight-now:assignment-1");
+  assert.equal(supabase.rpcCalls.length, 2);
+  assert.equal(supabase.rpcCalls[1].name, "create_account_run_request");
+  assert.equal(supabase.rpcCalls[1].args.p_requested_run_type, "login_provisioning");
+  assert.equal(supabase.rpcCalls[1].args.p_idempotency_key, "login-preflight-now:assignment-1");
 });
 
 test("readiness now does not mint a second idempotency key when first enqueue returns terminal status", async () => {
@@ -293,7 +296,7 @@ test("readiness now duplicate click is idempotent and does not create another re
   assert.equal(result.idempotent, true);
   assert.equal(result.preflight_request_created, false);
   assert.equal(result.request_id, "existing-request");
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["account_package_runtime_contract_status"]);
 });
 
 test("readiness now client response does not expose technical identifiers", async () => {
@@ -341,6 +344,6 @@ test("readiness now does not create DM jobs", async () => {
 
   await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
 
-  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["create_account_run_request"]);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["account_package_runtime_contract_status", "create_account_run_request"]);
   assert.equal(supabase.rpcCalls.some((call) => /dm/i.test(call.name)), false);
 });

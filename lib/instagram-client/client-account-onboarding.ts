@@ -9,6 +9,7 @@ import {
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import { loadTargetEligibilityCountsForAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
+import { reconcilePackageRuntimeContract } from "@/lib/instagram-dashboard/package-runtime-contract";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
 import { createClientInstagramAccount, projectClientPublicProfileLookup } from "./create-account";
 import {
@@ -217,6 +218,11 @@ async function finalizeCompletedOnboardingAssignment(
       assignmentReason,
       loginStatus: "unknown",
     };
+  }
+
+  const contract = await reconcilePackageRuntimeContract(supabase, accountId, "client_onboarding_finalize");
+  if (!contract.ok) {
+    throw Object.assign(new Error(contract.reason), { status: 409 });
   }
 
   const { error } = await supabase

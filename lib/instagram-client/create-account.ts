@@ -19,6 +19,7 @@ import {
 import { applyAddProfileRuntimeDefaults } from "@/lib/instagram-dashboard/add-profile-runtime-defaults";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
+import { reconcilePackageRuntimeContract } from "@/lib/instagram-dashboard/package-runtime-contract";
 import {
   parseLoginEmailInput,
   persistAccountLoginEmail,
@@ -392,16 +393,25 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
     accountId,
   });
 
-  await applyAddProfileRuntimeDefaults(supabase, {
+  const runtimeDefaults = await applyAddProfileRuntimeDefaults(supabase, {
     accountId,
     username: accountUsername,
     appPackageName: "com.instagram.android",
     preset: packagePreset,
   });
+  if (!runtimeDefaults.ok) {
+    return { ok: false, status: 500, error: "Package settings could not be applied.", code: "package_settings_incomplete" };
+  }
 
   const assignment = targetingSetup
     ? { assigned: false, reason: "targeting_setup_incomplete" }
     : await tryAutoAssignOnboardingSchedule(accountId);
+  if (assignment.assigned) {
+    const contract = await reconcilePackageRuntimeContract(supabase, accountId, "client_account_create");
+    if (!contract.ok) {
+      return { ok: false, status: 409, error: "Package runtime contract is incomplete.", code: contract.reason };
+    }
+  }
   const assignmentStatus = targetingSetup
     ? "onboarding_targeting_pending"
     : assignment.assigned ? "assigned" : "pending_assignment";

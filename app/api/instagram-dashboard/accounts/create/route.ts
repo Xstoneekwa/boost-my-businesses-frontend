@@ -22,6 +22,7 @@ import {
 } from "@/lib/instagram-dashboard/add-profile-credentials-response";
 import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
 import { tryAssignManualOnlyOnboardingSchedule, tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
+import { reconcilePackageRuntimeContract } from "@/lib/instagram-dashboard/package-runtime-contract";
 import {
   parseLoginEmailInput,
   persistAccountLoginEmail,
@@ -1351,6 +1352,17 @@ export async function POST(request: Request) {
           repairPossible: true,
         }));
       }
+      const contract = await reconcilePackageRuntimeContract(supabase, accountId, "admin_account_create_botapp");
+      if (!contract.ok) {
+        return jsonError(contract.reason, 409, addProfilePartialMeta({
+          accountId,
+          accountCreated: true,
+          credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
+          assignmentFailed: true,
+          reason: contract.reason,
+          repairPossible: true,
+        }));
+      }
       await tryRecordAddProfileAudit(supabase, {
         accountId,
         username: accountUsername,
@@ -1433,6 +1445,18 @@ export async function POST(request: Request) {
         credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
         assignmentFailed: true,
         reason: onboardingSchedule.reason,
+        repairPossible: true,
+      }));
+    }
+
+    const contract = await reconcilePackageRuntimeContract(supabase, accountId, "admin_account_create");
+    if (!contract.ok) {
+      return jsonError(contract.reason, 409, addProfilePartialMeta({
+        accountId,
+        accountCreated: true,
+        credentialsSaved: credentialsAlreadySaved || Boolean(credentials),
+        assignmentFailed: true,
+        reason: contract.reason,
         repairPossible: true,
       }));
     }
