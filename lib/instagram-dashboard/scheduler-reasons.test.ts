@@ -28,6 +28,7 @@ test("every mandated canonical reason code exists with a short operator label", 
     "readiness_blocked",
     "login_not_connected",
     "quota_reached",
+    "all_enabled_phase_work_completed",
     "phone_rest_active",
     "scheduler_disabled_race_rejected",
     "enqueue_failed",
@@ -72,6 +73,12 @@ test("comma-joined reason lists normalize on the primary cause", () => {
   const normalized = normalizeSchedulerReason("resume_plan_missing,max_restarts_day");
   assert.equal(normalized.code, "resume_plan_missing");
   assert.equal(normalized.raw, "resume_plan_missing,max_restarts_day");
+});
+
+test("all enabled phase work completed stays a stable business reason", () => {
+  const normalized = normalizeSchedulerReason("all_enabled_phase_work_completed");
+  assert.equal(normalized.code, "all_enabled_phase_work_completed");
+  assert.equal(normalized.kind, "business");
 });
 
 test("worker plan prefixes map to stable codes and keep their payload in raw", () => {
