@@ -167,7 +167,11 @@ async function loadRestartCounts(supabase: SupabaseLike, sinceIso: string) {
   for (const row of rows) {
     const accountId = readString(row.account_id);
     const businessSessionId = readString(row.business_session_id);
-    if (accountId) byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + 1);
+    // Human-confirmed resumes have no canonical business session and must not
+    // consume the automatic per-account daily budget.
+    if (accountId && businessSessionId) {
+      byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + 1);
+    }
     if (accountId && businessSessionId) {
       const key = `${accountId}:${businessSessionId}`;
       byBusinessSession.set(key, (byBusinessSession.get(key) ?? 0) + 1);
@@ -617,11 +621,12 @@ export async function runAutoRestartTick(
       const restartsInBusinessSession = businessSessionId
         ? restartCounts.byBusinessSession.get(`${candidate.accountId}:${businessSessionId}`) ?? 0
         : 0;
+      const progressContinuation = candidate.reliability.businessProgressMade === true;
       if (!businessSessionId) blockReasons.push("business_session_id_missing");
-      if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
+      if (!progressContinuation && extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_day");
       }
-      if (extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
+      if (!progressContinuation && extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
         blockReasons.push("max_restarts_window");
       }
 
@@ -658,7 +663,7 @@ export async function runAutoRestartTick(
       // idempotency key and report a phantom enqueue of the old request.
       const nextRetryIndex = Math.max(
         candidate.nextRetryIndex,
-        restartsInBusinessSession + 1,
+        progressContinuation ? candidate.nextRetryIndex : restartsInBusinessSession + 1,
       );
       const scheduledCandidate = nextRetryIndex === candidate.nextRetryIndex
         ? candidate
@@ -675,6 +680,7 @@ export async function runAutoRestartTick(
         accountId: candidate.accountId,
         businessSessionId,
         retryIndex: nextRetryIndex,
+        progressSourceRunId: progressContinuation ? candidate.sourceRunId : undefined,
       });
 
       let deviceId: string | null = null;

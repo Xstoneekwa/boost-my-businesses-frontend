@@ -29,6 +29,15 @@ test("auto restart request idempotency is stable per business session and retry"
     }),
     "auto-restart:account-1:run-1:retry:2",
   );
+  assert.equal(
+    autoRestartEnqueueIdempotencyKey({
+      accountId: "account-1",
+      businessSessionId: "run-1",
+      retryIndex: 1,
+      progressSourceRunId: "progress-run-2",
+    }),
+    "auto-restart:account-1:run-1:source:progress-run-2:retry:1",
+  );
 });
 
 test("generic failed text is not an unsafe account marker", () => {

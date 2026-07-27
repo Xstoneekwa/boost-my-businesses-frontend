@@ -136,6 +136,7 @@ export type AutoRestartCandidate = {
     safeCheckpointAvailable: boolean;
     targetRotationSafeAfterScrollFailure: boolean;
     scrollFailureSurfaceAmbiguous: boolean;
+    businessProgressMade?: boolean;
     lastRunId: string;
     lastRunStatus: string;
     sourceLabel: string;
@@ -401,6 +402,7 @@ function reliabilityFromLatestRun(
       safeCheckpointAvailable: false,
       targetRotationSafeAfterScrollFailure: false,
       scrollFailureSurfaceAmbiguous: false,
+      businessProgressMade: false,
       lastRunId: "",
       lastRunStatus: "",
       sourceLabel: "no_recent_run",
@@ -413,6 +415,8 @@ function reliabilityFromLatestRun(
     ?? readRecord(performance?.auto_restart_resume_plan)
     ?? readRecord(performance?.admin_reliability_snapshot);
   const persistedPhases = readRecord(resumePlan?.phases_to_run);
+  const quotaDone = readRecord(resumePlan?.quota_done);
+  const unfollowOutcome = readRecord(resumePlan?.unfollow_outcome);
   const unsafeRaw = resumePlan?.unsafe_markers ?? performance?.unsafe_markers;
   const unsafeMarkers = Array.isArray(unsafeRaw)
     ? unsafeRaw.map((marker) => readString(marker)).filter(Boolean)
@@ -484,6 +488,11 @@ function reliabilityFromLatestRun(
       resumePlan?.scroll_failure_surface_ambiguous
         ?? performance?.scroll_failure_surface_ambiguous,
       false,
+    ),
+    businessProgressMade: Boolean(
+      Object.values(quotaDone ?? {}).some((value) => readNumber(value, 0) > 0)
+      || readNumber(unfollowOutcome?.persisted_count, 0) > 0
+      || readNumber(unfollowOutcome?.verified_count, 0) > 0
     ),
     lastRunId: readString(latestRun.id),
     lastRunStatus: readString(latestRun.status),

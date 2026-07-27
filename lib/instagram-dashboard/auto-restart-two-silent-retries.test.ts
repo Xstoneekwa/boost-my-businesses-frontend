@@ -166,6 +166,7 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
       safeCheckpointAvailable: false,
       targetRotationSafeAfterScrollFailure: false,
       scrollFailureSurfaceAmbiguous: false,
+      businessProgressMade: false,
       lastRunId,
       lastRunStatus: "failed",
       sourceLabel: "test",
@@ -178,6 +179,45 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
     },
   };
 }
+
+test("persisted business progress starts a new bounded continuation generation", async () => {
+  const supabase = new FakeSupabase();
+  supabase.rows("auto_restart_decisions").push(
+    {
+      account_id: "account-1",
+      business_session_id: null,
+      decision: "enqueued",
+      created_at: "2026-07-22T19:00:00.000Z",
+    },
+    ...[1, 2].map((index) => ({
+      account_id: "account-1",
+      business_session_id: "business-session-1",
+      decision: "enqueued",
+      created_at: `2026-07-22T19:0${index}:00.000Z`,
+    })),
+  );
+  const progressed = candidate(0);
+  progressed.sourceRunId = "progress-run-2";
+  progressed.reliability.lastRunId = "progress-run-2";
+  progressed.reliability.businessProgressMade = true;
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [progressed as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.enqueued_count, 1);
+  assert.equal(result.result.blocked_count, 0);
+  assert.equal(
+    supabase.requests[0].p_idempotency_key,
+    "auto-restart:account-1:business-session-1:source:progress-run-2:retry:1",
+  );
+});
 
 test("actual tick creates exactly retry requests 1 and 2, then no third request", async () => {
   const supabase = new FakeSupabase();

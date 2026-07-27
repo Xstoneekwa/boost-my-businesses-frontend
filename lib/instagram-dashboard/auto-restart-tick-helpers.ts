@@ -53,7 +53,11 @@ export function autoRestartEnqueueIdempotencyKey(input: {
   accountId: string;
   businessSessionId: string;
   retryIndex: number;
+  progressSourceRunId?: string;
 }) {
+  if (input.progressSourceRunId) {
+    return `auto-restart:${input.accountId}:${input.businessSessionId}:source:${input.progressSourceRunId}:retry:${input.retryIndex}`;
+  }
   return `auto-restart:${input.accountId}:${input.businessSessionId}:retry:${input.retryIndex}`;
 }
 
