@@ -1,5 +1,51 @@
 import type { AutoRestartCandidate } from "@/app/instagram-dashboard/auto-restart-data";
 
+/** Rebuild a resolved incident from live canonical quotas, never its stale snapshot. */
+export function rebuildResolvedIncidentResumeCandidate(
+  candidate: AutoRestartCandidate,
+): AutoRestartCandidate {
+  const welcome = candidate.quotas.welcome.enabled && candidate.quotas.welcome.remaining > 0;
+  const follow = candidate.quotas.follow.enabled
+    && candidate.quotas.follow.remaining > 0
+    && Number(candidate.eligibleFollowTargetCount || 0) > 0;
+  const unfollow = candidate.quotas.unfollow.enabled && candidate.quotas.unfollow.remaining > 0;
+  const phases = { welcome, follow, unfollow };
+  const remaining = {
+    welcome: welcome ? candidate.quotas.welcome.remaining : 0,
+    follow: follow ? candidate.quotas.follow.remaining : 0,
+    unfollow: unfollow ? candidate.quotas.unfollow.remaining : 0,
+    outreach: candidate.quotas.outreach.enabled ? candidate.quotas.outreach.remaining : 0,
+  };
+  const actionable = Object.values(phases).some(Boolean);
+  const rebuiltFollowStrategy = follow
+    ? candidate.exactViewportResumeAvailable
+      ? candidate.safeRestartStrategy
+      : candidate.nextTargetId
+        ? "next_target"
+        : "rebuilt_safe_target_plan"
+    : candidate.safeRestartStrategy;
+
+  return {
+    ...candidate,
+    accountEligible: actionable,
+    accountEligibilityReason: actionable ? "resolved_incident_live_plan_rebuilt" : "resume_phase_plan_not_actionable",
+    restartNeeded: actionable,
+    restartNeedReason: actionable ? "resolved_incident_live_plan_rebuilt" : "resume_phase_plan_not_actionable",
+    safeRestartStrategy: rebuiltFollowStrategy,
+    safeRestartReason: follow && rebuiltFollowStrategy === "rebuilt_safe_target_plan"
+      ? "resolved_incident_canonical_target_plan_rebuild"
+      : candidate.safeRestartReason,
+    enqueueAllowed: actionable,
+    remainingFollowQuota: remaining.follow,
+    plannedPhasesToRun: phases,
+    plannedQuotaRemaining: remaining,
+    plannedRunType: actionable ? "account_session" : "none",
+    restartEligible: actionable,
+    decisionOutcome: actionable ? "eligible" : "not_needed",
+    blockReason: actionable ? "" : "resume_phase_plan_not_actionable",
+  };
+}
+
 export function buildInstagramRestrictionPreflightMetadata(input: {
   accountId: string;
   assignmentId: string | null;

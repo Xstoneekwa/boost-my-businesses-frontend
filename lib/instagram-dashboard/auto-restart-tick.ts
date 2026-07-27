@@ -36,6 +36,7 @@ export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
 import {
   buildAutoRestartResumePlanMetadata,
   buildInstagramRestrictionPreflightMetadata,
+  rebuildResolvedIncidentResumeCandidate,
   validateCanonicalResumePlan,
 } from "./auto-restart-resume-metadata";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
@@ -1182,10 +1183,8 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_candidate_unavailable");
           continue;
         }
-        resumeMetadata = buildAutoRestartResumePlanMetadata(
-          { ...candidate, enqueueAllowed: true } as AutoRestartCandidate,
-          now,
-        );
+        const rebuiltCandidate = rebuildResolvedIncidentResumeCandidate(candidate);
+        resumeMetadata = buildAutoRestartResumePlanMetadata(rebuiltCandidate, now);
         Object.assign(resumeMetadata.resume_plan, {
           business_date: sastBusinessDay(now),
           resume_reason: "resolved_incident_human_authorized",
