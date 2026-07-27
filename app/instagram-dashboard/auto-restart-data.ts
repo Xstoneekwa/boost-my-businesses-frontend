@@ -60,10 +60,21 @@ export type AutoRestartQuotaPreview = {
 
 export type AutoRestartCandidate = {
   accountId: string;
+  assignmentId?: string | null;
   deviceId: string;
   appInstanceId: string;
   username: string;
   packageLabel: string;
+  packageCode?: string | null;
+  packageCaps?: Record<string, unknown> | null;
+  followSessionOverride?: number | null;
+  maxFollowsPerTargetPerRun?: number | null;
+  maxTargetsPerRun?: number | null;
+  warmupDay?: number | null;
+  warmupStatus?: string | null;
+  scheduledWindowStart?: string | null;
+  scheduledWindowEnd?: string | null;
+  eligibleFollowTargetCount?: number;
   commercialAddonsLabel: string;
   outreachSourceLabel: string;
   runtimeProfilesLabel: string;
@@ -643,6 +654,7 @@ function planCandidate({
   account,
   settings,
   followFilterSettings,
+  followSourceSettings,
   unfollowSettings,
   dmSettings,
   packageSummary,
@@ -663,6 +675,7 @@ function planCandidate({
   account: ManageAccount;
   settings: SupabaseRecord | undefined;
   followFilterSettings: SupabaseRecord | undefined;
+  followSourceSettings: SupabaseRecord | undefined;
   unfollowSettings: SupabaseRecord | undefined;
   dmSettings: SupabaseRecord | undefined;
   packageSummary: SupabaseRecord | undefined;
@@ -859,10 +872,23 @@ function planCandidate({
 
   return {
     accountId: account.accountId,
+    assignmentId: readString(assignment?.id, "") || null,
     deviceId: readString(assignment?.device_id, ""),
     appInstanceId: readString(assignment?.app_instance_id, ""),
     username: account.username,
     packageLabel: packageDefaults.label,
+    packageCode: readString(packageSummary?.commercial_package_code, "") || null,
+    packageCaps: readRecord(packageSummary?.package_caps) || null,
+    followSessionOverride: followSessionCap,
+    maxFollowsPerTargetPerRun: readNumber(followSourceSettings?.max_follows_per_target_per_run, 0) || null,
+    maxTargetsPerRun: readNumber(followSourceSettings?.max_targets_per_run, 0) || null,
+    warmupDay: packageSummary?.warmup_day === null || packageSummary?.warmup_day === undefined
+      ? null
+      : readNumber(packageSummary.warmup_day, 0),
+    warmupStatus: readString(packageSummary?.warmup_status, "") || null,
+    scheduledWindowStart: startsAt || null,
+    scheduledWindowEnd: endsAt || null,
+    eligibleFollowTargetCount,
     commercialAddonsLabel: account.commercialAddonsLabel,
     outreachSourceLabel: account.outreachSourceLabel,
     runtimeProfilesLabel: account.runtimeProfilesLabel,
@@ -955,6 +981,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceHeartbeatsResult,
     packageSummaryResult,
     followFilterSettingsResult,
+    followSourceSettingsResult,
     targetsResult,
     assignmentsResult,
     restWindowsResult,
@@ -977,12 +1004,13 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("auto_restart_decisions").select("id,created_at,account_id,action,reason,actor,mode,request_id,new_request_id,metadata_safe").order("created_at", { ascending: false }).limit(20),
     supabase.from("worker_heartbeats").select("worker_id,status,last_seen_at").order("last_seen_at", { ascending: false }).limit(20),
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
-    supabase.from("account_package_summary").select("account_id,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
+    supabase.from("account_package_summary").select("account_id,commercial_package_code,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
     supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(500),
+    supabase.from("account_follow_source_settings").select("account_id,max_follows_per_target_per_run,max_targets_per_run").in("account_id", accountIds).limit(500),
     supabase.from("ig_targets").select("*").in("account_id", accountIds).in("status", ["valid", "active"]).limit(5000),
     supabase
       .from("account_assignments")
-      .select("account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,app_instance_id,schedule_mode,phone_devices(name,timezone,status)")
+      .select("id,account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,app_instance_id,schedule_mode,phone_devices(name,timezone,status)")
       .in("account_id", accountIds)
       .in("status", ["pending", "reserved", "active"])
       .limit(500),
@@ -1059,6 +1087,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     deviceHeartbeatsResult.error,
     packageSummaryResult.error,
     followFilterSettingsResult.error,
+    followSourceSettingsResult.error,
     targetsResult.error,
     assignmentsResult.error,
     restWindowsResult.error,
@@ -1083,6 +1112,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
+  const followSourceSettingsByAccount = mapByAccount((followSourceSettingsResult.data ?? []) as SupabaseRecord[]);
   const eligibleTargetsByAccount = eligibleFollowTargetCounts((targetsResult.data ?? []) as SupabaseRecord[]);
   const safeTargetsByAccount = safeBoundaryTargetsByAccount((targetsResult.data ?? []) as SupabaseRecord[]);
   const priorTargetByRun = latestTargetSelectionByRun((targetSelectionsResult.data ?? []) as SupabaseRecord[]);
@@ -1129,6 +1159,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         account,
         settings: settingsByAccount.get(account.accountId),
         followFilterSettings: followFilterSettingsByAccount.get(account.accountId),
+        followSourceSettings: followSourceSettingsByAccount.get(account.accountId),
         unfollowSettings: unfollowByAccount.get(account.accountId),
         dmSettings: dmByAccount.get(account.accountId),
         packageSummary: packageSummaryByAccount.get(account.accountId),

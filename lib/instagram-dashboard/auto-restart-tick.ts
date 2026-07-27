@@ -32,14 +32,11 @@ export {
 } from "./auto-restart-tick-helpers";
 
 export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
-import { buildAutoRestartResumePlanMetadata } from "./auto-restart-resume-metadata";
+import { buildAutoRestartResumePlanMetadata, validateCanonicalResumePlan } from "./auto-restart-resume-metadata";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
 import {
-  bindAuthorizationToRequest,
-  claimAuthorizationAtomically,
   loadResumePlanForRun,
   markAuthorizationExpired,
-  setResumePlanState,
   updateIncidentRecoveryState,
   windowContainsNow,
 } from "./incident-resume-authorization";
@@ -402,6 +399,25 @@ async function enqueueAutoRestartRequest(
   });
   if (error) throw new Error(error.message || "auto_restart_enqueue_failed");
   return data;
+}
+
+async function consumeAuthorizationAndCreateRequest(
+  supabase: SupabaseLike,
+  input: {
+    authorizationId: string;
+    workerId: string;
+    deviceId: string | null;
+    metadata: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v2", {
+    p_authorization_id: input.authorizationId,
+    p_worker_id: input.workerId,
+    p_device_id: input.deviceId,
+    p_metadata_safe: input.metadata,
+  });
+  if (error) throw new Error(error.message || "resume_atomic_enqueue_failed");
+  return data as Record<string, unknown> | null;
 }
 
 export type AutoRestartTickSummary = {
@@ -968,13 +984,11 @@ function emptySummary(workerId: string, dryRun: boolean, reason: string | null):
  *     expired with the stable reason `resume_authorization_expired`);
  *   - the canonical run-start gates apply (manual_only excluded, no active
  *     run/request, assignment window active);
- *   - the authorization is claimed ATOMICALLY (armed -> consumed) BEFORE
- *     the request is created: two concurrent ticks can never consume twice
- *     (`resume_authorization_consumed` for the loser);
- *   - exactly one resume request is created through the canonical path
- *     (create_account_run_request RPC + CP0 atomic guard);
- *   - if creation fails after consumption, the authorization STAYS consumed
- *     (anti-loop) and the incident flips to `reintervention_required`.
+ *   - the device lock is acquired before the authorization can be consumed;
+ *   - authorization consumption + request creation + linkage are one DB
+ *     transaction; any failure leaves the authorization armed and retryable;
+ *   - a pre-business phase-plan failure restores one generation of retry
+ *     credit through the generic reconciliation RPC.
  */
 async function processHumanConfirmedResumes(
   supabase: SupabaseLike,
@@ -990,8 +1004,16 @@ async function processHumanConfirmedResumes(
   },
 ) {
   const { summary, now } = input;
+  const resolvedIncidentReconciliation = await supabase.rpc("reconcile_resolved_incident_resume_windows_v1", {});
+  if (resolvedIncidentReconciliation.error) {
+    throw new Error(resolvedIncidentReconciliation.error.message || "resolved_incident_resume_reconciliation_failed");
+  }
+  const restoration = await supabase.rpc("restore_prebusiness_resume_retry_credits_v1", {});
+  if (restoration.error) {
+    throw new Error(restoration.error.message || "resume_retry_credit_reconciliation_failed");
+  }
   const armedResult = await (query(supabase, "incident_resume_authorizations")
-    .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,test") as QueryBuilder)
+    .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,retry_generation,test") as QueryBuilder)
     .eq("status", "armed")
     .limit(20) as unknown as QueryResult;
   if (armedResult.error) {
@@ -1056,6 +1078,33 @@ async function processHumanConfirmedResumes(
         { ...candidate, enqueueAllowed: true } as AutoRestartCandidate,
         now,
       );
+      Object.assign(resumeMetadata.resume_plan, {
+        business_date: sastBusinessDay(now),
+        resume_reason: "resolved_incident_human_authorized",
+        resume_strategy: candidate.safeRestartStrategy,
+        source_incident_id: incidentId,
+        source_request_id: input.requestId,
+        authorization_id: authorizationId,
+        retry_generation: readNumber(authorization.retry_generation, 0),
+        last_checkpoint: {
+          prior_run_id: originalRunId || null,
+          prior_target_id: candidate.priorTargetId,
+          next_target_id: candidate.nextTargetId,
+          exact_viewport_resume_available: candidate.exactViewportResumeAvailable,
+          safe_restart_reason: candidate.safeRestartReason,
+        },
+        last_safe_checkpoint: {
+          prior_run_id: originalRunId || null,
+          prior_target_id: candidate.priorTargetId,
+          next_target_id: candidate.nextTargetId,
+          strategy: candidate.safeRestartStrategy,
+        },
+      });
+      const planReason = validateCanonicalResumePlan(resumeMetadata.resume_plan as Record<string, unknown>);
+      if (planReason) {
+        await blockResume(planReason);
+        continue;
+      }
       const actionablePhases = Object.values(resumeMetadata.resume_plan.phases_to_run)
         .some((enabled) => enabled === true);
       if (!actionablePhases) {
@@ -1087,13 +1136,6 @@ async function processHumanConfirmedResumes(
         deviceId = readString(plan.device_id) || candidate.deviceId || null;
       }
 
-      // Atomic consumption BEFORE request creation: 1 click -> max 1 resume.
-      const claimed = await claimAuthorizationAtomically(supabase, authorizationId, now);
-      if (!claimed) {
-        await blockResume("resume_authorization_consumed");
-        continue;
-      }
-
       if (deviceId) {
         const deviceLock = await acquireDeviceLock(supabase, {
           deviceId,
@@ -1103,55 +1145,38 @@ async function processHumanConfirmedResumes(
           leaseSeconds: input.leaseSeconds,
         });
         if (!deviceLock.ok) {
-          // Consumed but not creatable: stable terminal outcome, no loop.
-          await bindAuthorizationToRequest(supabase, authorizationId, null, deviceLock.reason);
-          await updateIncidentRecoveryState(supabase, incidentId, "reintervention_required", {
-            consume_error: deviceLock.reason,
-          });
+          // The authorization has not been consumed yet; the natural next
+          // tick may retry after this transient lock clears.
           await blockResume(deviceLock.reason);
           continue;
         }
       }
 
       try {
-        if (resumePlanId) {
-          await setResumePlanState(supabase, resumePlanId, "resume_requested");
-        }
-        const requestData = await enqueueAutoRestartRequest(supabase, {
-          accountId,
+        const metadata = {
+          source: AUTO_RESTART_TICK_SOURCE,
+          trigger: "scheduler_tick",
+          trigger_source: "scheduled_auto_restart",
+          requested_by_actor: input.actor,
+          execution_worker_id: input.workerId,
+          worker_id: input.workerId,
+          auto_restart: true,
+          ...resumeMetadata,
+          recovery_mode: "human_confirmed_resume",
+          incident_id: incidentId,
+          authorization_id: authorizationId,
+          original_run_id: originalRunId || null,
+          prior_run_id: originalRunId || null,
+          resume_plan_id: resumePlanId || null,
+          resume_window_key: resumeWindowKey || null,
+        };
+        const atomicResult = await consumeAuthorizationAndCreateRequest(supabase, {
+          authorizationId,
           workerId: input.workerId,
-          idempotencyKey: `resume-auth:${authorizationId}`,
-          runType: "account_session",
-          metadata: {
-            source: AUTO_RESTART_TICK_SOURCE,
-            trigger: "scheduler_tick",
-            trigger_source: "scheduled_auto_restart",
-            requested_by_actor: input.actor,
-            execution_worker_id: input.workerId,
-            worker_id: input.workerId,
-            auto_restart: true,
-            ...resumeMetadata,
-            recovery_mode: "human_confirmed_resume",
-            incident_id: incidentId,
-            original_run_id: originalRunId || null,
-            prior_run_id: originalRunId || null,
-            resume_plan_id: resumePlanId || null,
-            resume_window_key: resumeWindowKey || null,
-          },
+          deviceId,
+          metadata,
         });
-        const newRequestId = readString((requestData as Record<string, unknown>)?.id, "") || null;
-        if (deviceId && newRequestId) {
-          await bindDeviceLockToRequest(supabase, {
-            deviceId,
-            workerId: input.workerId,
-            requestId: newRequestId,
-            leaseSeconds: input.leaseSeconds,
-          });
-        }
-        await bindAuthorizationToRequest(supabase, authorizationId, newRequestId);
-        await updateIncidentRecoveryState(supabase, incidentId, "resume_requested", {
-          resume_request_id: newRequestId,
-        });
+        const newRequestId = readString(atomicResult?.request_id, "") || null;
         summary.enqueued_count += 1;
         summary.enqueued.push({ account_id: accountId, username: "", request_id: newRequestId });
         await writeDecision(supabase, {
@@ -1173,16 +1198,8 @@ async function processHumanConfirmedResumes(
           newRequestId,
         });
       } catch (error) {
-        // Anti-loop by contract: the consumed authorization is never re-armed
-        // automatically. The incident asks for a new human intervention.
-        const reason = error instanceof Error ? error.message : "resume_enqueue_failed";
-        await bindAuthorizationToRequest(supabase, authorizationId, null, reason);
-        if (resumePlanId) {
-          await setResumePlanState(supabase, resumePlanId, "awaiting_human_resume_authorization");
-        }
-        await updateIncidentRecoveryState(supabase, incidentId, "reintervention_required", {
-          consume_error: reason.slice(0, 200),
-        });
+        // The database transaction rolls back authorization consumption and
+        // every linked write. Release the pre-acquired device lease only.
         if (deviceId) {
           await releaseDeviceLock(supabase, deviceId, input.workerId);
         }
