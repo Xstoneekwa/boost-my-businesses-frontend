@@ -6,6 +6,7 @@ import {
   runTotalsCounters,
   TOTAL_INTERACTIONS_DEFINITION,
 } from "@/lib/instagram-dashboard/social-counters";
+import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/profile-counter-business-day";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
@@ -57,8 +58,7 @@ function accountId(row: RecordValue) {
 }
 
 function dayStartIso() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+  return profileCounterBusinessDayStartIso();
 }
 
 function fallbackPackageCaps(packageLabel: string) {
