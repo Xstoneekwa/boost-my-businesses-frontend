@@ -73,9 +73,14 @@ export async function getProfileDetailsData(accountId: string) {
   }
 
   const supabase = createSupabaseClient();
-  const [accountResult, settingsResult, filtersResult, dmSettingsResult, dmTemplatesResult, unfollowSettingsResult, sourceSettingsResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult, packageRuntimeContract] = await Promise.all([
+  const [accountResult, settingsResult, followLimitOverrideResult, filtersResult, dmSettingsResult, dmTemplatesResult, unfollowSettingsResult, sourceSettingsResult, targetsResult, targetJobsResult, runsResult, logsResult, packageResult, activityResult, readinessResult, packageRuntimeContract] = await Promise.all([
     supabase.from("ig_accounts").select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at").eq("id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("*").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
+    supabase
+      .from("ig_account_follow_limit_overrides")
+      .select("classification,follow_day_cap_override,follow_session_cap_override,source,source_surface,updated_at")
+      .eq("account_id", accountId)
+      .maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_dm_settings").select("account_id,welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit,total_dm_per_day_limit").eq("account_id", accountId).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_dm_templates").select("id,template_type,body,active,is_default").eq("account_id", accountId).eq("active", true).limit(20),
@@ -116,7 +121,19 @@ export async function getProfileDetailsData(accountId: string) {
     ?? templates.find((row) => readString(row.template_type, "") === "outreach" && row.is_default === true)
     ?? templates.find((row) => readString(row.template_type, "") === "outreach")
     ?? null;
+  const followOverrideClassification = readString(followLimitOverrideResult.data?.classification, "");
+  const followOverrideStatus = followOverrideClassification === "explicit"
+    ? "explicit"
+    : followOverrideClassification === "legacy_unclassified" ? "legacy_unclassified" : "none_inherits_package";
   const domainSettings: SupabaseRecord = {
+    follow_account_override_status: followOverrideStatus,
+    follow_account_override_source: readString(followLimitOverrideResult.data?.source, ""),
+    manual_follow_day_cap: followOverrideStatus === "explicit"
+      ? followLimitOverrideResult.data?.follow_day_cap_override ?? null
+      : settingsResult.data?.max_actions_per_day ?? null,
+    manual_follow_session_cap: followOverrideStatus === "explicit"
+      ? followLimitOverrideResult.data?.follow_session_cap_override ?? null
+      : settingsResult.data?.follow_limit ?? null,
     dm_settings_status: dmSettingsResult.error ? "backend_pending" : "connected",
     welcome_enabled: dmSettingsResult.data?.welcome_enabled === true,
     welcome_dm_enabled: dmSettingsResult.data?.welcome_enabled === true,
@@ -192,8 +209,8 @@ export async function getProfileDetailsData(accountId: string) {
     },
     settings: {
       data: safeSettingsRecord(settingsResult.data ?? null, accountId, domainSettings),
-      status: settingsResult.error || dmSettingsResult.error || unfollowSettingsResult.error || sourceSettingsResult.error ? "backend_pending" : settingsResult.data ? "connected" : "not_available",
-      error: settingsResult.error?.message ?? dmSettingsResult.error?.message ?? unfollowSettingsResult.error?.message ?? sourceSettingsResult.error?.message ?? null,
+      status: settingsResult.error || followLimitOverrideResult.error || dmSettingsResult.error || unfollowSettingsResult.error || sourceSettingsResult.error ? "backend_pending" : settingsResult.data ? "connected" : "not_available",
+      error: settingsResult.error?.message ?? followLimitOverrideResult.error?.message ?? dmSettingsResult.error?.message ?? unfollowSettingsResult.error?.message ?? sourceSettingsResult.error?.message ?? null,
     },
     packageSummary: {
       data: packageResult.data ? redactRecord(packageResult.data) : { account_id: accountId, status: "not_available" },
@@ -241,7 +258,7 @@ export async function getProfileDetailsData(accountId: string) {
       stats: runsResult.error ? "backend_pending" : "ig_runs+ig_action_logs",
       logs: logsResult.error ? "backend_pending" : "ig_action_logs+activity_log",
       targets: targetsResult.error ? "backend_pending" : "ig_targets",
-      settings: settingsResult.error ? "backend_pending" : "ig_account_settings+domain_settings",
+      settings: settingsResult.error || followLimitOverrideResult.error ? "backend_pending" : "ig_account_settings+ig_account_follow_limit_overrides+domain_settings",
       packageSummary: packageResult.error ? "backend_pending" : "account_package_summary",
       filters: filtersResult.error ? "backend_pending" : "ig_account_follow_settings",
       readiness: "readiness_now_dry_run",

@@ -22,6 +22,15 @@ test("profile details projects domain DM Unfollow and Source settings", () => {
   assert.match(source, /max_follows_per_target_per_run/);
 });
 
+test("profile details projects explicit Follow override provenance for BotApp refresh", () => {
+  assert.match(source, /from\("ig_account_follow_limit_overrides"\)/);
+  assert.match(source, /follow_account_override_status:\s*followOverrideStatus/);
+  assert.match(source, /follow_account_override_source:\s*readString\(followLimitOverrideResult\.data\?\.source/);
+  assert.match(source, /manual_follow_day_cap:[\s\S]*follow_day_cap_override/);
+  assert.match(source, /manual_follow_session_cap:[\s\S]*follow_session_cap_override/);
+  assert.match(source, /followLimitOverrideResult\.error[\s\S]*"backend_pending"/);
+});
+
 test("profile details defaults skip private profiles to true", () => {
   assert.match(source, /skip_private_profiles:\s*true/);
   assert.match(source, /dont_follow_private_accounts:\s*true/);
