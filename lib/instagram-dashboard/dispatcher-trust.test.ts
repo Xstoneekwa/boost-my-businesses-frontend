@@ -12,6 +12,7 @@ import {
 
 type SupabaseState = {
   heartbeat?: Record<string, unknown> | null;
+  heartbeats?: Record<string, unknown>[];
   phoneDevices?: Record<string, unknown>[];
 };
 
@@ -27,7 +28,10 @@ function makeSupabase(state: SupabaseState, options: { trackTables?: string[] } 
         select: () => query,
         eq: () => query,
         in: () => query,
-        limit: () => query,
+        order: () => query,
+        limit: async () => table === "worker_heartbeats"
+          ? { data: state.heartbeats ?? (state.heartbeat ? [state.heartbeat] : []), error: null }
+          : { data: [], error: null },
         maybeSingle: async () => {
           if (table === "worker_heartbeats") {
             return { data: state.heartbeat ?? null, error: null };
@@ -236,6 +240,26 @@ test("authenticated manual path resolves fresh dispatcher from phone_devices hos
   assert.equal(result.ok, true);
   assert.equal(result.workerId, "run-dispatcher:mac-a");
   assert.ok(result.verifiedAt);
+});
+
+test("authenticated manual path resolves a stable host to its configured dispatcher alias", async () => {
+  const heartbeat = freshHeartbeat({
+    worker_id: "run-dispatcher:mac-admin-01",
+    host_machine: "Ekwas-MacBook-Pro-M1-Pro.local",
+  });
+  const supabase = makeSupabase({
+    heartbeat,
+    heartbeats: [heartbeat],
+    phoneDevices: [{
+      id: "phone-1",
+      host_machine: "Ekwas-MacBook-Pro-M1-Pro.local",
+      status: "active",
+      metadata: {},
+    }],
+  });
+  const result = await resolveTrustedDispatcherWorkerForPhoneDevice(supabase as never, "phone-1");
+  assert.equal(result.ok, true);
+  assert.equal(result.workerId, "run-dispatcher:mac-admin-01");
 });
 
 test("dispatcher worker alias is authorized by its fresh heartbeat host", async () => {

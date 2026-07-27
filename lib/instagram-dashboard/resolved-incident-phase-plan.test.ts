@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAutoRestartResumePlanMetadata, validateCanonicalResumePlan } from "./auto-restart-resume-metadata.ts";
+import {
+  buildAutoRestartResumePlanMetadata,
+  buildInstagramRestrictionPreflightMetadata,
+  validateCanonicalResumePlan,
+} from "./auto-restart-resume-metadata.ts";
 
 const candidate = {
   accountId: "00000000-0000-4000-8000-000000000001",
@@ -44,6 +48,8 @@ const candidate = {
   nextTargetId: "00000000-0000-4000-8000-000000000006",
   nextRetryIndex: 1,
   remainingFollowQuota: 10,
+  plannedPhasesToRun: { welcome: false, follow: true, unfollow: false },
+  plannedQuotaRemaining: { welcome: 0, follow: 10, unfollow: 0, outreach: 0 },
   decisionOutcome: "eligible" as const,
   restartEligible: true,
   blockReason: "",
@@ -89,7 +95,36 @@ test("unknown plan and zero-quota enabled phase fail closed", () => {
 test("no executable phase is rejected before authorization consumption", () => {
   const metadata = buildAutoRestartResumePlanMetadata({
     ...candidate,
+    plannedPhasesToRun: { welcome: false, follow: false, unfollow: false },
+    plannedQuotaRemaining: { welcome: 0, follow: 0, unfollow: 0, outreach: 0 },
     reliability: { ...candidate.reliability, phasesToRun: { welcome: false, follow: false, unfollow: false } },
   });
   assert.equal(validateCanonicalResumePlan(metadata.resume_plan), "resume_phase_plan_not_actionable");
+});
+
+test("a restriction preflight is the only valid zero-business-phase plan", () => {
+  const metadata = buildInstagramRestrictionPreflightMetadata({
+    accountId: "00000000-0000-4000-8000-000000000001",
+    assignmentId: "00000000-0000-4000-8000-000000000002",
+    deviceId: "00000000-0000-4000-8000-000000000003",
+    appInstanceId: "00000000-0000-4000-8000-000000000004",
+    incidentId: "00000000-0000-4000-8000-000000000005",
+    authorizationId: "00000000-0000-4000-8000-000000000006",
+    resumePlanId: "00000000-0000-4000-8000-000000000007",
+    originalRunId: "00000000-0000-4000-8000-000000000008",
+    retryGeneration: 0,
+    now: new Date("2026-07-27T14:00:00.000Z"),
+  });
+  assert.equal(validateCanonicalResumePlan(metadata.resume_plan), null);
+  assert.deepEqual(metadata.resume_plan.phases_to_run, {
+    welcome: false,
+    follow: false,
+    unfollow: false,
+  });
+  assert.equal(metadata.resume_plan.quota_remaining.total, 0);
+  assert.equal(metadata.restriction_preflight_only, true);
+
+  const unsafe = structuredClone(metadata.resume_plan);
+  unsafe.phases_to_run.unfollow = true;
+  assert.equal(validateCanonicalResumePlan(unsafe), "restriction_preflight_contract_invalid");
 });

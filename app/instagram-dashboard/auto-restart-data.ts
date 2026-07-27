@@ -12,10 +12,15 @@ import {
   type SafeRestartStrategy,
 } from "@/lib/instagram-dashboard/auto-restart-candidate-policy";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
+import {
+  resolvePlannedAccountSession,
+  type AutoRestartAccountSessionPhases,
+} from "@/lib/instagram-dashboard/auto-restart-phase-plan";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
 
 type SupabaseRecord = Record<string, unknown>;
+type DailyActionCounts = { follow: number; unfollow: number; welcome: number; outreach: number };
 
 export type AutoRestartMode = "production";
 export type AutoRestartStatus = "connected" | "pending" | "unknown";
@@ -100,6 +105,8 @@ export type AutoRestartCandidate = {
   nextTargetId: string | null;
   nextRetryIndex: number;
   remainingFollowQuota: number;
+  plannedPhasesToRun: AutoRestartAccountSessionPhases;
+  plannedQuotaRemaining: { welcome: number; follow: number; unfollow: number; outreach: number };
   decisionOutcome: "eligible" | "not_needed" | "blocked";
   restartEligible: boolean;
   blockReason: string;
@@ -344,15 +351,6 @@ function quota({
     enabled,
     sourceLabel,
   };
-}
-
-function countToday(rows: SupabaseRecord[], predicate: (row: SupabaseRecord) => boolean) {
-  return rows.filter(predicate).length;
-}
-
-function rowDateToday(row: SupabaseRecord, key: string, since: string) {
-  const raw = readString(row[key]);
-  return Boolean(raw && raw >= since);
 }
 
 function readRecord(value: unknown): SupabaseRecord | undefined {
@@ -658,7 +656,7 @@ function planCandidate({
   unfollowSettings,
   dmSettings,
   packageSummary,
-  interactions,
+  dailyActionCounts,
   activeRun,
   activeRequest,
   assignment,
@@ -679,7 +677,7 @@ function planCandidate({
   unfollowSettings: SupabaseRecord | undefined;
   dmSettings: SupabaseRecord | undefined;
   packageSummary: SupabaseRecord | undefined;
-  interactions: SupabaseRecord[];
+  dailyActionCounts: DailyActionCounts;
   activeRun: SupabaseRecord | undefined;
   activeRequest: SupabaseRecord | undefined;
   assignment: SupabaseRecord | undefined;
@@ -709,31 +707,29 @@ function planCandidate({
   const outreachEnabled = readBoolean(dmSettings?.outreach_enabled, packageDefaults.outreachCap > 0);
   const outreachDayCap = readNumber(dmSettings?.outreach_per_day_limit, packageDefaults.outreachCap);
   const outreachSessionCap = readNumber(dmSettings?.outreach_per_session_limit, outreachDayCap);
-  const since = todayStartIso();
-
   const follow = quota({
-    doneToday: countToday(interactions, (row) => rowDateToday(row, "followed_at", since) && readBoolean(row.was_successful, true)),
+    doneToday: dailyActionCounts.follow,
     capDay: followDayCap,
     sessionCap: followSessionCap,
     enabled: followEnabled,
     sourceLabel: "account_package_summary warmup preview + ig_interacted_users.followed_at",
   });
   const unfollow = quota({
-    doneToday: countToday(interactions, (row) => rowDateToday(row, "unfollowed_at", since) && readString(row.unfollow_result) === "success"),
+    doneToday: dailyActionCounts.unfollow,
     capDay: unfollowDayCap,
     sessionCap: unfollowSessionCap,
     enabled: unfollowEnabled,
     sourceLabel: "ig_account_unfollow_settings + ig_interacted_users.unfollowed_at",
   });
   const welcome = quota({
-    doneToday: countToday(interactions, (row) => rowDateToday(row, "updated_at", since) && readBoolean(row.welcome_dm_sent, false)),
+    doneToday: dailyActionCounts.welcome,
     capDay: welcomeDayCap,
     sessionCap: welcomeSessionCap,
     enabled: welcomeEnabled,
     sourceLabel: "ig_account_dm_settings + welcome_dm_sent marker",
   });
   const outreach = quota({
-    doneToday: countToday(interactions, (row) => rowDateToday(row, "updated_at", since) && readBoolean(row.dm_sent, false) && !readBoolean(row.welcome_dm_sent, false)),
+    doneToday: dailyActionCounts.outreach,
     capDay: outreachDayCap,
     sessionCap: outreachSessionCap,
     enabled: outreachEnabled,
@@ -796,11 +792,22 @@ function planCandidate({
   if ((!resolvedPhoneName || resolvedPhoneName === "Unknown phone") && !hasAssignedDevice) {
     blockingReasons.push("assignment_or_device_pending");
   }
-  if (follow.enabled && follow.remaining > 0 && eligibleFollowTargetCount < 1) blockingReasons.push("no_eligible_targets");
+  const plannedAccountSession = resolvePlannedAccountSession({
+    persistedPhases: reliability.phasesToRun,
+    persistedQuotaRemaining: reliability.quotaRemaining,
+    quotas: { follow, unfollow, welcome },
+  });
+  if (
+    plannedAccountSession.phases.follow
+    && plannedAccountSession.remaining.follow > 0
+    && eligibleFollowTargetCount < 1
+  ) blockingReasons.push("no_eligible_targets");
   applySafetyBlocks({ account, rules, blockingReasons, reliability });
 
-  const accountSessionRemaining = follow.remaining + unfollow.remaining + welcome.remaining;
-  const outreachRemaining = outreach.remaining;
+  const accountSessionRemaining = plannedAccountSession.totalRemaining;
+  // A canonical account-session resume plan is authoritative. It must never
+  // silently switch to a fresh Outreach run because unrelated raw quota exists.
+  const outreachRemaining = reliability.phasesToRun ? 0 : outreach.remaining;
   if (accountSessionRemaining < 1 && outreachRemaining < 1) blockingReasons.push("no_quota_remaining");
 
   const accountEligibility = resolveAccountRestartEligibility(blockingReasons);
@@ -821,7 +828,8 @@ function planCandidate({
   });
   const safeRestart = resolveSafeRestartStrategy({
     restartNeeded: restartNeed.needed,
-    followRemaining: follow.remaining,
+    followPhasePlanned: plannedAccountSession.phases.follow,
+    followRemaining: plannedAccountSession.remaining.follow,
     exactViewportResumeAvailable,
     priorTargetId,
     eligibleTargets: eligibleFollowTargets,
@@ -918,7 +926,12 @@ function planCandidate({
     priorTargetId,
     nextTargetId: safeRestart.nextTargetId,
     nextRetryIndex,
-    remainingFollowQuota: follow.remaining,
+    remainingFollowQuota: plannedAccountSession.remaining.follow,
+    plannedPhasesToRun: plannedAccountSession.phases,
+    plannedQuotaRemaining: {
+      ...plannedAccountSession.remaining,
+      outreach: outreachRemaining,
+    },
     decisionOutcome,
     restartEligible,
     blockReason: decisionReason,
@@ -962,7 +975,10 @@ function mapCanonicalDecision(row: SupabaseRecord): AutoRestartDecision {
 
 export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const supabase = createSupabaseClient();
-  const [manageData, radarData] = await Promise.all([getManageData(), getRadarData()]);
+  const [manageData, radarData] = await Promise.all([
+    getManageData({ includeOrphanRecovery: false, requireCanonicalComplete: true }),
+    getRadarData(),
+  ]);
   const accountIds = manageData.activeAccounts.map((account) => account.accountId).filter(Boolean);
   const since = todayStartIso();
 
@@ -971,7 +987,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     settingsResult,
     unfollowResult,
     dmResult,
-    interactionsResult,
+    dailyActionCountsResult,
     runsResult,
     sessionRunsResult,
     requestsResult,
@@ -993,41 +1009,44 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     resumePlansResult,
   ] = await Promise.all([
     supabase.from("auto_restart_settings").select("*").eq("id", "global").limit(1).maybeSingle<SupabaseRecord>(),
-    supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(500),
-    supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap").in("account_id", accountIds).limit(500),
-    supabase.from("ig_account_dm_settings").select("account_id,welcome_enabled,outreach_enabled,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit").in("account_id", accountIds).limit(500),
-    supabase.from("ig_interacted_users").select("account_id,followed_at,unfollowed_at,unfollow_result,was_successful,welcome_dm_sent,dm_sent,updated_at").in("account_id", accountIds).or(`followed_at.gte.${since},unfollowed_at.gte.${since},updated_at.gte.${since}`).limit(5000),
-    supabase.from("ig_runs").select("id,account_id,status,created_at,updated_at").in("account_id", accountIds).in("status", [...ACTIVE_RUN_STATUSES]).limit(500),
-    supabase.from("ig_runs").select("id,account_id,status,finished_at,updated_at,performance_summary").in("account_id", accountIds).order("created_at", { ascending: false }).limit(500),
-    supabase.from("account_run_requests").select("id,account_id,status,requested_run_type,created_at,metadata_safe").in("account_id", accountIds).in("status", [...ACTIVE_REQUEST_STATUSES]).limit(500),
+    supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(5000),
+    supabase.from("ig_account_unfollow_settings").select("account_id,unfollow_enabled,unfollow_per_session_limit,unfollow_per_day_limit,runtime_cap_mode,runtime_safety_cap").in("account_id", accountIds).limit(5000),
+    supabase.from("ig_account_dm_settings").select("account_id,welcome_enabled,outreach_enabled,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit").in("account_id", accountIds).limit(5000),
+    supabase.rpc("auto_restart_daily_action_counts_v1", {
+      p_account_ids: accountIds,
+      p_since: since,
+    }),
+    supabase.from("ig_runs").select("id,account_id,status,created_at,updated_at").in("account_id", accountIds).in("status", [...ACTIVE_RUN_STATUSES]).limit(5000),
+    supabase.rpc("auto_restart_latest_session_runs_v1", { p_account_ids: accountIds }),
+    supabase.from("account_run_requests").select("id,account_id,status,requested_run_type,created_at,metadata_safe").in("account_id", accountIds).in("status", [...ACTIVE_REQUEST_STATUSES]).limit(5000),
     supabase.from("runtime_events").select("id,created_at,event_type,reason,source,job_id,metadata").ilike("event_type", "%restart%").order("created_at", { ascending: false }).limit(10),
     supabase.from("auto_restart_decisions").select("id,created_at,account_id,action,reason,actor,mode,request_id,new_request_id,metadata_safe").order("created_at", { ascending: false }).limit(20),
     supabase.from("worker_heartbeats").select("worker_id,status,last_seen_at").order("last_seen_at", { ascending: false }).limit(20),
     supabase.from("device_heartbeats").select("device_id,status,last_seen_at,current_account_id").order("last_seen_at", { ascending: false }).limit(50),
-    supabase.from("account_package_summary").select("account_id,commercial_package_code,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(500),
-    supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(500),
-    supabase.from("account_follow_source_settings").select("account_id,max_follows_per_target_per_run,max_targets_per_run").in("account_id", accountIds).limit(500),
-    supabase.from("ig_targets").select("*").in("account_id", accountIds).in("status", ["valid", "active"]).limit(5000),
+    supabase.from("account_package_summary").select("account_id,commercial_package_code,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", accountIds).limit(5000),
+    supabase.from("ig_account_follow_settings").select("account_id,dont_follow_private_accounts,min_followers,max_followers,min_posts").in("account_id", accountIds).limit(5000),
+    supabase.from("account_follow_source_settings").select("account_id,max_follows_per_target_per_run,max_targets_per_run").in("account_id", accountIds).limit(5000),
+    supabase.from("ig_targets").select("*").in("account_id", accountIds).in("status", ["valid", "active"]).limit(50000),
     supabase
       .from("account_assignments")
       .select("id,account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,app_instance_id,schedule_mode,phone_devices(name,timezone,status)")
       .in("account_id", accountIds)
       .in("status", ["pending", "reserved", "active"])
-      .limit(500),
+      .limit(5000),
     supabase
       .from("phone_rest_windows")
       .select("id,device_id,weekday,local_start_time,local_end_time,timezone,status,reason")
       .eq("status", "active")
       .limit(1000),
     supabase.from("phone_rest_overrides").select("device_id,status,reason,updated_at").limit(1000),
-    supabase.from("auto_restart_device_locks").select("device_id,lease_expires_at,request_id").limit(500),
+    supabase.from("auto_restart_device_locks").select("device_id,lease_expires_at,request_id").limit(5000),
     accountIds.length > 0
       ? supabase
         .from("account_incidents")
         .select("id,account_id,status,incident_type,reason,failure_reason,resolved_at,archived_at,last_seen_at,metadata")
         .in("account_id", accountIds)
         .in("status", ["open", "acknowledged", "investigating"])
-        .limit(500)
+        .limit(5000)
       : Promise.resolve({ data: [], error: null }),
     accountIds.length > 0
       ? supabase
@@ -1046,15 +1065,27 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .order("tick_completed_at", { ascending: false })
       .limit(1)
       .maybeSingle<SupabaseRecord>(),
-    accountIds.length > 0
-      ? supabase
-        .from("account_session_resume_plans")
-        .select("run_id,account_id,restart_allowed,restart_block_reason,resume_state,attempts_in_window,plan,last_updated_at")
-        .in("account_id", accountIds)
-        .order("last_updated_at", { ascending: false })
-        .limit(500)
-      : Promise.resolve({ data: [], error: null }),
+    supabase.rpc("auto_restart_latest_resume_plans_v1", { p_account_ids: accountIds }),
   ]);
+  const criticalProjectionError = [
+    settingsResult.error,
+    unfollowResult.error,
+    dmResult.error,
+    dailyActionCountsResult.error,
+    runsResult.error,
+    sessionRunsResult.error,
+    requestsResult.error,
+    packageSummaryResult.error,
+    followFilterSettingsResult.error,
+    followSourceSettingsResult.error,
+    targetsResult.error,
+    assignmentsResult.error,
+    openIncidentsResult.error,
+    resumePlansResult.error,
+  ].find(Boolean);
+  if (criticalProjectionError) {
+    throw new Error(`auto_restart_candidate_projection_incomplete:${criticalProjectionError.message}`);
+  }
   const rules = rulesFromSettings(autoRestartSettingsResult.data as SupabaseRecord | null | undefined);
 
   const sessionRunRows = (sessionRunsResult.data ?? []) as SupabaseRecord[];
@@ -1069,7 +1100,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .in("run_id", latestRunIds)
       .eq("action_type", "follow_target_selected")
       .order("created_at", { ascending: false })
-      .limit(500)
+      .limit(5000)
     : { data: [], error: null };
 
   const errors = [
@@ -1077,7 +1108,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     settingsResult.error,
     unfollowResult.error,
     dmResult.error,
-    interactionsResult.error,
+    dailyActionCountsResult.error,
     runsResult.error,
     sessionRunsResult.error,
     requestsResult.error,
@@ -1105,7 +1136,17 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const settingsByAccount = mapByAccount((settingsResult.data ?? []) as SupabaseRecord[]);
   const unfollowByAccount = mapByAccount((unfollowResult.data ?? []) as SupabaseRecord[]);
   const dmByAccount = mapByAccount((dmResult.data ?? []) as SupabaseRecord[]);
-  const interactionsByAccount = groupByAccount((interactionsResult.data ?? []) as SupabaseRecord[]);
+  const dailyActionCountsByAccount = new Map<string, DailyActionCounts>();
+  for (const row of (dailyActionCountsResult.data ?? []) as SupabaseRecord[]) {
+    const accountId = readString(row.account_id);
+    if (!accountId) continue;
+    dailyActionCountsByAccount.set(accountId, {
+      follow: readNumber(row.follow_done, 0),
+      unfollow: readNumber(row.unfollow_done, 0),
+      welcome: readNumber(row.welcome_done, 0),
+      outreach: readNumber(row.outreach_done, 0),
+    });
+  }
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
   const latestSessionRunsByAccount = latestSessionRuns;
   const latestResumePlansByAccount = latestSessionRunByAccount((resumePlansResult.data ?? []) as SupabaseRecord[]);
@@ -1163,7 +1204,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         unfollowSettings: unfollowByAccount.get(account.accountId),
         dmSettings: dmByAccount.get(account.accountId),
         packageSummary: packageSummaryByAccount.get(account.accountId),
-        interactions: interactionsByAccount.get(account.accountId) ?? [],
+        dailyActionCounts: dailyActionCountsByAccount.get(account.accountId)
+          ?? { follow: 0, unfollow: 0, welcome: 0, outreach: 0 },
         activeRun: activeRunsByAccount.get(account.accountId),
         activeRequest: activeRequestsByAccount.get(account.accountId),
         assignment,
@@ -1187,8 +1229,9 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         )?.reason ?? null,
       });
     })
-    .sort((a, b) => Number(b.restartEligible) - Number(a.restartEligible) || b.quotas.follow.remaining + b.quotas.unfollow.remaining - (a.quotas.follow.remaining + a.quotas.unfollow.remaining))
-    .slice(0, 50);
+    .sort((a, b) => Number(b.restartEligible) - Number(a.restartEligible)
+      || Date.parse(a.reliability.nextRestartAt ?? "1970-01-01") - Date.parse(b.reliability.nextRestartAt ?? "1970-01-01")
+      || a.accountId.localeCompare(b.accountId));
 
   const activeRestartCandidates = candidates.filter((candidate) => candidate.restartEligible).length;
   const blockedCandidates = candidates.length - activeRestartCandidates;
@@ -1251,7 +1294,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     ],
     sourceStatus: [
       { label: "Auto Restart settings", status: autoRestartSettingsResult.error ? "pending" : "connected", detail: autoRestartSettingsResult.error ? "auto_restart_settings unavailable; apply migration before real save/load." : `Loaded from ${rules.sourceLabel}.` },
-      { label: "Quota counts", status: interactionsResult.error ? "unknown" : "connected", detail: "Derived from ig_interacted_users daily markers." },
+      { label: "Quota counts", status: dailyActionCountsResult.error ? "unknown" : "connected", detail: "Aggregated in Postgres from ig_interacted_users daily markers." },
       { label: "Run protection", status: runsResult.error || requestsResult.error ? "unknown" : "connected", detail: "Reads ig_runs and account_run_requests without creating requests." },
       { label: "Decisions/audit", status: canonicalDecisionsResult.error && runtimeEventsResult.error ? "unknown" : "connected", detail: "Reads auto_restart_decisions with runtime_events restart fallback." },
     ],

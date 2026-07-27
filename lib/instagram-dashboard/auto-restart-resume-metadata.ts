@@ -1,5 +1,48 @@
 import type { AutoRestartCandidate } from "@/app/instagram-dashboard/auto-restart-data";
 
+export function buildInstagramRestrictionPreflightMetadata(input: {
+  accountId: string;
+  assignmentId: string | null;
+  deviceId: string | null;
+  appInstanceId: string | null;
+  incidentId: string;
+  authorizationId: string;
+  resumePlanId: string;
+  originalRunId: string;
+  retryGeneration: number;
+  now: Date;
+}) {
+  const phases = { welcome: false, follow: false, unfollow: false };
+  const quota = { welcome: 0, follow: 0, unfollow: 0, outreach: 0, total: 0 };
+  return {
+    resume_plan_version: 2,
+    resume_plan_schema: "AUTO_RESTART_RESUME_PLAN_V2",
+    prior_run_id: input.originalRunId,
+    restriction_preflight_only: true,
+    incident_id: input.incidentId,
+    authorization_id: input.authorizationId,
+    resume_plan: {
+      schema: "AUTO_RESTART_RESUME_PLAN_V2",
+      plan_version: 2,
+      resume_kind: "instagram_restriction_preflight",
+      restriction_preflight_only: true,
+      account_id: input.accountId,
+      assignment_id: input.assignmentId,
+      device_id: input.deviceId,
+      app_instance_id: input.appInstanceId,
+      incident_id: input.incidentId,
+      authorization_id: input.authorizationId,
+      resume_plan_id: input.resumePlanId,
+      prior_run_id: input.originalRunId,
+      phase_order: ["welcome", "follow", "unfollow"],
+      phases_to_run: phases,
+      quota_remaining: quota,
+      retry_generation: input.retryGeneration,
+      scheduled_at: input.now.toISOString(),
+    },
+  };
+}
+
 export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandidate, now = new Date()) {
   const reliability = candidate.reliability;
   const retryIndex = candidate.nextRetryIndex;
@@ -46,17 +89,17 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
       scheduled_window_end: candidate.scheduledWindowEnd,
       window_id: candidate.assignmentId,
       phase_order: ["welcome", "follow", "unfollow"],
-      follow_enabled: candidate.quotas.follow.enabled,
-      unfollow_enabled: candidate.quotas.unfollow.enabled,
+      follow_enabled: candidate.plannedPhasesToRun.follow,
+      unfollow_enabled: candidate.plannedPhasesToRun.unfollow,
       outreach_enabled: candidate.quotas.outreach.enabled,
-      follow_target: candidate.quotas.follow.plannedNextRunQuota,
-      follow_remaining: candidate.quotas.follow.remaining,
+      follow_target: candidate.plannedQuotaRemaining.follow,
+      follow_remaining: candidate.plannedQuotaRemaining.follow,
       follow_session_override: candidate.followSessionOverride ?? null,
       max_follows_per_target_per_run: candidate.maxFollowsPerTargetPerRun ?? null,
       max_targets_per_run: candidate.maxTargetsPerRun ?? null,
-      unfollow_target: candidate.quotas.unfollow.plannedNextRunQuota,
-      unfollow_remaining: candidate.quotas.unfollow.remaining,
-      outreach_remaining: candidate.quotas.outreach.remaining,
+      unfollow_target: candidate.plannedQuotaRemaining.unfollow,
+      unfollow_remaining: candidate.plannedQuotaRemaining.unfollow,
+      outreach_remaining: candidate.plannedQuotaRemaining.outreach,
       candidate_counts: {
         follow_targets: candidate.eligibleFollowTargetCount,
         unfollow_candidates: null,
@@ -83,7 +126,7 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
       historical_safe_boundary_fallback: candidate.historicalSafeBoundaryFallback,
       prior_target_id: candidate.priorTargetId,
       next_target_id: candidate.nextTargetId,
-      phases_to_run: inferPhasesToRun(candidate),
+      phases_to_run: candidate.plannedPhasesToRun,
       quota_consumed: {
         follow: candidate.quotas.follow.doneToday,
         unfollow: candidate.quotas.unfollow.doneToday,
@@ -97,10 +140,10 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
         outreach: candidate.quotas.outreach.capDay,
       },
       quota_remaining: {
-        follow: candidate.quotas.follow.remaining,
-        unfollow: candidate.quotas.unfollow.remaining,
-        welcome: candidate.quotas.welcome.remaining,
-        outreach: candidate.quotas.outreach.remaining,
+        follow: candidate.plannedQuotaRemaining.follow,
+        unfollow: candidate.plannedQuotaRemaining.unfollow,
+        welcome: candidate.plannedQuotaRemaining.welcome,
+        outreach: candidate.plannedQuotaRemaining.outreach,
       },
       prior_run_id: candidate.sourceRunId || null,
       resume_plan_version: 2,
@@ -111,6 +154,21 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
 export function validateCanonicalResumePlan(plan: Record<string, unknown>): string | null {
   if (plan.schema !== "AUTO_RESTART_RESUME_PLAN_V2" || plan.plan_version !== 2) return "phase_plan_unknown";
   if (typeof plan.account_id !== "string" || !plan.account_id) return "phase_plan_account_missing";
+  if (plan.restriction_preflight_only === true) {
+    if (plan.resume_kind !== "instagram_restriction_preflight") return "restriction_preflight_contract_invalid";
+    if (typeof plan.incident_id !== "string" || !plan.incident_id) return "restriction_preflight_contract_invalid";
+    if (typeof plan.authorization_id !== "string" || !plan.authorization_id) return "restriction_preflight_contract_invalid";
+    const phases = plan.phases_to_run as Record<string, unknown> | undefined;
+    const quota = plan.quota_remaining as Record<string, unknown> | undefined;
+    if (!phases || !quota) return "restriction_preflight_contract_invalid";
+    if (["welcome", "follow", "unfollow"].some((phase) => phases[phase] !== false)) {
+      return "restriction_preflight_contract_invalid";
+    }
+    if (["welcome", "follow", "unfollow", "outreach", "total"].some((phase) => quota[phase] !== 0)) {
+      return "restriction_preflight_contract_invalid";
+    }
+    return null;
+  }
   if (plan.package_contract_ready !== true) return "phase_plan_package_unknown";
   if (!Array.isArray(plan.phase_order) || plan.phase_order.join(",") !== "welcome,follow,unfollow") {
     return "phase_plan_order_invalid";
@@ -127,19 +185,4 @@ export function validateCanonicalResumePlan(plan: Record<string, unknown>): stri
     }
   }
   return null;
-}
-
-function inferPhasesToRun(candidate: AutoRestartCandidate) {
-  const persisted = candidate.reliability.phasesToRun;
-  return {
-    welcome: persisted
-      ? persisted.welcome && candidate.quotas.welcome.remaining > 0 && candidate.quotas.welcome.enabled
-      : candidate.quotas.welcome.remaining > 0 && candidate.quotas.welcome.enabled,
-    follow: persisted
-      ? persisted.follow && candidate.quotas.follow.remaining > 0 && candidate.quotas.follow.enabled
-      : candidate.quotas.follow.remaining > 0 && candidate.quotas.follow.enabled,
-    unfollow: persisted
-      ? persisted.unfollow && candidate.quotas.unfollow.remaining > 0 && candidate.quotas.unfollow.enabled
-      : candidate.quotas.unfollow.remaining > 0 && candidate.quotas.unfollow.enabled,
-  };
 }

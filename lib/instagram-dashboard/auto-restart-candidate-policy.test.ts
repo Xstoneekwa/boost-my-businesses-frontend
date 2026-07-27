@@ -66,6 +66,7 @@ test("the safe boundary target order mirrors the Worker unused-then-oldest contr
 test("j_automatise resumes at the next unused CT with exactly 23 follows remaining", () => {
   const strategy = resolveSafeRestartStrategy({
     restartNeeded: true,
+    followPhasePlanned: true,
     followRemaining: 23,
     exactViewportResumeAvailable: false,
     priorTargetId: "0b189dbf-b3da-49ec-a3f5-8fa404d94046",
@@ -93,6 +94,7 @@ test("j_automatise resumes at the next unused CT with exactly 23 follows remaini
 test("when only the prior target remains it restarts from its top with social-memory dedup", () => {
   assert.equal(resolveSafeRestartStrategy({
     restartNeeded: true,
+    followPhasePlanned: true,
     followRemaining: 23,
     exactViewportResumeAvailable: false,
     priorTargetId: "target-1",
@@ -104,6 +106,7 @@ test("when only the prior target remains it restarts from its top with social-me
 test("without a historical CT it rebuilds a deterministic safe target plan", () => {
   assert.deepEqual(resolveSafeRestartStrategy({
     restartNeeded: true,
+    followPhasePlanned: true,
     followRemaining: 23,
     exactViewportResumeAvailable: false,
     priorTargetId: null,
@@ -124,6 +127,7 @@ test("an exact checkpoint is used only when explicit evidence exists", () => {
   }), false);
   assert.equal(resolveSafeRestartStrategy({
     restartNeeded: true,
+    followPhasePlanned: true,
     followRemaining: 23,
     exactViewportResumeAvailable: true,
     priorTargetId: "target-1",
@@ -135,6 +139,7 @@ test("an exact checkpoint is used only when explicit evidence exists", () => {
 test("no exact checkpoint and no eligible target fails closed", () => {
   assert.deepEqual(resolveSafeRestartStrategy({
     restartNeeded: true,
+    followPhasePlanned: true,
     followRemaining: 23,
     exactViewportResumeAvailable: false,
     priorTargetId: "target-1",
@@ -144,5 +149,35 @@ test("no exact checkpoint and no eligible target fails closed", () => {
     strategy: "none",
     reason: "no_safe_target_plan_available",
     nextTargetId: null,
+  });
+});
+
+test("an explicit Unfollow-only plan never requires a CT even when raw Follow quota remains", () => {
+  assert.deepEqual(resolveSafeRestartStrategy({
+    restartNeeded: true,
+    followPhasePlanned: false,
+    followRemaining: 30,
+    exactViewportResumeAvailable: false,
+    priorTargetId: "stale-follow-target",
+    eligibleTargets: [],
+    workerPlanExplicitlySafe: true,
+  }), {
+    strategy: "exact_checkpoint_resume",
+    reason: "non_follow_phase_resume_plan",
+    nextTargetId: null,
+  });
+});
+
+test("explicit restart_allowed wins over a missing legacy block reason", () => {
+  assert.deepEqual(resolveRestartNeed({
+    lastRunId: "terminal-partial-run",
+    sessionTerminationClass: "partial_resumable",
+    restartAllowed: true,
+    restartBlockReason: "resume_plan_missing",
+    totalRemainingQuota: 3,
+  }), {
+    needed: true,
+    reason: "partial_run_resume_needed",
+    historicalSafeBoundaryFallback: false,
   });
 });

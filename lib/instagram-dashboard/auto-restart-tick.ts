@@ -32,7 +32,11 @@ export {
 } from "./auto-restart-tick-helpers";
 
 export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
-import { buildAutoRestartResumePlanMetadata, validateCanonicalResumePlan } from "./auto-restart-resume-metadata";
+import {
+  buildAutoRestartResumePlanMetadata,
+  buildInstagramRestrictionPreflightMetadata,
+  validateCanonicalResumePlan,
+} from "./auto-restart-resume-metadata";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
 import {
   loadResumePlanForRun,
@@ -64,6 +68,7 @@ type QueryBuilder = {
   eq: (...args: unknown[]) => QueryBuilder;
   in: (...args: unknown[]) => QueryBuilder;
   gte: (...args: unknown[]) => QueryBuilder;
+  order: (...args: unknown[]) => QueryBuilder;
   insert: (...args: unknown[]) => Promise<QueryResult>;
   upsert: (...args: unknown[]) => Promise<QueryResult>;
   update: (...args: unknown[]) => QueryBuilder;
@@ -146,30 +151,27 @@ async function loadSettingsRow(supabase: SupabaseLike) {
   return (result.data ?? null) as SupabaseRecord | null;
 }
 
-async function countRestartsToday(supabase: SupabaseLike, accountId: string, sinceIso: string) {
+async function loadRestartCounts(supabase: SupabaseLike, sinceIso: string) {
   const result = await query(supabase, "auto_restart_decisions")
-    .select("id")
-    .eq("account_id", accountId)
+    .select("account_id,business_session_id")
     .eq("decision", "enqueued")
     .gte("created_at", sinceIso)
-    .limit(100);
+    .limit(10000);
   if (result.error) throw new Error(result.error.message || "auto_restart_decisions_unavailable");
-  return readRows(result.data).length;
-}
-
-async function countRestartsForBusinessSession(
-  supabase: SupabaseLike,
-  accountId: string,
-  businessSessionId: string,
-) {
-  const result = await query(supabase, "auto_restart_decisions")
-    .select("id")
-    .eq("account_id", accountId)
-    .eq("business_session_id", businessSessionId)
-    .eq("decision", "enqueued")
-    .limit(10);
-  if (result.error) throw new Error(result.error.message || "auto_restart_decisions_unavailable");
-  return readRows(result.data).length;
+  const rows = readRows(result.data);
+  if (rows.length >= 10000) throw new Error("auto_restart_count_projection_truncated");
+  const byAccount = new Map<string, number>();
+  const byBusinessSession = new Map<string, number>();
+  for (const row of rows) {
+    const accountId = readString(row.account_id);
+    const businessSessionId = readString(row.business_session_id);
+    if (accountId) byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + 1);
+    if (accountId && businessSessionId) {
+      const key = `${accountId}:${businessSessionId}`;
+      byBusinessSession.set(key, (byBusinessSession.get(key) ?? 0) + 1);
+    }
+  }
+  return { byAccount, byBusinessSession };
 }
 
 async function acquireTickLock(
@@ -201,14 +203,14 @@ async function completeTickLock(
   idempotencyKey: string,
   status: "completed" | "failed",
   failure?: { reason: string },
+  completion?: Record<string, unknown>,
 ) {
   const update: Record<string, unknown> = {
     status,
     tick_completed_at: new Date().toISOString(),
   };
-  if (status === "failed" && failure) {
-    // Preserve the acquisition metadata and add the redacted failure reason so
-    // the scheduler-status read-model can expose a real last_error.
+  if ((status === "failed" && failure) || completion) {
+    // Preserve acquisition metadata and append bounded completion evidence.
     const existing = await query(supabase, "auto_restart_tick_locks")
       .select("metadata_safe")
       .eq("idempotency_key", idempotencyKey)
@@ -218,7 +220,8 @@ async function completeTickLock(
       : {};
     update.metadata_safe = {
       ...(currentMetadata && typeof currentMetadata === "object" && !Array.isArray(currentMetadata) ? currentMetadata : {}),
-      failure_reason: failure.reason,
+      ...(failure ? { failure_reason: failure.reason } : {}),
+      ...(completion ?? {}),
     };
   }
   await query(supabase, "auto_restart_tick_locks")
@@ -410,7 +413,7 @@ async function consumeAuthorizationAndCreateRequest(
     metadata: Record<string, unknown>;
   },
 ) {
-  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v2", {
+  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v3", {
     p_authorization_id: input.authorizationId,
     p_worker_id: input.workerId,
     p_device_id: input.deviceId,
@@ -452,6 +455,7 @@ export async function runAutoRestartTick(
     evaluateEligibility?: (
       accountId: string,
       runType: "account_session" | "outreach_session",
+      phasesToRun?: { welcome: boolean; follow: boolean; unfollow: boolean },
     ) => Promise<{ ok: boolean; reason: string }>;
   },
 ): Promise<{ status: 200 | 401 | 403 | 503; result: AutoRestartTickSummary }> {
@@ -546,6 +550,7 @@ export async function runAutoRestartTick(
     summary.scanned_candidates = overview.candidates.length;
 
     const since = todayStartIso(now);
+    const restartCounts = await loadRestartCounts(supabase, since);
     for (const candidate of overview.candidates) {
       if (!candidate.restartEligible) {
         const decision = candidate.decisionOutcome === "not_needed" ? "not_needed" : "blocked";
@@ -605,10 +610,10 @@ export async function runAutoRestartTick(
         blockReasons.push("business_day_sast_changed");
       }
 
-      const restartsToday = await countRestartsToday(supabase, candidate.accountId, since);
+      const restartsToday = restartCounts.byAccount.get(candidate.accountId) ?? 0;
       const businessSessionId = candidate.sourceBusinessSessionId;
       const restartsInBusinessSession = businessSessionId
-        ? await countRestartsForBusinessSession(supabase, candidate.accountId, businessSessionId)
+        ? restartCounts.byBusinessSession.get(`${candidate.accountId}:${businessSessionId}`) ?? 0
         : 0;
       if (!businessSessionId) blockReasons.push("business_session_id_missing");
       if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
@@ -657,11 +662,12 @@ export async function runAutoRestartTick(
           ? "outreach_session"
           : "account_session";
         const eligibility = options.evaluateEligibility
-          ? await options.evaluateEligibility(candidate.accountId, runType)
+          ? await options.evaluateEligibility(candidate.accountId, runType, candidate.plannedPhasesToRun)
           : await (async () => {
             const { evaluateRunStartEligibility } = await import("./run-control.ts");
             return evaluateRunStartEligibility(candidate.accountId, runType, {
               trigger: "scheduler",
+              phasesToRun: runType === "account_session" ? candidate.plannedPhasesToRun : undefined,
             });
           })();
         if (!eligibility.ok) {
@@ -951,7 +957,14 @@ export async function runAutoRestartTick(
   }
 
   if (lockHeld) {
-    await completeTickLock(supabase, tickId, "completed");
+    await completeTickLock(supabase, tickId, "completed", undefined, {
+      scanned_candidates: summary.scanned_candidates,
+      eligible_candidates: summary.eligible_candidates,
+      enqueued_count: summary.enqueued_count,
+      blocked_count: summary.blocked_count,
+      not_needed_count: summary.not_needed_count,
+      deduplicated_count: summary.deduplicated_count,
+    });
   }
 
   return { status: 200, result: summary };
@@ -1015,7 +1028,8 @@ async function processHumanConfirmedResumes(
   const armedResult = await (query(supabase, "incident_resume_authorizations")
     .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,retry_generation,test") as QueryBuilder)
     .eq("status", "armed")
-    .limit(20) as unknown as QueryResult;
+    .order("armed_at", { ascending: true })
+    .limit(100) as unknown as QueryResult;
   if (armedResult.error) {
     throw new Error(armedResult.error.message || "resume_authorizations_unavailable");
   }
@@ -1064,42 +1078,84 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      // A human authorization removes the human-review blocker; it does not
-      // invent an execution plan. Rebuild the canonical current candidate so
-      // the request carries explicit phases and quotas. If the account is no
-      // longer present in the overview, leave the authorization armed for a
-      // later tick instead of consuming it into a phase_plan_unknown run.
-      const candidate = input.candidates.find((row) => row.accountId === accountId);
-      if (!candidate) {
-        await blockResume("resume_candidate_unavailable");
+      const incidentResult = await query(supabase, "account_incidents")
+        .select("id,account_id,incident_type,status")
+        .eq("id", incidentId)
+        .eq("account_id", accountId)
+        .maybeSingle();
+      const incident = incidentResult.data as SupabaseRecord | null | undefined;
+      if (incidentResult.error || !incident || readString(incident.status) !== "resolved") {
+        await blockResume("resume_incident_not_resolved");
         continue;
       }
-      const resumeMetadata = buildAutoRestartResumePlanMetadata(
-        { ...candidate, enqueueAllowed: true } as AutoRestartCandidate,
-        now,
-      );
-      Object.assign(resumeMetadata.resume_plan, {
-        business_date: sastBusinessDay(now),
-        resume_reason: "resolved_incident_human_authorized",
-        resume_strategy: candidate.safeRestartStrategy,
-        source_incident_id: incidentId,
-        source_request_id: input.requestId,
-        authorization_id: authorizationId,
-        retry_generation: readNumber(authorization.retry_generation, 0),
-        last_checkpoint: {
-          prior_run_id: originalRunId || null,
-          prior_target_id: candidate.priorTargetId,
-          next_target_id: candidate.nextTargetId,
-          exact_viewport_resume_available: candidate.exactViewportResumeAvailable,
-          safe_restart_reason: candidate.safeRestartReason,
-        },
-        last_safe_checkpoint: {
-          prior_run_id: originalRunId || null,
-          prior_target_id: candidate.priorTargetId,
-          next_target_id: candidate.nextTargetId,
-          strategy: candidate.safeRestartStrategy,
-        },
-      });
+      const restrictionPreflight = readString(incident.incident_type) === "instagram_account_restriction";
+      const candidate = input.candidates.find((row) => row.accountId === accountId);
+      const storedPlan = originalRunId ? await loadResumePlanForRun(supabase, originalRunId) : null;
+      if (!storedPlan || readString(storedPlan.resume_state) !== "awaiting_human_resume_authorization") {
+        await blockResume("resume_plan_not_recoverable");
+        continue;
+      }
+
+      let deviceId = readString(storedPlan.device_id) || candidate?.deviceId || null;
+      let resumeMetadata: ReturnType<typeof buildAutoRestartResumePlanMetadata>
+        | ReturnType<typeof buildInstagramRestrictionPreflightMetadata>;
+      if (restrictionPreflight) {
+        const holdResult = await query(supabase, "instagram_account_restriction_holds")
+          .select("id,status,incident_id")
+          .eq("account_id", accountId)
+          .eq("incident_id", incidentId)
+          .eq("status", "verification_required")
+          .maybeSingle();
+        if (holdResult.error || !holdResult.data) {
+          await blockResume("restriction_preflight_not_authorized");
+          continue;
+        }
+        resumeMetadata = buildInstagramRestrictionPreflightMetadata({
+          accountId,
+          assignmentId: readString(storedPlan.assignment_id) || null,
+          deviceId,
+          appInstanceId: readString(storedPlan.app_instance_id) || null,
+          incidentId,
+          authorizationId,
+          resumePlanId,
+          originalRunId,
+          retryGeneration: readNumber(authorization.retry_generation, 0),
+          now,
+        });
+      } else {
+        // Normal recovery remains candidate-backed: a resolved incident never
+        // invents business phases or quota.
+        if (!candidate) {
+          await blockResume("resume_candidate_unavailable");
+          continue;
+        }
+        resumeMetadata = buildAutoRestartResumePlanMetadata(
+          { ...candidate, enqueueAllowed: true } as AutoRestartCandidate,
+          now,
+        );
+        Object.assign(resumeMetadata.resume_plan, {
+          business_date: sastBusinessDay(now),
+          resume_reason: "resolved_incident_human_authorized",
+          resume_strategy: candidate.safeRestartStrategy,
+          source_incident_id: incidentId,
+          source_request_id: input.requestId,
+          authorization_id: authorizationId,
+          retry_generation: readNumber(authorization.retry_generation, 0),
+          last_checkpoint: {
+            prior_run_id: originalRunId || null,
+            prior_target_id: candidate.priorTargetId,
+            next_target_id: candidate.nextTargetId,
+            exact_viewport_resume_available: candidate.exactViewportResumeAvailable,
+            safe_restart_reason: candidate.safeRestartReason,
+          },
+          last_safe_checkpoint: {
+            prior_run_id: originalRunId || null,
+            prior_target_id: candidate.priorTargetId,
+            next_target_id: candidate.nextTargetId,
+            strategy: candidate.safeRestartStrategy,
+          },
+        });
+      }
       const planReason = validateCanonicalResumePlan(resumeMetadata.resume_plan as Record<string, unknown>);
       if (planReason) {
         await blockResume(planReason);
@@ -1107,7 +1163,7 @@ async function processHumanConfirmedResumes(
       }
       const actionablePhases = Object.values(resumeMetadata.resume_plan.phases_to_run)
         .some((enabled) => enabled === true);
-      if (!actionablePhases) {
+      if (!restrictionPreflight && !actionablePhases) {
         await blockResume("resume_phase_plan_not_actionable");
         continue;
       }
@@ -1117,23 +1173,16 @@ async function processHumanConfirmedResumes(
       const { evaluateRunStartEligibility } = await import("./run-control.ts");
       const eligibility = await evaluateRunStartEligibility(accountId, "account_session", {
         trigger: "scheduler",
+        phasesToRun: resumeMetadata.resume_plan.phases_to_run,
+        restrictionPreflight: restrictionPreflight
+          ? { incidentId, authorizationId }
+          : undefined,
       });
       if (!eligibility.ok) {
         // The authorization stays armed: a later tick in the same window may
         // still consume it once the transient gate clears.
         await blockResume(eligibility.reason);
         continue;
-      }
-
-      // Package/assignment coherence + device for the session lock.
-      let deviceId: string | null = null;
-      if (originalRunId) {
-        const plan = await loadResumePlanForRun(supabase, originalRunId);
-        if (!plan || readString(plan.resume_state) !== "awaiting_human_resume_authorization") {
-          await blockResume("resume_plan_not_recoverable");
-          continue;
-        }
-        deviceId = readString(plan.device_id) || candidate.deviceId || null;
       }
 
       if (deviceId) {
@@ -1163,6 +1212,7 @@ async function processHumanConfirmedResumes(
           auto_restart: true,
           ...resumeMetadata,
           recovery_mode: "human_confirmed_resume",
+          restriction_preflight_only: restrictionPreflight,
           incident_id: incidentId,
           authorization_id: authorizationId,
           original_run_id: originalRunId || null,
@@ -1187,7 +1237,7 @@ async function processHumanConfirmedResumes(
           deviceId,
           action: "human_confirmed_resume_enqueued",
           decision: "enqueued",
-          reason: "human_confirmed_resume",
+          reason: restrictionPreflight ? "instagram_restriction_preflight" : "human_confirmed_resume",
           mode: input.mode,
           metadata: {
             incident_id: incidentId,

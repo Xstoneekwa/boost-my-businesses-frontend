@@ -1200,6 +1200,25 @@ test("mini-run preflight blocks when Follow caps are not proven to be one", () =
   );
 });
 
+test("an explicit Unfollow-only resume does not require unrelated Follow mini-run caps", () => {
+  assert.equal(
+    evaluateMiniRunCapsPreflight({
+      requestedRunType: "account_session",
+      followEnabled: false,
+      welcomeEnabled: false,
+      welcomeRealSendEnabled: false,
+      outreachRealSendEnabled: false,
+      outreachEnabled: false,
+      env: {
+        INSTAGRAM_RUN_CONTROL_MINI_RUN_CAPS_REQUIRED: "true",
+        FOLLOW_MAX_PER_RUN: "0",
+        FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN: "0",
+      },
+    }),
+    null,
+  );
+});
+
 test("mini-run preflight blocks when Outreach isolation is not proven", () => {
   assert.equal(
     evaluateMiniRunCapsPreflight({

@@ -544,29 +544,29 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .select("account_id,status,reauth_required,secret_ref,created_at,metadata_safe")
         .in("account_id", accountIds)
         .order("created_at", { ascending: false })
-        .limit(1000),
+        .limit(5000),
       supabase
         .from("account_assignments")
         .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,released_at,schedule_mode,slot_kind")
         .in("account_id", accountIds)
         .in("status", ["pending", "reserved", "active"])
         .order("starts_at", { ascending: false })
-        .limit(1000),
+        .limit(5000),
       supabase
         .from("client_instagram_accounts")
         .select("account_id,login_status,provisioning_status,onboarding_status")
         .in("account_id", accountIds)
-        .limit(1000),
+        .limit(5000),
       supabase
         .from("ig_account_settings")
         .select("account_id,email")
         .in("account_id", accountIds)
-        .limit(1000),
+        .limit(5000),
       supabase
         .from("phone_app_instances")
         .select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id")
         .in("current_account_id", accountIds)
-        .limit(1000),
+        .limit(5000),
     ]);
 
     if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error || settingsResult.error || appInstancesByAccountResult.error) {
@@ -746,17 +746,17 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         .select("account_id,action_type,status,blocking_campaign")
         .in("account_id", accountIds)
         .in("status", ["pending", "acknowledged", "pending_verification"])
-        .limit(1000),
+        .limit(5000),
       supabase
         .from("ig_account_dm_settings")
         .select("account_id,welcome_enabled,outreach_enabled")
         .in("account_id", accountIds)
-        .limit(1000),
+        .limit(5000),
       supabase
         .from("ig_account_unfollow_settings")
         .select("account_id,unfollow_enabled,unfollow_mode")
         .in("account_id", accountIds)
-        .limit(1000),
+        .limit(5000),
     ]);
 
     const errors = [...overview.errors];
@@ -1189,34 +1189,42 @@ export async function getManageDataFromAdminDashboardApi(): Promise<ManageOvervi
   const timeout = setTimeout(() => controller.abort(), adminDashboardTimeoutMs);
 
   try {
-    const response = await fetch(config.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "manage_overview",
-        limit: 200,
-        offset: 0,
-        search: null,
-        status: null,
-      }),
-      cache: "no-store",
-      signal: controller.signal,
-    });
+    const pageSize = 200;
+    const maxPages = 25;
+    const items: SupabaseRecord[] = [];
+    for (let page = 0; page < maxPages; page += 1) {
+      const response = await fetch(config.url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "manage_overview",
+          limit: pageSize,
+          offset: page * pageSize,
+          search: null,
+          status: null,
+        }),
+        cache: "no-store",
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      throw new ManageApiError(`Backend API returned ${response.status}`);
+      if (!response.ok) {
+        throw new ManageApiError(`Backend API returned ${response.status}`);
+      }
+
+      const payload = (await response.json()) as AdminDashboardManageResponse;
+      if (payload.ok !== true || payload.action !== "manage_overview" || !Array.isArray(payload.items)) {
+        throw new ManageApiError("Backend API returned invalid manage_overview shape");
+      }
+      const pageItems = payload.items.filter((item): item is SupabaseRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+      items.push(...pageItems);
+      if (pageItems.length < pageSize) break;
+      if (page === maxPages - 1) {
+        throw new ManageApiError("Backend API manage_overview exceeded bounded 5000-account scan");
+      }
     }
-
-    const payload = (await response.json()) as AdminDashboardManageResponse;
-
-    if (payload.ok !== true || payload.action !== "manage_overview" || !Array.isArray(payload.items)) {
-      throw new ManageApiError("Backend API returned invalid manage_overview shape");
-    }
-
-    const items = payload.items.filter((item): item is SupabaseRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item));
     return assembleOverview(items.map(mapAdminDashboardAccount), [], adminSourceStatus());
   } catch (error) {
     if (error instanceof ManageApiError) throw error;
@@ -1256,22 +1264,32 @@ async function enrichWithOrphanRecovery(overview: ManageOverview): Promise<Manag
   return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
 }
 
-export async function getManageData() {
+export async function getManageData(options: {
+  includeOrphanRecovery?: boolean;
+  requireCanonicalComplete?: boolean;
+} = {}) {
+  const includeOrphanRecovery = options.includeOrphanRecovery !== false;
   let overview: ManageOverview;
   if (!adminDashboardConfig()) {
+    if (options.requireCanonicalComplete) {
+      throw new ManageApiError("Canonical manage_overview API is required for a complete account scan");
+    }
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    return await enrichWithOrphanRecovery(await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview))))));
+    const enriched = await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
+    return includeOrphanRecovery ? await enrichWithOrphanRecovery(enriched) : enriched;
   }
 
   try {
     overview = await getManageDataFromAdminDashboardApi();
   } catch {
+    if (options.requireCanonicalComplete) throw new ManageApiError("Canonical manage_overview account scan failed");
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiFallbackStatus, {
       ...fallback,
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  return await enrichWithOrphanRecovery(await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview))))));
+  const enriched = await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
+  return includeOrphanRecovery ? await enrichWithOrphanRecovery(enriched) : enriched;
 }

@@ -20,6 +20,7 @@ class Query {
   select() { return this; }
   eq(column: string, value: unknown) { this.filters.push([column, value]); return this; }
   in() { return this; }
+  order() { return this; }
   gte(column: string, value: string) { this.since.push([column, value]); return this; }
   update() { return this; }
   delete() { return this; }
@@ -86,6 +87,12 @@ class FakeSupabase {
   from(table: string) { return new Query(this, table); }
 
   async rpc(name: string, args: Row) {
+    if (name === "reconcile_resolved_incident_resume_windows_v1") {
+      return { data: { armed_count: 0 }, error: null };
+    }
+    if (name === "restore_prebusiness_resume_retry_credits_v1") {
+      return { data: { restored_count: 0 }, error: null };
+    }
     assert.equal(name, "create_account_run_request");
     const request = { id: `request-${this.requests.length + 1}`, ...args };
     this.requests.push(request);
@@ -127,6 +134,8 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
     nextTargetId: null,
     nextRetryIndex,
     remainingFollowQuota: 0,
+    plannedPhasesToRun: { welcome: false, follow: false, unfollow: true },
+    plannedQuotaRemaining: { welcome: 0, follow: 0, unfollow: 120, outreach: 0 },
     decisionOutcome: "eligible",
     restartEligible: true,
     blockReason: "",

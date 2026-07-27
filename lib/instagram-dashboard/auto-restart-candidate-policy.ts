@@ -21,6 +21,7 @@ export type RestartNeedInput = {
 
 export type SafeRestartStrategyInput = {
   restartNeeded: boolean;
+  followPhasePlanned: boolean;
   followRemaining: number;
   exactViewportResumeAvailable: boolean;
   priorTargetId: string | null;
@@ -74,16 +75,23 @@ export function resolveRestartNeed(input: RestartNeedInput) {
 
   const partial = isPartialResumeClass(input.sessionTerminationClass);
   const blockReason = normalized(input.restartBlockReason);
-  const historicalSafeBoundaryFallback = partial
+  const historicalSafeBoundaryFallback = input.restartAllowed !== true
+    && partial
     && HISTORICAL_SAFE_BOUNDARY_FALLBACK_REASONS.has(blockReason);
 
-  if (partial && (input.restartAllowed === true || historicalSafeBoundaryFallback)) {
+  if (partial && input.restartAllowed === true) {
     return {
       needed: true,
-      reason: historicalSafeBoundaryFallback
-        ? "historical_partial_run_requires_safe_boundary"
-        : "partial_run_resume_needed",
-      historicalSafeBoundaryFallback,
+      reason: "partial_run_resume_needed",
+      historicalSafeBoundaryFallback: false,
+    } as const;
+  }
+
+  if (historicalSafeBoundaryFallback) {
+    return {
+      needed: true,
+      reason: "historical_partial_run_requires_safe_boundary",
+      historicalSafeBoundaryFallback: true,
     } as const;
   }
 
@@ -132,7 +140,7 @@ export function resolveSafeRestartStrategy(input: SafeRestartStrategyInput) {
     };
   }
 
-  if (input.followRemaining <= 0 && input.workerPlanExplicitlySafe) {
+  if (!input.followPhasePlanned && input.workerPlanExplicitlySafe) {
     return {
       strategy: "exact_checkpoint_resume" as SafeRestartStrategy,
       reason: "non_follow_phase_resume_plan",

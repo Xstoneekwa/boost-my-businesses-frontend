@@ -8,6 +8,7 @@ type QueryBuilder = {
   select: (...args: unknown[]) => QueryBuilder;
   eq: (...args: unknown[]) => QueryBuilder;
   in: (...args: unknown[]) => QueryBuilder;
+  order: (...args: unknown[]) => QueryBuilder;
   limit: (...args: unknown[]) => Promise<QueryResult>;
   maybeSingle: () => Promise<QueryResult>;
 };
@@ -198,7 +199,7 @@ export async function resolveTrustedDispatcherWorkerForPhoneDevice(
   }
 
   const phoneDevice = phoneRows[0];
-  const hostMachine = readString(phoneDevice.host_machine).toLowerCase();
+  const hostMachine = readString(phoneDevice.host_machine);
   if (!hostMachine) {
     return {
       ok: false as const,
@@ -208,10 +209,35 @@ export async function resolveTrustedDispatcherWorkerForPhoneDevice(
     };
   }
 
-  const workerId = `run-dispatcher:${hostMachine}`;
+  const heartbeatResult = await query(supabase, "worker_heartbeats")
+    .select("worker_id,status,last_seen_at,host_machine,metadata")
+    .eq("host_machine", hostMachine)
+    .order("last_seen_at", { ascending: false })
+    .limit(20);
+  const heartbeatRows = Array.isArray(heartbeatResult.data)
+    ? heartbeatResult.data as Record<string, unknown>[]
+    : [];
+  const maxAgeSeconds = options.maxAgeSeconds ?? runControlDispatcherHealthMaxAgeSeconds();
+  const heartbeat = heartbeatRows.find((row) => {
+    const workerId = readString(row.worker_id);
+    const ageSeconds = runControlHeartbeatAgeSeconds(readString(row.last_seen_at));
+    return isRunDispatcherWorkerId(workerId)
+      && ["starting", "idle", "running"].includes(readString(row.status, "unknown"))
+      && ageSeconds != null
+      && ageSeconds <= maxAgeSeconds;
+  });
+  const workerId = readString(heartbeat?.worker_id);
+  if (heartbeatResult.error || !workerId) {
+    return {
+      ok: false as const,
+      reason: DISPATCHER_TRUST_FAILURE,
+      workerId: "",
+      verifiedAt: null as string | null,
+    };
+  }
   const trust = await assertTrustedDispatcherIdentity(supabase, workerId, {
     deviceIds: [normalizedDeviceId],
-    maxAgeSeconds: options.maxAgeSeconds,
+    maxAgeSeconds,
   });
   if (!trust.ok) {
     return {

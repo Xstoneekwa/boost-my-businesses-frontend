@@ -19,7 +19,7 @@ test("authorization consumption and request creation use one atomic RPC", () => 
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
   assert.match(humanSection, /consumeAuthorizationAndCreateRequest\(supabase/);
   assert.doesNotMatch(humanSection, /claimAuthorizationAtomically/);
-  assert.match(tickSource, /consume_resume_authorization_and_create_request_v2/);
+  assert.match(tickSource, /consume_resume_authorization_and_create_request_v3/);
 });
 
 test("resume request creation stays on the canonical CP0 path", () => {
@@ -55,7 +55,16 @@ test("expired window expires the authorization with a stable reason", () => {
 
 test("canonical run-start gates apply (manual_only excluded, no active run)", () => {
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
-  assert.match(humanSection, /evaluateRunStartEligibility\(accountId, "account_session", \{\s*trigger: "scheduler",?\s*\}\)/);
+  assert.match(humanSection, /evaluateRunStartEligibility\(accountId, "account_session", \{/);
+  assert.match(humanSection, /phasesToRun: resumeMetadata\.resume_plan\.phases_to_run/);
+});
+
+test("resolved Instagram restrictions enqueue only a zero-business-action preflight", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(humanSection, /instagram_account_restriction/);
+  assert.match(humanSection, /buildInstagramRestrictionPreflightMetadata/);
+  assert.match(humanSection, /verification_required/);
+  assert.match(humanSection, /restriction_preflight_only: restrictionPreflight/);
 });
 
 test("a failed atomic enqueue leaves authorization retryable", () => {

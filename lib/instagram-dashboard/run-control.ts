@@ -79,6 +79,8 @@ export type RunStartBlockReason =
   | "account_cancelled"
   | "account_paused"
   | "account_needs_assistance"
+  | "restriction_preflight_contract_invalid"
+  | "restriction_preflight_not_authorized"
   | "eligibility_query_failed"
   | "credentials_review_required"
   | "reauth_required"
@@ -624,6 +626,7 @@ export function dispatcherAllowsOnlyAccountSession(env: MiniRunEnv = process.env
 
 export function evaluateMiniRunCapsPreflight({
   requestedRunType,
+  followEnabled = true,
   welcomeEnabled,
   welcomeRealSendEnabled,
   outreachRealSendEnabled,
@@ -631,6 +634,7 @@ export function evaluateMiniRunCapsPreflight({
   env = process.env,
 }: {
   requestedRunType: string;
+  followEnabled?: boolean;
   welcomeEnabled: boolean;
   welcomeRealSendEnabled: boolean;
   outreachRealSendEnabled: boolean;
@@ -654,7 +658,7 @@ export function evaluateMiniRunCapsPreflight({
     ["INSTAGRAM_RUN_CONTROL_FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN", "FOLLOWERS_LIST_MAX_ITERATIONS_PER_RUN"],
     env,
   );
-  if (!capProvesAtMostOne(followMax) || !capProvesAtMostOne(iterationsMax)) {
+  if (followEnabled && (!capProvesAtMostOne(followMax) || !capProvesAtMostOne(iterationsMax))) {
     return "mini_run_follow_cap_unproven";
   }
 
@@ -1859,9 +1863,25 @@ export async function evaluateLoginConnectionStartGate(
 export async function evaluateRunStartEligibility(
   accountId: string,
   requestedRunType: string,
-  options: { trigger?: unknown; manualStart?: unknown } = {},
+  options: {
+    trigger?: unknown;
+    manualStart?: unknown;
+    phasesToRun?: { welcome: boolean; follow: boolean; unfollow: boolean };
+    restrictionPreflight?: { incidentId: string; authorizationId: string };
+  } = {},
 ) {
   const normalizedRunType = requestedRunType.trim().toLowerCase();
+  const accountSessionPhasePlan = normalizedRunType === "account_session" ? options.phasesToRun : undefined;
+  const restrictionPreflight = options.restrictionPreflight;
+  if (
+    accountSessionPhasePlan
+    && !accountSessionPhasePlan.welcome
+    && !accountSessionPhasePlan.follow
+    && !accountSessionPhasePlan.unfollow
+    && !restrictionPreflight
+  ) {
+    return { ok: false as const, reason: "no_executable_phase" as RunStartBlockReason };
+  }
   const normalizedTrigger = options.manualStart === true ? "manual" : normalizeRunStartTrigger(options.trigger);
   if (isTechnicalAccountRun(normalizedRunType)) {
     return evaluateLoginChallengeRunEligibility(accountId, normalizedRunType, normalizedTrigger === "auto" ? "technical" : normalizedTrigger);
@@ -1880,6 +1900,30 @@ export async function evaluateRunStartEligibility(
   }
 
   const supabase = createSupabaseClient();
+  if (restrictionPreflight) {
+    if (
+      normalizedRunType !== "account_session"
+      || !accountSessionPhasePlan
+      || accountSessionPhasePlan.welcome
+      || accountSessionPhasePlan.follow
+      || accountSessionPhasePlan.unfollow
+      || !restrictionPreflight.incidentId
+      || !restrictionPreflight.authorizationId
+    ) {
+      return { ok: false as const, reason: "restriction_preflight_contract_invalid" as RunStartBlockReason, health };
+    }
+    const { data: hold, error: holdError } = await supabase
+      .from("instagram_account_restriction_holds")
+      .select("id,status,incident_id")
+      .eq("account_id", accountId)
+      .eq("incident_id", restrictionPreflight.incidentId)
+      .eq("status", "verification_required")
+      .limit(1)
+      .maybeSingle();
+    if (holdError || !hold) {
+      return { ok: false as const, reason: "restriction_preflight_not_authorized" as RunStartBlockReason, health };
+    }
+  }
   let safeFollowFiltersSummary: ReturnType<typeof followFiltersSummary> | undefined;
   const { data: accountRow, error: accountError } = await supabase
     .from("ig_accounts")
@@ -1894,7 +1938,7 @@ export async function evaluateRunStartEligibility(
 
   const accountStatus = readString(accountRow.status, "active").toLowerCase();
   const adminLifecycleStatus = readString(accountRow.admin_lifecycle_status, accountStatus).toLowerCase();
-  if (adminLifecycleStatus === "paused") {
+  if (adminLifecycleStatus === "paused" && !restrictionPreflight) {
     return { ok: false as const, reason: "account_paused" as RunStartBlockReason, health };
   }
   if (adminLifecycleStatus === "needs_assistance") {
@@ -1925,7 +1969,7 @@ export async function evaluateRunStartEligibility(
     }
   }
 
-  if (normalizedRunType === "account_session" || normalizedRunType === "outreach_session") {
+  if ((normalizedRunType === "account_session" || normalizedRunType === "outreach_session") && !restrictionPreflight) {
     const { data: dmSettings, error: dmSettingsError } = await supabase
       .from("ig_account_dm_settings")
       .select("welcome_enabled,outreach_enabled,welcome_template_id,default_outreach_template_id,welcome_per_session_limit,welcome_per_day_limit,outreach_per_session_limit,outreach_per_day_limit,total_dm_per_day_limit")
@@ -1939,7 +1983,8 @@ export async function evaluateRunStartEligibility(
 
     const welcomeRealSendEnabled = runControlWelcomeRealSendEnabled();
     const outreachRealSendEnabled = runControlOutreachRealSendEnabled();
-    const welcomeEnabled = dmSettings?.welcome_enabled === true;
+    const welcomeEnabled = dmSettings?.welcome_enabled === true
+      && (normalizedRunType !== "account_session" || accountSessionPhasePlan?.welcome !== false);
     const outreachEnabled = dmSettings?.outreach_enabled === true;
     const { data: dmCounter, error: dmCounterError } = await supabase
       .from("ig_account_dm_counters")
@@ -2033,6 +2078,7 @@ export async function evaluateRunStartEligibility(
 
     const miniRunBlock = evaluateMiniRunCapsPreflight({
       requestedRunType: normalizedRunType,
+      followEnabled: accountSessionPhasePlan?.follow !== false,
       welcomeEnabled,
       welcomeRealSendEnabled,
       outreachRealSendEnabled,
@@ -2044,63 +2090,64 @@ export async function evaluateRunStartEligibility(
 
     if (normalizedRunType === "account_session") {
       let eligibleFollowTargets = 0;
-      try {
-        eligibleFollowTargets = await countEligibleFollowTargets(accountId);
-      } catch {
-        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
-      }
-      if (eligibleFollowTargets < 1) {
-        if (welcomeEnabled) {
-          // Welcome-only account_session may still be executable without follow targets.
-        } else {
-          return { ok: false as const, reason: "no_eligible_targets" as RunStartBlockReason, health };
-        }
-      }
-
-      const { data: packageSummary, error: packageSummaryError } = await supabase
-        .from("account_package_summary")
-        .select("warmup_status,package_caps,effective_caps_preview")
-        .eq("account_id", accountId)
-        .limit(1)
-        .maybeSingle<SupabaseRecord>();
-      if (packageSummaryError) {
-        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
-      }
-      const followCaps = resolveFollowCapPreview(packageSummary);
-      let followExecutableByCap = eligibleFollowTargets >= 1;
+      const followPhasePlanned = accountSessionPhasePlan?.follow !== false;
+      let followCaps = resolveFollowCapPreview(null);
+      let followExecutableByCap = false;
       let followWarmupPending = false;
-      if (followCaps.packageCap > 0) {
-        let followsDoneToday = 0;
+      if (followPhasePlanned) {
         try {
-          followsDoneToday = await countFollowsToday(accountId);
+          eligibleFollowTargets = await countEligibleFollowTargets(accountId);
         } catch {
           return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
         }
-        const remaining = Math.max(0, followCaps.followDay - followsDoneToday);
-        const effectiveFollowCap = Math.min(followCaps.followSession, remaining);
-        if (effectiveFollowCap < 1 && followCaps.followDay > 0) {
-          followExecutableByCap = false;
+        if (eligibleFollowTargets < 1 && !welcomeEnabled && accountSessionPhasePlan?.unfollow !== true) {
+          return { ok: false as const, reason: "no_eligible_targets" as RunStartBlockReason, health };
         }
-        if (followCaps.warmupStatus === "pending_package_start" && followCaps.warmupApplied) {
-          followWarmupPending = true;
-          followExecutableByCap = false;
-        }
-      }
 
-      const { data: followFilterSettings, error: followFilterSettingsError } = await supabase
-        .from("ig_account_follow_settings")
-        .select("dont_follow_private_accounts,min_followers,max_followers,min_posts")
-        .eq("account_id", accountId)
-        .limit(1)
-        .maybeSingle<SupabaseRecord>();
-      if (followFilterSettingsError) {
-        return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
+        const { data: packageSummary, error: packageSummaryError } = await supabase
+          .from("account_package_summary")
+          .select("warmup_status,package_caps,effective_caps_preview")
+          .eq("account_id", accountId)
+          .limit(1)
+          .maybeSingle<SupabaseRecord>();
+        if (packageSummaryError) {
+          return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
+        }
+        followCaps = resolveFollowCapPreview(packageSummary);
+        followExecutableByCap = eligibleFollowTargets >= 1;
+        if (followCaps.packageCap > 0) {
+          let followsDoneToday = 0;
+          try {
+            followsDoneToday = await countFollowsToday(accountId);
+          } catch {
+            return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
+          }
+          const remaining = Math.max(0, followCaps.followDay - followsDoneToday);
+          const effectiveFollowCap = Math.min(followCaps.followSession, remaining);
+          if (effectiveFollowCap < 1 && followCaps.followDay > 0) {
+            followExecutableByCap = false;
+          }
+          if (followCaps.warmupStatus === "pending_package_start" && followCaps.warmupApplied) {
+            followWarmupPending = true;
+            followExecutableByCap = false;
+          }
+        }
+
+        const { data: followFilterSettings, error: followFilterSettingsError } = await supabase
+          .from("ig_account_follow_settings")
+          .select("dont_follow_private_accounts,min_followers,max_followers,min_posts")
+          .eq("account_id", accountId)
+          .limit(1)
+          .maybeSingle<SupabaseRecord>();
+        if (followFilterSettingsError) {
+          return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
+        }
+        const followFilterBlock = validateFollowFilterSettingsRow(followFilterSettings);
+        if (followFilterBlock) {
+          return { ok: false as const, reason: followFilterBlock, health };
+        }
+        safeFollowFiltersSummary = followFiltersSummary(followFilterSettings);
       }
-      const followFilterBlock = validateFollowFilterSettingsRow(followFilterSettings);
-      if (followFilterBlock) {
-        return { ok: false as const, reason: followFilterBlock, health };
-      }
-      safeFollowFiltersSummary = followFiltersSummary(followFilterSettings);
 
       const { data: unfollowSettings, error: unfollowSettingsError } = await supabase
         .from("ig_account_unfollow_settings")
@@ -2134,7 +2181,8 @@ export async function evaluateRunStartEligibility(
         return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason, health };
       }
 
-      const unfollowEnabled = unfollowSettings?.unfollow_enabled === true;
+      const unfollowEnabled = unfollowSettings?.unfollow_enabled === true
+        && accountSessionPhasePlan?.unfollow !== false;
       let unfollowPassedPreflight = false;
       if (unfollowEnabled) {
         const unfollowBlock = evaluateUnfollowStartGate({

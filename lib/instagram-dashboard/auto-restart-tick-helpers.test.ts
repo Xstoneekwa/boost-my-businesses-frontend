@@ -126,6 +126,8 @@ function recoverableCandidate(retryIndex: 0 | 1): AutoRestartCandidate {
     nextTargetId: null,
     nextRetryIndex,
     remainingFollowQuota: 0,
+    plannedPhasesToRun: { welcome: false, follow: false, unfollow: true },
+    plannedQuotaRemaining: { welcome: 0, follow: 0, unfollow: 120, outreach: 0 },
     decisionOutcome: "eligible",
     restartEligible: true,
     blockReason: "",
