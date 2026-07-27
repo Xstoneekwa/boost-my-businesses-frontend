@@ -263,6 +263,8 @@ const runtimeProjectionKeys = [
   "package_default_follow_session_cap",
   "manual_follow_day_cap",
   "manual_follow_session_cap",
+  "follow_account_override_status",
+  "follow_account_override_source",
   "effective_follow_cap_today",
   "effective_follow_session_cap",
   "effective_warmup_cap_today",

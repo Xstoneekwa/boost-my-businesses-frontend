@@ -18,10 +18,12 @@ for (const [label, relativePath] of routes) {
   });
 }
 
-test("settings save excludes ig_accounts lifecycle projection fields from ig_account_settings writes", () => {
+test("settings save excludes lifecycle and Follow provenance projections from ig_account_settings writes", () => {
   const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
   assert.match(source, /"admin_lifecycle_status"/);
   assert.match(source, /runtimeProjectionKeys[\s\S]*"admin_lifecycle_status"/);
+  assert.match(source, /runtimeProjectionKeys[\s\S]*"follow_account_override_status"/);
+  assert.match(source, /runtimeProjectionKeys[\s\S]*"follow_account_override_source"/);
   assert.match(source, /const baseSettings = existing/);
   assert.doesNotMatch(source, /normalizeSettings\(body, accountId\)/);
 });
