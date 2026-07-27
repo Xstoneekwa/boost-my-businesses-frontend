@@ -67,10 +67,6 @@ function followerHistoryPendingSubtitle(lang: "fr" | "en") {
     : "Follower history collection in progress";
 }
 
-function followerHistoryAvailableSubtitle(lang: "fr" | "en") {
-  return lang === "fr" ? "Sur les 30 derniers jours" : "Over the last 30 days";
-}
-
 export function buildOverviewStats(
   insights: ClientAccountInsights | null,
   lang: "fr" | "en",
@@ -88,15 +84,14 @@ export function buildOverviewStats(
 
   const interactions = insights.overview.campaignInteractions;
   const followers = insights.overview.followerEvolution;
-  const followerAvailable = followers.status === "available";
-  const followerSubtitle = followerAvailable
-    ? followerHistoryAvailableSubtitle(lang)
-    : followerHistoryPendingSubtitle(lang);
+  const followerAvailable = followers.status === "ready" || followers.status === "stale";
+  const interactionsAvailable = interactions.status === "ready";
+  const followerSubtitle = lang === "fr" ? followers.subtitleFr : followers.subtitleEn;
 
   return [
     {
       lbl: lang === "fr" ? "Ce mois-ci" : "This month",
-      val: formatCount(interactions.monthInteractions, lang),
+      val: interactionsAvailable ? formatCount(interactions.monthInteractions, lang) : empty,
       sub: lang === "fr" ? "Interactions campagne" : "Campaign interactions",
       highlight: true,
     },
@@ -109,7 +104,7 @@ export function buildOverviewStats(
     },
     {
       lbl: lang === "fr" ? "Aujourd'hui" : "Today",
-      val: formatCount(interactions.todayInteractions, lang),
+      val: interactionsAvailable ? formatCount(interactions.todayInteractions, lang) : empty,
       sub: lang === "fr" ? "Interactions du jour" : "Today's interactions",
     },
     {
@@ -211,7 +206,7 @@ export function buildAccountScopedSubscriptionCard(
   const hasPrice = /€|\d/.test(display.priceLabel);
 
   return {
-    title: lang === "fr" ? `Abonnement — @${handle}` : `Subscription — @${handle}`,
+    title: lang === "fr" ? `Plan du compte Instagram — @${handle}` : `Instagram account plan — @${handle}`,
     planName: display.planLabel || "—",
     statusLabel: display.statusLabel || pending,
     price: display.priceLabel || "—",
@@ -250,4 +245,3 @@ export function buildAccountManagerOverview(
     bookingHref: manager?.bookingUrl || null,
   };
 }
-

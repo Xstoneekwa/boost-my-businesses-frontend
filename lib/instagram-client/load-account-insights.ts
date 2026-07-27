@@ -7,13 +7,15 @@ import {
   toStatsDaySocialCounters,
 } from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
-import { computeClientCampaignInteractionOverview, type ClientCampaignInteractionOverview } from "./client-campaign-interaction-stats";
+import { buildClientCampaignInteractionErrorOverview, computeClientCampaignInteractionOverview, type ClientCampaignInteractionOverview } from "./client-campaign-interaction-stats";
 import { resolveClientFollowerEvolutionMetrics, type ClientFollowerEvolutionMetrics } from "./client-follower-evolution-metrics";
+import { buildClientPersistedInteractionEvidence } from "./client-persisted-interaction-evidence";
 import {
   buildClientOverviewRecentFeed,
   type ClientOverviewRecentFeedItem,
 } from "./client-overview-recent-feed-projection";
 import { readString } from "./guards";
+import { isMissingSnapshotTableError } from "./load-client-follower-growth";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -156,13 +158,15 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     filtersResult,
     activityRpcResult,
     packageSummaries,
-    settingsResult,
     overviewEventsResult,
+    unfollowRowsResult,
+    dmJobsResult,
+    socialSnapshotsResult,
   ] = await Promise.all([
     supabase.from("ig_accounts").select("id,username,status,admin_lifecycle_status,followers_count").eq("id", accountId).maybeSingle(),
     supabase.from("ig_action_logs").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(5000),
     supabase.from("ig_runs").select("id,status,created_at,started_at,total_follow,total_like,total_dm,total_story").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(1000),
-    supabase.from("ig_interaction_events").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(5000),
+    supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,interaction_status,event_at,created_at,payload,username").eq("account_id", accountId).gte("event_at", since.toISOString()).order("event_at", { ascending: false }).limit(5000),
     supabase.from("ig_targets").select("id,normalized_username,target_username,input_username,status,verification_status,quality_status,followers_count,created_at").eq("account_id", accountId).order("created_at", { ascending: false }).limit(500),
     supabase
       .from("account_protection_list_entries")
@@ -177,14 +181,37 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       p_limit: 100,
     }),
     getAccountPackageSummaries([accountId]),
-    supabase.from("ig_account_settings").select("timezone").eq("account_id", accountId).maybeSingle(),
     supabase
       .from("ig_interaction_events")
-      .select("id,account_id,run_id,request_id,session_id,event_type,event_status,interaction_type,event_at,created_at,username,source_target_username")
+      .select("id,account_id,run_id,request_id,session_id,event_type,event_status,interaction_type,interaction_status,event_at,created_at,username,source_target_username")
       .eq("account_id", accountId)
       .gte("event_at", since.toISOString())
       .order("event_at", { ascending: false })
       .limit(10000),
+    supabase
+      .from("ig_interacted_users")
+      .select("id,account_id,run_id,last_run_id,username,unfollow_result,unfollowed_at")
+      .eq("account_id", accountId)
+      .eq("unfollow_result", "success")
+      .gte("unfollowed_at", since.toISOString())
+      .order("unfollowed_at", { ascending: false })
+      .limit(10000),
+    supabase
+      .from("ig_dm_jobs")
+      .select("id,account_id,dm_type,recipient_username,status,sent_at")
+      .eq("account_id", accountId)
+      .eq("status", "sent")
+      .gte("sent_at", since.toISOString())
+      .order("sent_at", { ascending: false })
+      .limit(10000),
+    supabase
+      .from("ig_account_social_profile_snapshots")
+      .select("followers_count,observed_at,account_timezone,lookup_status,source_provider,freshness_status")
+      .eq("account_id", accountId)
+      .eq("lookup_status", "found")
+      .gte("observed_at", since.toISOString())
+      .order("observed_at", { ascending: true })
+      .limit(5000),
   ]);
 
   if (accountResult.error || !accountResult.data?.id) return null;
@@ -236,15 +263,35 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
   }
 
   const statsDays = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
-  const campaignInteractions = computeClientCampaignInteractionOverview(
-    (overviewEventsResult.data ?? []) as SupabaseRecord[],
-    readString((settingsResult.data as SupabaseRecord | null)?.timezone, ""),
-  );
+  const socialSnapshots = (socialSnapshotsResult.data ?? []) as SupabaseRecord[];
+  const latestSocialSnapshot = socialSnapshots.at(-1) ?? null;
+  const businessTimezone = readString(latestSocialSnapshot?.account_timezone, "");
+  const persistedEvidence = buildClientPersistedInteractionEvidence({
+    interactionEvents: (overviewEventsResult.data ?? []) as SupabaseRecord[],
+    unfollowRows: (unfollowRowsResult.data ?? []) as SupabaseRecord[],
+    dmJobs: (dmJobsResult.data ?? []) as SupabaseRecord[],
+  });
+  const interactionSourceErrors = [
+    overviewEventsResult.error ? "ig_interaction_events" : "",
+    unfollowRowsResult.error ? "ig_interacted_users" : "",
+    dmJobsResult.error ? "ig_dm_jobs" : "",
+  ].filter(Boolean);
+  const campaignInteractions = interactionSourceErrors.length
+    ? buildClientCampaignInteractionErrorOverview(businessTimezone, interactionSourceErrors)
+    : computeClientCampaignInteractionOverview(persistedEvidence, businessTimezone);
+  const followerSourceStatus = socialSnapshotsResult.error
+    ? (isMissingSnapshotTableError(socialSnapshotsResult.error.message) ? "unavailable" as const : "error" as const)
+    : "ready" as const;
   const followerEvolution = resolveClientFollowerEvolutionMetrics({
     currentFollowersCount: accountResult.data.followers_count == null
       ? null
       : readNumber(accountResult.data.followers_count, 0),
-    snapshotRows: [],
+    snapshotRows: socialSnapshots.map((row) => ({
+      observed_at: readString(row.observed_at),
+      followers_count: row.followers_count == null ? null : readNumber(row.followers_count),
+      lookup_status: readString(row.lookup_status),
+    })),
+    sourceStatus: followerSourceStatus,
   });
 
   const activityRows = !activityRpcResult.error && Array.isArray(activityRpcResult.data)
@@ -262,9 +309,8 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     } satisfies ClientActivityFeedItem;
   });
   const accountUsername = readString(accountResult.data.username, "").replace(/^@+/, "").toLowerCase();
-  const businessTimezone = readString((settingsResult.data as SupabaseRecord | null)?.timezone, "");
   const recentFeed = buildClientOverviewRecentFeed(
-    (overviewEventsResult.data ?? []) as SupabaseRecord[],
+    persistedEvidence,
     {
       accountId,
       accountUsername,
@@ -284,7 +330,6 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     }))
     .filter((row) => Boolean(row.id && row.username));
 
-  const filters = filtersResult.data as SupabaseRecord | null;
   const packageSummary = packageSummaries.get(accountId);
   const packageLabel = packageSummary?.commercialPackageLabel || "Growth";
   const packageCode = packageSummary?.commercialPackageCode || "growth";

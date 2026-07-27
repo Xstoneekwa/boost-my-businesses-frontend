@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 import { requireInstagramDashboardAccess } from "@/lib/restaurant-analytics/session";
 import { createSupabaseClient } from "@/lib/supabase";
 import { loadClientInstagramAccounts } from "@/lib/instagram-client/load-client-instagram-accounts";
-import { loadClientAccountInsights, type ClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
+import { loadClientAccountInsights } from "@/lib/instagram-client/load-account-insights";
 import { loadClientFollowerGrowthSeries } from "@/lib/instagram-client/load-client-follower-growth";
-import { getClientWorkspaceView, type ClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
+import { loadAccountCommercialSubscriptionDisplay } from "@/lib/instagram-client/load-account-commercial-subscription";
+import { getClientWorkspaceView } from "@/lib/instagram-client/workspace-data";
 import ClientDashboard from "./ClientDashboard";
 import {
   loadClientAccountNotificationsForClient,
@@ -170,12 +171,17 @@ export default async function InstagramClientPage() {
 
   const agencyModeActive = orderedAccounts.length >= 2;
   const primaryAccountId = agencyModeActive ? "" : (orderedAccounts[0]?.accountId ?? "");
-  const [accountInsights, followerGrowth] = primaryAccountId
+  const [accountInsights, followerGrowth, accountSubscription] = primaryAccountId
     ? await Promise.all([
       loadClientAccountInsights(primaryAccountId),
-      loadClientFollowerGrowthSeries(primaryAccountId),
+      loadClientFollowerGrowthSeries(primaryAccountId, userContext.tenantId),
+      loadAccountCommercialSubscriptionDisplay({
+        clientId: userContext.tenantId,
+        accountId: primaryAccountId,
+        lang: "fr",
+      }),
     ])
-    : [null, null];
+    : [null, null, null];
 
   return (
     <ClientDashboard
@@ -188,6 +194,7 @@ export default async function InstagramClientPage() {
       initialWorkspace={workspace}
       initialAccountInsights={accountInsights}
       initialFollowerGrowth={followerGrowth}
+      initialAccountSubscription={accountSubscription}
       initialAgencyModeActive={agencyModeActive}
     />
   );

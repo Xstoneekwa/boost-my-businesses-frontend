@@ -9,18 +9,18 @@ export type ClientCampaignInteractionRule = {
 
 export const CLIENT_CAMPAIGN_INTERACTION_TYPES: ClientCampaignInteractionRule[] = [
   {
-    actionType: "follow_sent",
-    aliases: ["follow"],
-    countInCampaignInteractions: true,
-    successOnly: true,
-    clientLabel: { fr: "Abonnement envoyé", en: "Follow sent" },
-  },
-  {
     actionType: "unfollow_sent",
     aliases: ["unfollow"],
     countInCampaignInteractions: true,
     successOnly: true,
     clientLabel: { fr: "Désabonnement envoyé", en: "Unfollow sent" },
+  },
+  {
+    actionType: "follow_sent",
+    aliases: ["follow"],
+    countInCampaignInteractions: true,
+    successOnly: true,
+    clientLabel: { fr: "Abonnement envoyé", en: "Follow sent" },
   },
   {
     actionType: "like_sent",
@@ -30,18 +30,18 @@ export const CLIENT_CAMPAIGN_INTERACTION_TYPES: ClientCampaignInteractionRule[] 
     clientLabel: { fr: "Like envoyé", en: "Like sent" },
   },
   {
-    actionType: "dm_sent",
-    aliases: ["dm"],
+    actionType: "outreach_dm_sent",
+    aliases: ["outreach_dm"],
     countInCampaignInteractions: true,
     successOnly: true,
-    clientLabel: { fr: "DM envoyé", en: "DM sent" },
+    clientLabel: { fr: "DM Outreach envoyé", en: "Outreach DM sent" },
   },
   {
-    actionType: "story_viewed",
-    aliases: ["story_view"],
+    actionType: "welcome_dm_sent",
+    aliases: ["welcome_dm"],
     countInCampaignInteractions: true,
     successOnly: true,
-    clientLabel: { fr: "Story consultée", en: "Story viewed" },
+    clientLabel: { fr: "DM de bienvenue envoyé", en: "Welcome DM sent" },
   },
   {
     actionType: "mute_success",

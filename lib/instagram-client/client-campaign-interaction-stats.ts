@@ -24,6 +24,13 @@ export type ClientCampaignInteractionOverview = {
   monthInteractions: number;
   todayInteractions: number;
   businessTimezone: string;
+  monthByActionType: Record<string, number>;
+  todayByActionType: Record<string, number>;
+  source: "verified_persisted_interaction_evidence";
+  verifiedOnly: true;
+  lastEventAt: string | null;
+  status: "ready" | "error";
+  sourceErrors: string[];
 };
 
 export type ClientCampaignInteractionBreakdown = {
@@ -87,36 +94,42 @@ export function computeClientCampaignInteractionOverview(
   timezone?: string | null,
   now = new Date(),
 ): ClientCampaignInteractionOverview {
-  const businessTimezone = normalizeBusinessTimezone(timezone);
-  const nowParts = zonedDateParts(now, businessTimezone);
-  const currentMonthKey = `${String(nowParts.year).padStart(4, "0")}-${String(nowParts.month).padStart(2, "0")}`;
-  const todayKey = `${currentMonthKey}-${String(nowParts.day).padStart(2, "0")}`;
-
-  let monthInteractions = 0;
-  let todayInteractions = 0;
-  const seenIds = new Set<string>();
-
-  for (const row of eventRows) {
-    if (!shouldCountClientCampaignInteractionEvent(row)) continue;
-    const id = readString(row.id, "");
-    if (id) {
-      if (seenIds.has(id)) continue;
-      seenIds.add(id);
-    }
-
-    const occurredAt = readEventAt(row);
-    if (!occurredAt) continue;
-
-    const dayKey = businessDayKeyFromIso(occurredAt, businessTimezone);
-    const monthKey = businessMonthKeyFromIso(occurredAt, businessTimezone);
-    if (monthKey === currentMonthKey) monthInteractions += 1;
-    if (dayKey === todayKey) todayInteractions += 1;
-  }
-
+  const breakdown = computeClientCampaignInteractionBreakdown(eventRows, timezone, now);
+  const lastEventAt = eventRows
+    .filter(shouldCountClientCampaignInteractionEvent)
+    .map(readEventAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
   return {
-    monthInteractions,
-    todayInteractions,
-    businessTimezone,
+    monthInteractions: breakdown.monthTotal,
+    todayInteractions: breakdown.todayTotal,
+    businessTimezone: breakdown.businessTimezone,
+    monthByActionType: breakdown.monthByActionType,
+    todayByActionType: breakdown.todayByActionType,
+    source: "verified_persisted_interaction_evidence",
+    verifiedOnly: true,
+    lastEventAt,
+    status: "ready",
+    sourceErrors: [],
+  };
+}
+
+export function buildClientCampaignInteractionErrorOverview(
+  timezone?: string | null,
+  sourceErrors: string[] = [],
+): ClientCampaignInteractionOverview {
+  return {
+    monthInteractions: 0,
+    todayInteractions: 0,
+    businessTimezone: normalizeBusinessTimezone(timezone),
+    monthByActionType: {},
+    todayByActionType: {},
+    source: "verified_persisted_interaction_evidence",
+    verifiedOnly: true,
+    lastEventAt: null,
+    status: "error",
+    sourceErrors,
   };
 }
 

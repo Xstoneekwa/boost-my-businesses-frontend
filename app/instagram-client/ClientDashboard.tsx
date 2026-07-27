@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientNotificationsPanel from "./ClientNotificationsPanel";
@@ -84,6 +83,7 @@ interface Props {
   initialWorkspace?: ClientWorkspaceView | null;
   initialAccountInsights?: ClientAccountInsights | null;
   initialFollowerGrowth?: LoadClientFollowerGrowthResult | null;
+  initialAccountSubscription?: AccountCommercialSubscriptionDisplay | null;
   initialAgencyModeActive?: boolean;
 }
 
@@ -150,7 +150,7 @@ const T = {
       profile:"Mon profil", subscription:"Abonnement",
       fname:"Prénom", lname:"Nom", phone:"Numéro de téléphone", email:"Email", ig:"Compte Instagram",
       save:"Enregistrer les modifications",
-      planLabel:"Formule active", planVal:"Pro — 197€/mois",
+      planLabel:"Plan du tenant", planVal:"Pro — 197€/mois",
       since:"Membre depuis", sinceVal:"15 janvier 2026",
       next:"Prochain prélèvement", nextVal:"3 juillet 2026 — 197€",
       periodEnd:"Échéance de l'abonnement",
@@ -229,7 +229,7 @@ const T = {
       profile:"My profile", subscription:"Subscription",
       fname:"First name", lname:"Last name", phone:"Phone number", email:"Email", ig:"Instagram handle",
       save:"Save changes",
-      planLabel:"Active plan", planVal:"Pro — €197/mo",
+      planLabel:"Tenant plan", planVal:"Pro — €197/mo",
       since:"Member since", sinceVal:"January 15, 2026",
       next:"Next billing", nextVal:"July 3, 2026 — €197",
       periodEnd:"Subscription end date",
@@ -339,10 +339,6 @@ function FollowerChart({ period, lang, onPeriodChange, title, views }: {
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => {
-    setHoverIdx(null);
-  }, [period, view.points.length]);
-
   const H = 240;
   const padL = 44;
   const padR = 18;
@@ -365,7 +361,10 @@ function FollowerChart({ period, lang, onPeriodChange, title, views }: {
   const areaPath = showChart
     ? `${linePath} L${xp(data.length - 1)},${padT + ch} L${xp(0)},${padT + ch} Z`
     : "";
-  const activeIdx = hoverIdx ?? Math.max(0, data.length - 1);
+  const activeIdx = Math.min(
+    hoverIdx ?? Math.max(0, data.length - 1),
+    Math.max(0, data.length - 1),
+  );
   const diff = showChart && activeIdx > 0
     ? data[activeIdx] - data[activeIdx - 1]
     : 0;
@@ -483,7 +482,7 @@ function FollowerChart({ period, lang, onPeriodChange, title, views }: {
         ) : (
           <div className="cd-chart-empty" style={{ minHeight: H, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <span style={{ color: "var(--ink-mute)", fontSize: 13 }}>
-              {lang === "fr" ? "Courbe disponible après collecte d'historique" : "Chart available once history is collected"}
+              {view.subtitle || (lang === "fr" ? "Courbe indisponible" : "Chart unavailable")}
             </span>
           </div>
         )}
@@ -500,7 +499,6 @@ function FollowerChart({ period, lang, onPeriodChange, title, views }: {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 export default function ClientDashboard({
-  userId: _userId,
   tenantId: _tenantId,
   loginEmail = "",
   initialNotifications = [],
@@ -509,6 +507,7 @@ export default function ClientDashboard({
   initialWorkspace = null,
   initialAccountInsights = null,
   initialFollowerGrowth = null,
+  initialAccountSubscription = null,
   initialAgencyModeActive = false,
 }: Props) {
   const [activeView, setActiveView]     = useState<View>("overview");
@@ -528,7 +527,7 @@ export default function ClientDashboard({
   const [followerGrowth, setFollowerGrowth] = useState<LoadClientFollowerGrowthResult | null>(initialFollowerGrowth);
   const [accountScopeLoading, setAccountScopeLoading] = useState(false);
   const [accountScopeError, setAccountScopeError] = useState<string | null>(null);
-  const [accountSubscriptionDisplay, setAccountSubscriptionDisplay] = useState<AccountCommercialSubscriptionDisplay | null>(null);
+  const [accountSubscriptionDisplay, setAccountSubscriptionDisplay] = useState<AccountCommercialSubscriptionDisplay | null>(initialAccountSubscription);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
@@ -545,7 +544,11 @@ export default function ClientDashboard({
     || initialNotifications.length > 0
     || (initialWorkspace?.linkedInstagramAccounts?.length ?? 0) > 0
     || (workspace?.linkedInstagramAccounts?.length ?? 0) > 0;
-  const hasOverviewInsights = Boolean(accountInsights) && (!agencyModeActive || overviewScope !== "agency");
+  const hasOverviewInsights = Boolean(accountInsights)
+    && (!agencyModeActive || (
+      overviewScope !== "agency"
+      && accountInsights?.accountId === overviewScope
+    ));
   const demoMode = !hasLinkedInstagramAccount;
 
   const [targetingOverview, setTargetingOverview] = useState<TargetsOverview | null>(null);
@@ -953,7 +956,7 @@ export default function ClientDashboard({
   }, [agencyModeActive, initialAccounts]);
 
   const sidebarName = workspace?.displayName || [profileForm.firstName, profileForm.lastName].filter(Boolean).join(" ") || "Client";
-  const sidebarPlan = workspace?.clientPlanLabel || accountInsights?.packageLabel || "—";
+  const sidebarPlan = workspace?.clientPlanLabel || "—";
   const activityBadge = hasOverviewInsights && accountInsights?.recentFeed.length
     ? accountInsights.recentFeed.reduce((sum, item) => sum + item.count, 0)
     : undefined;
@@ -985,6 +988,9 @@ export default function ClientDashboard({
         historyStartDate: null,
         points: [],
         coverageStatus: "none" as const,
+        source: "ig_account_social_profile_snapshots" as const,
+        currentAgeSeconds: null,
+        freshnessStatus: "unavailable" as const,
       };
       const emptyBundle = { all: emptySeries, d30: { ...emptySeries, period: "30d" as const }, daily: { ...emptySeries, period: "daily" as const } };
       return buildFollowerChartViews(emptyBundle, lang);
@@ -992,12 +998,15 @@ export default function ClientDashboard({
     return buildFollowerChartViews(growth.bundle, lang);
   }, [followerGrowth, initialFollowerGrowth, lang]);
   const subscriptionPlanValue = workspace?.clientPlanLabel || accountInsights?.packageLabel || "";
-  const useAccountScopedSubscription = agencyModeActive && overviewScope !== "agency";
+  const selectedOverviewAccountId = agencyModeActive
+    ? (overviewScope === "agency" ? "" : overviewScope)
+    : (primaryAccount?.accountId || accountInsights?.accountId || "");
+  const useAccountScopedSubscription = Boolean(selectedOverviewAccountId);
   const subscriptionCard = useAccountScopedSubscription
     ? buildAgencyAccountSubscriptionCard(
       accountSubscriptionDisplay,
       accountInsights,
-      overviewScope,
+      selectedOverviewAccountId,
       lang,
     )
     : buildSubscriptionOverviewCard(workspace, subscriptionPlanValue, lang);
@@ -1165,6 +1174,7 @@ export default function ClientDashboard({
             <div className="cd-sb-av">{sidebarName.charAt(0).toUpperCase()}</div>
             <div>
               <div className="cd-sb-aname">{sidebarName}</div>
+              <div className="cd-sb-ascope">{lang === "fr" ? "Plan du tenant" : "Tenant plan"}</div>
               <div className="cd-sb-aplan">{sidebarPlan}</div>
             </div>
             <div className="cd-sb-live"><div className="cd-sb-dot"/></div>
@@ -1796,6 +1806,7 @@ const CSS = `
 .cd-sb-acct{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:var(--r-sm);background:var(--surface-2)}
 .cd-sb-av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-family:var(--font-d);font-weight:800;font-size:.85rem;color:#fff;flex:none}
 .cd-sb-aname{font-size:.83rem;font-weight:700;line-height:1.2;color:var(--ink)}
+.cd-sb-ascope{font-size:.58rem;color:var(--ink-mute);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
 .cd-sb-aplan{font-size:.7rem;color:var(--accent);font-weight:700}
 .cd-sb-live{display:flex;align-items:center;gap:4px;margin-left:auto}
 .cd-sb-dot{width:7px;height:7px;border-radius:50%;background:var(--good);animation:cd-blink 2s ease-in-out infinite}

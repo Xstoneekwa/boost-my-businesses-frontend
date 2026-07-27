@@ -16,7 +16,7 @@ export type FollowerChartView = {
   coverageStatus: ClientFollowerGrowthSeries["coverageStatus"];
 };
 
-function dash(lang: "fr" | "en") {
+function dash() {
   return "—";
 }
 
@@ -42,6 +42,34 @@ function formatHistoryDate(value: string, lang: "fr" | "en") {
 }
 
 function resolveSubtitle(series: ClientFollowerGrowthSeries, lang: "fr" | "en") {
+  if (series.freshnessStatus === "error") {
+    return lang === "fr" ? "Erreur de lecture des abonnés" : "Follower data read error";
+  }
+  if (series.freshnessStatus === "unavailable") {
+    return lang === "fr" ? "Données abonnés indisponibles" : "Follower data unavailable";
+  }
+  if (series.period === "daily") {
+    if (series.coverageStatus === "none") {
+      return lang === "fr"
+        ? "Première lecture des abonnés en cours"
+        : "First follower reading in progress";
+    }
+    if (series.points.length < 2) {
+      if (series.freshnessStatus === "stale" && series.currentCapturedAt) {
+        return lang === "fr"
+          ? `Historique intrajournalier indisponible — dernier relevé ancien du ${formatHistoryDate(series.currentCapturedAt, lang)}`
+          : `Intraday history unavailable — last reading is stale from ${formatHistoryDate(series.currentCapturedAt, lang)}`;
+      }
+      return lang === "fr"
+        ? "Historique intrajournalier indisponible — relevés espacés d’au moins 36 h"
+        : "Intraday history unavailable — readings are at least 36 hours apart";
+    }
+  }
+  if (series.freshnessStatus === "stale" && series.currentCapturedAt) {
+    return lang === "fr"
+      ? `Données anciennes — dernier relevé le ${formatHistoryDate(series.currentCapturedAt, lang)}`
+      : `Stale data — last captured on ${formatHistoryDate(series.currentCapturedAt, lang)}`;
+  }
   if (series.coverageStatus === "none") {
     return lang === "fr"
       ? "Première lecture des abonnés en cours"
@@ -52,11 +80,6 @@ function resolveSubtitle(series: ClientFollowerGrowthSeries, lang: "fr" | "en") 
       ? "Historique des abonnés en cours de collecte"
       : "Follower history collection in progress";
   }
-  if (series.period === "daily" && series.points.length < 2) {
-    return lang === "fr"
-      ? "Lecture intrajournalière en cours de collecte"
-      : "Intraday follower readings collection in progress";
-  }
   if (series.coverageStatus === "partial" && series.historyStartDate) {
     return lang === "fr"
       ? `Historique disponible depuis le ${formatHistoryDate(series.historyStartDate, lang)}`
@@ -66,7 +89,7 @@ function resolveSubtitle(series: ClientFollowerGrowthSeries, lang: "fr" | "en") 
 }
 
 function resolveDeltaDisplay(series: ClientFollowerGrowthSeries, lang: "fr" | "en") {
-  if (series.deltaStatus === "unknown" || series.delta === null) return dash(lang);
+  if (series.deltaStatus === "unknown" || series.delta === null) return dash();
   return formatSignedDelta(series.delta, lang);
 }
 
@@ -86,7 +109,7 @@ export function buildFollowerChartView(
   series: ClientFollowerGrowthSeries,
   lang: "fr" | "en",
 ): FollowerChartView {
-  const empty = dash(lang);
+  const empty = dash();
   const mainValue = series.currentFollowers === null ? empty : formatCount(series.currentFollowers, lang);
   const deltaDisplay = series.coverageStatus === "none" ? empty : resolveDeltaDisplay(series, lang);
   const showChart = series.points.length >= 2;

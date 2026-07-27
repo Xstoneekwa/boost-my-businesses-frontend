@@ -2,15 +2,15 @@ import { createSupabaseClient } from "@/lib/supabase";
 import {
   buildClientFollowerGrowthBundle,
   type ClientFollowerGrowthBundle,
+  type ClientFollowerHistoryRow,
 } from "./client-follower-growth-projection";
-import type { FollowerSnapshotRow } from "./follower-snapshot-contract";
 import { readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
 
-function isMissingSnapshotTableError(message: string) {
+export function isMissingSnapshotTableError(message: string) {
   const normalized = message.toLowerCase();
-  return normalized.includes("ig_account_follower_snapshots")
+  return normalized.includes("ig_account_social_profile_snapshots")
     && (normalized.includes("does not exist") || normalized.includes("schema cache"));
 }
 
@@ -19,9 +19,24 @@ export type LoadClientFollowerGrowthResult = {
   username: string;
   bundle: ClientFollowerGrowthBundle;
   snapshotTableAvailable: boolean;
+  dataStatus: "ready" | "stale" | "insufficient" | "pending" | "unavailable" | "error";
 };
 
-export async function loadClientFollowerGrowthSeries(accountId: string): Promise<LoadClientFollowerGrowthResult | null> {
+function withFollowerSourceStatus(
+  bundle: ClientFollowerGrowthBundle,
+  status: "unavailable" | "error",
+): ClientFollowerGrowthBundle {
+  return {
+    all: { ...bundle.all, freshnessStatus: status },
+    d30: { ...bundle.d30, freshnessStatus: status },
+    daily: { ...bundle.daily, freshnessStatus: status },
+  };
+}
+
+export async function loadClientFollowerGrowthSeries(
+  accountId: string,
+  clientId?: string,
+): Promise<LoadClientFollowerGrowthResult | null> {
   if (!accountId) return null;
 
   const supabase = createSupabaseClient();
@@ -38,60 +53,79 @@ export async function loadClientFollowerGrowthSeries(accountId: string): Promise
       .from("client_instagram_accounts")
       .select("created_at")
       .eq("account_id", accountId)
+      .eq("active", true)
+      .match(clientId ? { client_id: clientId } : {})
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle(),
     supabase
-      .from("ig_account_settings")
-      .select("timezone")
+      .from("ig_account_social_profile_snapshots")
+      .select("account_timezone")
       .eq("account_id", accountId)
+      .eq("lookup_status", "found")
+      .order("observed_at", { ascending: false })
+      .limit(1)
       .maybeSingle(),
     supabase
-      .from("ig_account_follower_snapshots")
-      .select("id,account_id,followers_count,captured_at,source,observation_kind,created_at")
+      .from("ig_account_social_profile_snapshots")
+      .select("id,account_id,followers_count,observed_at,source_provider,source_trigger,lookup_status,created_at")
       .eq("account_id", accountId)
-      .gte("captured_at", since.toISOString())
-      .order("captured_at", { ascending: true })
+      .eq("lookup_status", "found")
+      .gte("observed_at", since.toISOString())
+      .order("observed_at", { ascending: true })
       .limit(5000),
   ]);
 
   if (accountResult.error || !accountResult.data) return null;
 
   let snapshotTableAvailable = true;
-  let snapshots: FollowerSnapshotRow[] = [];
+  let sourceStatus: "ready" | "unavailable" | "error" = "ready";
+  let snapshots: ClientFollowerHistoryRow[] = [];
+
+  const sourceErrors = [settingsResult.error, snapshotsResult.error].filter(Boolean);
+  if (sourceErrors.some((error) => isMissingSnapshotTableError(error?.message ?? ""))) {
+    snapshotTableAvailable = false;
+    sourceStatus = "unavailable";
+  } else if (sourceErrors.length || linkResult.error || (clientId && !linkResult.data)) {
+    sourceStatus = "error";
+  }
 
   if (snapshotsResult.error) {
     if (isMissingSnapshotTableError(snapshotsResult.error.message)) {
       snapshotTableAvailable = false;
-    } else {
-      throw new Error(snapshotsResult.error.message);
+      sourceStatus = "unavailable";
     }
   } else {
     snapshots = ((snapshotsResult.data ?? []) as SupabaseRecord[]).map((row) => ({
       id: readString(row.id),
       account_id: readString(row.account_id, accountId),
       followers_count: Number(row.followers_count),
-      captured_at: readString(row.captured_at),
-      source: readString(row.source),
-      observation_kind: readString(row.observation_kind),
+      captured_at: readString(row.observed_at),
+      source: "ig_account_social_profile_snapshots",
+      observation_kind: readString(row.source_trigger, "daily_fallback") === "baseline_one_shot" ? "baseline" : "daily",
+      lookup_status: readString(row.lookup_status),
       created_at: readString(row.created_at),
     }));
   }
 
   const clientLinkedAt = readString((linkResult.data as SupabaseRecord | null)?.created_at, "") || null;
-  const businessTimezone = readString((settingsResult.data as SupabaseRecord | null)?.timezone, "");
+  const businessTimezone = readString((settingsResult.data as SupabaseRecord | null)?.account_timezone, "");
 
-  const bundle = buildClientFollowerGrowthBundle({
+  const projectedBundle = buildClientFollowerGrowthBundle({
     accountId,
     snapshots,
     clientLinkedAt,
     businessTimezone,
   });
+  const bundle = sourceStatus === "ready"
+    ? projectedBundle
+    : withFollowerSourceStatus(projectedBundle, sourceStatus);
 
   return {
     accountId,
     username: readString(accountResult.data.username, "Instagram account"),
     bundle,
     snapshotTableAvailable,
+    dataStatus: bundle.all.freshnessStatus,
   };
 }

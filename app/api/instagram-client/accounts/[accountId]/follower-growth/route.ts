@@ -22,7 +22,7 @@ export async function GET(
     return NextResponse.json({ ok: false, error: ownership.error }, { status: ownership.status });
   }
 
-  const growth = await loadClientFollowerGrowthSeries(normalizedAccountId);
+  const growth = await loadClientFollowerGrowthSeries(normalizedAccountId, session.clientId);
   if (!growth) {
     return NextResponse.json({ ok: false, error: "Follower growth unavailable." }, { status: 404 });
   }

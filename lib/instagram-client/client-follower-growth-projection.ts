@@ -5,10 +5,13 @@ import {
   zonedDateParts,
 } from "../instagram-dashboard/business-timezone.ts";
 import {
-  isAllowedFollowerSnapshotSource,
   isReliableFollowerCount,
   type FollowerSnapshotRow,
 } from "./follower-snapshot-contract.ts";
+
+export type ClientFollowerHistoryRow = FollowerSnapshotRow & {
+  lookup_status?: string;
+};
 
 export type FollowerGrowthPeriod = "all" | "30d" | "daily";
 
@@ -35,11 +38,14 @@ export type ClientFollowerGrowthSeries = {
   historyStartDate: string | null;
   points: FollowerGrowthPoint[];
   coverageStatus: FollowerCoverageStatus;
+  source: "ig_account_social_profile_snapshots";
+  currentAgeSeconds: number | null;
+  freshnessStatus: "ready" | "stale" | "insufficient" | "pending" | "unavailable" | "error";
 };
 
 export type ProjectFollowerGrowthInput = {
   accountId: string;
-  snapshots: FollowerSnapshotRow[];
+  snapshots: ClientFollowerHistoryRow[];
   clientLinkedAt: string | null;
   businessTimezone?: string | null;
   period: FollowerGrowthPeriod;
@@ -52,7 +58,7 @@ export type FollowerDelta72hProjection = {
   previousFollowers: number | null;
   from: string | null;
   to: string | null;
-  source: "ig_account_follower_snapshots";
+  source: "ig_account_social_profile_snapshots";
   freshness: "complete" | "insufficient_history";
 };
 
@@ -61,9 +67,10 @@ function readSnapshotTime(row: FollowerSnapshotRow) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function filterReliableFollowerSnapshots(rows: FollowerSnapshotRow[]) {
+export function filterReliableFollowerSnapshots(rows: ClientFollowerHistoryRow[]) {
   return rows
-    .filter((row) => isAllowedFollowerSnapshotSource(row.source))
+    .filter((row) => row.source === "ig_account_social_profile_snapshots")
+    .filter((row) => !row.lookup_status || row.lookup_status === "found")
     .filter((row) => isReliableFollowerCount(row.followers_count))
     .map((row) => ({ ...row, captured_at: new Date(row.captured_at).toISOString() }))
     .sort((left, right) => left.captured_at.localeCompare(right.captured_at));
@@ -106,7 +113,7 @@ export function projectFollowerDelta72h(rows: FollowerSnapshotRow[]): FollowerDe
       previousFollowers: null,
       from: null,
       to: null,
-      source: "ig_account_follower_snapshots",
+      source: "ig_account_social_profile_snapshots",
       freshness: "insufficient_history",
     };
   }
@@ -120,7 +127,7 @@ export function projectFollowerDelta72h(rows: FollowerSnapshotRow[]): FollowerDe
     previousFollowers: reference?.followers_count ?? null,
     from: reference?.captured_at ?? null,
     to: latest.captured_at,
-    source: "ig_account_follower_snapshots",
+    source: "ig_account_social_profile_snapshots",
     freshness: reference ? "complete" : "insufficient_history",
   };
 }
@@ -177,6 +184,10 @@ export function projectClientFollowerGrowthSeries(input: ProjectFollowerGrowthIn
   const linked = snapshotsAfterClientLink(reliable, input.clientLinkedAt);
 
   const latest = linked.length ? linked[linked.length - 1] : null;
+  const currentAgeSeconds = latest
+    ? Math.max(0, Math.round((now.getTime() - Date.parse(latest.captured_at)) / 1000))
+    : null;
+  const stale = currentAgeSeconds !== null && currentAgeSeconds > 36 * 60 * 60;
   const base: ClientFollowerGrowthSeries = {
     period: input.period,
     businessTimezone: timezone,
@@ -190,6 +201,15 @@ export function projectClientFollowerGrowthSeries(input: ProjectFollowerGrowthIn
     historyStartDate: linked[0]?.captured_at ?? null,
     points: [],
     coverageStatus: linked.length === 0 ? "none" : linked.length === 1 ? "baseline_only" : "partial",
+    source: "ig_account_social_profile_snapshots",
+    currentAgeSeconds,
+    freshnessStatus: linked.length === 0
+      ? "pending"
+      : stale
+        ? "stale"
+      : linked.length === 1
+          ? "insufficient"
+          : "ready",
   };
 
   if (!linked.length) return base;

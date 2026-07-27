@@ -5,6 +5,7 @@ import { readString } from "./guards";
 import { loadClientConnectProgress } from "./load-client-connect-progress";
 import { isActiveClientConnectStatus, shouldSuppressPassiveReadyToConnect } from "./connect-operation-state";
 import { projectPassiveReadinessByAccountId } from "./project-client-workspace-readiness";
+import { isClientSelectableInstagramAccount } from "./client-account-visibility";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -71,6 +72,10 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
     .filter(([id]) => Boolean(id)));
 
   const accountRows = (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
+    .filter((row) => isClientSelectableInstagramAccount({
+      adminLifecycleStatus: row.admin_lifecycle_status,
+      status: row.status,
+    }))
     .map((row) => {
       const accountId = readString(row.id);
       const link = linkByAccount.get(accountId);
