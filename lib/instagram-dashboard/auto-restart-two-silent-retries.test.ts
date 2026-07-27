@@ -77,6 +77,7 @@ class FakeSupabase {
     ["runtime_events", []],
   ]);
   requests: Row[] = [];
+  createRequestStatus = "queued";
 
   rows(table: string) {
     const rows = this.tables.get(table) ?? [];
@@ -94,7 +95,7 @@ class FakeSupabase {
       return { data: { restored_count: 0 }, error: null };
     }
     assert.equal(name, "create_account_run_request");
-    const request = { id: `request-${this.requests.length + 1}`, ...args };
+    const request = { id: `request-${this.requests.length + 1}`, status: this.createRequestStatus, ...args };
     this.requests.push(request);
     return { data: request, error: null };
   }
@@ -275,6 +276,28 @@ test("terminal request without a new run advances the durable retry idempotency 
   assert.equal(secondMetadata.retry_index, 2);
   assert.equal(secondMetadata.attempt_id, 3);
   assert.equal(secondPlan.next_retry_index, 2);
+});
+
+test("a terminal idempotent enqueue response is never counted as a new request", async () => {
+  const supabase = new FakeSupabase();
+  supabase.createRequestStatus = "blocked";
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [candidate(0) as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.enqueued_count, 0);
+  assert.equal(result.result.blocked_count, 1);
+  assert.match(result.result.blocked[0].reason, /^enqueue_returned_terminal_request:blocked$/);
+  assert.equal(
+    supabase.rows("auto_restart_decisions")[0].reason,
+    "enqueue_returned_terminal_request:blocked",
+  );
 });
 
 test("the natural tick persists a not-needed decision without creating a request", async () => {

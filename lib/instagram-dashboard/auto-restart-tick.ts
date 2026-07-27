@@ -105,6 +105,8 @@ function readRows(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : [];
 }
 
+const ENQUEUE_ACTIVE_REQUEST_STATUSES = new Set(["queued", "claimed", "starting", "running"]);
+
 function query(supabase: SupabaseLike, table: string): QueryBuilder {
   return supabase.from(table) as QueryBuilder;
 }
@@ -822,7 +824,34 @@ export async function runAutoRestartTick(
           },
         });
 
-        const newRequestId = readString((requestData as Record<string, unknown>)?.id, "") || null;
+        const requestRow = (requestData ?? {}) as Record<string, unknown>;
+        const newRequestId = readString(requestRow.id, "") || null;
+        const returnedRequestStatus = readString(requestRow.status, "").toLowerCase();
+        if (!newRequestId || !ENQUEUE_ACTIVE_REQUEST_STATUSES.has(returnedRequestStatus)) {
+          if (deviceId) await releaseDeviceLock(supabase, deviceId, executionWorkerId);
+          const reason = !newRequestId
+            ? "enqueue_request_id_missing"
+            : `enqueue_returned_terminal_request:${returnedRequestStatus || "unknown"}`;
+          summary.blocked_count += 1;
+          summary.blocked.push({
+            account_id: candidate.accountId,
+            username: candidate.username,
+            reason,
+          });
+          await writeBlockedCandidateDecision(supabase, {
+            candidate: scheduledCandidate,
+            requestId,
+            idempotencyKey: `${enqueueKey}:terminal-response`,
+            actor: options.actor || "system",
+            reason,
+            mode: extendedRules.mode,
+            evaluatedAt: now.toISOString(),
+            deviceId,
+            restartCountDay: restartsToday,
+            restartCountWindow: restartsInBusinessSession,
+          });
+          continue;
+        }
         if (deviceId && newRequestId) {
           const bound = await bindDeviceLockToRequest(supabase, {
             deviceId,
