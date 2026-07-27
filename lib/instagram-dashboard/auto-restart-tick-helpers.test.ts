@@ -7,6 +7,7 @@ import { maxRetriesBlockReason } from "./auto-restart-operational.ts";
 import {
   autoRestartEnqueueIdempotencyKey,
   autoRestartTickIdempotencyKey,
+  autoRestartTickLockBucketStart,
   accountRiskTier,
   resumePlanRuntimeSupported,
   sameSastBusinessDay,
@@ -37,6 +38,17 @@ test("auto restart request idempotency is stable per business session and retry"
       progressSourceRunId: "progress-run-2",
     }),
     "auto-restart:account-1:run-1:source:progress-run-2:retry:1",
+  );
+});
+
+test("tick lock advances every minute even when account checks use a longer interval", () => {
+  assert.equal(
+    autoRestartTickLockBucketStart(new Date("2026-07-27T19:30:59.999Z")),
+    "2026-07-27T19:30:00.000Z",
+  );
+  assert.equal(
+    autoRestartTickLockBucketStart(new Date("2026-07-27T19:31:00.000Z")),
+    "2026-07-27T19:31:00.000Z",
   );
 });
 

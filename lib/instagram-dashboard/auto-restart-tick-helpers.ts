@@ -49,6 +49,15 @@ export function autoRestartTickIdempotencyKey(workerId: string, bucketStartIso: 
   return `auto-restart-tick:${workerId}:${bucketStartIso}`;
 }
 
+export function autoRestartTickLockBucketStart(now: Date) {
+  // The production cron and embedded dispatcher both evaluate every minute.
+  // Their shared lock must advance at the same cadence so a tick just before
+  // an exact cooldown boundary cannot suppress the first eligible tick.
+  const ms = 60_000;
+  const bucket = Math.floor(now.getTime() / ms) * ms;
+  return new Date(bucket).toISOString();
+}
+
 export function autoRestartEnqueueIdempotencyKey(input: {
   accountId: string;
   businessSessionId: string;
