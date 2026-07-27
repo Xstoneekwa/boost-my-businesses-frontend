@@ -1,5 +1,9 @@
 import { createSupabaseClient } from "@/lib/supabase";
-import { normalizeBusinessTimezone, normalizeLegacyScheduleTimezone } from "@/lib/instagram-dashboard/business-timezone";
+import {
+  businessDayKeyFromIso,
+  normalizeBusinessTimezone,
+  normalizeLegacyScheduleTimezone,
+} from "@/lib/instagram-dashboard/business-timezone";
 import { jsonError, jsonOk, readString, requireInstagramAdmin, type SupabaseRecord } from "../../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 
@@ -37,7 +41,9 @@ function readDateForTimezone(timezone: string) {
   const year = parts.find((part) => part.type === "year")?.value;
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
-  return year && month && day ? `${year}-${month}-${day}` : new Date().toISOString().slice(0, 10);
+  return year && month && day
+    ? `${year}-${month}-${day}`
+    : businessDayKeyFromIso(new Date().toISOString(), normalizeBusinessTimezone());
 }
 
 function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {

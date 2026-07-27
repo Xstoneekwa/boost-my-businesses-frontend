@@ -1,4 +1,5 @@
 import { readString } from "./guards.ts";
+import { businessDayRangeStartIso } from "@/lib/instagram-dashboard/business-timezone";
 
 type Lang = "fr" | "en";
 type SafeRecord = Record<string, unknown>;
@@ -457,8 +458,5 @@ export function collectForbiddenAmbiguousClientLabels(payload: unknown) {
 
 export function clientActivityPeriodSince(period: ClientActivityQuery["period"]) {
   const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - days + 1);
-  since.setUTCHours(0, 0, 0, 0);
-  return since.toISOString();
+  return businessDayRangeStartIso(new Date(), days);
 }

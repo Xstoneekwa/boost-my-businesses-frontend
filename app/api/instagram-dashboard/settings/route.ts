@@ -20,6 +20,7 @@ import {
 import { dmTemplateStatusLabel, fetchActiveDmTemplate } from "@/lib/instagram-dashboard/dm-template-store";
 import {
   businessDayKeyFromIso,
+  businessDayWindow,
   zonedLocalDateTimeToUtc,
 } from "@/lib/instagram-dashboard/business-timezone";
 import {
@@ -378,7 +379,7 @@ async function countSuccessfulUnfollowsToday(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
 ) {
-  const since = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+  const since = businessDayWindow().startIso;
   const { count, error } = await supabase
     .from("ig_interacted_users")
     .select("id", { count: "exact", head: true })

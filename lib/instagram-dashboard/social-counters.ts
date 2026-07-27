@@ -1,5 +1,7 @@
 type RecordValue = Record<string, unknown>;
 
+import { businessDayKeyFromIso, DEFAULT_BUSINESS_TIMEZONE } from "./business-timezone.ts";
+
 export type ProfileSocialCounters = {
   follows: number;
   unfollows: number;
@@ -214,7 +216,7 @@ export function verifiedUnfollowRowsAsInteractionEvents(rows: RecordValue[]): Re
   const verified = new Map<string, RecordValue>();
   for (const row of rows) {
     const accountId = readString(row.account_id, "");
-    const runId = readString(row.run_id, readString(row.last_run_id, ""));
+    const runId = readString(row.last_run_id, readString(row.run_id, ""));
     const username = normalizedTarget(row);
     const unfollowedAt = readString(row.unfollowed_at, "");
     const result = readString(row.unfollow_result, "").toLowerCase();
@@ -314,16 +316,17 @@ export function reconcileSocialCounters(...sources: ProfileSocialCounters[]): Pr
   return withInteractionsTotal(counters);
 }
 
-export function dayKeyFromIso(value: unknown) {
-  const date = new Date(readString(value, ""));
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+export function dayKeyFromIso(value: unknown, timezone = DEFAULT_BUSINESS_TIMEZONE) {
+  return businessDayKeyFromIso(readString(value, ""), timezone);
 }
 
-export function interactionEventCountersByDay(eventRows: RecordValue[]) {
+export function interactionEventCountersByDay(
+  eventRows: RecordValue[],
+  timezone = DEFAULT_BUSINESS_TIMEZONE,
+) {
   const rowsByDay = new Map<string, RecordValue[]>();
   for (const row of eventRows) {
-    const date = dayKeyFromIso(row.event_at ?? row.created_at);
+    const date = dayKeyFromIso(row.event_at ?? row.created_at, timezone);
     if (!date) continue;
     rowsByDay.set(date, [...(rowsByDay.get(date) ?? []), row]);
   }

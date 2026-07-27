@@ -1,6 +1,7 @@
 import { jsonError, jsonOk, requireInstagramAdmin } from "@/app/api/instagram-dashboard/_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "@/app/api/instagram-dashboard/compass/relay-auth";
 import { projectProfilesLive } from "@/lib/instagram-dashboard/profiles-live-projection";
+import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
 import { createSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,8 @@ export async function GET(request: Request) {
     if (unauthorized) return unauthorized;
 
     const requestedAccountIds = accountIdsFromRequest(request);
-    const now = new Date().toISOString();
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
     if (!requestedAccountIds.length) {
       return liveJsonOk({
         generated_at: now,
@@ -78,7 +80,8 @@ export async function GET(request: Request) {
       });
     }
 
-    const since = `${now.slice(0, 10)}T00:00:00.000Z`;
+    const businessDay = businessDayWindow(nowDate);
+    const since = businessDay.startIso;
     const [requests, runs, logs, events, unfollows, actions, socialProfileSnapshots] = await Promise.all([
       supabase.from("account_run_requests").select("id,account_id,status,run_id,cancel_requested_at,created_at,claimed_at").in("account_id", existingAccountIds).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]).limit(1000),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at").in("account_id", existingAccountIds).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
@@ -109,6 +112,12 @@ export async function GET(request: Request) {
       query_count: 8,
       source: "profiles_live_batched_v2",
       projection_mode: "full_snapshot",
+      counter_projection: {
+        business_date: businessDay.businessDate,
+        business_timezone: businessDay.timezone,
+        computed_at: now,
+        source: "canonical_persisted_actions_sast_v1",
+      },
     });
   } catch {
     return jsonError("Could not load live Profiles projection.", 500);

@@ -1,6 +1,7 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { mapScheduleGateReasonToRunStart, type ScheduleBlockReason } from "@/lib/instagram-dashboard/schedule";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
+import { businessDayWindow } from "./business-timezone.ts";
 
 import { ACTIVE_RUN_REQUEST_STATUSES } from "./run-request-statuses.ts";
 
@@ -1044,7 +1045,7 @@ async function accountHasFeatureEntitlement(accountId: string, featureCode: "fol
 }
 
 async function countUnfollowsToday(accountId: string) {
-  const since = `${utcDateString()}T00:00:00.000Z`;
+  const since = businessDayWindow().startIso;
   const { count, error } = await createSupabaseClient()
     .from("ig_interacted_users")
     .select("id", { count: "exact", head: true })
@@ -1058,7 +1059,7 @@ async function countUnfollowsToday(accountId: string) {
 }
 
 async function countFollowsToday(accountId: string) {
-  const since = `${utcDateString()}T00:00:00.000Z`;
+  const since = businessDayWindow().startIso;
   const { count, error } = await createSupabaseClient()
     .from("ig_interacted_users")
     .select("id", { count: "exact", head: true })

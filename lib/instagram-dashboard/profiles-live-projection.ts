@@ -1,6 +1,7 @@
 import { isCurrentBlockingDashboardAction } from "./dashboard-action-blockers.ts";
 import { projectSocialProfileFollowerDelta3d } from "./social-profile-growth-projection.ts";
 import type { SocialProfileSnapshotRow } from "./social-profile-snapshot-contract.ts";
+import { businessDayWindow } from "./business-timezone.ts";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
@@ -86,6 +87,7 @@ export function projectProfilesLive(input: {
   dashboardActions: Row[];
   socialProfileSnapshots: SocialProfileSnapshotRow[];
 }) {
+  const projection = businessDayWindow(new Date(input.now));
   const requestsByAccount = grouped(input.requests);
   const runsByAccount = grouped(input.runs);
   const logsByAccount = grouped(input.actionLogs);
@@ -153,6 +155,12 @@ export function projectProfilesLive(input: {
       currentRunCounters: counters,
       liveSupportedKinds: ["follow", "unfollow", "like", "dm"],
       countersToday: counters.projectedDisplayCount,
+      counterProjection: {
+        businessDate: projection.businessDate,
+        businessTimezone: projection.timezone,
+        computedAt: input.now,
+        source: "canonical_persisted_actions_sast_v1",
+      },
       interactionsToday: counters.projectedDisplayCount.interactionsTotal,
       currentBlocker: currentBlocker ? {
         actionType: text(currentBlocker.action_type),

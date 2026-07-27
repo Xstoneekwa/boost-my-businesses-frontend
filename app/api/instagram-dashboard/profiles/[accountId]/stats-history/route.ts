@@ -3,10 +3,16 @@ import {
   reconcileStatsDaySocialCounters,
   socialActionKindFromLog,
   toStatsDaySocialCounters,
+  verifiedUnfollowRowsAsInteractionEvents,
   TOTAL_INTERACTIONS_DEFINITION,
   STATS_TOTAL_INTERACTIONS_DEFINITION,
 } from "@/lib/instagram-dashboard/social-counters";
-import { businessDayKeyFromIso } from "@/lib/instagram-dashboard/business-timezone";
+import {
+  businessDayKeyFromIso,
+  businessDayRangeStartIso,
+  DEFAULT_BUSINESS_TIMEZONE,
+  formatBusinessTimestamp,
+} from "@/lib/instagram-dashboard/business-timezone";
 import {
   projectSocialProfileSnapshots,
   type SocialProfileSnapshotRow,
@@ -79,11 +85,9 @@ function dayKey(value: unknown, timezone: string) {
   return businessDayKeyFromIso(readString(value, ""), timezone);
 }
 
-function formatSessionTime(value: string | null) {
+function formatSessionTime(value: string | null, timezone: string) {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${date.toISOString().slice(11, 19)} ${date.toISOString().slice(0, 10)}`;
+  return formatBusinessTimestamp(value, timezone);
 }
 
 function latestIso(a: string | null, b: string | null) {
@@ -231,39 +235,46 @@ export async function GET(
 
     const url = new URL(request.url);
     const days = Math.max(1, Math.min(30, readNumber(url.searchParams.get("days"), 30)));
-    const since = new Date();
-    since.setUTCDate(since.getUTCDate() - days + 1);
-    since.setUTCHours(0, 0, 0, 0);
+    const now = new Date();
+    const since = businessDayRangeStartIso(now, days, DEFAULT_BUSINESS_TIMEZONE);
 
     const supabase = createSupabaseClient();
-    const [logsResult, runsResult, interactionEventsResult, socialSnapshotsResult, settingsResult, packageResult] = await Promise.all([
+    const [logsResult, runsResult, interactionEventsResult, unfollowsResult, socialSnapshotsResult, settingsResult, packageResult] = await Promise.all([
       supabase
         .from("ig_action_logs")
         .select("id,action_type,status,created_at")
         .eq("account_id", normalizedAccountId)
-        .gte("created_at", since.toISOString())
+        .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(5000),
       supabase
         .from("ig_runs")
         .select("id,status,created_at,started_at,finished_at,total_follow,total_like,total_dm,total_story")
         .eq("account_id", normalizedAccountId)
-        .gte("created_at", since.toISOString())
+        .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(500),
       supabase
         .from("ig_interaction_events")
         .select("event_type,event_status,interaction_type,event_at,payload")
         .eq("account_id", normalizedAccountId)
-        .gte("event_at", since.toISOString())
+        .gte("event_at", since)
         .order("event_at", { ascending: false })
         .limit(5000),
+      supabase
+        .from("ig_interacted_users")
+        .select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence")
+        .eq("account_id", normalizedAccountId)
+        .eq("unfollow_result", "success")
+        .gte("unfollowed_at", since)
+        .order("unfollowed_at", { ascending: false })
+        .limit(10000),
       supabase
         .from("ig_account_social_profile_snapshots")
         .select("account_id,username_normalized,followers_count,following_count,posts_count,observed_at,snapshot_local_date,account_timezone,timezone_source,source_provider,source_trigger,source_event_id,source_run_id,source_business_session_id,lookup_status,freshness_status,idempotency_key")
         .eq("account_id", normalizedAccountId)
         .eq("lookup_status", "found")
-        .gte("observed_at", since.toISOString())
+        .gte("observed_at", since)
         .order("observed_at", { ascending: true })
         .limit(5000),
       supabase
@@ -280,7 +291,7 @@ export async function GET(
         .maybeSingle<SupabaseRecord>(),
     ]);
 
-    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? socialSnapshotsResult.error ?? settingsResult.error ?? packageResult.error;
+    const firstError = logsResult.error ?? runsResult.error ?? interactionEventsResult.error ?? unfollowsResult.error ?? socialSnapshotsResult.error ?? settingsResult.error ?? packageResult.error;
     if (firstError) return jsonError(firstError.message, 500);
 
     const byDay = new Map<string, DayCounters>();
@@ -317,8 +328,13 @@ export async function GET(
       runTotalsByDay.set(date, totals);
     }
 
+    const canonicalInteractionEvents = [
+      ...((interactionEventsResult.data ?? []) as SupabaseRecord[]),
+      ...verifiedUnfollowRowsAsInteractionEvents((unfollowsResult.data ?? []) as SupabaseRecord[]),
+    ];
     const interactionEventsByDay = interactionEventCountersByDay(
-      (interactionEventsResult.data ?? []) as SupabaseRecord[],
+      canonicalInteractionEvents,
+      socialSnapshots.timezone,
     );
     const eventTotalsByDay = new Map<string, SocialCounters>();
     for (const [date, counters] of interactionEventsByDay.entries()) {
@@ -368,7 +384,9 @@ export async function GET(
         return {
           ...reconciled,
           ...caps,
-          session_time: formatSessionTime(day.session_time),
+          session_at: day.session_time,
+          session_time: formatSessionTime(day.session_time, socialSnapshots.timezone),
+          session_timezone: socialSnapshots.timezone,
           total_interactions: reconciled.follow_count + reconciled.unfollow_count + reconciled.like_count + reconciled.comment_count + reconciled.dm_count + reconciled.watch_count,
         };
       })
@@ -382,6 +400,7 @@ export async function GET(
         actions: "ig_action_logs",
         runs: "ig_runs.total_* reconciliation for post-follow likes",
         interaction_events: "ig_interaction_events post_like_success for live post-follow likes",
+        unfollows: "ig_interacted_users.unfollowed_at where unfollow_result=success",
         caps: "account_package_summary+ig_account_settings",
         followers: "ig_account_social_profile_snapshots",
         followings: "ig_account_social_profile_snapshots",

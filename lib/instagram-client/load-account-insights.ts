@@ -16,6 +16,10 @@ import {
 } from "./client-overview-recent-feed-projection";
 import { readString } from "./guards";
 import { isMissingSnapshotTableError } from "./load-client-follower-growth";
+import {
+  businessDayKeyFromIso,
+  businessDayRangeStartIso,
+} from "@/lib/instagram-dashboard/business-timezone";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -75,9 +79,7 @@ function readNumber(value: unknown, fallback = 0) {
 }
 
 function dayKey(value: unknown) {
-  const date = new Date(readString(value, ""));
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+  return businessDayKeyFromIso(readString(value, ""));
 }
 
 function socialActionKind(actionType: string) {
@@ -145,9 +147,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
   if (!accountId) return null;
   const supabase = createSupabaseClient();
   const days = 90;
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - days + 1);
-  since.setUTCHours(0, 0, 0, 0);
+  const since = businessDayRangeStartIso(new Date(), days);
 
   const [
     accountResult,
@@ -164,9 +164,9 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
     socialSnapshotsResult,
   ] = await Promise.all([
     supabase.from("ig_accounts").select("id,username,status,admin_lifecycle_status,followers_count").eq("id", accountId).maybeSingle(),
-    supabase.from("ig_action_logs").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(5000),
-    supabase.from("ig_runs").select("id,status,created_at,started_at,total_follow,total_like,total_dm,total_story").eq("account_id", accountId).gte("created_at", since.toISOString()).order("created_at", { ascending: false }).limit(1000),
-    supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,interaction_status,event_at,created_at,payload,username").eq("account_id", accountId).gte("event_at", since.toISOString()).order("event_at", { ascending: false }).limit(5000),
+    supabase.from("ig_action_logs").select("id,action_type,status,created_at").eq("account_id", accountId).gte("created_at", since).order("created_at", { ascending: false }).limit(5000),
+    supabase.from("ig_runs").select("id,status,created_at,started_at,total_follow,total_like,total_dm,total_story").eq("account_id", accountId).gte("created_at", since).order("created_at", { ascending: false }).limit(1000),
+    supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,interaction_status,event_at,created_at,payload,username").eq("account_id", accountId).gte("event_at", since).order("event_at", { ascending: false }).limit(5000),
     supabase.from("ig_targets").select("id,normalized_username,target_username,input_username,status,verification_status,quality_status,followers_count,created_at").eq("account_id", accountId).order("created_at", { ascending: false }).limit(500),
     supabase
       .from("account_protection_list_entries")
@@ -185,7 +185,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       .from("ig_interaction_events")
       .select("id,account_id,run_id,request_id,session_id,event_type,event_status,interaction_type,interaction_status,event_at,created_at,username,source_target_username")
       .eq("account_id", accountId)
-      .gte("event_at", since.toISOString())
+      .gte("event_at", since)
       .order("event_at", { ascending: false })
       .limit(10000),
     supabase
@@ -193,7 +193,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       .select("id,account_id,run_id,last_run_id,username,unfollow_result,unfollowed_at")
       .eq("account_id", accountId)
       .eq("unfollow_result", "success")
-      .gte("unfollowed_at", since.toISOString())
+      .gte("unfollowed_at", since)
       .order("unfollowed_at", { ascending: false })
       .limit(10000),
     supabase
@@ -201,7 +201,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       .select("id,account_id,dm_type,recipient_username,status,sent_at")
       .eq("account_id", accountId)
       .eq("status", "sent")
-      .gte("sent_at", since.toISOString())
+      .gte("sent_at", since)
       .order("sent_at", { ascending: false })
       .limit(10000),
     supabase
@@ -209,7 +209,7 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
       .select("followers_count,observed_at,account_timezone,lookup_status,source_provider,freshness_status")
       .eq("account_id", accountId)
       .eq("lookup_status", "found")
-      .gte("observed_at", since.toISOString())
+      .gte("observed_at", since)
       .order("observed_at", { ascending: true })
       .limit(5000),
   ]);

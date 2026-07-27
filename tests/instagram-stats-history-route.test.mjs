@@ -37,3 +37,19 @@ test("stats history reconciles post-follow likes from ig_runs totals", () => {
   assert.match(source, /ig_interaction_events/);
   assert.match(source, /post_like_success/);
 });
+
+test("stats history restores canonical persisted Unfollows including continuation runs", () => {
+  assert.match(source, /ig_interacted_users/);
+  assert.match(source, /unfollow_result", "success"/);
+  assert.match(source, /verifiedUnfollowRowsAsInteractionEvents/);
+  assert.match(source, /last_run_id/);
+  assert.match(source, /ig_interacted_users\.unfollowed_at where unfollow_result=success/);
+});
+
+test("stats history filters and groups by the SAST business date and labels SAST", () => {
+  assert.match(source, /businessDayRangeStartIso/);
+  assert.match(source, /interactionEventCountersByDay\([\s\S]*socialSnapshots\.timezone/);
+  assert.match(source, /formatBusinessTimestamp/);
+  assert.doesNotMatch(source, /setUTCHours\(0/);
+  assert.doesNotMatch(source, /toISOString\(\)\.slice\(11, 19\)/);
+});

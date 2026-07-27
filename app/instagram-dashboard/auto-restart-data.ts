@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
 import { firstAutomationBlockingIncident } from "@/lib/instagram-dashboard/incident-automation-blocking";
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
@@ -223,7 +224,7 @@ function readBoolean(value: unknown, fallback = false) {
 }
 
 function todayStartIso() {
-  return `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+  return businessDayWindow().startIso;
 }
 
 function mapByAccount(rows: SupabaseRecord[], key = "account_id") {

@@ -89,10 +89,54 @@ export function zonedLocalDateTimeToUtc(
   return new Date(guess);
 }
 
-function addLocalDays(localDate: string, days: number) {
+export function addBusinessDays(localDate: string, days: number) {
   const [year, month, day] = localDate.split("-").map(Number);
   const utc = new Date(Date.UTC(year, month - 1, day + days, 0, 0, 0, 0));
   return utc.toISOString().slice(0, 10);
+}
+
+export function businessDayWindow(
+  now = new Date(),
+  timezone = DEFAULT_BUSINESS_TIMEZONE,
+) {
+  const businessDate = businessDayKeyFromIso(now.toISOString(), timezone);
+  if (!businessDate) throw new Error("business_day_invalid");
+  const nextBusinessDate = addBusinessDays(businessDate, 1);
+  return {
+    businessDate,
+    timezone: normalizeBusinessTimezone(timezone),
+    startIso: zonedLocalDateTimeToUtc(businessDate, "00:00", timezone).toISOString(),
+    endIso: zonedLocalDateTimeToUtc(nextBusinessDate, "00:00", timezone).toISOString(),
+  };
+}
+
+export function businessDayRangeStartIso(
+  now = new Date(),
+  days = 1,
+  timezone = DEFAULT_BUSINESS_TIMEZONE,
+) {
+  const { businessDate } = businessDayWindow(now, timezone);
+  const firstBusinessDate = addBusinessDays(businessDate, -Math.max(0, Math.trunc(days) - 1));
+  return zonedLocalDateTimeToUtc(firstBusinessDate, "00:00", timezone).toISOString();
+}
+
+export function formatBusinessTimestamp(
+  value: string,
+  timezone = DEFAULT_BUSINESS_TIMEZONE,
+) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-ZA", {
+    timeZone: normalizeBusinessTimezone(timezone),
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+    timeZoneName: "short",
+  }).format(date).replace(",", " ·");
 }
 
 export function standardBusinessSlotsForLocalDate(
@@ -100,7 +144,7 @@ export function standardBusinessSlotsForLocalDate(
   timezone = DEFAULT_BUSINESS_TIMEZONE,
 ) {
   return STANDARD_BUSINESS_SLOTS_LOCAL.map((slot) => {
-    const endDate = slot.end === "00:00" ? addLocalDays(localDate, 1) : localDate;
+    const endDate = slot.end === "00:00" ? addBusinessDays(localDate, 1) : localDate;
     return {
       ...slot,
       timezone,

@@ -16,6 +16,7 @@ import {
 import type { ClientAgencyRecentFeedItem } from "./client-agency-overview-projection";
 import { loadTargetEligibilityCountsByAccount } from "../instagram-dashboard/account-target-eligibility";
 import { readString } from "./guards";
+import { businessDayRangeStartIso } from "../instagram-dashboard/business-timezone";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -43,13 +44,12 @@ async function loadPasswordActionAccountIds(clientId: string, accountIds: string
 async function loadRecentInteractionEvents(accountIds: string[]) {
   if (!accountIds.length) return [] as SupabaseRecord[];
   const supabase = createSupabaseClient();
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 14);
+  const since = businessDayRangeStartIso(new Date(), 15);
   const { data, error } = await supabase
     .from("ig_interaction_events")
     .select("id,account_id,run_id,request_id,session_id,event_type,event_status,interaction_type,event_at,created_at,username,source_target_username")
     .in("account_id", accountIds)
-    .gte("event_at", since.toISOString())
+    .gte("event_at", since)
     .order("event_at", { ascending: false })
     .limit(400);
   if (error || !Array.isArray(data)) return [];

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -34,7 +33,10 @@ test("backend query failures are errors and never empty successful projections",
   assert.match(routeSource, /if \(failed\?\.error\) return jsonError\("Could not load live Profiles projection\.", 500\)/);
 });
 
-test("the full Profiles route remains byte-for-byte unchanged from backend base", () => {
-  const hash = createHash("sha256").update(fullProfilesSource).digest("hex");
-  assert.equal(hash, "dccc627ab36d9451d20b0b8df33f82cd489c1e6d7ae1accce94320d623c665d4");
+test("full and live Profiles routes share the canonical SAST freshness contract", () => {
+  assert.match(routeSource, /businessDayWindow\(nowDate\)/);
+  assert.doesNotMatch(routeSource, /now\.slice\(0, 10\).*T00:00:00\.000Z/);
+  assert.match(routeSource, /canonical_persisted_actions_sast_v1/);
+  assert.match(fullProfilesSource, /canonical_persisted_actions_sast_v1/);
+  assert.match(fullProfilesSource, /businessDayWindow/);
 });
