@@ -239,6 +239,44 @@ test("actual tick creates exactly retry requests 1 and 2, then no third request"
   }));
 });
 
+test("terminal request without a new run advances the durable retry idempotency key", async () => {
+  const supabase = new FakeSupabase();
+  const unchangedSourceRun = candidate(0);
+  const common = {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  };
+
+  const retryOne = await runAutoRestartTick(supabase as never, {
+    ...common,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [unchangedSourceRun as unknown as Row] },
+  });
+  assert.equal(retryOne.result.enqueued_count, 1);
+
+  const retryTwo = await runAutoRestartTick(supabase as never, {
+    ...common,
+    now: new Date("2026-07-22T20:10:00.000Z"),
+    overview: { candidates: [unchangedSourceRun as unknown as Row] },
+  });
+  assert.equal(retryTwo.result.enqueued_count, 1);
+  assert.deepEqual(
+    supabase.requests.map((row) => row.p_idempotency_key),
+    [
+      "auto-restart:account-1:business-session-1:retry:1",
+      "auto-restart:account-1:business-session-1:retry:2",
+    ],
+  );
+  const secondMetadata = supabase.requests[1].p_metadata_safe as Row;
+  const secondPlan = secondMetadata.resume_plan as Row;
+  assert.equal(secondMetadata.retry_index, 2);
+  assert.equal(secondMetadata.attempt_id, 3);
+  assert.equal(secondPlan.next_retry_index, 2);
+});
+
 test("the natural tick persists a not-needed decision without creating a request", async () => {
   const supabase = new FakeSupabase();
   const complete = candidate(0);

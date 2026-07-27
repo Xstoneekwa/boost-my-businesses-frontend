@@ -649,7 +649,26 @@ export async function runAutoRestartTick(
         continue;
       }
 
-      const nextRetryIndex = candidate.nextRetryIndex;
+      // A request may terminalize before creating a new ig_runs row (claim
+      // validation, device preflight, etc.). In that case the latest run keeps
+      // advertising the previous nextRetryIndex. Advance from the durable
+      // enqueue history so a later natural tick cannot reuse the same
+      // idempotency key and report a phantom enqueue of the old request.
+      const nextRetryIndex = Math.max(
+        candidate.nextRetryIndex,
+        restartsInBusinessSession + 1,
+      );
+      const scheduledCandidate = nextRetryIndex === candidate.nextRetryIndex
+        ? candidate
+        : {
+          ...candidate,
+          nextRetryIndex,
+          reliability: {
+            ...candidate.reliability,
+            nextRetryIndex: String(nextRetryIndex),
+            nextAttempt: String(nextRetryIndex + 1),
+          },
+        };
       const enqueueKey = autoRestartEnqueueIdempotencyKey({
         accountId: candidate.accountId,
         businessSessionId,
@@ -782,7 +801,7 @@ export async function runAutoRestartTick(
           }
         }
 
-        const resumeMetadata = buildAutoRestartResumePlanMetadata(candidate, now);
+        const resumeMetadata = buildAutoRestartResumePlanMetadata(scheduledCandidate, now);
         const requestedByActor = options.requestedByActor
           || (options.manual ? MANUAL_RESTART_AUDIT_ACTOR : options.actor || "system");
         const requestData = await enqueueAutoRestartRequest(supabase, {
@@ -860,7 +879,7 @@ export async function runAutoRestartTick(
           restartCountWindow: restartsInBusinessSession + 1,
           businessSessionId,
           metadata: {
-            ...candidateDecisionMetadata(candidate, {
+            ...candidateDecisionMetadata(scheduledCandidate, {
               enqueueAllowed: true,
               evaluatedAt: now.toISOString(),
             }),
