@@ -13,8 +13,11 @@ import {
 } from "@/lib/instagram-dashboard/auto-restart-candidate-policy";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
 import {
+  pruneTerminalAccountSessionPhases,
+  resolvePhaseCompletion,
   resolvePlannedAccountSession,
   type AutoRestartAccountSessionPhases,
+  type PhaseCompletion,
 } from "@/lib/instagram-dashboard/auto-restart-phase-plan";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
@@ -107,6 +110,13 @@ export type AutoRestartCandidate = {
   remainingFollowQuota: number;
   plannedPhasesToRun: AutoRestartAccountSessionPhases;
   plannedQuotaRemaining: { welcome: number; follow: number; unfollow: number; outreach: number };
+  allEnabledPhasesTerminal?: boolean;
+  phaseCompletion?: {
+    welcome: PhaseCompletion;
+    follow: PhaseCompletion;
+    unfollow: PhaseCompletion;
+    outreach: PhaseCompletion;
+  };
   decisionOutcome: "eligible" | "not_needed" | "blocked";
   restartEligible: boolean;
   blockReason: string;
@@ -801,23 +811,51 @@ function planCandidate({
   if ((!resolvedPhoneName || resolvedPhoneName === "Unknown phone") && !hasAssignedDevice) {
     blockingReasons.push("assignment_or_device_pending");
   }
-  const plannedAccountSession = resolvePlannedAccountSession({
+  const initialPlannedAccountSession = resolvePlannedAccountSession({
     persistedPhases: reliability.phasesToRun,
     persistedQuotaRemaining: reliability.quotaRemaining,
     quotas: { follow, unfollow, welcome },
   });
-  if (
-    plannedAccountSession.phases.follow
-    && plannedAccountSession.remaining.follow > 0
-    && eligibleFollowTargetCount < 1
-  ) blockingReasons.push("no_eligible_targets");
-  applySafetyBlocks({ account, rules, blockingReasons, reliability });
-
+  const accountSessionPhaseCompletion = {
+    follow: resolvePhaseCompletion({
+      enabled: initialPlannedAccountSession.phases.follow || (follow.enabled && follow.remaining < 1),
+      quotaRemaining: initialPlannedAccountSession.remaining.follow,
+      eligibleWorkRemaining: eligibleFollowTargetCount,
+    }),
+    unfollow: resolvePhaseCompletion({
+      enabled: initialPlannedAccountSession.phases.unfollow || (unfollow.enabled && unfollow.remaining < 1),
+      quotaRemaining: initialPlannedAccountSession.remaining.unfollow,
+      eligibleWorkRemaining: null,
+    }),
+    welcome: resolvePhaseCompletion({
+      enabled: initialPlannedAccountSession.phases.welcome || (welcome.enabled && welcome.remaining < 1),
+      quotaRemaining: initialPlannedAccountSession.remaining.welcome,
+      eligibleWorkRemaining: null,
+    }),
+  };
+  const plannedAccountSession = pruneTerminalAccountSessionPhases(
+    initialPlannedAccountSession,
+    accountSessionPhaseCompletion,
+  );
   const accountSessionRemaining = plannedAccountSession.totalRemaining;
   // A canonical account-session resume plan is authoritative. It must never
   // silently switch to a fresh Outreach run because unrelated raw quota exists.
   const outreachRemaining = reliability.phasesToRun ? 0 : outreach.remaining;
-  if (accountSessionRemaining < 1 && outreachRemaining < 1) blockingReasons.push("no_quota_remaining");
+  const outreachPhaseCompletion = resolvePhaseCompletion({
+    enabled: outreachRemaining > 0,
+    quotaRemaining: outreachRemaining,
+    eligibleWorkRemaining: null,
+  });
+  const allEnabledPhasesTerminal = [
+    ...Object.values(accountSessionPhaseCompletion),
+    outreachPhaseCompletion,
+  ].every((phase) => phase.terminal);
+  if (allEnabledPhasesTerminal) {
+    blockingReasons.unshift("all_enabled_phase_work_completed");
+  } else if (accountSessionRemaining < 1 && outreachRemaining < 1) {
+    blockingReasons.push("no_quota_remaining");
+  }
+  applySafetyBlocks({ account, rules, blockingReasons, reliability });
 
   const accountEligibility = resolveAccountRestartEligibility(blockingReasons);
   const accountEligible = accountEligibility.eligible;
@@ -865,6 +903,7 @@ function planCandidate({
     "run_in_progress",
     "quota_exhausted",
     "no_quota_remaining",
+    "all_enabled_phase_work_completed",
   ]);
   const decisionOutcome = enqueueAllowed
     ? "eligible"
@@ -940,6 +979,11 @@ function planCandidate({
     plannedQuotaRemaining: {
       ...plannedAccountSession.remaining,
       outreach: outreachRemaining,
+    },
+    allEnabledPhasesTerminal,
+    phaseCompletion: {
+      ...accountSessionPhaseCompletion,
+      outreach: outreachPhaseCompletion,
     },
     decisionOutcome,
     restartEligible,
@@ -1044,7 +1088,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .limit(5000),
     supabase
       .from("phone_rest_windows")
-      .select("id,device_id,weekday,local_start_time,local_end_time,timezone,status,reason")
+      .select("id,device_id,weekday,starts_at_local,ends_at_local,timezone,status,reason")
       .eq("status", "active")
       .limit(1000),
     supabase.from("phone_rest_overrides").select("device_id,status,reason,updated_at").limit(1000),
@@ -1199,8 +1243,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       const restWindows = (restWindowsByDevice.get(deviceId) ?? []).map((row) => ({
         id: readString(row.id, ""),
         weekday: typeof row.weekday === "number" ? row.weekday : null,
-        local_start_time: readString(row.local_start_time, ""),
-        local_end_time: readString(row.local_end_time, ""),
+        local_start_time: readString(row.starts_at_local, ""),
+        local_end_time: readString(row.ends_at_local, ""),
         timezone: readString(row.timezone, "UTC"),
         status: readString(row.status, "active"),
         reason: readString(row.reason, "") || null,

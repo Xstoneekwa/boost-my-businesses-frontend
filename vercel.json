@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/instagram-dashboard/schedule-session/cron",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/instagram-dashboard/login-preflight/cron",

@@ -5,6 +5,7 @@ import {
   AUTO_RESTART_TICK_TOKEN_HEADER,
   autoRestartEnqueueIdempotencyKey,
   autoRestartTickIdempotencyKey,
+  autoRestartTickLockBucketStart,
   passesRiskPolicy,
   resumePlanRuntimeSupported,
   sastBusinessDay,
@@ -35,6 +36,7 @@ export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
 import {
   buildAutoRestartResumePlanMetadata,
   buildInstagramRestrictionPreflightMetadata,
+  rebuildResolvedIncidentResumeCandidate,
   validateCanonicalResumePlan,
 } from "./auto-restart-resume-metadata";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
@@ -130,12 +132,6 @@ export function readAutoRestartTickEnv(env: Record<string, string | undefined> =
     configuredToken: env.INSTAGRAM_AUTO_RESTART_TICK_TOKEN?.trim() || null,
     deviceLockLeaseSeconds: Math.min(3600, Math.max(60, Number(env.INSTAGRAM_AUTO_RESTART_DEVICE_LOCK_SECONDS || 900) || 900)),
   };
-}
-
-function tickBucketStart(now: Date, checkEveryMinutes: number) {
-  const ms = checkEveryMinutes * 60_000;
-  const bucket = Math.floor(now.getTime() / ms) * ms;
-  return new Date(bucket).toISOString();
 }
 
 function todayStartIso(now = new Date()) {
@@ -513,7 +509,7 @@ export async function runAutoRestartTick(
     dryRun: options.dryRun,
   });
   const forceDryRun = tickGate.forceDryRun;
-  const tickBucket = tickBucketStart(now, checkEveryMinutes);
+  const tickBucket = autoRestartTickLockBucketStart(now);
   const tickId = autoRestartTickIdempotencyKey(options.workerId, tickBucket);
   const requestId = `auto-restart-tick-${Date.now().toString(36)}`;
   const lockHeld = !forceDryRun && !options.manual;
@@ -522,7 +518,11 @@ export async function runAutoRestartTick(
     const lock = await acquireTickLock(supabase, {
       idempotencyKey: tickId,
       workerId: options.workerId,
-      metadata: { tick_bucket: tickBucket, check_every_minutes: checkEveryMinutes },
+      metadata: {
+        tick_bucket: tickBucket,
+        tick_lock_bucket_minutes: 1,
+        check_every_minutes: checkEveryMinutes,
+      },
     });
     if (!lock.acquired) {
       return {
@@ -1150,7 +1150,7 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      let deviceId = readString(storedPlan.device_id) || candidate?.deviceId || null;
+      const deviceId = readString(storedPlan.device_id) || candidate?.deviceId || null;
       let resumeMetadata: ReturnType<typeof buildAutoRestartResumePlanMetadata>
         | ReturnType<typeof buildInstagramRestrictionPreflightMetadata>;
       if (restrictionPreflight) {
@@ -1183,10 +1183,8 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_candidate_unavailable");
           continue;
         }
-        resumeMetadata = buildAutoRestartResumePlanMetadata(
-          { ...candidate, enqueueAllowed: true } as AutoRestartCandidate,
-          now,
-        );
+        const rebuiltCandidate = rebuildResolvedIncidentResumeCandidate(candidate);
+        resumeMetadata = buildAutoRestartResumePlanMetadata(rebuiltCandidate, now);
         Object.assign(resumeMetadata.resume_plan, {
           business_date: sastBusinessDay(now),
           resume_reason: "resolved_incident_human_authorized",

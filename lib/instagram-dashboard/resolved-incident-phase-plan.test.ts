@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildAutoRestartResumePlanMetadata,
   buildInstagramRestrictionPreflightMetadata,
+  rebuildResolvedIncidentResumeCandidate,
   validateCanonicalResumePlan,
 } from "./auto-restart-resume-metadata.ts";
 
@@ -100,6 +101,64 @@ test("no executable phase is rejected before authorization consumption", () => {
     reliability: { ...candidate.reliability, phasesToRun: { welcome: false, follow: false, unfollow: false } },
   });
   assert.equal(validateCanonicalResumePlan(metadata.resume_plan), "resume_phase_plan_not_actionable");
+});
+
+test("resolved incident rebuild ignores a stale empty historical phase plan", () => {
+  const stale = {
+    ...candidate,
+    plannedPhasesToRun: { welcome: false, follow: false, unfollow: false },
+    plannedQuotaRemaining: { welcome: 0, follow: 0, unfollow: 0, outreach: 0 },
+    enqueueAllowed: false,
+    restartEligible: false,
+    plannedRunType: "none" as const,
+    decisionOutcome: "not_needed" as const,
+    blockReason: "all_enabled_phase_work_completed",
+    reliability: {
+      ...candidate.reliability,
+      phasesToRun: { welcome: false, follow: false, unfollow: false },
+      quotaRemaining: { welcome: 0, follow: 0, unfollow: 0 },
+    },
+  };
+  const rebuilt = rebuildResolvedIncidentResumeCandidate(stale);
+  assert.deepEqual(rebuilt.plannedPhasesToRun, { welcome: false, follow: true, unfollow: false });
+  assert.equal(rebuilt.plannedQuotaRemaining.follow, 10);
+  assert.equal(rebuilt.enqueueAllowed, true);
+  assert.equal(rebuilt.safeRestartStrategy, "next_target");
+  assert.equal(validateCanonicalResumePlan(buildAutoRestartResumePlanMetadata(rebuilt).resume_plan), null);
+});
+
+test("resolved incident remains armed when no live phase is actionable", () => {
+  const rebuilt = rebuildResolvedIncidentResumeCandidate({
+    ...candidate,
+    eligibleFollowTargetCount: 0,
+    quotas: {
+      ...candidate.quotas,
+      follow: { ...candidate.quotas.follow, remaining: 10 },
+      unfollow: { ...candidate.quotas.unfollow, enabled: false, remaining: 0 },
+      welcome: { ...candidate.quotas.welcome, enabled: false, remaining: 0 },
+    },
+  });
+  assert.deepEqual(rebuilt.plannedPhasesToRun, { welcome: false, follow: false, unfollow: false });
+  assert.equal(rebuilt.enqueueAllowed, false);
+  assert.equal(rebuilt.blockReason, "resume_phase_plan_not_actionable");
+  assert.equal(
+    validateCanonicalResumePlan(buildAutoRestartResumePlanMetadata(rebuilt).resume_plan),
+    "resume_phase_plan_not_actionable",
+  );
+});
+
+test("resolved incident rebuild uses every live enabled account-session quota", () => {
+  const rebuilt = rebuildResolvedIncidentResumeCandidate({
+    ...candidate,
+    quotas: {
+      ...candidate.quotas,
+      follow: { ...candidate.quotas.follow, remaining: 7 },
+      unfollow: { ...candidate.quotas.unfollow, enabled: true, remaining: 12 },
+      welcome: { ...candidate.quotas.welcome, enabled: true, remaining: 3 },
+    },
+  });
+  assert.deepEqual(rebuilt.plannedPhasesToRun, { welcome: true, follow: true, unfollow: true });
+  assert.deepEqual(rebuilt.plannedQuotaRemaining, { welcome: 3, follow: 7, unfollow: 12, outreach: 0 });
 });
 
 test("a restriction preflight is the only valid zero-business-phase plan", () => {
