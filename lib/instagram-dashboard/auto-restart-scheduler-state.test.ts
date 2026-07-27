@@ -14,9 +14,14 @@ test("latest completed tick uses tick_completed_at not created_at", () => {
     new URL("../../app/instagram-dashboard/auto-restart-data.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /auto_restart_tick_locks/);
-  assert.match(source, /tick_completed_at/);
-  assert.doesNotMatch(source, /auto_restart_tick_locks[\s\S]*created_at/);
+  const tickLockQuery = source.match(
+    /\.from\("auto_restart_tick_locks"\)[\s\S]*?\.maybeSingle<SupabaseRecord>\(\)/,
+  )?.[0];
+
+  assert.ok(tickLockQuery, "auto_restart_tick_locks query must remain present");
+  assert.match(tickLockQuery, /\.select\("[^"]*tick_completed_at[^"]*"\)/);
+  assert.match(tickLockQuery, /\.order\("tick_completed_at", \{ ascending: false \}\)/);
+  assert.doesNotMatch(tickLockQuery, /created_at/);
 });
 
 test("lastSchedulerCheck comes from latest completed tick", () => {
