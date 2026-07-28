@@ -109,3 +109,7 @@ Le scheduler ne doit que réclamer les batches dont `expires_at <= now`, appeler
 - correspondance exacte vers les champs et événements actuels d'`ig_targets` et Activity Log.
 
 Tant que ces points et le GO DB ne sont pas clos, les ports mémoire restent la seule implémentation autorisée.
+
+## Contrat implémenté localement
+
+La baseline et les noms sont maintenant certifiés dans `supabase/baseline/manifest.json`. Batch V1 accepte 1 à 20 propositions, défaut produit 10, revue exactement cinq jours et cooldown rejet 30 jours. Les RPC service-only couvrent journal idempotent, assessment lifecycle, création batch, décision simple/bulk, claim J+5, activation, finalisation et freeze/cancel. Les références email restent `enabled=false`; aucun provider ni send intent n'est créé. Les adaptateurs Supabase ne sont importés par aucun runtime et échouent fermés sans activation explicite.
