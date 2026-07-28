@@ -17,6 +17,7 @@ files=(
   supabase/migrations/20260728132018_ct_target_evaluation_performance_lifecycle_v1.sql
   supabase/migrations/20260728132019_ct_premium_proposals_and_action_contracts_v1.sql
   supabase/migrations/20260728132020_ct_system_rls_and_grants_v1.sql
+  supabase/migrations/20260728185253_fix_client_account_notifications_global_grants_v1.sql
   supabase/migrations/20260728132021_ct_system_transactional_rpcs_v1.sql
   supabase/tests/ct-system-fixtures.sql
   supabase/tests/ct-system-contract.sql
@@ -25,5 +26,8 @@ files=(
 for file in "${files[@]}"; do
   psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "$port" -d "$database_name" -f "$file"
 done
+
+CT_TEST_DATABASE_URL="postgresql://127.0.0.1:${port}/${database_name}" \
+  node supabase/tests/ct-system-security-forward-fix.test.mjs
 
 psql -X -Atq -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "$port" -d "$database_name" -f supabase/tests/ct-system-structure-hash.sql
