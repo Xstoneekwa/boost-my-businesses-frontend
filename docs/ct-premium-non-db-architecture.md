@@ -165,6 +165,12 @@ Les fixtures utilisent uniquement des identifiants `tenant_fixture_*`, `account_
 
 Les tests Node couvrent les branches critiques du domaine, des adaptateurs, des DTO et de la projection UI. Le composant React est en plus validé par TypeScript, ESLint et le build Next complet.
 
+## Harness de validation shadow
+
+`shadow-validation/` compose 168 scénarios synthétiques avec horloge et identifiants déterministes. Les dimensions incluent plans, stocks, onze états lifecycle/commerciaux, quinze profils de provider/candidats, huit variantes de ciblage, huit états temporels/snapshot et quatre structures tenant. Vingt-cinq invariants fail-closed contrôlent scope, gate 15/5, déduplication, blacklist, targets actifs, idempotence, sérialisation, scoring et impossibilité d'activation.
+
+La commande locale `npm run test:ct-premium-shadow` retourne un code non nul sur tout invariant en échec. Elle ne contacte aucun réseau et n'écrit aucun artefact runtime.
+
 ## Limitations et décisions ouvertes
 
 - Recherche, vérification de profil et revalidation restent abstraites ; aucun provider réel n'est choisi ou connecté.
