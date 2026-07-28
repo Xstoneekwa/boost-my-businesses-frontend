@@ -15,6 +15,7 @@ export * from "./candidate-search-provider.ts";
 export * from "./shadow-types.ts";
 export * from "./shadow-safety.ts";
 export * from "./shadow-pipeline.ts";
+export * from "./shadow-validation/index.ts";
 export * from "./ports.ts";
 export * from "./memory-adapters.ts";
 export * from "./api-contracts.ts";
