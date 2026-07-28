@@ -153,6 +153,14 @@ Dépendances interdites : domaine universel vers Premium/React/Supabase/UI; Work
 
 ## Roadmap
 
+### Availability universelle avant Live Shadow
+
+`Target Availability` est une dimension d'entrée universelle du `Target Lifecycle Engine`, pour Growth, Pro et Premium. Elle combine identité, disponibilité, badge certifié et exploitabilité de la surface Followers ; elle ne devient pas un Engine séparé.
+
+Un compte certifié peut devenir inexploitable. Le badge et la restriction de surface sont deux evidences distinctes : le badge seul n'autorise pas l'archive. Growth/Pro demandent des CT au client ; Premium prépare automatiquement un remplacement avec revue/J+5 avant archive.
+
+Roadmap canonique : A audit/modèle pur (terminé), B extension DB additive, C shadow read-only, D instrumentation Worker, E policy shadow multi-pack, F activation progressive. Aucune fonctionnalité Availability n'est active. Voir `docs/ct-target-availability-audit.md`.
+
 - **A — Maintenant :** domaine lifecycle universel, revue globale des frontières, simulation multi-pack, test d'architecture et documentation canonique; aucune persistance.
 - **B — Récupération baseline DB :** certifier l'historique et confronter les bounded contexts au schéma réel, sans mutation opportuniste.
 - **B2 — Design DB :** journal unique des profils évalués, contrat Target Performance, compteurs account/target, assessments et reasons persistants; aucune archive automatique initiale.

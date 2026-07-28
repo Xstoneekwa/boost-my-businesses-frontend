@@ -98,6 +98,21 @@ Le scheduler ne doit que réclamer les batches dont `expires_at <= now`, appeler
 
 ## Points bloqués ou à décider
 
+### Extension additive Target Availability
+
+Phase 8B ne suffit pas à représenter durablement l'Availability universelle. Avant un Live Shadow terrain, une phase DB séparée doit définir :
+
+- stable platform user ID autoritatif et collisions ;
+- journal 1:N des observations/evidences redacted ;
+- old/new username et historique de rename ;
+- assessment Availability courant, confidence et reason codes ;
+- quarantine, next recheck et terminal proof ;
+- RLS/grants service-role et idempotence.
+
+`ct_target_evaluation_events.metadata_safe` peut transporter une ombre générique provisoire, mais ne constitue pas le contrat canonique. Les captures/signatures détaillées restent dans les logs Worker ; seule une empreinte sûre est persistable.
+
+Availability est universelle. Un compte certifié peut devenir inexploitable, mais badge et restriction Followers doivent rester séparés. Growth/Pro demandent des CT au client ; Premium prépare automatiquement le remplacement. Rien n'est actif et aucune migration Availability n'est incluse ici.
+
 - certification de la baseline migrations et stratégie de non-replay ;
 - schéma/noms définitifs et politique de rétention ;
 - taille produit par défaut d'un batch ;

@@ -159,6 +159,14 @@ Ces chiffres ne constituent pas un SLA. Aucun comportement quadratique manifeste
 
 ## Critères futurs de Live Shadow
 
+### Prérequis Availability universelle
+
+Le Live Shadow doit traiter Availability pour tous les packs, pas seulement Premium. Il doit distinguer certification et restriction effective de la surface Followers. Un compte certifié peut devenir inexploitable, mais le badge seul reste une evidence insuffisante.
+
+Growth/Pro simulent une demande de CT au client ; Premium simule un remplacement automatique replacement-first. Aucun email, notification, remplacement ou archive n'est actif.
+
+Le shadow terrain est bloqué tant que l'identité stable, les evidences structurées et l'instrumentation Worker ne sont pas disponibles. Les 22 scénarios purs servent de baseline, sans remplacer une preuve terrain.
+
 Avant promotion : baseline DB certifiée, provider réel approuvé, stockage de rapports isolé, feature flag fermé par défaut, vérification des secrets côté serveur, métriques de qualité en observation, concurrence/idempotence certifiées et revue humaine. La sécurité shadow doit rester séparée des ports de persistance, email, notification et activation.
 
 ## WHAT THIS PHASE DOES NOT PROVE
