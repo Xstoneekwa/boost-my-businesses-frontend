@@ -1,10 +1,18 @@
 # Plan de récupération de la baseline Supabase canonique — sans exécution
 
-## Statut
+## Statut initial
 
 Ce document est exclusivement préparatoire. Aucun accès Supabase, SQL, CLI, migration, rebuild ou environnement temporaire n'a été exécuté pendant la Phase 4 CT Premium. Le statut reste `DATABASE_MIGRATION_HISTORY_UNCERTIFIED`.
 
 Les nombres 167 migrations de production et 49 versions locales proviennent du cadrage de coordination et devront être revalidés au démarrage d'un chantier DB autorisé.
+
+## Certification Phase 5 — 2026-07-28
+
+Le chantier DB autorisé a revalidé 169 migrations production, 67 fichiers SQL locaux, 151 versions production absentes localement, 49 versions locales absentes de production et 46 familles même nom/timestamp différent. La stratégie B est adoptée au cutover `20260728001632`.
+
+Le dump `schema-only` normalisé et son manifeste vivent dans `supabase/baseline/`. Deux reconstructions locales PostgreSQL 17 doivent rester vertes avant tout futur déploiement. La baseline n'est jamais pending sur production et les migrations historiques ne sont jamais rejouées.
+
+Statut : `DATABASE_BASELINE_CUTOVER_CERTIFIED` localement, sans changement production.
 
 ## Stratégie A — reconstitution exhaustive
 
