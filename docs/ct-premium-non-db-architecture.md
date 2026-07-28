@@ -104,7 +104,17 @@ Le résultat contient total, breakdown, raisons positives, pénalités, exclusio
 
 ## Snapshot et idempotence
 
-Le builder trie les collections indépendantes de l'ordre, copie et gèle les valeurs, puis produit un fingerprint FNV-1a sur une sérialisation canonique. Le batch combine `accountId`, fingerprint du snapshot, usernames retenus et version du scoring. Une clé déjà connue produit `idempotency_conflict` au lieu d'un doublon.
+Le builder canonique trie et normalise les collections, copie et gèle récursivement les valeurs, puis produit un fingerprint FNV-1a sur une sérialisation canonique excluant l'identifiant et `createdAt`. Il fige scope, entitlement abstrait, stock, ciblage, historiques, signaux, versions, fenêtre de revue, batch, cooldown et trigger. `compareSnapshotCompatibility` distingue `identical`, `compatible`, `materially_changed` et `invalid`.
+
+## Gate 15 / trigger 5
+
+`evaluateCtLowStockGate` est pur et reçoit son horloge. Le minimum de 15 CT valides reste le gate d'onboarding initial et ne peut pas être remplacé par le low-stock. Après readiness, un stock `<= 5` demande des CT client en Growth/Pro et autorise une simulation en Premium actif. Un batch actif, une pause, une annulation, un blocker, une ownership inactive ou un scope divergent échouent fermés. Les valeurs 15, 5, 10, 20, 30 et 5 jours sont centralisées dans `config.ts`.
+
+## Recherche et pipeline shadow
+
+`CtCandidateSearchProvider` abstrait la recherche. Les seuls adaptateurs présents sont fixture, déterministe, vide et en erreur; aucun n'utilise le réseau. `runCtPremiumShadowGeneration` enchaîne gate, snapshot, compatibilité/idempotence, provider, relecture facultative de l'état, normalisation, déduplication, scoring et rapport.
+
+Le rapport expose scope, trace provider, candidats, exclusions, scores, distribution, qualité, recommandation et durées logiques. Il porte toujours `mode: shadow`, `mutationExecuted: false` et `activationAllowed: false`. Le `CtShadowBatch` a un statut distinct et n'implémente aucun port de production; `assertActivatableBatch` le refuse explicitement.
 
 ## Construction du batch
 
@@ -157,9 +167,9 @@ Les tests Node couvrent les branches critiques du domaine, des adaptateurs, des 
 
 ## Limitations et décisions ouvertes
 
-- Recherche, vérification de profil et revalidation sont des entrées abstraites ; les providers restent à choisir.
-- Le maximum de propositions est configurable par appel. La valeur produit par défaut devra être confirmée avant branchement.
-- Le cooldown des rejets est représenté dans le snapshot (fixture/default de domaine : 30 jours), mais la politique produit et sa source de configuration restent à confirmer.
+- Recherche, vérification de profil et revalidation restent abstraites ; aucun provider réel n'est choisi ou connecté.
+- Le mode shadow de production n'est pas actif : les rapports sont uniquement retournés en mémoire par le domaine.
+- Les valeurs produit verrouillées sont 10 propositions par défaut, 20 maximum et 30 jours de cooldown.
 - Le scheduler de timeout, la transaction d'activation et l'ordre notification/email seront définis pendant la phase DB/runtime.
 - La récupération/certification globale de l'historique de migrations demeure extérieure à cette phase. Les migrations SAST héritées de la baseline ne sont pas des changements CT Premium.
 
