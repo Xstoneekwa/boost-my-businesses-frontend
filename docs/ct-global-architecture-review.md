@@ -198,6 +198,14 @@ Identifiants obligatoires sur les contextes métier : `tenantId`, `accountId`, p
 
 ## Recommandation finale et roadmap
 
+### Addendum Availability
+
+La revue confirme la frontière : `Target Availability Service` produit des observations/assessments ; le `Target Lifecycle Engine` combine availability, utilisation et performance ; `Plan Policy` choisit l'action commerciale. Aucun nouvel Engine n'est légitime.
+
+La détection est universelle. Growth/Pro demandent des CT au client ; Premium remplace automatiquement selon replacement-first. Un badge certifié peut signaler un risque, mais seul le couple badge + surface Followers restreinte répétée ou terminalement prouvée justifie `verified_restricted`. Rien n'est actif en production.
+
+Le schéma Phase 8B porte le lifecycle courant mais pas l'identité stable, le journal d'evidence, la quarantaine ni le recheck. L'extension DB et l'instrumentation Worker sont des phases séparées obligatoires avant un Live Shadow Availability terrain.
+
 Choix retenu : **A + D**.
 
 - Aucune extraction de domaine supplémentaire n'est nécessaire avant DB.
