@@ -171,6 +171,8 @@ Les tests Node couvrent les branches critiques du domaine, des adaptateurs, des 
 
 La commande locale `npm run test:ct-premium-shadow` retourne un code non nul sur tout invariant en échec. Elle ne contacte aucun réseau et n'écrit aucun artefact runtime.
 
+La Phase 4.1 ajoute `CtTargetUtilizationAssessment`, une simulation sans effet de bord de l'utilisation d'un CT. Ce modèle reste en shadow et ne participe pas au calcul de `eligibleTargetCount` : son branchement futur dépend d'une baseline DB certifiée, d'un compteur unique de profils évalués et d'un rollout replacement-first.
+
 ## Limitations et décisions ouvertes
 
 - Recherche, vérification de profil et revalidation restent abstraites ; aucun provider réel n'est choisi ou connecté.

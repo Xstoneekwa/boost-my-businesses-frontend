@@ -168,3 +168,7 @@ Avant promotion : baseline DB certifiée, provider réel approuvé, stockage de 
 - Elle ne valide pas les emails ou notifications.
 - Elle ne valide pas l'activation dans `ig_targets`.
 - Elle ne remplace pas le futur Live Shadow.
+
+## Extension Phase 4.1 — utilisation des CT
+
+Une simulation pure distincte étudie désormais la surexploitation d'un compte cible. Elle compare des profils uniques consommés à une audience exploitable estimée, avec fallback sur un follower count frais, minimum absolu et confiance. Elle ne modifie ni le scoring candidat, ni le gate low-stock, ni le runtime. Voir `docs/ct-target-overutilization-audit.md`.
