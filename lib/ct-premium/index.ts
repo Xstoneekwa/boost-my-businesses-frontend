@@ -10,6 +10,7 @@ export * from "./review.ts";
 export * from "./timeout.ts";
 export * from "./commercial.ts";
 export * from "./config.ts";
+export * from "./low-stock-gate.ts";
 export * from "./ports.ts";
 export * from "./memory-adapters.ts";
 export * from "./api-contracts.ts";
