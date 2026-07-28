@@ -122,10 +122,40 @@ Un compte avec 6 CT dont 1 exhausted passe à 5 et satisfait le gate low-stock. 
 
 Admin/frontend et BotApp ne font que projeter des états; ils ne recalculent pas la vérité lifecycle.
 
+## GLOBAL DOMAIN BOUNDARIES
+
+La revue globale Phase 4.3 est détaillée dans `docs/ct-global-architecture-review.md`. Elle fixe la frontière finale avant récupération DB :
+
+```text
+Worker observations
+        |
+        v
+Target Performance (contrat universel)
+        |
+        v
+Target Lifecycle Engine
+        |
+        v
+Plan Policy ---- Growth / Pro / Premium
+                               |
+                               v
+                    CT Premium Replacement Flow
+```
+
+- `Target Performance` possède les observations, fenêtres, agrégats et fiabilité; il ne décide aucune archive.
+- `Target Lifecycle` possède utilisation, épuisement, statut et besoin de remplacement; il n'absorbe ni FBR policy, ni catalogue, ni discovery.
+- `Target Catalog` possède CT actifs/archivés, verification, eligibility catalogue et identité durable.
+- Discovery reste un service/provider; Candidate Scoring reste prédictif et Premium; la performance active reste observée et universelle.
+- Plan Policy traduit un fait en action. Growth/Pro demandent des CT; Premium orchestre discovery, proposition, revue, J+5 et replacement-first.
+- Rotation reste Worker-only. Recommendation et Quality génériques ne deviennent pas des Engines.
+
+Dépendances interdites : domaine universel vers Premium/React/Supabase/UI; Worker vers plan policy; UI/BotApp vers recalcul canonique; discovery vers activation directe. Le contrôle `architecture-boundary.test.mjs` certifie l'absence d'import Premium, React, Supabase ou plan UI depuis `target-lifecycle`, l'arête autorisée Premium vers lifecycle et l'absence de cycle local.
+
 ## Roadmap
 
-- **A — Maintenant :** domaine universel, simulation multi-pack, documentation canonique, aucune persistance.
-- **B — Après récupération baseline DB :** journal unique des profils évalués, compteurs account/target, assessments et reasons persistants; aucune archive automatique initiale.
+- **A — Maintenant :** domaine lifecycle universel, revue globale des frontières, simulation multi-pack, test d'architecture et documentation canonique; aucune persistance.
+- **B — Récupération baseline DB :** certifier l'historique et confronter les bounded contexts au schéma réel, sans mutation opportuniste.
+- **B2 — Design DB :** journal unique des profils évalués, contrat Target Performance, compteurs account/target, assessments et reasons persistants; aucune archive automatique initiale.
 - **C — Live Shadow universel :** calcul réel Growth/Pro/Premium aux seuils 75/80/85/90/95, sans suppression.
 - **D — Policy Shadow :** actions simulées, emails Growth/Pro simulés, remplacement Premium simulé.
 - **E — Replacement Shadow Premium :** remplacements réels préparés mais non activés; ancien CT maintenu.
@@ -134,4 +164,4 @@ Admin/frontend et BotApp ne font que projeter des états; ils ne recalculent pas
 
 ## Gel et limites
 
-Aucun port futur ci-dessus n'est implémenté. Aucun schéma, migration, table, RPC, policy, grant, route, Worker, BotApp runtime, Stripe, email, notification, archive, compte, run, device ou déploiement n'est touché par la Phase 4.2.
+Aucun port futur ci-dessus n'est implémenté. Aucun schéma, migration, table, RPC, policy, grant, route, Worker, BotApp runtime, Stripe, email, notification, archive, compte, run, device ou déploiement n'est touché par les Phases 4.2–4.3.
