@@ -22,8 +22,8 @@ export interface CtDeduplicationContext {
 }
 
 export interface CtDeduplicationResult {
-  accepted: readonly Array<{ candidate: CtProposalCandidate; normalizedUsername: string }>;
-  excluded: readonly Array<{ username: string; normalizedUsername: string | null; reasons: readonly CtExclusionReasonCode[] }>;
+  accepted: ReadonlyArray<{ candidate: CtProposalCandidate; normalizedUsername: string }>;
+  excluded: ReadonlyArray<{ username: string; normalizedUsername: string | null; reasons: readonly CtExclusionReasonCode[] }>;
 }
 
 function normalizedSet(values: readonly string[]) {
