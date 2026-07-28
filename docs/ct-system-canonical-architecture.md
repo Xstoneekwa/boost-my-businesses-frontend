@@ -1,0 +1,137 @@
+# CT System — architecture canonique
+
+## Statut
+
+Ce document est la synthèse canonique du bloc CT après la Phase 4.2. Le code livré est exclusivement un domaine TypeScript pur, des simulations locales et de la documentation. Il ne lit ni n'écrit Supabase, ne persiste rien et n'active aucun comportement de production.
+
+Décision verrouillée : **l'épuisement d'un compte cible est universel ; seul le remplacement automatique est Premium**. Le `Target Lifecycle Engine` évalue un CT sans connaître le pack. `Plan Policy` traduit ensuite le même assessment en action Growth, Pro ou Premium.
+
+## Audit du couplage Phase 4.1
+
+| Élément | Premium-only réel | Universel | Action retenue |
+|---|---:|---:|---|
+| `target-utilization.ts` | Non | Oui | logique extraite dans `lib/target-lifecycle/`; compatibilité Premium conservée |
+| `target-utilization.test.ts` | Non | Oui | tests historiques préservés, matrice universelle ajoutée |
+| modèles de propositions/batches/revue | Oui | Non | restent dans `lib/ct-premium/` |
+| shadow reports et snapshots de génération | Oui | Non | restent Premium, consomment à terme un assessment universel |
+| gate onboarding 15 / low-stock 5 | politique cross-pack | Oui | contrat existant conservé; stock lifecycle rendu calculable |
+| scoring, revue et J+5 | Oui | Non | restent Premium |
+| audit de surexploitation | Non | Oui | renommé conceptuellement Target Lifecycle Engine |
+
+La dépendance admise est `ct-premium -> target-lifecycle`. La dépendance inverse n'existe pas. Le moteur universel n'importe ni React, ni Supabase, ni Stripe, ni Worker, ni BotApp, ni email, ni notification, ni UI de plan.
+
+## Flux canonique
+
+```text
+                    Target Lifecycle Engine
+                              |
+          healthy / watch / replacement / exhausted
+                              |
+              +---------------+---------------+
+              |               |               |
+           Growth            Pro           Premium
+              |               |               |
+       Archive + Ask    Archive + Ask   Auto Replacement
+       client for CT    client for CT    + Review + J+5
+```
+
+Les mentions d'archive ci-dessus décrivent une politique future à certifier. Cette phase ne code aucune suppression ni mutation.
+
+## Les vingt contrats du système CT
+
+1. **Onboarding minimum 15 CT.** Le compte doit atteindre au moins 15 CT valides pour sa readiness initiale. Ce gate ne se confond pas avec le stock courant.
+2. **Low-stock à `<= 5`.** Après readiness, cinq CT éligibles ou moins produisent un besoin de réapprovisionnement.
+3. **CT actifs dans `ig_targets`.** Cette table reste la future source canonique runtime, mais elle n'est pas lue ou modifiée ici.
+4. **Target Lifecycle Engine universel.** `lib/target-lifecycle/` évalue Growth, Pro et Premium avec les mêmes métriques.
+5. **Utilisation et épuisement.** `uniqueProfilesEvaluated / estimatedExploitableAudience`; le dernier follower count frais n'est qu'un fallback haut.
+6. **FBR indépendant.** Bon ou mauvais FBR ne modifie jamais le taux de consommation d'audience.
+7. **Growth Policy.** Observation universelle, notification/email futurs et ajout manuel par le client; jamais de génération automatique.
+8. **Pro Policy.** Même contrat que Growth pour le lifecycle; aucune capacité Premium inventée.
+9. **Premium Policy.** Peut préparer un remplacement automatique puis utiliser propositions, revue client, J+5 et activation.
+10. **Snapshots.** Les snapshots immuables de critères et de scoring restent propres au pipeline Premium.
+11. **Scoring.** Le scoring des nouveaux candidats ne participe pas à l'assessment d'épuisement de l'ancien CT.
+12. **Génération shadow.** Le provider et les rapports Premium restent sans persistance ni activation.
+13. **Revue Premium.** Les propositions sont acceptées/rejetées dans un scope strict `tenantId + accountId`.
+14. **J+5.** Seules les propositions Premium encore pending peuvent suivre la politique de timeout après revalidation.
+15. **Replacement-first.** Ancien CT maintenu, remplacement préparé, validé puis activé, ancien CT archivé ensuite.
+16. **Archivage.** Recommandation universelle seulement; archive immédiate réservée à un futur contrat de preuve terminale forte.
+17. **Notifications/emails futurs.** Growth/Pro demandent des CT au client; les intents et livraisons seront séparés et idempotents.
+18. **Séparation application/DB.** Le domaine émet assessments et décisions; de futurs adaptateurs seulement pourront persister ou muter.
+19. **Roadmap.** La progression va du domaine local au Live Shadow, puis Policy/Replacement Shadow et activation contrôlée.
+20. **Limitations actuelles.** Aucun journal durable exhaustif de profils évalués, baseline DB non récupérée, seuils non calibrés sur terrain et aucun port production implémenté.
+
+## Modèle lifecycle universel
+
+Le scope obligatoire est `(tenantId, accountId, targetId, normalizedUsername)`. Un profil est évalué une seule fois par username canonique dans ce scope. Un retraitement met à jour/complète l'évidence future sans incrémenter le numérateur unique. `followed`, `skipped`, `ineligible`, `unavailable`, `already_processed`, `duplicate` et `blacklisted` sont des breakdowns diagnostiques : ils ne sont jamais additionnés pour fabriquer le numérateur. Un historique incomplet dégrade explicitement la confiance.
+
+Le dénominateur porte `value`, `kind`, `version`, `source`, `observedAt` et `reliability`. La confiance combine fraîcheur, couverture historique, couverture des évaluations uniques, fiabilité du dénominateur, attribution source et couverture des versions Worker. Le résultat expose score, niveau et raisons.
+
+| Ratio initial non productif | État |
+|---:|---|
+| 75 % | `watch` |
+| 80 % | `replacement_recommended` |
+| 85 % | `replacement_pending` candidat shadow |
+| 90 % + confiance forte + minimum absolu | `exhausted` |
+| 95 % + preuve terminale | confirmation conservatrice future |
+
+Les minimums initiaux sont 250, 500, 1 000 ou 2 500 évaluations selon la taille d'audience. Ils sont centralisés et restent recalibrables.
+
+## États, stock et transitions
+
+États : `healthy`, `watch`, `replacement_recommended`, `replacement_pending`, `exhausted`, `archived`, `stale_data`, `insufficient_data`. Les quatre premiers comptent dans le stock éligible. `archived` ne compte jamais. `exhausted` est exclu seulement lorsque l'assessment l'a établi avec forte confiance. Les données obsolètes ou insuffisantes échouent fermées.
+
+Un compte avec 6 CT dont 1 exhausted passe à 5 et satisfait le gate low-stock. Growth/Pro demandent alors des CT au client; Premium peut anticiper un remplacement avant retrait. Le calcul filtre toujours tenant et account, y compris pour une agence mixte.
+
+## Matrice FBR × utilisation
+
+| FBR | Utilisation | État moteur | Recommandation |
+|---|---|---|---|
+| Bon | Faible | `healthy` | conserver |
+| Bon | Élevée | replacement/exhausted | remplacer |
+| Faible | Faible | lifecycle `healthy` | décision low-FBR séparée |
+| Faible | Élevée | `exhausted` | priorité remplacement/archivage futur |
+
+`auto_low_followback_ratio` appartient à la politique FBR existante. Les reasons lifecycle sont distinctes : `target_utilization_threshold_reached`, `target_replacement_recommended`, `target_replacement_pending`, `target_audience_exhausted`, `target_exploitable_audience_depleted`, `target_utilization_data_insufficient`, `target_follower_count_stale`, `target_utilization_confidence_low`, `target_archived_after_replacement`, `target_archived_terminal_exhaustion`.
+
+## Politiques de pack
+
+`evaluateTargetLifecyclePlanPolicy` reçoit plan, assessment, stock, onboarding, état du remplacement, état abstrait de notification et instant injecté. Sa sortie explicable expose action, archivage permis/différé, remplacement requis/automatique, notification/email, recalcul stock, reason codes et explication.
+
+| Assessment | Growth | Pro | Premium |
+|---|---|---|---|
+| healthy | `no_action` | `no_action` | `no_action` |
+| watch | `monitor` | `monitor` | `monitor` |
+| replacement | `request_client_targets` | `request_client_targets` | `prepare_automatic_replacement` |
+| exhausted, preuve non terminale | demande manuelle; archive future | demande manuelle; archive future | remplacement d'abord; archive différée |
+| remplacement Premium prêt | n/a | n/a | `mark_replacement_pending` + revue/J+5 |
+| remplacement Premium activé | n/a | n/a | `archive_after_replacement` |
+| preuve terminale forte | contrat futur d'archive immédiate | idem | idem |
+
+## Ports futurs et propriétaires
+
+| Port | Implémentation future responsable |
+|---|---|
+| `TargetEvaluationEventWriter` | Worker, avec clé unique account/target/username |
+| `TargetLifecycleAssessmentRepository` | backend + stockage DB certifié |
+| `TargetLifecyclePolicyRunner` | scheduler/backend |
+| `TargetArchivePort` | backend transactionnel vers `ig_targets` |
+| `TargetReplacementPort` | CT Premium pour Premium; absent Growth/Pro |
+| `TargetClientNotificationPort` | système de notifications |
+| `TargetClientEmailPort` | système email/outbox |
+| `TargetLifecycleMetricsPort` | backend/observabilité/admin et projections BotApp |
+
+Admin/frontend et BotApp ne font que projeter des états; ils ne recalculent pas la vérité lifecycle.
+
+## Roadmap
+
+- **A — Maintenant :** domaine universel, simulation multi-pack, documentation canonique, aucune persistance.
+- **B — Après récupération baseline DB :** journal unique des profils évalués, compteurs account/target, assessments et reasons persistants; aucune archive automatique initiale.
+- **C — Live Shadow universel :** calcul réel Growth/Pro/Premium aux seuils 75/80/85/90/95, sans suppression.
+- **D — Policy Shadow :** actions simulées, emails Growth/Pro simulés, remplacement Premium simulé.
+- **E — Replacement Shadow Premium :** remplacements réels préparés mais non activés; ancien CT maintenu.
+- **F — Activation progressive :** Growth/Pro archive certifiée puis notifications/emails; Premium replacement-first puis archive.
+- **G — Généralisation :** supervision, monitoring, rollback et recalibrage des seuils avec données réelles.
+
+## Gel et limites
+
+Aucun port futur ci-dessus n'est implémenté. Aucun schéma, migration, table, RPC, policy, grant, route, Worker, BotApp runtime, Stripe, email, notification, archive, compte, run, device ou déploiement n'est touché par la Phase 4.2.

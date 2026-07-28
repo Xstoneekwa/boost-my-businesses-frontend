@@ -4,9 +4,14 @@
 
 Spécification uniquement. Ce document n'autorise aucune migration, requête de production ou persistance. L'intégration reste bloquée jusqu'à un GO DB explicite et une baseline de migrations certifiée. Aucun SQL n'est fourni.
 
+La Phase 4.2 ajoute uniquement des ports futurs au contrat : journal des évaluations uniques, repository d'assessments lifecycle, runner de policy, archive, remplacement, notification, email et métriques. Le moteur universel demeure indépendant de leur implémentation. La synthèse et la répartition des propriétaires figurent dans `docs/ct-system-canonical-architecture.md`.
+
 ## Données à persister
 
 Le futur stockage doit représenter séparément :
+
+- événements uniques de profils évalués, scopés par tenant/account/target/username canonique, avec outcome diagnostique et version Worker ;
+- assessments lifecycle versionnés, métriques, confiance, reasons et décision de policy séparée ;
 
 - snapshots immuables, avec `tenant_id`, `account_id`, payload canonique, fingerprint et version de scoring ;
 - batches, scope account, entitlement capturé, statut, fenêtre de revue, idempotency key et version optimiste ;

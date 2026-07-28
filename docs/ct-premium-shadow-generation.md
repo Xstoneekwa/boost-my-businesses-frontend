@@ -1,5 +1,7 @@
 # CT Premium — génération shadow non persistante
 
+Le déclencheur d'un besoin peut désormais provenir du `Target Lifecycle Engine` universel, mais la recherche, les propositions, la revue et J+5 restent des capacités Premium. Growth/Pro ne doivent jamais appeler ce pipeline : leur policy demande des CT au client. Voir `docs/ct-system-canonical-architecture.md`.
+
 Le pipeline shadow évalue le gate de stock, fige un snapshot canonique, interroge un fournisseur injecté, déduplique et score les candidats, puis retourne un rapport sérialisable. Il ne possède aucun port de persistance, notification, email ou activation.
 
 Le rapport opérateur expose désormais chaque évaluation synthétique, les principales raisons d'exclusion, le score retenu le plus faible, le score rejeté le plus élevé, l'écart au seuil recommended, la santé du provider, la compatibilité du snapshot et une recommandation dérivée (`ready_for_future_live_shadow`, `insufficient_candidates`, `provider_quality_low`, `snapshot_data_incomplete`, `scoring_distribution_suspicious` ou `blocked_by_commercial_state`).

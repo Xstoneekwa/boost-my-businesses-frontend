@@ -4,6 +4,8 @@
 
 Cette phase certifie le comportement synthétique du moteur CT Premium avant toute décision de Live Shadow. Elle utilise uniquement des objets en mémoire, des providers synthétiques et une horloge fixe au `2026-07-28T12:00:00.000Z`.
 
+Complément Phase 4.2 : le harness Premium est préservé, et une matrice séparée certifie le `Target Lifecycle Engine` universel. Le même assessment produit une demande client pour Growth/Pro et une préparation automatique différée pour Premium. Cette matrice ne constitue toujours pas un Live Shadow. Référence canonique : `docs/ct-system-canonical-architecture.md`.
+
 HEAD initial : `dd22aadc586715bb37e2e9e19bf001fa6c2758e6`.
 
 ## Carte de configuration auditée
