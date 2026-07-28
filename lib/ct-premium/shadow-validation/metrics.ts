@@ -16,7 +16,7 @@ function rate(numerator: number, denominator: number) { return denominator ? Num
 
 export function aggregateCtShadowValidation(runs: readonly CtShadowValidationRun[]): CtShadowValidationAggregate {
   const findings = runs.flatMap((run) => run.findings);
-  const scores = runs.flatMap((run) => run.report.scoredCandidates.map((candidate) => candidate.score.total)).sort((a, b) => a - b);
+  const scores = runs.flatMap((run) => run.report.candidateEvaluations.flatMap((candidate) => candidate.score ? [candidate.score.total] : [])).sort((a, b) => a - b);
   const triggerCounts: Record<CtPlan, { total: number; triggered: number }> = { growth: { total: 0, triggered: 0 }, pro: { total: 0, triggered: 0 }, premium: { total: 0, triggered: 0 } };
   const stockCounts: Record<string, { total: number; triggered: number }> = {};
   const snapshotCompatibility: Record<string, number> = {};
@@ -45,7 +45,7 @@ export function aggregateCtShadowValidation(runs: readonly CtShadowValidationRun
     increment(snapshotCompatibility, report.snapshotCompatibility);
     increment(reasonCodes, report.gate.reasonCode);
     for (const [reason, count] of Object.entries(report.exclusionCounts)) increment(exclusionReasons, reason, count);
-    for (const [band, count] of Object.entries(report.quality.bands)) bands[band as keyof typeof bands] += count;
+    for (const evaluation of report.candidateEvaluations) if (evaluation.score) bands[evaluation.score.band] += 1;
   }
 
   const passCount = runs.filter((run) => !run.findings.some((finding) => finding.verdict === "fail")).length;

@@ -2,6 +2,8 @@ import { buildProposalBatch } from "./batch-builder.ts";
 import type { CtCandidateSearchProvider } from "./candidate-search-provider.ts";
 import { defaultCtBatchBuildConfig } from "./config.ts";
 import { evaluateCtLowStockGate, type CtLowStockGateInput } from "./low-stock-gate.ts";
+import { normalizeInstagramUsername } from "./normalization.ts";
+import { scoreProposalCandidate } from "./scoring.ts";
 import { buildCtTargetingCriteriaSnapshot, compareSnapshotCompatibility, ctStableFingerprint, type CtCanonicalSnapshotInput } from "./snapshot.ts";
 import type { CtShadowQualitySummary, CtShadowReport } from "./shadow-types.ts";
 import type { CtClock, CtIdGenerator, CtProposalScore, CtTargetingCriteriaSnapshot } from "./types.ts";
@@ -42,7 +44,12 @@ export async function runCtShadowGeneration(input: CtShadowPipelineInput): Promi
     const recommendation = values.recommendation ?? "review_shadow_failure";
     const snapshot = values.snapshot ?? null;
     const providerResult = values.providerResult ?? null;
-    return Object.freeze({ runId: `shadow_run_${baseKey}`, mode: "shadow", tenantId: input.gateInput.tenantId, accountId: input.gateInput.accountId, status: "failed", mutationExecuted: false, activationAllowed: false, gate: initialGate, gateResult: values.gate ?? initialGate, snapshot, snapshotFingerprint: snapshot?.fingerprint ?? null, snapshotCompatibility: "new", providerResult, providerTrace: providerResult ? { provider: providerResult.provider, version: providerResult.providerVersion, traceId: providerResult.traceId, durationMs: providerResult.durationMs } : null, candidatesReceived: providerResult?.candidates.length ?? 0, scoredCandidates: values.shadowBatch?.proposals.map((proposal) => ({ username: proposal.normalizedUsername, score: proposal.score })) ?? [], shadowBatch: null, quality: qualityValue, qualitySummary: qualityValue, scoreDistribution: { average: qualityValue.averageScore, median: qualityValue.medianScore, bands: qualityValue.bands }, exclusionCounts, exclusions: { total: Object.values(exclusionCounts).reduce((sum, count) => sum + count, 0), invalid: exclusionCounts.invalid_username ?? 0, duplicates: (exclusionCounts.duplicate_in_batch ?? 0) + (exclusionCounts.duplicate_active_target ?? 0) + (exclusionCounts.duplicate_active_proposal ?? 0), blacklisted: exclusionCounts.blacklisted ?? 0, ineligible: (exclusionCounts.profile_not_eligible ?? 0) + (exclusionCounts.score_below_threshold ?? 0), byReason: exclusionCounts }, proposedCount: values.shadowBatch?.proposals.length ?? 0, idempotencyKey: baseKey, recommendation, recommendationDetail: { code: recommendation, requiresHumanReview: true }, warnings: providerResult?.warnings ?? [], errors: [], generatedAt, startedAt: generatedAt, completedAt: generatedAt, stepDurationsMs: { gate: 0, snapshot: 0, provider: providerResult?.durationMs ?? 0, scoring: 0 }, ...values });
+    const candidateEvaluations = values.candidateEvaluations ?? [];
+    const retainedScores = values.shadowBatch?.proposals.map((proposal) => proposal.score.total) ?? [];
+    const rejectedScores = candidateEvaluations.flatMap((evaluation) => evaluation.score?.band === "reject" ? [evaluation.score.total] : []);
+    const topExclusionReasons = Object.entries(exclusionCounts).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 5).map(([reason, count]) => ({ reason, count }));
+    const providerHealth = !providerResult ? "not_called" : providerResult.warnings.length ? "warning" : providerResult.candidates.length ? "healthy" : "empty";
+    return Object.freeze({ runId: `shadow_run_${baseKey}`, mode: "shadow", tenantId: input.gateInput.tenantId, accountId: input.gateInput.accountId, status: "failed", mutationExecuted: false, activationAllowed: false, gate: initialGate, gateResult: values.gate ?? initialGate, snapshot, snapshotFingerprint: snapshot?.fingerprint ?? null, snapshotCompatibility: "new", providerResult, providerTrace: providerResult ? { provider: providerResult.provider, version: providerResult.providerVersion, traceId: providerResult.traceId, durationMs: providerResult.durationMs } : null, candidatesReceived: providerResult?.candidates.length ?? 0, scoredCandidates: values.shadowBatch?.proposals.map((proposal) => ({ username: proposal.normalizedUsername, score: proposal.score })) ?? [], candidateEvaluations, shadowBatch: null, quality: qualityValue, qualitySummary: qualityValue, scoreDistribution: { average: qualityValue.averageScore, median: qualityValue.medianScore, bands: qualityValue.bands }, exclusionCounts, exclusions: { total: Object.values(exclusionCounts).reduce((sum, count) => sum + count, 0), invalid: exclusionCounts.invalid_username ?? 0, duplicates: (exclusionCounts.duplicate_in_batch ?? 0) + (exclusionCounts.duplicate_active_target ?? 0) + (exclusionCounts.duplicate_active_proposal ?? 0), blacklisted: exclusionCounts.blacklisted ?? 0, ineligible: (exclusionCounts.profile_not_eligible ?? 0) + (exclusionCounts.score_below_threshold ?? 0), byReason: exclusionCounts }, topExclusionReasons, proposedCount: values.shadowBatch?.proposals.length ?? 0, lowestRetainedScore: retainedScores.length ? Math.min(...retainedScores) : null, highestRejectedScore: rejectedScores.length ? Math.max(...rejectedScores) : null, scoreGapToRecommended: retainedScores.length ? Number((Math.min(...retainedScores) - defaultCtBatchBuildConfig().scoring.thresholds.recommended).toFixed(2)) : null, providerHealth, idempotencyKey: baseKey, recommendation, recommendationDetail: { code: recommendation, requiresHumanReview: true }, warnings: providerResult?.warnings ?? [], errors: [], generatedAt, startedAt: generatedAt, completedAt: generatedAt, stepDurationsMs: { gate: 0, snapshot: 0, provider: providerResult?.durationMs ?? 0, scoring: 0 }, ...values });
   };
 
   if (input.snapshotInput.tenantId !== input.gateInput.tenantId || input.snapshotInput.accountId !== input.gateInput.accountId) return report({ status: "blocked", snapshotCompatibility: "invalid", recommendation: "fix_scope_before_retry", errors: ["cross_account_access"] });
@@ -58,7 +65,7 @@ export async function runCtShadowGeneration(input: CtShadowPipelineInput): Promi
   try {
     providerResult = await input.provider.searchCandidates({ tenantId: snapshot.tenantId, accountId: snapshot.accountId, snapshot, maxCandidates: snapshot.batchSize * 3 });
   } catch (error) {
-    return report({ snapshot, snapshotCompatibility, recommendation: "retry_provider_after_review", errors: [error instanceof Error ? error.message : "candidate_provider_failed"] });
+    return report({ snapshot, snapshotCompatibility, providerHealth: "failed", recommendation: "provider_quality_low", errors: [error instanceof Error ? error.message : "candidate_provider_failed"] });
   }
 
   if (input.readCurrentGateInput) {
@@ -74,11 +81,22 @@ export async function runCtShadowGeneration(input: CtShadowPipelineInput): Promi
     existingIdempotencyKeys: input.existingShadowIdempotencyKeys, clock: input.clock, ids: input.ids,
     config: defaultCtBatchBuildConfig(snapshot.batchSize),
   });
+  const retainedUsernames = new Set(built.proposals.map((proposal) => proposal.normalizedUsername));
+  const exclusionsByUsername = new Map<string, string[]>();
+  for (const excluded of built.excluded) exclusionsByUsername.set(excluded.username, [...(exclusionsByUsername.get(excluded.username) ?? []), ...excluded.reasons]);
+  const candidateEvaluations = providerResult.candidates.map((candidate) => {
+    const normalized = normalizeInstagramUsername(candidate.username);
+    const normalizedUsername = normalized.ok ? normalized.normalized : null;
+    return Object.freeze({ username: candidate.username, normalizedUsername, score: normalized.ok ? scoreProposalCandidate(candidate) : null, exclusionReasons: Object.freeze(exclusionsByUsername.get(candidate.username) ?? []), retained: normalizedUsername !== null && retainedUsernames.has(normalizedUsername) });
+  });
   const exclusionCounts = built.excluded.flatMap((entry) => entry.reasons).reduce<Record<string, number>>((counts, reason) => ({ ...counts, [reason]: (counts[reason] ?? 0) + 1 }), {});
   const idempotencyKey = built.batch?.idempotencyKey ?? ctStableFingerprint({ snapshot: snapshot.fingerprint, candidates: providerResult.candidates.map((candidate) => candidate.username) });
-  if (!built.batch) return report({ status: built.error ? "blocked" : "skipped", snapshot, snapshotCompatibility, providerResult, exclusionCounts, idempotencyKey, recommendation: built.explanation, errors: built.error ? [built.error] : [] });
+  if (!built.batch) return report({ status: built.error ? "blocked" : "skipped", snapshot, snapshotCompatibility, providerResult, candidateEvaluations, exclusionCounts, idempotencyKey, recommendation: built.error ? "blocked_by_commercial_state" : built.explanation === "no_candidates" ? "insufficient_candidates" : "provider_quality_low", errors: built.error ? [built.error] : [] });
   const shadowBatch = Object.freeze({ mode: "shadow" as const, id: built.batch.id, tenantId: built.batch.tenantId, accountId: built.batch.accountId, snapshotId: built.batch.snapshotId, entitlementId: built.batch.entitlementId, status: "shadow_ready_for_review" as const, proposalIds: built.batch.proposalIds, idempotencyKey: built.batch.idempotencyKey, generatedAt, proposals: built.proposals, excluded: built.excluded });
-  return report({ status: "generated", snapshot, snapshotCompatibility, providerResult, shadowBatch, quality: quality(built.proposals.map((proposal) => proposal.score), providerResult.candidates.length), exclusionCounts, idempotencyKey, recommendation: "review_shadow_quality_before_persistence" });
+  const qualitySummary = quality(built.proposals.map((proposal) => proposal.score), providerResult.candidates.length);
+  const reviewShare = built.proposals.length ? qualitySummary.bands.review / built.proposals.length : 0;
+  const recommendation = snapshot.accountAnalysis.completeness === "partial" ? "snapshot_data_incomplete" : reviewShare > .65 ? "scoring_distribution_suspicious" : built.proposals.length < snapshot.batchSize ? "insufficient_candidates" : "ready_for_future_live_shadow";
+  return report({ status: "generated", snapshot, snapshotCompatibility, providerResult, candidateEvaluations, shadowBatch, quality: qualitySummary, exclusionCounts, idempotencyKey, recommendation });
 }
 
 export const runCtPremiumShadowGeneration = runCtShadowGeneration;
