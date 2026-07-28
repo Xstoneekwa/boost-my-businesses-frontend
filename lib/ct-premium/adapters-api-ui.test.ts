@@ -4,7 +4,7 @@ import { assertApiScope, CT_PREMIUM_API_PATHS } from "./api-contracts.ts";
 import { activateProposal } from "./activation.ts";
 import { CT_PREMIUM_EDGE_FIXTURES, CT_PREMIUM_SYNTHETIC_SCOPES, syntheticCommercial, syntheticReviewBatch, syntheticReviewProposals, syntheticRuntime } from "./fixtures.ts";
 import { InMemoryCtActivationPort, InMemoryCtEmailPort, InMemoryCtNotificationPort, InMemoryCtStore } from "./memory-adapters.ts";
-import { CT_REVIEW_COPY, projectCtReviewState, projectCtReviewView } from "./review-view-model.ts";
+import { CT_REVIEW_COPY, ctInstagramProfileUrl, projectCtReviewState, projectCtReviewView } from "./review-view-model.ts";
 import type { TargetId } from "./types.ts";
 
 test("memory store isolates accounts in the same tenant and rejects stale writes", async () => {
@@ -80,4 +80,8 @@ test("FR/EN copy states J+5 revalidation and permanent rejection guarantees", ()
   assert.match(CT_REVIEW_COPY.fr.rejection, /jamais/);
   assert.match(CT_REVIEW_COPY.en.timeout, /reviewed again/);
   assert.match(CT_REVIEW_COPY.en.rejection, /never/);
+});
+
+test("proposal usernames resolve to the canonical Instagram profile URL", () => {
+  assert.equal(ctInstagramProfileUrl("synthetic_target"), "https://www.instagram.com/synthetic_target/");
 });

@@ -4,6 +4,10 @@ import type { CtProposal, CtProposalBatch } from "./types.ts";
 export type CtReviewLanguage = "fr" | "en";
 export type CtReviewUiState = "preparing" | "review" | "frozen" | "canceled" | "completed" | "empty" | "error";
 
+export function ctInstagramProfileUrl(normalizedUsername: string) {
+  return `https://www.instagram.com/${encodeURIComponent(normalizedUsername)}/`;
+}
+
 export const CT_REVIEW_COPY = Object.freeze({
   fr: {
     title: "Propositions de comptes cibles",
