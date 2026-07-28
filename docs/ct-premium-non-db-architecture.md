@@ -4,6 +4,8 @@
 
 Cette phase implémente le domaine métier des propositions automatiques de comptes cibles Premium sans persistance, fournisseur externe, route API active, scheduler, notification ou email réel. Le code est isolé dans `lib/ct-premium/`. La preview React est montée uniquement sur `/ct-premium-preview` en développement ; la page appelle `notFound()` dans tout build de production et n'apparaît dans aucune navigation.
 
+Depuis la Phase 4.2, l'évaluation d'utilisation/épuisement n'est plus un concept Premium : elle vit dans `lib/target-lifecycle/`. Le domaine Premium peut l'importer via sa couche de compatibilité, jamais l'inverse. Les propositions, le scoring, la revue et J+5 restent Premium-only. Voir `docs/ct-system-canonical-architecture.md`.
+
 La baseline de développement est le successeur applicatif canonique `3690e6cf035f341572a1ee1a6dfeaa513d4e7d05`. Elle remplace la référence historique `d651643` du brief, conformément à la coordination SAST postérieure.
 
 ## Décisions produit

@@ -1,5 +1,7 @@
 # Audit de surexploitation et d'épuisement des comptes cibles
 
+> Mise à jour Phase 4.2 : ce concept est désormais le **Target Lifecycle Engine universel**, commun à Growth, Pro et Premium. L'architecture et la roadmap canoniques sont regroupées dans `docs/ct-system-canonical-architecture.md`. Le présent document reste la preuve d'audit Phase 4.1.
+
 ## Statut et périmètre
 
 Phase 4.1 locale, synthétique et non-DB. L'audit porte sur le Backend au `0473b482e597cedb68e963d2126d03ca3ad962b5`, le Worker local canonique audité au `6976e188e3a6bb5c7ae788edfeda30e740a40839` et BotApp local audité au `fac5ac0c01637d6fb343438f4238633744f1da6e`.
@@ -106,9 +108,9 @@ Stratégie progressive proposée : 75 % `watch`, 80 % `replacement_recommended`,
 
 Minimums absolus synthétiques à tester, sans décision produit finale : 250 profils sous 500 followers, 500 entre 500 et 1 999, 1 000 entre 2 000 et 9 999, 2 500 à partir de 10 000. Pour les petits CT, une revalidation plus fréquente ou une preuve de frontière doit compléter le ratio.
 
-## Simulation pure Phase 4.1
+## Simulation pure Phase 4.1 et extraction Phase 4.2
 
-`CtTargetUtilizationAssessment` est un modèle en mémoire. Il ne lit rien, ne persiste rien et ne modifie ni le gate ni un lifecycle. Le numérateur `uniqueProfilesProcessed` est canonique ; le breakdown sert à vérifier la cohérence. Le ratio est borné à 100 % pour la décision, tandis que `rawUtilizationRatio` conserve les incohérences supérieures à 100 %.
+`CtTargetUtilizationAssessment` reste une surface de compatibilité Premium en mémoire. La logique canonique vit maintenant dans `lib/target-lifecycle/`, sans import vers `ct-premium`. Elle ne lit rien, ne persiste rien et ne modifie ni gate ni lifecycle runtime. Le numérateur `uniqueProfilesEvaluated` est canonique ; les breakdowns servent au diagnostic. Le ratio est borné à 100 % pour la décision, tandis que `rawUtilizationRatio` conserve les incohérences supérieures à 100 %.
 
 | Scénario | Résultat par défaut |
 |---|---|
@@ -173,7 +175,7 @@ Le message client doit parler de renouvellement de ciblage, sans exposer le dét
 
 1. **Phase 4.1 actuelle** : audit, modèle pur, seuils candidats, aucun runtime.
 2. **Après récupération de baseline DB** : schéma d'événements uniques et évaluations versionnées ; aucun archivage automatique.
-3. **Live Shadow** : calcul réel 80/85/90/95, mesure de couverture et faux positifs, aucune suppression.
+3. **Live Shadow universel** : calcul réel Growth/Pro/Premium à 75/80/85/90/95, mesure de couverture et faux positifs, aucune suppression.
 4. **Replacement Shadow** : préparer un CT Premium de remplacement en gardant l'ancien actif.
 5. **Activation progressive** : archiver seulement après remplacement prêt, pilotes, rollback et monitoring.
 6. **Généralisation** : seuils par taille/confiance et automatisation supervisée.
