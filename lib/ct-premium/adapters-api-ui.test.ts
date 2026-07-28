@@ -3,6 +3,7 @@ import test from "node:test";
 import { assertApiScope, CT_PREMIUM_API_PATHS } from "./api-contracts.ts";
 import { activateProposal } from "./activation.ts";
 import { CT_PREMIUM_EDGE_FIXTURES, CT_PREMIUM_SYNTHETIC_SCOPES, syntheticCommercial, syntheticReviewBatch, syntheticReviewProposals, syntheticRuntime } from "./fixtures.ts";
+import { CtDomainError } from "./errors.ts";
 import { InMemoryCtActivationPort, InMemoryCtEmailPort, InMemoryCtNotificationPort, InMemoryCtStore } from "./memory-adapters.ts";
 import { CT_REVIEW_COPY, ctInstagramProfileUrl, projectCtReviewState, projectCtReviewView } from "./review-view-model.ts";
 import type { TargetId } from "./types.ts";
@@ -17,7 +18,12 @@ test("memory store isolates accounts in the same tenant and rejects stale writes
   for (const proposal of syntheticReviewProposals().slice(0, 2)) await store.save(proposal, 0);
   assert.equal((await store.listByBatch(batch.tenantId, batch.accountId, batch.id)).length, 2);
   assert.equal((await store.list(scope.tenantId, scope.accounts[1].accountId)).length, 0);
-  await assert.rejects(() => store.save({ ...batch, version: 2 }, 0), /batch_version_conflict/);
+  await assert.rejects(
+    () => store.save({ ...batch, version: 2 }, 0),
+    (error) => error instanceof CtDomainError
+      && error.code === "idempotency_conflict"
+      && error.message === "batch_version_conflict",
+  );
 });
 
 test("notification and email adapters only record in-memory intents", async () => {
