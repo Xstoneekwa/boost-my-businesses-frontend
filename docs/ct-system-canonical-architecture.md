@@ -165,3 +165,7 @@ Dépendances interdites : domaine universel vers Premium/React/Supabase/UI; Work
 ## Gel et limites
 
 Aucun port futur ci-dessus n'est implémenté. Aucun schéma, migration, table, RPC, policy, grant, route, Worker, BotApp runtime, Stripe, email, notification, archive, compte, run, device ou déploiement n'est touché par les Phases 4.2–4.3.
+
+## Phase DB locale
+
+Les ports universels Evaluation/Performance/Lifecycle et les ports Premium snapshots/batches/proposals/review/replacement possèdent désormais une persistance post-cutover et des RPC testées localement. Les adaptateurs Supabase restent fail-closed et non montés. L'archive automatique reste explicitement désactivée; Growth/Pro restent notification + ajout manuel, Premium seul possède replacement-first.

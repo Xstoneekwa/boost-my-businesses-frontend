@@ -218,3 +218,7 @@ Roadmap :
 ## Gel Phase 4.3
 
 Le seul code ajouté est un test de scan d'imports. Aucun fichier runtime, route, migration, SQL, Worker, BotApp, Stripe, email, notification, compte, run, device, target ou déploiement n'est modifié.
+
+## Certification DB post-cutover
+
+La frontière auditée est conservée : Worker produit les observations; Target Performance et Lifecycle sont universels; Plan Policy distingue Growth/Pro de Premium; Premium orchestre seulement propositions, revue J+5, activation et replacement-first. Aucun Recommendation Engine, Quality Engine ou moteur de rotation applicatif n'a été introduit.

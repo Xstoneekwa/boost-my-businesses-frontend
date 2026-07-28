@@ -42,3 +42,20 @@ export interface CtEmailPort { record(intent: CtEmailIntent): Promise<void> }
 export interface CtActivationPort {
   activate(input: { tenantId: TenantId; accountId: AccountId; batchId: BatchId; proposalId: ProposalId; normalizedUsername: string; idempotencyKey: string }): Promise<{ ok: true; targetId: TargetId } | { ok: false; reasonCode: string }>;
 }
+
+export interface CtLifecyclePersistencePort {
+  recompute(input: {
+    accountId: AccountId;
+    targetId: TargetId;
+    estimatedExploitableAudience: number | null;
+    denominatorSource: string;
+    denominatorVersion: string;
+    confidence: "high" | "medium" | "low" | "unknown";
+    assessmentKey: string;
+    assessedAt: string;
+  }): Promise<Readonly<Record<string, unknown>>>;
+}
+
+export interface CtTargetPerformanceReader {
+  readLatest(tenantId: TenantId, accountId: AccountId, targetId: TargetId): Promise<Readonly<Record<string, unknown>> | null>;
+}
