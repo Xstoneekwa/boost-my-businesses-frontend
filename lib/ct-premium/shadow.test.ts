@@ -24,7 +24,11 @@ test("shadow pipeline generates an observable batch without mutation or activati
   assert.equal(result.shadowBatch?.proposals.length, 10);
   assert.equal(result.quality.candidateCount, 10);
   assert.equal(result.quality.retainedCount, 10);
-  assert.match(JSON.stringify(result), /review_shadow_quality_before_persistence/);
+  assert.equal(result.recommendation, "ready_for_future_live_shadow");
+  assert.equal(result.providerHealth, "healthy");
+  assert.equal(result.candidateEvaluations.length, 10);
+  assert.equal(result.lowestRetainedScore, 74.62);
+  assert.equal(result.highestRejectedScore, null);
   assert.throws(() => assertActivatableBatch(result.shadowBatch!), (error) => error instanceof CtDomainError && error.code === "activation_blocked");
 });
 
@@ -58,7 +62,8 @@ test("provider failure and empty results are explicit safe reports", async () =>
   assert.deepEqual(failed.errors, ["fixture_failure"]);
   const empty = await runCtShadowGeneration(pipelineInput({ provider: new EmptyCandidateSearchProvider(clock) }));
   assert.equal(empty.status, "skipped");
-  assert.equal(empty.recommendation, "no_candidates");
+  assert.equal(empty.recommendation, "insufficient_candidates");
+  assert.equal(empty.providerHealth, "empty");
 });
 
 test("post-search runtime drift aborts before batch construction", async () => {

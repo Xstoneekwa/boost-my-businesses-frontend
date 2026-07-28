@@ -42,6 +42,14 @@ export interface CtShadowScoreDistribution {
 
 export interface CtShadowRecommendation { code: string; requiresHumanReview: boolean }
 
+export interface CtShadowCandidateEvaluation {
+  username: string;
+  normalizedUsername: string | null;
+  score: CtProposalScore | null;
+  exclusionReasons: readonly string[];
+  retained: boolean;
+}
+
 export interface CtShadowReport {
   readonly runId: string;
   readonly mode: "shadow";
@@ -59,13 +67,19 @@ export interface CtShadowReport {
   readonly providerTrace: Readonly<{ provider: string; version: string; traceId: string; durationMs: number }> | null;
   readonly candidatesReceived: number;
   readonly scoredCandidates: readonly Readonly<{ username: string; score: CtProposalScore }>[];
+  readonly candidateEvaluations: readonly CtShadowCandidateEvaluation[];
   readonly shadowBatch: CtShadowBatch | null;
   readonly quality: CtShadowQualitySummary;
   readonly qualitySummary: CtShadowQualitySummary;
   readonly scoreDistribution: CtShadowScoreDistribution;
   readonly exclusionCounts: Readonly<Record<string, number>>;
   readonly exclusions: CtShadowExclusionSummary;
+  readonly topExclusionReasons: readonly Readonly<{ reason: string; count: number }>[];
   readonly proposedCount: number;
+  readonly lowestRetainedScore: number | null;
+  readonly highestRejectedScore: number | null;
+  readonly scoreGapToRecommended: number | null;
+  readonly providerHealth: "not_called" | "healthy" | "warning" | "empty" | "failed";
   readonly idempotencyKey: string;
   readonly recommendation: string;
   readonly recommendationDetail: CtShadowRecommendation;
