@@ -3,7 +3,7 @@ import type { CtDomainErrorCode } from "./types.ts";
 export class CtDomainError extends Error {
   readonly code: CtDomainErrorCode;
 
-  constructor(code: CtDomainErrorCode, message = code) {
+  constructor(code: CtDomainErrorCode, message: string = code) {
     super(message);
     this.name = "CtDomainError";
     this.code = code;
