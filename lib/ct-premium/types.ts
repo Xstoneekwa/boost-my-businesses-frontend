@@ -105,6 +105,9 @@ export interface CtTargetingCriteriaSnapshot {
   tenantId: TenantId;
   accountId: AccountId;
   plan: CtPlan;
+  entitlementIdentity: string;
+  entitlementVersion: string;
+  eligibleTargetCount: number;
   accountLanguage: string;
   targetGeographies: readonly string[];
   targetLanguages: readonly string[];
@@ -114,9 +117,15 @@ export interface CtTargetingCriteriaSnapshot {
   accountAnalysis: Readonly<Record<string, string | number | boolean | null>>;
   activeTargetUsernames: readonly string[];
   historicalTargetPerformance: readonly CtTargetPerformance[];
+  sourceTargetPerformance: Readonly<Record<string, number>>;
+  followbackSignals: Readonly<Record<string, number>>;
+  skipEligibilitySignals: Readonly<Record<string, string | number | boolean | null>>;
   blacklistUsernames: readonly string[];
   reviewConfig: Readonly<{ durationDays: 5; rejectedCooldownDays: number }>;
   scoringVersion: string;
+  searchStrategyVersion: string;
+  batchSize: number;
+  triggerReason: string;
   createdAt: string;
   fingerprint: string;
 }
