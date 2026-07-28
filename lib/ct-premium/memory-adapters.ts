@@ -52,7 +52,9 @@ export class InMemoryCtStore implements CtProposalRepository, CtSnapshotReposito
   async list(tenantId: TenantId, accountId: AccountId) {
     return [...this.batches.values()].filter((batch) => batch.tenantId === tenantId && batch.accountId === accountId);
   }
-  async get(tenantId: TenantId, accountId: AccountId, id: BatchId | SnapshotId) {
+  async get(tenantId: TenantId, accountId: AccountId, id: BatchId): Promise<CtProposalBatch | null>;
+  async get(tenantId: TenantId, accountId: AccountId, id: SnapshotId): Promise<CtTargetingCriteriaSnapshot | null>;
+  async get(tenantId: TenantId, accountId: AccountId, id: BatchId | SnapshotId): Promise<CtProposalBatch | CtTargetingCriteriaSnapshot | null> {
     const key = entityKey(tenantId, accountId, id);
     return this.batches.get(key) ?? this.snapshots.get(key) ?? null;
   }
