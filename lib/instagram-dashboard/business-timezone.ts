@@ -135,7 +135,6 @@ export function formatBusinessTimestamp(
     minute: "2-digit",
     hour12: false,
     hourCycle: "h23",
-    timeZoneName: "short",
   }).format(date).replace(",", " ·");
 }
 

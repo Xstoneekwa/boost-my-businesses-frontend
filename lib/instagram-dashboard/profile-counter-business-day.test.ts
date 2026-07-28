@@ -33,10 +33,10 @@ test("multi-day ranges start on the first requested SAST business date", () => {
   );
 });
 
-test("displayed operational timestamps are explicit SAST values", () => {
+test("displayed operational timestamps use Johannesburg time without a timezone suffix", () => {
   assert.equal(
     formatBusinessTimestamp("2026-07-27T19:46:16.000Z"),
-    "27 Jul 2026 · 21:46 SAST",
+    "27 Jul 2026 · 21:46",
   );
 });
 

@@ -464,8 +464,8 @@ function remainingCap(limit: number | null, used: number | null) {
   return Math.max(0, limit - (used ?? 0));
 }
 
-function utcDateString(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+export function dmCounterBusinessDate(date = new Date()) {
+  return businessDayWindow(date).businessDate;
 }
 
 export function resolveWelcomePreflightCap({
@@ -1991,7 +1991,7 @@ export async function evaluateRunStartEligibility(
       .from("ig_account_dm_counters")
       .select("welcome_sent_count,outreach_sent_count,total_dm_sent_count")
       .eq("account_id", accountId)
-      .eq("counter_date", utcDateString())
+      .eq("counter_date", dmCounterBusinessDate())
       .limit(1)
       .maybeSingle();
 

@@ -7,6 +7,7 @@ import { validateUnfollowDomainInput } from "../api/instagram-dashboard/settings
 import { DM_TEMPLATE_MESSAGE_MAX_CHARS, normalizeDmTemplateMessage } from "../../lib/instagram-dashboard/dm-formatting";
 import {
   accountSessionBlockedByWelcomeRealSendDisabled,
+  dmCounterBusinessDate,
   evaluateAccountSessionExecutablePhaseGate,
   evaluateAccountSessionExecutablePhases,
   evaluateDmStartGate,
@@ -38,6 +39,11 @@ import {
   scheduleValidationError,
 } from "./InstagramDashboardButtons";
 import type { ScheduleProjection } from "../../lib/instagram-dashboard/schedule";
+
+test("DM and Outreach counter date rolls at midnight Johannesburg", () => {
+  assert.equal(dmCounterBusinessDate(new Date("2026-07-27T21:59:59.999Z")), "2026-07-27");
+  assert.equal(dmCounterBusinessDate(new Date("2026-07-27T22:00:00.000Z")), "2026-07-28");
+});
 
 test("canonical package projection grants full-cycle Follow and Unfollow features", () => {
   const projection = {
