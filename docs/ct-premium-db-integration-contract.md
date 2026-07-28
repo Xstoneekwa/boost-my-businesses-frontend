@@ -113,6 +113,8 @@ Phase 8B ne suffit pas à représenter durablement l'Availability universelle. A
 
 Availability est universelle. Un compte certifié peut devenir inexploitable, mais badge et restriction Followers doivent rester séparés. Growth/Pro demandent des CT au client ; Premium prépare automatiquement le remplacement. Rien n'est actif et aucune migration Availability n'est incluse ici.
 
+Phase 8B.1 a désormais préparé le contrat dans une migration additive séparée, non appliquée. Elle crée cinq relations service-role-only sans modifier `ig_targets`, sans RPC et sans donnée. La procédure et le gate 8B.2 sont documentés dans `docs/ct-target-availability-foundations.md`.
+
 - certification de la baseline migrations et stratégie de non-replay ;
 - schéma/noms définitifs et politique de rétention ;
 - taille produit par défaut d'un batch ;
