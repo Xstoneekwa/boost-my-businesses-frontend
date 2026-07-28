@@ -30,7 +30,124 @@ export type TargetLifecycleReason =
   | "pro_client_target_request_required"
   | "premium_automatic_replacement_required"
   | "premium_replacement_ready_for_review"
-  | "premium_archive_deferred_until_replacement";
+  | "premium_archive_deferred_until_replacement"
+  | TargetAvailabilityReason;
+
+export type TargetAvailabilityStatus =
+  | "available"
+  | "username_changed"
+  | "verified_restricted"
+  | "temporarily_unavailable"
+  | "permanently_unavailable"
+  | "lookup_failed"
+  | "followers_surface_restricted"
+  | "suspended_or_disabled"
+  | "deleted_or_not_found"
+  | "identity_conflict"
+  | "stale_evidence"
+  | "insufficient_evidence"
+  | "availability_unknown";
+
+export type TargetAvailabilityConfidence = "unknown" | "low" | "medium" | "high";
+
+export type TargetAvailabilityReason =
+  | "target_username_changed"
+  | "target_identity_match_confirmed"
+  | "target_identity_conflict"
+  | "target_previous_username_reassigned"
+  | "target_profile_not_found"
+  | "target_temporarily_unavailable"
+  | "target_permanently_unavailable"
+  | "target_suspended_or_disabled"
+  | "target_lookup_failed"
+  | "target_availability_unknown"
+  | "target_availability_recheck_required"
+  | "target_verified_status_detected"
+  | "target_became_verified"
+  | "target_verified_followers_surface_restricted"
+  | "target_followers_surface_terminally_limited"
+  | "target_accessible_audience_insufficient"
+  | "target_navigation_retry_budget_exhausted"
+  | "target_source_profile_resolution_failed"
+  | "target_followers_entry_failed"
+  | "target_quarantined_for_availability_review";
+
+export type TargetAvailabilityEvidenceSource = "worker" | "provider" | "operator" | "synthetic";
+export type TargetFollowersSurfaceState = "normal" | "restricted" | "terminally_limited" | "unknown";
+export type TargetLookupResult = "found" | "not_found" | "unavailable" | "failed" | "unknown";
+
+export interface TargetAvailabilityEvidence {
+  evidenceId: string;
+  observedAt: string;
+  source: TargetAvailabilityEvidenceSource;
+  runId?: string | null;
+  deviceId?: string | null;
+  searchedUsername: string;
+  observedUsername?: string | null;
+  observedStablePlatformUserId?: string | null;
+  lookupResult: TargetLookupResult;
+  profileFound?: boolean | null;
+  verifiedBadge?: boolean | null;
+  followersSurface: TargetFollowersSurfaceState;
+  accessibleProfilesCount?: number | null;
+  terminalEndDetected?: boolean;
+  repeatedProfilesDetected?: boolean;
+  networkHealthy?: boolean | null;
+  sessionHealthy?: boolean | null;
+  uiEvidenceQuality?: "unknown" | "low" | "medium" | "high";
+  instagramVersion?: string | null;
+  workerVersion?: string | null;
+}
+
+export interface TargetIdentityResolution {
+  status: "unchanged" | "matched_rename" | "conflict" | "unresolved";
+  stablePlatformUserId: string | null;
+  previousUsername: string | null;
+  resolvedUsername: string | null;
+  automaticUsernameUpdateAllowed: boolean;
+  reasons: readonly TargetAvailabilityReason[];
+}
+
+export interface TargetUsernameChangeAssessment {
+  changed: boolean;
+  previousUsername: string;
+  observedUsername: string | null;
+  identityMatch: boolean;
+  previousUsernameReassigned: boolean;
+  operatorConfirmationRequired: boolean;
+}
+
+export interface TargetAvailabilityAssessment {
+  scope: TargetLifecycleScope & { stablePlatformUserId: string | null };
+  status: TargetAvailabilityStatus;
+  confidence: TargetAvailabilityConfidence;
+  reasons: readonly TargetAvailabilityReason[];
+  identityResolution: TargetIdentityResolution;
+  usernameChange: TargetUsernameChangeAssessment;
+  evidenceCount: number;
+  distinctRunCount: number;
+  distinctDeviceCount: number;
+  latestObservedAt: string | null;
+  recheckRequired: boolean;
+  quarantineRecommended: boolean;
+  replacementRequired: boolean;
+  terminalProof: boolean;
+  calculatedAt: string;
+}
+
+export interface TargetAvailabilityAssessmentInput extends TargetLifecycleScope {
+  stablePlatformUserId?: string | null;
+  evidence: readonly TargetAvailabilityEvidence[];
+  calculatedAt: string;
+  staleAfterDays?: number;
+}
+
+export interface TargetAvailabilityTransition {
+  from: TargetAvailabilityStatus;
+  to: TargetAvailabilityStatus;
+  allowed: boolean;
+  reason: TargetAvailabilityReason;
+}
 
 export interface TargetLifecycleScope {
   tenantId: string;
@@ -97,6 +214,7 @@ export interface TargetLifecycleAssessment {
   confidence: TargetUtilizationConfidence;
   reasons: readonly TargetLifecycleReason[];
   archiveRecommendation: TargetArchiveRecommendation;
+  availability: TargetAvailabilityAssessment | null;
   thresholdVersion: string;
   calculatedAt: string;
 }
@@ -118,6 +236,7 @@ export interface TargetLifecycleAssessmentInput extends TargetLifecycleScope {
   terminalProof?: boolean;
   archived?: boolean;
   replacementState?: TargetReplacementState;
+  availability?: TargetAvailabilityAssessment | null;
   calculatedAt: string;
 }
 
@@ -145,6 +264,10 @@ export type TargetPlanPolicyAction =
   | "prepare_automatic_replacement"
   | "archive_after_replacement"
   | "archive_immediately_terminal"
+  | "resolve_target_identity"
+  | "recheck_availability"
+  | "quarantine_target"
+  | "hold_for_operator"
   | "block_due_to_insufficient_data";
 
 export interface TargetPlanPolicyInput {
@@ -154,6 +277,7 @@ export interface TargetPlanPolicyInput {
   minimumEligibleTargetCount: number;
   onboardingComplete: boolean;
   replacementState: TargetReplacementState;
+  availabilityAssessment?: TargetAvailabilityAssessment | null;
   notificationState?: "not_sent" | "sent";
   evaluatedAt: string;
 }
