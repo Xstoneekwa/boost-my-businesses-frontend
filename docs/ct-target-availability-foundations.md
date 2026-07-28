@@ -119,6 +119,41 @@ The report is frozen, serializable, explicitly `mode=local_shadow` and `mutation
 
 Supabase CLI `db lint` could not load `pgsql_check` in the plain temporary PostgreSQL cluster. This is an environment limitation, not a hidden green result; direct SQL contract validation remains authoritative for this phase.
 
+## Phase 8B.2 ACL and foreign-key forward-fix
+
+The original migration stated the narrow grants after table creation, but the
+hosted project's `postgres` default privileges had already granted
+`service_role` all table privileges. A `GRANT` is additive, so the effective
+ACL remained `arwdDxtm`. The compensating migration
+`20260728230641_ct_target_availability_restrict_service_role_and_index_fks_v1.sql`
+first revokes all `service_role` table privileges on the five Availability
+relations, then restores only the documented contract:
+
+| Relation class | SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGER |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| observations, identity history, assessments | yes | yes | no | no | no | no | no |
+| identity current, availability current | yes | yes | yes | no | no | no | no |
+
+The migration does not change policies or global/default privileges. RLS stays
+enabled and forced, client roles remain unprivileged, and the five existing
+`service_role` policies remain the only policies on these tables. Table ACL is
+the operative least-privilege boundary because hosted `service_role` bypasses
+RLS.
+
+The Supabase performance advisor reported fourteen uncovered foreign keys. The
+forward-fix adds eleven indexes: on four tables, one composite
+`(account_id, target_id)` index covers both the single-column `account_id` FK
+and the composite account/target FK through the PostgreSQL left-prefix rule.
+Separate `target_id`, `observation_id`, and `last_history_id` indexes cover the
+remaining relationships. No original index is removed; the existing partial
+run/stable-ID and domain query-path indexes remain intact.
+
+The dedicated forward-fix contract verifies exact table and column ACLs,
+PUBLIC/anon/authenticated denial, real `service_role` reads/inserts/current
+updates, denial of historical updates/deletes and all truncation/reference/
+trigger operations, RLS/policies, all fourteen FK prefixes, absence of
+duplicate indexes, and rollback of every synthetic fixture.
+
 ## Phase 8B.2 deployment gate
 
 The package can be proposed for a separate controlled dormant deployment only after:
