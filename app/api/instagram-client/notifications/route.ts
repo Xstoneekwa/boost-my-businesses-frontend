@@ -6,6 +6,7 @@ import {
   probeClientAccountNotificationsTable,
   reconcileClientAccountNotificationsForClient,
 } from "@/lib/instagram-client/client-account-notifications";
+import { buildClientNotificationsUnavailablePatchResponse } from "@/lib/instagram-client/client-notification-responses";
 import { readString, rejectTechnicalClientFields, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
 
 export const dynamic = "force-dynamic";
@@ -84,13 +85,4 @@ export async function PATCH(request: Request) {
     const message = error instanceof Error ? error.message : "Could not update notification.";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
-}
-
-export function buildClientNotificationsUnavailablePatchResponse() {
-  return {
-    ok: false as const,
-    featureAvailable: false as const,
-    reason: "feature_unavailable" as const,
-    error: "Client account notifications are not available yet.",
-  };
 }

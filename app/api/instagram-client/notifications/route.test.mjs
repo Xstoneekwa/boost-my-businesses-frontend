@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const routeSource = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+const responseHelperSource = readFileSync(
+  new URL("../../../../lib/instagram-client/client-notification-responses.ts", import.meta.url),
+  "utf8",
+);
 const pageSource = readFileSync(new URL("../../../instagram-client/page.tsx", import.meta.url), "utf8");
 const dashboardSource = readFileSync(new URL("../../../instagram-client/ClientDashboard.tsx", import.meta.url), "utf8");
 
@@ -15,8 +19,13 @@ test("notifications GET exposes featureAvailable when table is unavailable", () 
 
 test("notifications PATCH is explicit no-op when feature is unavailable", () => {
   assert.match(routeSource, /probeClientAccountNotificationsTable/);
+  assert.match(routeSource, /from "@\/lib\/instagram-client\/client-notification-responses"/);
   assert.match(routeSource, /buildClientNotificationsUnavailablePatchResponse/);
-  assert.match(routeSource, /feature_unavailable/);
+  assert.doesNotMatch(routeSource, /export function buildClientNotificationsUnavailablePatchResponse/);
+  assert.match(responseHelperSource, /ok: false as const/);
+  assert.match(responseHelperSource, /featureAvailable: false as const/);
+  assert.match(responseHelperSource, /reason: "feature_unavailable" as const/);
+  assert.match(responseHelperSource, /error: "Client account notifications are not available yet\."/);
   assert.doesNotMatch(routeSource, /\.insert\(/);
   assert.doesNotMatch(routeSource, /\.update\(/);
 });
