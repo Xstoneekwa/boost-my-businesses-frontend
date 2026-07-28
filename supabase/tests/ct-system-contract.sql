@@ -24,6 +24,11 @@ select pg_temp.assert_true(
 select pg_temp.assert_true(not has_table_privilege('anon','public.ct_proposals','SELECT'),'anon denied');
 select pg_temp.assert_true(not has_table_privilege('authenticated','public.ct_proposals','SELECT'),'authenticated direct read denied');
 select pg_temp.assert_true(has_table_privilege('service_role','public.ct_proposals','SELECT,INSERT,UPDATE'),'service role allowed');
+select pg_temp.assert_true(not has_table_privilege('anon','public.client_account_notifications','UPDATE'),'anon notification update denied');
+select pg_temp.assert_true(not has_table_privilege('authenticated','public.client_account_notifications','UPDATE'),'authenticated notification update denied');
+select pg_temp.assert_true(has_table_privilege('service_role','public.client_account_notifications','SELECT,INSERT,UPDATE,DELETE'),'service notification access allowed');
+select pg_temp.assert_true((select relrowsecurity from pg_class where oid='public.client_account_notifications'::regclass),'notification RLS remains enabled');
+select pg_temp.assert_true((select count(*)=0 from pg_policies where schemaname='public' and tablename='client_account_notifications'),'notification user policy remains absent');
 select pg_temp.assert_true(not has_function_privilege('authenticated','public.ct_activate_premium_proposal_v1(uuid,uuid,uuid,text,timestamptz)','EXECUTE'),'authenticated activation denied');
 select pg_temp.assert_true(has_function_privilege('service_role','public.ct_activate_premium_proposal_v1(uuid,uuid,uuid,text,timestamptz)','EXECUTE'),'service activation allowed');
 
