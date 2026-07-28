@@ -1,15 +1,15 @@
 import type { AccountId, TargetId, TenantId } from "../types.ts";
+import {
+  TARGET_LIFECYCLE_THRESHOLDS,
+  TARGET_LIFECYCLE_THRESHOLD_VERSION,
+  assessTargetLifecycle,
+  minimumEvaluatedProfilesForAudience,
+  type TargetLifecycleThresholds,
+} from "../../target-lifecycle/index.ts";
 
-export const CT_TARGET_UTILIZATION_THRESHOLD_VERSION = "ct-target-utilization-shadow-v1";
-
-export type CtTargetUtilizationStatus =
-  | "insufficient_data"
-  | "healthy"
-  | "watch"
-  | "replacement_recommended"
-  | "exhausted"
-  | "stale_data";
-
+/** @deprecated Compatibility surface. New consumers must import target-lifecycle directly. */
+export const CT_TARGET_UTILIZATION_THRESHOLD_VERSION = TARGET_LIFECYCLE_THRESHOLD_VERSION;
+export type CtTargetUtilizationStatus = "insufficient_data" | "healthy" | "watch" | "replacement_recommended" | "replacement_pending" | "exhausted" | "archived" | "stale_data";
 export type CtTargetUtilizationThresholds = Readonly<{
   watchRatio: number;
   replacementRatio: number;
@@ -17,13 +17,12 @@ export type CtTargetUtilizationThresholds = Readonly<{
   minimumConfidence: number;
   followerCountFreshnessDays: number;
 }>;
-
 export const CT_TARGET_UTILIZATION_SHADOW_THRESHOLDS: CtTargetUtilizationThresholds = Object.freeze({
-  watchRatio: 0.75,
-  replacementRatio: 0.8,
-  exhaustedRatio: 0.9,
-  minimumConfidence: 0.8,
-  followerCountFreshnessDays: 14,
+  watchRatio: TARGET_LIFECYCLE_THRESHOLDS.watchRatio,
+  replacementRatio: TARGET_LIFECYCLE_THRESHOLDS.replacementRatio,
+  exhaustedRatio: TARGET_LIFECYCLE_THRESHOLDS.exhaustedRatio,
+  minimumConfidence: TARGET_LIFECYCLE_THRESHOLDS.minimumHighConfidence,
+  followerCountFreshnessDays: TARGET_LIFECYCLE_THRESHOLDS.freshnessDays,
 });
 
 export type CtTargetUtilizationInput = Readonly<{
@@ -45,146 +44,62 @@ export type CtTargetUtilizationInput = Readonly<{
   thresholds?: CtTargetUtilizationThresholds;
 }>;
 
-export type CtTargetUtilizationAssessment = Readonly<{
-  tenantId: TenantId;
-  accountId: AccountId;
-  targetId: TargetId;
-  normalizedUsername: string;
-  followerCountObserved: number | null;
-  followerCountObservedAt: string | null;
-  uniqueProfilesProcessed: number | null;
-  uniqueProfilesFollowed: number | null;
-  uniqueProfilesSkipped: number | null;
-  uniqueProfilesIneligible: number | null;
-  uniqueProfilesUnavailable: number | null;
-  estimatedExploitableAudience: number | null;
-  denominator: number | null;
-  denominatorKind: "estimated_exploitable_audience" | "observed_follower_count" | "unavailable";
-  rawUtilizationRatio: number | null;
-  utilizationRatio: number | null;
-  confidence: number;
-  thresholdVersion: typeof CT_TARGET_UTILIZATION_THRESHOLD_VERSION;
-  minimumAbsoluteCount: number;
-  followerCountIsFresh: boolean;
-  status: CtTargetUtilizationStatus;
-  archiveRecommended: boolean;
-  archiveReason: "target_audience_exhausted" | null;
-  fbrBand: "unknown" | "low" | "average" | "good";
-  calculatedAt: string;
-}>;
+export type CtTargetUtilizationAssessment = ReturnType<typeof assessCtTargetUtilization>;
+export const minimumProcessedProfilesForAudience = minimumEvaluatedProfilesForAudience;
 
-function count(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
-}
-
-function bounded(value: number, min = 0, max = 1) {
-  return Math.max(min, Math.min(max, value));
-}
-
-export function minimumProcessedProfilesForAudience(audience: number | null) {
-  if (audience === null || audience <= 0) return 0;
-  if (audience < 500) return 250;
-  if (audience < 2_000) return 500;
-  if (audience < 10_000) return 1_000;
-  return 2_500;
-}
-
-function fbrBand(value: number | null | undefined): CtTargetUtilizationAssessment["fbrBand"] {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "unknown";
-  if (value < 8) return "low";
-  if (value < 15) return "average";
-  return "good";
-}
-
-export function assessCtTargetUtilization(input: CtTargetUtilizationInput): CtTargetUtilizationAssessment {
-  const thresholds = input.thresholds ?? CT_TARGET_UTILIZATION_SHADOW_THRESHOLDS;
-  const followerCountObserved = count(input.followerCountObserved);
-  const estimatedExploitableAudience = count(input.estimatedExploitableAudience);
-  const uniqueProfilesProcessed = count(input.uniqueProfilesProcessed);
-  const uniqueProfilesFollowed = count(input.uniqueProfilesFollowed);
-  const uniqueProfilesSkipped = count(input.uniqueProfilesSkipped);
-  const uniqueProfilesIneligible = count(input.uniqueProfilesIneligible);
-  const uniqueProfilesUnavailable = count(input.uniqueProfilesUnavailable);
-  const denominator = estimatedExploitableAudience && estimatedExploitableAudience > 0
-    ? estimatedExploitableAudience
-    : followerCountObserved && followerCountObserved > 0
-      ? followerCountObserved
-      : null;
-  const denominatorKind = estimatedExploitableAudience && estimatedExploitableAudience > 0
-    ? "estimated_exploitable_audience" as const
-    : denominator
-      ? "observed_follower_count" as const
-      : "unavailable" as const;
-  const calculatedAtMs = Date.parse(input.calculatedAt);
-  const observedAtMs = input.followerCountObservedAt ? Date.parse(input.followerCountObservedAt) : Number.NaN;
-  const ageMs = calculatedAtMs - observedAtMs;
-  const followerCountIsFresh = Number.isFinite(calculatedAtMs)
-    && Number.isFinite(observedAtMs)
-    && ageMs >= 0
-    && ageMs <= thresholds.followerCountFreshnessDays * 86_400_000;
-  const rawUtilizationRatio = denominator && uniqueProfilesProcessed !== null
-    ? uniqueProfilesProcessed / denominator
-    : null;
-  const utilizationRatio = rawUtilizationRatio === null ? null : bounded(rawUtilizationRatio);
-  const breakdown = [uniqueProfilesFollowed, uniqueProfilesSkipped, uniqueProfilesIneligible, uniqueProfilesUnavailable];
-  const breakdownComplete = breakdown.every((value) => value !== null);
-  const breakdownTotal = breakdown.reduce<number>((sum, value) => sum + (value ?? 0), 0);
-  const breakdownConsistent = breakdownComplete
-    && uniqueProfilesProcessed !== null
-    && breakdownTotal <= uniqueProfilesProcessed;
-  let confidence = 0;
-  if (followerCountIsFresh) confidence += 0.3;
-  confidence += 0.3 * bounded(input.historicalCoverage);
-  if (breakdownConsistent) confidence += 0.2;
-  if (denominatorKind === "estimated_exploitable_audience") confidence += 0.2;
-  else if (denominatorKind === "observed_follower_count") confidence += 0.15;
-  if (rawUtilizationRatio !== null && rawUtilizationRatio > 1) confidence -= 0.25;
-  confidence = Number(bounded(confidence).toFixed(2));
-  const minimumAbsoluteCount = minimumProcessedProfilesForAudience(denominator);
-
-  let status: CtTargetUtilizationStatus;
-  if (!denominator || uniqueProfilesProcessed === null) status = "insufficient_data";
-  else if (!followerCountIsFresh) status = "stale_data";
-  else if (confidence < 0.5) status = "insufficient_data";
-  else if (
-    utilizationRatio !== null
-    && utilizationRatio >= thresholds.exhaustedRatio
-    && uniqueProfilesProcessed >= minimumAbsoluteCount
-    && confidence >= thresholds.minimumConfidence
-  ) status = "exhausted";
-  else if (
-    utilizationRatio !== null
-    && utilizationRatio >= thresholds.replacementRatio
-    && uniqueProfilesProcessed >= minimumAbsoluteCount
-  ) status = "replacement_recommended";
-  else if (utilizationRatio !== null && utilizationRatio >= thresholds.watchRatio) status = "watch";
-  else status = "healthy";
-
+export function assessCtTargetUtilization(input: CtTargetUtilizationInput) {
+  const thresholds: TargetLifecycleThresholds = input.thresholds ? {
+    ...TARGET_LIFECYCLE_THRESHOLDS,
+    watchRatio: input.thresholds.watchRatio,
+    replacementRatio: input.thresholds.replacementRatio,
+    exhaustedRatio: input.thresholds.exhaustedRatio,
+    minimumHighConfidence: input.thresholds.minimumConfidence,
+    freshnessDays: input.thresholds.followerCountFreshnessDays,
+  } : TARGET_LIFECYCLE_THRESHOLDS;
+  const assessment = assessTargetLifecycle({
+    tenantId: input.tenantId,
+    accountId: input.accountId,
+    targetId: input.targetId,
+    normalizedUsername: input.normalizedUsername,
+    observedFollowerCount: input.followerCountObserved,
+    denominatorObservedAt: input.followerCountObservedAt,
+    estimatedExploitableAudience: input.estimatedExploitableAudience,
+    uniqueProfilesEvaluated: input.uniqueProfilesProcessed,
+    breakdown: {
+      followed: input.uniqueProfilesFollowed,
+      skipped: input.uniqueProfilesSkipped,
+      ineligible: input.uniqueProfilesIneligible,
+      unavailable: input.uniqueProfilesUnavailable,
+    },
+    historicalCoverage: input.historicalCoverage,
+    followbackRatio: input.followbackRatio,
+    calculatedAt: input.calculatedAt,
+  }, thresholds);
   return Object.freeze({
     tenantId: input.tenantId,
     accountId: input.accountId,
     targetId: input.targetId,
-    normalizedUsername: input.normalizedUsername.trim().replace(/^@+/, "").toLowerCase(),
-    followerCountObserved,
+    normalizedUsername: assessment.scope.normalizedUsername,
+    followerCountObserved: input.followerCountObserved,
     followerCountObservedAt: input.followerCountObservedAt,
-    uniqueProfilesProcessed,
-    uniqueProfilesFollowed,
-    uniqueProfilesSkipped,
-    uniqueProfilesIneligible,
-    uniqueProfilesUnavailable,
-    estimatedExploitableAudience,
-    denominator,
-    denominatorKind,
-    rawUtilizationRatio: rawUtilizationRatio === null ? null : Number(rawUtilizationRatio.toFixed(4)),
-    utilizationRatio: utilizationRatio === null ? null : Number(utilizationRatio.toFixed(4)),
-    confidence,
+    uniqueProfilesProcessed: assessment.metrics.uniqueProfilesEvaluated,
+    uniqueProfilesFollowed: assessment.metrics.breakdown.followed,
+    uniqueProfilesSkipped: assessment.metrics.breakdown.skipped,
+    uniqueProfilesIneligible: assessment.metrics.breakdown.ineligible,
+    uniqueProfilesUnavailable: assessment.metrics.breakdown.unavailable,
+    estimatedExploitableAudience: input.estimatedExploitableAudience ?? null,
+    denominator: assessment.metrics.denominator.value,
+    denominatorKind: assessment.metrics.denominator.kind,
+    rawUtilizationRatio: assessment.metrics.rawUtilizationRatio,
+    utilizationRatio: assessment.metrics.utilizationRatio,
+    confidence: assessment.confidence.score,
     thresholdVersion: CT_TARGET_UTILIZATION_THRESHOLD_VERSION,
-    minimumAbsoluteCount,
-    followerCountIsFresh,
-    status,
-    archiveRecommended: status === "exhausted",
-    archiveReason: status === "exhausted" ? "target_audience_exhausted" : null,
-    fbrBand: fbrBand(input.followbackRatio),
-    calculatedAt: input.calculatedAt,
+    minimumAbsoluteCount: assessment.metrics.minimumAbsoluteCount,
+    followerCountIsFresh: assessment.metrics.followerCountIsFresh,
+    status: assessment.status === "replacement_pending" ? "replacement_recommended" as const : assessment.status,
+    archiveRecommended: assessment.archiveRecommendation.recommended,
+    archiveReason: assessment.archiveRecommendation.reason === "target_exploitable_audience_depleted" ? "target_audience_exhausted" as const : null,
+    fbrBand: assessment.metrics.fbrBand,
+    calculatedAt: assessment.calculatedAt,
   });
 }
