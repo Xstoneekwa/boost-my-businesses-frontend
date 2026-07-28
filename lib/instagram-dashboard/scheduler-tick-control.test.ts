@@ -116,7 +116,10 @@ test("business outcomes stay successful ticks and never reach the failed path", 
   assert.match(tickSource, /action: "auto_restart_runtime_rejected",[\s\S]*?decision: "blocked",/);
   // The nominal end of scan (no candidates, exclusions, runs created) always
   // finalizes the lock as completed.
-  assert.match(tickSource, /if \(lockHeld\) \{\n    await completeTickLock\(supabase, tickId, "completed"\);\n  \}/);
+  assert.match(
+    tickSource,
+    /if \(lockHeld\) \{\n    await completeTickLock\(supabase, tickId, "completed", undefined, \{[\s\S]*?deduplicated_count: summary\.deduplicated_count,[\s\S]*?\}\);\n  \}/,
+  );
   // failTickLock is called from exactly one place: the unexpected-exception path.
   const failCalls = tickSource.match(/await failTickLock\(/g) ?? [];
   assert.equal(failCalls.length, 1);

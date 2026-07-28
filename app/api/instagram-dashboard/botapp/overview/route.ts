@@ -3,7 +3,7 @@ import { getActivityLogData } from "@/app/instagram-dashboard/activity-log-data"
 import { getCredentialsActionsData } from "@/app/instagram-dashboard/credentials-actions-data";
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import { getRadarData } from "@/app/instagram-dashboard/radar-data";
-import { getDashboardDevices } from "../../devices/route";
+import { getDashboardDevices } from "../../devices/helpers";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../../_utils";
 import { verifyCompassRelayKey } from "../../compass/relay-auth";
 

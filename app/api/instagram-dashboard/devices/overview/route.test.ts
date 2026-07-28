@@ -10,7 +10,7 @@ import {
   type LivePhoneDevice,
   type LivePhoneInventorySummary,
 } from "../../../../instagram-dashboard/devices-live-data";
-import { DevicesKpis, RegisteredPhonesList } from "../../../../instagram-dashboard/devices/page";
+import { DevicesKpis, RegisteredPhonesList } from "../../../../instagram-dashboard/devices/components";
 
 const summary: LivePhoneInventorySummary = {
   total_phone_devices: 1,
