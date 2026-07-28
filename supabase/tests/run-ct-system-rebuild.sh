@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+database_name="${1:?temporary database name required}"
+port="${CT_TEST_POSTGRES_PORT:-55437}"
+
+if [[ ! "$database_name" =~ ^ct_validation[0-9]+$ ]]; then
+  echo "temporary database name rejected" >&2
+  exit 2
+fi
+
+createdb -h 127.0.0.1 -p "$port" "$database_name"
+
+files=(
+  supabase/baseline/0000_local_platform_compatibility.sql
+  supabase/baseline/20260728001632_public_schema.sql
+  supabase/migrations/20260728132018_ct_target_evaluation_performance_lifecycle_v1.sql
+  supabase/migrations/20260728132019_ct_premium_proposals_and_action_contracts_v1.sql
+  supabase/migrations/20260728132020_ct_system_rls_and_grants_v1.sql
+  supabase/migrations/20260728132021_ct_system_transactional_rpcs_v1.sql
+  supabase/tests/ct-system-fixtures.sql
+  supabase/tests/ct-system-contract.sql
+)
+
+for file in "${files[@]}"; do
+  psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "$port" -d "$database_name" -f "$file"
+done
+
+psql -X -Atq -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "$port" -d "$database_name" -f supabase/tests/ct-system-structure-hash.sql
