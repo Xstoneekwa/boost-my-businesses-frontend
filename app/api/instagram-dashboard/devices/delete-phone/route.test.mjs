@@ -5,7 +5,7 @@ import {
   deletePhoneErrorMessage,
   deletePhoneStableReason,
   forwardDeletePhysicalPhone,
-} from "./route.ts";
+} from "./helpers.ts";
 
 const routeSource = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
 const entry2cDeviceId = "00000000-0000-4000-8000-00000022c002";
