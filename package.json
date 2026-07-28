@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:ct-premium-shadow": "node --test --experimental-strip-types lib/ct-premium/shadow-validation/*.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",
