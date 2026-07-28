@@ -190,7 +190,7 @@ Terminé : modèle, raisons, simulation et architecture, aucun runtime.
 
 ### Phase B — Contrat DB additif
 
-Obligatoire : identité stable, journal evidence, assessment Availability courant, quarantaine/recheck, RLS/grants service-role, runtime OFF.
+Préparé localement en Phase 8B.1 : identité stable, journal evidence, assessment Availability courant, quarantaine/recheck, RLS/grants service-role, runtime OFF. La migration additive reste non appliquée ; voir `docs/ct-target-availability-foundations.md`.
 
 ### Phase C — Read-only Availability Shadow
 

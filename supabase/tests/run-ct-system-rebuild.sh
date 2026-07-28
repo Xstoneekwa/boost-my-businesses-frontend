@@ -19,8 +19,10 @@ files=(
   supabase/migrations/20260728132020_ct_system_rls_and_grants_v1.sql
   supabase/migrations/20260728185253_fix_client_account_notifications_global_grants_v1.sql
   supabase/migrations/20260728132021_ct_system_transactional_rpcs_v1.sql
+  supabase/migrations/20260728220631_ct_target_availability_foundations_v1.sql
   supabase/tests/ct-system-fixtures.sql
   supabase/tests/ct-system-contract.sql
+  supabase/tests/ct-target-availability-contract.sql
 )
 
 for file in "${files[@]}"; do
