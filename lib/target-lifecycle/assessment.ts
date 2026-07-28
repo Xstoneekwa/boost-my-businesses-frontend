@@ -130,6 +130,7 @@ export function assessTargetLifecycle(
       terminalProof,
       reason: archiveRecommended ? "target_exploitable_audience_depleted" : null,
     }),
+    availability: input.availability ?? null,
     thresholdVersion: TARGET_LIFECYCLE_THRESHOLD_VERSION,
     calculatedAt: input.calculatedAt,
   });
