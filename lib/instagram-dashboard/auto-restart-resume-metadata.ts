@@ -8,12 +8,17 @@ export function rebuildResolvedIncidentResumeCandidate(
   const follow = candidate.quotas.follow.enabled
     && candidate.quotas.follow.remaining > 0
     && Number(candidate.eligibleFollowTargetCount || 0) > 0;
-  const unfollow = candidate.quotas.unfollow.enabled && candidate.quotas.unfollow.remaining > 0;
+  const actionableUnfollow = Math.max(0, Number(candidate.eligibleUnfollowCandidateCount || 0));
+  const unfollow = candidate.quotas.unfollow.enabled
+    && candidate.quotas.unfollow.remaining > 0
+    && actionableUnfollow > 0;
   const phases = { welcome, follow, unfollow };
   const remaining = {
     welcome: welcome ? candidate.quotas.welcome.remaining : 0,
     follow: follow ? candidate.quotas.follow.remaining : 0,
-    unfollow: unfollow ? candidate.quotas.unfollow.remaining : 0,
+    unfollow: unfollow
+      ? Math.min(candidate.quotas.unfollow.remaining, actionableUnfollow)
+      : 0,
     outreach: candidate.quotas.outreach.enabled ? candidate.quotas.outreach.remaining : 0,
   };
   const actionable = Object.values(phases).some(Boolean);
@@ -148,7 +153,8 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
       outreach_remaining: candidate.plannedQuotaRemaining.outreach,
       candidate_counts: {
         follow_targets: candidate.eligibleFollowTargetCount,
-        unfollow_candidates: null,
+        unfollow_candidates: candidate.eligibleUnfollowCandidateCount ?? null,
+        unfollow_unavailable: candidate.unavailableUnfollowCandidateCount ?? null,
         welcome_candidates: null,
         source: "canonical_backend_candidate_projection",
       },
@@ -156,10 +162,10 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
       restart_block_reason: candidate.enqueueAllowed ? "" : reliability.restartBlockReason || "",
       session_termination_class: reliability.sessionTerminationClass || "",
       business_session_id: candidate.sourceBusinessSessionId || null,
-      attempt_id: Number.isFinite(Number(reliability.attemptId)) ? Number(reliability.attemptId) : Math.max(1, retryIndex),
-      retry_index: Number.isFinite(Number(reliability.retryIndex)) ? Number(reliability.retryIndex) : Math.max(0, retryIndex - 1),
+      attempt_id: attemptId,
+      retry_index: retryIndex,
       next_retry_index: retryIndex,
-      previous_run_id: reliability.previousRunId || null,
+      previous_run_id: candidate.sourceRunId || reliability.previousRunId || null,
       root_failure_code: reliability.rootFailureCode || null,
       failure_signature: reliability.failureSignature || null,
       failure_category: reliability.failureCategory || null,

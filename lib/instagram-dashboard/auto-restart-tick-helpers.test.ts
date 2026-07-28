@@ -198,6 +198,8 @@ test("retry request metadata preserves one business session and only remaining u
   assert.equal(retryOne.business_session_id, "business-session-1");
   assert.equal(retryOne.attempt_id, 2);
   assert.equal(retryOne.retry_index, 1);
+  assert.equal(retryOne.resume_plan.attempt_id, 2);
+  assert.equal(retryOne.resume_plan.retry_index, 1);
   assert.equal(retryOne.previous_run_id, "initial-run");
   assert.deepEqual(retryOne.resume_plan.phases_to_run, {
     welcome: false,
@@ -210,6 +212,8 @@ test("retry request metadata preserves one business session and only remaining u
   assert.equal(retryTwo.business_session_id, retryOne.business_session_id);
   assert.equal(retryTwo.attempt_id, 3);
   assert.equal(retryTwo.retry_index, 2);
+  assert.equal(retryTwo.resume_plan.attempt_id, 3);
+  assert.equal(retryTwo.resume_plan.retry_index, 2);
   assert.equal(retryTwo.previous_run_id, "retry-run-1");
   assert.equal(maxRetriesBlockReason("2", 2), "auto_restart_retries_exhausted");
 });

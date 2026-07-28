@@ -73,6 +73,7 @@ export function resolvePlannedAccountSession(input: {
   persistedPhases: AutoRestartAccountSessionPhases | null;
   persistedQuotaRemaining: Record<string, number>;
   quotas: { welcome: PhaseQuota; follow: PhaseQuota; unfollow: PhaseQuota };
+  eligibleWorkRemaining?: Partial<Record<keyof AutoRestartAccountSessionPhases, number | null>>;
 }): PlannedAccountSession {
   const phaseNames = ["welcome", "follow", "unfollow"] as const;
   const phases = Object.fromEntries(phaseNames.map((phase) => [
@@ -87,7 +88,16 @@ export function resolvePlannedAccountSession(input: {
     if (!phases[phase]) return [phase, 0];
     const persisted = input.persistedQuotaRemaining[phase];
     const raw = Math.max(0, input.quotas[phase].remaining);
-    return [phase, Number.isFinite(persisted) ? Math.min(raw, Math.max(0, persisted)) : raw];
+    const persistedBound = Number.isFinite(persisted)
+      ? Math.min(raw, Math.max(0, persisted))
+      : raw;
+    const eligible = input.eligibleWorkRemaining?.[phase];
+    return [
+      phase,
+      eligible === null || eligible === undefined || !Number.isFinite(eligible)
+        ? persistedBound
+        : Math.min(persistedBound, Math.max(0, eligible)),
+    ];
   })) as PlannedAccountSession["remaining"];
 
   return {

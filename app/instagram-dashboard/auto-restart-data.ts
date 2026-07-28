@@ -25,6 +25,11 @@ import { getRadarData } from "./radar-data";
 
 type SupabaseRecord = Record<string, unknown>;
 type DailyActionCounts = { follow: number; unfollow: number; welcome: number; outreach: number };
+type UnfollowBacklogCounts = {
+  eligibleTotal: number;
+  actionableRemaining: number;
+  unavailableRemaining: number;
+};
 
 export type AutoRestartMode = "production";
 export type AutoRestartStatus = "connected" | "pending" | "unknown";
@@ -84,6 +89,8 @@ export type AutoRestartCandidate = {
   scheduledWindowStart?: string | null;
   scheduledWindowEnd?: string | null;
   eligibleFollowTargetCount?: number;
+  eligibleUnfollowCandidateCount?: number;
+  unavailableUnfollowCandidateCount?: number;
   commercialAddonsLabel: string;
   outreachSourceLabel: string;
   runtimeProfilesLabel: string;
@@ -685,6 +692,7 @@ function planCandidate({
   deviceLockActive,
   eligibleFollowTargetCount,
   eligibleFollowTargets,
+  unfollowBacklog,
   priorTargetId,
   rules,
   reliability,
@@ -706,6 +714,7 @@ function planCandidate({
   deviceLockActive?: boolean;
   eligibleFollowTargetCount: number;
   eligibleFollowTargets: SafeBoundaryTarget[];
+  unfollowBacklog: UnfollowBacklogCounts;
   priorTargetId: string | null;
   rules: AutoRestartRulePreview;
   reliability: AutoRestartCandidate["reliability"];
@@ -816,6 +825,9 @@ function planCandidate({
     persistedPhases: reliability.phasesToRun,
     persistedQuotaRemaining: reliability.quotaRemaining,
     quotas: { follow, unfollow, welcome },
+    eligibleWorkRemaining: {
+      unfollow: unfollowBacklog.actionableRemaining,
+    },
   });
   const accountSessionPhaseCompletion = {
     follow: resolvePhaseCompletion({
@@ -826,7 +838,7 @@ function planCandidate({
     unfollow: resolvePhaseCompletion({
       enabled: initialPlannedAccountSession.phases.unfollow || (unfollow.enabled && unfollow.remaining < 1),
       quotaRemaining: initialPlannedAccountSession.remaining.unfollow,
-      eligibleWorkRemaining: null,
+      eligibleWorkRemaining: unfollowBacklog.actionableRemaining,
     }),
     welcome: resolvePhaseCompletion({
       enabled: initialPlannedAccountSession.phases.welcome || (welcome.enabled && welcome.remaining < 1),
@@ -946,6 +958,8 @@ function planCandidate({
     scheduledWindowStart: startsAt || null,
     scheduledWindowEnd: endsAt || null,
     eligibleFollowTargetCount,
+    eligibleUnfollowCandidateCount: unfollowBacklog.actionableRemaining,
+    unavailableUnfollowCandidateCount: unfollowBacklog.unavailableRemaining,
     commercialAddonsLabel: account.commercialAddonsLabel,
     outreachSourceLabel: account.outreachSourceLabel,
     runtimeProfilesLabel: account.runtimeProfilesLabel,
@@ -1061,6 +1075,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     incidentActionsResult,
     latestCompletedTickResult,
     resumePlansResult,
+    unfollowBacklogResult,
   ] = await Promise.all([
     supabase.from("auto_restart_settings").select("*").eq("id", "global").limit(1).maybeSingle<SupabaseRecord>(),
     supabase.from("ig_account_settings").select("account_id,follow_enabled,follow_limit,max_actions_per_day,total_follows_limit,current_run_status,manual_stop_requested").in("account_id", accountIds).limit(5000),
@@ -1120,6 +1135,10 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .limit(1)
       .maybeSingle<SupabaseRecord>(),
     supabase.rpc("auto_restart_latest_resume_plans_v1", { p_account_ids: accountIds }),
+    supabase.rpc("auto_restart_unfollow_backlog_v1", {
+      p_account_ids: accountIds,
+      p_as_of: new Date().toISOString(),
+    }),
   ]);
   const criticalProjectionError = [
     settingsResult.error,
@@ -1136,6 +1155,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     assignmentsResult.error,
     openIncidentsResult.error,
     resumePlansResult.error,
+    unfollowBacklogResult.error,
   ].find(Boolean);
   if (criticalProjectionError) {
     throw new Error(`auto_restart_candidate_projection_incomplete:${criticalProjectionError.message}`);
@@ -1182,6 +1202,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     incidentActionsResult.error,
     latestCompletedTickResult.error,
     resumePlansResult.error,
+    unfollowBacklogResult.error,
     targetSelectionsResult.error,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
@@ -1209,6 +1230,16 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
   const followSourceSettingsByAccount = mapByAccount((followSourceSettingsResult.data ?? []) as SupabaseRecord[]);
   const eligibleTargetsByAccount = eligibleFollowTargetCounts((targetsResult.data ?? []) as SupabaseRecord[]);
+  const unfollowBacklogByAccount = new Map<string, UnfollowBacklogCounts>();
+  for (const row of (unfollowBacklogResult.data ?? []) as SupabaseRecord[]) {
+    const accountId = readString(row.account_id);
+    if (!accountId) continue;
+    unfollowBacklogByAccount.set(accountId, {
+      eligibleTotal: readNumber(row.eligible_total, 0),
+      actionableRemaining: readNumber(row.backlog_actionable_remaining, 0),
+      unavailableRemaining: readNumber(row.backlog_unavailable_remaining, 0),
+    });
+  }
   const safeTargetsByAccount = safeBoundaryTargetsByAccount((targetsResult.data ?? []) as SupabaseRecord[]);
   const priorTargetByRun = latestTargetSelectionByRun((targetSelectionsResult.data ?? []) as SupabaseRecord[]);
   const assignmentsByAccount = mapByAccount((assignmentsResult.data ?? []) as SupabaseRecord[]);
@@ -1268,6 +1299,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         deviceLockActive: activeDeviceLocks.has(deviceId),
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         eligibleFollowTargets: safeTargetsByAccount.get(account.accountId) ?? [],
+        unfollowBacklog: unfollowBacklogByAccount.get(account.accountId)
+          ?? { eligibleTotal: 0, actionableRemaining: 0, unavailableRemaining: 0 },
         priorTargetId: priorTargetByRun.get(
           readString(latestSessionRunsByAccount.get(account.accountId)?.id, ""),
         ) ?? null,

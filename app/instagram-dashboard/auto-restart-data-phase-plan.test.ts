@@ -35,6 +35,28 @@ test("a persisted quota is bounded by the current daily remainder", () => {
   }).remaining.unfollow, 3);
 });
 
+test("an Unfollow resume is bounded by the actionable candidate backlog", () => {
+  assert.deepEqual(resolvePlannedAccountSession({
+    persistedPhases: { welcome: false, follow: false, unfollow: true },
+    persistedQuotaRemaining: { unfollow: 20 },
+    quotas: { follow: quota(0), unfollow: quota(120), welcome: quota(0, false) },
+    eligibleWorkRemaining: { unfollow: 2 },
+  }), {
+    phases: { welcome: false, follow: false, unfollow: true },
+    remaining: { welcome: 0, follow: 0, unfollow: 2 },
+    totalRemaining: 2,
+  });
+});
+
+test("a not-found-only Unfollow backlog becomes non-actionable", () => {
+  assert.equal(resolvePlannedAccountSession({
+    persistedPhases: { welcome: false, follow: false, unfollow: true },
+    persistedQuotaRemaining: { unfollow: 1 },
+    quotas: { follow: quota(0), unfollow: quota(120), welcome: quota(0, false) },
+    eligibleWorkRemaining: { unfollow: 0 },
+  }).totalRemaining, 0);
+});
+
 test("without a persisted plan the live enabled quotas remain the source of truth", () => {
   assert.deepEqual(resolvePlannedAccountSession({
     persistedPhases: null,

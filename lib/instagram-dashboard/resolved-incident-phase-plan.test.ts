@@ -24,6 +24,8 @@ const candidate = {
   scheduledWindowStart: "2026-07-27T20:00:00.000Z",
   scheduledWindowEnd: "2026-07-28T02:00:00.000Z",
   eligibleFollowTargetCount: 13,
+  eligibleUnfollowCandidateCount: 12,
+  unavailableUnfollowCandidateCount: 0,
   commercialAddonsLabel: "",
   outreachSourceLabel: "",
   runtimeProfilesLabel: "",
@@ -159,6 +161,24 @@ test("resolved incident rebuild uses every live enabled account-session quota", 
   });
   assert.deepEqual(rebuilt.plannedPhasesToRun, { welcome: true, follow: true, unfollow: true });
   assert.deepEqual(rebuilt.plannedQuotaRemaining, { welcome: 3, follow: 7, unfollow: 12, outreach: 0 });
+});
+
+test("resolved incident never revives an Unfollow phase with only unavailable candidates", () => {
+  const rebuilt = rebuildResolvedIncidentResumeCandidate({
+    ...candidate,
+    eligibleFollowTargetCount: 0,
+    eligibleUnfollowCandidateCount: 0,
+    unavailableUnfollowCandidateCount: 1,
+    quotas: {
+      ...candidate.quotas,
+      follow: { ...candidate.quotas.follow, enabled: false, remaining: 0 },
+      unfollow: { ...candidate.quotas.unfollow, enabled: true, remaining: 50 },
+      welcome: { ...candidate.quotas.welcome, enabled: false, remaining: 0 },
+    },
+  });
+  assert.equal(rebuilt.plannedPhasesToRun.unfollow, false);
+  assert.equal(rebuilt.plannedQuotaRemaining.unfollow, 0);
+  assert.equal(rebuilt.enqueueAllowed, false);
 });
 
 test("a restriction preflight is the only valid zero-business-phase plan", () => {
