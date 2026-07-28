@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:ct-premium-shadow": "node --test --experimental-strip-types lib/ct-premium/shadow-validation/*.test.ts",
-    "test:target-lifecycle": "node --test --experimental-strip-types lib/target-lifecycle/*.test.ts"
+    "test:target-lifecycle": "node --test --experimental-strip-types lib/target-lifecycle/*.test.ts",
+    "test:ct-architecture": "node --test lib/target-lifecycle/architecture-boundary.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",
