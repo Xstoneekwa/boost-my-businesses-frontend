@@ -26,6 +26,9 @@ const candidate = {
   eligibleFollowTargetCount: 13,
   eligibleUnfollowCandidateCount: 12,
   unavailableUnfollowCandidateCount: 0,
+  terminalUnfollowCandidateCount: 0,
+  technicalHoldUnfollowCandidateCount: 0,
+  unfollowPhaseCircuitOpen: false,
   commercialAddonsLabel: "",
   outreachSourceLabel: "",
   runtimeProfilesLabel: "",
@@ -152,6 +155,7 @@ test("resolved incident remains armed when no live phase is actionable", () => {
 test("resolved incident rebuild uses every live enabled account-session quota", () => {
   const rebuilt = rebuildResolvedIncidentResumeCandidate({
     ...candidate,
+    eligibleUnfollowCandidateCount: 12,
     quotas: {
       ...candidate.quotas,
       follow: { ...candidate.quotas.follow, remaining: 7 },
@@ -179,6 +183,44 @@ test("resolved incident never revives an Unfollow phase with only unavailable ca
   assert.equal(rebuilt.plannedPhasesToRun.unfollow, false);
   assert.equal(rebuilt.plannedQuotaRemaining.unfollow, 0);
   assert.equal(rebuilt.enqueueAllowed, false);
+});
+
+test("resolved incident rebuild excludes terminal and held Unfollow backlog", () => {
+  const rebuilt = rebuildResolvedIncidentResumeCandidate({
+    ...candidate,
+    eligibleFollowTargetCount: 0,
+    eligibleUnfollowCandidateCount: 0,
+    terminalUnfollowCandidateCount: 5,
+    technicalHoldUnfollowCandidateCount: 2,
+    quotas: {
+      ...candidate.quotas,
+      follow: { ...candidate.quotas.follow, enabled: false, remaining: 0 },
+      unfollow: { ...candidate.quotas.unfollow, enabled: true, remaining: 12 },
+      welcome: { ...candidate.quotas.welcome, enabled: false, remaining: 0 },
+    },
+  });
+  assert.equal(rebuilt.plannedPhasesToRun.unfollow, false);
+  assert.equal(rebuilt.plannedQuotaRemaining.unfollow, 0);
+  assert.equal(rebuilt.restartEligible, false);
+});
+
+test("Unfollow phase circuit never disables still-actionable Follow", () => {
+  const rebuilt = rebuildResolvedIncidentResumeCandidate({
+    ...candidate,
+    eligibleUnfollowCandidateCount: 12,
+    unfollowPhaseCircuitOpen: true,
+    quotas: {
+      ...candidate.quotas,
+      follow: { ...candidate.quotas.follow, enabled: true, remaining: 7 },
+      unfollow: { ...candidate.quotas.unfollow, enabled: true, remaining: 12 },
+    },
+  });
+  assert.deepEqual(rebuilt.plannedPhasesToRun, {
+    welcome: false,
+    follow: true,
+    unfollow: false,
+  });
+  assert.equal(rebuilt.restartEligible, true);
 });
 
 test("a restriction preflight is the only valid zero-business-phase plan", () => {

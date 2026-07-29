@@ -29,6 +29,12 @@ type UnfollowBacklogCounts = {
   eligibleTotal: number;
   actionableRemaining: number;
   unavailableRemaining: number;
+  terminalUnavailable: number;
+  technicalHold: number;
+  nextCandidateRetryAt: string | null;
+  phaseCircuitOpen: boolean;
+  phaseCircuitReason: string | null;
+  phaseCircuitNextRetryAt: string | null;
 };
 
 export type AutoRestartMode = "production";
@@ -91,6 +97,12 @@ export type AutoRestartCandidate = {
   eligibleFollowTargetCount?: number;
   eligibleUnfollowCandidateCount?: number;
   unavailableUnfollowCandidateCount?: number;
+  terminalUnfollowCandidateCount?: number;
+  technicalHoldUnfollowCandidateCount?: number;
+  unfollowNextCandidateRetryAt?: string | null;
+  unfollowPhaseCircuitOpen?: boolean;
+  unfollowPhaseCircuitReason?: string | null;
+  unfollowPhaseCircuitNextRetryAt?: string | null;
   commercialAddonsLabel: string;
   outreachSourceLabel: string;
   runtimeProfilesLabel: string;
@@ -837,8 +849,14 @@ function planCandidate({
     }),
     unfollow: resolvePhaseCompletion({
       enabled: initialPlannedAccountSession.phases.unfollow || (unfollow.enabled && unfollow.remaining < 1),
-      quotaRemaining: initialPlannedAccountSession.remaining.unfollow,
+      // Candidate availability bounds the next request size, but it is not the
+      // commercial quota. Keep the live quota here so a temporary hold or an
+      // open Unfollow-only circuit remains resumable instead of being
+      // misclassified as quota terminal.
+      quotaRemaining: unfollow.remaining,
       eligibleWorkRemaining: unfollowBacklog.actionableRemaining,
+      temporarilyUnavailableWork: unfollowBacklog.technicalHold,
+      phaseCircuitOpen: unfollowBacklog.phaseCircuitOpen,
     }),
     welcome: resolvePhaseCompletion({
       enabled: initialPlannedAccountSession.phases.welcome || (welcome.enabled && welcome.remaining < 1),
@@ -866,7 +884,13 @@ function planCandidate({
   if (allEnabledPhasesTerminal) {
     blockingReasons.unshift("all_enabled_phase_work_completed");
   } else if (accountSessionRemaining < 1 && outreachRemaining < 1) {
-    blockingReasons.push("no_quota_remaining");
+    if (unfollowBacklog.phaseCircuitOpen) {
+      blockingReasons.push("unfollow_phase_circuit_open");
+    } else if (unfollowBacklog.technicalHold > 0) {
+      blockingReasons.push("unfollow_candidates_on_technical_hold");
+    } else {
+      blockingReasons.push("no_quota_remaining");
+    }
   }
   applySafetyBlocks({ account, rules, blockingReasons, reliability });
 
@@ -960,6 +984,12 @@ function planCandidate({
     eligibleFollowTargetCount,
     eligibleUnfollowCandidateCount: unfollowBacklog.actionableRemaining,
     unavailableUnfollowCandidateCount: unfollowBacklog.unavailableRemaining,
+    terminalUnfollowCandidateCount: unfollowBacklog.terminalUnavailable,
+    technicalHoldUnfollowCandidateCount: unfollowBacklog.technicalHold,
+    unfollowNextCandidateRetryAt: unfollowBacklog.nextCandidateRetryAt,
+    unfollowPhaseCircuitOpen: unfollowBacklog.phaseCircuitOpen,
+    unfollowPhaseCircuitReason: unfollowBacklog.phaseCircuitReason,
+    unfollowPhaseCircuitNextRetryAt: unfollowBacklog.phaseCircuitNextRetryAt,
     commercialAddonsLabel: account.commercialAddonsLabel,
     outreachSourceLabel: account.outreachSourceLabel,
     runtimeProfilesLabel: account.runtimeProfilesLabel,
@@ -1135,7 +1165,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .limit(1)
       .maybeSingle<SupabaseRecord>(),
     supabase.rpc("auto_restart_latest_resume_plans_v1", { p_account_ids: accountIds }),
-    supabase.rpc("auto_restart_unfollow_backlog_v1", {
+    supabase.rpc("auto_restart_unfollow_backlog_v2", {
       p_account_ids: accountIds,
       p_as_of: new Date().toISOString(),
     }),
@@ -1234,10 +1264,18 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   for (const row of (unfollowBacklogResult.data ?? []) as SupabaseRecord[]) {
     const accountId = readString(row.account_id);
     if (!accountId) continue;
+    const terminalUnavailable = readNumber(row.backlog_terminal_unavailable, 0);
+    const technicalHold = readNumber(row.backlog_technical_hold, 0);
     unfollowBacklogByAccount.set(accountId, {
       eligibleTotal: readNumber(row.eligible_total, 0),
       actionableRemaining: readNumber(row.backlog_actionable_remaining, 0),
-      unavailableRemaining: readNumber(row.backlog_unavailable_remaining, 0),
+      unavailableRemaining: terminalUnavailable + technicalHold,
+      terminalUnavailable,
+      technicalHold,
+      nextCandidateRetryAt: readString(row.next_candidate_retry_at) || null,
+      phaseCircuitOpen: readBoolean(row.phase_circuit_open, false),
+      phaseCircuitReason: readString(row.phase_circuit_reason) || null,
+      phaseCircuitNextRetryAt: readString(row.phase_circuit_next_retry_at) || null,
     });
   }
   const safeTargetsByAccount = safeBoundaryTargetsByAccount((targetsResult.data ?? []) as SupabaseRecord[]);
@@ -1299,8 +1337,17 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         deviceLockActive: activeDeviceLocks.has(deviceId),
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         eligibleFollowTargets: safeTargetsByAccount.get(account.accountId) ?? [],
-        unfollowBacklog: unfollowBacklogByAccount.get(account.accountId)
-          ?? { eligibleTotal: 0, actionableRemaining: 0, unavailableRemaining: 0 },
+        unfollowBacklog: unfollowBacklogByAccount.get(account.accountId) ?? {
+          eligibleTotal: 0,
+          actionableRemaining: 0,
+          unavailableRemaining: 0,
+          terminalUnavailable: 0,
+          technicalHold: 0,
+          nextCandidateRetryAt: null,
+          phaseCircuitOpen: false,
+          phaseCircuitReason: null,
+          phaseCircuitNextRetryAt: null,
+        },
         priorTargetId: priorTargetByRun.get(
           readString(latestSessionRunsByAccount.get(account.accountId)?.id, ""),
         ) ?? null,

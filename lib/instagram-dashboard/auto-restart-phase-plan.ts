@@ -16,6 +16,8 @@ export type PhaseCompletionReason =
   | "disabled"
   | "quota_reached"
   | "candidates_exhausted"
+  | "technical_hold"
+  | "phase_circuit_open"
   | "work_remaining";
 
 export type PhaseCompletion = {
@@ -24,28 +26,42 @@ export type PhaseCompletion = {
   reason: PhaseCompletionReason;
   quotaRemaining: number;
   eligibleWorkRemaining: number | null;
+  temporarilyUnavailableWork: number;
 };
 
 export function resolvePhaseCompletion(input: {
   enabled: boolean;
   quotaRemaining: number;
   eligibleWorkRemaining?: number | null;
+  temporarilyUnavailableWork?: number;
+  phaseCircuitOpen?: boolean;
 }): PhaseCompletion {
   const quotaRemaining = Math.max(0, Number.isFinite(input.quotaRemaining) ? input.quotaRemaining : 0);
   const eligibleWorkRemaining = input.eligibleWorkRemaining === null
     || input.eligibleWorkRemaining === undefined
     ? null
     : Math.max(0, Number.isFinite(input.eligibleWorkRemaining) ? input.eligibleWorkRemaining : 0);
+  const temporarilyUnavailableWork = Math.max(
+    0,
+    Number.isFinite(input.temporarilyUnavailableWork)
+      ? Number(input.temporarilyUnavailableWork)
+      : 0,
+  );
   if (!input.enabled) {
-    return { terminal: true, executable: false, reason: "disabled", quotaRemaining, eligibleWorkRemaining };
+    return { terminal: true, executable: false, reason: "disabled", quotaRemaining, eligibleWorkRemaining, temporarilyUnavailableWork };
   }
   if (quotaRemaining < 1) {
-    return { terminal: true, executable: false, reason: "quota_reached", quotaRemaining, eligibleWorkRemaining };
+    return { terminal: true, executable: false, reason: "quota_reached", quotaRemaining, eligibleWorkRemaining, temporarilyUnavailableWork };
+  }
+  if (input.phaseCircuitOpen === true) {
+    return { terminal: false, executable: false, reason: "phase_circuit_open", quotaRemaining, eligibleWorkRemaining, temporarilyUnavailableWork };
   }
   if (eligibleWorkRemaining === 0) {
-    return { terminal: true, executable: false, reason: "candidates_exhausted", quotaRemaining, eligibleWorkRemaining };
+    return temporarilyUnavailableWork > 0
+      ? { terminal: false, executable: false, reason: "technical_hold", quotaRemaining, eligibleWorkRemaining, temporarilyUnavailableWork }
+      : { terminal: true, executable: false, reason: "candidates_exhausted", quotaRemaining, eligibleWorkRemaining, temporarilyUnavailableWork };
   }
-  return { terminal: false, executable: true, reason: "work_remaining", quotaRemaining, eligibleWorkRemaining };
+  return { terminal: false, executable: true, reason: "work_remaining", quotaRemaining, eligibleWorkRemaining, temporarilyUnavailableWork };
 }
 
 export function pruneTerminalAccountSessionPhases(

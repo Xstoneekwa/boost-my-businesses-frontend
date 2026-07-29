@@ -8,10 +8,14 @@ export function rebuildResolvedIncidentResumeCandidate(
   const follow = candidate.quotas.follow.enabled
     && candidate.quotas.follow.remaining > 0
     && Number(candidate.eligibleFollowTargetCount || 0) > 0;
-  const actionableUnfollow = Math.max(0, Number(candidate.eligibleUnfollowCandidateCount || 0));
+  const actionableUnfollow = Math.max(
+    0,
+    Number(candidate.eligibleUnfollowCandidateCount || 0),
+  );
   const unfollow = candidate.quotas.unfollow.enabled
     && candidate.quotas.unfollow.remaining > 0
-    && actionableUnfollow > 0;
+    && actionableUnfollow > 0
+    && candidate.unfollowPhaseCircuitOpen !== true;
   const phases = { welcome, follow, unfollow };
   const remaining = {
     welcome: welcome ? candidate.quotas.welcome.remaining : 0,
@@ -155,8 +159,16 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
         follow_targets: candidate.eligibleFollowTargetCount,
         unfollow_candidates: candidate.eligibleUnfollowCandidateCount ?? null,
         unfollow_unavailable: candidate.unavailableUnfollowCandidateCount ?? null,
+        unfollow_terminal_unavailable: candidate.terminalUnfollowCandidateCount ?? null,
+        unfollow_technical_hold: candidate.technicalHoldUnfollowCandidateCount ?? null,
+        unfollow_next_candidate_retry_at: candidate.unfollowNextCandidateRetryAt ?? null,
         welcome_candidates: null,
         source: "canonical_backend_candidate_projection",
+      },
+      unfollow_phase_circuit: {
+        open: candidate.unfollowPhaseCircuitOpen === true,
+        reason: candidate.unfollowPhaseCircuitReason ?? null,
+        next_retry_at: candidate.unfollowPhaseCircuitNextRetryAt ?? null,
       },
       restart_allowed: candidate.enqueueAllowed,
       restart_block_reason: candidate.enqueueAllowed ? "" : reliability.restartBlockReason || "",

@@ -89,6 +89,7 @@ test("49/50 remains executable and 50/50 is quota-terminal", () => {
     reason: "quota_reached",
     quotaRemaining: 0,
     eligibleWorkRemaining: 4,
+    temporarilyUnavailableWork: 0,
   });
 });
 
@@ -115,6 +116,7 @@ test("a disabled phase is terminal and never executable", () => {
     reason: "disabled",
     quotaRemaining: 120,
     eligibleWorkRemaining: 50,
+    temporarilyUnavailableWork: 0,
   });
 });
 
@@ -141,4 +143,39 @@ test("only the incomplete executable phase survives pruning", () => {
     remaining: { welcome: 0, follow: 0, unfollow: 12 },
     totalRemaining: 12,
   });
+});
+
+test("actionable Unfollow quota is bounded by canonical backlog", () => {
+  const plan = resolvePlannedAccountSession({
+    persistedPhases: { welcome: false, follow: false, unfollow: true },
+    persistedQuotaRemaining: { unfollow: 120 },
+    quotas: { follow: quota(0), unfollow: quota(120), welcome: quota(0) },
+    eligibleWorkRemaining: { unfollow: 3 },
+  });
+  assert.equal(plan.remaining.unfollow, 3);
+});
+
+test("technical candidate hold is non-terminal and non-executable", () => {
+  const outcome = resolvePhaseCompletion({
+    enabled: true,
+    quotaRemaining: 10,
+    eligibleWorkRemaining: 0,
+    temporarilyUnavailableWork: 2,
+  });
+  assert.equal(outcome.reason, "technical_hold");
+  assert.equal(outcome.terminal, false);
+  assert.equal(outcome.executable, false);
+});
+
+test("phase circuit is non-terminal and does not make Unfollow executable", () => {
+  const outcome = resolvePhaseCompletion({
+    enabled: true,
+    quotaRemaining: 10,
+    eligibleWorkRemaining: 4,
+    temporarilyUnavailableWork: 0,
+    phaseCircuitOpen: true,
+  });
+  assert.equal(outcome.reason, "phase_circuit_open");
+  assert.equal(outcome.terminal, false);
+  assert.equal(outcome.executable, false);
 });
