@@ -54,6 +54,13 @@ export function followSourceRotationChangedFields(
   ].filter(Boolean);
 }
 
+export function followSourceRotationPersistenceMismatch(
+  requested: Pick<FollowSourceRotationSummary, "max_follows_per_target_per_run" | "max_targets_per_run">,
+  persisted: Pick<FollowSourceRotationSummary, "max_follows_per_target_per_run" | "max_targets_per_run">,
+) {
+  return followSourceRotationChangedFields(requested, persisted);
+}
+
 export function redactedFollowSourceRotationSummary(input: FollowSourceRotationSummary) {
   return {
     max_follows_per_target_per_run: input.max_follows_per_target_per_run,

@@ -3,6 +3,7 @@ import {
   FOLLOW_SOURCE_ROTATION_BOUNDS,
   followSourceRotationDefaultsForPackage,
   followSourceRotationChangedFields,
+  followSourceRotationPersistenceMismatch,
   redactedFollowSourceRotationSummary,
   validateFollowSourceRotationInteger,
   type FollowSourceRotationField,
@@ -29,7 +30,10 @@ export type FollowSourcesProjection = {
   max_follows_per_target_per_run: number;
   max_targets_per_run: number;
   source: SettingsSource;
-  bounds: typeof FOLLOW_SOURCE_ROTATION_BOUNDS;
+  bounds: {
+    max_follows_per_target_per_run: { min: number; max: number };
+    max_targets_per_run: { min: number; max: number };
+  };
   save_ready: boolean;
   runtime_status: "active" | "schema_pending";
   note: string;
@@ -48,6 +52,11 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "max_targets_per_run",
 ]);
 
+type PackageRotationContext = {
+  packageLabel: string;
+  bounds: FollowSourcesProjection["bounds"];
+};
+
 function isFollowSourcesSchemaPending(message: string) {
   return /account_follow_source_settings|schema cache|could not find/i.test(message);
 }
@@ -63,7 +72,24 @@ function readEnvInteger(
   return result.error ? null : result.value;
 }
 
-function envFallbackProjection(accountId: string, packageLabel?: string | null): FollowSourcesProjection {
+function fallbackPackageRotationContext(packageLabel?: string | null): PackageRotationContext {
+  const defaults = followSourceRotationDefaultsForPackage(packageLabel);
+  return {
+    packageLabel: packageLabel ?? "",
+    bounds: {
+      max_follows_per_target_per_run: {
+        min: FOLLOW_SOURCE_ROTATION_BOUNDS.max_follows_per_target_per_run.min,
+        max: defaults.max_follows_per_target_per_run,
+      },
+      max_targets_per_run: {
+        min: FOLLOW_SOURCE_ROTATION_BOUNDS.max_targets_per_run.min,
+        max: defaults.max_targets_per_run,
+      },
+    },
+  };
+}
+
+function envFallbackProjection(accountId: string, packageContext: PackageRotationContext): FollowSourcesProjection {
   const envMaxFollows = readEnvInteger(
     "FOLLOW_TARGET_MAX_FOLLOWS_PER_TARGET_PER_RUN",
     "max_follows_per_target_per_run",
@@ -73,23 +99,27 @@ function envFallbackProjection(accountId: string, packageLabel?: string | null):
     "max_targets_per_run",
   );
   const hasEnvFallback = envMaxFollows !== null || envMaxTargets !== null;
-  const packageDefaults = followSourceRotationDefaultsForPackage(packageLabel);
+  const packageDefaults = followSourceRotationDefaultsForPackage(packageContext.packageLabel);
   return {
     account_id: accountId,
     max_follows_per_target_per_run:
       envMaxFollows ?? packageDefaults.max_follows_per_target_per_run,
     max_targets_per_run: envMaxTargets ?? packageDefaults.max_targets_per_run,
     source: hasEnvFallback ? "env_fallback" : "default",
-    bounds: FOLLOW_SOURCE_ROTATION_BOUNDS,
+    bounds: packageContext.bounds,
     save_ready: true,
     runtime_status: "active",
     note: "Per-run settings. Global Follow caps still apply.",
   };
 }
 
-function projectionFromRow(accountId: string, row: SupabaseRecord | null | undefined, packageLabel?: string | null): FollowSourcesProjection {
-  if (!row) return envFallbackProjection(accountId, packageLabel);
-  const packageDefaults = followSourceRotationDefaultsForPackage(packageLabel);
+function projectionFromRow(
+  accountId: string,
+  row: SupabaseRecord | null | undefined,
+  packageContext: PackageRotationContext,
+): FollowSourcesProjection {
+  if (!row) return envFallbackProjection(accountId, packageContext);
+  const packageDefaults = followSourceRotationDefaultsForPackage(packageContext.packageLabel);
   return {
     account_id: accountId,
     max_follows_per_target_per_run:
@@ -101,34 +131,73 @@ function projectionFromRow(accountId: string, row: SupabaseRecord | null | undef
         ? row.max_targets_per_run
         : packageDefaults.max_targets_per_run,
     source: "account_setting",
-    bounds: FOLLOW_SOURCE_ROTATION_BOUNDS,
+    bounds: packageContext.bounds,
     save_ready: true,
     runtime_status: "active",
     note: "Per-run settings. Global Follow caps still apply.",
   };
 }
 
-function pendingProjection(accountId: string, packageLabel?: string | null): FollowSourcesProjection {
+function pendingProjection(accountId: string, packageContext: PackageRotationContext): FollowSourcesProjection {
   return {
-    ...envFallbackProjection(accountId, packageLabel),
+    ...envFallbackProjection(accountId, packageContext),
     save_ready: false,
     runtime_status: "schema_pending",
     note: "Follow source settings schema is pending.",
   };
 }
 
-async function fetchCommercialPackageLabel(
+function boundedPackageMaximum(value: unknown, field: FollowSourceRotationField, fallback: number) {
+  const globalBounds = FOLLOW_SOURCE_ROTATION_BOUNDS[field];
+  return typeof value === "number" && Number.isInteger(value) && value >= globalBounds.min && value <= globalBounds.max
+    ? value
+    : fallback;
+}
+
+async function fetchCommercialPackageRotation(
   supabase: ReturnType<typeof createSupabaseClient>,
   accountId: string,
-) {
+): Promise<PackageRotationContext> {
   const { data, error } = await supabase
     .from("account_package_summary")
-    .select("commercial_package_label")
+    .select("commercial_package_code,commercial_package_label")
     .eq("account_id", accountId)
     .limit(1)
     .maybeSingle<SupabaseRecord>();
-  if (error) return null;
-  return readString(data?.commercial_package_label, "");
+  const packageLabel = readString(data?.commercial_package_label, "");
+  const fallback = fallbackPackageRotationContext(packageLabel);
+  const packageCode = readString(data?.commercial_package_code, "");
+  if (error || !packageCode) return fallback;
+
+  const { data: runtime, error: runtimeError } = await supabase
+    .from("commercial_package_runtime_settings")
+    .select("max_follows_per_target_per_run,max_targets_per_run")
+    .eq("package_code", packageCode)
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (runtimeError || !runtime) return fallback;
+
+  return {
+    packageLabel,
+    bounds: {
+      max_follows_per_target_per_run: {
+        min: FOLLOW_SOURCE_ROTATION_BOUNDS.max_follows_per_target_per_run.min,
+        max: boundedPackageMaximum(
+          runtime.max_follows_per_target_per_run,
+          "max_follows_per_target_per_run",
+          fallback.bounds.max_follows_per_target_per_run.max,
+        ),
+      },
+      max_targets_per_run: {
+        min: FOLLOW_SOURCE_ROTATION_BOUNDS.max_targets_per_run.min,
+        max: boundedPackageMaximum(
+          runtime.max_targets_per_run,
+          "max_targets_per_run",
+          fallback.bounds.max_targets_per_run.max,
+        ),
+      },
+    },
+  };
 }
 
 async function fetchFollowSourceSettingsRow(
@@ -185,13 +254,13 @@ export async function GET(request: Request) {
     if (accountIdError) return accountIdError;
 
     const supabase = createSupabaseClient();
-    const packageLabel = await fetchCommercialPackageLabel(supabase, accountId);
+    const packageContext = await fetchCommercialPackageRotation(supabase, accountId);
     try {
       const row = await fetchFollowSourceSettingsRow(supabase, accountId);
-      return jsonOk(projectionFromRow(accountId, row, packageLabel));
+      return jsonOk(projectionFromRow(accountId, row, packageContext));
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (isFollowSourcesSchemaPending(message)) return jsonOk(pendingProjection(accountId, packageLabel));
+      if (isFollowSourcesSchemaPending(message)) return jsonOk(pendingProjection(accountId, packageContext));
       throw error;
     }
   } catch (error) {
@@ -227,10 +296,16 @@ export async function PATCH(request: Request) {
     if (maxTargets.error) return jsonError(maxTargets.error, 400);
 
     const supabase = createSupabaseClient();
-    const packageLabel = await fetchCommercialPackageLabel(supabase, accountId);
+    const packageContext = await fetchCommercialPackageRotation(supabase, accountId);
+    if (maxFollows.value > packageContext.bounds.max_follows_per_target_per_run.max) {
+      return jsonError("max_follows_per_target_per_run_exceeds_package_ceiling", 400);
+    }
+    if (maxTargets.value > packageContext.bounds.max_targets_per_run.max) {
+      return jsonError("max_targets_per_run_exceeds_package_ceiling", 400);
+    }
     let before: FollowSourcesProjection;
     try {
-      before = projectionFromRow(accountId, await fetchFollowSourceSettingsRow(supabase, accountId), packageLabel);
+      before = projectionFromRow(accountId, await fetchFollowSourceSettingsRow(supabase, accountId), packageContext);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (isFollowSourcesSchemaPending(message)) {
@@ -268,11 +343,34 @@ export async function PATCH(request: Request) {
       return jsonError(sanitizeRunControlReason(error.message, "Could not save Follow source settings."), 500);
     }
 
-    const after = projectionFromRow(accountId, {
-      account_id: accountId,
-      max_follows_per_target_per_run: maxFollows.value,
-      max_targets_per_run: maxTargets.value,
-    }, packageLabel);
+    let after: FollowSourcesProjection;
+    try {
+      after = projectionFromRow(
+        accountId,
+        await fetchFollowSourceSettingsRow(supabase, accountId),
+        packageContext,
+      );
+    } catch (readAfterWriteError) {
+      const message = readAfterWriteError instanceof Error ? readAfterWriteError.message : "";
+      return jsonError(
+        sanitizeRunControlReason(message, "Could not verify saved Follow source settings."),
+        500,
+      );
+    }
+
+    const persistenceMismatch = followSourceRotationPersistenceMismatch(
+      {
+        max_follows_per_target_per_run: maxFollows.value,
+        max_targets_per_run: maxTargets.value,
+      },
+      after,
+    );
+    if (persistenceMismatch.length) {
+      return jsonError(
+        `Follow source settings were not persisted: ${persistenceMismatch.join(",")}.`,
+        409,
+      );
+    }
     await recordAudit(supabase, {
       accountId,
       actorId,

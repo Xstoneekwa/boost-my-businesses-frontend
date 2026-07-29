@@ -289,6 +289,7 @@ type FieldSpec = {
   disabledOptions?: string[];
   optionLabels?: Record<string, string>;
   min?: number;
+  max?: number;
   step?: number;
   hideStateText?: boolean;
   hideHelper?: boolean;
@@ -5002,6 +5003,7 @@ function SourcesPolicyPanel({
               label: "Max follows per target per run",
               type: "number",
               min: followSources.bounds.max_follows_per_target_per_run.min,
+              max: followSources.bounds.max_follows_per_target_per_run.max,
               runtimeStatus: "active",
               hideHelper: true,
             }}
@@ -5014,6 +5016,7 @@ function SourcesPolicyPanel({
               label: "Max targets per run",
               type: "number",
               min: followSources.bounds.max_targets_per_run.min,
+              max: followSources.bounds.max_targets_per_run.max,
               runtimeStatus: "active",
               hideHelper: true,
             }}
@@ -5693,6 +5696,7 @@ function ConfigField({ field, value, onChange }: { field: FieldSpec; value: Conf
         <input
           type="number"
           min={field.min ?? 0}
+          max={field.max}
           step={field.step ?? 1}
           value={Number(value ?? 0)}
           disabled={disabled}

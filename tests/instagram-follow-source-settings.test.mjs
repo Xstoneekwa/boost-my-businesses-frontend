@@ -5,6 +5,7 @@ import {
   FOLLOW_SOURCE_ROTATION_DEFAULTS,
   followSourceRotationDefaultsForPackage,
   followSourceRotationChangedFields,
+  followSourceRotationPersistenceMismatch,
   redactedFollowSourceRotationSummary,
   validateFollowSourceRotationInteger,
 } from "../lib/instagram-dashboard/follow-source-settings.ts";
@@ -77,5 +78,22 @@ test("follow source rotation audit summary is safe", () => {
       max_targets_per_run: 4,
       source: "account_setting",
     },
+  );
+});
+
+test("follow source rotation detects a database reconciliation overwrite", () => {
+  assert.deepEqual(
+    followSourceRotationPersistenceMismatch(
+      { max_follows_per_target_per_run: 2, max_targets_per_run: 3 },
+      { max_follows_per_target_per_run: 30, max_targets_per_run: 4 },
+    ),
+    ["max_follows_per_target_per_run", "max_targets_per_run"],
+  );
+  assert.deepEqual(
+    followSourceRotationPersistenceMismatch(
+      { max_follows_per_target_per_run: 2, max_targets_per_run: 3 },
+      { max_follows_per_target_per_run: 2, max_targets_per_run: 3 },
+    ),
+    [],
   );
 });
