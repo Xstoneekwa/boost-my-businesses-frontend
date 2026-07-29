@@ -101,6 +101,20 @@ type ResumeCandidate = {
   };
   blockReason: string;
   gateStatus: string;
+  plannedRunType?: "account_session" | "outreach_session" | "none";
+  plannedPhasesToRun?: {
+    welcome: boolean;
+    follow: boolean;
+    unfollow: boolean;
+  };
+  plannedQuotaRemaining?: {
+    welcome: number;
+    follow: number;
+    unfollow: number;
+    outreach: number;
+  };
+  eligibleUnfollowCandidateCount?: number;
+  unavailableUnfollowCandidateCount?: number;
   quotas: {
     follow: ResumeCandidateQuota;
     unfollow: ResumeCandidateQuota;
@@ -118,7 +132,79 @@ type ResumeCandidateQuota = {
   sourceLabel?: string;
 };
 
-export function resumePlanRuntimeSupported(candidate: ResumeCandidate) {
+type ResumeRuntimeSupport = { ok: true; reason: "" } | { ok: false; reason: string };
+
+function canonicalResumeQuotaRuntimeSupported(candidate: ResumeCandidate): ResumeRuntimeSupport {
+  const phases = candidate.plannedPhasesToRun;
+  const remaining = candidate.plannedQuotaRemaining;
+  const runType = candidate.plannedRunType;
+  if (!phases || !remaining || !runType || runType === "none") {
+    return { ok: false, reason: "resume_plan_invalid" };
+  }
+
+  const phaseNames = ["welcome", "follow", "unfollow"] as const;
+  const quotaNames = [...phaseNames, "outreach"] as const;
+  if (quotaNames.some((phase) => !Number.isSafeInteger(remaining[phase]) || remaining[phase] < 0)) {
+    return { ok: false, reason: "resume_plan_invalid" };
+  }
+
+  if (runType === "account_session") {
+    if (!phaseNames.some((phase) => phases[phase]) || remaining.outreach !== 0) {
+      return { ok: false, reason: "resume_plan_invalid" };
+    }
+  } else if (
+    runType !== "outreach_session"
+    || phaseNames.some((phase) => phases[phase])
+    || remaining.outreach < 1
+  ) {
+    return { ok: false, reason: "resume_plan_invalid" };
+  }
+
+  for (const phase of phaseNames) {
+    const plannedQuota = remaining[phase];
+    const phaseIsPlanned = phases[phase];
+    const quota = candidate.quotas[phase];
+    if (phaseIsPlanned !== (plannedQuota > 0)) {
+      return { ok: false, reason: "resume_plan_invalid" };
+    }
+    if (
+      plannedQuota > 0
+      && (
+        quota.enabled !== true
+        || plannedQuota > quota.remaining
+        || plannedQuota > quota.plannedNextRunQuota
+      )
+    ) {
+      return { ok: false, reason: "resume_plan_invalid" };
+    }
+  }
+
+  const outreachQuota = candidate.quotas.outreach;
+  if (
+    remaining.outreach > 0
+    && (
+      outreachQuota.enabled !== true
+      || remaining.outreach > outreachQuota.remaining
+      || remaining.outreach > outreachQuota.plannedNextRunQuota
+    )
+  ) {
+    return { ok: false, reason: "resume_plan_invalid" };
+  }
+
+  if (remaining.unfollow > 0) {
+    const actionableBacklog = candidate.eligibleUnfollowCandidateCount;
+    if (
+      typeof actionableBacklog !== "number"
+      || !Number.isSafeInteger(actionableBacklog)
+      || Number(actionableBacklog) < remaining.unfollow
+    ) {
+      return { ok: false, reason: "resume_plan_invalid" };
+    }
+  }
+  return { ok: true, reason: "" };
+}
+
+function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRuntimeSupport {
   const reliability = candidate.reliability;
   const safeBoundaryFallback = candidate.historicalSafeBoundaryFallback === true
     && candidate.restartNeeded === true
@@ -149,20 +235,46 @@ export function resumePlanRuntimeSupported(candidate: ResumeCandidate) {
   if (!sessionClass || sessionClass === "unknown") {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }
+  if (["completed", "success", "completed_all_phases"].includes(sessionClass)) {
+    return { ok: false as const, reason: "no_partial_run_to_resume" };
+  }
   if (!["partial_safe_stopped", "partial_resumable"].includes(sessionClass) && reliability.restartAllowed !== true) {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }
-  const planned = candidate.quotas;
-  const hasPlannedQuotaOverride = [
-    planned.follow.plannedNextRunQuota,
-    planned.unfollow.plannedNextRunQuota,
-    planned.welcome.plannedNextRunQuota,
-    planned.outreach.plannedNextRunQuota,
-  ].some((value) => value > 0 && value < (planned.follow.remaining || planned.unfollow.remaining || 1));
-  if (hasPlannedQuotaOverride) {
-    return { ok: false as const, reason: "resume_runtime_not_supported" };
-  }
-  return { ok: true as const, reason: "" };
+  return canonicalResumeQuotaRuntimeSupported(candidate);
+}
+
+export function resumePlanRuntimeSupported(candidate: ResumeCandidate) {
+  return evaluateResumePlanRuntimeSupport(candidate);
+}
+
+export function resumePlanRuntimeEvidence(candidate: ResumeCandidate) {
+  const support = evaluateResumePlanRuntimeSupport(candidate);
+  return {
+    actionable_backlog: typeof candidate.eligibleUnfollowCandidateCount === "number"
+      && Number.isSafeInteger(candidate.eligibleUnfollowCandidateCount)
+      ? Number(candidate.eligibleUnfollowCandidateCount)
+      : null,
+    unavailable_backlog: typeof candidate.unavailableUnfollowCandidateCount === "number"
+      && Number.isSafeInteger(candidate.unavailableUnfollowCandidateCount)
+      ? Number(candidate.unavailableUnfollowCandidateCount)
+      : null,
+    planned_resume_quota: candidate.plannedQuotaRemaining ?? null,
+    daily_remaining: {
+      welcome: candidate.quotas.welcome.remaining,
+      follow: candidate.quotas.follow.remaining,
+      unfollow: candidate.quotas.unfollow.remaining,
+      outreach: candidate.quotas.outreach.remaining,
+    },
+    session_remaining: {
+      welcome: candidate.quotas.welcome.plannedNextRunQuota,
+      follow: candidate.quotas.follow.plannedNextRunQuota,
+      unfollow: candidate.quotas.unfollow.plannedNextRunQuota,
+      outreach: candidate.quotas.outreach.plannedNextRunQuota,
+    },
+    runtime_supported: support.ok,
+    runtime_support_block_reason: support.reason,
+  };
 }
 
 export function accountRiskTier(candidate: Pick<ResumeCandidate, "reliability" | "blockReason" | "gateStatus">) {

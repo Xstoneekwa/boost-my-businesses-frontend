@@ -7,6 +7,7 @@ import {
   autoRestartTickIdempotencyKey,
   autoRestartTickLockBucketStart,
   passesRiskPolicy,
+  resumePlanRuntimeEvidence,
   resumePlanRuntimeSupported,
   sastBusinessDay,
   sanitizeTickFailureReason,
@@ -311,6 +312,7 @@ function candidateDecisionMetadata(
     enqueue_allowed: input.enqueueAllowed,
     evaluated_at: input.evaluatedAt,
     planned_run_type: candidate.plannedRunType,
+    ...resumePlanRuntimeEvidence(candidate),
   };
 }
 
