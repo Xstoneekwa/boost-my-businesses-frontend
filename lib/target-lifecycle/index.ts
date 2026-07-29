@@ -5,3 +5,8 @@ export * from "./availability.ts";
 export * from "./availability-shadow.ts";
 export * from "./policy.ts";
 export * from "./stock.ts";
+export * from "./feature-flags.ts";
+export * from "./utilization-shadow.ts";
+export * from "./performance-shadow.ts";
+export * from "./lifecycle-shadow.ts";
+export * from "./policy-shadow.ts";

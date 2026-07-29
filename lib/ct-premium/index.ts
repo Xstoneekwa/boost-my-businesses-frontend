@@ -7,6 +7,7 @@ export * from "./eligibility.ts";
 export * from "./batch-builder.ts";
 export * from "./state-machine.ts";
 export * from "./review.ts";
+export * from "./replacement-shadow.ts";
 export * from "./timeout.ts";
 export * from "./commercial.ts";
 export * from "./config.ts";
