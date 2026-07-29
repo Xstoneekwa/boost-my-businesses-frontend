@@ -51,6 +51,7 @@ export type TargetAvailabilityStatus =
 export type TargetAvailabilityConfidence = "unknown" | "low" | "medium" | "high";
 
 export type TargetAvailabilityReason =
+  | "target_available"
   | "target_username_changed"
   | "target_identity_match_confirmed"
   | "target_identity_conflict"
@@ -66,7 +67,7 @@ export type TargetAvailabilityReason =
   | "target_became_verified"
   | "target_verified_followers_surface_restricted"
   | "target_followers_surface_terminally_limited"
-  | "target_accessible_audience_insufficient"
+  | "accessible_audience_surface_insufficient"
   | "target_navigation_retry_budget_exhausted"
   | "target_source_profile_resolution_failed"
   | "target_followers_entry_failed"

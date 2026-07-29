@@ -159,7 +159,7 @@ export function assessTargetAvailability(input: TargetAvailabilityAssessmentInpu
       "target_verified_status_detected",
       "target_verified_followers_surface_restricted",
       ...(terminalRestricted.length ? ["target_followers_surface_terminally_limited" as const] : []),
-      "target_accessible_audience_insufficient",
+      "accessible_audience_surface_insufficient",
     ]];
   } else if (terminalAbsence) {
     [status, reasons] = ["deleted_or_not_found", ["target_profile_not_found", "target_permanently_unavailable"]];
@@ -178,7 +178,7 @@ export function assessTargetAvailability(input: TargetAvailabilityAssessmentInpu
       "target_availability_recheck_required",
     ]];
   } else if (found.length > 0 && latest?.followersSurface === "normal") {
-    [status, reasons] = ["available", []];
+    [status, reasons] = ["available", ["target_available"]];
   }
 
   const replacementRequired = ["verified_restricted", "permanently_unavailable", "deleted_or_not_found"].includes(status);
