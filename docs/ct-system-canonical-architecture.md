@@ -1,5 +1,9 @@
 # CT System — architecture canonique
 
+## V2-1 observation and shadow boundary
+
+The canonical flow is `existing Worker facts -> versioned observation -> append-only evidence -> pure Availability -> independent Utilization and Performance -> Lifecycle Shadow -> package Policy Shadow`. Only adapter layers may import Supabase. The universal domain imports neither Premium nor UI; Premium may consume universal recommendations. All V2-1 flags default OFF and there is no production caller.
+
 ## Statut
 
 Ce document est la synthèse canonique du bloc CT après la Phase 4.2. Le code livré est exclusivement un domaine TypeScript pur, des simulations locales et de la documentation. Il ne lit ni n'écrit Supabase, ne persiste rien et n'active aucun comportement de production.
