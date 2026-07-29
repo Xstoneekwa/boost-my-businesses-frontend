@@ -12,6 +12,8 @@
 
 Review exact SHAs, diffs, service-role environment, release immutability, rollback, monitoring and zero-runtime activation. Gate 2 may authorize deploying dormant code only; it cannot activate capture, writers or shadows.
 
+Every future pilot activation is account-scoped and fail-closed. Each independent flag requires the same explicit, valid and non-empty `account_id` allowlist; a true flag without that allowlist remains OFF. See `ct-target-availability-pilot-flags.md`.
+
 ## Later explicit gates
 
 1. deploy dormant Backend/Worker packages;
