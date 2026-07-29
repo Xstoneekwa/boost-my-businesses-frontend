@@ -1,8 +1,10 @@
 # CT Target Availability — Phase 8B.1 foundations
 
+> V2-1 update: the dormant observation runtime, fail-open observation writer, universal local shadows and unconnected Backend assessment writer are implemented on the dedicated branches. Production remains unactivated. See `ct-system-roadmap-v2.md`.
+
 ## Status and safety boundary
 
-Phase 8B.1 prepares a dormant database contract, a pure Worker observation contract and a local-only Shadow calculator. No migration is applied, no adapter is connected to Supabase, and no runtime path imports the Worker contract.
+Phase 8B.1 created the dormant database contract. V2-1 adds a feature-gated Worker import and unconnected adapters; with all flags OFF, no capture, thread, network call or write occurs.
 
 There is no decision, replacement, archive, rename, notification, email, campaign mutation, cron or deployment in this phase.
 
