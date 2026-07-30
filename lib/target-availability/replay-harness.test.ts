@@ -104,6 +104,59 @@ test("10000 observation replay remains deterministic and tenant scoped", async (
   assert.deepEqual(stable(first), stable(second));
 });
 
+test("portfolio capacity review covers 5 accounts, 106 targets and 54 runs over seven days", async () => {
+  const [base] = await loadReplayFixtures(fixturePath);
+  assert.ok(base);
+  const accountIds = Array.from({ length: 5 }, (_, index) => `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`);
+  const tenantIds = [
+    "10000000-0000-4000-8000-000000000001",
+    "10000000-0000-4000-8000-000000000002",
+  ];
+  const runIds = new Set<string>();
+  const reports = Array.from({ length: 106 }, (_, targetIndex) => {
+    const accountIndex = targetIndex % accountIds.length;
+    const scope = {
+      tenantId: tenantIds[accountIndex % tenantIds.length]!,
+      accountId: accountIds[accountIndex]!,
+      targetId: `30000000-0000-4000-8000-${String(targetIndex + 1).padStart(12, "0")}`,
+    };
+    const username = targetIndex % 11 === 0 ? "shared.username" : `portfolio.target_${targetIndex + 1}`;
+    const calculatedAt = base.calculatedAt;
+    const observations = Array.from({ length: 4 }, (_, observationIndex) => {
+      const runNumber = (targetIndex * 4 + observationIndex) % 54;
+      const runId = `portfolio-run-${runNumber + 1}`;
+      runIds.add(runId);
+      return Object.freeze({
+        ...base.observations[0]!,
+        ...scope,
+        observationId: `portfolio-${targetIndex + 1}-observation-${observationIndex + 1}`,
+        idempotencyKey: `portfolio-${targetIndex + 1}-key-${observationIndex + 1}`,
+        expectedUsername: username,
+        observedUsername: username,
+        stablePlatformUserId: `portfolio-stable-${targetIndex + 1}`,
+        observedAt: new Date(Date.parse(calculatedAt) - ((targetIndex + observationIndex) % (7 * 24)) * 3_600_000).toISOString(),
+        runId,
+      });
+    });
+    return replayTargetAvailability({
+      name: `portfolio-target-${targetIndex + 1}`,
+      scope,
+      expectedUsername: username,
+      stablePlatformUserId: `portfolio-stable-${targetIndex + 1}`,
+      calculatedAt,
+      observations,
+      expected: { acceptedCount: 4, rejectedCount: 0, deduplicatedCount: 0 },
+    });
+  });
+
+  assert.equal(reports.length, 106);
+  assert.equal(new Set(reports.map((report) => report.finalIdentity.accountId)).size, 5);
+  assert.equal(new Set(reports.map((report) => report.finalIdentity.tenantId)).size, 2);
+  assert.equal(runIds.size, 54);
+  assert.deepEqual(reports.flatMap((report) => report.invariantViolations), []);
+  assert.equal(reports.every((report) => report.eventsAccepted === 4), true);
+});
+
 test("assessment computation remains side-effect free during replay", async () => {
   const [fixture] = await loadReplayFixtures(fixturePath);
   assert.ok(fixture);
