@@ -38,6 +38,7 @@ test("stale and mismatched human resume lineages fail closed", () => {
     storedPlanRunId: "run-new",
     latestCanonicalRunId: "run-new",
     latestTerminationClass: "completed",
+    resolvedIncidentAuthorized: true,
   }), { ok: false, reason: "resume_authorization_stale" });
 });
 
@@ -49,6 +50,39 @@ test("only an aligned latest partial lineage is accepted", () => {
     latestCanonicalRunId: "run-new",
     latestTerminationClass: "partial_resumable",
   }), { ok: true, reason: "" });
+});
+
+test("a resolved exact incident authorizes one new boundary after a non-recoverable stop", () => {
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-mythyl",
+    incidentRunId: "run-mythyl",
+    storedPlanRunId: "run-mythyl",
+    latestCanonicalRunId: "run-mythyl",
+    latestTerminationClass: "non_recoverable_failure",
+    resolvedIncidentAuthorized: true,
+  }), { ok: true, reason: "" });
+});
+
+test("a non-recoverable stop without resolved-incident authorization remains blocked", () => {
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-mythyl",
+    incidentRunId: "run-mythyl",
+    storedPlanRunId: "run-mythyl",
+    latestCanonicalRunId: "run-mythyl",
+    latestTerminationClass: "non_recoverable_failure",
+    resolvedIncidentAuthorized: false,
+  }), { ok: false, reason: "resume_authorization_stale" });
+});
+
+test("resolved review never bypasses exact latest-run lineage", () => {
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-old",
+    incidentRunId: "run-old",
+    storedPlanRunId: "run-old",
+    latestCanonicalRunId: "run-new",
+    latestTerminationClass: "non_recoverable_failure",
+    resolvedIncidentAuthorized: true,
+  }), { ok: false, reason: "resume_source_run_superseded" });
 });
 
 test("configured delay reports exact authoritative remaining seconds", () => {

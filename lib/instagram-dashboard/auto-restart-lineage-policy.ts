@@ -30,6 +30,7 @@ export function validateResumeAuthorizationLineage(input: {
   storedPlanRunId: string;
   latestCanonicalRunId: string;
   latestTerminationClass: string;
+  resolvedIncidentAuthorized?: boolean;
 }): ResumeLineageVerdict {
   const authorizationRunId = clean(input.authorizationRunId);
   const incidentRunId = clean(input.incidentRunId);
@@ -47,7 +48,16 @@ export function validateResumeAuthorizationLineage(input: {
   if (!latestCanonicalRunId || authorizationRunId !== latestCanonicalRunId) {
     return { ok: false, reason: "resume_source_run_superseded" };
   }
-  if (!["partial_resumable", "partial_safe_stopped"].includes(clean(input.latestTerminationClass).toLowerCase())) {
+  const terminationClass = clean(input.latestTerminationClass).toLowerCase();
+  const terminalSuccess = ["completed", "success", "completed_all_phases"].includes(terminationClass);
+  // Resolving the exact incident is an explicit human authorization for one
+  // new account-session boundary.  It may recover a run that was intentionally
+  // classified non-recoverable before review, but it can never revive a
+  // superseded lineage or an already completed session.
+  if (input.resolvedIncidentAuthorized === true && !terminalSuccess) {
+    return { ok: true, reason: "" };
+  }
+  if (!["partial_resumable", "partial_safe_stopped"].includes(terminationClass)) {
     return { ok: false, reason: "resume_authorization_stale" };
   }
   return { ok: true, reason: "" };

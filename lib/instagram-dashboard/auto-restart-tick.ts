@@ -1250,6 +1250,7 @@ async function processHumanConfirmedResumes(
         storedPlanRunId: readString(storedPlan.run_id),
         latestCanonicalRunId: candidate?.sourceRunId || "",
         latestTerminationClass: candidate?.reliability.sessionTerminationClass || "",
+        resolvedIncidentAuthorized: true,
       });
       if (!restrictionPreflight && !lineageVerdict.ok) {
         await markAuthorizationExpired(supabase, authorizationId, now);
@@ -1262,11 +1263,10 @@ async function processHumanConfirmedResumes(
       }
 
       if (!restrictionPreflight && candidate) {
-        const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
-        if (delayReason) {
-          await blockResume(delayReason);
-          continue;
-        }
+        // A resolved incident is the operator's explicit one-shot authorization
+        // for evaluation on the next natural tick.  The generic retry delay is
+        // not applied a second time; every live cap, warmup, phase, assignment,
+        // run/request, lock and restart-budget gate below remains authoritative.
         const phaseKey = resumePhaseKey(candidate.plannedPhasesToRun);
         const reasonKey = resumeReasonKey(candidate);
         const lineageKey = resumeLineageBudgetKey(candidate);
