@@ -13,6 +13,7 @@ import {
   type SafeRestartStrategy,
 } from "@/lib/instagram-dashboard/auto-restart-candidate-policy";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
+import { canonicalResumePlanForLatestRun } from "@/lib/instagram-dashboard/auto-restart-lineage-policy";
 import {
   pruneTerminalAccountSessionPhases,
   resolvePhaseCompletion,
@@ -103,6 +104,7 @@ export type AutoRestartCandidate = {
   unfollowPhaseCircuitOpen?: boolean;
   unfollowPhaseCircuitReason?: string | null;
   unfollowPhaseCircuitNextRetryAt?: string | null;
+  configuredRestartDelayMinutes?: number;
   commercialAddonsLabel: string;
   outreachSourceLabel: string;
   runtimeProfilesLabel: string;
@@ -990,6 +992,7 @@ function planCandidate({
     unfollowPhaseCircuitOpen: unfollowBacklog.phaseCircuitOpen,
     unfollowPhaseCircuitReason: unfollowBacklog.phaseCircuitReason,
     unfollowPhaseCircuitNextRetryAt: unfollowBacklog.phaseCircuitNextRetryAt,
+    configuredRestartDelayMinutes: rules.restartDelayMinutes,
     commercialAddonsLabel: account.commercialAddonsLabel,
     outreachSourceLabel: account.outreachSourceLabel,
     runtimeProfilesLabel: account.runtimeProfilesLabel,
@@ -1354,7 +1357,10 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         rules,
         reliability: reliabilityFromLatestRun(
           latestSessionRunsByAccount.get(account.accountId),
-          latestResumePlansByAccount.get(account.accountId),
+          canonicalResumePlanForLatestRun(
+            latestSessionRunsByAccount.get(account.accountId),
+            latestResumePlansByAccount.get(account.accountId),
+          ),
           rules,
         ),
         incidentBlockReason: firstAutomationBlockingIncident(

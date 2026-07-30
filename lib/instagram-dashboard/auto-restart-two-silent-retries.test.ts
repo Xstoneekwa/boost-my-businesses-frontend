@@ -110,6 +110,12 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
     appInstanceId: "instance-1",
     username: "mythyl_fitness",
     packageLabel: "clone-2",
+    configuredRestartDelayMinutes: 20,
+    eligibleUnfollowCandidateCount: 120,
+    technicalHoldUnfollowCandidateCount: 0,
+    terminalUnfollowCandidateCount: 0,
+    unfollowPhaseCircuitOpen: false,
+    unfollowPhaseCircuitReason: null,
     commercialAddonsLabel: "",
     outreachSourceLabel: "",
     runtimeProfilesLabel: "",
@@ -180,7 +186,7 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
   };
 }
 
-test("persisted business progress starts a new bounded continuation generation", async () => {
+test("persisted business progress cannot bypass the configured restart window budget", async () => {
   const supabase = new FakeSupabase();
   supabase.rows("auto_restart_decisions").push(
     {
@@ -211,12 +217,10 @@ test("persisted business progress starts a new bounded continuation generation",
     evaluateEligibility: async () => ({ ok: true, reason: "" }),
   });
 
-  assert.equal(result.result.enqueued_count, 1);
-  assert.equal(result.result.blocked_count, 0);
-  assert.equal(
-    supabase.requests[0].p_idempotency_key,
-    "auto-restart:account-1:business-session-1:source:progress-run-2:retry:1",
-  );
+  assert.equal(result.result.enqueued_count, 0);
+  assert.equal(result.result.blocked_count, 1);
+  assert.match(result.result.blocked[0].reason, /max_restarts_window/);
+  assert.equal(supabase.requests.length, 0);
 });
 
 test("actual tick creates exactly retry requests 1 and 2, then no third request", async () => {
@@ -280,7 +284,7 @@ test("actual tick creates exactly retry requests 1 and 2, then no third request"
   }));
 });
 
-test("terminal request without a new run advances the durable retry idempotency key", async () => {
+test("a source run can authorize at most one bounded continuation lineage", async () => {
   const supabase = new FakeSupabase();
   const unchangedSourceRun = candidate(0);
   const common = {
@@ -303,19 +307,41 @@ test("terminal request without a new run advances the durable retry idempotency 
     now: new Date("2026-07-22T20:10:00.000Z"),
     overview: { candidates: [unchangedSourceRun as unknown as Row] },
   });
-  assert.equal(retryTwo.result.enqueued_count, 1);
+  assert.equal(retryTwo.result.enqueued_count, 0);
+  assert.equal(retryTwo.result.blocked_count, 1);
+  assert.match(retryTwo.result.blocked[0].reason, /resume_lineage_retry_budget_exhausted/);
   assert.deepEqual(
     supabase.requests.map((row) => row.p_idempotency_key),
     [
       "auto-restart:account-1:business-session-1:retry:1",
-      "auto-restart:account-1:business-session-1:retry:2",
     ],
   );
-  const secondMetadata = supabase.requests[1].p_metadata_safe as Row;
-  const secondPlan = secondMetadata.resume_plan as Row;
-  assert.equal(secondMetadata.retry_index, 2);
-  assert.equal(secondMetadata.attempt_id, 3);
-  assert.equal(secondPlan.next_retry_index, 2);
+});
+
+test("legacy decision rows remain authoritative through prior_run_id", async () => {
+  const supabase = new FakeSupabase();
+  supabase.rows("auto_restart_decisions").push({
+    account_id: "account-1",
+    business_session_id: "business-session-old",
+    prior_run_id: "initial-run",
+    decision: "enqueued",
+    metadata_safe: {},
+    created_at: "2026-07-22T19:59:00.000Z",
+  });
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [candidate(0) as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.enqueued_count, 0);
+  assert.equal(result.result.blocked_count, 1);
+  assert.match(result.result.blocked[0].reason, /resume_lineage_retry_budget_exhausted/);
 });
 
 test("a terminal idempotent enqueue response is never counted as a new request", async () => {

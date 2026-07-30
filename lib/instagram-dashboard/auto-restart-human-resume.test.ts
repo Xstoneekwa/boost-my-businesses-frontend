@@ -78,6 +78,20 @@ test("internal test authorizations can never enqueue anything", () => {
   assert.match(tickSource, /test_authorization_excluded/);
 });
 
+test("a human authorization must match the latest canonical partial run", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(humanSection, /validateResumeAuthorizationLineage/);
+  assert.match(humanSection, /latestCanonicalRunId: candidate\?\.sourceRunId/);
+  assert.match(humanSection, /markAuthorizationExpired\(supabase, authorizationId, now\)/);
+  assert.match(humanSection, /await blockResume\(lineageVerdict\.reason\)/);
+});
+
+test("the configured global delay also gates human-confirmed resumes", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(humanSection, /restartDelayBlockReason\(candidate\.reliability\.nextRestartAt, now\)/);
+  assert.match(humanSection, /await blockResume\(delayReason\)/);
+});
+
 test("every decision is audited in auto_restart_decisions", () => {
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
   assert.match(humanSection, /human_confirmed_resume_enqueued/);

@@ -42,6 +42,13 @@ import {
 } from "./auto-restart-resume-metadata";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
 import {
+  buildUnfollowResumeNotificationPayload,
+  resumeLineageBudgetKey,
+  resumePhaseKey,
+  resumeReasonKey,
+  validateResumeAuthorizationLineage,
+} from "./auto-restart-lineage-policy";
+import {
   loadResumePlanForRun,
   markAuthorizationExpired,
   updateIncidentRecoveryState,
@@ -152,7 +159,7 @@ async function loadSettingsRow(supabase: SupabaseLike) {
 
 async function loadRestartCounts(supabase: SupabaseLike, sinceIso: string) {
   const result = await query(supabase, "auto_restart_decisions")
-    .select("account_id,business_session_id")
+    .select("account_id,business_session_id,prior_run_id,metadata_safe")
     .eq("decision", "enqueued")
     .gte("created_at", sinceIso)
     .limit(10000);
@@ -161,20 +168,47 @@ async function loadRestartCounts(supabase: SupabaseLike, sinceIso: string) {
   if (rows.length >= 10000) throw new Error("auto_restart_count_projection_truncated");
   const byAccount = new Map<string, number>();
   const byBusinessSession = new Map<string, number>();
+  const byPhase = new Map<string, number>();
+  const byReason = new Map<string, number>();
+  const byLineage = new Map<string, number>();
+  const bySourceRun = new Map<string, number>();
   for (const row of rows) {
     const accountId = readString(row.account_id);
     const businessSessionId = readString(row.business_session_id);
-    // Human-confirmed resumes have no canonical business session and must not
-    // consume the automatic per-account daily budget.
-    if (accountId && businessSessionId) {
+    const priorRunId = readString(row.prior_run_id);
+    const metadata = row.metadata_safe && typeof row.metadata_safe === "object" && !Array.isArray(row.metadata_safe)
+      ? row.metadata_safe as Record<string, unknown>
+      : {};
+    const phaseKey = readString(metadata.resume_phase_key);
+    const reasonKey = readString(metadata.resume_reason_key);
+    const lineageKey = readString(metadata.resume_lineage_key);
+    if (accountId) {
       byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + 1);
     }
     if (accountId && businessSessionId) {
       const key = `${accountId}:${businessSessionId}`;
       byBusinessSession.set(key, (byBusinessSession.get(key) ?? 0) + 1);
     }
+    if (accountId && phaseKey) {
+      const key = `${accountId}:${phaseKey}`;
+      byPhase.set(key, (byPhase.get(key) ?? 0) + 1);
+    }
+    if (accountId && reasonKey) {
+      const key = `${accountId}:${reasonKey}`;
+      byReason.set(key, (byReason.get(key) ?? 0) + 1);
+    }
+    if (lineageKey) {
+      byLineage.set(lineageKey, (byLineage.get(lineageKey) ?? 0) + 1);
+    }
+    // Decisions created before the structured lineage metadata was deployed
+    // still carry prior_run_id. Keep those durable rows authoritative so a
+    // deployment cannot reset a source-run budget mid business day.
+    if (accountId && priorRunId) {
+      const key = `${accountId}:${priorRunId}`;
+      bySourceRun.set(key, (bySourceRun.get(key) ?? 0) + 1);
+    }
   }
-  return { byAccount, byBusinessSession };
+  return { byAccount, byBusinessSession, byPhase, byReason, byLineage, bySourceRun };
 }
 
 async function acquireTickLock(
@@ -292,8 +326,17 @@ async function writeDecision(
 
 function candidateDecisionMetadata(
   candidate: AutoRestartCandidate,
-  input: { enqueueAllowed: boolean; evaluatedAt: string },
+  input: {
+    enqueueAllowed: boolean;
+    evaluatedAt: string;
+    reason?: string;
+    authorizationSource?: string | null;
+  },
 ) {
+  const resumePhase = resumePhaseKey(candidate.plannedPhasesToRun);
+  const resumeReason = resumeReasonKey(candidate);
+  const resumeLineage = resumeLineageBudgetKey(candidate);
+  const decisionReason = input.reason || (input.enqueueAllowed ? "eligible" : candidate.blockReason || "blocked");
   return {
     username: candidate.username,
     account_eligible: candidate.accountEligible,
@@ -312,6 +355,15 @@ function candidateDecisionMetadata(
     enqueue_allowed: input.enqueueAllowed,
     evaluated_at: input.evaluatedAt,
     planned_run_type: candidate.plannedRunType,
+    resume_phase_key: resumePhase,
+    resume_reason_key: resumeReason,
+    resume_lineage_key: resumeLineage,
+    notification_payload: buildUnfollowResumeNotificationPayload({
+      candidate,
+      reason: decisionReason,
+      evaluatedAt: input.evaluatedAt,
+      authorizationSource: input.authorizationSource,
+    }),
     ...resumePlanRuntimeEvidence(candidate),
   };
 }
@@ -344,6 +396,7 @@ async function writeBlockedCandidateDecision(
     metadata: candidateDecisionMetadata(input.candidate, {
       enqueueAllowed: false,
       evaluatedAt: input.evaluatedAt,
+      reason: input.reason,
     }),
     priorRunId: input.candidate.sourceRunId || null,
     restartCountDay: input.restartCountDay,
@@ -624,12 +677,30 @@ export async function runAutoRestartTick(
         ? restartCounts.byBusinessSession.get(`${candidate.accountId}:${businessSessionId}`) ?? 0
         : 0;
       const progressContinuation = candidate.reliability.businessProgressMade === true;
+      const phaseKey = resumePhaseKey(candidate.plannedPhasesToRun);
+      const reasonKey = resumeReasonKey(candidate);
+      const lineageKey = resumeLineageBudgetKey(candidate);
+      const restartsForPhase = restartCounts.byPhase.get(`${candidate.accountId}:${phaseKey}`) ?? 0;
+      const restartsForReason = restartCounts.byReason.get(`${candidate.accountId}:${reasonKey}`) ?? 0;
+      const restartsForLineage = restartCounts.byLineage.get(lineageKey) ?? 0;
+      const restartsForSourceRun = candidate.sourceRunId
+        ? restartCounts.bySourceRun.get(`${candidate.accountId}:${candidate.sourceRunId}`) ?? 0
+        : 0;
       if (!businessSessionId) blockReasons.push("business_session_id_missing");
-      if (!progressContinuation && extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
+      if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_day");
       }
-      if (!progressContinuation && extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
+      if (extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
         blockReasons.push("max_restarts_window");
+      }
+      if (extendedRules.maxRestartsPerDay > 0 && restartsForPhase >= extendedRules.maxRestartsPerDay) {
+        blockReasons.push("max_restarts_phase_business_day");
+      }
+      if (extendedRules.maxRestartsPerDay > 0 && restartsForReason >= extendedRules.maxRestartsPerDay) {
+        blockReasons.push("max_restarts_reason_business_day");
+      }
+      if (restartsForLineage > 0 || restartsForSourceRun > 0) {
+        blockReasons.push("resume_lineage_retry_budget_exhausted");
       }
 
       if (blockReasons.length) {
@@ -919,6 +990,7 @@ export async function runAutoRestartTick(
             ...candidateDecisionMetadata(scheduledCandidate, {
               enqueueAllowed: true,
               evaluatedAt: now.toISOString(),
+              reason: "eligible",
             }),
             username: candidate.username,
             attempt_id: nextRetryIndex + 1,
@@ -999,6 +1071,9 @@ export async function runAutoRestartTick(
         workerId: options.workerId,
         leaseSeconds: env.deviceLockLeaseSeconds,
         now,
+        restartCounts,
+        maxRestartsPerDay: extendedRules.maxRestartsPerDay,
+        maxRestartsPerWindow: extendedRules.maxRestartsPerWindow,
       });
     }
 
@@ -1070,6 +1145,9 @@ async function processHumanConfirmedResumes(
     workerId: string;
     leaseSeconds: number;
     now: Date;
+    restartCounts: Awaited<ReturnType<typeof loadRestartCounts>>;
+    maxRestartsPerDay: number;
+    maxRestartsPerWindow: number;
   },
 ) {
   const { summary, now } = input;
@@ -1099,6 +1177,7 @@ async function processHumanConfirmedResumes(
     const resumePlanId = readString(authorization.resume_plan_id);
     const resumeWindowKey = readString(authorization.resume_window_key);
     if (!authorizationId || !accountId || !incidentId) continue;
+    let notificationCandidate: AutoRestartCandidate | undefined;
 
     const blockResume = async (reason: string) => {
       summary.blocked_count += 1;
@@ -1113,7 +1192,19 @@ async function processHumanConfirmedResumes(
         decision: "blocked",
         reason,
         mode: input.mode,
-        metadata: { incident_id: incidentId, authorization_id: authorizationId },
+        metadata: {
+          incident_id: incidentId,
+          authorization_id: authorizationId,
+          authorization_source: "incident_resume_authorizations",
+          ...(notificationCandidate
+            ? candidateDecisionMetadata(notificationCandidate, {
+              enqueueAllowed: false,
+              evaluatedAt: now.toISOString(),
+              reason,
+              authorizationSource: "incident_resume_authorizations",
+            })
+            : {}),
+        },
         priorRunId: originalRunId || null,
       });
     };
@@ -1135,7 +1226,7 @@ async function processHumanConfirmedResumes(
       }
 
       const incidentResult = await query(supabase, "account_incidents")
-        .select("id,account_id,incident_type,status")
+        .select("id,account_id,run_id,incident_type,status")
         .eq("id", incidentId)
         .eq("account_id", accountId)
         .maybeSingle();
@@ -1146,10 +1237,64 @@ async function processHumanConfirmedResumes(
       }
       const restrictionPreflight = readString(incident.incident_type) === "instagram_account_restriction";
       const candidate = input.candidates.find((row) => row.accountId === accountId);
+      notificationCandidate = candidate;
       const storedPlan = originalRunId ? await loadResumePlanForRun(supabase, originalRunId) : null;
       if (!storedPlan || readString(storedPlan.resume_state) !== "awaiting_human_resume_authorization") {
         await blockResume("resume_plan_not_recoverable");
         continue;
+      }
+
+      const lineageVerdict = validateResumeAuthorizationLineage({
+        authorizationRunId: originalRunId,
+        incidentRunId: readString(incident.run_id),
+        storedPlanRunId: readString(storedPlan.run_id),
+        latestCanonicalRunId: candidate?.sourceRunId || "",
+        latestTerminationClass: candidate?.reliability.sessionTerminationClass || "",
+      });
+      if (!restrictionPreflight && !lineageVerdict.ok) {
+        await markAuthorizationExpired(supabase, authorizationId, now);
+        await updateIncidentRecoveryState(supabase, incidentId, lineageVerdict.reason, {
+          authorization_run_id: originalRunId || null,
+          latest_canonical_run_id: candidate?.sourceRunId || null,
+        });
+        await blockResume(lineageVerdict.reason);
+        continue;
+      }
+
+      if (!restrictionPreflight && candidate) {
+        const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
+        if (delayReason) {
+          await blockResume(delayReason);
+          continue;
+        }
+        const phaseKey = resumePhaseKey(candidate.plannedPhasesToRun);
+        const reasonKey = resumeReasonKey(candidate);
+        const lineageKey = resumeLineageBudgetKey(candidate);
+        const accountRestarts = input.restartCounts.byAccount.get(accountId) ?? 0;
+        const sessionRestarts = candidate.sourceBusinessSessionId
+          ? input.restartCounts.byBusinessSession.get(`${accountId}:${candidate.sourceBusinessSessionId}`) ?? 0
+          : 0;
+        const phaseRestarts = input.restartCounts.byPhase.get(`${accountId}:${phaseKey}`) ?? 0;
+        const reasonRestarts = input.restartCounts.byReason.get(`${accountId}:${reasonKey}`) ?? 0;
+        const lineageRestarts = input.restartCounts.byLineage.get(lineageKey) ?? 0;
+        const sourceRunRestarts = candidate.sourceRunId
+          ? input.restartCounts.bySourceRun.get(`${accountId}:${candidate.sourceRunId}`) ?? 0
+          : 0;
+        const budgetReason = input.maxRestartsPerDay > 0 && accountRestarts >= input.maxRestartsPerDay
+          ? "max_restarts_day"
+          : input.maxRestartsPerWindow > 0 && sessionRestarts >= input.maxRestartsPerWindow
+            ? "max_restarts_window"
+            : input.maxRestartsPerDay > 0 && phaseRestarts >= input.maxRestartsPerDay
+              ? "max_restarts_phase_business_day"
+              : input.maxRestartsPerDay > 0 && reasonRestarts >= input.maxRestartsPerDay
+                ? "max_restarts_reason_business_day"
+                : lineageRestarts > 0 || sourceRunRestarts > 0
+                  ? "resume_lineage_retry_budget_exhausted"
+                  : "";
+        if (budgetReason) {
+          await blockResume(budgetReason);
+          continue;
+        }
       }
 
       const deviceId = readString(storedPlan.device_id) || candidate?.deviceId || null;
@@ -1297,9 +1442,19 @@ async function processHumanConfirmedResumes(
             incident_id: incidentId,
             authorization_id: authorizationId,
             resume_window_key: resumeWindowKey || null,
+            authorization_source: "incident_resume_authorizations",
+            ...(candidate
+              ? candidateDecisionMetadata(candidate, {
+                enqueueAllowed: true,
+                evaluatedAt: now.toISOString(),
+                reason: restrictionPreflight ? "instagram_restriction_preflight" : "human_confirmed_resume",
+                authorizationSource: "incident_resume_authorizations",
+              })
+              : {}),
           },
           priorRunId: originalRunId || null,
           newRequestId,
+          businessSessionId: candidate?.sourceBusinessSessionId || null,
         });
       } catch (error) {
         // The database transaction rolls back authorization consumption and
