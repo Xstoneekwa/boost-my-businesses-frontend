@@ -10,7 +10,7 @@
     "test:ct-premium-shadow": "node --test --experimental-strip-types lib/ct-premium/shadow-validation/*.test.ts",
     "test:target-lifecycle": "node --test --experimental-strip-types lib/target-lifecycle/*.test.ts",
     "test:target-availability-writer": "node --test --experimental-strip-types lib/target-availability/*.test.ts",
-    "test:target-availability-engine": "node --test --experimental-strip-types lib/target-availability/identity-engine.test.ts lib/target-availability/assessment-engine.test.ts lib/target-availability/current-projection.test.ts lib/target-availability/replay-harness.test.ts && node --test lib/target-availability/engine-architecture.test.mjs",
+    "test:target-availability-engine": "node --test --experimental-strip-types lib/target-availability/identity-engine.test.ts lib/target-availability/assessment-engine.test.ts lib/target-availability/current-projection.test.ts lib/target-availability/replay-harness.test.ts && node --test lib/target-availability/engine-architecture.test.mjs lib/target-availability/dormancy-contract.test.mjs",
     "replay:target-availability": "node --experimental-strip-types lib/target-availability/replay-cli.ts",
     "test:ct-v2-1": "node --test --experimental-strip-types lib/target-lifecycle/*.test.ts lib/target-availability/*.test.ts lib/ct-premium/replacement-shadow.test.ts",
     "test:ct-architecture": "node --test lib/target-lifecycle/architecture-boundary.test.mjs"
