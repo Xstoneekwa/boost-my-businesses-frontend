@@ -35,6 +35,7 @@ export {
 
 export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
 import {
+  applyRexFollow60sOneShotFrozenPlan,
   buildAutoRestartResumePlanMetadata,
   buildInstagramRestrictionPreflightMetadata,
   rebuildResolvedIncidentResumeCandidate,
@@ -1160,7 +1161,7 @@ async function processHumanConfirmedResumes(
     throw new Error(restoration.error.message || "resume_retry_credit_reconciliation_failed");
   }
   const armedResult = await (query(supabase, "incident_resume_authorizations")
-    .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,retry_generation,test") as QueryBuilder)
+    .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,retry_generation,frozen_phase_plan,test") as QueryBuilder)
     .eq("status", "armed")
     .order("armed_at", { ascending: true })
     .limit(100) as unknown as QueryResult;
@@ -1262,7 +1263,24 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      if (!restrictionPreflight && candidate) {
+      const rebuiltCandidate = !restrictionPreflight && candidate
+        ? rebuildResolvedIncidentResumeCandidate(candidate)
+        : null;
+      const rexFollowOneShot = rebuiltCandidate
+        ? applyRexFollow60sOneShotFrozenPlan({
+          baseMetadata: buildAutoRestartResumePlanMetadata(rebuiltCandidate, now),
+          frozenPlan: authorization.frozen_phase_plan,
+          authorizationAccountId: accountId,
+          originalRunId,
+          liveFollowRemaining: rebuiltCandidate.plannedQuotaRemaining.follow,
+        })
+        : null;
+      if (rexFollowOneShot?.matched && !rexFollowOneShot.ok) {
+        await blockResume(rexFollowOneShot.reason);
+        continue;
+      }
+
+      if (!restrictionPreflight && candidate && rexFollowOneShot?.matched !== true) {
         // A resolved incident is the operator's explicit one-shot authorization
         // for evaluation on the next natural tick.  The generic retry delay is
         // not applied a second time; every live cap, warmup, phase, assignment,
@@ -1330,8 +1348,12 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_candidate_unavailable");
           continue;
         }
-        const rebuiltCandidate = rebuildResolvedIncidentResumeCandidate(candidate);
-        resumeMetadata = buildAutoRestartResumePlanMetadata(rebuiltCandidate, now);
+        resumeMetadata = rexFollowOneShot?.matched
+          ? rexFollowOneShot.metadata
+          : buildAutoRestartResumePlanMetadata(
+            rebuiltCandidate ?? rebuildResolvedIncidentResumeCandidate(candidate),
+            now,
+          );
         Object.assign(resumeMetadata.resume_plan, {
           business_date: sastBusinessDay(now),
           resume_reason: "resolved_incident_human_authorized",
