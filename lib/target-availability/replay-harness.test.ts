@@ -73,6 +73,37 @@ test("100 and 1000 observation local performance is measured without production 
   assert.ok(wallMs >= 0);
 });
 
+test("10000 observation replay remains deterministic and tenant scoped", async () => {
+  const fixtures = await loadReplayFixtures(fixturePath);
+  const high = fixtures[29]!;
+  const template = high.observations[0]!;
+  const baseTime = Date.parse(high.calculatedAt);
+  const tenThousand = {
+    ...high,
+    name: "10000 observation capacity review",
+    observations: Object.freeze(Array.from({ length: 10_000 }, (_, index) => Object.freeze({
+      ...template,
+      observationId: `capacity-observation-${index + 1}`,
+      idempotencyKey: `capacity-key-${index + 1}`,
+      observedAt: new Date(baseTime - (10_000 - index) * 1_000).toISOString(),
+      runId: `capacity-run-${Math.floor(index / 25) + 1}`,
+    }))),
+    generatedObservationCount: 10_000,
+    expected: { ...high.expected, acceptedCount: 10_000 },
+  };
+  const first = replayTargetAvailability(tenThousand);
+  const second = replayTargetAvailability(tenThousand);
+  const stable = (report: typeof first) => ({ ...report, timingMs: { total: 0, identity: 0, assessment: 0, current: 0 } });
+
+  assert.equal(first.inputs, 10_000);
+  assert.equal(first.eventsAccepted, 10_000);
+  assert.equal(first.eventsRejected, 0);
+  assert.deepEqual(first.invariantViolations, []);
+  assert.equal(first.finalIdentity.tenantId, high.scope.tenantId);
+  assert.equal(first.finalAvailabilityCurrent?.accountId, high.scope.accountId);
+  assert.deepEqual(stable(first), stable(second));
+});
+
 test("assessment computation remains side-effect free during replay", async () => {
   const [fixture] = await loadReplayFixtures(fixturePath);
   assert.ok(fixture);
