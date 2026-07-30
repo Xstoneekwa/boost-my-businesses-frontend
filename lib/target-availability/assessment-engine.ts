@@ -22,8 +22,6 @@ import { deterministicUuid, event, orderAndValidateObservations, timestamp } fro
 const distinctRuns = (rows: readonly AvailabilityObservation[]) =>
   new Set(rows.map((row) => row.runId || row.observationId)).size;
 
-const latestAt = (rows: readonly AvailabilityObservation[]) => rows.at(-1)?.observedAt ?? null;
-
 const after = (row: AvailabilityObservation, other: AvailabilityObservation | null) =>
   !other || timestamp(row.observedAt) > timestamp(other.observedAt);
 
