@@ -1,5 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
-import { reconcileSocialCounters, runTotalsCounters, interactionEventCounters } from "@/lib/instagram-dashboard/social-counters";
+import { actionCountersFromLogs, reconcileSocialCounters, runTotalsCounters, interactionEventCounters } from "@/lib/instagram-dashboard/social-counters";
 import { getAccountId, jsonError, jsonOk, readDate, readNumber, readString, requireInstagramAdmin, validateAccountId, type SupabaseRecord } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -10,19 +10,6 @@ function keyForRun(row: SupabaseRecord) {
 
 function logRunId(row: SupabaseRecord) {
   return readString(row.run_id, readString(row.ig_run_id, ""));
-}
-
-function countAction(logs: SupabaseRecord[], names: string[], excludedNames: string[] = []) {
-  return logs.reduce((total, log) => {
-    const type = readString(log.action_type, readString(log.action, readString(log.event_type, ""))).toLowerCase();
-    if (!names.some((name) => type.includes(name))) return total;
-    if (excludedNames.some((name) => type.includes(name))) return total;
-
-    const status = readString(log.status, readString(log.result, "")).toLowerCase();
-    if (["failed", "error", "skipped"].some((blocked) => status.includes(blocked))) return total;
-
-    return total + readNumber(log.count, 1);
-  }, 0);
 }
 
 function isRecord(value: unknown): value is SupabaseRecord {
@@ -109,22 +96,9 @@ function buildRow(
   interactionEvents: SupabaseRecord[],
   index: number,
 ) {
-  const followFromLogs = countAction(logs, ["follow"], ["unfollow"]);
-  const unfollowFromLogs = countAction(logs, ["unfollow"]);
-  const likeFromLogs = countAction(logs, ["like"]);
-  const commentFromLogs = countAction(logs, ["comment"]);
-  const dmFromLogs = countAction(logs, ["dm", "message"]);
-  const watchFromLogs = countAction(logs, ["watch", "story"]);
+  const actionLogCounters = actionCountersFromLogs(logs);
   const reconciled = reconcileSocialCounters(
-    {
-      follows: followFromLogs,
-      unfollows: unfollowFromLogs,
-      likes: likeFromLogs,
-      comments: commentFromLogs,
-      dms: dmFromLogs,
-      stories: watchFromLogs,
-      interactionsTotal: 0,
-    },
+    actionLogCounters,
     run ? runTotalsCounters([run]) : runTotalsCounters([]),
     interactionEventCounters(interactionEvents),
   );

@@ -75,9 +75,21 @@ export function socialActionKindFromLog(actionType: string) {
   return null;
 }
 
-function shouldCountSocialLog(row: RecordValue) {
+function hasExplicitFailedActionPayload(row: RecordValue) {
+  const payload = readRecord(row.payload);
+  if (!payload) return false;
+  const values = [payload.ok, payload.verified, payload.success];
+  return values.some((value) => (
+    value === false
+    || value === 0
+    || (typeof value === "string" && ["false", "0", "failed", "error"].includes(value.trim().toLowerCase()))
+  ));
+}
+
+export function isCountableSocialActionLog(row: RecordValue) {
   const status = readString(row.status, "").toLowerCase();
   if (["failed", "error", "skipped", "blocked", "dry_run"].some((blocked) => status.includes(blocked))) return false;
+  if (hasExplicitFailedActionPayload(row)) return false;
   return Boolean(socialActionKindFromLog(readString(row.action_type, "")));
 }
 
@@ -160,7 +172,7 @@ function canonicalActionUnits(row: RecordValue, kind: SocialCounterKind) {
 function actionUnitsByIdentity(rows: RecordValue[]) {
   const units = new Map<string, { kind: SocialCounterKind; units: number }>();
   for (const row of rows) {
-    if (!shouldCountSocialLog(row)) continue;
+    if (!isCountableSocialActionLog(row)) continue;
     const kind = socialActionKindFromLog(readString(row.action_type, ""));
     if (!kind) continue;
     const identity = canonicalActionIdentity(row, kind);

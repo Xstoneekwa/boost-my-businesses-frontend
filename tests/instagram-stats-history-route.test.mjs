@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("../app/api/instagram-dashboard/profiles/[accountId]/stats-history/route.ts", import.meta.url), "utf8");
+const statsRouteSource = readFileSync(new URL("../app/api/instagram-dashboard/stats/route.ts", import.meta.url), "utf8");
 
 test("stats history uses real social action logs and excludes operational logs", () => {
   assert.match(source, /ig_action_logs/);
@@ -10,6 +11,8 @@ test("stats history uses real social action logs and excludes operational logs",
   assert.match(source, /ig_interaction_events/);
   assert.doesNotMatch(source, /login_completed/);
   assert.doesNotMatch(source, /preflight_completed/);
+  assert.match(source, /action_type,status,created_at,payload/);
+  assert.match(source, /isCountableSocialActionLog/);
 });
 
 test("stats history exposes canonical social profile snapshots with explicit freshness", () => {
@@ -52,4 +55,9 @@ test("stats history filters and groups by the SAST business date and labels SAST
   assert.match(source, /formatBusinessTimestamp/);
   assert.doesNotMatch(source, /setUTCHours\(0/);
   assert.doesNotMatch(source, /toISOString\(\)\.slice\(11, 19\)/);
+});
+
+test("stats summary uses the canonical payload-aware log counter", () => {
+  assert.match(statsRouteSource, /actionCountersFromLogs\(logs\)/);
+  assert.doesNotMatch(statsRouteSource, /function countAction\(/);
 });
