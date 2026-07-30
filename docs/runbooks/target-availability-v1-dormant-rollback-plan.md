@@ -1,5 +1,7 @@
 # Target Availability V1 — Dormant Rollback Plan
 
+> Current baseline authority: `docs/checkpoints/target-availability-v1-gate0-current-baseline-reconciliation.md`.
+
 Status: **prepared only — execution is not authorized**
 
 ## Immediate containment
@@ -18,7 +20,7 @@ has existed. The documentary down migration is safe only before producers/reader
 
 ### Backend
 
-- Promote the previous production Backend SHA `d1de142892a13e4d24bb7fd1d7e2651f423a421b` if the dormant code introduces a build or serving regression.
+- Promote the previous production Backend SHA `bb253f02c49b2c953011fd028842cd9c713dc248` (`dpl_AiLkm2FtxXxhteq8FwQxe8DAR9E8`) if the dormant code introduces a build or serving regression.
 - No Worker restart is required for a Backend-only rollback.
 - Recheck the stable alias, HTTP status, SHA provenance and dormant controls.
 

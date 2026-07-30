@@ -2,6 +2,8 @@
 
 Status: **prepared only; execution requires a separate explicit GO**
 
+Gate 0 authority: `docs/checkpoints/target-availability-v1-gate0-current-baseline-reconciliation.md`.
+
 ## Containment
 
 Keep kill switch ON; keep capture, writer, all shadows, enforcement, Lifecycle and replacement OFF; keep allowlist empty. Preserve the four Gate 4C observations and all audit evidence.
@@ -12,11 +14,11 @@ After any producer or reader has existed, prefer a forward-fix. The documentary 
 
 ## Backend
 
-If the candidate causes a serving/build regression, promote predecessor `d1de142892a13e4d24bb7fd1d7e2651f423a421b`, then verify SHA provenance, stable alias HTTP 200 and dormant controls. No Worker restart is required.
+If the candidate causes a serving/build regression, promote predecessor `bb253f02c49b2c953011fd028842cd9c713dc248` from deployment `dpl_AiLkm2FtxXxhteq8FwQxe8DAR9E8`, then verify SHA provenance, stable alias HTTP 200 and dormant controls. No Worker restart is required.
 
 ## Worker
 
-The final dormant plan leaves active Worker `fecf91dfe8e60535810cd99ad9c10d370022ab16` unchanged, so there is no Worker rollback. Do not mutate the symlink or dispatcher.
+The final dormant plan leaves active Worker `2ab324043e0ffdef99d0311eb2812726fde85bc1` and release `2ab3240-follow-60s-rex-corrected-v1` unchanged, so there is no Worker rollback. Do not mutate the symlink or dispatcher.
 
 ## Database
 

@@ -1,5 +1,7 @@
 # Target Availability V1 — Final Reconciliation Checkpoint
 
+> Superseded for baseline selection by `docs/checkpoints/target-availability-v1-gate0-current-baseline-reconciliation.md`.
+
 Date: 2026-07-30  
 Status: **candidate review only; production deployment not authorized**
 

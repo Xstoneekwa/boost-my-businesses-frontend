@@ -3,6 +3,8 @@
 Status: **candidate only — not deployed**  
 Canonical source: `supabase/migrations/20260730123708_ct_target_availability_identity_assessment_current_v1.sql`
 
+Gate 0 current-baseline reconciliation: Backend predecessor `bb253f02c49b2c953011fd028842cd9c713dc248`; Worker runtime predecessor `2ab324043e0ffdef99d0311eb2812726fde85bc1`. These provenance references do not alter the SQL contract. Every future production preflight must derive legacy row counts, migration order, collisions and fingerprints from the live database rather than treating an earlier snapshot as a constant.
+
 The migration SQL is authoritative. The static Node contract derives its inventory directly from every `ADD COLUMN` clause and requires exactly 41 unique table/column pairs, split 7 + 8 + 14 + 12. The PostgreSQL contract verifies that the same 41 pairs exist after forward migration. Checkpoints and runbooks must agree with this derived result.
 
 `Security` is `SR/RLS` for every row: the owning table retains RLS plus FORCE RLS, `public`/`anon`/`authenticated` receive no grant, and only the documented `service_role` privileges are restored. `Legacy` is `no` for every row: the production collision audit found none of these columns before migration. `Required=yes` and `Redundant=no` are the result of the field-by-field domain audit.
