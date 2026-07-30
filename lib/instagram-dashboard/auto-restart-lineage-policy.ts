@@ -14,6 +14,108 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function positiveAttempt(value: unknown) {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value)
+      : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/**
+ * The request linked to an ig_run is the canonical source of its attempt.
+ * A run-side projection is retained only as an observable legacy fallback.
+ */
+export function resolveCanonicalAttemptIdentity(input: {
+  sourceRunId: string;
+  sourceAccountId?: string;
+  sourceRequest?: {
+    id?: unknown;
+    account_id?: unknown;
+    run_id?: unknown;
+    metadata_safe?: unknown;
+  } | null;
+  runProjectionAttemptId?: unknown;
+}) {
+  const sourceRunId = clean(input.sourceRunId);
+  const requestId = clean(input.sourceRequest?.id);
+  const sourceAccountId = clean(input.sourceAccountId);
+  const requestAccountId = clean(input.sourceRequest?.account_id);
+  const requestRunId = clean(input.sourceRequest?.run_id);
+  const metadata = record(input.sourceRequest?.metadata_safe);
+  const resumePlan = record(metadata?.resume_plan);
+  const requestAttemptId = positiveAttempt(
+    metadata?.attempt_id
+      ?? metadata?.current_attempt_id
+      ?? resumePlan?.attempt_id
+      ?? resumePlan?.current_attempt_id,
+  );
+  const runProjectionAttemptId = positiveAttempt(input.runProjectionAttemptId);
+  const retryContractPresent = Boolean(resumePlan)
+    || metadata?.resume_plan_version !== undefined
+    || metadata?.retry_index !== undefined
+    || metadata?.previous_run_id !== undefined
+    || metadata?.prior_run_id !== undefined;
+  const attemptContractMissing = retryContractPresent && requestAttemptId === null;
+  const resolvedAttemptId = requestAttemptId ?? runProjectionAttemptId;
+  const lineageValid = Boolean(
+    sourceRunId
+    && requestId
+    && requestRunId === sourceRunId
+    && (!sourceAccountId || requestAccountId === sourceAccountId)
+    && !attemptContractMissing
+    && resolvedAttemptId !== null
+  );
+  const canonicalAttemptId = lineageValid
+    ? resolvedAttemptId
+    : null;
+  return {
+    sourceRequestId: requestId || null,
+    canonicalAttemptId,
+    requestAttemptId,
+    runProjectionAttemptId,
+    attemptSource: requestAttemptId !== null
+      ? "account_run_requests.metadata_safe.attempt_id"
+      : attemptContractMissing
+        ? "account_run_requests.retry_attempt_missing_fail_closed"
+      : runProjectionAttemptId !== null
+        ? "ig_runs.performance_summary.attempt_id_fallback"
+        : "missing",
+    divergence: requestAttemptId !== null
+      && runProjectionAttemptId !== null
+      && requestAttemptId !== runProjectionAttemptId,
+    attemptContractMissing,
+    lineageValid,
+  } as const;
+}
+
+export function resolveCanonicalNextRetryIndex(input: {
+  canonicalAttemptId?: number | null;
+  retryIndex?: string | number | null;
+  nextRetryIndex?: string | number | null;
+}) {
+  const canonical = positiveAttempt(input.canonicalAttemptId);
+  const retryIndex = positiveAttempt(input.retryIndex) ?? (
+    Number(input.retryIndex) === 0 ? 0 : null
+  );
+  const nextRetryIndex = positiveAttempt(input.nextRetryIndex) ?? (
+    Number(input.nextRetryIndex) === 0 ? 0 : null
+  );
+  return Math.max(
+    canonical ?? 0,
+    nextRetryIndex ?? 0,
+    retryIndex === null ? 0 : retryIndex + 1,
+    1,
+  );
+}
+
 export function canonicalResumePlanForLatestRun<T extends Record<string, unknown>>(
   latestRun: Record<string, unknown> | undefined,
   latestPlan: T | undefined,
@@ -115,9 +217,15 @@ export function buildUnfollowResumeNotificationPayload(input: {
       ? "UNFOLLOW_RESUME_LINEAGE_MISMATCH"
       : reason.includes("circuit")
         ? "UNFOLLOW_RESUME_CIRCUIT_OPEN"
-        : reason.includes("technical_hold")
+        : reason.includes("technical_hold") || reason.includes("on_cooldown")
           ? "UNFOLLOW_RESUME_BLOCKED_BY_TECHNICAL_HOLDS"
-          : "UNFOLLOW_RESUME_ACTIONABLE_BACKLOG_READY";
+          : reason.includes("terminal_only")
+            ? "UNFOLLOW_RESUME_TERMINAL_BACKLOG_ONLY"
+            : reason.includes("backlog_exhausted")
+              ? "UNFOLLOW_RESUME_BACKLOG_EXHAUSTED"
+              : reason.includes("auto_restart_disabled") || reason === "unfollow_disabled"
+                ? "UNFOLLOW_RESUME_DISABLED"
+                : "UNFOLLOW_RESUME_ACTIONABLE_BACKLOG_READY";
   const nextAction = delayRemainingSeconds > 0
     ? "wait_next_natural_tick_after_delay"
     : candidate.unfollowPhaseCircuitOpen
@@ -131,6 +239,10 @@ export function buildUnfollowResumeNotificationPayload(input: {
   return {
     event_code: eventCode,
     run_source: candidate.sourceRunId || null,
+    request_source: candidate.sourceRequestId ?? null,
+    canonical_attempt_id: candidate.canonicalAttemptId ?? null,
+    attempt_projection_divergence: candidate.reliability.attemptProjectionDivergence === true,
+    lineage_valid: candidate.sourceLineageValid === true,
     run_parent: candidate.reliability.previousRunId || null,
     authorization_source: clean(input.authorizationSource) || null,
     configured_delay_minutes: candidate.configuredRestartDelayMinutes ?? null,
@@ -139,10 +251,13 @@ export function buildUnfollowResumeNotificationPayload(input: {
     follow_target: candidate.quotas.follow.capDay,
     follow_remaining: candidate.plannedQuotaRemaining.follow,
     unfollow_actionable: Number(candidate.eligibleUnfollowCandidateCount || 0),
+    unfollow_remaining_total: Number(candidate.unfollowBacklogTotal || 0),
     unfollow_holds: Number(candidate.technicalHoldUnfollowCandidateCount || 0),
     unfollow_terminal_unavailable: Number(candidate.terminalUnfollowCandidateCount || 0),
     unfollow_circuit_open: candidate.unfollowPhaseCircuitOpen === true,
     unfollow_circuit_reason: candidate.unfollowPhaseCircuitReason ?? null,
+    next_evaluation_at: candidate.unfollowNextEvaluationAt ?? null,
+    next_candidate_retry_at: candidate.unfollowNextCandidateRetryAt ?? null,
     reason,
     next_action: nextAction,
   };

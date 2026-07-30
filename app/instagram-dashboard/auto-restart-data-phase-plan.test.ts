@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   pruneTerminalAccountSessionPhases,
+  resolveBoundedSessionQuota,
+  resolvePartialUnfollowLiveResume,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
 } from "../../lib/instagram-dashboard/auto-restart-phase-plan.ts";
+
+test("a runtime session cap of zero remains zero and cannot fall back to the day cap", () => {
+  assert.deepEqual(resolveBoundedSessionQuota({
+    doneToday: 41,
+    capDay: 120,
+    sessionCap: 0,
+    enabled: true,
+  }), {
+    remaining: 79,
+    plannedNextRunQuota: 0,
+  });
+});
 
 const quota = (remaining: number, enabled = true) => ({
   doneToday: 0,
@@ -13,6 +28,159 @@ const quota = (remaining: number, enabled = true) => ({
   plannedNextRunQuota: remaining,
   enabled,
   sourceLabel: "test",
+});
+
+const partialUnfollow = (overrides: Partial<Parameters<typeof resolvePartialUnfollowLiveResume>[0]> = {}) =>
+  resolvePartialUnfollowLiveResume({
+    sessionTerminationClass: "partial_resumable",
+    unfollowPhaseStatus: "partial_resumable",
+    lineageValid: true,
+    autoRestartEnabled: true,
+    unfollowEnabled: true,
+    dailyQuotaRemaining: 79,
+    sessionQuotaRemaining: 50,
+    actionableNow: 3,
+    technicalHoldTotal: 3,
+    terminalTotal: 0,
+    nextCandidateRetryAt: "2026-07-30T18:03:55.000Z",
+    phaseCircuitOpen: false,
+    phaseCircuitNextRetryAt: null,
+    ...overrides,
+  });
+
+test("Loriele partial remainder rebuilds an exact Unfollow-only quota from actionable_now", () => {
+  const continuation = partialUnfollow();
+  assert.deepEqual(continuation, {
+    applies: true,
+    authorized: true,
+    reason: "partial_resumable_live_unfollow_backlog",
+    backlogTotal: 6,
+    actionableNow: 3,
+    technicalHoldTotal: 3,
+    terminalTotal: 0,
+    plannedQuota: 3,
+    nextEvaluationAt: null,
+  });
+  assert.deepEqual(resolvePlannedAccountSession({
+    persistedPhases: {
+      welcome: false,
+      follow: false,
+      unfollow: continuation.authorized,
+    },
+    persistedQuotaRemaining: {
+      welcome: 0,
+      follow: 0,
+      unfollow: continuation.plannedQuota,
+    },
+    quotas: {
+      welcome: quota(0, false),
+      follow: quota(70),
+      unfollow: quota(79),
+    },
+    eligibleWorkRemaining: { unfollow: continuation.actionableNow },
+  }), {
+    phases: { welcome: false, follow: false, unfollow: true },
+    remaining: { welcome: 0, follow: 0, unfollow: 3 },
+    totalRemaining: 3,
+  });
+});
+
+test("the phase circuit remains authoritative even when three candidates are actionable", () => {
+  assert.deepEqual(partialUnfollow({
+    phaseCircuitOpen: true,
+    phaseCircuitNextRetryAt: "2026-07-30T18:04:34.000Z",
+  }), {
+    applies: true,
+    authorized: false,
+    reason: "unfollow_phase_circuit_open",
+    backlogTotal: 6,
+    actionableNow: 3,
+    technicalHoldTotal: 3,
+    terminalTotal: 0,
+    plannedQuota: 0,
+    nextEvaluationAt: "2026-07-30T18:04:34.000Z",
+  });
+});
+
+test("expired holds become live actionables only on a future canonical backlog evaluation", () => {
+  const future = partialUnfollow({
+    actionableNow: 6,
+    technicalHoldTotal: 0,
+    nextCandidateRetryAt: null,
+  });
+  assert.equal(future.authorized, true);
+  assert.equal(future.plannedQuota, 6);
+});
+
+test("daily and session limits bound the live continuation", () => {
+  assert.equal(partialUnfollow({ actionableNow: 40, dailyQuotaRemaining: 2 }).plannedQuota, 2);
+  assert.equal(partialUnfollow({ actionableNow: 40, sessionQuotaRemaining: 1 }).plannedQuota, 1);
+});
+
+test("a completed frozen session target never hides newly actionable live backlog", () => {
+  const continuation = partialUnfollow({ actionableNow: 4, technicalHoldTotal: 0 });
+  assert.equal(continuation.authorized, true);
+  assert.equal(continuation.plannedQuota, 4);
+  const plan = resolvePlannedAccountSession({
+    persistedPhases: { welcome: false, follow: false, unfollow: continuation.authorized },
+    persistedQuotaRemaining: { welcome: 0, follow: 0, unfollow: continuation.plannedQuota },
+    quotas: { welcome: quota(0, false), follow: quota(70), unfollow: quota(79) },
+    eligibleWorkRemaining: { unfollow: continuation.actionableNow },
+  });
+  assert.deepEqual(plan.phases, { welcome: false, follow: false, unfollow: true });
+  assert.deepEqual(plan.remaining, { welcome: 0, follow: 0, unfollow: 4 });
+});
+
+test("a planned but never-started Unfollow phase cannot convert a Follow partial into Unfollow-only", () => {
+  const result = partialUnfollow({ unfollowPhaseStatus: "" });
+  assert.equal(result.applies, false);
+  assert.equal(result.authorized, false);
+  assert.equal(result.reason, "not_partial_unfollow_lineage");
+});
+
+test("a stale or superseded source lineage fails closed", () => {
+  assert.equal(partialUnfollow({ lineageValid: false }).reason, "resume_source_run_superseded");
+  assert.equal(partialUnfollow({ lineageValid: false }).authorized, false);
+});
+
+test("the global Unfollow Auto Restart switch remains authoritative", () => {
+  const result = partialUnfollow({ autoRestartEnabled: false });
+  assert.equal(result.authorized, false);
+  assert.equal(result.reason, "unfollow_auto_restart_disabled");
+});
+
+test("technical-hold-only backlog waits until next_candidate_retry_at", () => {
+  const result = partialUnfollow({ actionableNow: 0, technicalHoldTotal: 3 });
+  assert.equal(result.reason, "unfollow_backlog_on_cooldown");
+  assert.equal(result.nextEvaluationAt, "2026-07-30T18:03:55.000Z");
+});
+
+test("hold-only backlog outranks stale quota and circuit state", () => {
+  const result = partialUnfollow({
+    actionableNow: 0,
+    technicalHoldTotal: 3,
+    dailyQuotaRemaining: 0,
+    sessionQuotaRemaining: 0,
+    phaseCircuitOpen: true,
+    phaseCircuitNextRetryAt: "2026-07-30T18:04:34.000Z",
+  });
+  assert.equal(result.reason, "unfollow_backlog_on_cooldown");
+  assert.equal(result.nextEvaluationAt, "2026-07-30T18:03:55.000Z");
+});
+
+test("terminal-only and empty backlogs outrank a stale circuit-open flag", () => {
+  assert.equal(partialUnfollow({
+    actionableNow: 0,
+    technicalHoldTotal: 0,
+    terminalTotal: 3,
+    phaseCircuitOpen: true,
+  }).reason, "unfollow_backlog_terminal_only");
+  assert.equal(partialUnfollow({
+    actionableNow: 0,
+    technicalHoldTotal: 0,
+    terminalTotal: 0,
+    phaseCircuitOpen: true,
+  }).reason, "unfollow_backlog_exhausted");
 });
 
 test("a persisted Unfollow-only plan suppresses unrelated raw Follow quota", () => {
@@ -178,4 +346,19 @@ test("phase circuit is non-terminal and does not make Unfollow executable", () =
   assert.equal(outcome.reason, "phase_circuit_open");
   assert.equal(outcome.terminal, false);
   assert.equal(outcome.executable, false);
+});
+
+test("run-linked PostgREST projections are chunked for 1,000+ accounts", () => {
+  const source = readFileSync(new URL("./auto-restart-data.ts", import.meta.url), "utf8");
+  assert.match(source, /chunked\(latestRunIds, 100\)[\s\S]*?from\("ig_action_logs"\)[\s\S]*?\.in\("run_id", runIdBatch\)/);
+  assert.match(source, /chunked\(latestRunIds, 100\)[\s\S]*?from\("account_run_requests"\)[\s\S]*?\.in\("run_id", runIdBatch\)/);
+  assert.doesNotMatch(source, /\.in\("run_id", latestRunIds\)/);
+});
+
+test("the projected gate status cannot disagree with the canonical decision outcome", () => {
+  const source = readFileSync(new URL("./auto-restart-data.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /gateStatus:\s*decisionOutcome === "eligible" \? "eligible_preview" : decisionOutcome/,
+  );
 });

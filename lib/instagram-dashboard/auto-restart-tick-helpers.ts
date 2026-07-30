@@ -98,6 +98,7 @@ type ResumeCandidate = {
     lastRunId?: string;
     lastRunStatus?: string;
     sourceLabel?: string;
+    unfollowPhaseStatus?: string;
   };
   blockReason: string;
   gateStatus: string;
@@ -115,6 +116,16 @@ type ResumeCandidate = {
   };
   eligibleUnfollowCandidateCount?: number;
   unavailableUnfollowCandidateCount?: number;
+  terminalUnfollowCandidateCount?: number;
+  technicalHoldUnfollowCandidateCount?: number;
+  unfollowBacklogTotal?: number;
+  unfollowNextEvaluationAt?: string | null;
+  unfollowNextCandidateRetryAt?: string | null;
+  unfollowPhaseCircuitOpen?: boolean;
+  canonicalLiveUnfollowResumeAuthorized?: boolean;
+  sourceRequestId?: string | null;
+  canonicalAttemptId?: number | null;
+  sourceLineageValid?: boolean;
   quotas: {
     follow: ResumeCandidateQuota;
     unfollow: ResumeCandidateQuota;
@@ -206,10 +217,49 @@ function canonicalResumeQuotaRuntimeSupported(candidate: ResumeCandidate): Resum
 
 function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRuntimeSupport {
   const reliability = candidate.reliability;
+  const canonicalLiveUnfollowOverride = candidate.canonicalLiveUnfollowResumeAuthorized === true;
+  if (canonicalLiveUnfollowOverride) {
+    const phases = candidate.plannedPhasesToRun;
+    const remaining = candidate.plannedQuotaRemaining;
+    const partial = ["partial_resumable", "partial_safe_stopped"]
+      .includes(reliability.sessionTerminationClass.toLowerCase());
+    if (
+      !partial
+      || !["partial_resumable", "partial_safe_stopped"]
+        .includes(String(reliability.unfollowPhaseStatus || "").toLowerCase())
+      || candidate.sourceLineageValid !== true
+      || !candidate.sourceRequestId
+      || !Number.isSafeInteger(candidate.canonicalAttemptId)
+      || Number(candidate.canonicalAttemptId) < 1
+      || (
+        reliability.restartAllowed !== true
+        && reliability.restartBlockReason.toLowerCase() !== "restart_not_needed"
+      )
+      || candidate.unfollowPhaseCircuitOpen === true
+      || candidate.restartNeeded !== true
+      || candidate.plannedRunType !== "account_session"
+      || !phases
+      || phases.welcome
+      || phases.follow
+      || !phases.unfollow
+      || !remaining
+      || remaining.unfollow < 1
+      || remaining.welcome !== 0
+      || remaining.follow !== 0
+      || remaining.outreach !== 0
+      || Number(candidate.eligibleUnfollowCandidateCount || 0) < remaining.unfollow
+    ) {
+      return { ok: false as const, reason: "resume_plan_invalid" };
+    }
+  }
   const safeBoundaryFallback = candidate.historicalSafeBoundaryFallback === true
     && candidate.restartNeeded === true
     && Boolean(candidate.safeRestartStrategy && candidate.safeRestartStrategy !== "none");
-  if (reliability.restartAllowed !== true && !safeBoundaryFallback) {
+  if (
+    reliability.restartAllowed !== true
+    && !safeBoundaryFallback
+    && !canonicalLiveUnfollowOverride
+  ) {
     return { ok: false as const, reason: reliability.restartBlockReason || "restart_not_allowed" };
   }
   if (candidate.restartNeeded === false) {
@@ -259,6 +309,28 @@ export function resumePlanRuntimeEvidence(candidate: ResumeCandidate) {
       && Number.isSafeInteger(candidate.unavailableUnfollowCandidateCount)
       ? Number(candidate.unavailableUnfollowCandidateCount)
       : null,
+    actionable_now: typeof candidate.eligibleUnfollowCandidateCount === "number"
+      && Number.isSafeInteger(candidate.eligibleUnfollowCandidateCount)
+      ? Number(candidate.eligibleUnfollowCandidateCount)
+      : null,
+    technical_hold_total: typeof candidate.technicalHoldUnfollowCandidateCount === "number"
+      && Number.isSafeInteger(candidate.technicalHoldUnfollowCandidateCount)
+      ? Number(candidate.technicalHoldUnfollowCandidateCount)
+      : null,
+    terminal_total: typeof candidate.terminalUnfollowCandidateCount === "number"
+      && Number.isSafeInteger(candidate.terminalUnfollowCandidateCount)
+      ? Number(candidate.terminalUnfollowCandidateCount)
+      : null,
+    remaining_total: typeof candidate.unfollowBacklogTotal === "number"
+      && Number.isSafeInteger(candidate.unfollowBacklogTotal)
+      ? Number(candidate.unfollowBacklogTotal)
+      : null,
+    next_evaluation_at: candidate.unfollowNextEvaluationAt ?? null,
+    hold_next_retry_at: candidate.unfollowNextCandidateRetryAt ?? null,
+    canonical_live_unfollow_resume: candidate.canonicalLiveUnfollowResumeAuthorized === true,
+    source_request_id: candidate.sourceRequestId ?? null,
+    canonical_attempt_id: candidate.canonicalAttemptId ?? null,
+    lineage_valid: candidate.sourceLineageValid === true,
     planned_resume_quota: candidate.plannedQuotaRemaining ?? null,
     daily_remaining: {
       welcome: candidate.quotas.welcome.remaining,
@@ -275,6 +347,15 @@ export function resumePlanRuntimeEvidence(candidate: ResumeCandidate) {
     runtime_supported: support.ok,
     runtime_support_block_reason: support.reason,
   };
+}
+
+export function unfollowDecisionNextEvaluationAt(candidate: Pick<
+  ResumeCandidate,
+  "unfollowNextEvaluationAt" | "unfollowNextCandidateRetryAt"
+>) {
+  return candidate.unfollowNextEvaluationAt
+    ?? candidate.unfollowNextCandidateRetryAt
+    ?? null;
 }
 
 export function accountRiskTier(candidate: Pick<ResumeCandidate, "reliability" | "blockReason" | "gateStatus">) {

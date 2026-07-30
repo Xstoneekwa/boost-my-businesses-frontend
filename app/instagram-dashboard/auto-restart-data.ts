@@ -4,18 +4,26 @@ import { firstAutomationBlockingIncident } from "@/lib/instagram-dashboard/incid
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
 import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-restart-scheduler-state";
+import { resolveUnfollowRuntimeCap } from "@/lib/instagram-dashboard/run-control";
 import {
   exactViewportResumeEvidence,
   resolveAccountRestartEligibility,
+  resolveAutoRestartDecisionOutcome,
   resolveRestartNeed,
   resolveSafeRestartStrategy,
   type SafeBoundaryTarget,
   type SafeRestartStrategy,
 } from "@/lib/instagram-dashboard/auto-restart-candidate-policy";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
-import { canonicalResumePlanForLatestRun } from "@/lib/instagram-dashboard/auto-restart-lineage-policy";
+import {
+  canonicalResumePlanForLatestRun,
+  resolveCanonicalAttemptIdentity,
+  resolveCanonicalNextRetryIndex,
+} from "@/lib/instagram-dashboard/auto-restart-lineage-policy";
 import {
   pruneTerminalAccountSessionPhases,
+  resolveBoundedSessionQuota,
+  resolvePartialUnfollowLiveResume,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
   type AutoRestartAccountSessionPhases,
@@ -104,6 +112,12 @@ export type AutoRestartCandidate = {
   unfollowPhaseCircuitOpen?: boolean;
   unfollowPhaseCircuitReason?: string | null;
   unfollowPhaseCircuitNextRetryAt?: string | null;
+  unfollowBacklogTotal?: number;
+  unfollowNextEvaluationAt?: string | null;
+  canonicalLiveUnfollowResumeAuthorized?: boolean;
+  sourceRequestId?: string | null;
+  canonicalAttemptId?: number | null;
+  sourceLineageValid?: boolean;
   configuredRestartDelayMinutes?: number;
   commercialAddonsLabel: string;
   outreachSourceLabel: string;
@@ -154,6 +168,12 @@ export type AutoRestartCandidate = {
     sessionTerminationClass: string;
     businessSessionId: string;
     attemptId: string;
+    canonicalAttemptId?: number | null;
+    sourceRequestId?: string | null;
+    attemptSource?: string;
+    attemptProjectionId?: number | null;
+    attemptProjectionDivergence?: boolean;
+    sourceLineageValid?: boolean;
     retryIndex: string;
     nextRetryIndex: string;
     previousRunId: string;
@@ -169,6 +189,9 @@ export type AutoRestartCandidate = {
     targetRotationSafeAfterScrollFailure: boolean;
     scrollFailureSurfaceAmbiguous: boolean;
     businessProgressMade?: boolean;
+    unfollowPhaseStatus?: string;
+    unfollowSessionTarget?: number;
+    unfollowSessionVerified?: number;
     lastRunId: string;
     lastRunStatus: string;
     sourceLabel: string;
@@ -362,7 +385,7 @@ function inferPackageDefaults(account: ManageAccount) {
   };
 }
 
-function quota({
+export function buildAutoRestartQuotaPreview({
   doneToday,
   capDay,
   sessionCap,
@@ -375,12 +398,17 @@ function quota({
   enabled: boolean;
   sourceLabel: string;
 }): AutoRestartQuotaPreview {
-  const remaining = Math.max(0, capDay - doneToday);
+  const { remaining, plannedNextRunQuota } = resolveBoundedSessionQuota({
+    doneToday,
+    capDay,
+    sessionCap,
+    enabled,
+  });
   return {
     doneToday,
     capDay,
     remaining,
-    plannedNextRunQuota: enabled ? Math.max(0, Math.min(sessionCap || capDay, remaining)) : 0,
+    plannedNextRunQuota,
     enabled,
     sourceLabel,
   };
@@ -403,10 +431,30 @@ function latestSessionRunByAccount(rows: SupabaseRecord[]) {
   return map;
 }
 
+function latestRunRequestByRun(rows: SupabaseRecord[]) {
+  const map = new Map<string, SupabaseRecord>();
+  for (const row of rows) {
+    const runId = readString(row.run_id);
+    if (!runId || map.has(runId)) continue;
+    map.set(runId, row);
+  }
+  return map;
+}
+
+function chunked<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function reliabilityFromLatestRun(
   latestRun: SupabaseRecord | undefined,
   canonicalPlanRow: SupabaseRecord | undefined,
   rules: AutoRestartRulePreview,
+  sourceRequest?: SupabaseRecord,
+  sourcePlanLineageValid = false,
 ): AutoRestartCandidate["reliability"] {
   if (!latestRun) {
     return {
@@ -420,6 +468,12 @@ function reliabilityFromLatestRun(
       sessionTerminationClass: "",
       businessSessionId: "",
       attemptId: "—",
+      canonicalAttemptId: null,
+      sourceRequestId: null,
+      attemptSource: "missing",
+      attemptProjectionId: null,
+      attemptProjectionDivergence: false,
+      sourceLineageValid: false,
       retryIndex: "—",
       nextRetryIndex: "—",
       previousRunId: "",
@@ -435,6 +489,9 @@ function reliabilityFromLatestRun(
       targetRotationSafeAfterScrollFailure: false,
       scrollFailureSurfaceAmbiguous: false,
       businessProgressMade: false,
+      unfollowPhaseStatus: "",
+      unfollowSessionTarget: 0,
+      unfollowSessionVerified: 0,
       lastRunId: "",
       lastRunStatus: "",
       sourceLabel: "no_recent_run",
@@ -443,11 +500,13 @@ function reliabilityFromLatestRun(
 
   const performance = readRecord(latestRun.performance_summary);
   const canonicalPlan = readRecord(canonicalPlanRow?.plan);
-  const resumePlan = canonicalPlan
-    ?? readRecord(performance?.auto_restart_resume_plan)
+  const runResumeProjection = readRecord(performance?.auto_restart_resume_plan)
     ?? readRecord(performance?.admin_reliability_snapshot);
+  const resumePlan = canonicalPlan
+    ?? runResumeProjection;
   const persistedPhases = readRecord(resumePlan?.phases_to_run);
   const quotaDone = readRecord(resumePlan?.quota_done);
+  const quotaTargets = readRecord(resumePlan?.quota_targets);
   const unfollowOutcome = readRecord(resumePlan?.unfollow_outcome);
   const unsafeRaw = resumePlan?.unsafe_markers ?? performance?.unsafe_markers;
   const unsafeMarkers = Array.isArray(unsafeRaw)
@@ -462,6 +521,24 @@ function reliabilityFromLatestRun(
   const nextRestartAt = finishedAt && rules.restartDelayMinutes > 0
     ? new Date(new Date(finishedAt).getTime() + rules.restartDelayMinutes * 60_000).toISOString()
     : null;
+  const attemptIdentity = resolveCanonicalAttemptIdentity({
+    sourceRunId: readString(latestRun.id),
+    sourceAccountId: readString(latestRun.account_id),
+    sourceRequest,
+    runProjectionAttemptId: performance?.attempt_id
+      ?? performance?.current_attempt_id
+      ?? runResumeProjection?.attempt_id
+      ?? runResumeProjection?.current_attempt_id,
+  });
+  const canonicalAttemptId = attemptIdentity.canonicalAttemptId;
+  const projectedRetryIndex = readString(resumePlan?.retry_index, "—") || "—";
+  const projectedNextRetryIndex = readString(resumePlan?.next_retry_index, "—") || "—";
+  const canonicalRetryIndex = canonicalAttemptId === null
+    ? projectedRetryIndex
+    : String(Math.max(0, canonicalAttemptId - 1));
+  const canonicalNextRetryIndex = canonicalAttemptId === null
+    ? projectedNextRetryIndex
+    : String(canonicalAttemptId);
 
   return {
     restartAllowed,
@@ -473,8 +550,12 @@ function reliabilityFromLatestRun(
       readString(performance?.auto_restart_restart_block_reason, "resume_plan_missing"),
     ),
     unsafeMarkers,
-    currentAttempt: readString(resumePlan?.current_attempt_id, "—") || "—",
-    nextAttempt: readString(resumePlan?.next_attempt_id, "—") || "—",
+    currentAttempt: canonicalAttemptId === null
+      ? readString(resumePlan?.current_attempt_id, "—") || "—"
+      : String(canonicalAttemptId),
+    nextAttempt: canonicalAttemptId === null
+      ? readString(resumePlan?.next_attempt_id, "—") || "—"
+      : String(canonicalAttemptId + 1),
     nextRestartAt,
     lastRestartError: readString(performance?.auto_restart_resume_plan_error, ""),
     sessionTerminationClass: readString(
@@ -482,9 +563,15 @@ function reliabilityFromLatestRun(
       readString(performance?.session_termination_class, ""),
     ),
     businessSessionId: readString(resumePlan?.business_session_id, ""),
-    attemptId: readString(resumePlan?.attempt_id, readString(resumePlan?.current_attempt_id, "—")) || "—",
-    retryIndex: readString(resumePlan?.retry_index, "—") || "—",
-    nextRetryIndex: readString(resumePlan?.next_retry_index, "—") || "—",
+    attemptId: canonicalAttemptId === null ? "—" : String(canonicalAttemptId),
+    canonicalAttemptId,
+    sourceRequestId: attemptIdentity.sourceRequestId,
+    attemptSource: attemptIdentity.attemptSource,
+    attemptProjectionId: attemptIdentity.runProjectionAttemptId,
+    attemptProjectionDivergence: attemptIdentity.divergence,
+    sourceLineageValid: sourcePlanLineageValid && attemptIdentity.lineageValid,
+    retryIndex: canonicalRetryIndex,
+    nextRetryIndex: canonicalNextRetryIndex,
     previousRunId: readString(resumePlan?.previous_run_id, ""),
     rootFailureCode: readString(resumePlan?.root_failure_code, readString(performance?.root_failure_code, "")),
     failureSignature: readString(resumePlan?.failure_signature, readString(performance?.failure_signature, "")),
@@ -525,6 +612,30 @@ function reliabilityFromLatestRun(
       Object.values(quotaDone ?? {}).some((value) => readNumber(value, 0) > 0)
       || readNumber(unfollowOutcome?.persisted_count, 0) > 0
       || readNumber(unfollowOutcome?.verified_count, 0) > 0
+    ),
+    unfollowPhaseStatus: readString(
+      unfollowOutcome?.phase_status,
+      readString(resumePlan?.unfollow_phase_status, ""),
+    ),
+    unfollowSessionTarget: readNumber(
+      unfollowOutcome?.planned_candidate_count,
+      readNumber(
+        unfollowOutcome?.planned_count,
+        readNumber(
+          unfollowOutcome?.target_count,
+          readNumber(
+            unfollowOutcome?.requested_count,
+            readNumber(quotaTargets?.unfollow, readNumber(resumePlan?.unfollow_quota_target, 0)),
+          ),
+        ),
+      ),
+    ),
+    unfollowSessionVerified: readNumber(
+      unfollowOutcome?.verified_count,
+      readNumber(
+        unfollowOutcome?.verified_actions,
+        readNumber(quotaDone?.unfollow, readNumber(resumePlan?.unfollow_actions_verified, 0)),
+      ),
     ),
     lastRunId: readString(latestRun.id),
     lastRunStatus: readString(latestRun.status),
@@ -743,40 +854,67 @@ function planCandidate({
   const followSessionCap = readNumber(settings?.follow_limit, followDayCap);
   const unfollowEnabled = readBoolean(unfollowSettings?.unfollow_enabled, false);
   const unfollowDayCap = readNumber(unfollowSettings?.unfollow_per_day_limit, packageDefaults.unfollowCap);
-  const unfollowSessionCap = readNumber(unfollowSettings?.unfollow_per_session_limit, unfollowDayCap);
+  const configuredUnfollowSessionCap = readNumber(unfollowSettings?.unfollow_per_session_limit, unfollowDayCap);
+  const runtimeUnfollowCap = resolveUnfollowRuntimeCap({
+    unfollowPerSessionLimit: configuredUnfollowSessionCap,
+    runtimeCapMode: unfollowSettings?.runtime_cap_mode,
+    runtimeSafetyCap: unfollowSettings?.runtime_safety_cap === null
+      || unfollowSettings?.runtime_safety_cap === undefined
+      ? null
+      : readNumber(unfollowSettings.runtime_safety_cap, 0),
+  });
+  const unfollowSessionCap = Math.min(
+    configuredUnfollowSessionCap,
+    runtimeUnfollowCap.cap ?? configuredUnfollowSessionCap,
+  );
   const welcomeEnabled = readBoolean(dmSettings?.welcome_enabled, packageDefaults.welcomeCap > 0);
   const welcomeDayCap = readNumber(dmSettings?.welcome_per_day_limit, packageDefaults.welcomeCap);
   const welcomeSessionCap = readNumber(dmSettings?.welcome_per_session_limit, welcomeDayCap);
   const outreachEnabled = readBoolean(dmSettings?.outreach_enabled, packageDefaults.outreachCap > 0);
   const outreachDayCap = readNumber(dmSettings?.outreach_per_day_limit, packageDefaults.outreachCap);
   const outreachSessionCap = readNumber(dmSettings?.outreach_per_session_limit, outreachDayCap);
-  const follow = quota({
+  const follow = buildAutoRestartQuotaPreview({
     doneToday: dailyActionCounts.follow,
     capDay: followDayCap,
     sessionCap: followSessionCap,
     enabled: followEnabled,
     sourceLabel: "account_package_summary warmup preview + ig_interacted_users.followed_at",
   });
-  const unfollow = quota({
+  const unfollow = buildAutoRestartQuotaPreview({
     doneToday: dailyActionCounts.unfollow,
     capDay: unfollowDayCap,
     sessionCap: unfollowSessionCap,
     enabled: unfollowEnabled,
     sourceLabel: "ig_account_unfollow_settings + ig_interacted_users.unfollowed_at",
   });
-  const welcome = quota({
+  const welcome = buildAutoRestartQuotaPreview({
     doneToday: dailyActionCounts.welcome,
     capDay: welcomeDayCap,
     sessionCap: welcomeSessionCap,
     enabled: welcomeEnabled,
     sourceLabel: "ig_account_dm_settings + welcome_dm_sent marker",
   });
-  const outreach = quota({
+  const outreach = buildAutoRestartQuotaPreview({
     doneToday: dailyActionCounts.outreach,
     capDay: outreachDayCap,
     sessionCap: outreachSessionCap,
     enabled: outreachEnabled,
     sourceLabel: "ig_account_dm_settings + dm_sent marker",
+  });
+  const partialUnfollowLiveResume = resolvePartialUnfollowLiveResume({
+    sessionTerminationClass: reliability.sessionTerminationClass,
+    unfollowPhaseStatus: reliability.unfollowPhaseStatus,
+    lineageValid: reliability.sourceLineageValid === true,
+    autoRestartEnabled: rules.resumeUnfollowIfQuotaRemaining,
+    unfollowEnabled,
+    dailyQuotaRemaining: unfollow.remaining,
+    sessionQuotaRemaining: unfollow.plannedNextRunQuota,
+    actionableNow: unfollowBacklog.actionableRemaining,
+    technicalHoldTotal: unfollowBacklog.technicalHold,
+    terminalTotal: unfollowBacklog.terminalUnavailable,
+    nextCandidateRetryAt: unfollowBacklog.nextCandidateRetryAt,
+    phaseCircuitOpen: unfollowBacklog.phaseCircuitOpen,
+    phaseCircuitNextRetryAt: unfollowBacklog.phaseCircuitNextRetryAt,
   });
 
   const blockingReasons: string[] = [];
@@ -835,9 +973,23 @@ function planCandidate({
   if ((!resolvedPhoneName || resolvedPhoneName === "Unknown phone") && !hasAssignedDevice) {
     blockingReasons.push("assignment_or_device_pending");
   }
+  const persistedPhasesForPlanning = partialUnfollowLiveResume.applies
+    ? {
+      welcome: false,
+      follow: false,
+      unfollow: partialUnfollowLiveResume.authorized,
+    }
+    : reliability.phasesToRun;
+  const persistedQuotaForPlanning = partialUnfollowLiveResume.applies
+    ? {
+      welcome: 0,
+      follow: 0,
+      unfollow: partialUnfollowLiveResume.plannedQuota,
+    }
+    : reliability.quotaRemaining;
   const initialPlannedAccountSession = resolvePlannedAccountSession({
-    persistedPhases: reliability.phasesToRun,
-    persistedQuotaRemaining: reliability.quotaRemaining,
+    persistedPhases: persistedPhasesForPlanning,
+    persistedQuotaRemaining: persistedQuotaForPlanning,
     quotas: { follow, unfollow, welcome },
     eligibleWorkRemaining: {
       unfollow: unfollowBacklog.actionableRemaining,
@@ -850,7 +1002,9 @@ function planCandidate({
       eligibleWorkRemaining: eligibleFollowTargetCount,
     }),
     unfollow: resolvePhaseCompletion({
-      enabled: initialPlannedAccountSession.phases.unfollow || (unfollow.enabled && unfollow.remaining < 1),
+      enabled: partialUnfollowLiveResume.applies
+        ? unfollow.enabled
+        : initialPlannedAccountSession.phases.unfollow || (unfollow.enabled && unfollow.remaining < 1),
       // Candidate availability bounds the next request size, but it is not the
       // commercial quota. Keep the live quota here so a temporary hold or an
       // open Unfollow-only circuit remains resumable instead of being
@@ -873,7 +1027,9 @@ function planCandidate({
   const accountSessionRemaining = plannedAccountSession.totalRemaining;
   // A canonical account-session resume plan is authoritative. It must never
   // silently switch to a fresh Outreach run because unrelated raw quota exists.
-  const outreachRemaining = reliability.phasesToRun ? 0 : outreach.remaining;
+  const outreachRemaining = reliability.phasesToRun || partialUnfollowLiveResume.applies
+    ? 0
+    : outreach.remaining;
   const outreachPhaseCompletion = resolvePhaseCompletion({
     enabled: outreachRemaining > 0,
     quotaRemaining: outreachRemaining,
@@ -883,8 +1039,13 @@ function planCandidate({
     ...Object.values(accountSessionPhaseCompletion),
     outreachPhaseCompletion,
   ].every((phase) => phase.terminal);
-  if (allEnabledPhasesTerminal) {
-    blockingReasons.unshift("all_enabled_phase_work_completed");
+  if (
+    partialUnfollowLiveResume.applies
+    && !partialUnfollowLiveResume.authorized
+  ) {
+    blockingReasons.push(partialUnfollowLiveResume.reason);
+  } else if (allEnabledPhasesTerminal) {
+    blockingReasons.push("all_enabled_phase_work_completed");
   } else if (accountSessionRemaining < 1 && outreachRemaining < 1) {
     if (unfollowBacklog.phaseCircuitOpen) {
       blockingReasons.push("unfollow_phase_circuit_open");
@@ -906,6 +1067,7 @@ function planCandidate({
     restartAllowed: reliability.restartAllowed,
     restartBlockReason: reliability.restartBlockReason,
     totalRemainingQuota,
+    canonicalLiveUnfollowResumeAuthorized: partialUnfollowLiveResume.authorized,
   });
   const exactViewportResumeAvailable = exactViewportResumeEvidence({
     safeCheckpointAvailable: reliability.safeCheckpointAvailable,
@@ -919,7 +1081,8 @@ function planCandidate({
     exactViewportResumeAvailable,
     priorTargetId,
     eligibleTargets: eligibleFollowTargets,
-    workerPlanExplicitlySafe: reliability.restartAllowed === true,
+    workerPlanExplicitlySafe: reliability.restartAllowed === true
+      || restartNeed.canonicalLiveUnfollowOverride,
   });
   const enqueueAllowed = accountEligible
     && restartNeed.needed
@@ -932,23 +1095,10 @@ function planCandidate({
       : safeRestart.strategy === "none"
         ? safeRestart.reason
         : "eligible_safe_boundary_restart";
-  const notNeededReasons = new Set([
-    "manual_only",
-    "planned_future_window",
-    "current_window_closed",
-    "active_run_exists",
-    "active_run_request_exists",
-    "no_partial_run_to_resume",
-    "run_in_progress",
-    "quota_exhausted",
-    "no_quota_remaining",
-    "all_enabled_phase_work_completed",
-  ]);
-  const decisionOutcome = enqueueAllowed
-    ? "eligible"
-    : notNeededReasons.has(decisionReason)
-      ? "not_needed"
-      : "blocked";
+  const decisionOutcome = resolveAutoRestartDecisionOutcome({
+    enqueueAllowed,
+    decisionReason,
+  });
   const plannedRunType =
     enqueueAllowed && accountSessionRemaining >= 1
       ? "account_session"
@@ -956,13 +1106,11 @@ function planCandidate({
         ? "outreach_session"
         : "none";
 
-  const parsedRetryIndex = Number.parseInt(reliability.retryIndex, 10);
-  const parsedNextRetryIndex = Number.parseInt(reliability.nextRetryIndex, 10);
-  const nextRetryIndex = Number.isFinite(parsedNextRetryIndex)
-    ? parsedNextRetryIndex
-    : Number.isFinite(parsedRetryIndex)
-      ? parsedRetryIndex + 1
-      : 1;
+  const nextRetryIndex = resolveCanonicalNextRetryIndex({
+    canonicalAttemptId: reliability.canonicalAttemptId,
+    retryIndex: reliability.retryIndex,
+    nextRetryIndex: reliability.nextRetryIndex,
+  });
   const sourceBusinessSessionId = reliability.businessSessionId || reliability.lastRunId;
 
   return {
@@ -992,6 +1140,12 @@ function planCandidate({
     unfollowPhaseCircuitOpen: unfollowBacklog.phaseCircuitOpen,
     unfollowPhaseCircuitReason: unfollowBacklog.phaseCircuitReason,
     unfollowPhaseCircuitNextRetryAt: unfollowBacklog.phaseCircuitNextRetryAt,
+    unfollowBacklogTotal: partialUnfollowLiveResume.backlogTotal,
+    unfollowNextEvaluationAt: partialUnfollowLiveResume.nextEvaluationAt,
+    canonicalLiveUnfollowResumeAuthorized: restartNeed.canonicalLiveUnfollowOverride,
+    sourceRequestId: reliability.sourceRequestId ?? null,
+    canonicalAttemptId: reliability.canonicalAttemptId ?? null,
+    sourceLineageValid: reliability.sourceLineageValid === true,
     configuredRestartDelayMinutes: rules.restartDelayMinutes,
     commercialAddonsLabel: account.commercialAddonsLabel,
     outreachSourceLabel: account.outreachSourceLabel,
@@ -1007,7 +1161,7 @@ function planCandidate({
     phoneRestStatus,
     sessionWindowStatus,
     assignmentStatus: assignment ? readString(assignment.status, "assigned") : "pending",
-    gateStatus: enqueueAllowed ? "eligible_preview" : accountEligible ? "not_needed" : "blocked",
+    gateStatus: decisionOutcome === "eligible" ? "eligible_preview" : decisionOutcome,
     accountEligible,
     accountEligibilityReason,
     restartNeeded: restartNeed.needed,
@@ -1200,15 +1354,45 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const latestRunIds = [...latestSessionRuns.values()]
     .map((row) => readString(row.id, ""))
     .filter(Boolean);
-  const targetSelectionsResult = latestRunIds.length > 0
-    ? await supabase
+  // Both run-linked projections are chunked. At 1,000+ accounts, sending all
+  // UUIDs through one PostgREST `in` filter can exceed intermediary URL limits.
+  const targetSelectionsPromise = Promise.all(
+    chunked(latestRunIds, 100).map((runIdBatch) => supabase
       .from("ig_action_logs")
       .select("run_id,created_at,payload")
-      .in("run_id", latestRunIds)
+      .in("run_id", runIdBatch)
       .eq("action_type", "follow_target_selected")
       .order("created_at", { ascending: false })
-      .limit(5000)
-    : { data: [], error: null };
+      .limit(5000)),
+  );
+  const sourceRunRequestsPromise = Promise.all(
+    chunked(latestRunIds, 100).map((runIdBatch) => supabase
+      .from("account_run_requests")
+      .select("id,account_id,run_id,status,created_at,metadata_safe")
+      .in("run_id", runIdBatch)
+      .order("created_at", { ascending: false })
+      .limit(1000)),
+  );
+  const [targetSelectionResults, sourceRunRequestResults] = await Promise.all([
+    targetSelectionsPromise,
+    sourceRunRequestsPromise,
+  ]);
+  const targetSelectionError = targetSelectionResults.find((result) => result.error)?.error ?? null;
+  if (targetSelectionError) {
+    throw new Error(`auto_restart_candidate_projection_incomplete:${targetSelectionError.message}`);
+  }
+  if (targetSelectionResults.some((result) => (result.data?.length ?? 0) >= 5000)) {
+    throw new Error("auto_restart_candidate_projection_incomplete:target_selection_projection_truncated");
+  }
+  const targetSelectionRows = targetSelectionResults.flatMap((result) => result.data ?? []);
+  const sourceRunRequestError = sourceRunRequestResults.find((result) => result.error)?.error ?? null;
+  if (sourceRunRequestError) {
+    throw new Error(`auto_restart_candidate_projection_incomplete:${sourceRunRequestError.message}`);
+  }
+  if (sourceRunRequestResults.some((result) => (result.data?.length ?? 0) >= 1000)) {
+    throw new Error("auto_restart_candidate_projection_incomplete:source_request_projection_truncated");
+  }
+  const sourceRunRequestRows = sourceRunRequestResults.flatMap((result) => result.data ?? []);
 
   const errors = [
     autoRestartSettingsResult.error,
@@ -1236,7 +1420,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     latestCompletedTickResult.error,
     resumePlansResult.error,
     unfollowBacklogResult.error,
-    targetSelectionsResult.error,
+    targetSelectionError,
+    sourceRunRequestError,
     ...manageData.errors.map((message) => ({ message })),
     ...radarData.errors.map((message) => ({ message })),
   ].map((error) => error?.message).filter((message): message is string => Boolean(message));
@@ -1258,6 +1443,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
   const latestSessionRunsByAccount = latestSessionRuns;
   const latestResumePlansByAccount = latestSessionRunByAccount((resumePlansResult.data ?? []) as SupabaseRecord[]);
+  const sourceRunRequestsByRun = latestRunRequestByRun(sourceRunRequestRows as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
@@ -1282,7 +1468,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     });
   }
   const safeTargetsByAccount = safeBoundaryTargetsByAccount((targetsResult.data ?? []) as SupabaseRecord[]);
-  const priorTargetByRun = latestTargetSelectionByRun((targetSelectionsResult.data ?? []) as SupabaseRecord[]);
+  const priorTargetByRun = latestTargetSelectionByRun(targetSelectionRows as SupabaseRecord[]);
   const assignmentsByAccount = mapByAccount((assignmentsResult.data ?? []) as SupabaseRecord[]);
   const restWindowsByDevice = groupByAccount((restWindowsResult.data ?? []) as SupabaseRecord[], "device_id");
   const phoneRestOverridesByDevice = new Map<string, PhoneRestOverride>();
@@ -1312,6 +1498,10 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const candidates = manageData.activeAccounts
     .map((account) => {
       const assignment = assignmentsByAccount.get(account.accountId);
+      const latestRun = latestSessionRunsByAccount.get(account.accountId);
+      const latestPlan = latestResumePlansByAccount.get(account.accountId);
+      const canonicalPlan = canonicalResumePlanForLatestRun(latestRun, latestPlan);
+      const latestRunId = readString(latestRun?.id, "");
       const deviceId = readString(assignment?.device_id, "");
       const restWindows = (restWindowsByDevice.get(deviceId) ?? []).map((row) => ({
         id: readString(row.id, ""),
@@ -1352,16 +1542,15 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
           phaseCircuitNextRetryAt: null,
         },
         priorTargetId: priorTargetByRun.get(
-          readString(latestSessionRunsByAccount.get(account.accountId)?.id, ""),
+          latestRunId,
         ) ?? null,
         rules,
         reliability: reliabilityFromLatestRun(
-          latestSessionRunsByAccount.get(account.accountId),
-          canonicalResumePlanForLatestRun(
-            latestSessionRunsByAccount.get(account.accountId),
-            latestResumePlansByAccount.get(account.accountId),
-          ),
+          latestRun,
+          canonicalPlan,
           rules,
+          sourceRunRequestsByRun.get(latestRunId),
+          Boolean(canonicalPlan),
         ),
         incidentBlockReason: firstAutomationBlockingIncident(
           incidentsByAccount.get(account.accountId) ?? [],

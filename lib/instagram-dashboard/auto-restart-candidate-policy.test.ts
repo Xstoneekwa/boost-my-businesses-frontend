@@ -4,10 +4,49 @@ import test from "node:test";
 import {
   exactViewportResumeEvidence,
   resolveAccountRestartEligibility,
+  resolveAutoRestartDecisionOutcome,
   resolveRestartNeed,
   resolveSafeRestartStrategy,
   sortSafeBoundaryTargets,
 } from "./auto-restart-candidate-policy.ts";
+
+test("terminal or exhausted live Unfollow backlog is not-needed, not a blocked incident", () => {
+  for (const reason of [
+    "unfollow_quota_reached",
+    "unfollow_backlog_terminal_only",
+    "unfollow_backlog_exhausted",
+  ]) {
+    assert.equal(resolveAutoRestartDecisionOutcome({
+      enqueueAllowed: false,
+      decisionReason: reason,
+    }), "not_needed");
+  }
+  assert.equal(resolveAutoRestartDecisionOutcome({
+    enqueueAllowed: false,
+    decisionReason: "unfollow_backlog_on_cooldown",
+  }), "blocked");
+});
+
+test("a live Unfollow advisory cannot mask an earlier account safety block", () => {
+  assert.deepEqual(resolveAccountRestartEligibility([
+    "manual_stop_requested",
+    "unfollow_phase_circuit_open",
+  ]), {
+    eligible: false,
+    reason: "manual_stop_requested",
+  });
+});
+
+test("a hard safety marker outranks an Unfollow circuit or hold advisory", () => {
+  assert.deepEqual(resolveAccountRestartEligibility([
+    "unfollow_phase_circuit_open",
+    "unfollow_backlog_on_cooldown",
+    "challenge_blocked",
+  ]), {
+    eligible: false,
+    reason: "challenge_blocked",
+  });
+});
 
 test("only current real blockers exclude an otherwise normal account", () => {
   assert.deepEqual(resolveAccountRestartEligibility([]), { eligible: true, reason: "eligible" });
@@ -36,6 +75,7 @@ test("a partial historical run remains needed when only its viewport checkpoint 
     needed: true,
     reason: "historical_partial_run_requires_safe_boundary",
     historicalSafeBoundaryFallback: true,
+    canonicalLiveUnfollowOverride: false,
   });
 });
 
@@ -179,5 +219,36 @@ test("explicit restart_allowed wins over a missing legacy block reason", () => {
     needed: true,
     reason: "partial_run_resume_needed",
     historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: false,
   });
+});
+
+test("canonical live Unfollow backlog overrides a stale restart_not_needed snapshot", () => {
+  assert.deepEqual(resolveRestartNeed({
+    lastRunId: "loriele-partial-run",
+    sessionTerminationClass: "partial_resumable",
+    restartAllowed: false,
+    restartBlockReason: "restart_not_needed",
+    totalRemainingQuota: 3,
+    canonicalLiveUnfollowResumeAuthorized: true,
+  }), {
+    needed: true,
+    reason: "partial_live_unfollow_backlog_resume_needed",
+    historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: true,
+  });
+});
+
+test("canonical live Unfollow backlog never overrides a critical Worker block", () => {
+  const result = resolveRestartNeed({
+    lastRunId: "run-critical",
+    sessionTerminationClass: "partial_resumable",
+    restartAllowed: false,
+    restartBlockReason: "cleanup_not_completed",
+    totalRemainingQuota: 3,
+    canonicalLiveUnfollowResumeAuthorized: true,
+  });
+  assert.equal(result.needed, false);
+  assert.equal(result.canonicalLiveUnfollowOverride, false);
+  assert.equal(result.reason, "cleanup_not_completed");
 });

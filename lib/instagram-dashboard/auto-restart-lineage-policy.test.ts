@@ -5,9 +5,139 @@ import {
   authoritativeDelayRemainingSeconds,
   buildUnfollowResumeNotificationPayload,
   canonicalResumePlanForLatestRun,
+  resolveCanonicalAttemptIdentity,
+  resolveCanonicalNextRetryIndex,
   resumeLineageBudgetKey,
   validateResumeAuthorizationLineage,
 } from "./auto-restart-lineage-policy.ts";
+
+test("the linked request is canonical when the run projection has a stale attempt", () => {
+  assert.deepEqual(resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-mythyl",
+    sourceRequest: {
+      id: "request-mythyl",
+      run_id: "run-mythyl",
+      metadata_safe: { attempt_id: 2 },
+    },
+    runProjectionAttemptId: 1,
+  }), {
+    sourceRequestId: "request-mythyl",
+    canonicalAttemptId: 2,
+    requestAttemptId: 2,
+    runProjectionAttemptId: 1,
+    attemptSource: "account_run_requests.metadata_safe.attempt_id",
+    divergence: true,
+    attemptContractMissing: false,
+    lineageValid: true,
+  });
+  assert.equal(resolveCanonicalNextRetryIndex({
+    canonicalAttemptId: 2,
+    retryIndex: "0",
+    nextRetryIndex: "1",
+  }), 2);
+});
+
+test("a request bound to an older run fails closed", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-new",
+    sourceRequest: {
+      id: "request-old",
+      run_id: "run-old",
+      metadata_safe: { attempt_id: 2 },
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(identity.lineageValid, false);
+  assert.equal(identity.canonicalAttemptId, null);
+});
+
+test("legacy initial requests without attempt metadata use an explicit run fallback", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-loriele",
+    sourceRequest: {
+      id: "request-loriele",
+      run_id: "run-loriele",
+      metadata_safe: {},
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(identity.canonicalAttemptId, 1);
+  assert.equal(identity.attemptSource, "ig_runs.performance_summary.attempt_id_fallback");
+  assert.equal(identity.divergence, false);
+  assert.equal(identity.attemptContractMissing, false);
+  assert.equal(identity.lineageValid, true);
+});
+
+test("a source request with no request or run attempt cannot authorize continuation", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-loriele",
+    sourceRequest: {
+      id: "request-loriele",
+      run_id: "run-loriele",
+      metadata_safe: {},
+    },
+  });
+  assert.equal(identity.canonicalAttemptId, null);
+  assert.equal(identity.attemptSource, "missing");
+  assert.equal(identity.lineageValid, false);
+});
+
+test("resume_plan.current_attempt_id is accepted as the request-linked canonical attempt", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-retry",
+    sourceAccountId: "account-1",
+    sourceRequest: {
+      id: "request-retry",
+      account_id: "account-1",
+      run_id: "run-retry",
+      metadata_safe: {
+        resume_plan_version: 2,
+        resume_plan: { current_attempt_id: 2 },
+      },
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(identity.canonicalAttemptId, 2);
+  assert.equal(identity.divergence, true);
+  assert.equal(identity.lineageValid, true);
+});
+
+test("a retry request missing its canonical attempt fails closed instead of falling back to run attempt 1", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-retry",
+    sourceAccountId: "account-1",
+    sourceRequest: {
+      id: "request-retry",
+      account_id: "account-1",
+      run_id: "run-retry",
+      metadata_safe: { resume_plan_version: 2, resume_plan: {} },
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(identity.canonicalAttemptId, null);
+  assert.equal(identity.attemptContractMissing, true);
+  assert.equal(identity.lineageValid, false);
+  assert.equal(identity.attemptSource, "account_run_requests.retry_attempt_missing_fail_closed");
+});
+
+test("missing or cross-account source requests cannot authorize a live continuation", () => {
+  assert.equal(resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-1",
+    sourceAccountId: "account-1",
+    runProjectionAttemptId: 1,
+  }).lineageValid, false);
+  assert.equal(resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-1",
+    sourceAccountId: "account-1",
+    sourceRequest: {
+      id: "request-1",
+      account_id: "account-other",
+      run_id: "run-1",
+      metadata_safe: {},
+    },
+    runProjectionAttemptId: 1,
+  }).lineageValid, false);
+});
 
 test("a resume plan is authoritative only for the latest canonical run", () => {
   const latest = { id: "run-new" };
