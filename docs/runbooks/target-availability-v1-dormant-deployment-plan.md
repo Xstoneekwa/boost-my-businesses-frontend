@@ -10,7 +10,7 @@ Production project: `zgafnshkjywfltxgbtzg`
 2. Re-fetch both official remotes and require the candidate SHAs recorded in the candidate checkpoint.
 3. Re-list production Supabase migrations. The expected predecessor is
    `20260729234627_unfollow_search_outcome_and_phase_circuit_v2`; stop if a newer migration collides with the candidate.
-4. Repeat the read-only collision query for all 37 columns and four indexes. Require zero collisions.
+4. Derive the canonical inventory from the migration SQL and repeat the read-only collision query for all 41 columns and four indexes. Require zero collisions.
 5. Confirm the production controls remain: capture OFF, writer OFF, account allowlist empty, kill switch ON,
    Availability Shadow OFF, Policy Shadow OFF, enforce OFF, Lifecycle/replacement OFF.
 6. Confirm Unfollow V2 remains Shadow ON/enforce OFF and record the active Worker release/symlink.
@@ -25,7 +25,7 @@ Production project: `zgafnshkjywfltxgbtzg`
 2. **Database migration**
    - Apply only `20260730123708_ct_target_availability_identity_assessment_current_v1.sql`.
    - Do not run the documentary down migration.
-   - The migration is additive: 37 nullable/defaulted columns and four indexes; no backfill, trigger, RPC or data write.
+   - The migration is additive: 41 nullable/defaulted columns and four indexes; no backfill, trigger, RPC or data write.
 3. **Database verification**
    - Verify all five tables have RLS enabled and forced.
    - Verify `public`, `anon`, and `authenticated` have zero table grants.
