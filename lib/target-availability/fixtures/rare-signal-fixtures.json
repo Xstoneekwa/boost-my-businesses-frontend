@@ -1,0 +1,39 @@
+{
+  "defaults": {
+    "scope": { "tenantId": "11111111-1111-4111-8111-111111111111", "accountId": "22222222-2222-4222-8222-222222222222", "targetId": "33333333-3333-4333-8333-333333333333" },
+    "expectedUsername": "target.one",
+    "calculatedAt": "2026-07-30T12:00:00.000Z"
+  },
+  "fixtures": [
+    { "name": "01 stable available profile", "stablePlatformUserId": "ig-100", "events": [{ "signal": "profile_available" }], "expected": { "identityStatus": "identity_confirmed", "assessmentStatus": "likely_available", "currentStatus": "likely_available", "acceptedCount": 1 } },
+    { "name": "02 temporary unavailable then available", "events": [{ "signal": "profile_unavailable", "minutesAgo": 20 }, { "signal": "profile_available", "minutesAgo": 5 }], "expected": { "assessmentStatus": "available", "currentStatus": "available", "acceptedCount": 2 } },
+    { "name": "03 confirmed deleted profile", "events": [{ "signal": "account_deleted", "minutesAgo": 10 }, { "signal": "account_deleted", "minutesAgo": 5 }], "expected": { "assessmentStatus": "unavailable_confirmed", "currentStatus": "unavailable_confirmed" } },
+    { "name": "04 suspected suspension contradicted", "events": [{ "signal": "account_suspended", "minutesAgo": 10 }, { "signal": "profile_available", "minutesAgo": 2 }], "expected": { "assessmentStatus": "available", "currentStatus": "available" } },
+    { "name": "05 username change with stable id", "stablePlatformUserId": "ig-100", "events": [{ "signal": "username_changed", "observedUsername": "target.renamed", "stablePlatformUserId": "ig-100" }], "expected": { "identityStatus": "username_change_confirmed", "assessmentStatus": "identity_changed", "currentStatus": "identity_changed" } },
+    { "name": "06 username change without stable id", "events": [{ "signal": "username_change_suspected", "observedUsername": "target.renamed", "minutesAgo": 10 }, { "signal": "username_change_suspected", "observedUsername": "target.renamed", "minutesAgo": 5 }], "expected": { "identityStatus": "username_change_suspected", "assessmentStatus": "identity_ambiguous", "currentStatus": "identity_ambiguous" } },
+    { "name": "07 identity conflict", "stablePlatformUserId": "ig-100", "events": [{ "signal": "identity_conflict", "stablePlatformUserId": "ig-200" }], "expected": { "identityStatus": "identity_conflict", "assessmentStatus": "conflicting_evidence", "currentStatus": "conflicting_evidence" } },
+    { "name": "08 cross tenant observation rejected", "events": [{ "signal": "profile_available", "tenantId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }], "expected": { "assessmentStatus": "insufficient_evidence", "acceptedCount": 0, "rejectedCount": 1 } },
+    { "name": "09 exact duplicate", "events": [{ "signal": "profile_available" }, { "signal": "profile_available", "duplicateOf": 0 }], "expected": { "assessmentStatus": "likely_available", "acceptedCount": 1, "deduplicatedCount": 1 } },
+    { "name": "10 out of order events", "events": [{ "signal": "profile_available", "minutesAgo": 2 }, { "signal": "profile_available", "minutesAgo": 10 }], "expected": { "assessmentStatus": "likely_available", "acceptedCount": 2 } },
+    { "name": "11 temporary login wall", "events": [{ "signal": "login_wall", "sessionHealthy": false }], "expected": { "assessmentStatus": "temporarily_unavailable" } },
+    { "name": "12 repeated network errors", "events": [{ "signal": "network_error", "networkHealthy": false }, { "signal": "network_error", "networkHealthy": false }], "expected": { "assessmentStatus": "insufficient_evidence" } },
+    { "name": "13 verified badge without restriction", "events": [{ "signal": "verified_badge_present", "verifiedBadge": true }], "expected": { "assessmentStatus": "insufficient_evidence" } },
+    { "name": "14 followers restricted without badge", "events": [{ "signal": "followers_surface_restricted", "followersSurface": "restricted" }, { "signal": "followers_surface_restricted", "followersSurface": "restricted" }], "expected": { "assessmentStatus": "insufficient_evidence" } },
+    { "name": "15 verified restriction once", "events": [{ "signal": "verified_badge_present", "verifiedBadge": true }, { "signal": "verified_followers_restricted", "verifiedBadge": true, "followersSurface": "restricted" }], "expected": { "assessmentStatus": "verified_restricted_suspected" } },
+    { "name": "16 verified restriction repeated", "events": [{ "signal": "verified_badge_present", "verifiedBadge": true }, { "signal": "verified_followers_restricted", "verifiedBadge": true, "followersSurface": "restricted" }, { "signal": "verified_followers_restricted", "verifiedBadge": true, "followersSurface": "restricted" }], "expected": { "assessmentStatus": "verified_restricted_confirmed", "currentStatus": "verified_restricted_confirmed" } },
+    { "name": "17 observations became stale", "events": [{ "signal": "profile_available", "minutesAgo": 50000 }], "expected": { "identityStatus": "stale_identity", "assessmentStatus": "stale", "currentStatus": "stale" } },
+    { "name": "18 concurrent workers", "events": [{ "signal": "profile_available", "workerId": "worker-a" }, { "signal": "profile_available", "workerId": "worker-b" }], "expected": { "assessmentStatus": "likely_available", "acceptedCount": 2 } },
+    { "name": "19 replay after interruption", "stablePlatformUserId": "ig-100", "resumeAfter": 1, "events": [{ "signal": "profile_available", "minutesAgo": 10 }, { "signal": "profile_available", "minutesAgo": 5 }], "expected": { "identityStatus": "identity_confirmed", "assessmentStatus": "likely_available", "acceptedCount": 2 } },
+    { "name": "20 engine version upgrade input", "events": [{ "signal": "profile_available" }], "expected": { "assessmentStatus": "likely_available" } },
+    { "name": "21 deleted then recreated same username", "events": [{ "signal": "account_deleted", "minutesAgo": 10 }, { "signal": "profile_available", "minutesAgo": 2 }], "expected": { "assessmentStatus": "available", "currentStatus": "available" } },
+    { "name": "22 historical username shared by another target", "events": [{ "signal": "profile_available", "observedUsername": "shared.name" }], "expected": { "identityStatus": "identity_ambiguous", "assessmentStatus": "identity_ambiguous" } },
+    { "name": "23 missing target id", "events": [{ "signal": "profile_available", "targetId": "" }], "expected": { "acceptedCount": 0, "rejectedCount": 1, "assessmentStatus": "insufficient_evidence" } },
+    { "name": "24 incorrect account id", "events": [{ "signal": "profile_available", "accountId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }], "expected": { "acceptedCount": 0, "rejectedCount": 1, "assessmentStatus": "insufficient_evidence" } },
+    { "name": "25 empty tenant id", "events": [{ "signal": "profile_available", "tenantId": "" }], "expected": { "acceptedCount": 0, "rejectedCount": 1, "assessmentStatus": "insufficient_evidence" } },
+    { "name": "26 inconsistent timestamps", "events": [{ "signal": "profile_available", "observedAt": "not-a-timestamp" }], "expected": { "acceptedCount": 0, "rejectedCount": 1, "assessmentStatus": "insufficient_evidence" } },
+    { "name": "27 partial observation", "events": [{ "signal": "profile_available", "idempotencyKey": "" }], "expected": { "acceptedCount": 0, "rejectedCount": 1, "assessmentStatus": "insufficient_evidence" } },
+    { "name": "28 assessment idempotent", "events": [{ "signal": "profile_available" }], "expected": { "assessmentStatus": "likely_available", "currentStatus": "likely_available" } },
+    { "name": "29 current state idempotent", "events": [{ "signal": "profile_available" }], "expected": { "assessmentStatus": "likely_available", "currentStatus": "likely_available" } },
+    { "name": "30 high volume one target", "events": [{ "signal": "profile_available" }], "generatedObservationCount": 1000, "expected": { "assessmentStatus": "likely_available", "acceptedCount": 1000 } }
+  ]
+}
