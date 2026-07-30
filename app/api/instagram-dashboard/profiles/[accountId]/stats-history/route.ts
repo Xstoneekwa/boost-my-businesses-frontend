@@ -1,5 +1,6 @@
 import {
   interactionEventCountersByDay,
+  isCountableSocialActionLog,
   reconcileStatsDaySocialCounters,
   socialActionKindFromLog,
   toStatsDaySocialCounters,
@@ -105,12 +106,6 @@ function socialActionKind(actionType: string) {
   if (kind === "comments") return "comment_count";
   if (kind === "dms") return "dm_count";
   return "watch_count";
-}
-
-function shouldCountSocialLog(row: SupabaseRecord) {
-  const status = readString(row.status, "").toLowerCase();
-  if (["failed", "error", "skipped", "blocked", "dry_run"].some((blocked) => status.includes(blocked))) return false;
-  return Boolean(socialActionKind(readString(row.action_type, "")));
 }
 
 function blankDay(date: string): DayCounters {
@@ -242,7 +237,7 @@ export async function GET(
     const [logsResult, runsResult, interactionEventsResult, unfollowsResult, socialSnapshotsResult, settingsResult, packageResult] = await Promise.all([
       supabase
         .from("ig_action_logs")
-        .select("id,action_type,status,created_at")
+        .select("id,action_type,status,created_at,payload")
         .eq("account_id", normalizedAccountId)
         .gte("created_at", since)
         .order("created_at", { ascending: false })
@@ -311,7 +306,7 @@ export async function GET(
       if (!date) continue;
       const day = ensureDay(date);
       day.session_time = latestIso(day.session_time, readString(row.created_at, ""));
-      if (!shouldCountSocialLog(row)) continue;
+      if (!isCountableSocialActionLog(row)) continue;
       const kind = socialActionKind(readString(row.action_type, ""));
       if (kind) day[kind] += 1;
     }
