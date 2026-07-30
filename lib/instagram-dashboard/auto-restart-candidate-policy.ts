@@ -17,6 +17,7 @@ export type RestartNeedInput = {
   restartAllowed: boolean | null;
   restartBlockReason: string;
   totalRemainingQuota: number;
+  canonicalLiveUnfollowResumeAuthorized?: boolean;
 };
 
 export type SafeRestartStrategyInput = {
@@ -44,10 +45,42 @@ export function isPartialResumeClass(value: string) {
 
 export function resolveAccountRestartEligibility(blockingReasons: string[]) {
   const reasons = blockingReasons.map((reason) => reason.trim()).filter(Boolean);
+  const hardSafetyReason = reasons.find((reason) =>
+    reason === "challenge_blocked"
+    || reason === "restriction_blocked"
+    || reason === "account_mismatch_blocked"
+    || reason === "device_offline_blocked"
+    || reason.startsWith("unsafe_markers:"));
   return {
     eligible: reasons.length === 0,
-    reason: reasons[0] || "eligible",
+    reason: hardSafetyReason || reasons[0] || "eligible",
   } as const;
+}
+
+const AUTO_RESTART_NOT_NEEDED_REASONS = new Set([
+  "manual_only",
+  "planned_future_window",
+  "current_window_closed",
+  "active_run_exists",
+  "active_run_request_exists",
+  "no_partial_run_to_resume",
+  "run_in_progress",
+  "quota_exhausted",
+  "no_quota_remaining",
+  "all_enabled_phase_work_completed",
+  "unfollow_quota_reached",
+  "unfollow_backlog_terminal_only",
+  "unfollow_backlog_exhausted",
+]);
+
+export function resolveAutoRestartDecisionOutcome(input: {
+  enqueueAllowed: boolean;
+  decisionReason: string;
+}) {
+  if (input.enqueueAllowed) return "eligible" as const;
+  return AUTO_RESTART_NOT_NEEDED_REASONS.has(input.decisionReason)
+    ? "not_needed" as const
+    : "blocked" as const;
 }
 
 /**
@@ -62,6 +95,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       needed: false,
       reason: "no_partial_run_to_resume",
       historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
     } as const;
   }
 
@@ -70,11 +104,24 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       needed: false,
       reason: "quota_exhausted",
       historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
     } as const;
   }
 
   const partial = isPartialResumeClass(input.sessionTerminationClass);
   const blockReason = normalized(input.restartBlockReason);
+  if (
+    partial
+    && input.canonicalLiveUnfollowResumeAuthorized === true
+    && blockReason === "restart_not_needed"
+  ) {
+    return {
+      needed: true,
+      reason: "partial_live_unfollow_backlog_resume_needed",
+      historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: true,
+    } as const;
+  }
   const historicalSafeBoundaryFallback = input.restartAllowed !== true
     && partial
     && HISTORICAL_SAFE_BOUNDARY_FALLBACK_REASONS.has(blockReason);
@@ -84,6 +131,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       needed: true,
       reason: "partial_run_resume_needed",
       historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
     } as const;
   }
 
@@ -92,6 +140,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       needed: true,
       reason: "historical_partial_run_requires_safe_boundary",
       historicalSafeBoundaryFallback: true,
+      canonicalLiveUnfollowOverride: false,
     } as const;
   }
 
@@ -100,6 +149,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       needed: false,
       reason: "run_in_progress",
       historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
     } as const;
   }
 
@@ -108,6 +158,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       needed: false,
       reason: "no_partial_run_to_resume",
       historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
     } as const;
   }
 
@@ -115,6 +166,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
     needed: false,
     reason: blockReason || "no_partial_run_to_resume",
     historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: false,
   } as const;
 }
 

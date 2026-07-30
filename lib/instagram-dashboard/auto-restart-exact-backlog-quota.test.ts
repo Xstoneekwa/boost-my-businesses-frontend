@@ -22,10 +22,18 @@ function exactBacklogCandidate(): Candidate {
     plannedQuotaRemaining: { welcome: 0, follow: 0, unfollow: 1, outreach: 0 },
     eligibleUnfollowCandidateCount: 1,
     unavailableUnfollowCandidateCount: 2,
+    terminalUnfollowCandidateCount: 0,
+    technicalHoldUnfollowCandidateCount: 2,
+    unfollowBacklogTotal: 3,
+    unfollowNextCandidateRetryAt: "2026-07-29T10:05:00.000Z",
+    unfollowNextEvaluationAt: "2026-07-29T10:05:00.000Z",
+    unfollowPhaseCircuitOpen: false,
+    sourceLineageValid: true,
     reliability: {
       restartAllowed: true,
       restartBlockReason: "",
       sessionTerminationClass: "partial_resumable",
+      unfollowPhaseStatus: "partial_resumable",
       unsafeMarkers: [],
       businessSessionId: "business-session-1",
       retryIndex: "0",
@@ -53,6 +61,16 @@ test("exact actionable backlog 1 is runtime-supported below daily and session re
   assert.deepEqual(resumePlanRuntimeEvidence(candidate), {
     actionable_backlog: 1,
     unavailable_backlog: 2,
+    actionable_now: 1,
+    technical_hold_total: 2,
+    terminal_total: 0,
+    remaining_total: 3,
+    next_evaluation_at: "2026-07-29T10:05:00.000Z",
+    hold_next_retry_at: "2026-07-29T10:05:00.000Z",
+    canonical_live_unfollow_resume: false,
+    source_request_id: null,
+    canonical_attempt_id: null,
+    lineage_valid: true,
     planned_resume_quota: { welcome: 0, follow: 0, unfollow: 1, outreach: 0 },
     daily_remaining: { welcome: 0, follow: 0, unfollow: 71, outreach: 0 },
     session_remaining: { welcome: 0, follow: 0, unfollow: 50, outreach: 0 },
@@ -66,6 +84,75 @@ test("actionable backlog 5 produces a supported exact Unfollow-only resume", () 
   candidate.eligibleUnfollowCandidateCount = 5;
   candidate.plannedQuotaRemaining!.unfollow = 5;
   assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+});
+
+test("live partial Unfollow continuation overrides only the stale Worker restart_not_needed verdict", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "restart_not_needed";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-2";
+  candidate.canonicalAttemptId = 2;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+});
+
+test("live continuation fails closed on an open circuit or superseded lineage", () => {
+  const circuit = exactBacklogCandidate();
+  circuit.reliability.restartAllowed = false;
+  circuit.reliability.restartBlockReason = "restart_not_needed";
+  circuit.canonicalLiveUnfollowResumeAuthorized = true;
+  circuit.sourceLineageValid = true;
+  circuit.sourceRequestId = "request-2";
+  circuit.canonicalAttemptId = 2;
+  circuit.unfollowPhaseCircuitOpen = true;
+  assert.deepEqual(resumePlanRuntimeSupported(circuit), { ok: false, reason: "resume_plan_invalid" });
+
+  const stale = exactBacklogCandidate();
+  stale.reliability.restartAllowed = false;
+  stale.reliability.restartBlockReason = "restart_not_needed";
+  stale.canonicalLiveUnfollowResumeAuthorized = true;
+  stale.sourceLineageValid = false;
+  stale.sourceRequestId = "request-2";
+  stale.canonicalAttemptId = 2;
+  assert.deepEqual(resumePlanRuntimeSupported(stale), { ok: false, reason: "resume_plan_invalid" });
+});
+
+test("live continuation fails closed without the request-linked canonical attempt", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "restart_not_needed";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-2";
+  candidate.canonicalAttemptId = null;
+  assert.deepEqual(
+    resumePlanRuntimeSupported(candidate),
+    { ok: false, reason: "resume_plan_invalid" },
+  );
+});
+
+test("live continuation cannot be forged without an explicit partial Unfollow outcome", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "restart_not_needed";
+  candidate.reliability.unfollowPhaseStatus = "completed";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-2";
+  candidate.canonicalAttemptId = 2;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: false, reason: "resume_plan_invalid" });
+});
+
+test("live continuation never bypasses a critical Worker restart block", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "cleanup_not_completed";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-2";
+  candidate.canonicalAttemptId = 2;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: false, reason: "resume_plan_invalid" });
 });
 
 test("session quota smaller than daily remaining remains a valid exact bound", () => {

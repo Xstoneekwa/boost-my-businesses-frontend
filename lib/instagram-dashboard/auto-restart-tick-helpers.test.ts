@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AutoRestartCandidate } from "@/app/instagram-dashboard/auto-restart-data";
 import { buildAutoRestartResumePlanMetadata } from "./auto-restart-resume-metadata.ts";
-import { maxRetriesBlockReason } from "./auto-restart-operational.ts";
+import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational.ts";
+import { resolveCanonicalAttemptIdentity } from "./auto-restart-lineage-policy.ts";
+import {
+  resolvePartialUnfollowLiveResume,
+  resolvePlannedAccountSession,
+} from "./auto-restart-phase-plan.ts";
 
 import {
   autoRestartEnqueueIdempotencyKey,
@@ -11,6 +16,7 @@ import {
   accountRiskTier,
   resumePlanRuntimeSupported,
   sameSastBusinessDay,
+  unfollowDecisionNextEvaluationAt,
 } from "./auto-restart-tick-helpers.ts";
 
 test("auto restart request idempotency is stable per business session and retry", () => {
@@ -218,6 +224,134 @@ test("retry request metadata preserves one business session and only remaining u
   assert.equal(retryTwo.resume_plan.retry_index, 2);
   assert.equal(retryTwo.previous_run_id, "retry-run-1");
   assert.equal(maxRetriesBlockReason("2", 2), "auto_restart_retries_exhausted");
+});
+
+test("Loriele two-tick lineage rebuilds an exact request only after circuit and holds clear", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "56ca1317-6164-4f8f-8c67-90eb1d526452",
+    sourceAccountId: "dfe78a92-3a51-435e-8911-ed10c93a4d82",
+    sourceRequest: {
+      id: "45d5f78d-03a8-4772-8e57-3396ac35afc4",
+      account_id: "dfe78a92-3a51-435e-8911-ed10c93a4d82",
+      run_id: "56ca1317-6164-4f8f-8c67-90eb1d526452",
+      metadata_safe: {
+        source: "schedule_session_cron",
+        trigger: "scheduler",
+        worker_id: "schedule_session_cron",
+        assignment_id: "fd07e592-19cc-4738-adc9-90fd3c3cd407",
+        device_timezone: "Africa/Johannesburg",
+        scheduled_session_at: "2026-07-30T16:00:00+00:00",
+        scheduled_session_ends_at: "2026-07-30T22:00:00+00:00",
+      },
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(identity.lineageValid, true);
+  assert.equal(identity.canonicalAttemptId, 1);
+  assert.equal(identity.divergence, false);
+
+  const common = {
+    sessionTerminationClass: "partial_resumable",
+    unfollowPhaseStatus: "partial_resumable",
+    lineageValid: identity.lineageValid,
+    autoRestartEnabled: true,
+    unfollowEnabled: true,
+    dailyQuotaRemaining: 79,
+    sessionQuotaRemaining: 50,
+    terminalTotal: 0,
+  };
+  const firstTick = resolvePartialUnfollowLiveResume({
+    ...common,
+    actionableNow: 3,
+    technicalHoldTotal: 3,
+    nextCandidateRetryAt: "2026-07-30T18:03:55.000Z",
+    phaseCircuitOpen: true,
+    phaseCircuitNextRetryAt: "2026-07-30T18:04:34.000Z",
+  });
+  assert.equal(firstTick.authorized, false);
+  assert.equal(firstTick.reason, "unfollow_phase_circuit_open");
+  assert.equal(firstTick.nextEvaluationAt, "2026-07-30T18:04:34.000Z");
+  assert.equal(
+    restartDelayBlockReason(
+      firstTick.nextEvaluationAt,
+      new Date("2026-07-30T18:04:33.000Z"),
+    ),
+    "restart_delay_not_elapsed",
+  );
+
+  const secondTick = resolvePartialUnfollowLiveResume({
+    ...common,
+    actionableNow: 6,
+    technicalHoldTotal: 0,
+    nextCandidateRetryAt: null,
+    phaseCircuitOpen: false,
+    phaseCircuitNextRetryAt: null,
+  });
+  assert.equal(secondTick.authorized, true);
+  assert.equal(secondTick.plannedQuota, 6);
+
+  const plan = resolvePlannedAccountSession({
+    persistedPhases: { welcome: false, follow: false, unfollow: true },
+    persistedQuotaRemaining: { welcome: 0, follow: 0, unfollow: secondTick.plannedQuota },
+    quotas: {
+      welcome: { doneToday: 0, capDay: 0, remaining: 0, plannedNextRunQuota: 0, enabled: false },
+      follow: { doneToday: 50, capDay: 120, remaining: 70, plannedNextRunQuota: 50, enabled: true },
+      unfollow: { doneToday: 41, capDay: 120, remaining: 79, plannedNextRunQuota: 50, enabled: true },
+    },
+    eligibleWorkRemaining: { unfollow: secondTick.actionableNow },
+  });
+  assert.deepEqual(plan, {
+    phases: { welcome: false, follow: false, unfollow: true },
+    remaining: { welcome: 0, follow: 0, unfollow: 6 },
+    totalRemaining: 6,
+  });
+
+  const candidate = recoverableCandidate(1);
+  candidate.sourceRunId = "56ca1317-6164-4f8f-8c67-90eb1d526452";
+  candidate.sourceRequestId = identity.sourceRequestId;
+  candidate.canonicalAttemptId = identity.canonicalAttemptId;
+  candidate.sourceLineageValid = identity.lineageValid;
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "restart_not_needed";
+  candidate.reliability.unfollowPhaseStatus = "partial_resumable";
+  candidate.reliability.attemptProjectionDivergence = identity.divergence;
+  candidate.eligibleUnfollowCandidateCount = 6;
+  candidate.technicalHoldUnfollowCandidateCount = 0;
+  candidate.unavailableUnfollowCandidateCount = 0;
+  candidate.unfollowBacklogTotal = 6;
+  candidate.unfollowPhaseCircuitOpen = false;
+  candidate.unfollowNextCandidateRetryAt = null;
+  candidate.unfollowNextEvaluationAt = null;
+  candidate.plannedPhasesToRun = plan.phases;
+  candidate.plannedQuotaRemaining = { ...plan.remaining, outreach: 0 };
+  candidate.quotas.unfollow.doneToday = 41;
+  candidate.quotas.unfollow.remaining = 79;
+  candidate.quotas.unfollow.plannedNextRunQuota = 50;
+  candidate.nextRetryIndex = identity.canonicalAttemptId!;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+  assert.equal(unfollowDecisionNextEvaluationAt(candidate), null);
+
+  const request = buildAutoRestartResumePlanMetadata(
+    candidate,
+    new Date("2026-07-30T18:04:35.000Z"),
+  );
+  assert.equal(request.source_request_id, "45d5f78d-03a8-4772-8e57-3396ac35afc4");
+  assert.equal(request.source_canonical_attempt_id, 1);
+  assert.equal(request.attempt_id, 2);
+  assert.equal(request.restart_block_reason, null);
+  assert.equal(request.resume_plan.restart_block_reason, "");
+  assert.deepEqual(request.resume_plan.phases_to_run, {
+    welcome: false,
+    follow: false,
+    unfollow: true,
+  });
+  assert.deepEqual(request.resume_plan.quota_remaining, {
+    follow: 0,
+    unfollow: 6,
+    welcome: 0,
+    outreach: 0,
+  });
 });
 
 test("recoverable retry requires proven cleanup and lock release", () => {
