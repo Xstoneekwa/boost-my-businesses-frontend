@@ -8,6 +8,7 @@ import {
   autoRestartTickLockBucketStart,
   passesRiskPolicy,
   resumePlanRuntimeEvidence,
+  unfollowDecisionNextEvaluationAt,
   resumePlanRuntimeSupported,
   sastBusinessDay,
   sanitizeTickFailureReason,
@@ -42,6 +43,7 @@ import {
 } from "./auto-restart-resume-metadata";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
 import {
+  authoritativeDelayRemainingSeconds,
   buildUnfollowResumeNotificationPayload,
   resumeLineageBudgetKey,
   resumePhaseKey,
@@ -338,6 +340,7 @@ function candidateDecisionMetadata(
   const resumeLineage = resumeLineageBudgetKey(candidate);
   const decisionReason = input.reason || (input.enqueueAllowed ? "eligible" : candidate.blockReason || "blocked");
   return {
+    ...resumePlanRuntimeEvidence(candidate),
     username: candidate.username,
     account_eligible: candidate.accountEligible,
     account_eligibility_reason: candidate.accountEligibilityReason,
@@ -349,7 +352,32 @@ function candidateDecisionMetadata(
     historical_safe_boundary_fallback: candidate.historicalSafeBoundaryFallback,
     remaining_follow_quota: candidate.remainingFollowQuota,
     source_run_id: candidate.sourceRunId || null,
+    source_request_id: candidate.sourceRequestId ?? null,
+    canonical_attempt_id: candidate.canonicalAttemptId ?? null,
+    canonical_attempt_source: candidate.reliability.attemptSource ?? null,
+    attempt_projection_id: candidate.reliability.attemptProjectionId ?? null,
+    attempt_projection_divergence: candidate.reliability.attemptProjectionDivergence === true,
     source_business_session_id: candidate.sourceBusinessSessionId || null,
+    phase_status: candidate.reliability.unfollowPhaseStatus ?? null,
+    session_target: candidate.reliability.unfollowSessionTarget ?? null,
+    session_verified: candidate.reliability.unfollowSessionVerified ?? null,
+    actionable_now: candidate.eligibleUnfollowCandidateCount ?? null,
+    technical_hold_total: candidate.technicalHoldUnfollowCandidateCount ?? null,
+    terminal_total: candidate.terminalUnfollowCandidateCount ?? null,
+    remaining_total: candidate.unfollowBacklogTotal ?? null,
+    next_retry_at: unfollowDecisionNextEvaluationAt(candidate),
+    planned_resume_quota: candidate.plannedQuotaRemaining,
+    restart_delay_remaining: authoritativeDelayRemainingSeconds(
+      candidate.reliability.nextRestartAt,
+      new Date(input.evaluatedAt),
+    ),
+    lineage_valid: candidate.sourceLineageValid === true,
+    circuit_state: {
+      open: candidate.unfollowPhaseCircuitOpen === true,
+      reason: candidate.unfollowPhaseCircuitReason ?? null,
+      next_retry_at: candidate.unfollowPhaseCircuitNextRetryAt ?? null,
+    },
+    final_reason: decisionReason,
     prior_target_id: candidate.priorTargetId,
     next_target_id: candidate.nextTargetId,
     enqueue_allowed: input.enqueueAllowed,
@@ -364,7 +392,6 @@ function candidateDecisionMetadata(
       evaluatedAt: input.evaluatedAt,
       authorizationSource: input.authorizationSource,
     }),
-    ...resumePlanRuntimeEvidence(candidate),
   };
 }
 
@@ -999,8 +1026,8 @@ export async function runAutoRestartTick(
             root_failure_code: candidate.reliability.rootFailureCode || null,
             failure_signature: candidate.reliability.failureSignature || null,
             failure_category: candidate.reliability.failureCategory || null,
-            quota_remaining: candidate.reliability.quotaRemaining,
-            phases_to_run: candidate.reliability.phasesToRun,
+            quota_remaining: scheduledCandidate.plannedQuotaRemaining,
+            phases_to_run: scheduledCandidate.plannedPhasesToRun,
             scheduled_at: now.toISOString(),
             claimed_at: null,
             completed_at: null,

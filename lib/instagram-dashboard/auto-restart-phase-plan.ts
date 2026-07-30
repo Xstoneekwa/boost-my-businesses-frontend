@@ -29,6 +29,158 @@ export type PhaseCompletion = {
   temporarilyUnavailableWork: number;
 };
 
+export type PartialUnfollowLiveResumeReason =
+  | "not_partial_unfollow_lineage"
+  | "resume_source_run_superseded"
+  | "unfollow_auto_restart_disabled"
+  | "unfollow_disabled"
+  | "unfollow_quota_reached"
+  | "unfollow_phase_circuit_open"
+  | "partial_resumable_live_unfollow_backlog"
+  | "unfollow_backlog_on_cooldown"
+  | "unfollow_backlog_terminal_only"
+  | "unfollow_backlog_exhausted";
+
+export type PartialUnfollowLiveResume = {
+  applies: boolean;
+  authorized: boolean;
+  reason: PartialUnfollowLiveResumeReason;
+  backlogTotal: number;
+  actionableNow: number;
+  technicalHoldTotal: number;
+  terminalTotal: number;
+  plannedQuota: number;
+  nextEvaluationAt: string | null;
+};
+
+function normalized(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function safeCount(value: number | null | undefined) {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : 0;
+}
+
+function validIso(value: string | null | undefined) {
+  if (!value) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+export function resolveBoundedSessionQuota(input: {
+  doneToday: number;
+  capDay: number;
+  sessionCap: number;
+  enabled: boolean;
+}) {
+  const doneToday = Math.max(0, Number.isFinite(input.doneToday) ? input.doneToday : 0);
+  const capDay = Math.max(0, Number.isFinite(input.capDay) ? input.capDay : 0);
+  const sessionCap = Math.max(0, Number.isFinite(input.sessionCap) ? input.sessionCap : 0);
+  const remaining = Math.max(0, capDay - doneToday);
+  return {
+    remaining,
+    plannedNextRunQuota: input.enabled
+      ? Math.min(sessionCap, remaining)
+      : 0,
+  } as const;
+}
+
+/**
+ * Reconciles a stale Worker phase snapshot with the canonical live Unfollow
+ * backlog.  This override is intentionally narrow: only the latest proven
+ * partial Unfollow lineage may rebuild an Unfollow-only continuation.
+ */
+export function resolvePartialUnfollowLiveResume(input: {
+  sessionTerminationClass: string;
+  unfollowPhaseStatus?: string | null;
+  lineageValid: boolean;
+  autoRestartEnabled: boolean;
+  unfollowEnabled: boolean;
+  dailyQuotaRemaining: number;
+  sessionQuotaRemaining: number;
+  actionableNow: number;
+  technicalHoldTotal: number;
+  terminalTotal: number;
+  nextCandidateRetryAt?: string | null;
+  phaseCircuitOpen: boolean;
+  phaseCircuitNextRetryAt?: string | null;
+}): PartialUnfollowLiveResume {
+  const actionableNow = safeCount(input.actionableNow);
+  const technicalHoldTotal = safeCount(input.technicalHoldTotal);
+  const terminalTotal = safeCount(input.terminalTotal);
+  const backlogTotal = actionableNow + technicalHoldTotal + terminalTotal;
+  const partial = ["partial_resumable", "partial_safe_stopped"]
+    .includes(normalized(input.sessionTerminationClass));
+  const phaseStatus = normalized(input.unfollowPhaseStatus);
+  // A planned Unfollow flag or raw quota is not proof that the phase actually
+  // started. Require the terminal Unfollow outcome itself to be partial.
+  const explicitUnfollowLineage = ["partial_resumable", "partial_safe_stopped"]
+    .includes(phaseStatus);
+  const applies = partial && explicitUnfollowLineage;
+  const result = (
+    reason: PartialUnfollowLiveResumeReason,
+    authorized = false,
+    plannedQuota = 0,
+    nextEvaluationAt: string | null = null,
+  ): PartialUnfollowLiveResume => ({
+    applies,
+    authorized,
+    reason,
+    backlogTotal,
+    actionableNow,
+    technicalHoldTotal,
+    terminalTotal,
+    plannedQuota,
+    nextEvaluationAt,
+  });
+
+  if (!applies) return result("not_partial_unfollow_lineage");
+  if (!input.lineageValid) return result("resume_source_run_superseded");
+  if (!input.autoRestartEnabled) return result("unfollow_auto_restart_disabled");
+  if (!input.unfollowEnabled) return result("unfollow_disabled");
+
+  // Live backlog classification is authoritative. A stale circuit flag from
+  // the previous execution must not turn an empty or terminal-only backlog
+  // into a resumable circuit wait.
+  if (backlogTotal === 0) return result("unfollow_backlog_exhausted");
+  if (actionableNow === 0 && technicalHoldTotal === 0 && terminalTotal > 0) {
+    return result("unfollow_backlog_terminal_only");
+  }
+
+  if (actionableNow === 0 && technicalHoldTotal > 0) {
+    return result(
+      "unfollow_backlog_on_cooldown",
+      false,
+      0,
+      validIso(input.nextCandidateRetryAt),
+    );
+  }
+
+  const dailyRemaining = safeCount(input.dailyQuotaRemaining);
+  const sessionRemaining = safeCount(input.sessionQuotaRemaining);
+  if (dailyRemaining < 1 || sessionRemaining < 1) {
+    return result("unfollow_quota_reached");
+  }
+
+  if (input.phaseCircuitOpen) {
+    return result(
+      "unfollow_phase_circuit_open",
+      false,
+      0,
+      validIso(input.phaseCircuitNextRetryAt),
+    );
+  }
+
+  const plannedQuota = Math.min(
+    actionableNow,
+    dailyRemaining,
+    sessionRemaining,
+  );
+  if (plannedQuota > 0) {
+    return result("partial_resumable_live_unfollow_backlog", true, plannedQuota);
+  }
+  return result("unfollow_backlog_exhausted");
+}
+
 export function resolvePhaseCompletion(input: {
   enabled: boolean;
   quotaRemaining: number;
