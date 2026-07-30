@@ -142,6 +142,8 @@ Migration locale : `supabase/migrations/20260730123708_ct_target_availability_id
 
 Elle complète de manière additive les tables existantes avec les champs d'historique, current, evidence IDs, versions, expirations et projection. Les vocabulaires V3 coexistent avec les colonnes legacy afin de préserver la compatibilité ; aucun backfill et aucune modification de donnée n'est inclus.
 
+Le contrat canonique comporte **41 colonnes additives** (7 Identity History, 8 Identity Current, 14 Assessment, 12 Availability Current) et quatre index. L'inventaire exhaustif, les types, usages, effets de sécurité et l'explication de l'ancien chiffre 37 sont dans `docs/contracts/target-availability-v1-db-column-contract.md`. Le SQL est la source autoritaire et le test statique en dérive automatiquement le total.
+
 Sécurité : RLS activée et forcée, aucun grant `public`, `anon` ou `authenticated`, `service_role` limité à `SELECT/INSERT` sur les journaux append-only et `SELECT/INSERT/UPDATE` sur les projections courantes. Aucune fonction ni `SECURITY DEFINER` n'est ajoutée. Les champs d'explication sont safe/structurés ; aucune trace UI brute ou secret n'est attendu.
 
 Rollback documentaire : `supabase/rollback/20260730123708_ct_target_availability_identity_assessment_current_v1.down.sql`. Il n'est pas autorisé ni appliqué.

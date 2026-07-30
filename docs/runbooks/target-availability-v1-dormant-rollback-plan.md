@@ -33,7 +33,7 @@ has existed. The documentary down migration is safe only before producers/reader
 - Do not automatically run the down migration.
 - If no producer/read path was ever enabled and rollback is explicitly approved, apply
   `supabase/rollback/20260730123708_ct_target_availability_identity_assessment_current_v1.down.sql`.
-- The down migration removes only the 37 V3 columns and four V3 indexes. It does not touch
+- The down migration removes only the 41 V3 columns and four V3 indexes. It does not touch
   `ct_target_availability_observations`, legacy CT tables, targets, accounts or business data.
 - After a DB rollback, verify all five foundation tables still exist, the four Gate observations remain, RLS/FORCE RLS remain,
   and grants remain fail closed.

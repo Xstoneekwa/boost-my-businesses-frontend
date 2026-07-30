@@ -8,6 +8,28 @@ const rollbackPath = new URL("../rollback/20260730123708_ct_target_availability_
 const migration = await readFile(migrationPath, "utf8");
 const rollback = await readFile(rollbackPath, "utf8");
 
+function extractAddedColumns(sql) {
+  const columns = [];
+  for (const statement of sql.matchAll(/alter table public\.(\w+)\s+([\s\S]*?);/gi)) {
+    for (const column of statement[2].matchAll(/\badd column\s+(\w+)\b/gi)) {
+      columns.push(`${statement[1]}.${column[1]}`);
+    }
+  }
+  return columns;
+}
+
+function extractDroppedColumns(sql) {
+  const columns = [];
+  for (const statement of sql.matchAll(/alter table public\.(\w+)\s+([\s\S]*?);/gi)) {
+    for (const column of statement[2].matchAll(/\bdrop column if exists\s+(\w+)\b/gi)) {
+      columns.push(`${statement[1]}.${column[1]}`);
+    }
+  }
+  return columns;
+}
+
+const addedColumns = extractAddedColumns(migration);
+
 test("migration is explicitly local, additive and contains no business data mutation", () => {
   assert.match(migration, /NOT DEPLOYED/);
   assert.doesNotMatch(migration, /\bdrop\s+(?:table|column|constraint|index)\b/i);
@@ -27,6 +49,38 @@ test("all required Identity, Assessment and Current fields are additive", () => 
     "availability_status", "latest_observation_at", "confirmed_at", "reason_codes",
     "policy_version", "engine_revision", "policy_revision",
   ]) assert.match(migration, new RegExp(`\\b${field}\\b`), field);
+});
+
+test("SQL artifact is the canonical 41-column contract", () => {
+  assert.equal(addedColumns.length, 41);
+  assert.equal(new Set(addedColumns).size, 41, "every additive column must be unique");
+  assert.deepEqual(
+    Object.fromEntries([
+      "ct_target_identity_history",
+      "ct_target_identity_current",
+      "ct_target_availability_assessments",
+      "ct_target_availability_current",
+    ].map((table) => [table, addedColumns.filter((entry) => entry.startsWith(`${table}.`)).length])),
+    {
+      ct_target_identity_history: 7,
+      ct_target_identity_current: 8,
+      ct_target_availability_assessments: 14,
+      ct_target_availability_current: 12,
+    },
+  );
+  for (const requiredProjectionVersion of [
+    "engine_version", "policy_version", "engine_revision", "policy_revision",
+  ]) {
+    assert.ok(
+      addedColumns.includes(`ct_target_availability_current.${requiredProjectionVersion}`),
+      requiredProjectionVersion,
+    );
+  }
+});
+
+test("documentary rollback covers the exact canonical column set", () => {
+  const droppedColumns = extractDroppedColumns(rollback);
+  assert.deepEqual([...droppedColumns].sort(), [...addedColumns].sort());
 });
 
 test("RLS and least-privilege grants remain fail closed", () => {

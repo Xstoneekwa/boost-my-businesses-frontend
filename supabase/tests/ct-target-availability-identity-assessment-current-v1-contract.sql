@@ -16,7 +16,7 @@ select pg_temp.assert_true(
   'RLS remains enabled and forced on all evolved tables');
 
 select pg_temp.assert_true(
-  (select count(*) = 37
+  (select count(*) = 41
    from information_schema.columns
    where table_schema = 'public' and (table_name, column_name) in (
      values
@@ -38,7 +38,9 @@ select pg_temp.assert_true(
        ('ct_target_availability_current','confidence'),('ct_target_availability_current','identity_status'),
        ('ct_target_availability_current','latest_observation_at'),('ct_target_availability_current','confirmed_at'),
        ('ct_target_availability_current','valid_until'),('ct_target_availability_current','stale_after'),
-       ('ct_target_availability_current','reason_codes')
+       ('ct_target_availability_current','reason_codes'),('ct_target_availability_current','engine_version'),
+       ('ct_target_availability_current','policy_version'),('ct_target_availability_current','engine_revision'),
+       ('ct_target_availability_current','policy_revision')
    )), 'all mandatory additive columns exist');
 
 do $$

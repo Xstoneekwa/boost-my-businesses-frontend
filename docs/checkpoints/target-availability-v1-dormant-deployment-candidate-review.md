@@ -1,5 +1,7 @@
 # Target Availability V1 — Dormant Deployment Candidate Review
 
+> Superseded by `docs/checkpoints/target-availability-v1-final-reconciliation.md`. This historical review used the pre-reconciliation Worker baseline and must not authorize deployment.
+
 Date: 2026-07-30  
 Status: candidate construction and review only  
 Production mutation authorized: **no**
@@ -20,7 +22,7 @@ reapplied the migration and passed the contract again.
 | Repository/layer | Local/remote/production baseline | Branch or migration | Status |
 |---|---|---|---|
 | Backend | `d1de142892a13e4d24bb7fd1d7e2651f423a421b` | `fix/unfollow-search-click-autorestart-v3-20260730` | official remote aligned; production deployment `dpl_3Dih83u6YEvQg7RPgGFpUJRrrLRf`, READY on stable alias |
-| Worker | `cfaea18b2f6b6eaef18de7e5dac855f9bf292d0d` | `codex/follow-60s-loriele-canary-v1` | local/official remote/active release aligned |
+| Worker | `fecf91dfe8e60535810cd99ad9c10d370022ab16` | `codex/follow-60s-loriele-canary-v1` | official remote/active immutable release aligned |
 | Database | `20260729234627` | `unfollow_search_outcome_and_phase_circuit_v2` | latest production migration re-listed during review |
 
 Official remotes: `Xstoneekwa/boost-my-businesses-frontend.git` and `Xstoneekwa/instagram-worker-python.git`.
@@ -30,8 +32,8 @@ Official remotes: `Xstoneekwa/boost-my-businesses-frontend.git` and `Xstoneekwa/
 - Official checkpoint: `docs/target-availability-v1-predeployment-20260730` at `1ea7f694e2ab5c0192145afa8c63c6e4bff20f31`.
 - Certified source: `feat/target-availability-identity-assessment-current-v1-20260730` at
   `f214f84b27dde5d32026010575231be3adaf25d1`.
-- Backend candidate: `feat/target-availability-v1-dormant-candidate-20260730` from `d1de142`.
-- Worker candidate: `feat/target-availability-v1-dormant-candidate-20260730` from `cfaea18` in the Worker repository.
+- Backend candidate: `feat/target-availability-v1-dormant-candidate-final-20260730` from `d1de142`.
+- Worker candidate: `feat/target-availability-v1-dormant-candidate-fecf91d-20260730` from `fecf91d` in the Worker repository.
 
 ## 4. Commit Reconciliation
 
@@ -56,7 +58,7 @@ baseline. The candidate adds only `tests/test_target_availability_v1_dormant_can
 bypass capture/allowlist, no Identity/Assessment/Current table producer exists, and all candidate deltas are test-only.
 
 `runner.py`, `instagram_navigation.py`, `account_session_orchestrator.py`, `supabase_client.py`, dispatcher, Auto Restart, Unfollow/Search
-V3 and Follow 60s Canary are unchanged from `cfaea18`.
+V3 and the consolidated Follow 60s implementation are unchanged from `fecf91d`.
 
 ## 6. Backend Reconciliation
 
@@ -70,7 +72,7 @@ business-action vocabulary and production table access.
 Candidate: `supabase/migrations/20260730123708_ct_target_availability_identity_assessment_current_v1.sql`.
 
 - Version is not present in production; its timestamp is later than the current production predecessor.
-- Live read-only audit: 0/37 candidate column collisions and 0/4 candidate index collisions.
+- Live read-only audit: 0/41 candidate column collisions and 0/4 candidate index collisions.
 - All five foundation tables exist; all have RLS enabled and forced.
 - Live grants exist only for `postgres` and `service_role`; public/anon/authenticated have none.
 - Current counts remain observations=4 and identity history/current, assessments/current=0.
@@ -115,12 +117,12 @@ Reference: Supabase RLS and API hardening guidance:
 
 ## 11. Tests
 
-- Worker baseline full suite: 2,219/2,219 green; Worker candidate full suite: 2,222/2,222 green.
-- Worker targeted Availability suite: 74/74 green.
+- Worker baseline-equivalent runtime suite: 2,223/2,223 green; final Worker candidate: 2,226/2,226 green (three added dormant certification tests).
+- Worker targeted compatibility suite: 319/319 green.
 - Backend engine tests: 27/27 green; architecture/dormancy: 6/6 green; CT V2.1 aggregate: 122/122 green;
   migration static contract: 4/4 green.
-- Backend baseline full runner: 2,091 passing reporter entries and 142 pre-existing failure entries. Candidate: 2,128 passing
-  and the exact same normalized 142-entry failure set. No candidate regression was added.
+- Backend baseline full runner: 2,376 passing and 71 pre-existing failures. Candidate: 2,415 passing
+  and the exact same normalized 71 failure titles. No candidate regression was added.
 - Standalone TypeScript reports the exact same 181 pre-existing test-file diagnostics on baseline and candidate, with no
   Target Availability diagnostic. The production Next.js webpack build is green and includes TypeScript/build validation.
 - PostgreSQL local rebuild/security/forward/rollback/reapply contracts: green; structure hash `ffa7cc29ec8cf3f0ea123ba6387c046f`.
