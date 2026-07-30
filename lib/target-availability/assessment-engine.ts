@@ -90,7 +90,7 @@ export function assessAvailability(input: Readonly<{
   const latestAvailable = available.at(-1) ?? null;
   const latestNegative = [...unavailable, ...deleted, ...suspended, ...banned, ...loginWall, ...accessRestricted, ...temporaryErrors]
     .sort((left, right) => timestamp(left.observedAt) - timestamp(right.observedAt)).at(-1) ?? null;
-  const recovered = Boolean(latestAvailable && after(latestAvailable, latestNegative));
+  const recovered = Boolean(latestAvailable && latestNegative && after(latestAvailable, latestNegative));
 
   let status: AvailabilityStatus = "insufficient_evidence";
   let confidence: AvailabilityConfidence = "unknown";

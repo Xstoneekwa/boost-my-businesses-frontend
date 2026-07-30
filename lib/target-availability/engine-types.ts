@@ -185,6 +185,7 @@ export type ReplayFixture = Readonly<{
   calculatedAt: string;
   observations: readonly AvailabilityObservation[];
   generatedObservationCount?: number;
+  resumeAfter?: number;
   expected: Readonly<{
     identityStatus?: IdentityStatus;
     assessmentStatus?: AvailabilityStatus;
