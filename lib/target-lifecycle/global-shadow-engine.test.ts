@@ -93,6 +93,7 @@ const cases: ReadonlyArray<readonly [string, Partial<TargetLifecycleGlobalShadow
   ["38 V3 identity changed with confirmed identity stays healthy", { availability: { ...base.availability!, status: "identity_changed" } }, "healthy", "monitor"],
   ["39 V3 stale status is stale", { availability: { ...base.availability!, status: "stale" } }, "stale_data", "recheck_stale_evidence"],
   ["40 V3 conflicting evidence fails closed", { availability: { ...base.availability!, status: "conflicting_evidence" } }, "insufficient_data", "collect_more_evidence"],
+  ["41 invalid Performance skips fail closed", { performance: { ...base.performance!, skips: -1 } }, "insufficient_data", "collect_more_evidence"],
 ];
 
 test("global Lifecycle priority matrix covers at least 30 deterministic replay cases", async (t) => {

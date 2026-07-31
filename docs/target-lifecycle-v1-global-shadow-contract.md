@@ -37,7 +37,7 @@ Les sorties `replacement_*` et `exhausted` sont seulement des recommandations Sh
 10. signal watch ;
 11. healthy.
 
-La matrice de replay couvre 40 scénarios, dont les valeurs Availability V3, l'identité, la fraîcheur, le seuil exact `8 %`, la borne exacte `100`, l'ordre des événements et les régressions de version.
+La matrice de replay couvre 41 scénarios, dont les valeurs Availability V3, l'identité, la fraîcheur, le seuil exact `8 %`, la borne exacte `100`, les skips Performance invalides, l'ordre des événements et les régressions de version.
 
 ## Architecture runtime
 
