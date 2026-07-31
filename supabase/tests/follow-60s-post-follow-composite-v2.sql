@@ -52,28 +52,28 @@ alter table public.follow_60s_canary_controls enable row level security;
 
 \ir ../migrations/20260731222500_follow_60s_post_follow_composite_v2.sql
 
-insert into public.ig_accounts values ('dfe78a92-3a51-435e-8911-ed10c93a4d82');
+insert into public.ig_accounts values ('b024e94e-395d-4f02-9787-81ddc679b014');
 insert into public.ig_runs(id,account_id,status,total_like) values
- ('00000000-0000-0000-0000-000000000101','dfe78a92-3a51-435e-8911-ed10c93a4d82','running',0);
+ ('00000000-0000-0000-0000-000000000101','b024e94e-395d-4f02-9787-81ddc679b014','running',0);
 insert into public.account_run_requests values
- ('00000000-0000-0000-0000-000000000102','dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101','running');
+ ('00000000-0000-0000-0000-000000000102','b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101','running');
 insert into public.follow_60s_canary_controls(account_id,status) values
- ('dfe78a92-3a51-435e-8911-ed10c93a4d82','armed');
+ ('b024e94e-395d-4f02-9787-81ddc679b014','armed');
 insert into public.ig_interacted_users(
  account_id,run_id,request_id,username,source_profile,interaction_type,was_successful,payload
 ) values (
- 'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+ 'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
  '00000000-0000-0000-0000-000000000102','candidate_one','source_ct','follow',true,
  '{"action_id":"00000000-0000-0000-0000-000000000103"}'::jsonb
 );
 
 set request.jwt.claim.role='service_role';
 select public.bind_follow_60s_canary_runtime_v2(
- 'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+ 'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
  '00000000-0000-0000-0000-000000000102',1,'business-session-1'
 ) as runtime_binding \gset
 select public.persist_follow_60s_post_follow_v2(
- 'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+ 'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
  '00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000103',
  encode(extensions.digest(convert_to('00000000-0000-0000-0000-000000000103','UTF8'),'sha256'),'hex'),
  'candidate_one','source_ct',1,'business-session-1',true,
@@ -85,7 +85,7 @@ declare i integer;
 begin
   for i in 1..10 loop
     perform public.persist_follow_60s_post_follow_v2(
-      'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+      'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
       '00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000103',
       encode(extensions.digest(convert_to('00000000-0000-0000-0000-000000000103','UTF8'),'sha256'),'hex'),
       'candidate_one','source_ct',1,'business-session-1',true,
@@ -122,12 +122,12 @@ end $$;
 insert into public.ig_interacted_users(
  account_id,run_id,request_id,username,source_profile,interaction_type,was_successful,payload
 ) values (
- 'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+ 'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
  '00000000-0000-0000-0000-000000000102','candidate_partial','source_ct','follow',true,
  '{"action_id":"00000000-0000-0000-0000-000000000104"}'::jsonb
 );
 select public.persist_follow_60s_post_follow_v2(
- 'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+ 'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
  '00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000104',
  encode(extensions.digest(convert_to('00000000-0000-0000-0000-000000000104','UTF8'),'sha256'),'hex'),
  'candidate_partial','source_ct',1,'business-session-1',false,
@@ -145,7 +145,7 @@ do $$
 begin
   begin
     perform public.persist_follow_60s_post_follow_v2(
-      'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+      'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
       '00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000103',
       encode(extensions.digest(convert_to('00000000-0000-0000-0000-000000000103','UTF8'),'sha256'),'hex'),
       'wrong_candidate','source_ct',1,'business-session-1',false,
@@ -158,7 +158,7 @@ begin
   end;
   begin
     perform public.persist_follow_60s_post_follow_v2(
-      'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+      'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
       '00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000103',
       repeat('0',64),'candidate_one','source_ct',1,'business-session-1',false,
       '[{"stage":"like_verified","event_at":"2026-07-31T20:02:00Z","payload":{"liked_count":1}}]'::jsonb
@@ -170,7 +170,7 @@ begin
   end;
   begin
     perform public.persist_follow_60s_post_follow_v2(
-      'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+      'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
       '00000000-0000-0000-0000-000000000998','00000000-0000-0000-0000-000000000103',
       encode(extensions.digest(convert_to('00000000-0000-0000-0000-000000000103','UTF8'),'sha256'),'hex'),
       'candidate_one','source_ct',1,'business-session-1',false,
@@ -199,9 +199,9 @@ end $$;
 -- Original exact run may replay after the operator hold; no other binding may.
 update public.follow_60s_canary_controls
 set status='waiting_operator_evaluation', hold_armed_at=now()
-where account_id='dfe78a92-3a51-435e-8911-ed10c93a4d82';
+where account_id='b024e94e-395d-4f02-9787-81ddc679b014';
 select public.persist_follow_60s_post_follow_v2(
- 'dfe78a92-3a51-435e-8911-ed10c93a4d82','00000000-0000-0000-0000-000000000101',
+ 'b024e94e-395d-4f02-9787-81ddc679b014','00000000-0000-0000-0000-000000000101',
  '00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000103',
  encode(extensions.digest(convert_to('00000000-0000-0000-0000-000000000103','UTF8'),'sha256'),'hex'),
  'candidate_one','source_ct',1,'business-session-1',false,

@@ -19,7 +19,7 @@ begin
   if auth.role() <> 'service_role' then
     raise exception 'service_role_required' using errcode = '42501';
   end if;
-  if p_account_id <> 'dfe78a92-3a51-435e-8911-ed10c93a4d82'::uuid
+  if p_account_id <> 'b024e94e-395d-4f02-9787-81ddc679b014'::uuid
     or p_run_id is null or p_request_id is null
     or coalesce(p_attempt_id, 0) < 1
     or nullif(pg_catalog.btrim(p_business_session_id), '') is null then
@@ -124,7 +124,7 @@ begin
     extensions.digest(convert_to(coalesce(p_action_id, ''), 'UTF8'), 'sha256'),
     'hex'
   );
-  if p_account_id <> 'dfe78a92-3a51-435e-8911-ed10c93a4d82'::uuid
+  if p_account_id <> 'b024e94e-395d-4f02-9787-81ddc679b014'::uuid
     or p_run_id is null or p_request_id is null
     or nullif(btrim(p_action_id), '') is null
     or p_action_id_hash !~ '^[0-9a-f]{64}$'
