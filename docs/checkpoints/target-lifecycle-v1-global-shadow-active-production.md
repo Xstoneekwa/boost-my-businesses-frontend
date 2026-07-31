@@ -1,6 +1,6 @@
 # Target Lifecycle V1 — Global Shadow actif en production
 
-Date de certification : 2026-07-31 20:46 SAST
+Date de certification : 2026-07-31 20:50 SAST
 
 Verdict : `GO — TARGET LIFECYCLE V1 ACTIVE GLOBALLY IN PRODUCTION SHADOW`
 
@@ -133,8 +133,8 @@ Target Availability reste inchangé en Global Shadow : capture, writer, identity
 - assessments Lifecycle : `106`
 - Lifecycle Current : `106`
 - observations de performance : `106`
-- `scan_count` : `2`
-- dernier scan complet : `2026-07-31T18:39:34.702228Z`
+- `scan_count` : `3`
+- dernier scan complet : `2026-07-31T18:44:33.427695Z`
 
 Répartition Current :
 
@@ -152,18 +152,18 @@ Cette répartition est une sortie Shadow fondée sur les données disponibles. E
 
 ## Métriques de certification
 
-- batches : `20`
-- tentatives : `474`
-- traitements effectifs : `63`
-- dédupliqués : `125`
-- cap hits : `19`
-- latence p50 : `240.232 ms`
-- latence p95 : `564.3222 ms`
-- cycle max : `3541.071 ms`
-- CPU moyen : `125.686 ms`
-- CPU max : `315.16 ms`
-- delta mémoire moyen : `2,829,926 octets`
-- delta mémoire max : `21,626,880 octets`
+- batches : `34`
+- tentatives : `791`
+- traitements effectifs : `106`
+- dédupliqués : `222`
+- cap hits : `31`
+- latence p50 moyenne des batches : `266.332 ms`
+- latence p95 moyenne des batches : `366.421 ms`
+- cycle max : `3625.453 ms`
+- CPU moyen : `133.583 ms`
+- CPU max : `336.708 ms`
+- delta mémoire moyen : `3,144,041 octets`
+- delta mémoire max : `22,478,848 octets`
 - erreurs : `0`
 - retries : `0`
 - out-of-order : `0`
