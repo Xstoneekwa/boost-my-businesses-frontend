@@ -62,3 +62,13 @@ test("ordinary successful info action without payload remains countable", () => 
   ]);
   assert.equal(counters.follows, 1);
 });
+
+test("legacy and persisted-v1 Follow receipts dedupe the same physical action", () => {
+  const counters = interactionEventCounters([
+    { account_id: "a", run_id: "r", username: "candidate", event_type: "follow_verified", event_status: "success" },
+    { account_id: "a", run_id: "r", username: "candidate", event_type: "follow_verified_persisted_v1", event_status: "success" },
+    { account_id: "a", run_id: "r", username: "candidate-2", event_type: "follow_verified_persisted_v1", event_status: "success" },
+  ]);
+  assert.equal(counters.follows, 2);
+  assert.equal(counters.interactionsTotal, 2);
+});

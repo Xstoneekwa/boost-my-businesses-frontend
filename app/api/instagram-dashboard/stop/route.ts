@@ -85,23 +85,15 @@ export async function POST(request: Request) {
     let orphanReconciled = false;
 
     if (linkedRunId) {
-      const reconcileResult = await reconcileLinkedIgRunTerminal(linkedRunId, "stopped");
-      runStopped = reconcileResult.reconciled;
-      orphanReconciled = reconcileResult.reconciled;
-      if (reconcileResult.reconciled) {
-        await insertManualRunAudit(
-          accountId,
-          "orphan_running_run_reconciled",
-          "success",
-          "Linked ig_runs row reconciled from dashboard stop.",
-          {
-            request_id: canceledRequestId,
-            previous_status: reconcileResult.previousStatus,
-            terminal_status: reconcileResult.terminalStatus,
-          },
-          linkedRunId,
-        ).catch(() => undefined);
-      }
+      // A linked run is owned by the dispatcher/Worker process.  Canceling its
+      // request is only the first half of a safe stop: the consumer signals the
+      // Worker, waits for device-action quiescence and process exit, then
+      // reconciles ig_runs from canonical events.  Marking the row terminal
+      // here made the dashboard claim "stopped" while UI actions could still
+      // be executing.
+      runId = linkedRunId;
+      runStopped = false;
+      orphanReconciled = false;
     } else {
       const { data: activeRuns, error: runError } = await supabase
         .from("ig_runs")
@@ -169,15 +161,22 @@ export async function POST(request: Request) {
     }));
 
     return jsonOk({
-      stopped: runStopped || Boolean(runId),
+      // `stopped` is physical/terminal truth, never merely the presence of a
+      // linked run id.  Consumers can render the intermediate state from the
+      // two explicit fields below.
+      stopped: runStopped,
+      stop_requested: Boolean(canceledRequestId || runStopped),
+      waiting_for_worker_quiescence: Boolean(linkedRunId && canceledRequestId && !runStopped),
       canceled_request: Boolean(canceledRequestId),
       request_status: canceledRequestStatus,
       orphan_reconciled: orphanReconciled,
       client_connect_projection_cleared: projectionCleanup.cleared === true,
       client_login_status: projectionCleanup.login_status ?? null,
       client_provisioning_status: projectionCleanup.provisioning_status ?? null,
-      message: runStopped
-        ? "Run stop requested."
+      message: linkedRunId && canceledRequestId
+        ? "Run stop requested; waiting for Worker quiescence."
+        : runStopped
+          ? "Run stop requested."
         : canceledRequestId
           ? "Queued run request canceled."
           : "No active run found. Stop log added.",

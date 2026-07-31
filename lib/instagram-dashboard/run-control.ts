@@ -130,6 +130,7 @@ export type RunStartBlockReason =
   | "manual_start_allowed_manual_only"
   | "already_running"
   | "already_requested"
+  | "follow_60s_evaluation_hold"
   | "invalid_run_type";
 
 const BLOCKED_ACCOUNT_STATUSES = new Set(["canceled", "cancelled", "deleted"]);
@@ -1883,6 +1884,21 @@ export async function evaluateRunStartEligibility(
   ) {
     return { ok: false as const, reason: "no_executable_phase" as RunStartBlockReason };
   }
+  const supabase = createSupabaseClient();
+  if (accountId === "ba73eda4-d22a-4b93-9683-2af7b8aab764") {
+    const { data: canaryControl, error: canaryControlError } = await supabase
+      .from("follow_60s_canary_controls")
+      .select("status")
+      .eq("account_id", accountId)
+      .limit(1)
+      .maybeSingle();
+    if (canaryControlError) {
+      return { ok: false as const, reason: "eligibility_query_failed" as RunStartBlockReason };
+    }
+    if (["barrier_waiting_stop", "waiting_operator_evaluation"].includes(readString(canaryControl?.status))) {
+      return { ok: false as const, reason: "follow_60s_evaluation_hold" as RunStartBlockReason };
+    }
+  }
   const normalizedTrigger = options.manualStart === true ? "manual" : normalizeRunStartTrigger(options.trigger);
   if (isTechnicalAccountRun(normalizedRunType)) {
     return evaluateLoginChallengeRunEligibility(accountId, normalizedRunType, normalizedTrigger === "auto" ? "technical" : normalizedTrigger);
@@ -1900,7 +1916,6 @@ export async function evaluateRunStartEligibility(
     return { ok: false as const, reason: "dispatcher_launch_disabled" as RunStartBlockReason, health };
   }
 
-  const supabase = createSupabaseClient();
   if (restrictionPreflight) {
     if (
       normalizedRunType !== "account_session"

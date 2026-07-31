@@ -120,7 +120,7 @@ type SocialCounterKind = Exclude<keyof ProfileSocialCounters, "interactionsTotal
 
 function verifiedInteractionKind(row: RecordValue): SocialCounterKind | null {
   const eventType = readString(row.event_type, "").toLowerCase();
-  if (eventType === "follow_verified") return "follows";
+  if (eventType === "follow_verified" || eventType === "follow_verified_persisted_v1") return "follows";
   if (eventType === "unfollow_verified" || eventType === "unfollow_success") return "unfollows";
   if (eventType === "post_like_success" || eventType === "post_like_verified") return "likes";
   if (["comment_verified", "comment_sent"].includes(eventType)) return "comments";
