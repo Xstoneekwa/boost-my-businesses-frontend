@@ -10,3 +10,4 @@ export * from "./utilization-shadow.ts";
 export * from "./performance-shadow.ts";
 export * from "./lifecycle-shadow.ts";
 export * from "./policy-shadow.ts";
+export * from "./global-shadow-engine.ts";

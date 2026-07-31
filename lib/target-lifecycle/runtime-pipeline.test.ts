@@ -1,0 +1,176 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  parseTargetLifecycleRuntimeState,
+  processTargetLifecycleBatch,
+  targetLifecycleRuntimeActive,
+} from "./runtime-pipeline.ts";
+
+const runtimeState = {
+  id: "global",
+  producer_enabled: true,
+  current_projector_enabled: true,
+  shadow_enabled: true,
+  scope_mode: "all_active_accounts",
+  enforce_enabled: false,
+  business_actions_enabled: false,
+  lifecycle_actions_enabled: false,
+  replacement_enabled: false,
+  notifications_enabled: false,
+  archiving_enabled: false,
+  premium_replacement_enabled: false,
+  auto_killed: false,
+  human_reenable_required: false,
+  config_version: 2,
+  cursor_target_id: null,
+  caps_safe: {
+    batch_size: 25,
+    retries: 1,
+    pipeline_duration_ms: 3000,
+    assessments_global_day: 1000,
+    assessments_account_day: 250,
+    global_concurrency: 1,
+  },
+};
+
+const row = {
+  tenant_id: "11111111-1111-4111-8111-111111111111",
+  account_id: "22222222-2222-4222-8222-222222222222",
+  target_id: "33333333-3333-4333-8333-333333333333",
+  normalized_username: "target.one",
+  target_updated_at: "2026-07-31T10:00:00.000Z",
+  followers_count: 1000,
+  denominator_observed_at: "2026-07-31T10:00:00.000Z",
+  follows_sent_count: 120,
+  followbacks_count: 12,
+  followback_ratio: 10,
+  metrics_observed_at: "2026-07-31T10:00:00.000Z",
+  performance_reliable_at: "2026-07-31T10:00:00.000Z",
+  unique_profiles_evaluated: 300,
+  last_evaluated_at: "2026-07-31T10:00:00.000Z",
+  terminal_proof: false,
+  availability_assessment_id: "44444444-4444-4444-8444-444444444444",
+  availability_status: "available",
+  availability_confidence: "high",
+  availability_identity_status: "identity_confirmed",
+  availability_latest_observation_at: "2026-07-31T10:00:00.000Z",
+  availability_valid_until: "2026-08-01T10:00:00.000Z",
+  availability_reason_codes: ["target_available"],
+  identity_status: "identity_confirmed",
+  lifecycle_status: null,
+};
+
+function fakeSupabase(input: { state?: Record<string, unknown>; persistOutcome?: string; rows?: unknown[] } = {}) {
+  const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+  let persistedBundle: Record<string, unknown> | null = null;
+  const client = {
+    from(table: string) {
+      assert.equal(table, "ct_target_lifecycle_runtime_state");
+      return {
+        select() {
+          return {
+            eq() {
+              return {
+                maybeSingle: async () => ({ data: input.state ?? runtimeState, error: null }),
+              };
+            },
+          };
+        },
+      };
+    },
+    async rpc(name: string, args?: Record<string, unknown>) {
+      calls.push({ name, args });
+      if (name === "claim_target_lifecycle_pipeline_lease_v1") {
+        return { data: "55555555-5555-4555-8555-555555555555", error: null };
+      }
+      if (name === "list_target_lifecycle_work_v1") {
+        return { data: { rows: input.rows ?? [row], next_cursor: row.target_id, wrapped: false }, error: null };
+      }
+      if (name === "claim_target_lifecycle_assessment_capacity_v1") return { data: true, error: null };
+      if (name === "persist_target_lifecycle_shadow_v1") {
+        persistedBundle = args?.p_bundle as Record<string, unknown>;
+        return { data: { outcome: input.persistOutcome ?? "processed" }, error: null };
+      }
+      return { data: true, error: null };
+    },
+  };
+  return { client, calls, persistedBundle: () => persistedBundle };
+}
+
+test("runtime state is globally active only while every business action is structurally off", () => {
+  assert.equal(targetLifecycleRuntimeActive(parseTargetLifecycleRuntimeState(runtimeState)), true);
+  assert.equal(targetLifecycleRuntimeActive(parseTargetLifecycleRuntimeState({ ...runtimeState, enforce_enabled: true })), false);
+  assert.equal(targetLifecycleRuntimeActive(parseTargetLifecycleRuntimeState({ ...runtimeState, scope_mode: "explicit_allowlist" })), false);
+  assert.equal(targetLifecycleRuntimeActive(parseTargetLifecycleRuntimeState({ ...runtimeState, auto_killed: true })), false);
+});
+
+test("one bounded batch persists a shadow-only bundle and records zero actions", async () => {
+  const fake = fakeSupabase();
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:2026-07-31T12:00:00.000Z",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+  assert.equal(result.active, true);
+  assert.equal(result.attempted, 1);
+  assert.equal(result.processed, 1);
+  assert.equal(result.errors, 0);
+  assert.equal(result.crossTenant, 0);
+  const bundle = fake.persistedBundle();
+  assert.equal(bundle?.enforcement_allowed, false);
+  assert.equal(bundle?.business_action_allowed, false);
+  assert.equal(bundle?.mutation_executed, false);
+  assert.equal(bundle?.tenant_id, row.tenant_id);
+  assert.equal(bundle?.account_id, row.account_id);
+  assert.equal(bundle?.target_id, row.target_id);
+  assert.ok(fake.calls.some((call) => call.name === "record_target_lifecycle_pipeline_metric_v1"
+    && (call.args?.p_counters_safe as Record<string, unknown>).business_actions === 0));
+  assert.ok(fake.calls.some((call) => call.name === "release_target_lifecycle_pipeline_lease_v1"));
+});
+
+test("duplicate and out-of-order outcomes stay non-critical and deterministic", async () => {
+  const duplicate = fakeSupabase({ persistOutcome: "deduplicated" });
+  const duplicateResult = await processTargetLifecycleBatch(duplicate.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:duplicate",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+  assert.equal(duplicateResult.deduplicated, 1);
+  assert.equal(duplicateResult.autoKilled, false);
+
+  const outOfOrder = fakeSupabase({ persistOutcome: "out_of_order_skipped" });
+  const outOfOrderResult = await processTargetLifecycleBatch(outOfOrder.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:out-of-order",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+  assert.equal(outOfOrderResult.skippedOutOfOrder, 1);
+  assert.equal(outOfOrderResult.autoKilled, false);
+});
+
+test("a confirmed cross-tenant persistence outcome triggers the lifecycle auto-kill", async () => {
+  const fake = fakeSupabase({ persistOutcome: "cross_tenant_rejected" });
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:cross-tenant",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+  assert.equal(result.crossTenant, 1);
+  assert.equal(result.autoKilled, true);
+  assert.ok(fake.calls.some((call) => call.name === "trigger_target_lifecycle_auto_kill_v1"));
+});
+
+test("inactive runtime performs no lease, work or persistence call", async () => {
+  const fake = fakeSupabase({ state: { ...runtimeState, shadow_enabled: false } });
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:inactive",
+    processorRelease: "backend-sha",
+  });
+  assert.equal(result.active, false);
+  assert.deepEqual(fake.calls, []);
+});
