@@ -560,7 +560,6 @@ export async function processTargetLifecycleBatch(
 
     if (partialBatch) {
       nextCursor = lastHandledCursor;
-      wrapped = false;
     }
 
     const advance = await supabase.rpc("advance_target_lifecycle_scan_cursor_v1", {

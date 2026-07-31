@@ -234,7 +234,7 @@ test("duration-limited partial batches advance only through the last handled tar
     },
     rows: [row, secondRow],
     nextCursor: secondTargetId,
-    wrapped: true,
+    wrapped: false,
     capacityDelayMs: 275,
   });
 
@@ -253,4 +253,33 @@ test("duration-limited partial batches advance only through the last handled tar
   const advance = fake.calls.find((call) => call.name === "advance_target_lifecycle_scan_cursor_v1");
   assert.equal(advance?.args?.p_next_cursor, row.target_id);
   assert.equal(advance?.args?.p_wrapped, false);
+});
+
+test("a partial batch after wrap retains both the completed-scan marker and handled cursor", async () => {
+  const secondTargetId = "66666666-6666-4666-8666-666666666666";
+  const secondRow = { ...row, target_id: secondTargetId, normalized_username: "target.two" };
+  const fake = fakeSupabase({
+    state: {
+      ...runtimeState,
+      caps_safe: { ...runtimeState.caps_safe, pipeline_duration_ms: 250 },
+    },
+    rows: [row, secondRow],
+    nextCursor: secondTargetId,
+    wrapped: true,
+    capacityDelayMs: 275,
+  });
+
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:wrapped-duration-cap",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+
+  assert.equal(result.processed, 1);
+  assert.equal(result.wrapped, true);
+  assert.equal(result.nextCursor, row.target_id);
+  const advance = fake.calls.find((call) => call.name === "advance_target_lifecycle_scan_cursor_v1");
+  assert.equal(advance?.args?.p_next_cursor, row.target_id);
+  assert.equal(advance?.args?.p_wrapped, true);
 });
