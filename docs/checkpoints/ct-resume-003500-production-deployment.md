@@ -15,6 +15,11 @@ migration `20260731133000`, or any other pending migration. It did not deploy
 Backend or Worker code, switch a Worker release, restart the dispatcher, change
 flags, trigger a run or tick, or touch a phone.
 
+After this CT window was certified and explicitly restituted, the separate
+Follow 60 task applied its own migration under registry version
+`20260731152156`. That later apply is not part of this task. It confirms the
+intended production order: CT Resume 003500 first, Follow 60 131850 second.
+
 ## Production baselines
 
 - Backend production: `b14d4f9b7775f591e04ec7f8978cb50834588b87`.
@@ -173,8 +178,8 @@ Availability therefore retained their current runtime behavior.
   `eecec3689d9515f84eb4913e4826f616bace7be82328c201c4998d1ca08326df`,
   unchanged.
 - Migration 133000 contains no CT Resume table or RPC reference.
-- DB ordering prerequisite is now satisfied: 003500 is registered before
-  133000.
+- DB ordering prerequisite is now satisfied: 003500 is registered before the
+  later Follow 60 migration 131850, and both precede the still-unapplied 133000.
 - Migration 133000 remains absent and Lifecycle remains OFF.
 
 `LIFECYCLE_133000_DB_ORDER_READY=true` means only that a separate, explicit GO
