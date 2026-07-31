@@ -108,7 +108,7 @@ L'auto-kill coupe producer/projector/shadow, remet le scope à `off`, incrément
 
 - build Next.js 16.2.1 et TypeScript : vert ;
 - replay Lifecycle : 40 cas, déterministes et sérialisables ;
-- suites Lifecycle/Availability/CT consolidées : 202/202 ;
+- suites Lifecycle/Availability/CT consolidées : 203/203 ;
 - contrat statique migration/runtime : 6/6 ;
 - reconstruction PostgreSQL 17 depuis la baseline CT : verte ;
 - activation, scan, caps, lease, persist, replay, ordre, version, cross-tenant, métriques et auto-kill en DB locale : verts ;
