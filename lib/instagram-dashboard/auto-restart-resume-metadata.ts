@@ -235,8 +235,8 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
   };
 }
 
-export const FOLLOW_60S_ONE_SHOT_ACCOUNT_ID = "ba73eda4-d22a-4b93-9683-2af7b8aab764";
-export const FOLLOW_60S_ONE_SHOT_SCHEMA = "J_AUTOMATISE_FOLLOW_60S_ONE_SHOT_V1";
+export const FOLLOW_60S_ONE_SHOT_ACCOUNT_ID = "dfe78a92-3a51-435e-8911-ed10c93a4d82";
+export const FOLLOW_60S_ONE_SHOT_SCHEMA = "LORIELE_FOLLOW_60S_ONE_SHOT_V1";
 
 type AutoRestartResumeMetadata = ReturnType<typeof buildAutoRestartResumePlanMetadata>;
 type Follow60sResumeMetadata = Omit<AutoRestartResumeMetadata, "resume_plan"> & {
