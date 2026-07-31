@@ -36,7 +36,7 @@ export {
 
 export { assertTrustedDispatcherWorkerId } from "./dispatcher-trust";
 import {
-  applyRexFollow60sOneShotFrozenPlan,
+  applyFollow60sOneShotFrozenPlan,
   buildAutoRestartResumePlanMetadata,
   buildInstagramRestrictionPreflightMetadata,
   rebuildResolvedIncidentResumeCandidate,
@@ -1293,8 +1293,8 @@ async function processHumanConfirmedResumes(
       const rebuiltCandidate = !restrictionPreflight && candidate
         ? rebuildResolvedIncidentResumeCandidate(candidate)
         : null;
-      const rexFollowOneShot = rebuiltCandidate
-        ? applyRexFollow60sOneShotFrozenPlan({
+      const follow60sOneShot = rebuiltCandidate
+        ? applyFollow60sOneShotFrozenPlan({
           baseMetadata: buildAutoRestartResumePlanMetadata(rebuiltCandidate, now),
           frozenPlan: authorization.frozen_phase_plan,
           authorizationAccountId: accountId,
@@ -1302,12 +1302,12 @@ async function processHumanConfirmedResumes(
           liveFollowRemaining: rebuiltCandidate.plannedQuotaRemaining.follow,
         })
         : null;
-      if (rexFollowOneShot?.matched && !rexFollowOneShot.ok) {
-        await blockResume(rexFollowOneShot.reason);
+      if (follow60sOneShot?.matched && !follow60sOneShot.ok) {
+        await blockResume(follow60sOneShot.reason);
         continue;
       }
 
-      if (!restrictionPreflight && candidate && rexFollowOneShot?.matched !== true) {
+      if (!restrictionPreflight && candidate && follow60sOneShot?.matched !== true) {
         // A resolved incident is the operator's explicit one-shot authorization
         // for evaluation on the next natural tick.  The generic retry delay is
         // not applied a second time; every live cap, warmup, phase, assignment,
@@ -1375,8 +1375,8 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_candidate_unavailable");
           continue;
         }
-        resumeMetadata = rexFollowOneShot?.matched
-          ? rexFollowOneShot.metadata
+        resumeMetadata = follow60sOneShot?.matched
+          ? follow60sOneShot.metadata
           : buildAutoRestartResumePlanMetadata(
             rebuiltCandidate ?? rebuildResolvedIncidentResumeCandidate(candidate),
             now,

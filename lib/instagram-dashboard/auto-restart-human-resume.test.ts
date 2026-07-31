@@ -48,12 +48,12 @@ test("human-confirmed resume rebuilds explicit phases before consuming authoriza
   assert.match(humanSection, /\.\.\.resumeMetadata/);
 });
 
-test("only the audited Rex one-shot may preserve a frozen Follow-only plan", () => {
+test("only the audited account-scoped one-shot may preserve a frozen Follow-only plan", () => {
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
   assert.match(humanSection, /retry_generation,frozen_phase_plan,test/);
-  assert.match(humanSection, /applyRexFollow60sOneShotFrozenPlan/);
-  assert.match(humanSection, /rexFollowOneShot\?\.matched !== true/);
-  assert.match(humanSection, /rexFollowOneShot\.metadata/);
+  assert.match(humanSection, /applyFollow60sOneShotFrozenPlan/);
+  assert.match(humanSection, /follow60sOneShot\?\.matched !== true/);
+  assert.match(humanSection, /follow60sOneShot\.metadata/);
 });
 
 test("expired window expires the authorization with a stable reason", () => {

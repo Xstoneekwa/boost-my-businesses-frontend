@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  applyRexFollow60sOneShotFrozenPlan,
-  REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
-  REX_FOLLOW_60S_ONE_SHOT_SCHEMA,
+  applyFollow60sOneShotFrozenPlan,
+  FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+  FOLLOW_60S_ONE_SHOT_SCHEMA,
 } from "./auto-restart-resume-metadata.ts";
 
 function baseMetadata() {
@@ -35,7 +35,7 @@ function baseMetadata() {
     resume_plan: {
       schema: "AUTO_RESTART_RESUME_PLAN_V2",
       plan_version: 2,
-      account_id: REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+      account_id: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
       assignment_id: "assignment",
       device_id: "device",
       app_instance_id: "app",
@@ -80,25 +80,26 @@ function frozenPlan() {
   return {
     schema: "AUTO_RESTART_RESUME_PLAN_V2",
     plan_version: 2,
-    account_id: REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+    account_id: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
     package_contract_ready: true,
     phase_order: ["welcome", "follow", "unfollow"],
     phases_to_run: { welcome: false, follow: true, unfollow: false },
     quota_remaining: { welcome: 0, follow: 40, unfollow: 0, outreach: 0, total: 40 },
     follow_60s_canary_contract: {
-      schema: REX_FOLLOW_60S_ONE_SHOT_SCHEMA,
+      schema: FOLLOW_60S_ONE_SHOT_SCHEMA,
       source_run_id: "source-run",
       follow_quota: 40,
       golden_fallback_policy: "proof_rejection_only",
+      expires_at: "2026-07-31T04:00:00.000Z",
     },
   };
 }
 
-test("Rex one-shot preserves exact Follow-only plan and strips rebuilt Unfollow", () => {
-  const result = applyRexFollow60sOneShotFrozenPlan({
+test("account-scoped one-shot preserves exact Follow-only plan and strips rebuilt Unfollow", () => {
+  const result = applyFollow60sOneShotFrozenPlan({
     baseMetadata: baseMetadata(),
     frozenPlan: frozenPlan(),
-    authorizationAccountId: REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+    authorizationAccountId: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
     originalRunId: "source-run",
     liveFollowRemaining: 40,
   });
@@ -118,23 +119,23 @@ test("Rex one-shot preserves exact Follow-only plan and strips rebuilt Unfollow"
   });
 });
 
-test("Rex one-shot fails closed when live Follow quota changed", () => {
-  const result = applyRexFollow60sOneShotFrozenPlan({
+test("account-scoped one-shot fails closed when live Follow quota changed", () => {
+  const result = applyFollow60sOneShotFrozenPlan({
     baseMetadata: baseMetadata(),
     frozenPlan: frozenPlan(),
-    authorizationAccountId: REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+    authorizationAccountId: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
     originalRunId: "source-run",
     liveFollowRemaining: 39,
   });
 
   assert.equal(result.matched, true);
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "rex_follow_60s_one_shot_live_quota_mismatch");
+  assert.equal(result.reason, "follow_60s_one_shot_live_quota_mismatch");
 });
 
 test("ordinary authorizations retain the canonical live rebuild", () => {
   const base = baseMetadata();
-  const result = applyRexFollow60sOneShotFrozenPlan({
+  const result = applyFollow60sOneShotFrozenPlan({
     baseMetadata: base,
     frozenPlan: { schema: "AUTO_RESTART_RESUME_PLAN_V2" },
     authorizationAccountId: "another-account",
