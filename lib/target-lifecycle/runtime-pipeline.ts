@@ -360,7 +360,7 @@ export async function processTargetLifecycleBatch(
     p_worker_id: text(context.workerId).slice(0, 120),
     p_batch_key: text(context.batchKey).slice(0, 200),
     p_global_limit: state.caps.globalConcurrency,
-    p_ttl_seconds: Math.min(300, Math.max(15, Math.ceil(state.caps.pipelineDurationMs / 1_000) * state.caps.batchSize)),
+    p_ttl_seconds: Math.min(300, Math.max(15, Math.ceil(state.caps.pipelineDurationMs / 1_000) + 5)),
   });
   if (lease.error) throw new Error(lease.error.message || "target_lifecycle_pipeline_lease_failed");
   const leaseId = uuid(lease.data);
@@ -408,6 +408,11 @@ export async function processTargetLifecycleBatch(
 
     for (const row of rows) {
       if (!row) continue;
+      if (performance.now() - batchStarted >= state.caps.pipelineDurationMs) {
+        capHits += 1;
+        reasons.push("target_lifecycle_pipeline_duration_cap_reached");
+        break;
+      }
       const itemStarted = performance.now();
       const bundle = assessmentBundle(row, calculatedAt);
       const capacity = await supabase.rpc("claim_target_lifecycle_assessment_capacity_v1", {
@@ -539,6 +544,7 @@ export async function processTargetLifecycleBatch(
       reasons.push("target_lifecycle_cursor_advance_failed");
     }
     const latencyMaxMs = latencies.length ? Math.max(...latencies) : 0;
+    const cycleLatencyMs = performance.now() - batchStarted;
     const volumeViolation = sourceRows.length > state.caps.batchSize;
     const criticalReason = businessActionViolations > 0 ? "target_lifecycle_business_action_detected"
       : crossTenant > 0 ? "target_lifecycle_cross_tenant_attempt"
@@ -546,7 +552,7 @@ export async function processTargetLifecycleBatch(
       : volumeViolation ? "target_lifecycle_unbounded_volume"
       : invalidRows >= 3 ? "target_lifecycle_abnormal_partial_rows"
       : errors >= 3 ? "target_lifecycle_critical_error_rate"
-      : latencyMaxMs > state.caps.pipelineDurationMs * 3 ? "target_lifecycle_critical_latency"
+      : cycleLatencyMs > state.caps.pipelineDurationMs * 3 ? "target_lifecycle_critical_latency"
       : "";
     if (criticalReason) {
       await triggerAutoKill(supabase, criticalReason, {
@@ -559,6 +565,7 @@ export async function processTargetLifecycleBatch(
         business_action_violations: businessActionViolations,
         version_regression_skipped: versionRegressionSkipped,
         volume_violation: volumeViolation,
+        cycle_latency_ms: Number(cycleLatencyMs.toFixed(3)),
         latency_max_ms: Number(latencyMaxMs.toFixed(3)),
       });
       reasons.push(criticalReason);

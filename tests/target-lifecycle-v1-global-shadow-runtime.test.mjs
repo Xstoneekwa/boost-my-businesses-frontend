@@ -53,6 +53,7 @@ test("runtime caller is bounded, retry-limited and cannot invoke business action
   assert.match(pipeline, /target_lifecycle_business_action_detected/);
   assert.match(pipeline, /target_lifecycle_version_divergence/);
   assert.match(pipeline, /target_lifecycle_unbounded_volume/);
+  assert.match(pipeline, /target_lifecycle_pipeline_duration_cap_reached/);
 });
 
 test("cron is authenticated, independent of Instagram runs and globally scheduled", () => {

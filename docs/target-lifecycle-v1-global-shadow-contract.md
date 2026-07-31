@@ -66,7 +66,7 @@ Caps initiales :
 |---|---:|
 | batch | 25 CT |
 | retries | 1 |
-| budget par item | 3 000 ms |
+| durée maximale du cycle | 3 000 ms |
 | assessments globaux/jour | 1 000 |
 | assessments/compte/jour | 250 |
 | concurrence globale | 1 |
