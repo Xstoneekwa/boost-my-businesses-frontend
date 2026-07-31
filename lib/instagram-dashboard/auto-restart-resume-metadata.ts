@@ -235,6 +235,116 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
   };
 }
 
+export const REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID = "b024e94e-395d-4f02-9787-81ddc679b014";
+export const REX_FOLLOW_60S_ONE_SHOT_SCHEMA = "REX_FOLLOW_60S_ONE_SHOT_V2";
+
+type AutoRestartResumeMetadata = ReturnType<typeof buildAutoRestartResumePlanMetadata>;
+type RexFollow60sResumeMetadata = Omit<AutoRestartResumeMetadata, "resume_plan"> & {
+  resume_plan: AutoRestartResumeMetadata["resume_plan"] & {
+    follow_60s_canary_contract?: Record<string, unknown>;
+  };
+};
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+/**
+ * Preserve the audited Rex Follow-only one-shot plan after rechecking its
+ * quota against the live canonical candidate.  No other authorization can
+ * override the normal live phase-plan rebuild.
+ */
+export function applyRexFollow60sOneShotFrozenPlan(input: {
+  baseMetadata: AutoRestartResumeMetadata;
+  frozenPlan: unknown;
+  authorizationAccountId: string;
+  originalRunId: string;
+  liveFollowRemaining: number;
+}): {
+  matched: boolean;
+  ok: boolean;
+  reason: string;
+  metadata: RexFollow60sResumeMetadata;
+} {
+  const frozenPlan = record(input.frozenPlan);
+  const contract = record(frozenPlan.follow_60s_canary_contract);
+  if (!Object.keys(contract).length) {
+    return { matched: false, ok: true, reason: "", metadata: input.baseMetadata };
+  }
+
+  const reject = (reason: string) => ({
+    matched: true,
+    ok: false,
+    reason,
+    metadata: input.baseMetadata,
+  });
+  const phases = record(frozenPlan.phases_to_run);
+  const quota = record(frozenPlan.quota_remaining);
+  const followQuota = Number(contract.follow_quota);
+  const liveFollowRemaining = Number(input.liveFollowRemaining);
+
+  if (
+    input.authorizationAccountId !== REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID
+    || frozenPlan.account_id !== REX_FOLLOW_60S_ONE_SHOT_ACCOUNT_ID
+  ) return reject("rex_follow_60s_one_shot_account_mismatch");
+  if (
+    contract.schema !== REX_FOLLOW_60S_ONE_SHOT_SCHEMA
+    || contract.source_run_id !== input.originalRunId
+    || contract.golden_fallback_policy !== "proof_rejection_only"
+  ) return reject("rex_follow_60s_one_shot_contract_invalid");
+  if (
+    frozenPlan.schema !== "AUTO_RESTART_RESUME_PLAN_V2"
+    || frozenPlan.plan_version !== 2
+    || frozenPlan.package_contract_ready !== true
+    || !Array.isArray(frozenPlan.phase_order)
+    || frozenPlan.phase_order.join(",") !== "welcome,follow,unfollow"
+  ) return reject("rex_follow_60s_one_shot_plan_invalid");
+  if (
+    phases.welcome !== false
+    || phases.follow !== true
+    || phases.unfollow !== false
+  ) return reject("rex_follow_60s_one_shot_phase_scope_invalid");
+  if (
+    !Number.isInteger(followQuota)
+    || followQuota <= 0
+    || Number(quota.follow) !== followQuota
+    || Number(quota.welcome) !== 0
+    || Number(quota.unfollow) !== 0
+    || Number(quota.outreach) !== 0
+  ) return reject("rex_follow_60s_one_shot_quota_invalid");
+  if (!Number.isFinite(liveFollowRemaining) || liveFollowRemaining !== followQuota) {
+    return reject("rex_follow_60s_one_shot_live_quota_mismatch");
+  }
+
+  return {
+    matched: true,
+    ok: true,
+    reason: "",
+    metadata: {
+      ...input.baseMetadata,
+      remaining_follow_quota: followQuota,
+      resume_plan: {
+        ...input.baseMetadata.resume_plan,
+        ...frozenPlan,
+        follow_60s_canary_contract: contract,
+        phases_to_run: {
+          welcome: false,
+          follow: true,
+          unfollow: false,
+        },
+        quota_remaining: {
+          welcome: 0,
+          follow: followQuota,
+          unfollow: 0,
+          outreach: 0,
+        },
+      },
+    },
+  };
+}
+
 export function validateCanonicalResumePlan(plan: Record<string, unknown>): string | null {
   if (plan.schema !== "AUTO_RESTART_RESUME_PLAN_V2" || plan.plan_version !== 2) return "phase_plan_unknown";
   if (typeof plan.account_id !== "string" || !plan.account_id) return "phase_plan_account_missing";
