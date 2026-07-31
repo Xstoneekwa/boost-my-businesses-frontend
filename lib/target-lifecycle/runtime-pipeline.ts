@@ -389,6 +389,8 @@ export async function processTargetLifecycleBatch(
   const latencies: number[] = [];
   let wrapped = false;
   let nextCursor = state.cursorTargetId;
+  let lastHandledCursor = state.cursorTargetId;
+  let partialBatch = false;
   try {
     const work = await supabase.rpc("list_target_lifecycle_work_v1", {
       p_after_target_id: state.cursorTargetId,
@@ -398,7 +400,8 @@ export async function processTargetLifecycleBatch(
     const payload = work.data && typeof work.data === "object" ? work.data as Record<string, unknown> : {};
     const sourceRows = Array.isArray(payload.rows) ? payload.rows : [];
     wrapped = payload.wrapped === true;
-    nextCursor = uuid(payload.next_cursor) || null;
+    const fetchedNextCursor = uuid(payload.next_cursor) || null;
+    nextCursor = fetchedNextCursor;
     const rows = sourceRows.map(sanitizeWorkRow);
     attempted = sourceRows.length;
     const invalidRows = rows.filter((row) => row === null).length;
@@ -407,13 +410,20 @@ export async function processTargetLifecycleBatch(
     const calculatedAt = validTimestamp(context.calculatedAt) ?? new Date().toISOString();
 
     for (const row of rows) {
-      if (!row) continue;
+      if (!row) {
+        partialBatch = true;
+        reasons.push("target_lifecycle_cursor_retained_for_invalid_row");
+        break;
+      }
       if (performance.now() - batchStarted >= state.caps.pipelineDurationMs) {
         capHits += 1;
+        partialBatch = true;
         reasons.push("target_lifecycle_pipeline_duration_cap_reached");
         break;
       }
       const itemStarted = performance.now();
+      let cursorSafe = false;
+      let haltAfterRow = false;
       const bundle = assessmentBundle(row, calculatedAt);
       const capacity = await supabase.rpc("claim_target_lifecycle_assessment_capacity_v1", {
         p_account_id: row.accountId,
@@ -424,18 +434,19 @@ export async function processTargetLifecycleBatch(
       });
       if (capacity.error) {
         errors += 1;
+        partialBatch = true;
         reasons.push("target_lifecycle_capacity_claim_failed");
-        continue;
+        break;
       }
       if (capacity.data !== true) {
         capHits += 1;
+        cursorSafe = true;
         reasons.push("target_lifecycle_assessment_capacity_reached");
-        continue;
-      }
-      try {
-        let persisted: { data: unknown; error: { message?: string } | null } | null = null;
-        for (let attempt = 0; attempt <= state.caps.retries; attempt += 1) {
-          persisted = await supabase.rpc("persist_target_lifecycle_shadow_v1", {
+      } else {
+        try {
+          let persisted: { data: unknown; error: { message?: string } | null } | null = null;
+          for (let attempt = 0; attempt <= state.caps.retries; attempt += 1) {
+            persisted = await supabase.rpc("persist_target_lifecycle_shadow_v1", {
             p_bundle: {
               tenant_id: row.tenantId,
               account_id: row.accountId,
@@ -496,42 +507,60 @@ export async function processTargetLifecycleBatch(
               },
             },
             p_processor_release: text(context.processorRelease).slice(0, 120),
-          });
-          if (!persisted.error || attempt >= state.caps.retries) break;
-          retries += 1;
-        }
-        if (!persisted || persisted.error) throw new Error(persisted?.error?.message || "target_lifecycle_persist_failed");
-        const persistedPayload = persisted.data && typeof persisted.data === "object" && !Array.isArray(persisted.data)
-          ? persisted.data as Record<string, unknown> : {};
-        const outcome = text(persistedPayload.outcome);
-        const businessActions = finiteInteger(persistedPayload.business_actions, 1);
-        if (businessActions !== 0) {
-          businessActionViolations += 1;
+            });
+            if (!persisted.error || attempt >= state.caps.retries) break;
+            retries += 1;
+          }
+          if (!persisted || persisted.error) throw new Error(persisted?.error?.message || "target_lifecycle_persist_failed");
+          const persistedPayload = persisted.data && typeof persisted.data === "object" && !Array.isArray(persisted.data)
+            ? persisted.data as Record<string, unknown> : {};
+          const outcome = text(persistedPayload.outcome);
+          const businessActions = finiteInteger(persistedPayload.business_actions, 1);
+          if (businessActions !== 0) {
+            businessActionViolations += 1;
+            errors += 1;
+            cursorSafe = true;
+            reasons.push("target_lifecycle_unexpected_business_action");
+          } else if (outcome === "cross_tenant_rejected") {
+            crossTenant += 1;
+            rejected += 1;
+            cursorSafe = true;
+          } else if (outcome === "out_of_order_skipped") {
+            outOfOrderSkipped += 1;
+            cursorSafe = true;
+          } else if (outcome === "version_regression_skipped") {
+            versionRegressionSkipped += 1;
+            cursorSafe = true;
+          } else if (outcome === "deduplicated") {
+            deduplicated += 1;
+            cursorSafe = true;
+          } else if (outcome === "processed") {
+            processed += 1;
+            cursorSafe = true;
+          } else {
+            partialBatch = true;
+            haltAfterRow = true;
+            errors += 1;
+            reasons.push(`target_lifecycle_unexpected_persist_outcome:${safeError(outcome)}`);
+          }
+        } catch (error) {
+          partialBatch = true;
+          haltAfterRow = true;
           errors += 1;
-          reasons.push("target_lifecycle_unexpected_business_action");
-        } else if (outcome === "cross_tenant_rejected") {
-          crossTenant += 1;
-          rejected += 1;
-        } else if (outcome === "out_of_order_skipped") {
-          outOfOrderSkipped += 1;
-        } else if (outcome === "version_regression_skipped") {
-          versionRegressionSkipped += 1;
-        } else if (outcome === "deduplicated") {
-          deduplicated += 1;
-        } else if (outcome === "processed") {
-          processed += 1;
-        } else {
-          errors += 1;
-          reasons.push(`target_lifecycle_unexpected_persist_outcome:${safeError(outcome)}`);
+          const reason = safeError(error);
+          reasons.push(reason);
+          if (reason.includes("cross_tenant") || reason.includes("scope_mismatch")) crossTenant += 1;
+        } finally {
+          latencies.push(performance.now() - itemStarted);
         }
-      } catch (error) {
-        errors += 1;
-        const reason = safeError(error);
-        reasons.push(reason);
-        if (reason.includes("cross_tenant") || reason.includes("scope_mismatch")) crossTenant += 1;
-      } finally {
-        latencies.push(performance.now() - itemStarted);
       }
+      if (cursorSafe) lastHandledCursor = row.targetId;
+      if (haltAfterRow) break;
+    }
+
+    if (partialBatch) {
+      nextCursor = lastHandledCursor;
+      wrapped = false;
     }
 
     const advance = await supabase.rpc("advance_target_lifecycle_scan_cursor_v1", {

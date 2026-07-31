@@ -68,6 +68,9 @@ function fakeSupabase(input: {
   persistOutcome?: string;
   businessActions?: number;
   rows?: unknown[];
+  nextCursor?: string | null;
+  wrapped?: boolean;
+  capacityDelayMs?: number;
 } = {}) {
   const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   let persistedBundle: Record<string, unknown> | null = null;
@@ -92,9 +95,19 @@ function fakeSupabase(input: {
         return { data: "55555555-5555-4555-8555-555555555555", error: null };
       }
       if (name === "list_target_lifecycle_work_v1") {
-        return { data: { rows: input.rows ?? [row], next_cursor: row.target_id, wrapped: false }, error: null };
+        return {
+          data: {
+            rows: input.rows ?? [row],
+            next_cursor: input.nextCursor === undefined ? row.target_id : input.nextCursor,
+            wrapped: input.wrapped ?? false,
+          },
+          error: null,
+        };
       }
-      if (name === "claim_target_lifecycle_assessment_capacity_v1") return { data: true, error: null };
+      if (name === "claim_target_lifecycle_assessment_capacity_v1") {
+        if (input.capacityDelayMs) await new Promise((resolve) => setTimeout(resolve, input.capacityDelayMs));
+        return { data: true, error: null };
+      }
       if (name === "persist_target_lifecycle_shadow_v1") {
         persistedBundle = args?.p_bundle as Record<string, unknown>;
         return {
@@ -209,4 +222,35 @@ test("inactive runtime performs no lease, work or persistence call", async () =>
   });
   assert.equal(result.active, false);
   assert.deepEqual(fake.calls, []);
+});
+
+test("duration-limited partial batches advance only through the last handled target", async () => {
+  const secondTargetId = "66666666-6666-4666-8666-666666666666";
+  const secondRow = { ...row, target_id: secondTargetId, normalized_username: "target.two" };
+  const fake = fakeSupabase({
+    state: {
+      ...runtimeState,
+      caps_safe: { ...runtimeState.caps_safe, pipeline_duration_ms: 250 },
+    },
+    rows: [row, secondRow],
+    nextCursor: secondTargetId,
+    wrapped: true,
+    capacityDelayMs: 275,
+  });
+
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:duration-cap",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+
+  assert.equal(result.attempted, 2);
+  assert.equal(result.processed, 1);
+  assert.equal(result.capHits, 1);
+  assert.equal(result.wrapped, false);
+  assert.equal(result.nextCursor, row.target_id);
+  const advance = fake.calls.find((call) => call.name === "advance_target_lifecycle_scan_cursor_v1");
+  assert.equal(advance?.args?.p_next_cursor, row.target_id);
+  assert.equal(advance?.args?.p_wrapped, false);
 });
