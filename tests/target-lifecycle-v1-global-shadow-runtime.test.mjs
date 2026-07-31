@@ -2,15 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const migration = readFileSync(new URL("../supabase/migrations/20260731133000_target_lifecycle_v1_global_shadow_runtime_v1.sql", import.meta.url), "utf8");
-const rollback = readFileSync(new URL("../supabase/rollback/20260731133000_target_lifecycle_v1_global_shadow_runtime_v1.down.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../supabase/migrations/20260731161623_target_lifecycle_v1_global_shadow_runtime_v1.sql", import.meta.url), "utf8");
+const rollback = readFileSync(new URL("../supabase/rollback/20260731161623_target_lifecycle_v1_global_shadow_runtime_v1.down.sql", import.meta.url), "utf8");
 const pipeline = readFileSync(new URL("../lib/target-lifecycle/runtime-pipeline.ts", import.meta.url), "utf8");
 const engine = readFileSync(new URL("../lib/target-lifecycle/global-shadow-engine.ts", import.meta.url), "utf8");
 const cronRoute = readFileSync(new URL("../app/api/cron/target-lifecycle/route.ts", import.meta.url), "utf8");
 const vercel = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
+const migrationVersion = "20260731161623";
 
-test("migration is ordered after CT Resume V4 and remains additive to business tables", () => {
-  assert.match(migration, /20260731133000|Target Lifecycle V1 global Shadow/);
+test("migration is ordered after the certified production head and remains additive to business tables", () => {
+  assert.ok(Number(migrationVersion) > 20260731154709);
+  assert.match(migration, /20260731154709|Target Lifecycle V1 global Shadow/);
   assert.doesNotMatch(migration, /(?:update|delete\s+from|truncate)\s+public\.ig_targets\b/i);
   assert.doesNotMatch(migration, /(?:update|delete\s+from|truncate)\s+public\.client_account_notifications\b/i);
   assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.ct_proposals\b/i);
@@ -35,6 +37,8 @@ test("persistence is idempotent, account scoped and protects current from older 
   assert.match(migration, /v_existing_source_at>v_source_at/);
   assert.match(migration, /out_of_order_skipped/);
   assert.match(migration, /version_regression_skipped/);
+  assert.match(migration, /performance_skips/);
+  assert.match(migration, /ct_target_evaluation_events/);
 });
 
 test("runtime caller is bounded, retry-limited and cannot invoke business actions", () => {
@@ -43,8 +47,12 @@ test("runtime caller is bounded, retry-limited and cannot invoke business action
   assert.match(pipeline, /business_actions: 0, notifications: 0, archives: 0, replacements: 0/);
   assert.doesNotMatch(pipeline, /from\(["']ig_targets["']\)\.(?:update|delete|upsert|insert)/);
   assert.doesNotMatch(pipeline, /client_account_notifications|ct_proposals|ct_target_replacement_links|sendEmail|archiveTarget/);
-  assert.match(engine, /businessActionAllowed: false/);
-  assert.match(engine, /enforcementAllowed: false/);
+  assert.match(engine, /BUSINESS_ACTION_GATE = false as const/);
+  assert.match(engine, /businessActionAllowed: BUSINESS_ACTION_GATE/);
+  assert.match(engine, /enforcementAllowed: BUSINESS_ACTION_GATE/);
+  assert.match(pipeline, /target_lifecycle_business_action_detected/);
+  assert.match(pipeline, /target_lifecycle_version_divergence/);
+  assert.match(pipeline, /target_lifecycle_unbounded_volume/);
 });
 
 test("cron is authenticated, independent of Instagram runs and globally scheduled", () => {

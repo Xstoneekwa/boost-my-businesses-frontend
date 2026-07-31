@@ -89,6 +89,11 @@ begin
       select 1 from jsonb_array_elements(v_work->'rows') row
       where row->>'tenant_id'=v_tenant_id::text and row->>'account_id'=v_account_id::text
     ) then raise exception 'global active-account work list is empty or incorrectly scoped'; end if;
+  if not exists(
+    select 1 from jsonb_array_elements(v_work->'rows') row
+    where row ? 'performance_skips' and row ? 'performance_errors'
+      and row ? 'performance_event_observed_at' and row ? 'unique_profiles_evaluated'
+  ) then raise exception 'performance skips/errors or utilization numerator missing from work source'; end if;
 
   if not public.claim_target_lifecycle_assessment_capacity_v1(
     v_account_id,v_target_id,1000,250,'local-capacity-check-0001'

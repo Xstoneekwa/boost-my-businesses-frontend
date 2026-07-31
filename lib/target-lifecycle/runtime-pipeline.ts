@@ -54,7 +54,8 @@ export type TargetLifecycleBatchResult = Readonly<{
   attempted: number;
   processed: number;
   deduplicated: number;
-  skippedOutOfOrder: number;
+  outOfOrderSkipped: number;
+  versionRegressionSkipped: number;
   rejected: number;
   errors: number;
   retries: number;
@@ -78,9 +79,12 @@ type WorkRow = Readonly<{
   denominatorObservedAt: string | null;
   follows: number;
   followbacks: number;
+  performanceSkips: number;
+  performanceErrors: number;
   followbackRatio: number | null;
   metricsObservedAt: string | null;
   performanceReliableAt: string | null;
+  performanceEventObservedAt: string | null;
   uniqueProfilesEvaluated: number;
   lastEvaluatedAt: string | null;
   terminalProof: boolean;
@@ -107,6 +111,9 @@ const finiteNumber = (value: unknown) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 const validTimestamp = (value: unknown) => Number.isFinite(Date.parse(text(value))) ? text(value) : null;
+const latestTimestamp = (...values: readonly (string | null)[]) => values
+  .filter((value): value is string => value !== null)
+  .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
 const integer = (value: unknown, fallback: number, minimum: number, maximum: number) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback;
@@ -186,9 +193,12 @@ function sanitizeWorkRow(value: unknown): WorkRow | null {
     denominatorObservedAt: validTimestamp(row.denominator_observed_at),
     follows: finiteInteger(row.follows_sent_count),
     followbacks: finiteInteger(row.followbacks_count),
+    performanceSkips: finiteInteger(row.performance_skips),
+    performanceErrors: finiteInteger(row.performance_errors),
     followbackRatio: finiteNumber(row.followback_ratio),
     metricsObservedAt: validTimestamp(row.metrics_observed_at),
     performanceReliableAt: validTimestamp(row.performance_reliable_at),
+    performanceEventObservedAt: validTimestamp(row.performance_event_observed_at),
     uniqueProfilesEvaluated: finiteInteger(row.unique_profiles_evaluated),
     lastEvaluatedAt: validTimestamp(row.last_evaluated_at),
     terminalProof: Boolean(row.terminal_proof),
@@ -225,11 +235,16 @@ function assessmentBundle(row: WorkRow, calculatedAt: string) {
     terminalProof: row.terminalProof,
     calculatedAt,
   });
-  const performanceObservedAt = row.metricsObservedAt ?? row.targetUpdatedAt;
+  const performanceObservedAt = latestTimestamp(
+    row.metricsObservedAt,
+    row.performanceEventObservedAt,
+  ) ?? row.targetUpdatedAt;
   const performance = {
     sourceObservationId: null,
     follows: row.follows,
     followbacks: row.followbacks,
+    skips: row.performanceSkips,
+    errors: row.performanceErrors,
     fbrPercent: row.followbackRatio,
     reliability: row.performanceReliableAt ? "strong" as const : "unknown" as const,
     observedAt: performanceObservedAt,
@@ -254,6 +269,8 @@ function assessmentBundle(row: WorkRow, calculatedAt: string) {
     identityStatus: row.identityStatus,
     follows: row.follows,
     followbacks: row.followbacks,
+    performanceSkips: row.performanceSkips,
+    performanceErrors: row.performanceErrors,
     performanceObservedAt,
     uniqueProfilesEvaluated: row.uniqueProfilesEvaluated,
     lastEvaluatedAt: row.lastEvaluatedAt,
@@ -286,7 +303,7 @@ function assessmentBundle(row: WorkRow, calculatedAt: string) {
   return Object.freeze({
     sourceFingerprint,
     assessmentKey: `target-lifecycle-v1:${hash(row.tenantId, row.accountId, row.targetId, sourceFingerprint, assessment.engineVersion, assessment.engineRevision)}`,
-    performanceSourceKey: `target-lifecycle-performance-v1:${hash(row.tenantId, row.accountId, row.targetId, row.follows, row.followbacks, performanceObservedAt, performance.reliability)}`,
+    performanceSourceKey: `target-lifecycle-performance-v1:${hash(row.tenantId, row.accountId, row.targetId, row.follows, row.followbacks, row.performanceSkips, row.performanceErrors, performanceObservedAt, performance.reliability)}`,
     assessment,
     performance,
     utilization,
@@ -324,7 +341,8 @@ export async function processTargetLifecycleBatch(
       attempted: 0,
       processed: 0,
       deduplicated: 0,
-      skippedOutOfOrder: 0,
+      outOfOrderSkipped: 0,
+      versionRegressionSkipped: 0,
       rejected: 0,
       errors: 0,
       retries: 0,
@@ -348,7 +366,8 @@ export async function processTargetLifecycleBatch(
   const leaseId = uuid(lease.data);
   if (!leaseId) {
     return Object.freeze({
-      active: true, autoKilled: false, attempted: 0, processed: 0, deduplicated: 0, skippedOutOfOrder: 0,
+      active: true, autoKilled: false, attempted: 0, processed: 0, deduplicated: 0,
+      outOfOrderSkipped: 0, versionRegressionSkipped: 0,
       rejected: 0, errors: 0, retries: 0, crossTenant: 0, capHits: 1, wrapped: false,
       nextCursor: state.cursorTargetId, latencyP50Ms: 0, latencyP95Ms: 0, latencyMaxMs: 0,
       reasons: Object.freeze(["target_lifecycle_concurrency_cap_reached"]),
@@ -358,11 +377,13 @@ export async function processTargetLifecycleBatch(
   let attempted = 0;
   let processed = 0;
   let deduplicated = 0;
-  let skippedOutOfOrder = 0;
+  let outOfOrderSkipped = 0;
+  let versionRegressionSkipped = 0;
   let rejected = 0;
   let errors = 0;
   let retries = 0;
   let crossTenant = 0;
+  let businessActionViolations = 0;
   let capHits = 0;
   const reasons: string[] = [];
   const latencies: number[] = [];
@@ -446,6 +467,8 @@ export async function processTargetLifecycleBatch(
                 mode: bundle.assessment.mode,
                 availability: bundle.assessment.availabilityStatus,
                 performance: bundle.assessment.performanceStatus,
+                performance_skips: bundle.performance.skips,
+                performance_errors: bundle.performance.errors,
                 utilization: bundle.assessment.utilizationStatus,
                 source_fingerprint: bundle.sourceFingerprint,
               },
@@ -459,7 +482,12 @@ export async function processTargetLifecycleBatch(
                 reliability: bundle.performance.reliability,
                 observed_at: bundle.performance.observedAt,
                 reason: "legacy_counter",
-                metadata_safe: { source: "target_lifecycle_global_shadow", source_fingerprint: bundle.sourceFingerprint },
+                metadata_safe: {
+                  source: "target_lifecycle_global_shadow",
+                  source_fingerprint: bundle.sourceFingerprint,
+                  skips: bundle.performance.skips,
+                  errors: bundle.performance.errors,
+                },
               },
             },
             p_processor_release: text(context.processorRelease).slice(0, 120),
@@ -471,11 +499,18 @@ export async function processTargetLifecycleBatch(
         const persistedPayload = persisted.data && typeof persisted.data === "object" && !Array.isArray(persisted.data)
           ? persisted.data as Record<string, unknown> : {};
         const outcome = text(persistedPayload.outcome);
-        if (outcome === "cross_tenant_rejected") {
+        const businessActions = finiteInteger(persistedPayload.business_actions, 1);
+        if (businessActions !== 0) {
+          businessActionViolations += 1;
+          errors += 1;
+          reasons.push("target_lifecycle_unexpected_business_action");
+        } else if (outcome === "cross_tenant_rejected") {
           crossTenant += 1;
           rejected += 1;
-        } else if (outcome === "out_of_order_skipped" || outcome === "version_regression_skipped") {
-          skippedOutOfOrder += 1;
+        } else if (outcome === "out_of_order_skipped") {
+          outOfOrderSkipped += 1;
+        } else if (outcome === "version_regression_skipped") {
+          versionRegressionSkipped += 1;
         } else if (outcome === "deduplicated") {
           deduplicated += 1;
         } else if (outcome === "processed") {
@@ -504,7 +539,11 @@ export async function processTargetLifecycleBatch(
       reasons.push("target_lifecycle_cursor_advance_failed");
     }
     const latencyMaxMs = latencies.length ? Math.max(...latencies) : 0;
-    const criticalReason = crossTenant > 0 ? "target_lifecycle_cross_tenant_attempt"
+    const volumeViolation = sourceRows.length > state.caps.batchSize;
+    const criticalReason = businessActionViolations > 0 ? "target_lifecycle_business_action_detected"
+      : crossTenant > 0 ? "target_lifecycle_cross_tenant_attempt"
+      : versionRegressionSkipped > 0 ? "target_lifecycle_version_divergence"
+      : volumeViolation ? "target_lifecycle_unbounded_volume"
       : invalidRows >= 3 ? "target_lifecycle_abnormal_partial_rows"
       : errors >= 3 ? "target_lifecycle_critical_error_rate"
       : latencyMaxMs > state.caps.pipelineDurationMs * 3 ? "target_lifecycle_critical_latency"
@@ -517,6 +556,9 @@ export async function processTargetLifecycleBatch(
         invalid_rows: invalidRows,
         errors,
         cross_tenant: crossTenant,
+        business_action_violations: businessActionViolations,
+        version_regression_skipped: versionRegressionSkipped,
+        volume_violation: volumeViolation,
         latency_max_ms: Number(latencyMaxMs.toFixed(3)),
       });
       reasons.push(criticalReason);
@@ -526,7 +568,8 @@ export async function processTargetLifecycleBatch(
     const metric = await supabase.rpc("record_target_lifecycle_pipeline_metric_v1", {
       p_metric_key: `target-lifecycle-batch:${hash(context.batchKey, context.processorRelease)}`,
       p_counters_safe: {
-        attempted, processed, deduplicated, skipped_out_of_order: skippedOutOfOrder,
+        attempted, processed, deduplicated, out_of_order_skipped: outOfOrderSkipped,
+        version_regression_skipped: versionRegressionSkipped,
         rejected, errors, retries, cross_tenant: crossTenant, cap_hits: capHits,
         wrapped: wrapped ? 1 : 0, business_actions: 0, notifications: 0, archives: 0, replacements: 0,
       },
@@ -544,7 +587,8 @@ export async function processTargetLifecycleBatch(
       attempted,
       processed,
       deduplicated,
-      skippedOutOfOrder,
+      outOfOrderSkipped,
+      versionRegressionSkipped,
       rejected,
       errors,
       retries,

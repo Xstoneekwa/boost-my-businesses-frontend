@@ -43,9 +43,12 @@ const row = {
   denominator_observed_at: "2026-07-31T10:00:00.000Z",
   follows_sent_count: 120,
   followbacks_count: 12,
+  performance_skips: 34,
+  performance_errors: 2,
   followback_ratio: 10,
   metrics_observed_at: "2026-07-31T10:00:00.000Z",
   performance_reliable_at: "2026-07-31T10:00:00.000Z",
+  performance_event_observed_at: "2026-07-31T10:30:00.000Z",
   unique_profiles_evaluated: 300,
   last_evaluated_at: "2026-07-31T10:00:00.000Z",
   terminal_proof: false,
@@ -60,7 +63,12 @@ const row = {
   lifecycle_status: null,
 };
 
-function fakeSupabase(input: { state?: Record<string, unknown>; persistOutcome?: string; rows?: unknown[] } = {}) {
+function fakeSupabase(input: {
+  state?: Record<string, unknown>;
+  persistOutcome?: string;
+  businessActions?: number;
+  rows?: unknown[];
+} = {}) {
   const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   let persistedBundle: Record<string, unknown> | null = null;
   const client = {
@@ -89,7 +97,13 @@ function fakeSupabase(input: { state?: Record<string, unknown>; persistOutcome?:
       if (name === "claim_target_lifecycle_assessment_capacity_v1") return { data: true, error: null };
       if (name === "persist_target_lifecycle_shadow_v1") {
         persistedBundle = args?.p_bundle as Record<string, unknown>;
-        return { data: { outcome: input.persistOutcome ?? "processed" }, error: null };
+        return {
+          data: {
+            outcome: input.persistOutcome ?? "processed",
+            business_actions: input.businessActions ?? 0,
+          },
+          error: null,
+        };
       }
       return { data: true, error: null };
     },
@@ -124,6 +138,11 @@ test("one bounded batch persists a shadow-only bundle and records zero actions",
   assert.equal(bundle?.tenant_id, row.tenant_id);
   assert.equal(bundle?.account_id, row.account_id);
   assert.equal(bundle?.target_id, row.target_id);
+  const performanceObservation = bundle?.performance_observation as Record<string, unknown>;
+  const performanceMetadata = performanceObservation.metadata_safe as Record<string, unknown>;
+  assert.equal(performanceMetadata.skips, 34);
+  assert.equal(performanceMetadata.errors, 2);
+  assert.equal(performanceObservation.observed_at, row.performance_event_observed_at);
   assert.ok(fake.calls.some((call) => call.name === "record_target_lifecycle_pipeline_metric_v1"
     && (call.args?.p_counters_safe as Record<string, unknown>).business_actions === 0));
   assert.ok(fake.calls.some((call) => call.name === "release_target_lifecycle_pipeline_lease_v1"));
@@ -147,7 +166,8 @@ test("duplicate and out-of-order outcomes stay non-critical and deterministic", 
     processorRelease: "backend-sha",
     calculatedAt: "2026-07-31T12:00:00.000Z",
   });
-  assert.equal(outOfOrderResult.skippedOutOfOrder, 1);
+  assert.equal(outOfOrderResult.outOfOrderSkipped, 1);
+  assert.equal(outOfOrderResult.versionRegressionSkipped, 0);
   assert.equal(outOfOrderResult.autoKilled, false);
 });
 
@@ -162,6 +182,22 @@ test("a confirmed cross-tenant persistence outcome triggers the lifecycle auto-k
   assert.equal(result.crossTenant, 1);
   assert.equal(result.autoKilled, true);
   assert.ok(fake.calls.some((call) => call.name === "trigger_target_lifecycle_auto_kill_v1"));
+});
+
+test("a version divergence or unexpected business action triggers the lifecycle auto-kill", async () => {
+  for (const [name, fake] of [
+    ["version", fakeSupabase({ persistOutcome: "version_regression_skipped" })],
+    ["business-action", fakeSupabase({ businessActions: 1 })],
+  ] as const) {
+    const result = await processTargetLifecycleBatch(fake.client as never, {
+      workerId: "backend-target-lifecycle-cron",
+      batchKey: `target-lifecycle-cron:${name}`,
+      processorRelease: "backend-sha",
+      calculatedAt: "2026-07-31T12:00:00.000Z",
+    });
+    assert.equal(result.autoKilled, true);
+    assert.ok(fake.calls.some((call) => call.name === "trigger_target_lifecycle_auto_kill_v1"));
+  }
 });
 
 test("inactive runtime performs no lease, work or persistence call", async () => {

@@ -31,6 +31,8 @@ const base: TargetLifecycleGlobalShadowInput = {
     sourceObservationId: null,
     follows: 120,
     followbacks: 18,
+    skips: 42,
+    errors: 1,
     fbrPercent: 15,
     reliability: "strong",
     observedAt: "2026-07-31T10:00:00.000Z",

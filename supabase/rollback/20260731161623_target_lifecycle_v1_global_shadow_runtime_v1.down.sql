@@ -1,4 +1,5 @@
 -- Emergency rollback for Target Lifecycle V1 global Shadow.
+-- Paired with migration 20260731161623_target_lifecycle_v1_global_shadow_runtime_v1.
 -- Existing lifecycle assessment/current rows are retained. The rollback removes
 -- only the runtime contract, projections metadata and scheduler-facing RPCs.
 

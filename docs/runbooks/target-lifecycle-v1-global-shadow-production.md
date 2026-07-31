@@ -7,7 +7,7 @@ Ce runbook décrit une activation Shadow sans action métier. Il n'autorise jama
 1. Obtenir la restitution explicite du chantier Follow 60 et son SHA Backend/Worker final.
 2. Rebaser/reconstruire le candidat Lifecycle sur le SHA Backend production restitué ; ne pas écraser les changements concurrents.
 3. Exiger un tree propre, remote exact et build/test final vert.
-4. Re-lister le registre Supabase. L'ordre attendu doit inclure, si leurs chantiers les ont autorisées et appliquées, les migrations antérieures `20260731003500` (CT Resume V4) et `20260731131850` (Follow 60) avant `20260731133000`.
+4. Re-lister le registre Supabase. La migration Lifecycle doit rester strictement postérieure à la tête production certifiée (`20260731154709` lors de cette livraison).
 5. Stopper sur collision de timestamp, historique incertain ou migration antérieure encore réservée/non autorisée.
 6. Recertifier Target Availability global Shadow inchangé et non autoritaire.
 7. Recertifier zéro request/run/queue/device lock/tick lock avant la fenêtre DB et le déploiement.
@@ -15,7 +15,7 @@ Ce runbook décrit une activation Shadow sans action métier. Il n'autorise jama
 
 ## Déploiement dormant
 
-1. Appliquer uniquement `20260731133000_target_lifecycle_v1_global_shadow_runtime_v1.sql` avec son checksum final.
+1. Appliquer uniquement `20260731161623_target_lifecycle_v1_global_shadow_runtime_v1.sql` avec le SHA-256 `d65044026f4ed93ee06f0adeef269b2d97966f94e6e75638b0f2911c76bc1254`.
 2. Vérifier que le singleton est dormant : producer/projector/shadow OFF, scope `off`, auto-kill OFF et toutes actions métier OFF.
 3. Vérifier les douze tables protégées, les dix RPC service-role-only, les index et les contraintes no-action.
 4. Vérifier que les counts historiques Lifecycle sont inchangés.
@@ -40,7 +40,7 @@ La désactivation dynamique suffit ; aucun restart n'est requis. Les assessments
 
 ## Rollback schéma exceptionnel
 
-Le rollback `20260731133000_target_lifecycle_v1_global_shadow_runtime_v1.down.sql` :
+Le rollback `20260731161623_target_lifecycle_v1_global_shadow_runtime_v1.down.sql` :
 
 - désactive et retire le runtime, ses RPC/tables/index ;
 - retire uniquement les colonnes V1 ajoutées ;

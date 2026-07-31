@@ -1,4 +1,5 @@
 -- Target Lifecycle V1 global Shadow runtime.
+-- Re-versioned after the certified production migration 20260731154709.
 -- Additive, dormant by default and strictly non-authoritative.
 -- This migration never mutates CT business state, notifications, archives,
 -- campaigns, packages, entitlements, Auto Restart, or Premium replacements.
@@ -244,6 +245,9 @@ begin
       t.follows_sent_count,t.followbacks_count,t.followback_ratio,
       coalesce(t.metrics_updated_at,t.updated_at) metrics_observed_at,
       t.followbacks_metrics_reliable_at performance_reliable_at,
+      coalesce(ev.performance_skips,0) performance_skips,
+      coalesce(ev.performance_errors,0) performance_errors,
+      ev.performance_event_observed_at,
       coalesce(ep.unique_profiles_evaluated,0) unique_profiles_evaluated,
       ep.last_evaluated_at,
       (t.last_exhausted_at is not null and nullif(btrim(t.exhaustion_reason),'') is not null) terminal_proof,
@@ -262,6 +266,14 @@ begin
       from public.ct_target_evaluated_profiles e
       where e.tenant_id=cia.client_id and e.account_id=cia.account_id and e.target_id=t.id
     ) ep on true
+    left join lateral (
+      select
+        count(*) filter (where e.outcome in ('filtered','duplicate','private','not_found'))::integer performance_skips,
+        count(*) filter (where e.outcome in ('follow_failed','rate_limited','provider_error'))::integer performance_errors,
+        max(e.evaluated_at) performance_event_observed_at
+      from public.ct_target_evaluation_events e
+      where e.tenant_id=cia.client_id and e.account_id=cia.account_id and e.target_id=t.id
+    ) ev on true
     left join public.ct_target_availability_current ac
       on ac.tenant_id=cia.client_id and ac.account_id=cia.account_id and ac.target_id=t.id
     left join public.ct_target_identity_current ic
@@ -288,6 +300,9 @@ begin
         t.follows_sent_count,t.followbacks_count,t.followback_ratio,
         coalesce(t.metrics_updated_at,t.updated_at) metrics_observed_at,
         t.followbacks_metrics_reliable_at performance_reliable_at,
+        coalesce(ev.performance_skips,0) performance_skips,
+        coalesce(ev.performance_errors,0) performance_errors,
+        ev.performance_event_observed_at,
         coalesce(ep.unique_profiles_evaluated,0) unique_profiles_evaluated,
         ep.last_evaluated_at,
         (t.last_exhausted_at is not null and nullif(btrim(t.exhaustion_reason),'') is not null) terminal_proof,
@@ -306,6 +321,14 @@ begin
         from public.ct_target_evaluated_profiles e
         where e.tenant_id=cia.client_id and e.account_id=cia.account_id and e.target_id=t.id
       ) ep on true
+      left join lateral (
+        select
+          count(*) filter (where e.outcome in ('filtered','duplicate','private','not_found'))::integer performance_skips,
+          count(*) filter (where e.outcome in ('follow_failed','rate_limited','provider_error'))::integer performance_errors,
+          max(e.evaluated_at) performance_event_observed_at
+        from public.ct_target_evaluation_events e
+        where e.tenant_id=cia.client_id and e.account_id=cia.account_id and e.target_id=t.id
+      ) ev on true
       left join public.ct_target_availability_current ac
         on ac.tenant_id=cia.client_id and ac.account_id=cia.account_id and ac.target_id=t.id
       left join public.ct_target_identity_current ic

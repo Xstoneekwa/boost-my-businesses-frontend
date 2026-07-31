@@ -10,7 +10,7 @@ Entrées canoniques :
 
 - scope strict `(tenant_id, account_id, target_id, normalized_username)` ;
 - Target Availability Current et Identity Current ;
-- Target Performance à partir des compteurs FBR certifiés ;
+- Target Performance à partir des compteurs FBR certifiés et des outcomes CT (`skips`, erreurs) ;
 - Target Utilization avec `uniqueProfilesEvaluated` comme numérateur canonique ;
 - fraîcheur, version et provenance de chaque source.
 
@@ -95,6 +95,9 @@ Les clés étrangères composites imposent le couple tenant/compte et le couple 
 Le runtime se remet automatiquement en état dormant et exige une réactivation humaine si l'un des signaux suivants apparaît :
 
 - tentative cross-tenant ;
+- action métier inattendue ;
+- divergence de version ;
+- volume supérieur au batch borné ;
 - au moins trois lignes partielles/invalides dans un batch ;
 - au moins trois erreurs dans un batch ;
 - latence maximale supérieure à trois fois le budget configuré.
@@ -105,12 +108,12 @@ L'auto-kill coupe producer/projector/shadow, remet le scope à `off`, incrément
 
 - build Next.js 16.2.1 et TypeScript : vert ;
 - replay Lifecycle : 40 cas, déterministes et sérialisables ;
-- suites Target Lifecycle : 138/138 ;
-- suites CT V2-1 : 177/177 ;
-- architecture : 4/4 ;
+- suites Lifecycle/Availability/CT consolidées : 202/202 ;
 - contrat statique migration/runtime : 6/6 ;
 - reconstruction PostgreSQL 17 depuis la baseline CT : verte ;
 - activation, scan, caps, lease, persist, replay, ordre, version, cross-tenant, métriques et auto-kill en DB locale : verts ;
 - rollback local : runtime supprimé, 7 assessments historiques conservés, RLS/FORCE RLS conservés.
+
+Migration candidate : `20260731161623_target_lifecycle_v1_global_shadow_runtime_v1.sql`, SHA-256 `d65044026f4ed93ee06f0adeef269b2d97966f94e6e75638b0f2911c76bc1254`.
 
 Cette certification locale n'est pas une certification production.

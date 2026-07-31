@@ -5,6 +5,7 @@ export const TARGET_LIFECYCLE_RULE_VERSION = "target-lifecycle-priority-v1";
 export const TARGET_LIFECYCLE_POLICY_VERSION = "target-lifecycle-no-action-v1";
 export const TARGET_LIFECYCLE_ENGINE_REVISION = 1;
 export const TARGET_LIFECYCLE_POLICY_REVISION = 1;
+export const BUSINESS_ACTION_GATE = false as const;
 
 export type TargetLifecycleAvailabilityState =
   | "healthy"
@@ -52,6 +53,8 @@ export type TargetLifecyclePerformanceInput = Readonly<{
   sourceObservationId: string | null;
   follows: number;
   followbacks: number;
+  skips: number;
+  errors: number;
   fbrPercent: number | null;
   reliability: "verified" | "strong" | "estimated" | "unknown";
   observedAt: string | null;
@@ -189,7 +192,8 @@ function performanceState(
   const observedAt = validDate(input.observedAt);
   if (observedAt === null || calculatedAtMs - observedAt > staleAfterMs) return "stale";
   if (!Number.isInteger(input.follows) || input.follows < 0 || !Number.isInteger(input.followbacks)
-    || input.followbacks < 0 || input.followbacks > input.follows) return "insufficient";
+    || input.followbacks < 0 || input.followbacks > input.follows || !Number.isInteger(input.skips)
+    || input.skips < 0 || !Number.isInteger(input.errors) || input.errors < 0) return "insufficient";
   if (!(["verified", "strong"] as const).includes(input.reliability as "verified" | "strong")) return "insufficient";
   if (input.follows < meaningfulFollowMinimum || input.fbrPercent === null
     || !Number.isFinite(input.fbrPercent) || input.fbrPercent < 0) return "insufficient";
@@ -319,8 +323,8 @@ export function assessTargetLifecycleGlobalShadow(
     policyVersion: TARGET_LIFECYCLE_POLICY_VERSION,
     engineRevision: TARGET_LIFECYCLE_ENGINE_REVISION,
     policyRevision: TARGET_LIFECYCLE_POLICY_REVISION,
-    enforcementAllowed: false,
-    businessActionAllowed: false,
-    mutationExecuted: false,
+    enforcementAllowed: BUSINESS_ACTION_GATE,
+    businessActionAllowed: BUSINESS_ACTION_GATE,
+    mutationExecuted: BUSINESS_ACTION_GATE,
   });
 }
