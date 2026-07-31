@@ -49,10 +49,13 @@ test("foundation block reason is stable", () => {
   );
 });
 
-test("settings route probes foundation", () => {
+test("settings route probes foundation through the canonical patch validator", () => {
   const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/settings/route.ts", import.meta.url), "utf8");
+  const helperSource = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/settings/helpers.ts", import.meta.url), "utf8");
   assert.match(source, /probeAutoRestartFoundation/);
-  assert.match(source, /validateActiveModePrerequisites/);
+  assert.match(source, /validateAutoRestartPatch/);
+  assert.match(helperSource, /validateActiveModePrerequisites/);
+  assert.match(helperSource, /INSTAGRAM_AUTO_RESTART_TICK_TOKEN/);
 });
 
 test("action preview gates mutations on foundation", () => {

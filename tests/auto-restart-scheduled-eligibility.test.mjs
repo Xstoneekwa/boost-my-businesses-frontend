@@ -200,9 +200,12 @@ test("tick route enforces runtime limits without pilot allowlist", () => {
 
 test("settings route persists schedule-based settings without pilot field", () => {
   const source = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/settings/route.ts", import.meta.url), "utf8");
+  const helperSource = readFileSync(new URL("../app/api/instagram-dashboard/auto-restart/settings/helpers.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /pilot_account_id/);
   assert.doesNotMatch(source, /validatePilotAccountForSettings/);
-  assert.match(source, /validateActiveModePrerequisites/);
+  assert.match(source, /validateAutoRestartPatch/);
+  assert.match(helperSource, /validateActiveModePrerequisites/);
+  assert.match(helperSource, /INSTAGRAM_AUTO_RESTART_TICK_TOKEN/);
 });
 
 test("execute route imports canonical rulesFromSettingsRow", () => {
