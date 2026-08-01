@@ -758,16 +758,20 @@ export async function runAutoRestartTick(
         ? restartCounts.bySourceRun.get(`${candidate.accountId}:${candidate.sourceRunId}`) ?? 0
         : 0;
       if (!businessSessionId) blockReasons.push("business_session_id_missing");
-      if (extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
+      // A valid armed Follow60 control is already a globally unique, DB-bound
+      // one-shot budget. Legacy retry counters from earlier terminal requests
+      // cannot consume that new authorization; the control is terminalized if
+      // its single activation fails and therefore cannot create a retry loop.
+      if (!follow60Authority && extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_day");
       }
-      if (extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
+      if (!follow60Authority && extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
         blockReasons.push("max_restarts_window");
       }
-      if (extendedRules.maxRestartsPerDay > 0 && restartsForPhase >= extendedRules.maxRestartsPerDay) {
+      if (!follow60Authority && extendedRules.maxRestartsPerDay > 0 && restartsForPhase >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_phase_business_day");
       }
-      if (extendedRules.maxRestartsPerDay > 0 && restartsForReason >= extendedRules.maxRestartsPerDay) {
+      if (!follow60Authority && extendedRules.maxRestartsPerDay > 0 && restartsForReason >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_reason_business_day");
       }
       if (!follow60Authority && (restartsForLineage > 0 || restartsForSourceRun > 0)) {

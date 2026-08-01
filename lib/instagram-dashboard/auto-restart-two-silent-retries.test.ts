@@ -577,6 +577,21 @@ test("an armed generic Follow60 control overrides a broader stopped follow+unfol
 
 test("an armed Follow60 control bootstraps a fresh Follow-only request when only the legacy resume plan is missing", async () => {
   const supabase = new FakeSupabase();
+  for (let index = 0; index < 3; index += 1) {
+    supabase.rows("auto_restart_decisions").push({
+      id: `legacy-enqueue-${index}`,
+      account_id: "account-1",
+      business_session_id: "legacy-failed-session",
+      prior_run_id: "pre-device-failed-run",
+      decision: "enqueued",
+      created_at: "2026-07-22T10:00:00.000Z",
+      metadata_safe: {
+        resume_phase_key: "follow",
+        resume_reason_key: "resume_plan_missing",
+        resume_lineage_key: "account-1:pre-device-failed-run:follow:resume_plan_missing",
+      },
+    });
+  }
   const missingPlan = candidate(2);
   missingPlan.username = "j_automatise_pour_toi";
   missingPlan.restartEligible = false;
