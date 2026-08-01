@@ -56,6 +56,23 @@ test("only the audited account-scoped one-shot may preserve a frozen Follow-only
   assert.match(humanSection, /follow60sOneShot\.metadata/);
 });
 
+test("an armed Follow60 control overrides resolved-incident generic phases", () => {
+  const callerSection = tickSource.slice(
+    tickSource.indexOf("await processHumanConfirmedResumes"),
+    tickSource.indexOf("await processHumanConfirmedResumes") + 700,
+  );
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+
+  assert.match(callerSection, /follow60ControlByAccount/);
+  assert.match(callerSection, /follow60ActiveControlCount: follow60ControlRows\.length/);
+  assert.match(humanSection, /resolveArmedFollow60Control\(\{/);
+  assert.match(humanSection, /row: input\.follow60ControlByAccount\.get\(accountId\)/);
+  assert.match(humanSection, /if \(follow60Resolution && !follow60Resolution\.ok\) \{\s*await blockResume\(follow60Resolution\.reason\)/);
+  assert.match(humanSection, /projectArmedFollow60Candidate\(rebuiltGoldenCandidate, follow60Resolution\.control\)/);
+  assert.match(humanSection, /attachArmedFollow60Contract\(/);
+  assert.match(humanSection, /!follow60Authority && follow60sOneShot\?\.matched !== true/);
+});
+
 test("expired window expires the authorization with a stable reason", () => {
   assert.match(tickSource, /markAuthorizationExpired\(supabase, authorizationId, now\)/);
   assert.match(tickSource, /resume_authorization_expired/);

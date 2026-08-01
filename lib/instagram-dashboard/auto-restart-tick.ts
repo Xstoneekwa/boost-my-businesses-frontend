@@ -1157,6 +1157,8 @@ export async function runAutoRestartTick(
       await processHumanConfirmedResumes(supabase, {
         summary,
         candidates: overview.candidates,
+        follow60ControlByAccount,
+        follow60ActiveControlCount: follow60ControlRows.length,
         requestId,
         actor: options.actor || "system",
         mode: extendedRules.mode,
@@ -1231,6 +1233,8 @@ async function processHumanConfirmedResumes(
   input: {
     summary: AutoRestartTickSummary;
     candidates: AutoRestartCandidate[];
+    follow60ControlByAccount: Map<string, Follow60ControlRow>;
+    follow60ActiveControlCount: number;
     requestId: string;
     actor: string;
     mode: AutoRestartMode;
@@ -1354,10 +1358,26 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      const rebuiltCandidate = !restrictionPreflight && candidate
+      const follow60Resolution = !restrictionPreflight && candidate
+        ? resolveArmedFollow60Control({
+          row: input.follow60ControlByAccount.get(accountId),
+          candidate,
+          now,
+          globalActiveControlCount: input.follow60ActiveControlCount,
+        })
+        : null;
+      if (follow60Resolution && !follow60Resolution.ok) {
+        await blockResume(follow60Resolution.reason);
+        continue;
+      }
+      const follow60Authority = follow60Resolution?.ok === true && follow60Resolution.control !== null;
+      const rebuiltGoldenCandidate = !restrictionPreflight && candidate
         ? rebuildResolvedIncidentResumeCandidate(candidate)
         : null;
-      const follow60sOneShot = rebuiltCandidate
+      const rebuiltCandidate = rebuiltGoldenCandidate && follow60Authority && follow60Resolution?.control
+        ? projectArmedFollow60Candidate(rebuiltGoldenCandidate, follow60Resolution.control)
+        : rebuiltGoldenCandidate;
+      const follow60sOneShot = rebuiltCandidate && !follow60Authority
         ? applyFollow60sOneShotFrozenPlan({
           baseMetadata: buildAutoRestartResumePlanMetadata(rebuiltCandidate, now),
           frozenPlan: authorization.frozen_phase_plan,
@@ -1371,7 +1391,7 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      if (!restrictionPreflight && candidate && follow60sOneShot?.matched !== true) {
+      if (!restrictionPreflight && candidate && !follow60Authority && follow60sOneShot?.matched !== true) {
         // A resolved incident is the operator's explicit one-shot authorization
         // for evaluation on the next natural tick.  The generic retry delay is
         // not applied a second time; every live cap, warmup, phase, assignment,
@@ -1439,12 +1459,24 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_candidate_unavailable");
           continue;
         }
-        resumeMetadata = follow60sOneShot?.matched
-          ? follow60sOneShot.metadata
-          : buildAutoRestartResumePlanMetadata(
-            rebuiltCandidate ?? rebuildResolvedIncidentResumeCandidate(candidate),
-            now,
-          );
+        const rebuiltMetadata = buildAutoRestartResumePlanMetadata(
+          rebuiltCandidate ?? rebuildResolvedIncidentResumeCandidate(candidate),
+          now,
+        );
+        resumeMetadata = follow60Authority && follow60Resolution?.control
+          ? attachArmedFollow60Contract(
+            rebuiltMetadata,
+            follow60Resolution.control,
+            originalRunId,
+            {
+              welcome: candidate.quotas.welcome.remaining,
+              unfollow: candidate.quotas.unfollow.remaining,
+              outreach: candidate.quotas.outreach.remaining,
+            },
+          )
+          : follow60sOneShot?.matched
+            ? follow60sOneShot.metadata
+            : rebuiltMetadata;
         Object.assign(resumeMetadata.resume_plan, {
           business_date: sastBusinessDay(now),
           resume_reason: "resolved_incident_human_authorized",
