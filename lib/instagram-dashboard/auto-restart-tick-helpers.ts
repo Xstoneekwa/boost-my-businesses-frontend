@@ -309,7 +309,12 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
     }
   }
   const sessionClass = reliability.sessionTerminationClass.toLowerCase();
-  if (!sessionClass || sessionClass === "unknown") {
+  // A canonical BotApp stop is proven by its exact request/run lineage,
+  // stopped/canceled terminal status, operator reason and fresh-boundary-only
+  // contract above. Older runs may legitimately predate the legacy
+  // sessionTerminationClass projection; that missing projection must not
+  // disqualify an otherwise fully proven operator-stop continuation.
+  if ((!sessionClass || sessionClass === "unknown") && !operatorStopContinuation) {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }
   if (["completed", "success", "completed_all_phases"].includes(sessionClass) && !operatorStopContinuation) {

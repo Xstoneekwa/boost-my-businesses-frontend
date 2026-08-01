@@ -420,7 +420,9 @@ test("a canonical BotApp stop gets one fresh-boundary natural continuation and n
   stopped.restartNeedReason = "operator_stopped_safe_boundary_continuation";
   stopped.reliability.restartAllowed = false;
   stopped.reliability.restartBlockReason = "operator_canceled";
-  stopped.reliability.sessionTerminationClass = "completed";
+  // Historical BotApp stops can predate this legacy projection. The exact
+  // operator-stop lineage above is sufficient and remains fail-closed.
+  stopped.reliability.sessionTerminationClass = "";
   stopped.reliability.lastRunStatus = "stopped";
   stopped.reliability.lastRunId = "operator-stopped-run";
   stopped.reliability.operatorStopContinuation = true;

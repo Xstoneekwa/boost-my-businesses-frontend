@@ -411,6 +411,14 @@ test("canonical BotApp stop is supported only as a fresh-boundary continuation",
   assert.equal(metadata.resume_plan.safe_restart_strategy, "rebuilt_safe_target_plan");
 });
 
+test("canonical BotApp stop does not require the legacy termination-class projection", () => {
+  const candidate = operatorStopCandidate();
+  candidate.reliability.sessionTerminationClass = "";
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+  candidate.reliability.sessionTerminationClass = "unknown";
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+});
+
 test("operator-stop continuation fails closed for a non-BotApp reason", () => {
   const candidate = operatorStopCandidate();
   candidate.operatorStopReason = "operator_stop_hotfix";
