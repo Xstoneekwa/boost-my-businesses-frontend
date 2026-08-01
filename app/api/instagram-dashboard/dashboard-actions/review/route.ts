@@ -77,9 +77,21 @@ export async function POST(request: Request) {
         return jsonError("Dashboard action not found.", 404, { code: "DASHBOARD_ACTION_NOT_FOUND" });
       }
       if (normalized.includes("not_reviewable") || normalized.includes("transition")) {
-        return jsonError("Dashboard action is no longer reviewable.", 409, { code: "DASHBOARD_ACTION_REVIEW_CONFLICT" });
+        return jsonError("This action can no longer be marked reviewed because it is already terminal.", 409, {
+          code: "DASHBOARD_ACTION_REVIEW_CONFLICT",
+          reason: "not_reviewable",
+        });
       }
-      return jsonError("Could not review dashboard action.", 500, { code: "DASHBOARD_ACTION_REVIEW_FAILED" });
+      if (error.code === "27000" || normalized.includes("tuple to be updated")) {
+        return jsonError("Review could not be recorded because the linked incident transition conflicted.", 409, {
+          code: "DASHBOARD_ACTION_REVIEW_CONFLICT",
+          reason: "incident_transition_conflict",
+        });
+      }
+      return jsonError("The review service is temporarily unavailable.", 503, {
+        code: "DASHBOARD_ACTION_REVIEW_FAILED",
+        reason: "backend_unavailable",
+      });
     }
 
     const row = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
@@ -87,11 +99,17 @@ export async function POST(request: Request) {
       contractVersion: "dashboard_action_review_v1",
       actionId,
       accountId,
-      status: readString(row.status, "resolved"),
+      status: readString(row.status, "acknowledged"),
       reviewedAt: readString(row.updated_at, new Date().toISOString()),
       source,
+      reason: "success",
+      message: "Review recorded. The linked incident requires separate resolution.",
+      incidentResolutionSeparate: true,
     });
   } catch {
-    return jsonError("Could not review dashboard action.", 500, { code: "DASHBOARD_ACTION_REVIEW_FAILED" });
+    return jsonError("The review service is temporarily unavailable.", 503, {
+      code: "DASHBOARD_ACTION_REVIEW_FAILED",
+      reason: "backend_unavailable",
+    });
   }
 }
