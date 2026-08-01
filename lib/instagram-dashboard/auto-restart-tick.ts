@@ -671,6 +671,7 @@ export async function runAutoRestartTick(
       const candidate = follow60Resolution.ok && follow60Resolution.control
         ? projectArmedFollow60Candidate(rawCandidate, follow60Resolution.control)
         : rawCandidate;
+      const follow60Authority = follow60Resolution.ok && follow60Resolution.control !== null;
       if (!candidate.restartEligible) {
         const decision = candidate.decisionOutcome === "not_needed" ? "not_needed" : "blocked";
         if (decision === "not_needed") {
@@ -711,7 +712,12 @@ export async function runAutoRestartTick(
       const riskReason = passesRiskPolicy(candidate, extendedRules);
       if (riskReason) blockReasons.push(riskReason);
 
-      const resumeSupport = resumePlanRuntimeSupported(candidate);
+      // The validated Follow60 V3 control plus the Worker-side V2 runtime
+      // binding replaces the legacy resume plan for this one fresh-boundary
+      // Follow-only attempt. All independent safety gates below still apply.
+      const resumeSupport = follow60Authority
+        ? { ok: true as const, reason: "" }
+        : resumePlanRuntimeSupported(candidate);
       if (!resumeSupport.ok) blockReasons.push(resumeSupport.reason);
 
       const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
@@ -721,7 +727,11 @@ export async function runAutoRestartTick(
         candidate.reliability.retryIndex,
         extendedRules.maxRetriesAfterInitialFailure,
       );
-      if (attemptsReason && candidate.operatorStopContinuation !== true) blockReasons.push(attemptsReason);
+      if (
+        attemptsReason
+        && candidate.operatorStopContinuation !== true
+        && !follow60Authority
+      ) blockReasons.push(attemptsReason);
 
       if (
         candidate.reliability.businessDaySast
@@ -760,7 +770,7 @@ export async function runAutoRestartTick(
       if (extendedRules.maxRestartsPerDay > 0 && restartsForReason >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_reason_business_day");
       }
-      if (restartsForLineage > 0 || restartsForSourceRun > 0) {
+      if (!follow60Authority && (restartsForLineage > 0 || restartsForSourceRun > 0)) {
         blockReasons.push("resume_lineage_retry_budget_exhausted");
       }
 
@@ -795,7 +805,7 @@ export async function runAutoRestartTick(
       // advertising the previous nextRetryIndex. Advance from the durable
       // enqueue history so a later natural tick cannot reuse the same
       // idempotency key and report a phantom enqueue of the old request.
-      const nextRetryIndex = candidate.operatorStopContinuation === true
+      const nextRetryIndex = follow60Authority || candidate.operatorStopContinuation === true
         ? 0
         : Math.max(
           candidate.nextRetryIndex,

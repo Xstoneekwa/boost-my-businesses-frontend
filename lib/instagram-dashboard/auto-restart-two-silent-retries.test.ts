@@ -188,6 +188,29 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
   };
 }
 
+function armedFollow60ControlRow(username = "j_automatise_pour_toi"): Row {
+  return {
+    account_id: "account-1",
+    status: "armed",
+    baseline_follow_count: 28,
+    evaluation_increment: 10,
+    target_follow_count: 38,
+    metadata_safe: {
+      schema: "FOLLOW_60S_CANARY_CONTROL_V3",
+      control_id: "11111111-1111-4111-8111-111111111111",
+      expected_worker_sha: "8c754eff287afabce7474553219845d1684c5dc9",
+      baseline_release_sha: "8c754eff287afabce7474553219845d1684c5dc9",
+      baseline_account_id: "account-1",
+      expected_username: username,
+      expected_run_type: "account_session",
+      binding_version: "FOLLOW_60S_CANARY_BINDING_V2",
+      runtime_binding_consumed: false,
+      active_control_count: 1,
+      expires_at: "2026-07-23T00:00:00.000Z",
+    },
+  };
+}
+
 test("persisted business progress cannot bypass the configured restart window budget", async () => {
   const supabase = new FakeSupabase();
   supabase.rows("auto_restart_decisions").push(
@@ -509,26 +532,7 @@ test("an armed generic Follow60 control overrides a broader stopped follow+unfol
     enabled: true,
     sourceLabel: "test",
   };
-  supabase.setRows("follow_60s_canary_controls", [{
-    account_id: "account-1",
-    status: "armed",
-    baseline_follow_count: 28,
-    evaluation_increment: 10,
-    target_follow_count: 38,
-    metadata_safe: {
-      schema: "FOLLOW_60S_CANARY_CONTROL_V3",
-      control_id: "11111111-1111-4111-8111-111111111111",
-      expected_worker_sha: "8c754eff287afabce7474553219845d1684c5dc9",
-      baseline_release_sha: "8c754eff287afabce7474553219845d1684c5dc9",
-      baseline_account_id: "account-1",
-      expected_username: "j_automatise_pour_toi",
-      expected_run_type: "account_session",
-      binding_version: "FOLLOW_60S_CANARY_BINDING_V2",
-      runtime_binding_consumed: false,
-      active_control_count: 1,
-      expires_at: "2026-07-23T00:00:00.000Z",
-    },
-  }]);
+  supabase.setRows("follow_60s_canary_controls", [armedFollow60ControlRow()]);
 
   const result = await runAutoRestartTick(supabase as never, {
     workerId: "operator-test",
@@ -569,4 +573,101 @@ test("an armed generic Follow60 control overrides a broader stopped follow+unfol
   assert.equal(expired.result.blocked_count, 1);
   assert.match(expired.result.blocked[0].reason, /follow60_armed_control_invalid/);
   assert.equal(supabase.requests.length, 1);
+});
+
+test("an armed Follow60 control bootstraps a fresh Follow-only request when only the legacy resume plan is missing", async () => {
+  const supabase = new FakeSupabase();
+  const missingPlan = candidate(2);
+  missingPlan.username = "j_automatise_pour_toi";
+  missingPlan.restartEligible = false;
+  missingPlan.enqueueAllowed = false;
+  missingPlan.decisionOutcome = "blocked";
+  missingPlan.blockReason = "resume_plan_missing";
+  missingPlan.restartNeeded = false;
+  missingPlan.restartNeedReason = "resume_plan_missing";
+  missingPlan.safeRestartStrategy = "none";
+  missingPlan.safeRestartReason = "no_partial_run_to_resume";
+  missingPlan.sourceRunId = "pre-device-failed-run";
+  missingPlan.sourceRequestId = "pre-device-failed-request";
+  missingPlan.sourceLineageValid = false;
+  missingPlan.sourceBusinessSessionId = "legacy-failed-session";
+  missingPlan.reliability.restartAllowed = false;
+  missingPlan.reliability.restartBlockReason = "resume_plan_missing";
+  missingPlan.reliability.sessionTerminationClass = "";
+  missingPlan.reliability.failureCategory = "";
+  missingPlan.reliability.lastRunId = "pre-device-failed-run";
+  missingPlan.reliability.lastRunStatus = "failed";
+  missingPlan.plannedPhasesToRun = { welcome: false, follow: true, unfollow: true };
+  missingPlan.plannedQuotaRemaining = { welcome: 0, follow: 22, unfollow: 80, outreach: 0 };
+  missingPlan.eligibleFollowTargetCount = 15;
+  missingPlan.quotas.follow = {
+    doneToday: 28,
+    capDay: 50,
+    remaining: 22,
+    plannedNextRunQuota: 22,
+    enabled: true,
+    sourceLabel: "test",
+  };
+  supabase.setRows("follow_60s_canary_controls", [armedFollow60ControlRow()]);
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [missingPlan as unknown as Row] },
+    evaluateEligibility: async (_accountId, _runType, phases) => {
+      assert.deepEqual(phases, { welcome: false, follow: true, unfollow: false });
+      return { ok: true, reason: "" };
+    },
+  });
+
+  assert.equal(result.result.enqueued_count, 1);
+  assert.equal(result.result.blocked_count, 0);
+  assert.equal(supabase.requests.length, 1);
+  const metadata = supabase.requests[0].p_metadata_safe as Row;
+  const resumePlan = metadata.resume_plan as Row;
+  assert.equal(metadata.fresh_boundary_only, true);
+  assert.equal(metadata.safe_restart_reason, "follow60_armed_control_fresh_boundary");
+  assert.equal(metadata.business_session_id, "follow60:11111111-1111-4111-8111-111111111111");
+  assert.deepEqual(resumePlan.phases_to_run, { welcome: false, follow: true, unfollow: false });
+  assert.deepEqual(resumePlan.quota_remaining, { welcome: 0, follow: 10, unfollow: 0, outreach: 0 });
+  assert.equal(resumePlan.phase_plan_source, "follow60_armed_control");
+});
+
+test("an armed Follow60 control never overrides a non-resume-plan safety rejection", async () => {
+  const supabase = new FakeSupabase();
+  const unsafe = candidate(0);
+  unsafe.username = "j_automatise_pour_toi";
+  unsafe.restartEligible = false;
+  unsafe.enqueueAllowed = false;
+  unsafe.decisionOutcome = "blocked";
+  unsafe.blockReason = "account_mismatch";
+  unsafe.accountEligible = false;
+  unsafe.accountEligibilityReason = "account_mismatch";
+  unsafe.quotas.follow = {
+    doneToday: 28,
+    capDay: 50,
+    remaining: 22,
+    plannedNextRunQuota: 22,
+    enabled: true,
+    sourceLabel: "test",
+  };
+  supabase.setRows("follow_60s_canary_controls", [armedFollow60ControlRow()]);
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [unsafe as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.enqueued_count, 0);
+  assert.equal(result.result.blocked_count, 1);
+  assert.equal(result.result.blocked[0].reason, "account_mismatch");
+  assert.equal(supabase.requests.length, 0);
 });

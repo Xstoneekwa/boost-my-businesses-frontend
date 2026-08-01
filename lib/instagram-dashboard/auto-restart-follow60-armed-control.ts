@@ -137,8 +137,33 @@ export function projectArmedFollow60Candidate(
   candidate: AutoRestartCandidate,
   control: ArmedFollow60Control,
 ): AutoRestartCandidate {
+  // A valid armed Follow60 control is itself the immutable authorization for
+  // a fresh-boundary Follow-only run. It may bootstrap the candidate when the
+  // only missing legacy artifact is a resume plan. No other account, device,
+  // restriction, quota, window, or safety rejection is overridden here.
+  const bootstrapFromControl = candidate.accountEligible === true
+    && candidate.restartEligible === false
+    && candidate.blockReason === "resume_plan_missing";
   return {
     ...candidate,
+    ...(bootstrapFromControl
+      ? {
+        restartNeeded: true,
+        restartNeedReason: "follow60_armed_control_fresh_start",
+        exactViewportResumeAvailable: false,
+        safeRestartStrategy: "rebuilt_safe_target_plan" as const,
+        safeRestartReason: "follow60_armed_control_fresh_boundary",
+        historicalSafeBoundaryFallback: false,
+        operatorStopContinuation: false,
+        freshBoundaryOnly: true,
+        enqueueAllowed: true,
+        decisionOutcome: "eligible" as const,
+        restartEligible: true,
+        blockReason: "",
+        sourceBusinessSessionId: `follow60:${control.controlId}`,
+        nextRetryIndex: 0,
+      }
+      : {}),
     remainingFollowQuota: control.followQuota,
     plannedRunType: "account_session",
     plannedPhasesToRun: { welcome: false, follow: true, unfollow: false },
