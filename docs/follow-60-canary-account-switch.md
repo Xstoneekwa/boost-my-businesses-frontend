@@ -106,6 +106,28 @@ expiry, active-control count, gate counts, runtime root, wrapper/consumer PIDs,
 request/run provenance, binder verdict/reason, rollback target and confirmation
 that Liam alone controls manual-to-scheduled.
 
+## Production switch record: 2026-08-01
+
+- Generic Worker SHA: `5132e8c42c1c271d0cb752a0f8b0f9cb893cf749`.
+- Immutable release: `/Users/admin/phonefarm-worker-releases/5132e8c-follow60-generic-control-v2-v1`.
+- Generic binding: `bind_follow_60s_canary_runtime_v2`.
+- Production migration registry: `20260801114507_follow_60s_canary_runtime_generic_v2`.
+- New control ID: `2bd2ff68-22d2-4378-99e7-fad4d26934bf`.
+- New-cycle ceiling: `10`.
+- The Rex control was disabled without deleting its historical baseline,
+  results, run or request provenance; Loriele remained disabled.
+- J received a new account-scoped baseline after the generic Worker became
+  active and remained manual/inactive for Liam's schedule handoff.
+
+Redacted transfer:
+
+```text
+old account -> preserve results -> disable control -> Golden
+new account -> fresh baseline -> one armed V2 control -> Follow 60 V4
+```
+
+Invariant: `CANARY_ACCOUNT_SWITCH_REQUIRES_ZERO_CODE_CHANGE`.
+
 ## Forbidden actions during source certification
 
 No production migration, control mutation, arm/disarm, schedule change, Worker
