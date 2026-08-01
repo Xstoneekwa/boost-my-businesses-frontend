@@ -85,6 +85,8 @@ class FakeSupabase {
     return rows;
   }
 
+  setRows(table: string, rows: Row[]) { this.tables.set(table, rows); }
+
   from(table: string) { return new Query(this, table); }
 
   async rpc(name: string, args: Row) {
@@ -458,5 +460,111 @@ test("a canonical BotApp stop gets one fresh-boundary natural continuation and n
   assert.equal(second.result.enqueued_count, 0);
   assert.equal(second.result.blocked_count, 1);
   assert.match(second.result.blocked[0].reason, /resume_lineage_retry_budget_exhausted/);
+  assert.equal(supabase.requests.length, 1);
+});
+
+test("an armed generic Follow60 control overrides a broader stopped follow+unfollow plan", async () => {
+  const supabase = new FakeSupabase();
+  const stopped = candidate(2);
+  stopped.username = "j_automatise_pour_toi";
+  stopped.operatorStopContinuation = true;
+  stopped.operatorStopReason = "botapp_manual_stop";
+  stopped.freshBoundaryOnly = true;
+  stopped.sourceRunId = "operator-stopped-run";
+  stopped.sourceRequestId = "operator-stop-request";
+  stopped.canonicalAttemptId = 2;
+  stopped.sourceLineageValid = true;
+  stopped.sourceBusinessSessionId = "operator-stop:operator-stopped-run";
+  stopped.nextRetryIndex = 0;
+  stopped.exactViewportResumeAvailable = false;
+  stopped.safeRestartStrategy = "rebuilt_safe_target_plan";
+  stopped.restartNeedReason = "operator_stopped_safe_boundary_continuation";
+  stopped.reliability.restartAllowed = false;
+  stopped.reliability.restartBlockReason = "operator_canceled";
+  stopped.reliability.sessionTerminationClass = "completed";
+  stopped.reliability.lastRunStatus = "stopped";
+  stopped.reliability.lastRunId = "operator-stopped-run";
+  stopped.reliability.operatorStopContinuation = true;
+  stopped.reliability.operatorStopReason = "botapp_manual_stop";
+  stopped.reliability.failureCategory = "";
+  stopped.reliability.businessDaySast = "";
+  stopped.plannedPhasesToRun = { welcome: false, follow: true, unfollow: true };
+  stopped.plannedQuotaRemaining = { welcome: 0, follow: 22, unfollow: 80, outreach: 0 };
+  stopped.eligibleUnfollowCandidateCount = 117;
+  stopped.quotas.follow = {
+    doneToday: 28,
+    capDay: 50,
+    remaining: 22,
+    plannedNextRunQuota: 22,
+    enabled: true,
+    sourceLabel: "test",
+  };
+  stopped.quotas.unfollow = {
+    doneToday: 0,
+    capDay: 120,
+    remaining: 80,
+    plannedNextRunQuota: 50,
+    enabled: true,
+    sourceLabel: "test",
+  };
+  supabase.setRows("follow_60s_canary_controls", [{
+    account_id: "account-1",
+    status: "armed",
+    baseline_follow_count: 28,
+    evaluation_increment: 10,
+    target_follow_count: 38,
+    metadata_safe: {
+      schema: "FOLLOW_60S_CANARY_CONTROL_V3",
+      control_id: "11111111-1111-4111-8111-111111111111",
+      expected_worker_sha: "8c754eff287afabce7474553219845d1684c5dc9",
+      baseline_release_sha: "8c754eff287afabce7474553219845d1684c5dc9",
+      baseline_account_id: "account-1",
+      expected_username: "j_automatise_pour_toi",
+      expected_run_type: "account_session",
+      binding_version: "FOLLOW_60S_CANARY_BINDING_V2",
+      runtime_binding_consumed: false,
+      active_control_count: 1,
+      expires_at: "2026-07-23T00:00:00.000Z",
+    },
+  }]);
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [stopped as unknown as Row] },
+    evaluateEligibility: async (_accountId, _runType, phases) => {
+      assert.deepEqual(phases, { welcome: false, follow: true, unfollow: false });
+      return { ok: true, reason: "" };
+    },
+  });
+
+  assert.equal(result.result.enqueued_count, 1);
+  assert.equal(result.result.blocked_count, 0);
+  assert.equal(supabase.requests.length, 1);
+  assert.match(String(supabase.requests[0].p_idempotency_key), /:follow60:11111111-/);
+  const requestMetadata = supabase.requests[0].p_metadata_safe as Row;
+  const resumePlan = requestMetadata.resume_plan as Row;
+  assert.deepEqual(resumePlan.phases_to_run, { welcome: false, follow: true, unfollow: false });
+  assert.deepEqual(resumePlan.quota_remaining, { welcome: 0, follow: 10, unfollow: 0, outreach: 0 });
+  assert.equal(resumePlan.phase_plan_source, "follow60_armed_control");
+  assert.deepEqual(resumePlan.preserved_business_backlog, { welcome: 0, unfollow: 80, outreach: 0 });
+
+  const controlMetadata = supabase.rows("follow_60s_canary_controls")[0].metadata_safe as Row;
+  controlMetadata.expires_at = "2026-07-22T19:59:59.000Z";
+  const expired = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:01:00.000Z"),
+    overview: { candidates: [stopped as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+  assert.equal(expired.result.enqueued_count, 0);
+  assert.equal(expired.result.blocked_count, 1);
+  assert.match(expired.result.blocked[0].reason, /follow60_armed_control_invalid/);
   assert.equal(supabase.requests.length, 1);
 });

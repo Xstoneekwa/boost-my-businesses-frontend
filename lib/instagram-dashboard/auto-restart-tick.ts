@@ -42,6 +42,12 @@ import {
   rebuildResolvedIncidentResumeCandidate,
   validateCanonicalResumePlan,
 } from "./auto-restart-resume-metadata";
+import {
+  attachArmedFollow60Contract,
+  projectArmedFollow60Candidate,
+  resolveArmedFollow60Control,
+  type Follow60ControlRow,
+} from "./auto-restart-follow60-armed-control";
 import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-operational";
 import {
   authoritativeDelayRemainingSeconds,
@@ -641,9 +647,30 @@ export async function runAutoRestartTick(
       : await getAutoRestartData();
     summary.scanned_candidates = overview.candidates.length;
 
+    const follow60ControlResult = await query(supabase, "follow_60s_canary_controls")
+      .select("account_id,status,baseline_follow_count,evaluation_increment,target_follow_count,metadata_safe")
+      .eq("status", "armed")
+      .limit(100);
+    if (follow60ControlResult.error) {
+      throw new Error(follow60ControlResult.error.message || "follow60_armed_controls_unavailable");
+    }
+    const follow60ControlRows = readRows(follow60ControlResult.data) as Follow60ControlRow[];
+    const follow60ControlByAccount = new Map(
+      follow60ControlRows.map((row) => [readString(row.account_id), row]),
+    );
+
     const since = todayStartIso(now);
     const restartCounts = await loadRestartCounts(supabase, since);
-    for (const candidate of overview.candidates) {
+    for (const rawCandidate of overview.candidates) {
+      const follow60Resolution = resolveArmedFollow60Control({
+        row: follow60ControlByAccount.get(rawCandidate.accountId),
+        candidate: rawCandidate,
+        now,
+        globalActiveControlCount: follow60ControlRows.length,
+      });
+      const candidate = follow60Resolution.ok && follow60Resolution.control
+        ? projectArmedFollow60Candidate(rawCandidate, follow60Resolution.control)
+        : rawCandidate;
       if (!candidate.restartEligible) {
         const decision = candidate.decisionOutcome === "not_needed" ? "not_needed" : "blocked";
         if (decision === "not_needed") {
@@ -680,6 +707,7 @@ export async function runAutoRestartTick(
 
       summary.eligible_candidates += 1;
       const blockReasons: string[] = [];
+      if (!follow60Resolution.ok) blockReasons.push(follow60Resolution.reason);
       const riskReason = passesRiskPolicy(candidate, extendedRules);
       if (riskReason) blockReasons.push(riskReason);
 
@@ -784,12 +812,15 @@ export async function runAutoRestartTick(
             nextAttempt: String(nextRetryIndex + 1),
           },
         };
-      const enqueueKey = autoRestartEnqueueIdempotencyKey({
+      const baseEnqueueKey = autoRestartEnqueueIdempotencyKey({
         accountId: candidate.accountId,
         businessSessionId,
         retryIndex: nextRetryIndex,
         progressSourceRunId: progressContinuation ? candidate.sourceRunId : undefined,
       });
+      const enqueueKey = follow60Resolution.ok && follow60Resolution.control
+        ? `${baseEnqueueKey}:follow60:${follow60Resolution.control.controlId}`
+        : baseEnqueueKey;
 
       let deviceId: string | null = null;
       try {
@@ -917,7 +948,19 @@ export async function runAutoRestartTick(
           }
         }
 
-        const resumeMetadata = buildAutoRestartResumePlanMetadata(scheduledCandidate, now);
+        const baseResumeMetadata = buildAutoRestartResumePlanMetadata(scheduledCandidate, now);
+        const resumeMetadata = follow60Resolution.ok && follow60Resolution.control
+          ? attachArmedFollow60Contract(
+            baseResumeMetadata,
+            follow60Resolution.control,
+            scheduledCandidate.sourceRunId,
+            {
+              welcome: rawCandidate.plannedQuotaRemaining.welcome,
+              unfollow: rawCandidate.plannedQuotaRemaining.unfollow,
+              outreach: rawCandidate.plannedQuotaRemaining.outreach,
+            },
+          )
+          : baseResumeMetadata;
         const requestedByActor = options.requestedByActor
           || (options.manual ? MANUAL_RESTART_AUDIT_ACTOR : options.actor || "system");
         const requestData = await enqueueAutoRestartRequest(supabase, {
