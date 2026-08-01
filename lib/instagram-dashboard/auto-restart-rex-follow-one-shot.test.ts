@@ -7,6 +7,11 @@ import {
   FOLLOW_60S_ONE_SHOT_SCHEMA,
 } from "./auto-restart-resume-metadata.ts";
 
+test("one-shot contract is scoped only to Rex V2", () => {
+  assert.equal(FOLLOW_60S_ONE_SHOT_ACCOUNT_ID, "b024e94e-395d-4f02-9787-81ddc679b014");
+  assert.equal(FOLLOW_60S_ONE_SHOT_SCHEMA, "REX_FOLLOW_60S_ONE_SHOT_V2");
+});
+
 function baseMetadata() {
   return {
     resume_plan_version: 2,
