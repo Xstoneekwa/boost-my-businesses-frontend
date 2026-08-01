@@ -241,13 +241,22 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
   };
 }
 
-export const FOLLOW_60S_ONE_SHOT_ACCOUNT_ID = "b024e94e-395d-4f02-9787-81ddc679b014";
-export const FOLLOW_60S_ONE_SHOT_SCHEMA = "REX_FOLLOW_60S_ONE_SHOT_V2";
+export const FOLLOW_60S_ONE_SHOT_SCHEMA = "FOLLOW_60S_ONE_SHOT_V2";
+const LEGACY_FOLLOW_60S_ONE_SHOT_SCHEMAS = new Set([
+  FOLLOW_60S_ONE_SHOT_SCHEMA,
+  "REX_FOLLOW_60S_ONE_SHOT_V2",
+]);
 
 type AutoRestartResumeMetadata = ReturnType<typeof buildAutoRestartResumePlanMetadata>;
 type Follow60sResumeMetadata = Omit<AutoRestartResumeMetadata, "resume_plan"> & {
   resume_plan: AutoRestartResumeMetadata["resume_plan"] & {
     follow_60s_canary_contract?: Record<string, unknown>;
+    phase_plan_source?: "follow60_armed_control";
+    preserved_business_backlog?: {
+      welcome: number;
+      unfollow: number;
+      outreach: number;
+    };
   };
 };
 
@@ -258,9 +267,9 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Preserve the audited account-scoped Follow-only one-shot plan after rechecking its
- * quota against the live canonical candidate.  No other authorization can
- * override the normal live phase-plan rebuild.
+ * Build the Follow-only phase plan from an explicitly frozen Follow60 contract.
+ * The contract account must match the authorization and frozen plan; there is
+ * deliberately no username/account allowlist in source.
  */
 export function applyFollow60sOneShotFrozenPlan(input: {
   baseMetadata: AutoRestartResumeMetadata;
@@ -292,11 +301,11 @@ export function applyFollow60sOneShotFrozenPlan(input: {
   const liveFollowRemaining = Number(input.liveFollowRemaining);
 
   if (
-    input.authorizationAccountId !== FOLLOW_60S_ONE_SHOT_ACCOUNT_ID
-    || frozenPlan.account_id !== FOLLOW_60S_ONE_SHOT_ACCOUNT_ID
+    !input.authorizationAccountId
+    || frozenPlan.account_id !== input.authorizationAccountId
   ) return reject("follow_60s_one_shot_account_mismatch");
   if (
-    contract.schema !== FOLLOW_60S_ONE_SHOT_SCHEMA
+    !LEGACY_FOLLOW_60S_ONE_SHOT_SCHEMAS.has(String(contract.schema || ""))
     || contract.source_run_id !== input.originalRunId
     || contract.golden_fallback_policy !== "proof_rejection_only"
   ) return reject("follow_60s_one_shot_contract_invalid");
@@ -314,19 +323,14 @@ export function applyFollow60sOneShotFrozenPlan(input: {
     || !Array.isArray(frozenPlan.phase_order)
     || frozenPlan.phase_order.join(",") !== "welcome,follow,unfollow"
   ) return reject("follow_60s_one_shot_plan_invalid");
-  if (
-    phases.welcome !== false
-    || phases.follow !== true
-    || phases.unfollow !== false
-  ) return reject("follow_60s_one_shot_phase_scope_invalid");
+  if (phases.follow !== true) {
+    return reject("follow_60s_one_shot_phase_scope_invalid");
+  }
   if (
     !Number.isInteger(followQuota)
     || followQuota <= 0
     || followQuota > 50
     || Number(quota.follow) !== followQuota
-    || Number(quota.welcome) !== 0
-    || Number(quota.unfollow) !== 0
-    || Number(quota.outreach) !== 0
   ) return reject("follow_60s_one_shot_quota_invalid");
   if (!Number.isFinite(liveFollowRemaining) || liveFollowRemaining !== followQuota) {
     return reject("follow_60s_one_shot_live_quota_mismatch");
@@ -342,7 +346,13 @@ export function applyFollow60sOneShotFrozenPlan(input: {
       resume_plan: {
         ...input.baseMetadata.resume_plan,
         ...frozenPlan,
-        follow_60s_canary_contract: contract,
+        follow_60s_canary_contract: {
+          ...contract,
+          // Normalize legacy Rex controls at plan construction.  The Worker
+          // accepts one account-neutral schema and never needs account source
+          // special-casing during activation.
+          schema: FOLLOW_60S_ONE_SHOT_SCHEMA,
+        },
         phases_to_run: {
           welcome: false,
           follow: true,
@@ -353,6 +363,12 @@ export function applyFollow60sOneShotFrozenPlan(input: {
           follow: followQuota,
           unfollow: 0,
           outreach: 0,
+        },
+        phase_plan_source: "follow60_armed_control",
+        preserved_business_backlog: {
+          welcome: Math.max(0, Number(quota.welcome) || 0),
+          unfollow: Math.max(0, Number(quota.unfollow) || 0),
+          outreach: Math.max(0, Number(quota.outreach) || 0),
         },
       },
     },

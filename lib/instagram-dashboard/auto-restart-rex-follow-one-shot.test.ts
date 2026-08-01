@@ -3,13 +3,13 @@ import test from "node:test";
 
 import {
   applyFollow60sOneShotFrozenPlan,
-  FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
   FOLLOW_60S_ONE_SHOT_SCHEMA,
 } from "./auto-restart-resume-metadata.ts";
 
-test("one-shot contract is scoped only to Rex V2", () => {
-  assert.equal(FOLLOW_60S_ONE_SHOT_ACCOUNT_ID, "b024e94e-395d-4f02-9787-81ddc679b014");
-  assert.equal(FOLLOW_60S_ONE_SHOT_SCHEMA, "REX_FOLLOW_60S_ONE_SHOT_V2");
+const ACCOUNT_ID = "ba73eda4-d22a-4b93-9683-2af7b8aab764";
+
+test("one-shot contract is generic and control-driven", () => {
+  assert.equal(FOLLOW_60S_ONE_SHOT_SCHEMA, "FOLLOW_60S_ONE_SHOT_V2");
 });
 
 function baseMetadata() {
@@ -40,7 +40,7 @@ function baseMetadata() {
     resume_plan: {
       schema: "AUTO_RESTART_RESUME_PLAN_V2",
       plan_version: 2,
-      account_id: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+      account_id: ACCOUNT_ID,
       assignment_id: "assignment",
       device_id: "device",
       app_instance_id: "app",
@@ -85,7 +85,7 @@ function frozenPlan() {
   return {
     schema: "AUTO_RESTART_RESUME_PLAN_V2",
     plan_version: 2,
-    account_id: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+    account_id: ACCOUNT_ID,
     package_contract_ready: true,
     phase_order: ["welcome", "follow", "unfollow"],
     phases_to_run: { welcome: false, follow: true, unfollow: false },
@@ -100,11 +100,14 @@ function frozenPlan() {
   };
 }
 
-test("account-scoped one-shot preserves exact Follow-only plan and strips rebuilt Unfollow", () => {
+test("account-scoped one-shot preserves backlog but forces exact Follow-only execution", () => {
+  const plan = frozenPlan();
+  plan.phases_to_run.unfollow = true;
+  plan.quota_remaining.unfollow = 24;
   const result = applyFollow60sOneShotFrozenPlan({
     baseMetadata: baseMetadata(),
-    frozenPlan: frozenPlan(),
-    authorizationAccountId: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+    frozenPlan: plan,
+    authorizationAccountId: ACCOUNT_ID,
     originalRunId: "source-run",
     liveFollowRemaining: 40,
   });
@@ -122,13 +125,19 @@ test("account-scoped one-shot preserves exact Follow-only plan and strips rebuil
     unfollow: 0,
     outreach: 0,
   });
+  assert.equal(result.metadata.resume_plan.phase_plan_source, "follow60_armed_control");
+  assert.deepEqual(result.metadata.resume_plan.preserved_business_backlog, {
+    welcome: 0,
+    unfollow: 24,
+    outreach: 0,
+  });
 });
 
 test("account-scoped one-shot fails closed when live Follow quota changed", () => {
   const result = applyFollow60sOneShotFrozenPlan({
     baseMetadata: baseMetadata(),
     frozenPlan: frozenPlan(),
-    authorizationAccountId: FOLLOW_60S_ONE_SHOT_ACCOUNT_ID,
+    authorizationAccountId: ACCOUNT_ID,
     originalRunId: "source-run",
     liveFollowRemaining: 39,
   });
