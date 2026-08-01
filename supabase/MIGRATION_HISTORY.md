@@ -1,5 +1,18 @@
 # Supabase migration history — reconciliation notes
 
+## Source-only candidate — Follow 60 generic runtime binder V2
+
+| Local version | Filename | Role | Production status |
+|---------------|----------|------|-------------------|
+| `20260801123500` | `20260801123500_follow_60s_canary_runtime_generic_v2.sql` | Replaces the Rex-scoped five-argument binder with the account-neutral, canonical-control-driven V2 signature | **Not applied** |
+
+Rollback: `supabase/rollback/20260801123500_follow_60s_canary_runtime_generic_v2.down.sql`.
+Procedure and handover: `docs/follow-60-canary-account-switch.md` and
+`docs/handover/follow-60-canary-account-switch-v1.md`.
+
+Do not apply this candidate, arm an account or switch/restart the Worker without
+a separate explicit runtime activation GO.
+
 This document records how the repository migration filenames align with the **main production database** migration history (`zgafnshkjywfltxgbtzg`).
 
 It does **not** replace the full remote history. The repo still contains only a subset of migrations used by this frontend project; older production migrations may exist only on the remote database.
