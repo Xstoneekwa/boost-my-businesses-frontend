@@ -6,6 +6,7 @@ import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/au
 import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-restart-scheduler-state";
 import { resolveUnfollowRuntimeCap } from "@/lib/instagram-dashboard/run-control";
 import {
+  canonicalOperatorStopContinuationAuthorized,
   exactViewportResumeEvidence,
   resolveAccountRestartEligibility,
   resolveAutoRestartDecisionOutcome,
@@ -137,6 +138,9 @@ export type AutoRestartCandidate = {
   safeRestartStrategy: SafeRestartStrategy;
   safeRestartReason: string;
   historicalSafeBoundaryFallback: boolean;
+  operatorStopContinuation?: boolean;
+  operatorStopReason?: string | null;
+  freshBoundaryOnly?: boolean;
   enqueueAllowed: boolean;
   sourceRunId: string;
   sourceBusinessSessionId: string;
@@ -195,6 +199,8 @@ export type AutoRestartCandidate = {
     lastRunId: string;
     lastRunStatus: string;
     sourceLabel: string;
+    operatorStopContinuation?: boolean;
+    operatorStopReason?: string;
   };
   quotas: {
     follow: AutoRestartQuotaPreview;
@@ -495,6 +501,8 @@ function reliabilityFromLatestRun(
       lastRunId: "",
       lastRunStatus: "",
       sourceLabel: "no_recent_run",
+      operatorStopContinuation: false,
+      operatorStopReason: "",
     };
   }
 
@@ -539,16 +547,28 @@ function reliabilityFromLatestRun(
   const canonicalNextRetryIndex = canonicalAttemptId === null
     ? projectedNextRetryIndex
     : String(canonicalAttemptId);
+  const restartBlockReason = readString(
+    canonicalPlanRow?.restart_block_reason ?? resumePlan?.restart_block_reason,
+    readString(performance?.auto_restart_restart_block_reason, "resume_plan_missing"),
+  );
+  const sourceRequestStatus = readString(sourceRequest?.status, "").toLowerCase();
+  const operatorStopReason = readString(sourceRequest?.cancel_reason, "").toLowerCase();
+  const operatorStopContinuation = canonicalOperatorStopContinuationAuthorized({
+    sourcePlanLineageValid,
+    attemptLineageValid: attemptIdentity.lineageValid,
+    lastRunStatus: readString(latestRun.status, ""),
+    sourceRequestStatus,
+    cancelRequestedAt: readString(sourceRequest?.cancel_requested_at, ""),
+    cancelReason: operatorStopReason,
+    restartBlockReason,
+  });
 
   return {
     restartAllowed,
     // CP1: a run without any resume-plan verdict is a real, explainable state
     // (the worker never produced a restart decision for it) — expose the
     // stable canonical reason instead of the former literal "unknown".
-    restartBlockReason: readString(
-      canonicalPlanRow?.restart_block_reason ?? resumePlan?.restart_block_reason,
-      readString(performance?.auto_restart_restart_block_reason, "resume_plan_missing"),
-    ),
+    restartBlockReason,
     unsafeMarkers,
     currentAttempt: canonicalAttemptId === null
       ? readString(resumePlan?.current_attempt_id, "—") || "—"
@@ -644,6 +664,8 @@ function reliabilityFromLatestRun(
       : resumePlan
         ? "ig_runs.performance_summary.resume_plan"
         : "ig_runs.performance_summary",
+    operatorStopContinuation,
+    operatorStopReason,
   };
 }
 
@@ -973,14 +995,19 @@ function planCandidate({
   if ((!resolvedPhoneName || resolvedPhoneName === "Unknown phone") && !hasAssignedDevice) {
     blockingReasons.push("assignment_or_device_pending");
   }
-  const persistedPhasesForPlanning = partialUnfollowLiveResume.applies
+  const operatorStopContinuation = reliability.operatorStopContinuation === true;
+  const persistedPhasesForPlanning = operatorStopContinuation
+    ? null
+    : partialUnfollowLiveResume.applies
     ? {
       welcome: false,
       follow: false,
       unfollow: partialUnfollowLiveResume.authorized,
     }
     : reliability.phasesToRun;
-  const persistedQuotaForPlanning = partialUnfollowLiveResume.applies
+  const persistedQuotaForPlanning = operatorStopContinuation
+    ? {}
+    : partialUnfollowLiveResume.applies
     ? {
       welcome: 0,
       follow: 0,
@@ -1028,7 +1055,7 @@ function planCandidate({
   // A canonical account-session resume plan is authoritative. It must never
   // silently switch to a fresh Outreach run because unrelated raw quota exists.
   const outreachRemaining = reliability.phasesToRun || partialUnfollowLiveResume.applies
-    ? 0
+    ? operatorStopContinuation ? outreach.remaining : 0
     : outreach.remaining;
   const outreachPhaseCompletion = resolvePhaseCompletion({
     enabled: outreachRemaining > 0,
@@ -1068,8 +1095,9 @@ function planCandidate({
     restartBlockReason: reliability.restartBlockReason,
     totalRemainingQuota,
     canonicalLiveUnfollowResumeAuthorized: partialUnfollowLiveResume.authorized,
+    operatorStopContinuationAuthorized: operatorStopContinuation,
   });
-  const exactViewportResumeAvailable = exactViewportResumeEvidence({
+  const exactViewportResumeAvailable = !operatorStopContinuation && exactViewportResumeEvidence({
     safeCheckpointAvailable: reliability.safeCheckpointAvailable,
     targetRotationSafeAfterScrollFailure: reliability.targetRotationSafeAfterScrollFailure,
     scrollFailureSurfaceAmbiguous: reliability.scrollFailureSurfaceAmbiguous,
@@ -1083,6 +1111,7 @@ function planCandidate({
     eligibleTargets: eligibleFollowTargets,
     workerPlanExplicitlySafe: reliability.restartAllowed === true
       || restartNeed.canonicalLiveUnfollowOverride,
+    forceFreshBoundary: operatorStopContinuation,
   });
   const enqueueAllowed = accountEligible
     && restartNeed.needed
@@ -1106,12 +1135,14 @@ function planCandidate({
         ? "outreach_session"
         : "none";
 
-  const nextRetryIndex = resolveCanonicalNextRetryIndex({
+  const nextRetryIndex = operatorStopContinuation ? 0 : resolveCanonicalNextRetryIndex({
     canonicalAttemptId: reliability.canonicalAttemptId,
     retryIndex: reliability.retryIndex,
     nextRetryIndex: reliability.nextRetryIndex,
   });
-  const sourceBusinessSessionId = reliability.businessSessionId || reliability.lastRunId;
+  const sourceBusinessSessionId = operatorStopContinuation
+    ? `operator-stop:${reliability.lastRunId}`
+    : reliability.businessSessionId || reliability.lastRunId;
 
   return {
     accountId: account.accountId,
@@ -1170,6 +1201,9 @@ function planCandidate({
     safeRestartStrategy: safeRestart.strategy,
     safeRestartReason: safeRestart.reason,
     historicalSafeBoundaryFallback: restartNeed.historicalSafeBoundaryFallback,
+    operatorStopContinuation,
+    operatorStopReason: operatorStopContinuation ? reliability.operatorStopReason : null,
+    freshBoundaryOnly: operatorStopContinuation,
     enqueueAllowed,
     sourceRunId: reliability.lastRunId,
     sourceBusinessSessionId,
@@ -1368,7 +1402,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const sourceRunRequestsPromise = Promise.all(
     chunked(latestRunIds, 100).map((runIdBatch) => supabase
       .from("account_run_requests")
-      .select("id,account_id,run_id,status,created_at,metadata_safe")
+      .select("id,account_id,run_id,status,created_at,cancel_reason,cancel_requested_at,metadata_safe")
       .in("run_id", runIdBatch)
       .order("created_at", { ascending: false })
       .limit(1000)),

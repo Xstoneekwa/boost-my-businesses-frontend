@@ -371,3 +371,70 @@ test("explicit platform unsafe marker blocks a retry but generic failure text do
   candidate.blockReason = "python failed with recoverable error";
   assert.equal(accountRiskTier(candidate), "green");
 });
+
+function operatorStopCandidate() {
+  const candidate = recoverableCandidate(0);
+  candidate.operatorStopContinuation = true;
+  candidate.operatorStopReason = "botapp_manual_stop";
+  candidate.freshBoundaryOnly = true;
+  candidate.sourceRunId = "operator-stopped-run";
+  candidate.sourceRequestId = "operator-stop-request";
+  candidate.canonicalAttemptId = 1;
+  candidate.sourceLineageValid = true;
+  candidate.sourceBusinessSessionId = "operator-stop:operator-stopped-run";
+  candidate.nextRetryIndex = 0;
+  candidate.exactViewportResumeAvailable = false;
+  candidate.safeRestartStrategy = "rebuilt_safe_target_plan";
+  candidate.safeRestartReason = "operator_stop_live_phase_plan_rebuilt";
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "operator_canceled";
+  candidate.reliability.sessionTerminationClass = "completed";
+  candidate.reliability.lastRunStatus = "stopped";
+  candidate.reliability.lastRunId = "operator-stopped-run";
+  candidate.reliability.operatorStopContinuation = true;
+  candidate.reliability.operatorStopReason = "botapp_manual_stop";
+  candidate.reliability.failureCategory = "";
+  candidate.plannedPhasesToRun = { welcome: false, follow: false, unfollow: true };
+  candidate.plannedQuotaRemaining = { welcome: 0, follow: 0, unfollow: 5, outreach: 0 };
+  candidate.eligibleUnfollowCandidateCount = 5;
+  return candidate;
+}
+
+test("canonical BotApp stop is supported only as a fresh-boundary continuation", () => {
+  const candidate = operatorStopCandidate();
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+  const metadata = buildAutoRestartResumePlanMetadata(candidate);
+  assert.equal(metadata.operator_stop_continuation, true);
+  assert.equal(metadata.operator_stop_source_reason, "botapp_manual_stop");
+  assert.equal(metadata.fresh_boundary_only, true);
+  assert.equal(metadata.attempt_id, 1);
+  assert.equal(metadata.resume_plan.safe_restart_strategy, "rebuilt_safe_target_plan");
+});
+
+test("operator-stop continuation fails closed for a non-BotApp reason", () => {
+  const candidate = operatorStopCandidate();
+  candidate.operatorStopReason = "operator_stop_hotfix";
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), {
+    ok: false,
+    reason: "operator_stop_continuation_invalid",
+  });
+});
+
+test("operator-stop continuation fails closed if exact viewport reuse is attempted", () => {
+  const candidate = operatorStopCandidate();
+  candidate.exactViewportResumeAvailable = true;
+  candidate.safeRestartStrategy = "exact_checkpoint_resume";
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), {
+    ok: false,
+    reason: "operator_stop_continuation_invalid",
+  });
+});
+
+test("operator-stop continuation fails closed without canonical source lineage", () => {
+  const candidate = operatorStopCandidate();
+  candidate.sourceLineageValid = false;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), {
+    ok: false,
+    reason: "operator_stop_continuation_invalid",
+  });
+});

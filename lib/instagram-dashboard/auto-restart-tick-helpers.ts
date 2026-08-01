@@ -74,6 +74,9 @@ type ResumeCandidate = {
   [key: string]: unknown;
   restartNeeded?: boolean;
   historicalSafeBoundaryFallback?: boolean;
+  operatorStopContinuation?: boolean;
+  operatorStopReason?: string | null;
+  freshBoundaryOnly?: boolean;
   safeRestartStrategy?: string;
   sourceBusinessSessionId?: string;
   nextRetryIndex?: number;
@@ -99,6 +102,8 @@ type ResumeCandidate = {
     lastRunStatus?: string;
     sourceLabel?: string;
     unfollowPhaseStatus?: string;
+    operatorStopContinuation?: boolean;
+    operatorStopReason?: string;
   };
   blockReason: string;
   gateStatus: string;
@@ -217,6 +222,27 @@ function canonicalResumeQuotaRuntimeSupported(candidate: ResumeCandidate): Resum
 
 function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRuntimeSupport {
   const reliability = candidate.reliability;
+  const operatorStopContinuation = candidate.operatorStopContinuation === true;
+  if (operatorStopContinuation) {
+    const lastRunStatus = String(reliability.lastRunStatus || "").toLowerCase();
+    if (
+      reliability.operatorStopContinuation !== true
+      || reliability.operatorStopReason !== "botapp_manual_stop"
+      || candidate.operatorStopReason !== "botapp_manual_stop"
+      || !["stopped", "canceled"].includes(lastRunStatus)
+      || reliability.restartBlockReason.toLowerCase() !== "operator_canceled"
+      || candidate.sourceLineageValid !== true
+      || !candidate.sourceRequestId
+      || !Number.isSafeInteger(candidate.canonicalAttemptId)
+      || Number(candidate.canonicalAttemptId) < 1
+      || candidate.freshBoundaryOnly !== true
+      || candidate.exactViewportResumeAvailable === true
+      || candidate.safeRestartStrategy === "exact_checkpoint_resume"
+      || candidate.restartNeeded !== true
+    ) {
+      return { ok: false as const, reason: "operator_stop_continuation_invalid" };
+    }
+  }
   const canonicalLiveUnfollowOverride = candidate.canonicalLiveUnfollowResumeAuthorized === true;
   if (canonicalLiveUnfollowOverride) {
     const phases = candidate.plannedPhasesToRun;
@@ -259,6 +285,7 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
     reliability.restartAllowed !== true
     && !safeBoundaryFallback
     && !canonicalLiveUnfollowOverride
+    && !operatorStopContinuation
   ) {
     return { ok: false as const, reason: reliability.restartBlockReason || "restart_not_allowed" };
   }
@@ -285,10 +312,14 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
   if (!sessionClass || sessionClass === "unknown") {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }
-  if (["completed", "success", "completed_all_phases"].includes(sessionClass)) {
+  if (["completed", "success", "completed_all_phases"].includes(sessionClass) && !operatorStopContinuation) {
     return { ok: false as const, reason: "no_partial_run_to_resume" };
   }
-  if (!["partial_safe_stopped", "partial_resumable"].includes(sessionClass) && reliability.restartAllowed !== true) {
+  if (
+    !["partial_safe_stopped", "partial_resumable"].includes(sessionClass)
+    && reliability.restartAllowed !== true
+    && !operatorStopContinuation
+  ) {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }
   return canonicalResumeQuotaRuntimeSupported(candidate);
@@ -328,6 +359,13 @@ export function resumePlanRuntimeEvidence(candidate: ResumeCandidate) {
     next_evaluation_at: candidate.unfollowNextEvaluationAt ?? null,
     hold_next_retry_at: candidate.unfollowNextCandidateRetryAt ?? null,
     canonical_live_unfollow_resume: candidate.canonicalLiveUnfollowResumeAuthorized === true,
+    ...(candidate.operatorStopContinuation === true
+      ? {
+        operator_stop_continuation: true,
+        operator_stop_reason: candidate.operatorStopReason ?? null,
+        fresh_boundary_only: candidate.freshBoundaryOnly === true,
+      }
+      : {}),
     source_request_id: candidate.sourceRequestId ?? null,
     canonical_attempt_id: candidate.canonicalAttemptId ?? null,
     lineage_valid: candidate.sourceLineageValid === true,

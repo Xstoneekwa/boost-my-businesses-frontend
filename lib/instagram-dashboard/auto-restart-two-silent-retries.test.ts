@@ -399,3 +399,64 @@ test("the natural tick persists a not-needed decision without creating a request
     "none",
   );
 });
+
+test("a canonical BotApp stop gets one fresh-boundary natural continuation and never loops", async () => {
+  const supabase = new FakeSupabase();
+  const stopped = candidate(2);
+  stopped.operatorStopContinuation = true;
+  stopped.operatorStopReason = "botapp_manual_stop";
+  stopped.freshBoundaryOnly = true;
+  stopped.sourceRunId = "operator-stopped-run";
+  stopped.sourceRequestId = "operator-stop-request";
+  stopped.canonicalAttemptId = 3;
+  stopped.sourceLineageValid = true;
+  stopped.sourceBusinessSessionId = "operator-stop:operator-stopped-run";
+  stopped.nextRetryIndex = 0;
+  stopped.exactViewportResumeAvailable = false;
+  stopped.safeRestartStrategy = "rebuilt_safe_target_plan";
+  stopped.safeRestartReason = "operator_stop_live_phase_plan_rebuilt";
+  stopped.restartNeedReason = "operator_stopped_safe_boundary_continuation";
+  stopped.reliability.restartAllowed = false;
+  stopped.reliability.restartBlockReason = "operator_canceled";
+  stopped.reliability.sessionTerminationClass = "completed";
+  stopped.reliability.lastRunStatus = "stopped";
+  stopped.reliability.lastRunId = "operator-stopped-run";
+  stopped.reliability.operatorStopContinuation = true;
+  stopped.reliability.operatorStopReason = "botapp_manual_stop";
+  stopped.reliability.retryIndex = "9";
+  stopped.reliability.nextRetryIndex = "10";
+  stopped.reliability.failureCategory = "";
+  stopped.reliability.businessDaySast = "";
+  stopped.plannedQuotaRemaining = { welcome: 0, follow: 0, unfollow: 5, outreach: 0 };
+  stopped.eligibleUnfollowCandidateCount = 5;
+
+  const common = {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  };
+  const first = await runAutoRestartTick(supabase as never, {
+    ...common,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [stopped as unknown as Row] },
+  });
+  assert.equal(first.result.enqueued_count, 1);
+  assert.equal(supabase.requests[0].p_idempotency_key,
+    "auto-restart:account-1:operator-stop:operator-stopped-run:retry:0");
+  const requestMetadata = supabase.requests[0].p_metadata_safe as Row;
+  assert.equal(requestMetadata.operator_stop_continuation, true);
+  assert.equal(requestMetadata.fresh_boundary_only, true);
+  assert.equal(requestMetadata.attempt_id, 1);
+
+  const second = await runAutoRestartTick(supabase as never, {
+    ...common,
+    now: new Date("2026-07-22T20:01:00.000Z"),
+    overview: { candidates: [stopped as unknown as Row] },
+  });
+  assert.equal(second.result.enqueued_count, 0);
+  assert.equal(second.result.blocked_count, 1);
+  assert.match(second.result.blocked[0].reason, /resume_lineage_retry_budget_exhausted/);
+  assert.equal(supabase.requests.length, 1);
+});

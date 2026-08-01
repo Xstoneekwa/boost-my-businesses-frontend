@@ -351,6 +351,9 @@ function candidateDecisionMetadata(
     safe_restart_strategy: candidate.safeRestartStrategy,
     safe_restart_reason: candidate.safeRestartReason,
     historical_safe_boundary_fallback: candidate.historicalSafeBoundaryFallback,
+    operator_stop_continuation: candidate.operatorStopContinuation,
+    operator_stop_reason: candidate.operatorStopReason,
+    fresh_boundary_only: candidate.freshBoundaryOnly,
     remaining_follow_quota: candidate.remainingFollowQuota,
     source_run_id: candidate.sourceRunId || null,
     source_request_id: candidate.sourceRequestId ?? null,
@@ -690,7 +693,7 @@ export async function runAutoRestartTick(
         candidate.reliability.retryIndex,
         extendedRules.maxRetriesAfterInitialFailure,
       );
-      if (attemptsReason) blockReasons.push(attemptsReason);
+      if (attemptsReason && candidate.operatorStopContinuation !== true) blockReasons.push(attemptsReason);
 
       if (
         candidate.reliability.businessDaySast
@@ -704,7 +707,9 @@ export async function runAutoRestartTick(
       const restartsInBusinessSession = businessSessionId
         ? restartCounts.byBusinessSession.get(`${candidate.accountId}:${businessSessionId}`) ?? 0
         : 0;
-      const progressContinuation = candidate.reliability.businessProgressMade === true;
+      const progressContinuation = candidate.operatorStopContinuation === true
+        ? false
+        : candidate.reliability.businessProgressMade === true;
       const phaseKey = resumePhaseKey(candidate.plannedPhasesToRun);
       const reasonKey = resumeReasonKey(candidate);
       const lineageKey = resumeLineageBudgetKey(candidate);
@@ -762,10 +767,12 @@ export async function runAutoRestartTick(
       // advertising the previous nextRetryIndex. Advance from the durable
       // enqueue history so a later natural tick cannot reuse the same
       // idempotency key and report a phantom enqueue of the old request.
-      const nextRetryIndex = Math.max(
-        candidate.nextRetryIndex,
-        progressContinuation ? candidate.nextRetryIndex : restartsInBusinessSession + 1,
-      );
+      const nextRetryIndex = candidate.operatorStopContinuation === true
+        ? 0
+        : Math.max(
+          candidate.nextRetryIndex,
+          progressContinuation ? candidate.nextRetryIndex : restartsInBusinessSession + 1,
+        );
       const scheduledCandidate = nextRetryIndex === candidate.nextRetryIndex
         ? candidate
         : {

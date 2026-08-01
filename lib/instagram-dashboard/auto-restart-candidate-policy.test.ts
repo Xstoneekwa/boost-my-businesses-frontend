@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canonicalOperatorStopContinuationAuthorized,
   exactViewportResumeEvidence,
   resolveAccountRestartEligibility,
   resolveAutoRestartDecisionOutcome,
@@ -251,4 +252,61 @@ test("canonical live Unfollow backlog never overrides a critical Worker block", 
   assert.equal(result.needed, false);
   assert.equal(result.canonicalLiveUnfollowOverride, false);
   assert.equal(result.reason, "cleanup_not_completed");
+});
+
+test("a canonical BotApp stop starts a fresh safe-boundary session when live quota remains", () => {
+  assert.deepEqual(resolveRestartNeed({
+    lastRunId: "stopped-run",
+    sessionTerminationClass: "completed",
+    restartAllowed: false,
+    restartBlockReason: "operator_canceled",
+    totalRemainingQuota: 7,
+    operatorStopContinuationAuthorized: true,
+  }), {
+    needed: true,
+    reason: "operator_stopped_safe_boundary_continuation",
+    historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: false,
+  });
+});
+
+test("operator-stop continuation ignores an exact viewport and rebuilds a fresh boundary", () => {
+  assert.deepEqual(resolveSafeRestartStrategy({
+    restartNeeded: true,
+    followPhasePlanned: false,
+    followRemaining: 0,
+    exactViewportResumeAvailable: true,
+    priorTargetId: "stale-target",
+    eligibleTargets: [],
+    workerPlanExplicitlySafe: false,
+    forceFreshBoundary: true,
+  }), {
+    strategy: "rebuilt_safe_target_plan",
+    reason: "operator_stop_live_phase_plan_rebuilt",
+    nextTargetId: null,
+  });
+});
+
+test("operator-stop provenance accepts only the exact canonical BotApp cancellation", () => {
+  const canonical = {
+    sourcePlanLineageValid: true,
+    attemptLineageValid: true,
+    lastRunStatus: "stopped",
+    sourceRequestStatus: "canceled",
+    cancelRequestedAt: "2026-08-01T12:00:00.000Z",
+    cancelReason: "botapp_manual_stop",
+    restartBlockReason: "operator_canceled",
+  };
+  assert.equal(canonicalOperatorStopContinuationAuthorized(canonical), true);
+  for (const mutation of [
+    { cancelReason: "operator_stop_hotfix" },
+    { cancelRequestedAt: "" },
+    { sourceRequestStatus: "running" },
+    { lastRunStatus: "completed" },
+    { restartBlockReason: "restriction_blocked" },
+    { sourcePlanLineageValid: false },
+    { attemptLineageValid: false },
+  ]) {
+    assert.equal(canonicalOperatorStopContinuationAuthorized({ ...canonical, ...mutation }), false);
+  }
 });

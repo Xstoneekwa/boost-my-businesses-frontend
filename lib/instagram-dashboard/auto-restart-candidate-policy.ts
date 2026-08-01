@@ -18,6 +18,7 @@ export type RestartNeedInput = {
   restartBlockReason: string;
   totalRemainingQuota: number;
   canonicalLiveUnfollowResumeAuthorized?: boolean;
+  operatorStopContinuationAuthorized?: boolean;
 };
 
 export type SafeRestartStrategyInput = {
@@ -28,6 +29,7 @@ export type SafeRestartStrategyInput = {
   priorTargetId: string | null;
   eligibleTargets: SafeBoundaryTarget[];
   workerPlanExplicitlySafe: boolean;
+  forceFreshBoundary?: boolean;
 };
 
 const HISTORICAL_SAFE_BOUNDARY_FALLBACK_REASONS = new Set([
@@ -37,6 +39,24 @@ const HISTORICAL_SAFE_BOUNDARY_FALLBACK_REASONS = new Set([
 
 function normalized(value: string | null | undefined) {
   return String(value || "").trim().toLowerCase();
+}
+
+export function canonicalOperatorStopContinuationAuthorized(input: {
+  sourcePlanLineageValid: boolean;
+  attemptLineageValid: boolean;
+  lastRunStatus: string;
+  sourceRequestStatus: string;
+  cancelRequestedAt: string;
+  cancelReason: string;
+  restartBlockReason: string;
+}) {
+  return input.sourcePlanLineageValid
+    && input.attemptLineageValid
+    && ["stopped", "canceled"].includes(normalized(input.lastRunStatus))
+    && normalized(input.sourceRequestStatus) === "canceled"
+    && Boolean(input.cancelRequestedAt.trim())
+    && normalized(input.cancelReason) === "botapp_manual_stop"
+    && normalized(input.restartBlockReason) === "operator_canceled";
 }
 
 export function isPartialResumeClass(value: string) {
@@ -103,6 +123,15 @@ export function resolveRestartNeed(input: RestartNeedInput) {
     return {
       needed: false,
       reason: "quota_exhausted",
+      historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
+    } as const;
+  }
+
+  if (input.operatorStopContinuationAuthorized === true) {
+    return {
+      needed: true,
+      reason: "operator_stopped_safe_boundary_continuation",
       historicalSafeBoundaryFallback: false,
       canonicalLiveUnfollowOverride: false,
     } as const;
@@ -192,6 +221,14 @@ export function resolveSafeRestartStrategy(input: SafeRestartStrategyInput) {
     };
   }
 
+  if (input.forceFreshBoundary && !input.followPhasePlanned) {
+    return {
+      strategy: "rebuilt_safe_target_plan" as SafeRestartStrategy,
+      reason: "operator_stop_live_phase_plan_rebuilt",
+      nextTargetId: null,
+    };
+  }
+
   if (!input.followPhasePlanned && input.workerPlanExplicitlySafe) {
     return {
       strategy: "exact_checkpoint_resume" as SafeRestartStrategy,
@@ -200,7 +237,7 @@ export function resolveSafeRestartStrategy(input: SafeRestartStrategyInput) {
     };
   }
 
-  if (input.exactViewportResumeAvailable) {
+  if (input.exactViewportResumeAvailable && !input.forceFreshBoundary) {
     return {
       strategy: "exact_checkpoint_resume" as SafeRestartStrategy,
       reason: "certified_exact_checkpoint",
