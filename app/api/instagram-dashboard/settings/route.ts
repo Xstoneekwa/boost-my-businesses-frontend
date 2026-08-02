@@ -29,6 +29,10 @@ import {
   type PackageFollowPolicy,
 } from "@/lib/instagram-dashboard/follow-cap-policy";
 import { getAccountId, readBoolean, readJsonBody, readNumber, readString, requireRelayOrAdmin, type SupabaseRecord } from "../_utils";
+import {
+  canonicalScheduleTimeslotFromAssignment,
+  projectCanonicalScheduleTimeslot,
+} from "@/lib/instagram-dashboard/schedule-settings-reconciliation";
 
 export const dynamic = "force-dynamic";
 
@@ -1014,6 +1018,31 @@ async function fetchAccount(accountId: string, supabase = createSupabaseClient()
   return data;
 }
 
+async function fetchCanonicalScheduleTimeslot(
+  accountId: string,
+  supabase: ReturnType<typeof createSupabaseClient>,
+) {
+  const { data: assignment, error } = await supabase
+    .from("account_assignments")
+    .select("schedule_mode,starts_at,ends_at,device_id")
+    .eq("account_id", accountId)
+    .in("status", ["pending", "reserved", "active"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<SupabaseRecord>();
+  if (error) throw new Error(`schedule_assignment_read_failed:${error.message}`);
+  if (!assignment || readString(assignment.schedule_mode, "") !== "scheduled") return null;
+  const deviceId = readString(assignment.device_id, "");
+  const { data: device, error: deviceError } = deviceId
+    ? await supabase.from("phone_devices").select("timezone").eq("id", deviceId).maybeSingle<SupabaseRecord>()
+    : { data: null, error: null };
+  if (deviceError) throw new Error(`schedule_device_read_failed:${deviceError.message}`);
+  return canonicalScheduleTimeslotFromAssignment({
+    ...assignment,
+    device_timezone: readString(device?.timezone, ""),
+  });
+}
+
 function jsonSuccess(settings: SettingsPayload, status = 200) {
   return NextResponse.json({ ok: true, data: safeSettingsForClient(settings) } satisfies SettingsResponse, { status });
 }
@@ -1133,12 +1162,16 @@ async function saveSettings(request: Request) {
         normalizeSettings({ account_id: accountId } as SettingsRecord, accountId),
         packagePolicy,
       );
-    const settings = withFollowManualAliases(
+    const normalizedSettings = withFollowManualAliases(
       preserveProtectedSettings(
         normalizeSettings({ ...baseSettings, ...body, account_id: accountId } as SettingsRecord, accountId),
         existing,
       ),
     );
+    const settings = projectCanonicalScheduleTimeslot(
+      normalizedSettings,
+      await fetchCanonicalScheduleTimeslot(accountId, supabase),
+    ) as SettingsPayload;
     const followCapValidation = validateConfiguredFollowCaps({
       configuredDayCap: settings.max_actions_per_day,
       configuredSessionCap: settings.follow_limit,

@@ -167,6 +167,31 @@ test("scheduleSessionIdempotencyKey is stable per assignment window", () => {
   );
 });
 
+for (const terminalStatus of ["failed", "completed", "canceled"] as const) {
+  test(`${terminalStatus} in the old slot cannot block the next slot`, () => {
+    const oldSlot = "2026-08-02T16:00:00.000Z";
+    const nextSlot = "2026-08-02T22:00:00.000Z";
+    const oldKey = scheduleSessionIdempotencyKey("assignment-1", oldSlot);
+    const nextKey = scheduleSessionIdempotencyKey("assignment-1", nextSlot);
+    assert.notEqual(oldKey, nextKey);
+    assert.equal({ status: terminalStatus, idempotency_key: oldKey }.status, terminalStatus);
+    assert.equal(nextKey, "schedule-session:assignment-1:2026-08-02T22:00:00.000Z");
+  });
+}
+
+test("same slot always keeps one idempotency key", () => {
+  assert.equal(
+    scheduleSessionIdempotencyKey("assignment-1", windowStart),
+    scheduleSessionIdempotencyKey("assignment-1", windowStart),
+  );
+});
+
+test("23:59 to 00:00 changes the materialized business slot key", () => {
+  const beforeMidnightSlot = scheduleSessionIdempotencyKey("assignment-1", "2026-08-01T22:00:00.000Z");
+  const nextMidnightSlot = scheduleSessionIdempotencyKey("assignment-1", "2026-08-02T22:00:00.000Z");
+  assert.notEqual(beforeMidnightSlot, nextMidnightSlot);
+});
+
 test("scheduleSessionRetryIdempotencyKey is stable and versioned", () => {
   const base = scheduleSessionIdempotencyKey("assignment-1", windowStart);
   assert.equal(scheduleSessionRetryIdempotencyKey(base, 1), `${base}:retry:v1:1`);

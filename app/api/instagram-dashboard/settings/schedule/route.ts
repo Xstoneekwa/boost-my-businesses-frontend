@@ -11,6 +11,9 @@ import {
 } from "@/lib/instagram-dashboard/schedule";
 import { normalizeLegacyScheduleTimezone } from "@/lib/instagram-dashboard/business-timezone";
 import { sanitizeRunControlReason } from "@/lib/instagram-dashboard/run-control";
+import {
+  canonicalScheduleTimeslotFromAssignment,
+} from "@/lib/instagram-dashboard/schedule-settings-reconciliation";
 import { createSupabaseClient } from "@/lib/supabase";
 import {
   getAccountId,
@@ -433,6 +436,25 @@ async function recordAudit(
   });
 }
 
+async function syncLegacyScheduleSettingsProjection(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  projection: ScheduleProjection,
+) {
+  const assignment = projection.current_assignment;
+  const canonical = canonicalScheduleTimeslotFromAssignment(assignment ? {
+    schedule_mode: assignment.schedule_mode,
+    starts_at: assignment.starts_at,
+    ends_at: assignment.ends_at,
+    device_timezone: projection.device_timezone,
+  } : null);
+  if (!canonical) return;
+  const { error } = await supabase
+    .from("ig_account_settings")
+    .update({ ...canonical, updated_at: new Date().toISOString() })
+    .eq("account_id", projection.account_id);
+  if (error) throw new Error(`schedule_settings_projection_sync_failed:${error.message}`);
+}
+
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
@@ -507,6 +529,7 @@ export async function PATCH(request: Request) {
       }
       const assignResult = readRpcObject(data);
       const after = await buildScheduleProjection(supabase, accountId);
+      await syncLegacyScheduleSettingsProjection(supabase, after);
       const fieldsChanged = sameAssignmentChanged(before.current_assignment, after.current_assignment)
         ? []
         : ["assignment_manual_only"];
@@ -586,6 +609,7 @@ export async function PATCH(request: Request) {
 
     const assignResult = readRpcObject(data);
     const after = await buildScheduleProjection(supabase, accountId);
+    await syncLegacyScheduleSettingsProjection(supabase, after);
     const fieldsChanged = sameAssignmentChanged(before.current_assignment, after.current_assignment)
       ? []
       : ["assignment_slot"];
