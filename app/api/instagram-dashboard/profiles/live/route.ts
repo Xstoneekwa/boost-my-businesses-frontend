@@ -84,7 +84,7 @@ export async function GET(request: Request) {
     const since = businessDay.startIso;
     const [requests, runs, logs, events, unfollows, actions, socialProfileSnapshots] = await Promise.all([
       supabase.from("account_run_requests").select("id,account_id,status,run_id,cancel_requested_at,created_at,claimed_at").in("account_id", existingAccountIds).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]).limit(1000),
-      supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at").in("account_id", existingAccountIds).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
+      supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at").in("account_id", existingAccountIds).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_action_logs").select("id,account_id,run_id,target_username,action_type,status,payload,created_at").in("account_id", existingAccountIds).gte("created_at", since).limit(10000),
       supabase.from("ig_interaction_events").select("id,account_id,run_id,username,event_type,event_status,event_at,created_at,payload").in("account_id", existingAccountIds).gte("event_at", since).lte("event_at", now).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", existingAccountIds).eq("unfollow_result", "success").gte("unfollowed_at", since).lte("unfollowed_at", now).limit(10000),

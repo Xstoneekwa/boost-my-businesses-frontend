@@ -126,6 +126,28 @@ function runScopedCounters(
   const scopedLogs = logs.filter((row) => readString(row.run_id, "") === runId);
   const scopedRuns = runs.filter((row) => readString(row.id, readString(row.run_id, "")) === runId);
   const scopedEvents = interactionEvents.filter((row) => readString(row.run_id, "") === runId);
+  const canonicalRun = scopedRuns.find((row) => "live_counter_revision" in row);
+  if (canonicalRun) {
+    const follows = Math.max(0, readNumber(canonicalRun, ["total_follow"], 0) ?? 0);
+    const likes = Math.max(0, readNumber(canonicalRun, ["total_like"], 0) ?? 0);
+    const dms = Math.max(0, readNumber(canonicalRun, ["total_dm"], 0) ?? 0);
+    const stories = Math.max(0, readNumber(canonicalRun, ["total_story"], 0) ?? 0);
+    return {
+      follows,
+      unfollows: 0,
+      likes,
+      comments: 0,
+      dms,
+      stories,
+      interactionsTotal: follows + likes + dms + stories,
+      source: "canonical_ack",
+      projectionSource: "canonical_ack",
+      runId,
+      revision: Math.max(0, readNumber(canonicalRun, ["live_counter_revision"], 0) ?? 0),
+      updatedAt: readString(canonicalRun.updated_at, "") || null,
+      lastProgressAt: readString(canonicalRun.updated_at, "") || null,
+    };
+  }
   return {
     ...reconcileSocialCounters(
       actionCountersFromLogs(scopedLogs),
@@ -325,7 +347,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
-      supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,created_at,started_at,finished_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
+      supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
     ]);

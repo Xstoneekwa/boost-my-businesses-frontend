@@ -32,6 +32,34 @@ function newest(rows: Row[]) {
   return [...rows].sort((left, right) => rowTime(right).localeCompare(rowTime(left)))[0];
 }
 
+function nonNegativeInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function versionedCanonicalRunCounters(run: Row | undefined) {
+  if (!run || !("live_counter_revision" in run)) return null;
+  const follows = nonNegativeInteger(run.total_follow);
+  const likes = nonNegativeInteger(run.total_like);
+  const dms = nonNegativeInteger(run.total_dm);
+  const stories = nonNegativeInteger(run.total_story);
+  return {
+    follows,
+    unfollows: 0,
+    likes,
+    comments: 0,
+    dms,
+    stories,
+    interactionsTotal: follows + likes + dms + stories,
+    source: "canonical_ack",
+    projectionSource: "canonical_ack",
+    runId: text(run.id) || null,
+    revision: nonNegativeInteger(run.live_counter_revision),
+    updatedAt: rowTime(run) || null,
+    lastProgressAt: rowTime(run) || null,
+  };
+}
+
 function grouped(rows: Row[]) {
   const result = new Map<string, Row[]>();
   for (const row of rows) {
@@ -105,6 +133,7 @@ export function projectProfilesLive(input: {
     const events = eventsByAccount.get(id) ?? [];
     const activeRequest = newest(requests.filter((row) => activeRequestStatuses.has(text(row.status).toLowerCase())));
     const activeRun = newest(runs.filter((row) => activeRunStatuses.has(text(row.status).toLowerCase())));
+    const latestRun = newest(runs);
     const activeProjection = activeRuntimeProjection(activeRequest, activeRun);
     const activeRunId = text(activeRun?.id) || text(activeRequest?.run_id);
     const historicalRuns = runs.filter((row) => text(row.id) !== activeRunId);
@@ -114,7 +143,7 @@ export function projectProfilesLive(input: {
       runTotalsCounters(historicalRuns),
       interactionEventCounters(historicalEvents),
     );
-    const counters = activeRunId
+    const projectedCounters = activeRunId
       ? projectVerifiedRunCounters({
           accountId: id,
           runId: activeRunId,
@@ -134,8 +163,9 @@ export function projectProfilesLive(input: {
           projectionSource: "canonical_daily",
           lastProgressAt: null,
         };
+    const counters = versionedCanonicalRunCounters(activeRun ?? latestRun)
+      ?? { ...projectedCounters, revision: 0, updatedAt: projectedCounters.lastProgressAt ?? null };
     const currentBlocker = newest((actionsByAccount.get(id) ?? []).filter((row) => isCurrentBlockingDashboardAction(row, { now: new Date(input.now) })));
-    const latestRun = newest(runs);
     const updatedAt = [
       rowTime(activeRequest ?? {}),
       rowTime(activeRun ?? {}),
@@ -154,14 +184,14 @@ export function projectProfilesLive(input: {
       runtimeIndicator: runtimeIndicator(activeRequest, activeRun, latestRun),
       currentRunCounters: counters,
       liveSupportedKinds: ["follow", "unfollow", "like", "dm"],
-      countersToday: counters.projectedDisplayCount,
+      countersToday: projectedCounters.projectedDisplayCount,
       counterProjection: {
         businessDate: projection.businessDate,
         businessTimezone: projection.timezone,
         computedAt: input.now,
         source: "canonical_persisted_actions_sast_v1",
       },
-      interactionsToday: counters.projectedDisplayCount.interactionsTotal,
+      interactionsToday: projectedCounters.projectedDisplayCount.interactionsTotal,
       currentBlocker: currentBlocker ? {
         actionType: text(currentBlocker.action_type),
         status: text(currentBlocker.status),
