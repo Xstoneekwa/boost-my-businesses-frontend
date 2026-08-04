@@ -69,6 +69,7 @@ export function resolveArmedFollow60Control(input: {
   const baseline = integer(row.baseline_follow_count);
   const increment = integer(row.evaluation_increment);
   const target = integer(row.target_follow_count);
+  const canonicalFollowLimit = integer(metadata.canonical_follow_limit);
   const expectedUsername = text(metadata.expected_username).replace(/^@/, "").toLowerCase();
   const candidateUsername = input.candidate.username.trim().replace(/^@/, "").toLowerCase();
   const expiresAtMs = Date.parse(expiresAt);
@@ -95,7 +96,9 @@ export function resolveArmedFollow60Control(input: {
     || baseline < 0
     || increment < 1
     || increment > 50
-    || target > 50
+    || canonicalFollowLimit === null
+    || canonicalFollowLimit < 1
+    || target > canonicalFollowLimit
     || target !== baseline + increment
   );
   if (invalid) {

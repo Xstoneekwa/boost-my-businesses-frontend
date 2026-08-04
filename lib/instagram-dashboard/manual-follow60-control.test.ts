@@ -30,11 +30,75 @@ function control(overrides: Record<string, unknown> = {}) {
       binding_version: "FOLLOW_60S_CANARY_BINDING_V2",
       runtime_binding_consumed: false,
       active_control_count: 1,
+      canonical_follow_limit: 50,
       expires_at: "2026-08-04T06:30:00.000Z",
       ...overrides,
     },
   };
 }
+
+test("armed BotApp Play accepts a target above 50 when the authoritative control limit allows it", () => {
+  const result = buildManualFollow60RequestContract({
+    accountId: ACCOUNT_ID,
+    controlRow: {
+      ...control({ canonical_follow_limit: 70 }),
+      baseline_follow_count: 50,
+      evaluation_increment: 10,
+      target_follow_count: 60,
+    },
+    activeControlCount: 1,
+    candidate: candidate({
+      remainingFollowQuota: 10,
+      quotas: {
+        ...candidate().quotas,
+        follow: quota(50, 70, 20, true),
+      },
+    }),
+    now: NOW,
+  });
+
+  assert.equal(result.matched, true);
+  assert.equal(result.ok, true);
+  const plan = result.metadata?.resume_plan as Record<string, unknown>;
+  const contract = plan.follow_60s_canary_contract as Record<string, unknown>;
+  assert.equal(contract.baseline_follow_count, 50);
+  assert.equal(contract.target_follow_count, 60);
+});
+
+test("armed BotApp Play rejects a target above its authoritative control limit", () => {
+  const result = buildManualFollow60RequestContract({
+    accountId: ACCOUNT_ID,
+    controlRow: {
+      ...control({ canonical_follow_limit: 50 }),
+      baseline_follow_count: 50,
+      evaluation_increment: 10,
+      target_follow_count: 60,
+    },
+    activeControlCount: 1,
+    candidate: candidate(),
+    now: NOW,
+  });
+
+  assert.equal(result.matched, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "follow60_armed_control_invalid");
+});
+
+test("armed BotApp Play fails closed when the authoritative control limit is absent", () => {
+  const missingLimit = control();
+  delete (missingLimit.metadata_safe as Record<string, unknown>).canonical_follow_limit;
+  const result = buildManualFollow60RequestContract({
+    accountId: ACCOUNT_ID,
+    controlRow: missingLimit,
+    activeControlCount: 1,
+    candidate: candidate(),
+    now: NOW,
+  });
+
+  assert.equal(result.matched, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "follow60_armed_control_invalid");
+});
 
 function quota(doneToday: number, capDay: number, remaining: number, enabled: boolean) {
   return {

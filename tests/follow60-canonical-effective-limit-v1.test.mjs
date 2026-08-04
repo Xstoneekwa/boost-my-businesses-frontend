@@ -10,10 +10,20 @@ const countsMigration = fs.readFileSync(
   new URL("../supabase/migrations/20260804201551_follow60_control_counts_effective_limit_v1.sql", import.meta.url),
   "utf8",
 );
+const armedControlResolver = fs.readFileSync(
+  new URL("../lib/instagram-dashboard/auto-restart-follow60-armed-control.ts", import.meta.url),
+  "utf8",
+);
 
 test("constructor no longer contains the legacy global target 50 ceiling", () => {
   assert.doesNotMatch(migration, /p_baseline_follow_count\s*\+\s*p_max_new_cycles\s*>\s*50/);
   assert.doesNotMatch(migration, /canonical_follow_limit[^\n]*p_/i);
+});
+
+test("Play validates the DB-authoritative control limit instead of a legacy global 50 ceiling", () => {
+  assert.match(armedControlResolver, /integer\(metadata\.canonical_follow_limit\)/);
+  assert.match(armedControlResolver, /target\s*>\s*canonicalFollowLimit/);
+  assert.doesNotMatch(armedControlResolver, /target\s*>\s*50/);
 });
 
 test("table CHECK keeps structural invariants without reintroducing a global cap", () => {
