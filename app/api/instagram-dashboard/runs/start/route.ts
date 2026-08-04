@@ -19,6 +19,7 @@ import {
 } from "../../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../../compass/relay-auth";
 import { runStartSuccessPayload } from "./helpers";
+import { buildManualFollow60RequestContract } from "@/lib/instagram-dashboard/manual-follow60-control";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,57 @@ export async function POST(request: Request) {
 
     const { createSupabaseClient } = await import("@/lib/supabase");
     const supabase = createSupabaseClient();
+    let manualFollow60Metadata: Record<string, unknown> | null = null;
+    if (sourceSurface === "botapp_manual_play") {
+      const activeControlStatuses = [
+        "armed",
+        "running",
+        "barrier_waiting_stop",
+        "waiting_operator_evaluation",
+        "continuation_authorized",
+      ];
+      const { data: activeControls, error: activeControlsError } = await supabase
+        .from("follow_60s_canary_controls")
+        .select("account_id,status,baseline_follow_count,evaluation_increment,target_follow_count,metadata_safe")
+        .in("status", activeControlStatuses);
+      if (activeControlsError) {
+        return jsonError("Could not verify the Follow60 Play contract.", 500);
+      }
+      const controlRows = Array.isArray(activeControls) ? activeControls : [];
+      const accountControl = controlRows.find(
+        (row) => readString((row as Record<string, unknown>)?.account_id, "") === accountId,
+      ) as Record<string, unknown> | undefined;
+      if (accountControl) {
+        const { getAutoRestartData } = await import("@/app/instagram-dashboard/auto-restart-data");
+        const overview = await getAutoRestartData();
+        const candidate = overview.candidates.find((item) => item.accountId === accountId);
+        const manualContract = buildManualFollow60RequestContract({
+          accountId,
+          controlRow: accountControl,
+          activeControlCount: controlRows.length,
+          candidate,
+        });
+        if (!manualContract.ok || !manualContract.metadata) {
+          await insertManualRunAudit(
+            accountId,
+            "manual_run_blocked",
+            "blocked",
+            "BotApp Play did not satisfy the armed Follow60 contract.",
+            {
+              reason: manualContract.reason || "follow60_manual_play_contract_missing",
+              requested_run_type: requestedRunType,
+              trigger,
+              source_surface: sourceSurface,
+            },
+          ).catch(() => undefined);
+          return jsonError(
+            `BotApp Play blocked: ${manualContract.reason || "follow60_manual_play_contract_missing"}.`,
+            409,
+          );
+        }
+        manualFollow60Metadata = manualContract.metadata;
+      }
+    }
     const { data, error } = await supabase.rpc("create_account_run_request", {
       p_account_id: accountId,
       p_requested_by: actorId,
@@ -122,6 +174,7 @@ export async function POST(request: Request) {
         source_surface: sourceSurface,
         manual_start: trigger === "manual",
         follow_filters: "followFiltersSummary" in eligibility ? eligibility.followFiltersSummary : undefined,
+        ...(manualFollow60Metadata ?? {}),
       },
     });
 
