@@ -15,6 +15,60 @@ export type ManualFollow60ContractResult =
   | { matched: true; ok: false; reason: string; metadata: null }
   | { matched: true; ok: true; reason: ""; metadata: Record<string, unknown> };
 
+function projectManualPlayFreshBoundary(
+  candidate: AutoRestartCandidate,
+  projected: AutoRestartCandidate,
+  controlId: string,
+): AutoRestartCandidate | null {
+  if (projected.enqueueAllowed && projected.restartEligible) return projected;
+
+  // BotApp Play is an explicit operator launch, not an Auto Restart retry. A
+  // valid armed Follow60 control may therefore turn the benign manual-only
+  // "nothing to resume" projection into a fresh-boundary run. Keep this gate
+  // deliberately narrow: restrictions, lineage failures, dirty cleanup,
+  // unreleased locks, unsafe markers and every other block remain fail-closed.
+  const manualOnly = candidate.accountEligibilityReason === "manual_only"
+    || candidate.blockReason === "manual_only";
+  const terminalSourceRun = new Set(["completed", "stopped", "cancelled", "canceled"])
+    .has(candidate.reliability.lastRunStatus.trim().toLowerCase());
+  const completedFreshBoundary = candidate.restartNeeded === false
+    && candidate.restartNeedReason === "no_partial_run_to_resume"
+    && candidate.reliability.restartBlockReason === "restart_not_needed"
+    && terminalSourceRun;
+  const runtimeSafe = candidate.sourceLineageValid === true
+    && candidate.reliability.cleanupCompleted === true
+    && candidate.reliability.lockReleased === true
+    && candidate.reliability.unsafeMarkers.length === 0;
+
+  if (!manualOnly || !completedFreshBoundary || !runtimeSafe) return null;
+
+  return {
+    ...projected,
+    accountEligible: true,
+    accountEligibilityReason: "follow60_manual_play_armed_control",
+    restartNeeded: true,
+    restartNeedReason: "follow60_manual_play_armed_control_fresh_start",
+    exactViewportResumeAvailable: false,
+    safeRestartStrategy: "rebuilt_safe_target_plan",
+    safeRestartReason: "follow60_manual_play_armed_control_fresh_boundary",
+    historicalSafeBoundaryFallback: false,
+    operatorStopContinuation: false,
+    freshBoundaryOnly: true,
+    enqueueAllowed: true,
+    decisionOutcome: "eligible",
+    restartEligible: true,
+    blockReason: "",
+    sourceBusinessSessionId: `follow60:${controlId}`,
+    nextRetryIndex: 0,
+    reliability: {
+      ...projected.reliability,
+      restartAllowed: true,
+      restartBlockReason: "",
+      sessionTerminationClass: "follow60_manual_play_fresh_boundary",
+    },
+  };
+}
+
 /**
  * Project BotApp Play onto the same immutable Follow60 request contract used by
  * the natural Auto Restart scheduler.  This function is pure: it creates no
@@ -53,10 +107,23 @@ export function buildManualFollow60RequestContract(input: {
       metadata: null,
     };
   }
-  const projected = projectArmedFollow60Candidate(
+  const armedProjection = projectArmedFollow60Candidate(
     input.candidate,
     resolution.control,
   );
+  const projected = projectManualPlayFreshBoundary(
+    input.candidate,
+    armedProjection,
+    resolution.control.controlId,
+  );
+  if (!projected) {
+    return {
+      matched: true,
+      ok: false,
+      reason: "follow60_manual_play_candidate_blocked",
+      metadata: null,
+    };
+  }
   if (!projected.sourceRunId) {
     return {
       matched: true,

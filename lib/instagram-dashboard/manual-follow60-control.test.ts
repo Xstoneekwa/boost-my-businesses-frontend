@@ -166,6 +166,115 @@ test("ordinary BotApp Play remains on the existing Golden path without an armed 
   assert.deepEqual(result, { matched: false, ok: true, reason: "", metadata: null });
 });
 
+test("armed BotApp Play promotes only the benign manual-only completed boundary", () => {
+  const result = buildManualFollow60RequestContract({
+    accountId: ACCOUNT_ID,
+    controlRow: control(),
+    activeControlCount: 1,
+    candidate: candidate({
+      accountEligible: false,
+      accountEligibilityReason: "manual_only",
+      restartNeeded: false,
+      restartNeedReason: "no_partial_run_to_resume",
+      exactViewportResumeAvailable: false,
+      safeRestartStrategy: "none",
+      safeRestartReason: "no_partial_run_to_resume",
+      freshBoundaryOnly: false,
+      enqueueAllowed: false,
+      decisionOutcome: "not_needed",
+      restartEligible: false,
+      blockReason: "manual_only",
+      reliability: {
+        ...candidate().reliability,
+        restartAllowed: false,
+        restartBlockReason: "restart_not_needed",
+        sessionTerminationClass: "completed",
+        lastRunStatus: "completed",
+        cleanupCompleted: true,
+        lockReleased: true,
+        unsafeMarkers: [],
+      },
+      sourceLineageValid: true,
+    }),
+    now: NOW,
+  });
+
+  assert.equal(result.matched, true);
+  assert.equal(result.ok, true);
+  const plan = result.metadata?.resume_plan as Record<string, unknown>;
+  assert.equal(plan.restart_allowed, true);
+  assert.equal(plan.restart_block_reason, "");
+  assert.equal(plan.fresh_boundary_only, true);
+  assert.equal(plan.safe_restart_strategy, "rebuilt_safe_target_plan");
+  assert.deepEqual(plan.phases_to_run, { welcome: false, follow: true, unfollow: false });
+  assert.deepEqual(plan.quota_remaining, { welcome: 0, follow: 10, unfollow: 0, outreach: 0 });
+});
+
+test("canonical BotApp Stop remains eligible for a later explicit armed Play", () => {
+  const result = buildManualFollow60RequestContract({
+    accountId: ACCOUNT_ID,
+    controlRow: control(),
+    activeControlCount: 1,
+    candidate: candidate({
+      accountEligible: false,
+      accountEligibilityReason: "manual_only",
+      restartNeeded: false,
+      restartNeedReason: "no_partial_run_to_resume",
+      enqueueAllowed: false,
+      decisionOutcome: "not_needed",
+      restartEligible: false,
+      blockReason: "manual_only",
+      sourceLineageValid: true,
+      reliability: {
+        ...candidate().reliability,
+        restartAllowed: false,
+        restartBlockReason: "restart_not_needed",
+        lastRunStatus: "stopped",
+        cleanupCompleted: true,
+        lockReleased: true,
+        unsafeMarkers: [],
+      },
+    }),
+    now: NOW,
+  });
+
+  assert.equal(result.ok, true);
+  const plan = result.metadata?.resume_plan as Record<string, unknown>;
+  assert.equal(plan.restart_allowed, true);
+  assert.equal(plan.fresh_boundary_only, true);
+});
+
+test("armed BotApp Play does not override a safety or lineage rejection", () => {
+  const unsafe = buildManualFollow60RequestContract({
+    accountId: ACCOUNT_ID,
+    controlRow: control(),
+    activeControlCount: 1,
+    candidate: candidate({
+      accountEligible: false,
+      accountEligibilityReason: "instagram_restriction_active",
+      restartNeeded: false,
+      restartNeedReason: "no_partial_run_to_resume",
+      enqueueAllowed: false,
+      decisionOutcome: "blocked",
+      restartEligible: false,
+      blockReason: "instagram_restriction_active",
+      sourceLineageValid: false,
+      reliability: {
+        ...candidate().reliability,
+        restartAllowed: false,
+        restartBlockReason: "restart_not_allowed",
+        unsafeMarkers: ["instagram_restriction_active"],
+      },
+    }),
+    now: NOW,
+  });
+
+  assert.equal(unsafe.matched, true);
+  assert.equal(unsafe.ok, false);
+  assert.equal(unsafe.reason, "follow60_manual_play_candidate_blocked");
+  assert.equal(unsafe.metadata, null);
+});
+
 test("present but expired or colliding controls fail closed", () => {
   const expired = buildManualFollow60RequestContract({
     accountId: ACCOUNT_ID,
