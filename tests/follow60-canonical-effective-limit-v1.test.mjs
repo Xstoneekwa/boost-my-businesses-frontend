@@ -6,10 +6,22 @@ const migration = fs.readFileSync(
   new URL("../supabase/migrations/20260804195414_follow60_canonical_effective_follow_limit_v1.sql", import.meta.url),
   "utf8",
 );
+const countsMigration = fs.readFileSync(
+  new URL("../supabase/migrations/20260804201551_follow60_control_counts_effective_limit_v1.sql", import.meta.url),
+  "utf8",
+);
 
 test("constructor no longer contains the legacy global target 50 ceiling", () => {
   assert.doesNotMatch(migration, /p_baseline_follow_count\s*\+\s*p_max_new_cycles\s*>\s*50/);
   assert.doesNotMatch(migration, /canonical_follow_limit[^\n]*p_/i);
+});
+
+test("table CHECK keeps structural invariants without reintroducing a global cap", () => {
+  assert.match(countsMigration, /baseline_follow_count\s*>?=\s*0/);
+  assert.match(countsMigration, /evaluation_increment\s+between\s+1\s+and\s+50/);
+  assert.match(countsMigration, /baseline_follow_count\s*\+\s*evaluation_increment\s*<=\s*target_follow_count/);
+  assert.doesNotMatch(countsMigration, /target_follow_count\s+(?:between\s+1\s+and|<=)\s*50/);
+  assert.match(countsMigration, /authoritative account\/day ceiling is enforced transactionally/i);
 });
 
 test("effective Follow cap is resolved server-side from Worker DB inputs", () => {

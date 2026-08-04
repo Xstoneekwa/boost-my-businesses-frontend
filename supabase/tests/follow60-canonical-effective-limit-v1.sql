@@ -28,7 +28,13 @@ create table public.follow_60s_canary_controls (
   hold_armed_at timestamptz,
   released_at timestamptz,
   metadata_safe jsonb not null default '{}'::jsonb,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint follow_60s_canary_controls_counts_check check (
+    baseline_follow_count between 0 and 50
+    and evaluation_increment between 1 and 50
+    and target_follow_count between 1 and 50
+    and baseline_follow_count + evaluation_increment <= target_follow_count
+  )
 );
 create table public.follow_60s_canary_control_history (
   id bigint generated always as identity primary key,
@@ -41,6 +47,7 @@ create table public.follow_60s_canary_control_history (
 );
 
 \ir ../migrations/20260804195414_follow60_canonical_effective_follow_limit_v1.sql
+\ir ../migrations/20260804201551_follow60_control_counts_effective_limit_v1.sql
 set request.jwt.claim.role='service_role';
 
 create function pg_temp.baseline(
