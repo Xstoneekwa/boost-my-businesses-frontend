@@ -166,7 +166,7 @@ test("ordinary BotApp Play remains on the existing Golden path without an armed 
   assert.deepEqual(result, { matched: false, ok: true, reason: "", metadata: null });
 });
 
-test("armed BotApp Play promotes only the benign manual-only completed boundary", () => {
+test("armed BotApp Play promotes the live benign boundary when cleanup receipts are not applicable", () => {
   const result = buildManualFollow60RequestContract({
     accountId: ACCOUNT_ID,
     controlRow: control(),
@@ -188,10 +188,10 @@ test("armed BotApp Play promotes only the benign manual-only completed boundary"
         ...candidate().reliability,
         restartAllowed: false,
         restartBlockReason: "restart_not_needed",
-        sessionTerminationClass: "completed",
+        sessionTerminationClass: "completed_waiting_operator_evaluation",
         lastRunStatus: "completed",
-        cleanupCompleted: true,
-        lockReleased: true,
+        cleanupCompleted: null,
+        lockReleased: null,
         unsafeMarkers: [],
       },
       sourceLineageValid: true,
@@ -208,6 +208,41 @@ test("armed BotApp Play promotes only the benign manual-only completed boundary"
   assert.equal(plan.safe_restart_strategy, "rebuilt_safe_target_plan");
   assert.deepEqual(plan.phases_to_run, { welcome: false, follow: true, unfollow: false });
   assert.deepEqual(plan.quota_remaining, { welcome: 0, follow: 10, unfollow: 0, outreach: 0 });
+});
+
+test("armed BotApp Play still fails closed on an explicit cleanup or lock failure", () => {
+  for (const failedReceipt of ["cleanupCompleted", "lockReleased"] as const) {
+    const result = buildManualFollow60RequestContract({
+      accountId: ACCOUNT_ID,
+      controlRow: control(),
+      activeControlCount: 1,
+      candidate: candidate({
+        accountEligible: false,
+        accountEligibilityReason: "manual_only",
+        restartNeeded: false,
+        restartNeedReason: "no_partial_run_to_resume",
+        enqueueAllowed: false,
+        decisionOutcome: "not_needed",
+        restartEligible: false,
+        blockReason: "manual_only",
+        sourceLineageValid: true,
+        reliability: {
+          ...candidate().reliability,
+          restartAllowed: false,
+          restartBlockReason: "restart_not_needed",
+          lastRunStatus: "completed",
+          cleanupCompleted: failedReceipt === "cleanupCompleted" ? false : null,
+          lockReleased: failedReceipt === "lockReleased" ? false : null,
+          unsafeMarkers: [],
+        },
+      }),
+      now: NOW,
+    });
+
+    assert.equal(result.matched, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "follow60_manual_play_candidate_blocked");
+  }
 });
 
 test("canonical BotApp Stop remains eligible for a later explicit armed Play", () => {

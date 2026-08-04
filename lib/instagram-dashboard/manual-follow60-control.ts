@@ -36,8 +36,11 @@ function projectManualPlayFreshBoundary(
     && candidate.reliability.restartBlockReason === "restart_not_needed"
     && terminalSourceRun;
   const runtimeSafe = candidate.sourceLineageValid === true
-    && candidate.reliability.cleanupCompleted === true
-    && candidate.reliability.lockReleased === true
+    // For a fully completed run with no partial session to resume, these
+    // receipts are legitimately absent (null). Explicit failures remain
+    // fail-closed; active runs and requests are gated before this projection.
+    && candidate.reliability.cleanupCompleted !== false
+    && candidate.reliability.lockReleased !== false
     && candidate.reliability.unsafeMarkers.length === 0;
 
   if (!manualOnly || !completedFreshBoundary || !runtimeSafe) return null;
