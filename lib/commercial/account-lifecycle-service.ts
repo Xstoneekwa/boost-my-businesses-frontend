@@ -180,6 +180,25 @@ async function setAdminLifecycleStatus(
   if (error) throw new Error(error.message || "admin_lifecycle_update_failed");
 }
 
+async function reconcileOperationalProjection(
+  supabase: SupabaseClient,
+  accountId: string,
+  source: "commercial_resume" | "schedule_assignment" | "operator_reconciliation",
+  actorId: string | null,
+) {
+  const { data, error } = await supabase.rpc("reconcile_account_operational_projection_v1", {
+    p_account_id: accountId,
+    p_source: source,
+    p_actor_id: actorId,
+  });
+  if (error) throw new Error(error.message || "operational_projection_reconciliation_failed");
+  const result = data && typeof data === "object" && !Array.isArray(data) ? data as Row : {};
+  if (result.ok !== true) {
+    throw new Error(readString(result.reason, "operational_projection_reconciliation_blocked"));
+  }
+  return result;
+}
+
 async function markEntitlementCancelled(
   supabase: SupabaseClient,
   entitlementId: string,
@@ -640,6 +659,12 @@ export async function executeCommercialAccountLifecycle(input: {
       }
 
       await setAdminLifecycleStatus(supabase, accountId, "active");
+      await reconcileOperationalProjection(
+        supabase,
+        accountId,
+        "commercial_resume",
+        input.actor.actorId,
+      );
       await upsertLifecycleState(supabase, {
         accountId,
         entitlementId: ctx.entitlementId,

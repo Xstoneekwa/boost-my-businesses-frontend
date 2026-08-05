@@ -23,3 +23,12 @@ test("assign now keeps current-window requirement separate from onboarding reser
   assert.match(assignNow, /requireCurrentWindow: true/);
   assert.match(onboarding, /reservationMode: explicitWindowProvided \? "immediate" : "onboarding"/);
 });
+
+test("scheduled assignment reconciles safe operational projections before assigning the slot", () => {
+  assert.match(scheduleRoute, /reconcile_account_operational_projection_v1/);
+  assert.match(scheduleRoute, /p_source:\s*"schedule_assignment"/);
+  const reconcileIndex = scheduleRoute.indexOf("await reconcileOperationalProjectionBeforeScheduling");
+  const assignIndex = scheduleRoute.indexOf('supabase.rpc("assign_account_slot"');
+  assert.ok(reconcileIndex >= 0);
+  assert.ok(assignIndex > reconcileIndex);
+});
