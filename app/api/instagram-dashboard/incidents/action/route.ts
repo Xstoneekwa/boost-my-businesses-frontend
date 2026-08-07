@@ -18,6 +18,8 @@ type ActionBody = {
   idempotency_key?: unknown;
   channel?: unknown;
   notification_id?: unknown;
+  expected_worker_sha?: unknown;
+  cause_fixed_version?: unknown;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -66,10 +68,19 @@ export async function POST(request: Request) {
   const actorType = relayAuth.ok ? "ops" : "admin";
   const note = readString(body.note || body.resolution_note).trim() || null;
   const resolutionReason = readString(body.resolution_reason).trim() || null;
+  const expectedWorkerSha = readString(body.expected_worker_sha).trim().toLowerCase();
+  const causeFixedVersion = readString(body.cause_fixed_version).trim();
+
+  if (action === "resolve" && (!/^[0-9a-f]{40}$/.test(expectedWorkerSha) || !causeFixedVersion || causeFixedVersion.length > 160)) {
+    return jsonError("A certified corrected Worker SHA and cause-fixed version are required.", 400, {
+      code: "INCIDENT_RESOLUTION_RUNTIME_PROOF_REQUIRED",
+      blocked_reason: !expectedWorkerSha ? "expected_worker_sha_missing" : "cause_fixed_version_missing_or_invalid",
+    });
+  }
 
   try {
     const supabase = createSupabaseClient();
-    const { data, error } = await supabase.rpc("transition_account_incident_human_review_v1", {
+    const { data, error } = await supabase.rpc("transition_account_incident_human_review_v2", {
       p_incident_id: incidentId,
       p_action: action,
       p_expected_version: expectedVersion,
@@ -79,6 +90,8 @@ export async function POST(request: Request) {
       p_note: note,
       p_resolution_reason: resolutionReason,
       p_idempotency_key: idempotencyKey,
+      p_expected_worker_sha: action === "resolve" ? expectedWorkerSha : null,
+      p_cause_fixed_version: action === "resolve" ? causeFixedVersion : null,
       p_channel: channel || null,
       p_notification_id: UUID.test(notificationId) ? notificationId : null,
     });
@@ -120,13 +133,22 @@ export async function POST(request: Request) {
 
     const detail = await loadIncidentDetail(incidentId);
     return jsonOk({
-      contractVersion: "incident_human_review_action_v1",
+      contractVersion: "incident_human_review_action_v2",
       action,
       eventId: transition.event_id ?? null,
       incidentId,
       status: transition.status ?? detail?.incident.status ?? null,
       version: transition.version ?? detail?.incident.version ?? expectedVersion,
       idempotent,
+      incident_resolved: transition.incident_resolved === true,
+      dashboard_action_resolved: transition.dashboard_action_resolved === true,
+      resume_authorization_created: transition.resume_authorization_created === true,
+      next_tick_eligible: transition.next_tick_eligible === true,
+      resume_authorization_id: transition.resume_authorization_id ?? null,
+      expires_at: transition.expires_at ?? null,
+      blocked_reason: transition.blocked_reason ?? null,
+      expected_worker_sha: transition.expected_worker_sha ?? null,
+      cause_fixed_version: transition.cause_fixed_version ?? null,
       deliveries,
       detail,
     });

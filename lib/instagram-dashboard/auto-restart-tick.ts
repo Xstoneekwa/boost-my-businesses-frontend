@@ -1247,7 +1247,7 @@ async function processHumanConfirmedResumes(
   },
 ) {
   const { summary, now } = input;
-  const resolvedIncidentReconciliation = await supabase.rpc("reconcile_resolved_incident_resume_windows_v1", {});
+  const resolvedIncidentReconciliation = await supabase.rpc("reconcile_resolved_incident_resume_windows_v2", {});
   if (resolvedIncidentReconciliation.error) {
     throw new Error(resolvedIncidentReconciliation.error.message || "resolved_incident_resume_reconciliation_failed");
   }
@@ -1256,7 +1256,7 @@ async function processHumanConfirmedResumes(
     throw new Error(restoration.error.message || "resume_retry_credit_reconciliation_failed");
   }
   const armedResult = await (query(supabase, "incident_resume_authorizations")
-    .select("id,incident_id,account_id,run_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,status,retry_generation,frozen_phase_plan,test") as QueryBuilder)
+    .select("id,incident_id,account_id,run_id,source_run_id,source_request_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,expires_at,status,retry_generation,frozen_phase_plan,test,expected_worker_sha,cause_fixed_version,idempotency_key") as QueryBuilder)
     .eq("status", "armed")
     .order("armed_at", { ascending: true })
     .limit(100) as unknown as QueryResult;
@@ -1269,7 +1269,7 @@ async function processHumanConfirmedResumes(
     const authorizationId = readString(authorization.id);
     const incidentId = readString(authorization.incident_id);
     const accountId = readString(authorization.account_id);
-    const originalRunId = readString(authorization.run_id);
+    const originalRunId = readString(authorization.source_run_id) || readString(authorization.run_id);
     const resumePlanId = readString(authorization.resume_plan_id);
     const resumeWindowKey = readString(authorization.resume_window_key);
     if (!authorizationId || !accountId || !incidentId) continue;
@@ -1313,11 +1313,31 @@ async function processHumanConfirmedResumes(
       }
 
       const windowStart = readString(authorization.scheduled_window_start) || null;
-      const windowEnd = readString(authorization.scheduled_window_end) || null;
+      const windowEnd = readString(authorization.expires_at) || readString(authorization.scheduled_window_end) || null;
       if (!windowContainsNow(windowStart, windowEnd, now)) {
         await markAuthorizationExpired(supabase, authorizationId, now);
         await updateIncidentRecoveryState(supabase, incidentId, "resume_authorization_expired");
         await blockResume("resume_authorization_expired");
+        continue;
+      }
+
+      const expectedWorkerSha = readString(authorization.expected_worker_sha).toLowerCase();
+      const causeFixedVersion = readString(authorization.cause_fixed_version);
+      if (!/^[0-9a-f]{40}$/.test(expectedWorkerSha) || !causeFixedVersion) {
+        await blockResume(!expectedWorkerSha ? "resume_worker_sha_missing" : "resume_cause_fixed_version_missing");
+        continue;
+      }
+      const heartbeatResult = await query(supabase, "worker_heartbeats")
+        .select("worker_id,git_sha,status,last_seen_at")
+        .eq("worker_id", input.workerId)
+        .maybeSingle();
+      const activeWorkerSha = readString((heartbeatResult.data as SupabaseRecord | null | undefined)?.git_sha).toLowerCase();
+      if (heartbeatResult.error || !/^[0-9a-f]{40}$/.test(activeWorkerSha)) {
+        await blockResume("resume_worker_sha_unavailable");
+        continue;
+      }
+      if (activeWorkerSha !== expectedWorkerSha) {
+        await blockResume("resume_worker_sha_mismatch");
         continue;
       }
 
@@ -1563,6 +1583,10 @@ async function processHumanConfirmedResumes(
           prior_run_id: originalRunId || null,
           resume_plan_id: resumePlanId || null,
           resume_window_key: resumeWindowKey || null,
+          authorization_source_request_id: readString(authorization.source_request_id) || null,
+          incident_resume_idempotency_key: readString(authorization.idempotency_key) || null,
+          expected_worker_sha: expectedWorkerSha,
+          cause_fixed_version: causeFixedVersion,
         };
         const atomicResult = await consumeAuthorizationAndCreateRequest(supabase, {
           authorizationId,
