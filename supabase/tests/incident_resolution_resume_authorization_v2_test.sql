@@ -80,6 +80,7 @@ declare
   v_account uuid := gen_random_uuid(); v_run uuid := gen_random_uuid();
   v_request uuid := gen_random_uuid(); v_incident uuid := gen_random_uuid();
   v_actor uuid := gen_random_uuid(); v_result jsonb; v_auth uuid;
+  v_original_window_key text; v_resume_key text;
 begin
   insert into public.account_run_requests values(v_request,v_account,'completed');
   insert into public.account_session_resume_plans values(
@@ -109,6 +110,15 @@ begin
   if (select source_request_id from public.incident_resume_authorizations where id=v_auth) <> v_request then
     raise exception 'source_request_not_bound';
   end if;
+  select resume_window_key, idempotency_key
+    into v_original_window_key, v_resume_key
+  from public.incident_resume_authorizations where id=v_auth;
+  if v_resume_key is null or v_resume_key not like 'incident-resume:%' then
+    raise exception 'resume_idempotency_namespace_invalid';
+  end if;
+  if v_resume_key like 'schedule-session:%' then
+    raise exception 'consumed_schedule_key_reused';
+  end if;
 
   v_result := public.transition_account_incident_human_review_v2(
     v_incident,'resolve',1,'ops',v_actor,'botapp_relay',null,'fixed','test:resolve:again',
@@ -118,6 +128,40 @@ begin
   if (select count(*) from public.incident_resume_authorizations where incident_id=v_incident) <> 1 then
     raise exception 'second_authorization_created';
   end if;
+  if (select resume_window_key from public.incident_resume_authorizations where id=v_auth)
+       is distinct from v_original_window_key then
+    raise exception 'old_schedule_window_key_mutated';
+  end if;
+
+  update public.incident_resume_authorizations set account_id=gen_random_uuid() where id=v_auth;
+  v_result := public.incident_resume_authorization_preflight_v2(v_auth);
+  if v_result ->> 'blocked_reason' <> 'resume_incident_not_resolved' then
+    raise exception 'wrong_account_not_rejected: %',v_result;
+  end if;
+  update public.incident_resume_authorizations set account_id=v_account where id=v_auth;
+
+  update public.incident_resume_authorizations set expires_at=now()-interval '1 second' where id=v_auth;
+  v_result := public.incident_resume_authorization_preflight_v2(v_auth);
+  if v_result ->> 'blocked_reason' <> 'resume_authorization_expired' then
+    raise exception 'expired_authorization_not_rejected: %',v_result;
+  end if;
+  update public.incident_resume_authorizations set expires_at=now()+interval '5 hours' where id=v_auth;
+
+  update public.incident_resume_authorizations set status='consumed', consumed_at=now() where id=v_auth;
+  v_result := public.incident_resume_authorization_preflight_v2(v_auth);
+  if v_result ->> 'blocked_reason' <> 'resume_authorization_not_pending' then
+    raise exception 'consumed_authorization_not_rejected: %',v_result;
+  end if;
+  update public.incident_resume_authorizations set status='revoked', canceled_at=now() where id=v_auth;
+  if (select status from public.incident_resume_authorizations_v2 where authorization_id=v_auth) <> 'canceled' then
+    raise exception 'canceled_status_not_projected';
+  end if;
+
+  begin
+    update public.incident_resume_authorizations set expected_worker_sha='bad-sha' where id=v_auth;
+    raise exception 'bad_sha_was_accepted';
+  exception when check_violation then null;
+  end;
 end $$;
 
 do $$
