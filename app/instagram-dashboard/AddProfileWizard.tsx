@@ -6,11 +6,7 @@ import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { projectCredentialBusinessStatus } from "@/lib/instagram-dashboard/account-status-projection";
 import {
-  addProfileAddonOptions,
-  addProfilePackageOptions,
   addProfileRuntimeOptions,
-  defaultAddProfileCommercialPackage,
-  packageLabelForSelection,
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import { DEFAULT_BUSINESS_TIMEZONE } from "@/lib/instagram-dashboard/business-timezone";
 
@@ -76,7 +72,8 @@ type SetupProgressStatus = "pending" | "running" | "done" | "failed" | "skipped"
 type SetupProgressStep = { id: string; label: string; subtitle: string; status: SetupProgressStatus };
 type SetupProgressState = { status: SetupProgressStatus; message: string; steps: SetupProgressStep[]; logs: Array<{ timestamp: string; phase: string; message: string }> };
 
-const steps = ["Device", "Account", "App Instance", "Package & Add-ons", "Schedule", "Review"];
+const steps = ["Owner & Device", "Account", "App Instance", "Entitlement", "Schedule", "Review"];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function progressTime() {
   return new Date().toLocaleTimeString();
@@ -150,6 +147,8 @@ export default function AddProfileWizard() {
   const [verification, setVerification] = useState<UsernameVerification | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [form, setForm] = useState({
+    client_id: "",
+    idempotency_key: crypto.randomUUID(),
     device_id: "",
     app_instance_id: "",
     username: "",
@@ -158,12 +157,10 @@ export default function AddProfileWizard() {
     display_name: "",
     internal_label: "",
     notes: "",
-    login_method: "manual",
+    login_method: "credentials",
     clone_mode: "off",
     template_mode: "default",
     template_id: "",
-    commercial_package: defaultAddProfileCommercialPackage(),
-    addons: [] as string[],
     runtime_mode: "safe_setup",
     schedule_mode: "scheduled",
     starts_at: "",
@@ -178,17 +175,9 @@ export default function AddProfileWizard() {
     () => selectedDevice?.app_instances.find((app) => app.app_instance_id === form.app_instance_id) ?? bestDefaultAppInstance(selectedDevice),
     [selectedDevice, form.app_instance_id],
   );
-  const selectedPackage = useMemo(
-    () => addProfilePackageOptions.find((pkg) => pkg.value === form.commercial_package) ?? addProfilePackageOptions[4],
-    [form.commercial_package],
-  );
   const selectedRuntime = useMemo(
     () => addProfileRuntimeOptions.find((plan) => plan.value === form.runtime_mode) ?? addProfileRuntimeOptions[0],
     [form.runtime_mode],
-  );
-  const selectedAddons = useMemo(
-    () => addProfileAddonOptions.filter((addon) => form.addons.includes(addon.value)),
-    [form.addons],
   );
   const selectedScheduleSlot = useMemo(
     () => scheduleSlots?.slots.find((slot) => (
@@ -325,13 +314,14 @@ export default function AddProfileWizard() {
     setSuccess("");
     setSetupProgress(null);
     setScheduleSlots(null);
+    setForm((current) => ({ ...current, idempotency_key: crypto.randomUUID() }));
   }
 
   function canMoveNext() {
-    if (step === 0) return Boolean(selectedDevice);
-    if (step === 1) return Boolean(form.username.trim()) && (form.login_method !== "credentials" || Boolean(form.password.trim()));
+    if (step === 0) return UUID_PATTERN.test(form.client_id.trim()) && Boolean(selectedDevice);
+    if (step === 1) return Boolean(form.username.trim() && form.password.trim());
     if (step === 2) return Boolean(selectedAppInstance?.selectable);
-    if (step === 3) return Boolean(form.commercial_package && form.runtime_mode && selectedPackage?.selectable);
+    if (step === 3) return Boolean(form.runtime_mode);
     if (step === 4) return Boolean(selectedScheduleSlot?.available);
     return Boolean(selectedDevice && selectedAppInstance && selectedScheduleSlot?.available);
   }
@@ -384,20 +374,21 @@ export default function AddProfileWizard() {
       const credentialsConfigured = credentialStatus === "active" || credentialStatus === "saved_pending_verification";
       setSetupProgress((current) => current ? {
         status: "done",
-        message: "Profile created with safe setup assignment. No login, provisioning, or run was launched.",
+        message: "Canonical onboarding started. Complete protection lists, targeting and 15 eligible CTs before assignment/readiness.",
         steps: current.steps.map((item) => {
           if (item.id === "save_credentials") return { ...item, status: form.login_method === "credentials" ? credentialsConfigured ? "done" : "failed" : "skipped" };
-          return { ...item, status: "done" };
+          if (item.id === "create_account") return { ...item, status: "done" };
+          return { ...item, status: "pending" };
         }),
         logs: [
           ...current.logs,
           { timestamp: progressTime(), phase: "PERSIST", message: `Created account ${String(account.id || payload.account_id || "created")}.` },
           { timestamp: progressTime(), phase: "CREDENTIALS", message: form.login_method === "credentials" ? credentialsConfigured ? "Credentials saved to secure backend." : "Credentials not saved — update required." : "Credentials skipped by manual login mode." },
-          { timestamp: progressTime(), phase: "SYNC", message: "Backend returned account setup confirmation." },
-          { timestamp: progressTime(), phase: "DONE", message: `Add Profile complete for @${String(account.username || verification?.canonical_username || form.username)}.` },
+          { timestamp: progressTime(), phase: "GATE", message: "Assignment, Auto Login, readiness and scheduler remain blocked until canonical onboarding completion and 15 eligible CTs." },
+          { timestamp: progressTime(), phase: "DONE", message: `Onboarding started for @${String(account.username || verification?.canonical_username || form.username)}.` },
         ],
       } : current);
-      setSuccess("Profile created with safe setup assignment. No login, provisioning, or run was launched.");
+      setSuccess("Canonical onboarding started. No login, assignment, provisioning, or run was launched.");
       router.refresh();
     } catch (createError) {
       const message = createError instanceof Error ? createError.message : "Could not create profile.";
@@ -446,6 +437,12 @@ export default function AddProfileWizard() {
               <div className="ig-profile-body">
                 {step === 0 ? (
                   <div className="ig-profile-options">
+                    <ProfileField
+                      label="Client owner ID (required)"
+                      value={form.client_id}
+                      onChange={(value) => updateField("client_id", value)}
+                    />
+                    <p className="ig-profile-note">The backend verifies this client, the operator role and an existing reserved entitlement. No fallback owner is allowed.</p>
                     {devices.map((device) => (
                       <button
                         key={device.id}
@@ -470,29 +467,21 @@ export default function AddProfileWizard() {
                       onChange={(value) => updateField("username", value)}
                       trailingAction={<button type="button" className="ig-profile-inline-action" onClick={() => void verifyUsername()} disabled={isVerifying || !form.username.trim()}>{isVerifying ? "..." : "Verify"}</button>}
                     />
-                    {form.login_method === "credentials" ? (
-                      <ProfileField
-                        label="Password (write-only)"
-                        type="password"
-                        value={form.password}
-                        onChange={(value) => updateField("password", value)}
-                      />
-                    ) : (
-                      <div className="ig-profile-note">
-                        <strong>Manual login</strong>
-                        <span>No credentials will be stored now. Provisioning stays manual and is not launched.</span>
-                      </div>
-                    )}
+                    <ProfileField
+                      label="Password (write-only)"
+                      type="password"
+                      value={form.password}
+                      onChange={(value) => updateField("password", value)}
+                    />
                     <ProfileField label="Email optional" value={form.email} onChange={(value) => updateField("email", value)} />
                     <ProfileField label="Display name optional" value={form.display_name} onChange={(value) => updateField("display_name", value)} />
                     <ProfileField label="Internal label optional" value={form.internal_label} onChange={(value) => updateField("internal_label", value)} />
                     <label className="ig-profile-field">
                       <span>Login method</span>
                       <select value={form.login_method} onChange={(event) => updateField("login_method", event.target.value)}>
-                        <option value="manual">manual</option>
                         <option value="credentials">credentials</option>
                       </select>
-                      <small>{form.login_method === "credentials" ? "Password is submitted write-only to the secure credentials API." : "No password is collected; login/provisioning is a later manual step."}</small>
+                      <small>Password is stored write-only by the canonical onboarding transaction. Login/provisioning remains a later readiness step.</small>
                     </label>
                     {verification ? (
                       <div className="ig-profile-verification">
@@ -536,22 +525,8 @@ export default function AddProfileWizard() {
                 {step === 3 ? (
                   <div className="ig-profile-package-step">
                     <section className="ig-profile-section">
-                      <h3>Package</h3>
-                      <div className="ig-profile-grid">
-                        {addProfilePackageOptions.map((pkg) => (
-                          <button
-                            key={pkg.value}
-                            type="button"
-                            className={form.commercial_package === pkg.value ? "ig-profile-option ig-profile-option-active" : "ig-profile-option"}
-                            onClick={() => updateField("commercial_package", pkg.value)}
-                            disabled={!pkg.selectable}
-                          >
-                            <strong>{pkg.label}</strong>
-                            <span>{pkg.detail}</span>
-                            {pkg.planned ? <em className="ig-profile-warning">Planned</em> : null}
-                          </button>
-                        ))}
-                      </div>
+                      <h3>Canonical entitlement</h3>
+                      <p className="ig-profile-note">Growth, Pro or Premium is derived server-side from the latest reserved entitlement for the selected client. This wizard cannot override package truth.</p>
                     </section>
                     <section className="ig-profile-section">
                       <h3>Runtime mode</h3>
@@ -569,29 +544,7 @@ export default function AddProfileWizard() {
                         ))}
                       </div>
                     </section>
-                    <section className="ig-profile-section">
-                      <h3>Add-ons</h3>
-                      <div className="ig-profile-grid">
-                        {addProfileAddonOptions.map((addon) => (
-                          <button
-                            key={addon.value}
-                            type="button"
-                            className={form.addons.includes(addon.value) ? "ig-profile-option ig-profile-option-active" : "ig-profile-option"}
-                            onClick={() => setForm((current) => ({
-                              ...current,
-                              addons: current.addons.includes(addon.value)
-                                ? current.addons.filter((code) => code !== addon.value)
-                                : [...current.addons, addon.value],
-                            }))}
-                            disabled={!addon.wired}
-                          >
-                            <strong>{addon.label}</strong>
-                            <span>{addon.wired ? "Included when wired" : "Planned · not wired yet"}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-                    <p className="ig-profile-message">No package or add-on launches login, provisioning, runner, DM, follow, or unfollow.</p>
+                    <p className="ig-profile-message">Package and add-ons are read from the reserved entitlement. This surface cannot create or override them, and it launches no login, provisioning, runner, DM, follow, or unfollow.</p>
                   </div>
                 ) : null}
 
@@ -626,6 +579,7 @@ export default function AddProfileWizard() {
 
                 {step === 5 ? (
                   <dl className="ig-profile-review">
+                    <div><dt>Client owner</dt><dd>{form.client_id}</dd></div>
                     <div><dt>Username</dt><dd>{verification?.canonical_username || form.username || "—"} · {verification?.status || "pending_verification"}</dd></div>
                     <div><dt>Avatar</dt><dd>{verification?.avatar_url ? "avatar preview ready" : "pending / unavailable"}</dd></div>
                     <div><dt>Device</dt><dd>{selectedDevice?.device_name || "—"} · {selectedDevice?.adb_serial || selectedDevice?.adb_serial_display || "adb unknown"}</dd></div>
@@ -633,11 +587,11 @@ export default function AddProfileWizard() {
                     <div><dt>App instance</dt><dd>{selectedAppInstance?.label || "—"} · index {selectedAppInstance?.instance_index ?? "—"}</dd></div>
                     <div><dt>Package</dt><dd>{selectedAppInstance?.package_name || "—"} · {selectedAppInstance?.status || "unknown"}</dd></div>
                     <div><dt>Login method</dt><dd>{form.login_method} · credentials {form.login_method === "credentials" ? "write-only" : "not submitted"}</dd></div>
-                    <div><dt>Package</dt><dd>{packageLabelForSelection(form.commercial_package as typeof form.commercial_package)} · settings source: commercial package defaults</dd></div>
+                    <div><dt>Package</dt><dd>Resolved from client_account_entitlements by the canonical backend engine</dd></div>
                     <div><dt>Runtime mode</dt><dd>{selectedRuntime.label}</dd></div>
-                    <div><dt>Add-ons</dt><dd>{selectedAddons.length ? selectedAddons.map((addon) => addon.label).join(", ") : "none"} · planned add-ons are not wired to runtime</dd></div>
+                    <div><dt>Add-ons</dt><dd>Resolved from the same reserved entitlement; no local override</dd></div>
                     <div><dt>Quotas preview</dt><dd>Package caps apply after assignment; no runtime quota is activated from Add Profile.</dd></div>
-                    <div><dt>Entitlements preview</dt><dd>{selectedPackage.commercialCode} · subscription type follows runtime mode · no auto entitlement run</dd></div>
+                    <div><dt>Entitlement</dt><dd>Existing reserved entitlement required · no checkout or entitlement is created here</dd></div>
                     <div><dt>Schedule</dt><dd>{form.schedule_mode === "manual_only" ? "Manual-only · no scheduled window" : `${selectedScheduleSlot?.local_label || "—"} · ${scheduleTimezone}`} · visible later in Schedule drawer</dd></div>
                     <div><dt>Safety</dt><dd>No login, provisioning, runner, DM, Welcome, Outreach or Unfollow is launched.</dd></div>
                     <div><dt>No run auto</dt><dd>Provisioning, login, and runner stay off.</dd></div>
@@ -670,7 +624,7 @@ export default function AddProfileWizard() {
         <div className="ig-profile-overlay" role="presentation" onMouseDown={() => setShowConfirm(false)}>
           <section className="ig-profile-confirm" role="dialog" aria-modal="true" aria-labelledby="ig-profile-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
             <h3 id="ig-profile-confirm-title">Create this profile?</h3>
-            <p>This creates the account, optional write-only credentials, and an explicit app-instance assignment. It does not launch login, provisioning, or a run.</p>
+            <p>This starts canonical onboarding and stores write-only credentials. Device/schedule intent stays deferred until protection lists, targeting and 15 eligible CTs are complete; it does not launch login, provisioning, or a run.</p>
             <div className="ig-profile-actions">
               <button type="button" className="ig-profile-secondary" onClick={() => setShowConfirm(false)} disabled={isSaving}>Cancel</button>
               <button type="button" className="ig-profile-primary" onClick={() => void createProfile()} disabled={isSaving}>{isSaving ? "Creating..." : "Create Profile"}</button>

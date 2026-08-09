@@ -52,10 +52,10 @@ test("Pro subscription modules include Follow Unfollow Welcome but not Outreach 
   assert.match(packageSource, /outreachEnabled = input\.runtimeMode === "outreach_only" && outreachAddonEnabled/);
 });
 
-test("accounts create route ensures ownership before assign_account_slot", () => {
-  assert.match(routeSource, /ensureAddProfileOwnership/);
-  assert.match(routeSource, /tryAutoAssignOnboardingSchedule\(accountId/);
-  assert.match(routeSource, /device_id: null/);
-  assert.match(routeSource, /loadRepairableAddProfileAccount/);
-  assert.match(routeSource, /partial:/);
+test("legacy ownership repair helper is not a second Add Profile creation engine", () => {
+  assert.match(ensureSource, /ensureAddProfileOwnership/);
+  assert.doesNotMatch(routeSource, /ensureAddProfileOwnership/);
+  assert.doesNotMatch(routeSource, /loadRepairableAddProfileAccount/);
+  assert.doesNotMatch(routeSource, /tryAutoAssignOnboardingSchedule\(accountId/);
+  assert.match(routeSource, /canonical-account-onboarding/);
 });

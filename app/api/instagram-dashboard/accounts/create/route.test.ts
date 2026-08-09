@@ -3,94 +3,63 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
-const scheduleSource = readFileSync(new URL("../../../../../lib/instagram-dashboard/onboarding-schedule.ts", import.meta.url), "utf8");
 
-test("accounts create route uses admin auth helper with local dev bypass", () => {
-  assert.match(source, /requireInstagramAdmin\(\)/);
+test("Admin and BotApp adapt to the single canonical onboarding engine", () => {
+  assert.match(source, /canonical-account-onboarding/);
+  assert.match(source, /beginInstagramAccountOnboarding/);
+  assert.match(source, /previewInstagramAccountOnboarding/);
+  assert.match(source, /updateInstagramAccountOnboarding/);
+  assert.match(source, /saveInstagramAccountOnboardingProtectionLists/);
+  assert.match(source, /CANONICAL_INSTAGRAM_ACCOUNT_ONBOARDING_ENGINE/);
+});
+
+test("operator identity is server-authenticated and never accepted from payload", () => {
   assert.match(source, /getInstagramAdminUserContext\(\)/);
+  assert.match(source, /canAccessTenantPages\(adminContext\)/);
+  assert.match(source, /verifyCompassRelayKey\(request\.headers\)/);
+  assert.match(source, /INSTAGRAM_BOTAPP_OPERATOR_USER_ID/);
+  assert.doesNotMatch(source, /body\.(actor_id|operator_id|user_id)/);
 });
 
-test("accounts create route requires credentials password only for credentials login method", () => {
-  assert.match(source, /loginMethod === "credentials" && !password/);
-  assert.doesNotMatch(source, /if \(!password\) return jsonError/);
+test("canonical create requires client ownership context and stable idempotency", () => {
+  assert.match(source, /client_id\?: unknown/);
+  assert.match(source, /idempotency_key\?: unknown/);
+  assert.match(source, /client_id_invalid/);
+  assert.match(source, /idempotency_key_invalid/);
+  assert.match(source, /restartInstagramAccountOnboarding/);
 });
 
-test("accounts create route validates explicit phone app instance target", () => {
-  assert.match(source, /resolveAddProfileAssignmentPolicy/);
-  assert.match(source, /fetchOnboardingTarget/);
-  assert.match(source, /phone_app_instances/);
-  assert.match(source, /app_instance_occupied/);
-  assert.match(source, /app_instance_device_mismatch/);
+test("package truth comes only from the reserved entitlement", () => {
+  assert.match(source, /source: "client_account_entitlements"/);
+  assert.doesNotMatch(source, /readCommercialPackage|resolveAddProfilePackagePreset|commercial_package\?:/);
+  assert.doesNotMatch(source, /applyAddProfileRuntimeDefaults|ensureAddProfileOwnership/);
 });
 
-test("accounts create route assigns the explicit app_instance_id and does not launch runtime", () => {
-  assert.match(source, /tryAssignOnboardingSchedule\(accountId, \{/);
-  assert.match(source, /appInstanceId/);
-  assert.match(scheduleSource, /p_clone_id: target\.appInstanceId \|\| null/);
-  assert.match(scheduleSource, /p_starts_at: startsAt/);
-  assert.match(scheduleSource, /p_ends_at: endsAt/);
-  assert.match(scheduleSource, /p_device_id: deviceId/);
-  assert.match(source, /scheduled_requires_timeslot/);
-  assert.match(source, /provisioning_started: false/);
-  assert.match(source, /run_started: false/);
+test("device and schedule are deferred source context, never immediate provisioning", () => {
+  assert.match(source, /function sourceContext/);
+  assert.match(source, /deviceId: readString\(body\.device_id\)/);
+  assert.match(source, /scheduleMode:/);
+  assert.match(source, /runtime_activation_requested: false/);
+  assert.doesNotMatch(source, /tryAssignOnboardingSchedule|assign_account_slot|provisioning_started|run_started/);
 });
 
-test("accounts create route supports manual_only placement without scheduled window", () => {
-  assert.match(source, /schedule_mode/);
-  assert.match(source, /manual_only_requires_app_instance/);
-  assert.match(source, /invalid_schedule_mode/);
-  assert.match(source, /tryAssignManualOnlyOnboardingSchedule/);
-  assert.match(scheduleSource, /assign_account_manual_only/);
-  assert.match(source, /scheduleMode === "manual_only"/);
-  assert.doesNotMatch(source, /if \(scheduleMode === "manual_only"\)[\s\S]*assertTargetScheduleSlotAvailable/);
+test("route has no parallel persistence engine", () => {
+  assert.doesNotMatch(source, /\.from\(/);
+  assert.doesNotMatch(source, /\.insert\(|\.upsert\(|\.update\(|\.delete\(/);
+  assert.doesNotMatch(source, /rotate_instagram_account_credentials|create_instagram_credentials_vault_secret/);
 });
 
-test("accounts create route does not write phone_devices.id into legacy ig_accounts.device_id", () => {
-  assert.match(source, /device_id: null/);
-  assert.doesNotMatch(source, /device_id: isUuid\(deviceId\)/);
-  assert.match(source, /tryAssignOnboardingSchedule\(accountId, \{[\s\S]*deviceId/);
-  assert.match(source, /device_name: deviceName/);
+test("credentials remain write-only and required for real canonical begin", () => {
+  assert.match(source, /if \(!dryRun && !password\)/);
+  assert.match(source, /password_status: "write_only"/);
+  assert.doesNotMatch(source, /secret_ref|service_role/i);
 });
 
-test("accounts create route keeps credentials and settings write-only", () => {
-  assert.match(source, /password: ""/);
-  assert.match(source, /if \(loginMethod === "credentials"\)/);
-  assert.doesNotMatch(source, /loginMethod !== "credentials"[\s\S]*callSubmitAddProfileCredentials/);
-});
-
-test("accounts create route ensures ownership subscription before assignment", () => {
-  assert.match(source, /ensureAddProfileOwnership/);
-  assert.match(scheduleSource, /client_subscription_accounts/);
-  assert.match(source, /ownership_failed:/);
-  assert.match(source, /assignment_failed:/);
-  assert.match(source, /loadRepairableAddProfileAccount/);
-  assert.match(source, /credentials_required_for_repair/);
-});
-
-test("accounts create route accepts commercial package payload", () => {
-  assert.match(source, /commercial_package/);
-  assert.match(source, /readCommercialPackage/);
-});
-
-test("accounts create route applies package runtime defaults after ownership", () => {
-  assert.match(source, /resolveAddProfilePackagePreset/);
-  assert.match(source, /applyAddProfileRuntimeDefaults/);
-  assert.match(source, /ensureAddProfileOwnership\(supabase, \{[\s\S]*addons: selectedAddons/);
-  assert.match(source, /runtime_defaults_applied/);
-});
-
-test("accounts create safe response does not expose raw assignment ids", () => {
-  const safeResponseSource = source.slice(source.indexOf("function safeCreateResponse"), source.indexOf("export async function POST"));
-  assert.doesNotMatch(safeResponseSource, /device_id/);
-  assert.doesNotMatch(safeResponseSource, /app_instance_id/);
-  assert.doesNotMatch(safeResponseSource, /assignment_id/);
-});
-
-test("accounts create safe response exposes explicit credential save fields", () => {
-  assert.match(source, /credential_save_status/);
-  assert.match(source, /resolveAddProfileCredentialsResponse/);
-  assert.match(source, /isAddProfileCredentialsSaved/);
-  assert.match(source, /loadSafeCredentialsConfirmation/);
-  const safeResponseSource = source.slice(source.indexOf("function safeCreateResponse"), source.indexOf("export async function POST"));
-  assert.doesNotMatch(safeResponseSource, /secret_ref/);
+test("the shared surface exposes resume and all canonical state transitions", () => {
+  assert.match(source, /export async function GET/);
+  assert.match(source, /export async function POST/);
+  assert.match(source, /export async function PATCH/);
+  for (const action of ["save_analysis", "save_protection_lists", "save_targeting", "open_targets", "complete", "abandon"]) {
+    assert.match(source, new RegExp(`"${action}"`));
+  }
 });

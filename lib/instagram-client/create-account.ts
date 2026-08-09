@@ -1,5 +1,4 @@
 import { createSupabaseClient } from "@/lib/supabase";
-import { defaultInstagramFilters, defaultInstagramSettings } from "@/lib/instagram-dashboard/defaults";
 import {
   isPlausibleInstagramPublicUsername,
   lookupInstagramPublicProfile,
@@ -13,21 +12,9 @@ import {
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import {
   entitlementToAddProfileInput,
-  getReservedEntitlementForClient,
-  markEntitlementConsumed,
+  peekReservedEntitlementForClient,
 } from "@/lib/commercial/entitlements";
-import { applyAddProfileRuntimeDefaults } from "@/lib/instagram-dashboard/add-profile-runtime-defaults";
-import { ensureAddProfileOwnership } from "@/lib/instagram-dashboard/ensure-add-profile-ownership";
-import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
-import { reconcilePackageRuntimeContract } from "@/lib/instagram-dashboard/package-runtime-contract";
-import {
-  parseLoginEmailInput,
-  persistAccountLoginEmail,
-} from "@/lib/instagram-dashboard/persist-account-login-email";
-import {
-  profileVerificationPayloadForInsert,
-} from "@/lib/instagram-accounts/profile-verification-payload";
-import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
+import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
 import { projectClientAccountRow, readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
@@ -67,15 +54,13 @@ export type ClientPublicProfileProjection = {
 export type ClientCreateAccountResult =
   | {
     ok: true;
-    dryRun?: boolean;
+    dryRun: true;
     account: ReturnType<typeof projectClientAccountRow>;
     assignment: { status: string; reason: string };
     commercialPackage: AddProfileCommercialPackage;
     publicProfile: ClientPublicProfileProjection;
   }
   | { ok: false; status: number; error: string; code?: string };
-
-const credentialsTimeoutMs = 9000;
 
 export function projectClientPublicProfileLookup(
   profileLookup: InstagramPublicProfileLookupResult,
@@ -101,47 +86,6 @@ export function projectClientPublicProfileLookup(
     recentCaptionSamples: profileLookup.recent_post_captions ?? [],
     checkedAt: profileLookup.checked_at,
   };
-}
-
-async function submitClientCredentials(input: {
-  accountId: string;
-  expectedUsername: string;
-  password: string;
-  externalRequestId: string;
-}) {
-  const config = resolveServerCredentialsConfig();
-  if (!config) throw new Error("credentials_api_not_configured");
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), credentialsTimeoutMs);
-  try {
-    const response = await fetch(config.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "submit_add_profile_credentials",
-        account_id: input.accountId,
-        expected_username: input.expectedUsername,
-        password: input.password,
-        actor_type: "client",
-        metadata_safe: {
-          flow: "client_add_account",
-          external_request_id: input.externalRequestId,
-          source_surface: "instagram_client",
-        },
-      }),
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error("credentials_ingestion_failed");
-    const payload = await response.json() as { ok?: unknown };
-    if (payload.ok !== true) throw new Error("credentials_ingestion_failed");
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 async function clientHasActiveSubscription(supabase: ReturnType<typeof createSupabaseClient>, clientId: string) {
@@ -181,251 +125,69 @@ async function usernameLinkedToClient(
   return Array.isArray(accounts) && accounts.length > 0;
 }
 
+/**
+ * Validation-only compatibility helper. Account creation was intentionally
+ * removed from this module; all writes now belong to the canonical PostgreSQL
+ * onboarding transaction exposed by canonical-account-onboarding.ts.
+ */
 export async function createClientInstagramAccount(input: ClientCreateAccountInput): Promise<ClientCreateAccountResult> {
-  const username = normalizeInstagramPublicUsername(readString(input.username));
-  const password = readString(input.password);
-  const emailParsed = parseLoginEmailInput(input.email);
-  const email = emailParsed.email ?? "";
-  const notes = readString(input.notes);
-  const dryRun = input.dryRun === true;
-  const targetingSetup = input.flowMode === "targeting_setup";
+  if (input.dryRun !== true) {
+    return {
+      ok: false,
+      status: 410,
+      error: "Direct account creation is retired. Use canonical onboarding.",
+      code: "legacy_direct_create_disabled",
+    };
+  }
 
+  const username = normalizeInstagramPublicUsername(readString(input.username));
+  const emailParsed = parseLoginEmailInput(input.email);
   if (!username) return { ok: false, status: 400, error: "Instagram username is required.", code: "username_required" };
-  if (emailParsed.present && emailParsed.invalid) {
-    return { ok: false, status: 400, error: "Instagram login email is invalid.", code: "email_invalid" };
-  }
-  if (!isPlausibleInstagramPublicUsername(username)) {
-    return { ok: false, status: 400, error: "Instagram username is invalid.", code: "username_invalid" };
-  }
-  if (!dryRun && !password) {
-    return { ok: false, status: 400, error: "Instagram password is required.", code: "password_required" };
-  }
-  if (!dryRun && !resolveServerCredentialsConfig()) {
-    return { ok: false, status: 503, error: "Credential setup is temporarily unavailable.", code: "credentials_unavailable" };
-  }
+  if (emailParsed.present && emailParsed.invalid) return { ok: false, status: 400, error: "Instagram login email is invalid.", code: "email_invalid" };
+  if (!isPlausibleInstagramPublicUsername(username)) return { ok: false, status: 400, error: "Instagram username is invalid.", code: "username_invalid" };
 
   const supabase = createSupabaseClient();
-  const subscriptionActive = await clientHasActiveSubscription(supabase, input.clientId);
-  if (!subscriptionActive) {
+  if (!await clientHasActiveSubscription(supabase, input.clientId)) {
     return { ok: false, status: 403, error: "Your subscription is not active.", code: "subscription_inactive" };
   }
 
   const profileLookup = await lookupInstagramPublicProfile(username);
-  if (profileLookup.status === "username_invalid") {
-    return { ok: false, status: 400, error: "Instagram username could not be verified.", code: "username_verification_failed" };
-  }
-  if (profileLookup.status === "not_found") {
-    return { ok: false, status: 404, error: "Instagram username was not found.", code: "username_not_found" };
-  }
-
-  const accountUsername = profileLookup.status === "found" &&
-    profileLookup.canonical_username &&
-    isPlausibleInstagramPublicUsername(profileLookup.canonical_username)
+  if (profileLookup.status === "username_invalid") return { ok: false, status: 400, error: "Instagram username could not be verified.", code: "username_verification_failed" };
+  if (profileLookup.status === "not_found") return { ok: false, status: 404, error: "Instagram username was not found.", code: "username_not_found" };
+  const accountUsername = profileLookup.status === "found" && profileLookup.canonical_username && isPlausibleInstagramPublicUsername(profileLookup.canonical_username)
     ? profileLookup.canonical_username
     : username;
-
   if (await usernameLinkedToClient(supabase, input.clientId, accountUsername)) {
     return { ok: false, status: 409, error: "This Instagram account is already linked to your workspace.", code: "username_already_linked" };
   }
 
-  const reservedEntitlement = await getReservedEntitlementForClient(supabase, input.clientId);
-  if (!reservedEntitlement?.id) {
-    return {
-      ok: false,
-      status: 403,
-      error: "Choose and activate a plan before adding an Instagram account.",
-      code: "entitlement_required",
-    };
+  const entitlement = await peekReservedEntitlementForClient(supabase, input.clientId);
+  if (!entitlement?.id) return { ok: false, status: 403, error: "Choose and activate a plan before adding an Instagram account.", code: "entitlement_required" };
+  const selection = entitlementToAddProfileInput(entitlement);
+  if (!isAddProfileCommercialPackage(selection.commercialPackage)) {
+    return { ok: false, status: 409, error: "Your selected plan cannot be applied to this account.", code: "entitlement_package_invalid" };
   }
-
-  const entitlementSelection = entitlementToAddProfileInput(reservedEntitlement);
-  const commercialPackage = isAddProfileCommercialPackage(entitlementSelection.commercialPackage)
-    ? entitlementSelection.commercialPackage
-    : null;
-  if (!commercialPackage) {
-    return {
-      ok: false,
-      status: 409,
-      error: "Your selected plan cannot be applied to this account.",
-      code: "entitlement_package_invalid",
-    };
-  }
-
-  const packagePreset = resolveAddProfilePackagePreset({
-    commercialPackage,
+  const preset = resolveAddProfilePackagePreset({
+    commercialPackage: selection.commercialPackage,
     runtimeMode: "safe_setup",
-    addons: entitlementSelection.addons,
+    addons: selection.addons,
   });
   const publicProfile = projectClientPublicProfileLookup(profileLookup, accountUsername);
-
-  if (dryRun) {
-    return {
-      ok: true,
-      dryRun: true,
-      account: projectClientAccountRow({
-        accountId: "dry-run-account",
-        username: accountUsername,
-        packageLabel: packagePreset.label,
-        accountStatus: targetingSetup ? "inactive" : "active",
-        onboardingStatus: "pending",
-        provisioningStatus: "not_started",
-        loginStatus: "unknown",
-        assignmentStatus: targetingSetup ? "onboarding_targeting_pending" : "pending_assignment",
-      }),
-      assignment: {
-        status: targetingSetup ? "onboarding_targeting_pending" : "pending_assignment",
-        reason: "dry_run",
-      },
-      commercialPackage,
-      publicProfile,
-    };
-  }
-
-  const externalRequestId = crypto.randomUUID();
-  const accountPayload = {
-    username: accountUsername,
-    display_name: "",
-    status: targetingSetup ? "inactive" : "active",
-    device_id: null,
-    device_name: "",
-    device_udid: "",
-    clone_mode: "off",
-    login_method: "credentials",
-    internal_label: null,
-    notes: notes || null,
-    ...profileVerificationPayloadForInsert(profileLookup, {
-      operation: "client_add_account",
-      sourceSurface: "instagram_client",
-    }),
-  };
-
-  const { data: insertedAccount, error: accountError } = await supabase
-    .from("ig_accounts")
-    .insert(accountPayload)
-    .select("*")
-    .single<SupabaseRecord>();
-
-  if (accountError || !insertedAccount?.id) {
-    return { ok: false, status: 500, error: "Could not create Instagram account.", code: "account_create_failed" };
-  }
-
-  const accountId = readString(insertedAccount.id);
-  const settings = {
-    ...defaultInstagramSettings,
-    account_id: accountId,
-    username: accountUsername,
-    display_name: "",
-    device_name: "",
-    device_udid: "",
-    email: "",
-    password: "",
-    account_status: targetingSetup ? "inactive" : "active",
-    cloned_app_mode: false,
-    dry_run_enabled: true,
-  };
-  const filters = { ...defaultInstagramFilters, account_id: accountId };
-
-  const [{ error: settingsError }, { error: filtersError }, { error: dmError }] = await Promise.all([
-    supabase.from("ig_account_settings").insert(settings),
-    supabase.from("ig_account_filters").insert(filters),
-    supabase.from("ig_account_dm_settings").insert({
-      account_id: accountId,
-      welcome_enabled: false,
-      outreach_enabled: false,
-      welcome_per_session_limit: 10,
-      welcome_per_day_limit: 10,
-      outreach_per_session_limit: 5,
-      outreach_per_day_limit: 30,
-      total_dm_per_day_limit: 40,
-    }),
-  ]);
-
-  if (settingsError || filtersError || dmError) {
-    await supabase.from("ig_accounts").delete().eq("id", accountId);
-    return { ok: false, status: 500, error: "Could not finish account setup.", code: "profile_setup_failed" };
-  }
-
-  if (email) {
-    const emailPersisted = await persistAccountLoginEmail(supabase, accountId, email, "client_add_account");
-    if (!emailPersisted.ok) {
-      await supabase.from("ig_accounts").delete().eq("id", accountId);
-      return { ok: false, status: 500, error: "Could not save Instagram login email.", code: "email_persist_failed" };
-    }
-  }
-
-  try {
-    await submitClientCredentials({ accountId, expectedUsername: accountUsername, password, externalRequestId });
-  } catch {
-    await supabase.from("ig_accounts").delete().eq("id", accountId);
-    return { ok: false, status: 502, error: "Could not save Instagram credentials securely.", code: "credentials_ingestion_failed" };
-  }
-
-  const ownership = await ensureAddProfileOwnership(supabase, {
-    accountId,
-    accountUsername,
-    clientId: input.clientId,
-    commercialPackage,
-    runtimeMode: "safe_setup",
-    addons: entitlementSelection.addons,
-    outreachVariant: entitlementSelection.outreachVariant,
-    entitlementId: reservedEntitlement.id,
-  });
-  if (!ownership.ok) {
-    return { ok: false, status: 500, error: "Could not link account to your client workspace.", code: ownership.reason };
-  }
-
-  await markEntitlementConsumed(supabase, {
-    entitlementId: reservedEntitlement.id,
-    accountId,
-  });
-
-  const runtimeDefaults = await applyAddProfileRuntimeDefaults(supabase, {
-    accountId,
-    username: accountUsername,
-    appPackageName: "com.instagram.android",
-    preset: packagePreset,
-  });
-  if (!runtimeDefaults.ok) {
-    return { ok: false, status: 500, error: "Package settings could not be applied.", code: "package_settings_incomplete" };
-  }
-
-  const assignment = targetingSetup
-    ? { assigned: false, reason: "targeting_setup_incomplete" }
-    : await tryAutoAssignOnboardingSchedule(accountId);
-  if (assignment.assigned) {
-    const contract = await reconcilePackageRuntimeContract(supabase, accountId, "client_account_create");
-    if (!contract.ok) {
-      return { ok: false, status: 409, error: "Package runtime contract is incomplete.", code: contract.reason };
-    }
-  }
-  const assignmentStatus = targetingSetup
-    ? "onboarding_targeting_pending"
-    : assignment.assigned ? "assigned" : "pending_assignment";
-
-  const { data: clientLink } = await supabase
-    .from("client_instagram_accounts")
-    .select("onboarding_status,provisioning_status,login_status")
-    .eq("account_id", accountId)
-    .limit(1)
-    .maybeSingle<SupabaseRecord>();
-
   return {
     ok: true,
+    dryRun: true,
     account: projectClientAccountRow({
-      accountId,
+      accountId: "dry-run-account",
       username: accountUsername,
-      packageLabel: packagePreset.label,
-      accountStatus: targetingSetup ? "inactive" : "active",
-      onboardingStatus: readString(clientLink?.onboarding_status, "pending"),
-      provisioningStatus: readString(clientLink?.provisioning_status, "not_started"),
-      loginStatus: readString(clientLink?.login_status, "unknown"),
-      assignmentStatus,
+      packageLabel: preset.label,
+      accountStatus: "inactive",
+      onboardingStatus: "pending",
+      provisioningStatus: "not_started",
+      loginStatus: "unknown",
+      assignmentStatus: "onboarding_targeting_pending",
     }),
-    assignment: {
-      status: assignmentStatus,
-      reason: assignment.assigned ? "auto_assigned" : readString(assignment.reason, "pending_setup"),
-    },
-    commercialPackage,
+    assignment: { status: "onboarding_targeting_pending", reason: "dry_run" },
+    commercialPackage: selection.commercialPackage,
     publicProfile,
   };
 }

@@ -4,13 +4,17 @@ import { loadCommercialPackageCapabilities } from "@/lib/commercial/package-capa
 import {
   entitlementToAddProfileInput,
   getReservedEntitlementForClient,
+  peekReservedEntitlementForClient,
 } from "@/lib/commercial/entitlements";
 import {
   isAddProfileCommercialPackage,
   type AddProfileCommercialPackage,
 } from "@/lib/instagram-dashboard/add-profile-packages";
 import { loadTargetEligibilityCountsForAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
-import { tryAutoAssignOnboardingSchedule } from "@/lib/instagram-dashboard/onboarding-schedule";
+import {
+  tryAssignManualOnlyOnboardingSchedule,
+  tryAutoAssignOnboardingSchedule,
+} from "@/lib/instagram-dashboard/onboarding-schedule";
 import { reconcilePackageRuntimeContract } from "@/lib/instagram-dashboard/package-runtime-contract";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
 import { createClientInstagramAccount, projectClientPublicProfileLookup } from "./create-account";
@@ -62,6 +66,23 @@ export type ClientOnboardingStatus =
   | "expired"
   | "abandoned";
 
+export type InstagramOnboardingActorType = "client" | "admin" | "botapp_operator";
+export type InstagramOnboardingSource = "client_dashboard" | "admin_dashboard" | "botapp";
+
+export type InstagramOnboardingActorContext = {
+  actorType: InstagramOnboardingActorType;
+  actorId: string;
+  source: InstagramOnboardingSource;
+};
+
+export type InstagramOnboardingSourceContext = {
+  deviceId?: string;
+  appInstanceId?: string;
+  scheduleMode?: "scheduled" | "manual_only";
+  startsAt?: string;
+  endsAt?: string;
+};
+
 export type { ClientPublicAnalysis } from "./profile-intelligence";
 
 export type ClientTargetingCriteria = {
@@ -97,14 +118,33 @@ export type ClientOnboardingSession = {
   assignmentStatus?: "assigned" | "pending_assignment";
   assignmentReason?: string;
   loginStatus?: "pending_login" | "unknown";
+  actorType?: InstagramOnboardingActorType;
+  source?: InstagramOnboardingSource;
+  sourceContext?: InstagramOnboardingSourceContext;
 };
 
 const ONBOARDING_SELECT = [
   "id", "client_id", "entitlement_id", "account_id", "idempotency_key",
   "requested_username", "package_code", "status", "current_step",
   "public_analysis", "targeting_criteria", "last_error_code", "failure_reason", "completed_at",
-  "expires_at", "last_progress_at", "updated_at",
+  "expires_at", "last_progress_at", "updated_at", "actor_type", "source_surface", "initiated_by_actor_id", "source_context",
 ].join(",");
+
+function clientActor(clientId: string, userId: string): InstagramOnboardingActorContext {
+  void clientId;
+  return { actorType: "client", actorId: userId, source: "client_dashboard" };
+}
+
+function sanitizeSourceContext(value: InstagramOnboardingSourceContext | undefined): InstagramOnboardingSourceContext {
+  if (!value) return {};
+  const context: InstagramOnboardingSourceContext = {};
+  if (readString(value.deviceId)) context.deviceId = readString(value.deviceId).slice(0, 120);
+  if (readString(value.appInstanceId)) context.appInstanceId = readString(value.appInstanceId).slice(0, 120);
+  if (value.scheduleMode === "scheduled" || value.scheduleMode === "manual_only") context.scheduleMode = value.scheduleMode;
+  if (readString(value.startsAt)) context.startsAt = readString(value.startsAt).slice(0, 80);
+  if (readString(value.endsAt)) context.endsAt = readString(value.endsAt).slice(0, 80);
+  return context;
+}
 
 function readObject(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -183,6 +223,9 @@ async function projectSession(supabase: Supabase, row: Row): Promise<ClientOnboa
     lastProgressAt: readString(row.last_progress_at),
     canRestart: status === "expired" || status === "abandoned",
     updatedAt: readString(row.updated_at),
+    actorType: (readString(row.actor_type) || "client") as InstagramOnboardingActorType,
+    source: (readString(row.source_surface) || "client_dashboard") as InstagramOnboardingSource,
+    sourceContext: sanitizeSourceContext(readObject(row.source_context) as InstagramOnboardingSourceContext),
   };
 }
 
@@ -217,7 +260,18 @@ async function finalizeCompletedOnboardingAssignment(
   const accountId = readString(row.account_id);
   if (!accountId) throw Object.assign(new Error("account_not_created"), { status: 409 });
 
-  const assignment = await tryAutoAssignOnboardingSchedule(accountId);
+  const sourceContext = sanitizeSourceContext(readObject(row.source_context) as InstagramOnboardingSourceContext);
+  const assignment = sourceContext.scheduleMode === "manual_only"
+    ? await tryAssignManualOnlyOnboardingSchedule(accountId, {
+      deviceId: sourceContext.deviceId,
+      appInstanceId: sourceContext.appInstanceId,
+    })
+    : await tryAutoAssignOnboardingSchedule(accountId, {
+      deviceId: sourceContext.deviceId,
+      appInstanceId: sourceContext.appInstanceId,
+      startsAt: sourceContext.startsAt,
+      endsAt: sourceContext.endsAt,
+    });
   const assignmentReason = readString(
     assignment.reason,
     assignment.assigned ? "onboarding_auto_assigned" : "pending_assignment",
@@ -230,7 +284,7 @@ async function finalizeCompletedOnboardingAssignment(
     };
   }
 
-  const contract = await reconcilePackageRuntimeContract(supabase, accountId, "client_onboarding_finalize");
+  const contract = await reconcilePackageRuntimeContract(supabase, accountId, "canonical_onboarding_finalize");
   if (!contract.ok) {
     throw Object.assign(new Error(contract.reason), { status: 409 });
   }
@@ -257,9 +311,15 @@ async function finalizeCompletedOnboardingAssignment(
 function rpcFailure(data: unknown, fallback: string) {
   const result = readObject(data);
   const reason = readString(result.reason, fallback);
-  const status = reason === "client_access_denied" || reason === "entitlement_required" ? 403
+  const status = ["client_access_denied", "onboarding_actor_access_denied", "entitlement_required"].includes(reason) ? 403
     : reason === "onboarding_not_found" ? 404
-      : reason === "creation_lease_active" ? 409
+      : [
+        "client_not_active",
+        "client_ownership_principal_missing",
+        "creation_lease_active",
+        "idempotency_actor_mismatch",
+        "onboarding_actor_session_mismatch",
+      ].includes(reason) ? 409
         : 400;
   return Object.assign(new Error(reason), {
     status,
@@ -268,17 +328,39 @@ function rpcFailure(data: unknown, fallback: string) {
   });
 }
 
-export async function loadLatestClientOnboardingSession(clientId: string, userId: string) {
-  const supabase = createSupabaseClient();
-  const expiry = await supabase.rpc("expire_client_instagram_onboarding_sessions", {
+async function assertInstagramOnboardingActorAccess(
+  supabase: Supabase,
+  clientId: string,
+  actor: InstagramOnboardingActorContext,
+) {
+  const { data, error } = await supabase.rpc("authorize_instagram_account_onboarding_actor_v1", {
     p_client_id: clientId,
-    p_actor_id: userId,
+    p_actor_type: actor.actorType,
+    p_actor_id: actor.actorId,
+    p_source_surface: actor.source,
+  });
+  if (error) throw Object.assign(new Error("onboarding_actor_authorization_failed"), { status: 503 });
+  const result = readObject(data);
+  if (result.ok !== true) throw rpcFailure(result, "onboarding_actor_access_denied");
+}
+
+export async function loadLatestInstagramAccountOnboardingSession(input: {
+  clientId: string;
+  actor: InstagramOnboardingActorContext;
+}) {
+  const supabase = createSupabaseClient();
+  await assertInstagramOnboardingActorAccess(supabase, input.clientId, input.actor);
+  const expiry = await supabase.rpc("expire_instagram_account_onboarding_sessions_v1", {
+    p_client_id: input.clientId,
+    p_actor_type: input.actor.actorType,
+    p_actor_id: input.actor.actorId,
+    p_source_surface: input.actor.source,
   });
   if (expiry.error) throw new Error("onboarding_expiry_failed");
   const { data, error } = await supabase
     .from("client_instagram_onboarding_sessions")
     .select(ONBOARDING_SELECT)
-    .eq("client_id", clientId)
+    .eq("client_id", input.clientId)
     .neq("status", "completed")
     .order("updated_at", { ascending: false })
     .limit(20)
@@ -288,21 +370,19 @@ export async function loadLatestClientOnboardingSession(clientId: string, userId
   return row?.id ? projectSession(supabase, row) : null;
 }
 
-export async function beginClientInstagramOnboarding(input: {
+export async function loadLatestClientOnboardingSession(clientId: string, userId: string) {
+  return loadLatestInstagramAccountOnboardingSession({ clientId, actor: clientActor(clientId, userId) });
+}
+
+export async function previewInstagramAccountOnboarding(input: {
   clientId: string;
-  userId: string;
-  idempotencyKey: string;
+  actor: InstagramOnboardingActorContext;
   username: string;
-  password: string;
   email?: string;
 }) {
   const supabase = createSupabaseClient();
-  const existing = await loadSessionRowByIdempotency(supabase, input.clientId, input.idempotencyKey);
-  if (existing && ["active", "completed"].includes(readString(existing.status))) {
-    return projectSession(supabase, existing);
-  }
-
-  const entitlement = await getReservedEntitlementForClient(supabase, input.clientId);
+  await assertInstagramOnboardingActorAccess(supabase, input.clientId, input.actor);
+  const entitlement = await peekReservedEntitlementForClient(supabase, input.clientId);
   if (!entitlement?.id) throw Object.assign(new Error("entitlement_required"), { status: 403 });
   const selection = entitlementToAddProfileInput(entitlement);
   if (!isAddProfileCommercialPackage(selection.commercialPackage)) {
@@ -311,7 +391,7 @@ export async function beginClientInstagramOnboarding(input: {
 
   const validation = await createClientInstagramAccount({
     clientId: input.clientId,
-    userId: input.userId,
+    userId: "canonical-onboarding-preview",
     username: input.username,
     password: "",
     email: input.email,
@@ -328,23 +408,95 @@ export async function beginClientInstagramOnboarding(input: {
     throw Object.assign(new Error("entitlement_package_mismatch"), { status: 409 });
   }
 
+  return { entitlement, selection, validation };
+}
+
+export async function beginInstagramAccountOnboarding(input: {
+  clientId: string;
+  actor: InstagramOnboardingActorContext;
+  idempotencyKey: string;
+  username: string;
+  password: string;
+  email?: string;
+  sourceContext?: InstagramOnboardingSourceContext;
+}) {
+  const supabase = createSupabaseClient();
+  await assertInstagramOnboardingActorAccess(supabase, input.clientId, input.actor);
+  const existing = await loadSessionRowByIdempotency(supabase, input.clientId, input.idempotencyKey);
+  if (existing && ["active", "completed"].includes(readString(existing.status))) {
+    const existingActorId = readString(existing.initiated_by_actor_id);
+    const existingActorType = readString(existing.actor_type);
+    const existingSource = readString(existing.source_surface);
+    if (existingActorId !== input.actor.actorId
+      || existingActorType !== input.actor.actorType
+      || existingSource !== input.actor.source) {
+      throw Object.assign(new Error("idempotency_actor_mismatch"), { status: 409 });
+    }
+    return projectSession(supabase, existing);
+  }
+
+  const reserved = await getReservedEntitlementForClient(supabase, input.clientId);
+  if (!reserved?.id) throw Object.assign(new Error("entitlement_required"), { status: 403 });
+  const { entitlement, validation } = await previewInstagramAccountOnboarding(input);
+
   const analysis = buildStoredPublicAnalysis(validation.publicProfile);
   const attemptId = crypto.randomUUID();
-  const { data, error } = await supabase.rpc("begin_client_instagram_onboarding", {
+  const { data, error } = await supabase.rpc("begin_instagram_account_onboarding_v1", {
     p_client_id: input.clientId,
-    p_actor_id: input.userId,
+    p_actor_type: input.actor.actorType,
+    p_actor_id: input.actor.actorId,
+    p_source_surface: input.actor.source,
     p_entitlement_id: entitlement.id,
     p_idempotency_key: input.idempotencyKey,
     p_attempt_id: attemptId,
-    p_lease_owner: `client-onboarding:${input.userId}`,
+    p_lease_owner: `canonical-onboarding:${input.actor.actorType}:${input.actor.actorId}`,
     p_requested_username: validation.publicProfile.username,
     p_login_email: input.email ?? "",
     p_password: input.password,
     p_public_analysis: analysis,
+    p_source_context: sanitizeSourceContext(input.sourceContext),
   });
   if (error) throw Object.assign(new Error("onboarding_atomic_create_failed"), { status: 500 });
   const result = readObject(data);
   if (result.ok !== true) throw rpcFailure(result, "onboarding_atomic_create_failed");
+  const row = await loadSessionRow(supabase, input.clientId, readString(result.session_id));
+  if (!row) throw Object.assign(new Error("onboarding_lookup_failed"), { status: 500 });
+  return projectSession(supabase, row);
+}
+
+export async function beginClientInstagramOnboarding(input: {
+  clientId: string;
+  userId: string;
+  idempotencyKey: string;
+  username: string;
+  password: string;
+  email?: string;
+}) {
+  return beginInstagramAccountOnboarding({
+    ...input,
+    actor: clientActor(input.clientId, input.userId),
+  });
+}
+
+export async function restartInstagramAccountOnboarding(input: {
+  clientId: string;
+  actor: InstagramOnboardingActorContext;
+  previousSessionId: string;
+  idempotencyKey: string;
+}) {
+  const supabase = createSupabaseClient();
+  await assertInstagramOnboardingActorAccess(supabase, input.clientId, input.actor);
+  const { data, error } = await supabase.rpc("restart_instagram_account_onboarding_v1", {
+    p_previous_session_id: input.previousSessionId,
+    p_client_id: input.clientId,
+    p_actor_type: input.actor.actorType,
+    p_actor_id: input.actor.actorId,
+    p_source_surface: input.actor.source,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) throw Object.assign(new Error("onboarding_restart_failed"), { status: 500 });
+  const result = readObject(data);
+  if (result.ok !== true) throw rpcFailure(result, "onboarding_restart_failed");
   const row = await loadSessionRow(supabase, input.clientId, readString(result.session_id));
   if (!row) throw Object.assign(new Error("onboarding_lookup_failed"), { status: 500 });
   return projectSession(supabase, row);
@@ -356,29 +508,21 @@ export async function restartClientInstagramOnboarding(input: {
   previousSessionId: string;
   idempotencyKey: string;
 }) {
-  const supabase = createSupabaseClient();
-  const { data, error } = await supabase.rpc("restart_client_instagram_onboarding", {
-    p_previous_session_id: input.previousSessionId,
-    p_client_id: input.clientId,
-    p_actor_id: input.userId,
-    p_idempotency_key: input.idempotencyKey,
+  return restartInstagramAccountOnboarding({
+    ...input,
+    actor: clientActor(input.clientId, input.userId),
   });
-  if (error) throw Object.assign(new Error("onboarding_restart_failed"), { status: 500 });
-  const result = readObject(data);
-  if (result.ok !== true) throw rpcFailure(result, "onboarding_restart_failed");
-  const row = await loadSessionRow(supabase, input.clientId, readString(result.session_id));
-  if (!row) throw Object.assign(new Error("onboarding_lookup_failed"), { status: 500 });
-  return projectSession(supabase, row);
 }
 
-export async function updateClientInstagramOnboarding(input: {
+export async function updateInstagramAccountOnboarding(input: {
   clientId: string;
-  userId: string;
+  actor: InstagramOnboardingActorContext;
   sessionId: string;
   action: "save_analysis" | "save_protection_lists" | "save_targeting" | "open_targets" | "complete" | "abandon";
   value?: unknown;
 }) {
   const supabase = createSupabaseClient();
+  await assertInstagramOnboardingActorAccess(supabase, input.clientId, input.actor);
   const row = await loadSessionRow(supabase, input.clientId, input.sessionId);
   if (!row) throw Object.assign(new Error("onboarding_not_found"), { status: 404 });
   if (readString(row.status) === "completed") {
@@ -391,10 +535,12 @@ export async function updateClientInstagramOnboarding(input: {
     : input.action === "save_targeting"
       ? sanitizeTargetingCriteria(input.value)
       : {};
-  const { data, error } = await supabase.rpc("advance_client_instagram_onboarding", {
+  const { data, error } = await supabase.rpc("advance_instagram_account_onboarding_v1", {
     p_session_id: input.sessionId,
     p_client_id: input.clientId,
-    p_actor_id: input.userId,
+    p_actor_type: input.actor.actorType,
+    p_actor_id: input.actor.actorId,
+    p_source_surface: input.actor.source,
     p_action: input.action,
     p_value: value,
   });
@@ -409,13 +555,27 @@ export async function updateClientInstagramOnboarding(input: {
   return { ...projected, ...assignment };
 }
 
-export async function saveClientInstagramOnboardingProtectionLists(input: {
+export async function updateClientInstagramOnboarding(input: {
   clientId: string;
   userId: string;
+  sessionId: string;
+  action: "save_analysis" | "save_protection_lists" | "save_targeting" | "open_targets" | "complete" | "abandon";
+  value?: unknown;
+}) {
+  return updateInstagramAccountOnboarding({
+    ...input,
+    actor: clientActor(input.clientId, input.userId),
+  });
+}
+
+export async function saveInstagramAccountOnboardingProtectionLists(input: {
+  clientId: string;
+  actor: InstagramOnboardingActorContext;
   sessionId: string;
   value: unknown;
 }) {
   const supabase = createSupabaseClient();
+  await assertInstagramOnboardingActorAccess(supabase, input.clientId, input.actor);
   const row = await loadSessionRow(supabase, input.clientId, input.sessionId);
   if (!row) throw Object.assign(new Error("onboarding_not_found"), { status: 404 });
   const accountId = readString(row.account_id);
@@ -455,12 +615,14 @@ export async function saveClientInstagramOnboardingProtectionLists(input: {
   }
 
   const fingerprint = (kind: string, items: string[]) => createHash("sha256")
-    .update(JSON.stringify({ accountId, kind, operation: "replace", items, sourceSurface: "client_onboarding" }))
+    .update(JSON.stringify({ accountId, kind, operation: "replace", items, sourceSurface: input.actor.source }))
     .digest("hex");
-  const { data, error } = await supabase.rpc("save_client_instagram_onboarding_protection_lists", {
+  const { data, error } = await supabase.rpc("save_instagram_account_onboarding_protection_lists_v1", {
     p_session_id: input.sessionId,
     p_client_id: input.clientId,
-    p_actor_id: input.userId,
+    p_actor_type: input.actor.actorType,
+    p_actor_id: input.actor.actorId,
+    p_source_surface: input.actor.source,
     p_mode: mode,
     p_unfollow_items: whitelistItems,
     p_blacklist_items: blacklistItems,
@@ -481,6 +643,18 @@ export async function saveClientInstagramOnboardingProtectionLists(input: {
   const updated = await loadSessionRow(supabase, input.clientId, input.sessionId);
   if (!updated) throw Object.assign(new Error("onboarding_not_found"), { status: 404 });
   return projectSession(supabase, updated);
+}
+
+export async function saveClientInstagramOnboardingProtectionLists(input: {
+  clientId: string;
+  userId: string;
+  sessionId: string;
+  value: unknown;
+}) {
+  return saveInstagramAccountOnboardingProtectionLists({
+    ...input,
+    actor: clientActor(input.clientId, input.userId),
+  });
 }
 
 function reanalysisError(code: string, status: number) {

@@ -1,13 +1,16 @@
 import { jsonError, jsonOk, readJsonBody } from "@/app/api/instagram-dashboard/_utils";
 import {
   analyzeClientInstagramProfileWithAi,
-  beginClientInstagramOnboarding,
-  loadLatestClientOnboardingSession,
   reanalyzeClientInstagramOnboarding,
-  restartClientInstagramOnboarding,
-  saveClientInstagramOnboardingProtectionLists,
-  updateClientInstagramOnboarding,
 } from "@/lib/instagram-client/client-account-onboarding";
+import {
+  beginInstagramAccountOnboarding,
+  loadLatestInstagramAccountOnboardingSession,
+  restartInstagramAccountOnboarding,
+  saveInstagramAccountOnboardingProtectionLists,
+  updateInstagramAccountOnboarding,
+  type InstagramOnboardingActorContext,
+} from "@/lib/instagram-onboarding/canonical-account-onboarding";
 import {
   readString,
   rejectTechnicalClientFields,
@@ -48,11 +51,18 @@ function safeError(error: unknown) {
   };
 }
 
+function clientActor(userId: string): InstagramOnboardingActorContext {
+  return { actorType: "client", actorId: userId, source: "client_dashboard" };
+}
+
 export async function GET() {
   const auth = await requireClientInstagramSession();
   if (!auth.ok) return jsonError(auth.error, auth.status);
   try {
-    const onboarding = await loadLatestClientOnboardingSession(auth.clientId, auth.userId);
+    const onboarding = await loadLatestInstagramAccountOnboardingSession({
+      clientId: auth.clientId,
+      actor: clientActor(auth.userId),
+    });
     return jsonOk({ onboarding });
   } catch {
     return jsonError("Could not load Instagram onboarding.", 503, { code: "onboarding_lookup_failed" });
@@ -76,9 +86,9 @@ export async function POST(request: Request) {
   if (restartSessionId) {
     if (!UUID_PATTERN.test(restartSessionId)) return jsonError("Invalid onboarding session.", 400, { code: "session_id_invalid" });
     try {
-      const onboarding = await restartClientInstagramOnboarding({
+      const onboarding = await restartInstagramAccountOnboarding({
         clientId: auth.clientId,
-        userId: auth.userId,
+        actor: clientActor(auth.userId),
         previousSessionId: restartSessionId,
         idempotencyKey,
       });
@@ -93,9 +103,9 @@ export async function POST(request: Request) {
   if (email.present && email.invalid) return jsonError("Instagram login email is invalid.", 400, { code: "email_invalid" });
 
   try {
-    const onboarding = await beginClientInstagramOnboarding({
+    const onboarding = await beginInstagramAccountOnboarding({
       clientId: auth.clientId,
-      userId: auth.userId,
+      actor: clientActor(auth.userId),
       idempotencyKey,
       username,
       password,
@@ -179,9 +189,9 @@ export async function PATCH(request: Request) {
 
   if (action === "save_protection_lists") {
     try {
-      const onboarding = await saveClientInstagramOnboardingProtectionLists({
+      const onboarding = await saveInstagramAccountOnboardingProtectionLists({
         clientId: auth.clientId,
-        userId: auth.userId,
+        actor: clientActor(auth.userId),
         sessionId,
         value: body.value,
       });
@@ -193,9 +203,9 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const onboarding = await updateClientInstagramOnboarding({
+    const onboarding = await updateInstagramAccountOnboarding({
       clientId: auth.clientId,
-      userId: auth.userId,
+      actor: clientActor(auth.userId),
       sessionId,
       action: action as "save_analysis" | "save_protection_lists" | "save_targeting" | "open_targets" | "complete" | "abandon",
       value: body.value,

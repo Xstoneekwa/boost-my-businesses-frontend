@@ -138,6 +138,19 @@ export async function getReservedEntitlementForClient(supabase: SupabaseClient, 
   return promoted?.id ? mapEntitlementRow(promoted) : null;
 }
 
+export async function peekReservedEntitlementForClient(supabase: SupabaseClient, clientId: string) {
+  const { data, error } = await supabase
+    .from("client_account_entitlements")
+    .select("*")
+    .eq("client_id", clientId)
+    .eq("status", "entitlement_reserved")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<Row>();
+  if (error) throw new Error("entitlement_lookup_failed");
+  return data?.id ? mapEntitlementRow(data) : null;
+}
+
 export async function getEntitlementById(supabase: SupabaseClient, entitlementId: string) {
   const { data, error } = await supabase
     .from("client_account_entitlements")

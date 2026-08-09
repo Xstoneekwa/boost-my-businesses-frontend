@@ -8,51 +8,44 @@ const scheduleRouteSource = readFileSync(
   "utf8",
 );
 
-test("Add Profile wizard loads real devices and app instances", () => {
+test("Add Profile loads real devices and preserves explicit device intent", () => {
   assert.match(source, /fetch\("\/api\/instagram-dashboard\/devices"/);
   assert.match(source, /app_instances/);
   assert.match(source, /bestDefaultAppInstance/);
-  assert.equal(source.includes("dual_app_normal"), false);
-  assert.equal(source.includes("Local Android Emulator"), false);
+  assert.match(source, /client_id/);
+  assert.match(source, /idempotency_key: crypto\.randomUUID\(\)/);
 });
 
-test("Add Profile wizard prefers free clones and disables unsafe primary selection", () => {
+test("Add Profile prefers free clones and disables unsafe primary selection", () => {
   assert.match(source, /instance_type === "clone"/);
   assert.match(source, /instance_index === 1/);
   assert.match(source, /Primary requires explicit override/);
   assert.match(source, /disabled=\{Boolean\(disabledReason\)\}/);
 });
 
-test("Add Profile wizard keeps password write-only and optional for manual login", () => {
-  assert.match(source, /form\.login_method === "credentials"/);
+test("Add Profile requires write-only credentials for canonical begin", () => {
   assert.match(source, /Password \(write-only\)/);
-  assert.match(source, /No credentials will be stored now/);
-  assert.match(source, /app_instance_id: selectedAppInstance\.app_instance_id/);
+  assert.match(source, /form\.username\.trim\(\) && form\.password\.trim\(\)/);
+  assert.match(source, /value="credentials"/);
+  assert.doesNotMatch(source, /value="manual"|No credentials will be stored now/);
 });
 
-test("Add Profile wizard has Package and Add-ons step plus Schedule", () => {
-  assert.match(source, /"Package & Add-ons"/);
-  assert.match(source, /"Schedule"/);
-  assert.match(source, /accounts\/schedule-slots/);
-  assert.match(source, /commercial_package/);
-  assert.match(source, /addProfilePackageOptions/);
-  assert.match(source, /addProfileRuntimeOptions/);
-  assert.match(source, /addProfileAddonOptions/);
-  assert.match(source, /defaultAddProfileCommercialPackage/);
-  assert.equal(source.includes("Start from scratch"), false);
-  assert.equal(source.includes("Select settings template"), false);
-  assert.equal(source.includes("Default settings template"), false);
+test("package and add-ons are entitlement-derived, never locally selected", () => {
+  assert.match(source, /"Entitlement"/);
+  assert.match(source, /client_account_entitlements/);
+  assert.match(source, /cannot override package truth/);
+  assert.doesNotMatch(source, /commercial_package|defaultAddProfileCommercialPackage|addProfileAddonOptions/);
 });
 
-test("Add Profile schedule slots use the business timezone helper", () => {
+test("schedule intent uses the business timezone helper", () => {
   assert.match(scheduleRouteSource, /normalizeBusinessTimezone/);
   assert.match(scheduleRouteSource, /generate_assignment_slot_catalog/);
-  assert.doesNotMatch(scheduleRouteSource, /readString\(device\.timezone, "UTC"\)/);
   assert.match(source, /DEFAULT_BUSINESS_TIMEZONE/);
   assert.doesNotMatch(source, /scheduleSlots\?\.timezone \|\| "UTC"/);
 });
 
-test("Add Profile review states no runtime action is launched", () => {
+test("UI states the canonical gate and zero runtime side effects", () => {
+  assert.match(source, /15 eligible CTs/);
+  assert.match(source, /Assignment, Auto Login, readiness and scheduler remain blocked/);
   assert.match(source, /No login, provisioning, runner, DM, Welcome, Outreach or Unfollow is launched/);
-  assert.match(source, /visible later in Schedule drawer/);
 });
