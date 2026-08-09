@@ -97,6 +97,28 @@ test("live partial Unfollow continuation overrides only the stale Worker restart
   assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
 });
 
+test("live partial Unfollow continuation overrides exhausted legacy retries only with exact lineage", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "auto_restart_retries_exhausted";
+  candidate.reliability.retryIndex = "2";
+  candidate.reliability.nextRetryIndex = "3";
+  candidate.reliability.failureCategory = "recoverable_python_runtime_failure";
+  candidate.reliability.rootFailureCode = "unfollow_runtime_exception";
+  candidate.reliability.failureSignature = "python:unfollow:duplicate_stop_reason";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-3";
+  candidate.canonicalAttemptId = 3;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+
+  candidate.sourceLineageValid = false;
+  assert.deepEqual(
+    resumePlanRuntimeSupported(candidate),
+    { ok: false, reason: "resume_plan_invalid" },
+  );
+});
+
 test("live continuation fails closed on an open circuit or superseded lineage", () => {
   const circuit = exactBacklogCandidate();
   circuit.reliability.restartAllowed = false;

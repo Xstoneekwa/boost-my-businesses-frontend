@@ -727,9 +727,14 @@ export async function runAutoRestartTick(
         candidate.reliability.retryIndex,
         extendedRules.maxRetriesAfterInitialFailure,
       );
+      // A canonical live Unfollow continuation is not a blind failure retry:
+      // it is a fresh request bounded by the latest partial lineage and exact
+      // actionable DB backlog.  Its source-run idempotency key below keeps the
+      // continuation one-shot while the daily account cap remains enforced.
       if (
         attemptsReason
         && candidate.operatorStopContinuation !== true
+        && candidate.canonicalLiveUnfollowResumeAuthorized !== true
         && !follow60Authority
       ) blockReasons.push(attemptsReason);
 
@@ -765,16 +770,35 @@ export async function runAutoRestartTick(
       if (!follow60Authority && extendedRules.maxRestartsPerDay > 0 && restartsToday >= extendedRules.maxRestartsPerDay) {
         blockReasons.push("max_restarts_day");
       }
-      if (!follow60Authority && extendedRules.maxRestartsPerWindow > 0 && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow) {
+      if (
+        !follow60Authority
+        && candidate.canonicalLiveUnfollowResumeAuthorized !== true
+        && extendedRules.maxRestartsPerWindow > 0
+        && restartsInBusinessSession >= extendedRules.maxRestartsPerWindow
+      ) {
         blockReasons.push("max_restarts_window");
       }
-      if (!follow60Authority && extendedRules.maxRestartsPerDay > 0 && restartsForPhase >= extendedRules.maxRestartsPerDay) {
+      if (
+        !follow60Authority
+        && candidate.canonicalLiveUnfollowResumeAuthorized !== true
+        && extendedRules.maxRestartsPerDay > 0
+        && restartsForPhase >= extendedRules.maxRestartsPerDay
+      ) {
         blockReasons.push("max_restarts_phase_business_day");
       }
-      if (!follow60Authority && extendedRules.maxRestartsPerDay > 0 && restartsForReason >= extendedRules.maxRestartsPerDay) {
+      if (
+        !follow60Authority
+        && candidate.canonicalLiveUnfollowResumeAuthorized !== true
+        && extendedRules.maxRestartsPerDay > 0
+        && restartsForReason >= extendedRules.maxRestartsPerDay
+      ) {
         blockReasons.push("max_restarts_reason_business_day");
       }
-      if (!follow60Authority && (restartsForLineage > 0 || restartsForSourceRun > 0)) {
+      if (
+        !follow60Authority
+        && candidate.canonicalLiveUnfollowResumeAuthorized !== true
+        && (restartsForLineage > 0 || restartsForSourceRun > 0)
+      ) {
         blockReasons.push("resume_lineage_retry_budget_exhausted");
       }
 

@@ -139,10 +139,14 @@ export function resolveRestartNeed(input: RestartNeedInput) {
 
   const partial = isPartialResumeClass(input.sessionTerminationClass);
   const blockReason = normalized(input.restartBlockReason);
+  // The live Unfollow authority is built from the latest request-linked
+  // partial outcome plus the current DB backlog.  A legacy retry counter is
+  // not allowed to terminalize that still-actionable business work.  Critical
+  // safety blocks remain excluded by this narrow allow-list.
   if (
     partial
     && input.canonicalLiveUnfollowResumeAuthorized === true
-    && blockReason === "restart_not_needed"
+    && ["restart_not_needed", "auto_restart_retries_exhausted"].includes(blockReason)
   ) {
     return {
       needed: true,

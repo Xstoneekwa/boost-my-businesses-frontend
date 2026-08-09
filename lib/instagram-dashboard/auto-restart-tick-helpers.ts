@@ -259,7 +259,8 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
       || Number(candidate.canonicalAttemptId) < 1
       || (
         reliability.restartAllowed !== true
-        && reliability.restartBlockReason.toLowerCase() !== "restart_not_needed"
+        && !["restart_not_needed", "auto_restart_retries_exhausted"]
+          .includes(reliability.restartBlockReason.toLowerCase())
       )
       || candidate.unfollowPhaseCircuitOpen === true
       || candidate.restartNeeded !== true
@@ -295,7 +296,10 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
   if (candidate.safeRestartStrategy === "none") {
     return { ok: false as const, reason: "no_safe_restart_strategy" };
   }
-  if (reliability.failureCategory === "recoverable_python_runtime_failure") {
+  if (
+    reliability.failureCategory === "recoverable_python_runtime_failure"
+    && !canonicalLiveUnfollowOverride
+  ) {
     const nextRetryIndex = Number.parseInt(String(reliability.nextRetryIndex || ""), 10);
     if (
       !reliability.businessSessionId

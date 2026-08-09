@@ -93,6 +93,9 @@ class FakeSupabase {
     if (name === "reconcile_resolved_incident_resume_windows_v1") {
       return { data: { armed_count: 0 }, error: null };
     }
+    if (name === "reconcile_resolved_incident_resume_windows_v2") {
+      return { data: { armed_count: 0 }, error: null };
+    }
     if (name === "restore_prebusiness_resume_retry_credits_v1") {
       return { data: { restored_count: 0 }, error: null };
     }
@@ -206,6 +209,7 @@ function armedFollow60ControlRow(username = "j_automatise_pour_toi"): Row {
       binding_version: "FOLLOW_60S_CANARY_BINDING_V2",
       runtime_binding_consumed: false,
       active_control_count: 1,
+      canonical_follow_limit: 50,
       expires_at: "2026-07-23T00:00:00.000Z",
     },
   };
@@ -245,6 +249,85 @@ test("persisted business progress cannot bypass the configured restart window bu
   assert.equal(result.result.enqueued_count, 0);
   assert.equal(result.result.blocked_count, 1);
   assert.match(result.result.blocked[0].reason, /max_restarts_window/);
+  assert.equal(supabase.requests.length, 0);
+});
+
+test("canonical live Unfollow backlog continues after legacy retries exhaust", async () => {
+  const supabase = new FakeSupabase();
+  supabase.rows("auto_restart_decisions").push(
+    ...[1, 2].map((index) => ({
+      account_id: "account-1",
+      business_session_id: "business-session-1",
+      decision: "enqueued",
+      source_run_id: index === 1 ? "initial-run" : "retry-run-1",
+      created_at: `2026-07-22T19:0${index}:00.000Z`,
+    })),
+  );
+  const partial = candidate(2);
+  partial.username = "lorielebras_autom";
+  partial.sourceRunId = "retry-run-2";
+  partial.sourceRequestId = "request-3";
+  partial.canonicalAttemptId = 3;
+  partial.sourceLineageValid = true;
+  partial.canonicalLiveUnfollowResumeAuthorized = true;
+  partial.restartNeedReason = "partial_live_unfollow_backlog_resume_needed";
+  partial.reliability.restartAllowed = false;
+  partial.reliability.restartBlockReason = "auto_restart_retries_exhausted";
+  partial.reliability.unfollowPhaseStatus = "partial_resumable";
+  partial.reliability.businessProgressMade = true;
+  partial.reliability.lastRunId = "retry-run-2";
+  partial.reliability.lastRunStatus = "completed";
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [partial as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.enqueued_count, 1, JSON.stringify(result.result));
+  assert.equal(result.result.blocked_count, 0);
+  assert.equal(supabase.requests.length, 1);
+  assert.match(String(supabase.requests[0].p_idempotency_key), /source:retry-run-2:retry:3/);
+});
+
+test("canonical live Unfollow continuation still obeys the account daily cap", async () => {
+  const supabase = new FakeSupabase();
+  supabase.rows("auto_restart_decisions").push(
+    ...[1, 2, 3].map((index) => ({
+      account_id: "account-1",
+      business_session_id: "business-session-1",
+      decision: "enqueued",
+      source_run_id: `source-run-${index}`,
+      created_at: `2026-07-22T19:0${index}:00.000Z`,
+    })),
+  );
+  const partial = candidate(2);
+  partial.sourceRunId = "retry-run-2";
+  partial.sourceRequestId = "request-3";
+  partial.canonicalAttemptId = 3;
+  partial.sourceLineageValid = true;
+  partial.canonicalLiveUnfollowResumeAuthorized = true;
+  partial.reliability.restartAllowed = false;
+  partial.reliability.restartBlockReason = "auto_restart_retries_exhausted";
+  partial.reliability.unfollowPhaseStatus = "partial_resumable";
+
+  const result = await runAutoRestartTick(supabase as never, {
+    workerId: "operator-test",
+    requestedByActor: "offline-test",
+    manual: true,
+    internal: true,
+    now: new Date("2026-07-22T20:00:00.000Z"),
+    overview: { candidates: [partial as unknown as Row] },
+    evaluateEligibility: async () => ({ ok: true, reason: "" }),
+  });
+
+  assert.equal(result.result.enqueued_count, 0);
+  assert.equal(result.result.blocked_count, 1);
+  assert.match(result.result.blocked[0].reason, /max_restarts_day/);
   assert.equal(supabase.requests.length, 0);
 });
 
@@ -547,7 +630,7 @@ test("an armed generic Follow60 control overrides a broader stopped follow+unfol
     },
   });
 
-  assert.equal(result.result.enqueued_count, 1);
+  assert.equal(result.result.enqueued_count, 1, JSON.stringify(result.result));
   assert.equal(result.result.blocked_count, 0);
   assert.equal(supabase.requests.length, 1);
   assert.match(String(supabase.requests[0].p_idempotency_key), /:follow60:11111111-/);
@@ -638,7 +721,7 @@ test("an armed Follow60 control bootstraps a fresh Follow-only request when only
     },
   });
 
-  assert.equal(result.result.enqueued_count, 1);
+  assert.equal(result.result.enqueued_count, 1, JSON.stringify(result.result));
   assert.equal(result.result.blocked_count, 0);
   assert.equal(supabase.requests.length, 1);
   const metadata = supabase.requests[0].p_metadata_safe as Row;
