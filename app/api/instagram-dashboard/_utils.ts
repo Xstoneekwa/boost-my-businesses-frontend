@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { canAccessTenantPages, getInstagramUserContext } from "@/lib/restaurant-analytics/session";
-import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "./compass/relay-auth";
+import { resolveInstagramDashboardActorAuth } from "@/lib/instagram-dashboard/instagram-dashboard-actor-auth";
+import { compassRelayAuthFailureReason, readRelayKey, relayAuthStatus, verifyCompassRelayKey } from "./compass/relay-auth";
 
 export type SupabaseRecord = Record<string, unknown>;
 
@@ -40,6 +41,40 @@ export async function requireInstagramAdmin() {
   }
 
   return null;
+}
+
+export async function resolveInstagramDashboardActor(request: Request, context = "Instagram dashboard") {
+  const result = await resolveInstagramDashboardActorAuth(request.headers, {
+    readRelayKey,
+    verifyRelayKey: verifyCompassRelayKey,
+    readBotAppOperatorId: () => process.env.INSTAGRAM_BOTAPP_OPERATOR_USER_ID ?? "",
+    getAdminContext: getInstagramAdminUserContext,
+    readAdminUserId: (adminContext) => adminContext.userId,
+    canAccessAdmin: canAccessTenantPages,
+  });
+
+  if (result.ok) return result;
+  if (result.reason === "botapp_operator_identity_unconfigured") {
+    return {
+      ok: false as const,
+      response: jsonError("BotApp onboarding operator identity is not configured.", result.status, {
+        code: result.reason,
+      }),
+    };
+  }
+  if (result.reason === "authentication_required") {
+    return { ok: false as const, response: jsonError("Authentication required.", result.status) };
+  }
+  if (result.reason === "admin_access_denied") {
+    return {
+      ok: false as const,
+      response: jsonError("You are not authorized to access the Instagram dashboard.", result.status),
+    };
+  }
+  return {
+    ok: false as const,
+    response: jsonError(`${context} relay authentication failed.`, result.status, { reason: result.reason }),
+  };
 }
 
 export async function requireRelayOrAdmin(request: Request, context = "Instagram dashboard") {

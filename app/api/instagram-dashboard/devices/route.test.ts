@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { safePhoneDevice } from "./helpers.ts";
+
+const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+
+test("devices route uses the shared actor auth contract", () => {
+  assert.match(source, /resolveInstagramDashboardActor\(request, "Devices"\)/);
+  assert.doesNotMatch(source, /verifyCompassRelayKey|requireRelayOrAdmin|requireInstagramAdmin/);
+});
+
+test("devices business loader remains unchanged after actor authorization", () => {
+  assert.match(source, /jsonOk\(await getDashboardDevices\(\)\)/);
+});
 
 test("devices route projects Samsung phones from phone_devices with app instances", () => {
   const phone = safePhoneDevice(

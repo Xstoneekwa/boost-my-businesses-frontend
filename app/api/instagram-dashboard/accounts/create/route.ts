@@ -6,24 +6,16 @@ import {
   restartInstagramAccountOnboarding,
   saveInstagramAccountOnboardingProtectionLists,
   updateInstagramAccountOnboarding,
-  type InstagramOnboardingActorContext,
   type InstagramOnboardingSourceContext,
 } from "@/lib/instagram-onboarding/canonical-account-onboarding";
-import { canAccessTenantPages } from "@/lib/restaurant-analytics/session";
 import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
 import {
-  getInstagramAdminUserContext,
   jsonError,
   jsonOk,
   readJsonBody,
   readString,
+  resolveInstagramDashboardActor,
 } from "../../_utils";
-import {
-  compassRelayAuthFailureReason,
-  readRelayKey,
-  relayAuthStatus,
-  verifyCompassRelayKey,
-} from "../../compass/relay-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -58,48 +50,6 @@ function safeError(error: unknown) {
     eligibleCount: Number(record.eligibleCount ?? 0),
     requiredCount: Number(record.requiredCount ?? 15),
     clientMessage: readString(record.clientMessage),
-  };
-}
-
-async function resolveOperatorActor(request: Request): Promise<
-  | { ok: true; actor: InstagramOnboardingActorContext }
-  | { ok: false; response: ReturnType<typeof jsonError> }
-> {
-  const suppliedRelayKey = readRelayKey(request.headers);
-  if (suppliedRelayKey) {
-    const relayAuth = verifyCompassRelayKey(request.headers);
-    if (!relayAuth.ok) {
-      const reason = compassRelayAuthFailureReason(relayAuth);
-      return {
-        ok: false,
-        response: jsonError("Add profile relay authentication failed.", relayAuthStatus(reason), { reason }),
-      };
-    }
-    const operatorId = readString(process.env.INSTAGRAM_BOTAPP_OPERATOR_USER_ID);
-    if (!UUID_PATTERN.test(operatorId)) {
-      return {
-        ok: false,
-        response: jsonError("BotApp onboarding operator identity is not configured.", 503, {
-          code: "botapp_operator_identity_unconfigured",
-        }),
-      };
-    }
-    return {
-      ok: true,
-      actor: { actorType: "botapp_operator", actorId: operatorId, source: "botapp" },
-    };
-  }
-
-  const adminContext = await getInstagramAdminUserContext();
-  if (!adminContext?.userId) {
-    return { ok: false, response: jsonError("Authentication required.", 401) };
-  }
-  if (!canAccessTenantPages(adminContext)) {
-    return { ok: false, response: jsonError("You are not authorized to create Instagram accounts.", 403) };
-  }
-  return {
-    ok: true,
-    actor: { actorType: "admin", actorId: adminContext.userId, source: "admin_dashboard" },
   };
 }
 
@@ -143,7 +93,7 @@ function safeCanonicalResponse(onboarding: Awaited<ReturnType<typeof beginInstag
 }
 
 export async function GET(request: Request) {
-  const auth = await resolveOperatorActor(request);
+  const auth = await resolveInstagramDashboardActor(request, "Add profile");
   if (!auth.ok) return auth.response;
   const clientId = new URL(request.url).searchParams.get("client_id")?.trim() ?? "";
   if (!UUID_PATTERN.test(clientId)) return jsonError("A valid client_id is required.", 400, { code: "client_id_invalid" });
@@ -157,7 +107,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await resolveOperatorActor(request);
+  const auth = await resolveInstagramDashboardActor(request, "Add profile");
   if (!auth.ok) return auth.response;
   const body = await readJsonBody<CreateProfilePayload>(request);
   if (!body) return jsonError("Invalid request body.", 400, { code: "invalid_body" });
@@ -231,7 +181,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await resolveOperatorActor(request);
+  const auth = await resolveInstagramDashboardActor(request, "Add profile");
   if (!auth.ok) return auth.response;
   const body = await readJsonBody<CreateProfilePayload>(request);
   if (!body) return jsonError("Invalid request body.", 400, { code: "invalid_body" });

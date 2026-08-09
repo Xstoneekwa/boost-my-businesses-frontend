@@ -16,6 +16,12 @@ test("Add Profile loads real devices and preserves explicit device intent", () =
   assert.match(source, /idempotency_key: crypto\.randomUUID\(\)/);
 });
 
+test("Admin Wizard relies on its authenticated session and never receives the BotApp relay secret", () => {
+  assert.match(source, /fetch\("\/api\/instagram-dashboard\/devices", \{ headers: \{ Accept: "application\/json" \} \}\)/);
+  assert.match(source, /fetch\(`\/api\/instagram-dashboard\/accounts\/schedule-slots\?/);
+  assert.doesNotMatch(source, /BOTAPP_RELAY_API_KEY|x-botapp-relay-key|localStorage|sessionStorage/);
+});
+
 test("Add Profile prefers free clones and disables unsafe primary selection", () => {
   assert.match(source, /instance_type === "clone"/);
   assert.match(source, /instance_index === 1/);
