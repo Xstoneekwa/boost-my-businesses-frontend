@@ -37,6 +37,7 @@ import {
 import { resolveClientConnectionActionPanel } from "@/lib/instagram-client/client-connection-action-scope";
 import { readAccountProtectionListValidator } from "@/lib/instagram-dashboard/account-protection-list-http";
 import { protectionListRequestErrorMessage } from "@/lib/instagram-dashboard/account-protection-list-input";
+import { CLIENT_ONBOARDING_TARGET_MINIMUM } from "@/lib/instagram-client/client-account-onboarding-policy";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -143,7 +144,7 @@ const T = {
       statusNeedsCompletion:"Ciblage à compléter",
       statusReady:"Ciblage prêt",
       statusCounts:"{{eligible}} comptes prêts pour la campagne sur {{total}} ajoutés",
-      statusCampaignNote:"La campagne démarre dès que 6 comptes sont prêts.",
+      statusCampaignNote:`La campagne démarre dès que ${CLIENT_ONBOARDING_TARGET_MINIMUM} comptes sont prêts.`,
       addTargetsCta:"Ajouter des comptes cibles",
     },
     account: {
@@ -222,7 +223,7 @@ const T = {
       statusNeedsCompletion:"Targeting needs completion",
       statusReady:"Targeting ready",
       statusCounts:"{{eligible}} campaign-ready targets out of {{total}} added",
-      statusCampaignNote:"Your campaign starts as soon as 6 targets are ready.",
+      statusCampaignNote:`Your campaign starts as soon as ${CLIENT_ONBOARDING_TARGET_MINIMUM} targets are ready.`,
       addTargetsCta:"Add target accounts",
     },
     account: {
