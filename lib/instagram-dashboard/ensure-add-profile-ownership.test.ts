@@ -30,7 +30,18 @@ test("ensure ownership module creates client and subscription links before assig
   assert.match(ensureSource, /account_commercial_addons/);
   assert.match(ensureSource, /client_subscription_modules/);
   assert.match(ensureSource, /sync_client_subscription_entitlements/);
-  assert.match(ensureSource, /ensureCommercialPackagePreset/);
+  assert.match(ensureSource, /requireActiveCommercialPackage/);
+});
+
+test("Add Profile treats the package catalogue as read-only canonical truth", () => {
+  const packageGuard = ensureSource.slice(
+    ensureSource.indexOf("async function requireActiveCommercialPackage"),
+    ensureSource.indexOf("function normalizeAddonCodes"),
+  );
+  assert.match(packageGuard, /from\("commercial_packages"\)/);
+  assert.match(packageGuard, /eq\("active", true\)/);
+  assert.match(packageGuard, /package_settings_incomplete/);
+  assert.doesNotMatch(packageGuard, /\.upsert\(|\.insert\(|\.update\(|\.delete\(/);
 });
 
 test("Pro subscription modules include Follow Unfollow Welcome but not Outreach without add-on", () => {

@@ -59,33 +59,27 @@ function normalizeCommercialPackage(value: string | undefined): AddProfileCommer
   return defaultAddProfileCommercialPackage();
 }
 
-async function ensureCommercialPackagePreset(
+async function requireActiveCommercialPackage(
   supabase: SupabaseClient,
   preset: ReturnType<typeof resolveAddProfilePackagePreset>,
 ) {
-  const { error } = await supabase.from("commercial_packages").upsert(
-    {
-      code: preset.commercialPackageCode,
-      label: preset.label,
-      default_follow_day_cap: preset.defaultFollowDayCap,
-      default_unfollow_day_cap: preset.defaultUnfollowDayCap,
-      default_follow_session_cap: preset.defaultFollowSessionCap,
-      default_unfollow_session_cap: preset.defaultUnfollowSessionCap,
-      max_follow_day_cap: preset.maxFollowDayCap,
-      max_follow_session_cap: preset.maxFollowSessionCap,
-      default_welcome_enabled: preset.defaultWelcomeEnabled,
-      default_outreach_enabled: preset.defaultOutreachEnabled,
-      default_welcome_day_cap: preset.defaultWelcomeDayCap,
-      default_outreach_day_cap: preset.defaultOutreachDayCap,
-      advanced_ct_enabled: preset.advancedCtEnabled,
-      ai_comment_enabled: preset.aiCommentEnabled,
-      ai_targeting_enabled: preset.aiTargetingEnabled,
-      active: true,
-    },
-    { onConflict: "code" },
-  );
+  // commercial_packages is the canonical product catalogue. Creating one
+  // account must never rewrite global package truth from a UI-side preset.
+  // Account rows are reconciled against this catalogue later in the flow, so
+  // a missing/inactive package fails closed instead of bootstrapping a second
+  // source of truth.
+  const { data, error } = await supabase
+    .from("commercial_packages")
+    .select("code,active")
+    .eq("code", preset.commercialPackageCode)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle<{ code?: string; active?: boolean }>();
 
-  if (error) throw new Error("commercial_package_upsert_failed");
+  if (error) throw new Error("commercial_package_lookup_failed");
+  if (data?.code !== preset.commercialPackageCode || data.active !== true) {
+    throw new Error("package_settings_incomplete");
+  }
 }
 
 function normalizeAddonCodes(addons: string[] | undefined): AddProfileAddonCode[] {
@@ -330,7 +324,7 @@ export async function ensureAddProfileOwnership(
       return { ok: false, reason: "add_profile_client_unavailable" };
     }
 
-    await ensureCommercialPackagePreset(supabase, preset);
+    await requireActiveCommercialPackage(supabase, preset);
     await ensureAccountCommercialPackage(supabase, input.accountId, commercialPackageCode, "add_profile", {
       ...(input.outreachVariant ? { outreach_variant: input.outreachVariant } : {}),
       ...(input.entitlementId ? { entitlement_id: input.entitlementId } : {}),
