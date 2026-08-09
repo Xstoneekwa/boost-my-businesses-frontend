@@ -166,7 +166,7 @@ insert into public.ig_action_logs (id, account_id, action_type, status, created_
   '2026-08-09T22:09:15Z'
 );
 
-\ir ../migrations/20260810010000_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.sql
+\ir ../migrations/20260809232913_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.sql
 
 do $$
 begin
@@ -240,7 +240,7 @@ select 'overrides'::text,
 from public.ig_account_unfollow_limit_overrides;
 
 -- A second execution must succeed and leave the exact persisted state intact.
-\ir ../migrations/20260810010000_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.sql
+\ir ../migrations/20260809232913_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.sql
 
 do $$
 declare
@@ -325,7 +325,7 @@ begin
   end if;
 end $$;
 
-\ir ../rollback/20260810010000_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.down.sql
+\ir ../rollback/20260809232913_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.down.sql
 
 do $$
 begin
