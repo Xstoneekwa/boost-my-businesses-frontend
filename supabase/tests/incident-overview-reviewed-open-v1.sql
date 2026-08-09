@@ -103,4 +103,21 @@ begin
   end if;
 end $$;
 
+-- The down migration must restore only the historical status-based projection.
+\ir ../rollback/20260809144500_incident_overview_reviewed_open_v1.down.sql
+
+do $$
+declare
+  v_open jsonb;
+  v_action jsonb;
+begin
+  v_open := public.get_account_incidents_overview_v1('open', 50, null, null, null, false);
+  v_action := public.get_account_incidents_overview_v1('action_required', 50, null, null, null, false);
+  if v_open->>'filtered_total' <> '0'
+     or v_action->>'filtered_total' <> '2'
+     or v_action #>> '{counters,actionRequired}' <> '2' then
+    raise exception 'overview_rollback_projection_failed:open=% action=%', v_open, v_action;
+  end if;
+end $$;
+
 select 'incident_overview_reviewed_open_v1_ok' as result;
