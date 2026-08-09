@@ -684,8 +684,8 @@ export async function activateClientAccountEntitlementFromCheckout(
       };
     }
 
-    let scopedClientId = checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
-    let scopedAuthUserId = checkoutContext === "public_new_workspace" ? null : input.authUserId?.trim() || null;
+    const scopedClientId = checkoutContext === "public_new_workspace" ? "" : input.clientId?.trim() || "";
+    const scopedAuthUserId = checkoutContext === "public_new_workspace" ? null : input.authUserId?.trim() || null;
     let resumeClientId: string | null = null;
     let resumeExistingCheckoutSessionId: string | null = null;
     let resumeExistingEntitlementId: string | null = null;
@@ -1073,7 +1073,7 @@ export async function activateClientAccountEntitlementFromCheckout(
       const auditResult = await insertCheckoutAuditEvent(supabase, {
         checkoutSessionId,
         entitlementId,
-        eventType: "simulated_checkout_activated",
+        eventType: input.mode === "stripe" ? "stripe_checkout_activated" : "simulated_checkout_activated",
         actorEmail: email,
         clientId,
         payload: auditPayload,
