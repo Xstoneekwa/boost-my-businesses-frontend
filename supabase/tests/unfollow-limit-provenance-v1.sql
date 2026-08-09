@@ -64,12 +64,18 @@ $$;
 insert into public.ig_accounts (id, username, created_at) values
   ('10000000-0000-4000-8000-000000000001', 'canonical_default_drift', '2026-08-09T22:00:13Z'),
   ('10000000-0000-4000-8000-000000000002', 'ambiguous_legacy_lower', '2026-07-01T00:00:00Z'),
-  ('10000000-0000-4000-8000-000000000003', 'package_exact', '2026-08-09T22:00:13Z');
+  ('10000000-0000-4000-8000-000000000003', 'package_exact', '2026-08-09T22:00:13Z'),
+  ('10000000-0000-4000-8000-000000000004', 'confirmed_human_override_50', '2026-08-09T22:00:13Z'),
+  ('10000000-0000-4000-8000-000000000005', 'pro_canonical_default_drift', '2026-08-09T22:00:13Z'),
+  ('10000000-0000-4000-8000-000000000006', 'premium_canonical_default_drift', '2026-08-09T22:00:13Z');
 
 insert into public.account_package_summary (account_id, package_caps) values
   ('10000000-0000-4000-8000-000000000001', '{"unfollow_day":80,"unfollow_session":80}'),
   ('10000000-0000-4000-8000-000000000002', '{"unfollow_day":80,"unfollow_session":80}'),
-  ('10000000-0000-4000-8000-000000000003', '{"unfollow_day":80,"unfollow_session":80}');
+  ('10000000-0000-4000-8000-000000000003', '{"unfollow_day":80,"unfollow_session":80}'),
+  ('10000000-0000-4000-8000-000000000004', '{"unfollow_day":120,"unfollow_session":120}'),
+  ('10000000-0000-4000-8000-000000000005', '{"unfollow_day":120,"unfollow_session":120}'),
+  ('10000000-0000-4000-8000-000000000006', '{"unfollow_day":120,"unfollow_session":120}');
 
 insert into public.ig_account_unfollow_settings (
   account_id, unfollow_per_session_limit, unfollow_per_day_limit,
@@ -90,20 +96,74 @@ insert into public.ig_account_unfollow_settings (
     '10000000-0000-4000-8000-000000000003', 80, 80,
     '{"source":"commercial_packages","package_code":"growth","unfollow_day":80,"unfollow_session":80}',
     'prod_normal', null, '2026-08-09T22:00:13Z', '2026-08-09T22:09:14Z'
+  ),
+  (
+    '10000000-0000-4000-8000-000000000004', 50, 120,
+    '{"source":"commercial_packages","package_code":"pro","unfollow_day":120,"unfollow_session":120}',
+    'prod_normal', null, '2026-08-09T22:00:13Z', '2026-08-09T22:09:14Z'
+  ),
+  (
+    '10000000-0000-4000-8000-000000000005', 50, 120,
+    '{"source":"commercial_packages","package_code":"pro","unfollow_day":120,"unfollow_session":120}',
+    'prod_normal', null, '2026-08-09T22:00:13Z', '2026-08-09T22:09:14Z'
+  ),
+  (
+    '10000000-0000-4000-8000-000000000006', 50, 120,
+    '{"source":"commercial_packages","package_code":"premium","unfollow_day":120,"unfollow_session":120}',
+    'prod_normal', null, '2026-08-09T22:00:13Z', '2026-08-09T22:09:14Z'
   );
 
 insert into public.client_instagram_onboarding_sessions (id, account_id, status, created_at) values
-  ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'completed', '2026-08-09T22:00:13Z');
+  ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'completed', '2026-08-09T22:00:13Z'),
+  ('20000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000004', 'completed', '2026-08-09T22:00:13Z'),
+  ('20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000005', 'completed', '2026-08-09T22:00:13Z'),
+  ('20000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000006', 'completed', '2026-08-09T22:00:13Z');
 
 insert into public.account_package_runtime_contract_events (
   id, account_id, event_type, source, details_safe, created_at
-) values (
-  '30000000-0000-4000-8000-000000000001',
-  '10000000-0000-4000-8000-000000000001',
-  'package_runtime_contract_reconciled',
-  'assignment_trigger',
-  '{"override_policy":"positive_account_override_lte_package"}',
-  '2026-08-09T22:09:14Z'
+) values
+  (
+    '30000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'package_runtime_contract_reconciled',
+    'assignment_trigger',
+    '{"override_policy":"positive_account_override_lte_package"}',
+    '2026-08-09T22:09:14Z'
+  ),
+  (
+    '30000000-0000-4000-8000-000000000004',
+    '10000000-0000-4000-8000-000000000004',
+    'package_runtime_contract_reconciled',
+    'assignment_trigger',
+    '{"override_policy":"positive_account_override_lte_package"}',
+    '2026-08-09T22:09:14Z'
+  ),
+  (
+    '30000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000005',
+    'package_runtime_contract_reconciled',
+    'assignment_trigger',
+    '{"override_policy":"positive_account_override_lte_package"}',
+    '2026-08-09T22:09:14Z'
+  ),
+  (
+    '30000000-0000-4000-8000-000000000006',
+    '10000000-0000-4000-8000-000000000006',
+    'package_runtime_contract_reconciled',
+    'assignment_trigger',
+    '{"override_policy":"positive_account_override_lte_package"}',
+    '2026-08-09T22:09:14Z'
+  );
+
+-- The audit is intentionally one second after the settings row update. The
+-- migration must treat the durable save event as human provenance instead of
+-- depending on timestamp ordering inside the old multi-write API path.
+insert into public.ig_action_logs (id, account_id, action_type, status, created_at) values (
+  '40000000-0000-4000-8000-000000000004',
+  '10000000-0000-4000-8000-000000000004',
+  'unfollow_domain_settings_saved',
+  'success',
+  '2026-08-09T22:09:15Z'
 );
 
 \ir ../migrations/20260810010000_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.sql
@@ -125,6 +185,104 @@ begin
   if (select classification from public.ig_account_unfollow_limit_overrides
       where account_id = '10000000-0000-4000-8000-000000000002') <> 'legacy_unclassified' then
     raise exception 'ambiguous_legacy_provenance_missing';
+  end if;
+  if (select unfollow_per_session_limit from public.ig_account_unfollow_settings
+      where account_id = '10000000-0000-4000-8000-000000000004') <> 50
+     or (select classification from public.ig_account_unfollow_limit_overrides
+         where account_id = '10000000-0000-4000-8000-000000000004') <> 'explicit'
+     or (select source from public.ig_account_unfollow_limit_overrides
+         where account_id = '10000000-0000-4000-8000-000000000004') <> 'migration_confirmed' then
+    raise exception 'confirmed_human_override_50_not_preserved';
+  end if;
+  if (select unfollow_per_day_limit from public.ig_account_unfollow_settings
+      where account_id = '10000000-0000-4000-8000-000000000005') <> 120
+     or (select unfollow_per_session_limit from public.ig_account_unfollow_settings
+         where account_id = '10000000-0000-4000-8000-000000000005') <> 120 then
+    raise exception 'pro_package_inheritance_not_120_120';
+  end if;
+  if (select unfollow_per_day_limit from public.ig_account_unfollow_settings
+      where account_id = '10000000-0000-4000-8000-000000000006') <> 120
+     or (select unfollow_per_session_limit from public.ig_account_unfollow_settings
+         where account_id = '10000000-0000-4000-8000-000000000006') <> 120 then
+    raise exception 'premium_package_inheritance_not_120_120';
+  end if;
+end $$;
+
+create temp table migration_state_before_second_run as
+select 'settings'::text as state_key,
+       jsonb_agg(
+         jsonb_build_object(
+           'account_id', account_id,
+           'day', unfollow_per_day_limit,
+           'session', unfollow_per_session_limit,
+           'updated_at', updated_at
+         ) order by account_id
+       ) as state_value
+from public.ig_account_unfollow_settings
+union all
+select 'overrides'::text,
+       coalesce(
+         jsonb_agg(
+           jsonb_build_object(
+             'account_id', account_id,
+             'classification', classification,
+             'day', unfollow_day_cap_override,
+             'session', unfollow_session_cap_override,
+             'source', source,
+             'surface', source_surface,
+             'reason', reason,
+             'created_at', created_at,
+             'updated_at', updated_at
+           ) order by account_id
+         ),
+         '[]'::jsonb
+       )
+from public.ig_account_unfollow_limit_overrides;
+
+-- A second execution must succeed and leave the exact persisted state intact.
+\ir ../migrations/20260810010000_unfollow_limit_provenance_and_canonical_onboarding_defaults_v1.sql
+
+do $$
+declare
+  v_settings jsonb;
+  v_overrides jsonb;
+begin
+  select jsonb_agg(
+           jsonb_build_object(
+             'account_id', account_id,
+             'day', unfollow_per_day_limit,
+             'session', unfollow_per_session_limit,
+             'updated_at', updated_at
+           ) order by account_id
+         )
+  into v_settings
+  from public.ig_account_unfollow_settings;
+
+  select coalesce(
+           jsonb_agg(
+             jsonb_build_object(
+               'account_id', account_id,
+               'classification', classification,
+               'day', unfollow_day_cap_override,
+               'session', unfollow_session_cap_override,
+               'source', source,
+               'surface', source_surface,
+               'reason', reason,
+               'created_at', created_at,
+               'updated_at', updated_at
+             ) order by account_id
+           ),
+           '[]'::jsonb
+         )
+  into v_overrides
+  from public.ig_account_unfollow_limit_overrides;
+
+  if v_settings is distinct from (
+       select state_value from migration_state_before_second_run where state_key = 'settings'
+     ) or v_overrides is distinct from (
+       select state_value from migration_state_before_second_run where state_key = 'overrides'
+     ) then
+    raise exception 'forward_migration_second_execution_changed_state';
   end if;
 end $$;
 

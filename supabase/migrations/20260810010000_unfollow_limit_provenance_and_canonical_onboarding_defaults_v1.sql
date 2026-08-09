@@ -54,14 +54,20 @@ insert into public.ig_account_unfollow_limit_overrides (
 )
 select
   s.account_id,
-  'legacy_unclassified',
+  case when human_audit.id is not null then 'explicit' else 'legacy_unclassified' end,
   case when s.unfollow_per_day_limit between 1 and caps.unfollow_day - 1
     then s.unfollow_per_day_limit end,
   case when s.unfollow_per_session_limit between 1 and caps.unfollow_session - 1
     then s.unfollow_per_session_limit end,
-  'migration_unclassified',
-  'legacy_current_state_audit',
-  'current_lower_value_without_provenance'
+  case when human_audit.id is not null then 'migration_confirmed' else 'migration_unclassified' end,
+  case when human_audit.id is not null
+    then 'ig_action_logs:unfollow_domain_settings_saved'
+    else 'legacy_current_state_audit'
+  end,
+  case when human_audit.id is not null
+    then 'confirmed_human_settings_save'
+    else 'current_lower_value_without_provenance'
+  end
 from public.ig_account_unfollow_settings s
 join public.ig_accounts a on a.id = s.account_id
 join public.account_package_summary aps on aps.account_id = s.account_id
@@ -70,6 +76,15 @@ cross join lateral (
     nullif(aps.package_caps ->> 'unfollow_day', '')::integer as unfollow_day,
     nullif(aps.package_caps ->> 'unfollow_session', '')::integer as unfollow_session
 ) caps
+left join lateral (
+  select al.id
+  from public.ig_action_logs al
+  where al.account_id = s.account_id
+    and al.action_type = 'unfollow_domain_settings_saved'
+    and al.status = 'success'
+  order by al.created_at desc
+  limit 1
+) human_audit on true
 where caps.unfollow_day > 0
   and caps.unfollow_session > 0
   and (
@@ -102,14 +117,7 @@ where caps.unfollow_day > 0
         and ev.details_safe ->> 'override_policy' = 'positive_account_override_lte_package'
         and abs(extract(epoch from (ev.created_at - s.updated_at))) < 1
     )
-    and not exists (
-      select 1
-      from public.ig_action_logs al
-      where al.account_id = s.account_id
-        and al.action_type = 'unfollow_domain_settings_saved'
-        and al.status = 'success'
-        and al.created_at <= s.updated_at
-    )
+    and human_audit.id is null
   )
 on conflict (account_id) do nothing;
 
@@ -179,8 +187,19 @@ grant execute on function public.apply_account_unfollow_limit_provenance_v1(uuid
 -- Wrap the existing canonical reconciler. Follow provenance remains fully
 -- authoritative inside the predecessor; this final layer applies the parallel
 -- Unfollow provenance after legacy values have been observed/materialized.
-alter function public.reconcile_account_package_runtime_contract(uuid, text)
-  rename to reconcile_account_package_runtime_contract_follow_provenance_v1;
+-- The guarded rename makes the forward migration safely re-runnable: once the
+-- predecessor exists, a second execution only replaces the wrapper in place.
+do $$
+begin
+  if to_regprocedure('public.reconcile_account_package_runtime_contract_follow_provenance_v1(uuid,text)') is null then
+    if to_regprocedure('public.reconcile_account_package_runtime_contract(uuid,text)') is null then
+      raise exception 'canonical_package_runtime_reconciler_missing';
+    end if;
+    alter function public.reconcile_account_package_runtime_contract(uuid, text)
+      rename to reconcile_account_package_runtime_contract_follow_provenance_v1;
+  end if;
+end;
+$$;
 
 revoke all on function public.reconcile_account_package_runtime_contract_follow_provenance_v1(uuid, text)
   from public, anon, authenticated;
