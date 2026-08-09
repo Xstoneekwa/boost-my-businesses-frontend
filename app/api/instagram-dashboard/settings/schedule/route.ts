@@ -455,23 +455,6 @@ async function syncLegacyScheduleSettingsProjection(
   if (error) throw new Error(`schedule_settings_projection_sync_failed:${error.message}`);
 }
 
-async function reconcileOperationalProjectionBeforeScheduling(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  accountId: string,
-  actorId: string | null,
-) {
-  const { data, error } = await supabase.rpc("reconcile_account_operational_projection_v1", {
-    p_account_id: accountId,
-    p_source: "schedule_assignment",
-    p_actor_id: actorId,
-  });
-  if (error) throw new Error(`schedule_operational_projection_reconciliation_failed:${error.message}`);
-  const result = readRpcObject(data);
-  if (result.ok !== true) {
-    throw new Error(`schedule_operational_projection_blocked:${readString(result.reason, "unknown")}`);
-  }
-}
-
 async function requireRelayOrAdmin(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
@@ -587,8 +570,6 @@ export async function PATCH(request: Request) {
         occupied_by: assignmentUsername(conflict),
       });
     }
-
-    await reconcileOperationalProjectionBeforeScheduling(supabase, accountId, actorId);
 
     const { data, error } = await supabase.rpc("assign_account_slot", {
       p_account_id: accountId,
