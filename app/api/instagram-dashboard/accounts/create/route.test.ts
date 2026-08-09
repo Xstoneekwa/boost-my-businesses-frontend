@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+const authUtilsSource = readFileSync(new URL("../../_utils.ts", import.meta.url), "utf8");
 
 test("Admin and BotApp adapt to the single canonical onboarding engine", () => {
   assert.match(source, /canonical-account-onboarding/);
@@ -14,10 +15,11 @@ test("Admin and BotApp adapt to the single canonical onboarding engine", () => {
 });
 
 test("operator identity is server-authenticated and never accepted from payload", () => {
-  assert.match(source, /getInstagramAdminUserContext\(\)/);
-  assert.match(source, /canAccessTenantPages\(adminContext\)/);
-  assert.match(source, /verifyCompassRelayKey\(request\.headers\)/);
-  assert.match(source, /INSTAGRAM_BOTAPP_OPERATOR_USER_ID/);
+  assert.match(source, /resolveInstagramDashboardActor\(request, "Add profile"\)/);
+  assert.match(authUtilsSource, /getAdminContext: getInstagramAdminUserContext/);
+  assert.match(authUtilsSource, /canAccessAdmin: canAccessTenantPages/);
+  assert.match(authUtilsSource, /verifyRelayKey: verifyCompassRelayKey/);
+  assert.match(authUtilsSource, /INSTAGRAM_BOTAPP_OPERATOR_USER_ID/);
   assert.doesNotMatch(source, /body\.(actor_id|operator_id|user_id)/);
 });
 

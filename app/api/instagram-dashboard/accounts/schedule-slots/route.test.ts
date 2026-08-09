@@ -33,8 +33,6 @@ test("schedule slots route exposes manual_only as a separate selectable option",
 });
 
 test("schedule slots route accepts BotApp relay auth like other shared backend APIs", () => {
-  assert.match(source, /verifyCompassRelayKey/);
-  assert.match(source, /requireRelayOrAdmin/);
-  assert.match(source, /Schedule slots relay authentication failed/);
-  assert.doesNotMatch(source, /export async function GET[\s\S]*requireInstagramAdmin\(\)/);
+  assert.match(source, /resolveInstagramDashboardActor\(request, "Schedule slots"\)/);
+  assert.doesNotMatch(source, /verifyCompassRelayKey|requireRelayOrAdmin|requireInstagramAdmin/);
 });
