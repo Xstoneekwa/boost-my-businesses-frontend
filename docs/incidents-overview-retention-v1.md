@@ -62,6 +62,40 @@ active linked dashboard actions in the same database transaction. Historical
 open incidents whose action is already resolved are visible under All, but are
 not blockers; they require object-by-object evidence before incident closure.
 
+### Resolution and configuration independence V3 (9 August 2026)
+
+An unresolved incident is scoped to its own account and recovery lineage. It
+must never block account configuration writes, another account, or an unrelated
+feature. In particular, Schedule Save enforces real slot/device conflicts but
+does not call the operational incident projection and does not require incident
+resolution first.
+
+`Resolve after verification` is the single canonical operator action for a
+verified non-security incident. `transition_account_incident_human_review_v2`
+atomically:
+
+1. resolves the incident and its linked active dashboard action;
+2. records the actor, expected Worker SHA, fixed-cause version and idempotency
+   key;
+3. restores `restart_allowed` on the matching recoverable resume plan;
+4. creates at most one resume authorization when a scheduled assignment is
+   currently active, or leaves it ready for the next natural scheduler
+   reconciliation when the account is `manual_only`;
+5. returns the next-tick eligibility result without creating a request, a run,
+   or a tick.
+
+Severity is presentation/impact metadata, not a security classification. A
+`critical` incident can therefore be resolved through the canonical action.
+Only an explicit security type (`security_*`) or
+`metadata.security_incident=true` remains fail-closed and requires a separate
+security procedure. This rule is generic: it contains no account allowlist or
+incident-specific exception.
+
+The production contract is implemented by migration
+`20260809180222_incident_resolution_config_independence_v3.sql`. Effective RPC
+access remains least-privilege: `service_role` only; `public`, `anon` and
+`authenticated` have no execute privilege.
+
 Acknowledgment and notes do not notify, avoiding review spam. A resolution
 prepares one unique event-scoped delivery key per enabled/configured channel.
 The database commits before provider delivery, so a Slack success and Discord
