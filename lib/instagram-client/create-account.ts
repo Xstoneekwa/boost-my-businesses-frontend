@@ -28,7 +28,7 @@ import {
   profileVerificationPayloadForInsert,
 } from "@/lib/instagram-accounts/profile-verification-payload";
 import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
-import { clientMaxAccountsLimit, projectClientAccountRow, readString } from "./guards";
+import { projectClientAccountRow, readString } from "./guards";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -144,16 +144,6 @@ async function submitClientCredentials(input: {
   }
 }
 
-async function countClientAccounts(supabase: ReturnType<typeof createSupabaseClient>, clientId: string) {
-  const { count, error } = await supabase
-    .from("client_instagram_accounts")
-    .select("id", { count: "exact", head: true })
-    .eq("client_id", clientId)
-    .eq("active", true);
-  if (error) throw new Error("client_account_count_failed");
-  return count ?? 0;
-}
-
 async function clientHasActiveSubscription(supabase: ReturnType<typeof createSupabaseClient>, clientId: string) {
   const { data, error } = await supabase
     .from("client_subscriptions")
@@ -218,12 +208,6 @@ export async function createClientInstagramAccount(input: ClientCreateAccountInp
   const subscriptionActive = await clientHasActiveSubscription(supabase, input.clientId);
   if (!subscriptionActive) {
     return { ok: false, status: 403, error: "Your subscription is not active.", code: "subscription_inactive" };
-  }
-
-  const linkedCount = await countClientAccounts(supabase, input.clientId);
-  const maxAccounts = clientMaxAccountsLimit();
-  if (linkedCount >= maxAccounts && Number.isFinite(maxAccounts)) {
-    return { ok: false, status: 409, error: "Maximum number of Instagram accounts reached for your plan.", code: "max_accounts_reached" };
   }
 
   const profileLookup = await lookupInstagramPublicProfile(username);
