@@ -611,6 +611,7 @@ export default function ClientDashboard({
         || ""))
     : (primaryAccount?.username || accountInsights?.username || "");
   const targetingPackageCode = accountInsights?.packageCode || primaryAccount?.packageLabel?.toLowerCase() || "growth";
+  const targetingAiEnabled = accountInsights?.aiTargetingEnabled === true;
   const useLiveTargeting = hasLinkedInstagramAccount && Boolean(targetingAccountId);
   const useLiveData = useLiveTargeting;
   const demoTargets = demoTargetList;
@@ -1683,6 +1684,7 @@ export default function ClientDashboard({
           accountId={targetingAccountId}
           accountUsername={targetingUsername}
           packageCode={targetingPackageCode}
+          aiTargetingEnabled={targetingAiEnabled}
           overview={targetingOverview}
           onOverviewChange={setTargetingOverview}
           onReload={reloadTargeting}

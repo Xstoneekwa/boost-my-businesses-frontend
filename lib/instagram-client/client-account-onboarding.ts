@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createSupabaseClient } from "@/lib/supabase";
+import { loadCommercialPackageCapabilities } from "@/lib/commercial/package-capabilities";
 import {
   entitlementToAddProfileInput,
   getReservedEntitlementForClient,
@@ -80,6 +81,7 @@ export type ClientOnboardingSession = {
   entitlementId: string;
   requestedUsername: string;
   packageCode: AddProfileCommercialPackage;
+  aiTargetingEnabled: boolean;
   status: ClientOnboardingStatus;
   currentStep: ClientOnboardingStep;
   publicAnalysis: ClientPublicAnalysis | null;
@@ -159,6 +161,7 @@ async function projectSession(supabase: Supabase, row: Row): Promise<ClientOnboa
     : { eligible: 0 };
   const packageCode = readString(row.package_code);
   if (!isAddProfileCommercialPackage(packageCode)) throw new Error("onboarding_package_invalid");
+  const packageCapabilities = await loadCommercialPackageCapabilities(supabase, packageCode);
   const status = readString(row.status, "active") as ClientOnboardingStatus;
   return {
     id: readString(row.id),
@@ -167,6 +170,7 @@ async function projectSession(supabase: Supabase, row: Row): Promise<ClientOnboa
     entitlementId: readString(row.entitlement_id),
     requestedUsername: readString(row.requested_username),
     packageCode,
+    aiTargetingEnabled: packageCapabilities.aiTargetingEnabled,
     status,
     currentStep: readString(row.current_step, "connection") as ClientOnboardingStep,
     publicAnalysis: mapAnalysis(row.public_analysis),

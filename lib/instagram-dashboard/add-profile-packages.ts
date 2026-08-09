@@ -122,7 +122,6 @@ export type AddProfilePackagePreset = {
   defaultOutreachDayCap: number | null;
   advancedCtEnabled: boolean;
   aiCommentEnabled: boolean;
-  aiTargetingEnabled: boolean;
   followEnabled: boolean;
   likeEnabled: boolean;
   muteAfterFollowEnabled: boolean;
@@ -161,7 +160,6 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
   | "defaultOutreachDayCap"
   | "advancedCtEnabled"
   | "aiCommentEnabled"
-  | "aiTargetingEnabled"
 >> = {
   growth: {
     commercialPackageCode: "growth",
@@ -178,7 +176,6 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultOutreachDayCap: null,
     advancedCtEnabled: false,
     aiCommentEnabled: false,
-    aiTargetingEnabled: false,
   },
   pro: {
     commercialPackageCode: "pro",
@@ -195,7 +192,6 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultOutreachDayCap: null,
     advancedCtEnabled: true,
     aiCommentEnabled: false,
-    aiTargetingEnabled: true,
   },
   premium: {
     commercialPackageCode: "premium",
@@ -212,7 +208,6 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultOutreachDayCap: null,
     advancedCtEnabled: true,
     aiCommentEnabled: true,
-    aiTargetingEnabled: true,
   },
   internal_test: {
     commercialPackageCode: "internal_test",
@@ -229,7 +224,6 @@ const baseCommercialPresets: Record<AddProfilePackagePreset["commercialPackageCo
     defaultOutreachDayCap: null,
     advancedCtEnabled: false,
     aiCommentEnabled: false,
-    aiTargetingEnabled: false,
   },
 };
 

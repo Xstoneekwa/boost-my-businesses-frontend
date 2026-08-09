@@ -1,16 +1,6 @@
-export type ClientCommercialPackageCode = "growth" | "pro" | "premium" | "internal_test" | string;
-
-export function normalizeClientPackageCode(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase();
-}
-
-/** Client-facing AI targeting gate: Growth disabled; Pro and Premium enabled. */
-export function isClientAiTargetingEnabled(packageCode: string | null | undefined) {
-  const normalized = normalizeClientPackageCode(packageCode);
-  if (!normalized || normalized === "growth") return false;
-  if (normalized === "pro" || normalized === "premium") return true;
-  if (normalized === "internal_test") return false;
-  return false;
+/** Consume the server-projected catalogue capability; never infer it from a package name. */
+export function isClientAiTargetingEnabled(catalogueCapability: boolean | null | undefined) {
+  return catalogueCapability === true;
 }
 
 export function clientAiTargetingUpgradeLabel(lang: "fr" | "en") {

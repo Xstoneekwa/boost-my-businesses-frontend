@@ -555,7 +555,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
     text(lang, "Connexion", "Connection"), text(lang, "Analyse", "Analysis"), text(lang, "Protection & ciblage", "Protection & targeting"),
     text(lang, "Comptes cibles", "Target accounts"), text(lang, "Terminé", "Complete"),
   ], [lang]);
-  const aiEnabled = isClientAiTargetingEnabled(session?.packageCode ?? "growth");
+  const aiEnabled = isClientAiTargetingEnabled(session?.aiTargetingEnabled);
   const packageLabel = session?.packageCode
     ? session.packageCode.charAt(0).toUpperCase() + session.packageCode.slice(1)
     : text(lang, "Package à confirmer", "Package pending");
@@ -734,7 +734,7 @@ export default function ClientInstagramOnboardingWizard({ open, lang, onClose, o
           {!loading && step === "complete" ? <div className="cio-complete"><span aria-hidden="true">✓</span><h3>{text(lang, "Ciblage terminé", "Targeting complete")}</h3><p>{text(lang, "Identifiants reçus, analyse vérifiée, critères confirmés et 15 comptes cibles validés.", "Credentials received, analysis reviewed, criteria confirmed, and 15 target accounts validated.")}</p><p className="cio-note">{session?.assignmentStatus === "assigned" ? text(lang, "Le téléphone est affecté et la connexion reste en attente. Auto Login démarrera uniquement après ton clic explicite depuis le tableau de bord.", "The phone is assigned and login remains pending. Auto Login will start only after your explicit click from the dashboard.") : text(lang, "L'affectation reste en attente de capacité. Aucune connexion, action ou run n'a été lancé.", "Assignment is waiting for capacity. No login, action, or run has been started.")}</p><button className="cd-btn cd-btn-primary" type="button" onClick={onClose}>{text(lang, "Retour au tableau de bord", "Return to dashboard")}</button></div> : null}
         </div>
       </section>
-      {session?.accountId ? <ClientAccountTargetsDrawer variant="onboarding" open={drawerOpen} onClose={() => { setDrawerOpen(false); void loadTargets(session.accountId!); }} lang={lang} copy={targetCopy(lang)} accountId={session.accountId} accountUsername={session.requestedUsername} packageCode={session.packageCode} overview={targets} onOverviewChange={setTargets} onReload={() => loadTargets(session.accountId!)} aiInitialCriteria={{ niche: criteria.niche, location: criteria.geography }} /> : null}
+      {session?.accountId ? <ClientAccountTargetsDrawer variant="onboarding" open={drawerOpen} onClose={() => { setDrawerOpen(false); void loadTargets(session.accountId!); }} lang={lang} copy={targetCopy(lang)} accountId={session.accountId} accountUsername={session.requestedUsername} packageCode={session.packageCode} aiTargetingEnabled={session.aiTargetingEnabled} overview={targets} onOverviewChange={setTargets} onReload={() => loadTargets(session.accountId!)} aiInitialCriteria={{ niche: criteria.niche, location: criteria.geography }} /> : null}
       <style jsx>{`
         .cio-shell{--cio-bg:#080b1b;--cio-panel:#10162b;--cio-panel-2:#151d34;--cio-border:#2a3350;--cio-text:#f7f8fc;--cio-muted:#9aa5bf;--cio-pink:#d95cff;--cio-orange:#ff9d57;--cio-green:#4ee2a0;width:min(1040px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;position:relative;background:var(--cio-bg);color:var(--cio-text);border:1px solid #303956;border-radius:8px;box-shadow:0 28px 90px rgba(1,3,14,.72)}
         .cio-accent{height:3px;background:linear-gradient(90deg,var(--cio-pink),#f36fa9 42%,var(--cio-orange));position:sticky;top:0;z-index:5}

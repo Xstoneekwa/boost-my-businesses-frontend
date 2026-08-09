@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { authorizeClientInstagramAccount, requireClientInstagramSession } from "@/lib/instagram-client/_utils";
 import { isClientAiTargetingEnabled } from "@/lib/instagram-client/ai-targeting-gate";
 import { resolveAccountPackageCode } from "@/lib/instagram-client/resolve-account-package-code";
+import { loadCommercialPackageCapabilities } from "@/lib/commercial/package-capabilities";
+import { createSupabaseClient } from "@/lib/supabase";
 import { isTargetAiConfigured, readTargetAiConfigStatus, safeTargetAiLog, type TargetAiErrorCode } from "@/lib/instagram-client/target-ai-config";
 import { targetAiErrorMessage } from "@/lib/instagram-client/target-ai-errors";
 
@@ -24,7 +26,8 @@ export async function authorizeClientTargetAiRoute(accountId: string, options?: 
   }
 
   const packageCode = await resolveAccountPackageCode(normalizedAccountId);
-  if (!isClientAiTargetingEnabled(packageCode)) {
+  const packageCapabilities = await loadCommercialPackageCapabilities(createSupabaseClient(), packageCode);
+  if (!isClientAiTargetingEnabled(packageCapabilities.aiTargetingEnabled)) {
     safeTargetAiLog("plan_not_allowed", {
       account_id: normalizedAccountId,
       package_code: packageCode,

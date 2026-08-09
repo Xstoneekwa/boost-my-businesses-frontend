@@ -7,6 +7,7 @@ import {
   toStatsDaySocialCounters,
 } from "@/lib/instagram-dashboard/social-counters";
 import { createSupabaseClient } from "@/lib/supabase";
+import { loadCommercialPackageCapabilities } from "@/lib/commercial/package-capabilities";
 import { buildClientCampaignInteractionErrorOverview, computeClientCampaignInteractionOverview, type ClientCampaignInteractionOverview } from "./client-campaign-interaction-stats";
 import { resolveClientFollowerEvolutionMetrics, type ClientFollowerEvolutionMetrics } from "./client-follower-evolution-metrics";
 import { buildClientPersistedInteractionEvidence } from "./client-persisted-interaction-evidence";
@@ -54,6 +55,7 @@ export type ClientAccountInsights = {
   username: string;
   packageLabel: string;
   packageCode: string;
+  aiTargetingEnabled: boolean;
   campaignActive: boolean;
   statsDays: ClientStatsDay[];
   overview: {
@@ -333,12 +335,14 @@ export async function loadClientAccountInsights(accountId: string): Promise<Clie
   const packageSummary = packageSummaries.get(accountId);
   const packageLabel = packageSummary?.commercialPackageLabel || "Growth";
   const packageCode = packageSummary?.commercialPackageCode || "growth";
+  const packageCapabilities = await loadCommercialPackageCapabilities(supabase, packageCode);
 
   return {
     accountId,
     username: readString(accountResult.data.username, "Instagram account"),
     packageLabel,
     packageCode,
+    aiTargetingEnabled: packageCapabilities.aiTargetingEnabled,
     campaignActive: readString(accountResult.data.admin_lifecycle_status, readString(accountResult.data.status, "active")) === "active",
     statsDays,
     overview: {

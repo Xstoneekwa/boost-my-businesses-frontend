@@ -149,6 +149,7 @@ export type ClientAccountTargetsDrawerProps = {
   accountId: string;
   accountUsername: string;
   packageCode: string;
+  aiTargetingEnabled: boolean;
   overview: TargetsOverview | null;
   onOverviewChange: (overview: TargetsOverview) => void;
   onReload: () => Promise<void>;
@@ -164,6 +165,7 @@ export default function ClientAccountTargetsDrawer({
   accountId,
   accountUsername,
   packageCode,
+  aiTargetingEnabled,
   overview,
   onOverviewChange,
   onReload,
@@ -182,7 +184,7 @@ export default function ClientAccountTargetsDrawer({
   const [aiWizardOpen, setAiWizardOpen] = useState(false);
 
   const filterKeys = ["all", "eligible", "pending", "rejected", "archived"];
-  const aiEnabled = isClientAiTargetingEnabled(packageCode);
+  const aiEnabled = isClientAiTargetingEnabled(aiTargetingEnabled);
   const drawerTitle = `@${accountUsername.replace(/^@+/, "")}`;
   const packageLabel = packageCode.charAt(0).toUpperCase() + packageCode.slice(1);
 
