@@ -332,6 +332,28 @@ export async function PATCH(request: Request) {
       return jsonOk({ ...(await buildUnfollowProjection(supabase, accountId)), changed_fields: [] });
     }
 
+    const actorContext = await getInstagramAdminUserContext();
+    const limitFieldsChanged = fieldsChanged.some((field) =>
+      field === "unfollow_per_session_limit" || field === "unfollow_per_day_limit"
+    );
+    if (limitFieldsChanged) {
+      const { error: overrideError } = await supabase.rpc("set_account_unfollow_limit_override_v1", {
+        p_account_id: accountId,
+        p_unfollow_day_cap: after.unfollowPerDayLimit,
+        p_unfollow_session_cap: after.unfollowPerSessionLimit,
+        p_source: "admin",
+        p_source_surface: "instagram_dashboard_settings",
+        p_updated_by: actorContext?.userId ?? null,
+        p_reason: "explicit_settings_save",
+      });
+      if (overrideError) {
+        return jsonError(
+          sanitizeRunControlReason(overrideError.message, "Could not save Unfollow limit provenance."),
+          500,
+        );
+      }
+    }
+
     const { error } = await supabase.from("ig_account_unfollow_settings").upsert(
       {
         account_id: accountId,
@@ -348,7 +370,6 @@ export async function PATCH(request: Request) {
     );
     if (error) return jsonError(sanitizeRunControlReason(error.message, "Could not save Unfollow settings."), 500);
 
-    const actorContext = await getInstagramAdminUserContext();
     await recordAudit(supabase, {
       accountId,
       actorId: actorContext?.userId ?? null,
