@@ -2,6 +2,7 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { mapScheduleGateReasonToRunStart, type ScheduleBlockReason } from "@/lib/instagram-dashboard/schedule";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 import { businessDayWindow } from "./business-timezone.ts";
+import { loadPackageRuntimeContract } from "./package-runtime-contract.ts";
 
 import { ACTIVE_RUN_REQUEST_STATUSES } from "./run-request-statuses.ts";
 
@@ -109,6 +110,11 @@ export type RunStartBlockReason =
   | "follow_warmup_pending"
   | "follow_filter_invalid_range"
   | "mini_run_outreach_off_unproven"
+  | "assignment_package_mismatch"
+  | "app_instance_package_mismatch"
+  | "clone_package_mismatch"
+  | "package_settings_incomplete"
+  | "runtime_profile_mismatch"
   | "unfollow_entitlement_missing"
   | "unfollow_disabled"
   | "unfollow_mode_not_supported"
@@ -1974,6 +1980,20 @@ export async function evaluateRunStartEligibility(
     return { ok: false as const, reason: "account_canceled" as RunStartBlockReason, health };
   }
 
+  if (
+    GROWTH_RUN_TYPES.includes(normalizedRunType as (typeof GROWTH_RUN_TYPES)[number])
+    && !restrictionPreflight
+  ) {
+    const packageRuntimeContract = await loadPackageRuntimeContract(supabase, accountId);
+    if (!packageRuntimeContract.ok) {
+      return {
+        ok: false as const,
+        reason: packageRuntimeContract.reason as RunStartBlockReason,
+        health,
+      };
+    }
+  }
+
   const scheduleBlock = await evaluateScheduleStartGate(accountId, normalizedRunType, normalizedTrigger);
   if (scheduleBlock) {
     return { ok: false as const, reason: scheduleBlock, health };
@@ -2424,6 +2444,13 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Manual run is blocked because Follow filter thresholds are invalid.";
     case "mini_run_outreach_off_unproven":
       return "Manual mini-run is blocked because Outreach isolation is not proven.";
+    case "assignment_package_mismatch":
+    case "app_instance_package_mismatch":
+    case "clone_package_mismatch":
+    case "runtime_profile_mismatch":
+      return "Manual run is blocked because assignment/runtime configuration does not match the canonical package.";
+    case "package_settings_incomplete":
+      return "Manual run is blocked because canonical package settings are incomplete.";
     case "unfollow_entitlement_missing":
       return "Manual run is blocked because the Unfollow entitlement is missing.";
     case "unfollow_disabled":

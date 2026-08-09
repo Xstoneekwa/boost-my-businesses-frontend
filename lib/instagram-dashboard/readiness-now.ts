@@ -411,6 +411,7 @@ export async function runReadinessNow(
     !packageSummary ? "missing_package" : null,
     !settingsRow ? "missing_settings" : null,
     !filtersRow ? "missing_filters" : null,
+    targetBlocker,
     blockingDashboardActionCount > 0 ? "blocking_dashboard_action" : null,
   ].filter((item): item is string => Boolean(item));
   const checks: Record<string, unknown> = {
@@ -466,6 +467,63 @@ export async function runReadinessNow(
   const loginStatus = normalize(clientStatus?.login_status || "unknown");
   const provisioningStatus = normalize(clientStatus?.provisioning_status || "unknown");
   if (connectedStatuses.has(loginStatus) && readyProvisioningStatuses.has(provisioningStatus)) {
+    const packageRuntimeContract = await loadPackageRuntimeContract(supabase, input.accountId);
+    checks.package_runtime_contract = packageRuntimeContract;
+    if (!packageRuntimeContract.ok) {
+      return safeResult({
+        audience,
+        readiness_status: "retry_later",
+        client_status: "try_again_later",
+        assignment_status: "blocked",
+        phone_available: null,
+        app_instance_available: null,
+        preflight_request_created: false,
+        idempotent: false,
+        request_id: null,
+        run_request_status: null,
+        next_action: "review_account",
+        reason: packageRuntimeContract.reason,
+        blockers: [packageRuntimeContract.reason, ...blockers],
+        checks,
+      });
+    }
+    if (targetBlocker) {
+      return safeResult({
+        audience,
+        readiness_status: "retry_later",
+        client_status: "try_again_later",
+        assignment_status: assignmentReady ? "ready" : "missing",
+        phone_available: null,
+        app_instance_available: null,
+        preflight_request_created: false,
+        idempotent: false,
+        request_id: null,
+        run_request_status: null,
+        next_action: "add_targets",
+        reason: targetBlocker,
+        blockers,
+        checks,
+      });
+    }
+    if (!assignmentReady) {
+      const capacityAvailable = await hasAvailableSlot(supabase, input.accountId);
+      return safeResult({
+        audience,
+        readiness_status: capacityAvailable ? "waiting_scheduled_assignment" : "capacity_unavailable",
+        client_status: capacityAvailable ? "waiting_next_slot" : "capacity_unavailable",
+        assignment_status: capacityAvailable ? "waiting_scheduled_assignment" : "missing",
+        phone_available: false,
+        app_instance_available: false,
+        preflight_request_created: false,
+        idempotent: false,
+        request_id: null,
+        run_request_status: null,
+        next_action: capacityAvailable ? "wait_for_scheduler_assignment" : "try_again_later",
+        reason: capacityAvailable ? "waiting_scheduled_assignment" : "capacity_unavailable",
+        blockers: ["missing_assignment", ...blockers],
+        checks,
+      });
+    }
     return safeResult({
       audience,
       readiness_status: "ready",

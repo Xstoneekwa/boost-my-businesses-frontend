@@ -68,7 +68,11 @@ function makeQuery(rows: Row[]) {
   return query;
 }
 
-function makeSupabase(rows = baseRows(), slotAvailable = false) {
+function makeSupabase(
+  rows = baseRows(),
+  slotAvailable = false,
+  packageContract: Row = { ok: true, reason: "ready" },
+) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   return {
     rpcCalls,
@@ -79,7 +83,7 @@ function makeSupabase(rows = baseRows(), slotAvailable = false) {
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
         if (name === "account_package_runtime_contract_status") {
-          return Promise.resolve({ data: { ok: true, reason: "ready" }, error: null });
+          return Promise.resolve({ data: packageContract, error: null });
         }
         if (name === "list_available_assignment_slots") {
           return Promise.resolve({
@@ -106,7 +110,45 @@ test("readiness now returns ready without request when account is connected", as
   assert.equal(result.readiness_status, "ready");
   assert.equal(result.client_status, "connected_ready");
   assert.equal(result.preflight_request_created, false);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["account_package_runtime_contract_status"]);
+});
+
+test("connected account remains not ready when canonical package settings are incomplete", async () => {
+  const supabase = makeSupabase(baseRows({
+    client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
+  }), false, { ok: false, reason: "package_settings_incomplete" });
+
+  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+
+  assert.equal(result.readiness_status, "retry_later");
+  assert.equal(result.reason, "package_settings_incomplete");
+  assert.equal(result.preflight_request_created, false);
+});
+
+test("connected account with no eligible CT is not projected ready", async () => {
+  const supabase = makeSupabase(baseRows({
+    client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
+    ig_targets: [],
+  }));
+
+  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+
+  assert.equal(result.readiness_status, "retry_later");
+  assert.equal(result.reason, "missing_ct");
+  assert.equal(result.preflight_request_created, false);
+});
+
+test("connected account without an assignment is not projected ready", async () => {
+  const supabase = makeSupabase(baseRows({
+    client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
+    account_assignments: [],
+  }), true);
+
+  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+
+  assert.equal(result.readiness_status, "waiting_scheduled_assignment");
+  assert.equal(result.assignment_status, "waiting_scheduled_assignment");
+  assert.equal(result.preflight_request_created, false);
 });
 
 test("readiness now returns needs_credentials when credentials are missing", async () => {
