@@ -104,6 +104,50 @@ attempt, timestamp and safe error state. Only the failed channel may be retried
 explicitly, with a maximum of three attempts. A reload or idempotent action
 cannot create or resend a duplicate delivery.
 
+## Auto Login Human Assistance and canonical resume
+
+Auto Login uses the same incident control plane. An unknown or ambiguous
+Instagram surface is not a retry-success signal. The Worker fails closed,
+atomically terminalizes the login request/run, normalizes a safe reason, then
+upserts one scoped incident and one
+`account_dashboard_action=operator_review_required`. The action dedupe key is
+bound to account plus run/request; the Auto Login path delegates notification
+to the canonical incident notifier so it cannot emit both a precise incident
+notification and a second generic operator-review notification.
+
+Slack and Discord payloads are redacted. They may identify account, phase,
+reason, incident and safe run/request references, but never password, OTP,
+secret reference, token, cookie, webhook, raw XML, screenshot or ADB serial.
+Channel delivery is independently idempotent and auditable.
+
+When the operator has physically verified the exact Instagram account on the
+assigned app instance, BotApp may invoke **Confirm login & refresh readiness**
+through its authenticated relay. The Backend endpoint also accepts an
+authenticated Admin caller with explicit `operator_confirmation=true`; the
+current Admin **Run readiness now** action is check-only because it does not set
+that flag. The authenticated Backend calls
+`confirm_instagram_login_operator_v1`, which revalidates lifecycle, assignment,
+device/app instance, credentials, package runtime, CT stock, blockers and active
+execution before writing `verification_source=operator`. If a linked incident
+exists, incident and dashboard action are terminalized atomically and at most
+one Resume Authorization is reconciled. The service then recomputes readiness;
+it never creates a run or a tick.
+
+The recovery contract remains:
+
+```text
+incident resolved with proof
+  -> Resume Authorization reconciled
+  -> next natural scheduler tick
+  -> normal eligibility/readiness/quota/window evaluation
+```
+
+The account keeps its canonical Auto Restart settings. No username allowlist,
+special one-shot or forced request is introduced. `manual_only`, a closed
+window, quota exhaustion, a different blocker or a security incident can still
+prevent enqueue. Security incidents remain on their dedicated fail-closed
+procedure.
+
 ## Retention policy
 
 Server configuration lives in `incident_retention_policies` and defaults to:

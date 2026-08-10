@@ -44,6 +44,21 @@ Targets use the existing account-scoped `ig_targets` APIs for single, bulk, assi
 
 Zero or fourteen qualifying rows cannot complete onboarding. Fifteen qualifying rows complete it and set the client account onboarding status to `configured`. Fifteen submitted but rejected or pending rows do not satisfy the gate. Completion records `runtime_activation_requested: false`; it does not start Auto Login, a campaign, a run, a Worker, or a device action.
 
+## Post-onboarding login and readiness boundary
+
+After the 15-target gate, assignment and Auto Login remain separate explicit
+steps. The canonical chain and incident-assisted recovery are documented in
+[`client-connect-challenge.md`](./client-connect-challenge.md). A login can be
+`connected` while the account is not yet `ready`; Client, Admin and BotApp must
+all consume the same Backend readiness projection.
+
+Identity is proven either by the Worker exact own-profile guard or by an
+authenticated operator through **Confirm login & refresh readiness** after a
+physical review of the assigned app instance. Historical pre-proof accounts
+are handled only by the bounded compatibility contract described in
+[`client-tenant-onboarding-e2e.md`](./client-tenant-onboarding-e2e.md); no future
+account inherits that exception.
+
 ## Ownership, isolation and recovery
 
 Every route requires the client session and revalidates tenant ownership. Onboarding RPCs are `service_role` only, onboarding session rows have RLS enabled, and browser roles have no direct execute privilege. A different tenant or unauthenticated caller is rejected.

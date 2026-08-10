@@ -236,8 +236,57 @@ existant.
 
 ### 4.10 Readiness
 
-- `onboarding_status=ready` + login connected → **Préparation vérifiée**  
-- Source : readiness-now + champs link table
+- `connected` ne suffit pas à produire **Préparation vérifiée**.
+- La source de vérité est la projection Backend
+  `buildAdminReadinessProjection`/`runReadinessNow`, construite depuis les
+  statuts persistés et les gates serveur : lifecycle, package, credentials,
+  assignment, phone, app instance, CT éligibles, paramètres runtime, blockers
+  et preuve d'identité autorisée.
+- Admin, Client et BotApp consomment cette projection. Ils n'en recalculent pas
+  une version locale et ne transforment jamais `unknown` en `ready`.
+- `can_start` reste une décision d'exécution distincte (fenêtre, quota, locks,
+  runtime). Il n'est pas une autorité pour le badge de readiness.
+
+### 4.11 Compatibilité historique et monotonie login
+
+Le modèle final distingue quatre cas :
+
+| Cas | Projection canonique |
+|---|---|
+| preuve exacte Worker ou opérateur, non invalidée | `connected` |
+| compte historique `connected`, `historical_model_missing`, aucune invalidation | `connected` sans inventer une preuve moderne |
+| `proven_false_ready`, preuve requise/failed ou identité discordante | bloqué, reconnexion ou intervention obligatoire |
+| nouveau compte sans preuve exacte | bloqué |
+
+La migration de production
+`20260810153716_login_state_monotonic_v1` impose une génération et un timestamp
+ordonnés. Un snapshot social, un refresh tardif ou une observation plus ancienne
+ne peut pas downgrader un login déjà prouvé. Une baisse exige une invalidation
+canonique plus récente parmi les raisons autorisées : logout explicite,
+identity mismatch, session/auth invalidée, écran login Instagram confirmé,
+credentials invalides, compte désactivé ou challenge sécurité.
+
+`20260810210246_login_preproof_transition_reconciliation_v1` est une exception
+historique bornée. Elle a reclassé uniquement les login-provisioning antérieurs
+au gate d'identité, terminés `completed` sans erreur/exit non nul, issus de
+`instagram_client_connect` en mode `login_preflight_now`, avec lifecycle actif,
+credentials valides et aucune invalidation ultérieure. Elle restaure
+`historical_model_missing`; elle ne crée jamais `verified`. Les nouveaux runs
+restent soumis à l'Identity Guard strict.
+
+### 4.12 Parité Admin / Client / BotApp
+
+La projection Backend est l'unique autorité. Le renderer BotApp :
+
+- ne couple pas statut social et statut login ;
+- ne transforme pas `unknown` en `ready` ;
+- ne déduit plus le badge depuis l'ancien `can_start` ;
+- affiche `growth ready` uniquement si `profile.readiness === "ready"`.
+
+Le hotfix BotApp `327bce37a6826c7cd8d826423cbac9f5fb9af682`
+a certifié après redémarrage réel la parité des six comptes de production :
+`connected · growth ready` pour chacun. Le refresh et le redémarrage relisent la
+même vérité serveur ; une preuve locale Electron n'est jamais autoritaire.
 
 ---
 

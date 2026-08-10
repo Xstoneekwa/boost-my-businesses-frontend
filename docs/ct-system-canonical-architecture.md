@@ -181,3 +181,41 @@ Aucun port futur ci-dessus n'est implémenté. Aucun schéma, migration, table, 
 ## Phase DB locale
 
 Les ports universels Evaluation/Performance/Lifecycle et les ports Premium snapshots/batches/proposals/review/replacement possèdent désormais une persistance post-cutover et des RPC testées localement. Les adaptateurs Supabase restent fail-closed et non montés. L'archive automatique reste explicitement désactivée; Growth/Pro restent notification + ajout manuel, Premium seul possède replacement-first.
+
+## À reprendre dans la documentation CT canonique finale
+
+La documentation CT consolidée devra intégrer explicitement les frontières
+amont et aval suivantes, sans créer une seconde source de vérité :
+
+1. **Credentials → login → identity → readiness.** Les credentials restent dans
+   Vault. Auto Login prouve le compte Instagram exact ; une preuve opérateur est
+   possible uniquement via le Backend authentifié. `connected != ready` et la
+   projection readiness serveur reste l'autorité pour Client, Admin et BotApp.
+   Voir [`client-connect-challenge.md`](./client-connect-challenge.md) et
+   [`client-tenant-onboarding-e2e.md`](./client-tenant-onboarding-e2e.md).
+2. **Gate initial de 15 CT.** La finalisation onboarding recompte en base les CT
+   actives, validées et éligibles. Ce gate initial reste distinct du seuil
+   ongoing low-stock `<= 5`.
+3. **Assignment et scheduler.** L'assignment device/app instance n'est créée
+   qu'après le gate initial. Le scheduler ne peut considérer le compte qu'après
+   readiness complète et réévalue fenêtre, quota, locks et blockers au tick
+   naturel.
+4. **Incident et Human Assistance.** Une surface Auto Login inconnue échoue
+   fermée, crée l'incident/action opérateur dédupliqués et utilise les
+   notifications redacted. Après preuve humaine, la Resume Authorization permet
+   une réévaluation normale, jamais un run forcé. Voir
+   [`incidents-overview-retention-v1.md`](./incidents-overview-retention-v1.md).
+5. **CT Resume.** Checkpoint, lease, anchor/prefix/overlap et business/social
+   dedupe restent account/run/target scoped. L'identité Worker doit provenir de
+   la release immuable réellement active ; aucun compte futur ne dépend d'une
+   allowlist historique.
+6. **Unfollow Daily Plan.** `UNFOLLOW_DAILY_PLAN_V1` reste l'autorité immuable :
+   même `plan_id` et reliquat lors d'une vraie reprise, traitement Search exact
+   dans la même session saine, not-found terminal stable, recovery candidat
+   distincte du circuit session et Auto Restart réservé aux interruptions
+   anormales. Le contrat dédié est
+   [`unfollow-one-healthy-session-contract.md`](https://github.com/Xstoneekwa/instagram-worker-python/blob/e88767d9f035af8cb93fdf176b6167d45fa46228/docs/unfollow-one-healthy-session-contract.md).
+7. **Isolation.** Tous les objets login, assignment, CT, checkpoint, plan
+   Unfollow, incident et Resume Authorization restent scopés par tenant/account.
+   Une preuve, action ou candidat d'un compte ne peut pas autoriser un autre
+   compte.
