@@ -85,11 +85,40 @@ export default function CommercialProdTestAdminPanel() {
     }
   }
 
+  async function onRevoke(authorization: AuthorizationStatus) {
+    if (!window.confirm(`Désactiver l'activation Test pour ${authorization.emailHint} ?`)) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch("/api/instagram-dashboard/commercial/prod-test-authorizations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          authorization_id: authorization.id,
+          admin_confirmation_acknowledged: true,
+        }),
+      });
+      const payload = await response.json() as {
+        ok?: boolean;
+        data?: { message_fr?: string };
+        error?: string;
+      };
+      if (!payload.ok) throw new Error(payload.error || "revoke_failed");
+      setSuccess(payload.data?.message_fr || "Activation Test désactivée.");
+      await loadAuthorizations();
+    } catch (revokeError) {
+      setError(revokeError instanceof Error ? revokeError.message : "revoke_failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="commercial-prod-test-admin">
       <p className="commercial-prod-test-admin-intro">
-        Crée une autorisation temporaire pour un checkout simulé avec une adresse réelle en production.
-        Aucun tenant, checkout, paiement ou email n&apos;est déclenché ici.
+        Source canonique serveur de l&apos;activation Test en production. Active, étends ou désactive une autorisation
+        temporaire ciblée. Aucun tenant, checkout, paiement ou email n&apos;est déclenché ici.
       </p>
 
       <form className="commercial-prod-test-admin-form" onSubmit={(event) => void onCreate(event)}>
@@ -129,7 +158,7 @@ export default function CommercialProdTestAdminPanel() {
           Je confirme qu&apos;il s&apos;agit d&apos;un parcours interne non facturable (first_purchase + add-account).
         </label>
         <button type="submit" disabled={loading || !confirmed || !email.trim()}>
-          {loading ? "Traitement…" : "Créer ou renouveler l'autorisation"}
+          {loading ? "Traitement…" : "Activer, étendre ou renouveler"}
         </button>
       </form>
 
@@ -157,6 +186,16 @@ export default function CommercialProdTestAdminPanel() {
               {" · tenant "}
               {authorization.hasLinkedClient ? "lié" : "—"}
               {" · aucun paiement"}
+              {authorization.status === "active" ? (
+                <button
+                  type="button"
+                  className="commercial-prod-test-admin-revoke"
+                  disabled={loading}
+                  onClick={() => void onRevoke(authorization)}
+                >
+                  Désactiver
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -173,6 +212,7 @@ export default function CommercialProdTestAdminPanel() {
         .commercial-prod-test-admin-confirm { font-weight: 500; grid-template-columns: auto 1fr; align-items: start; }
         button { justify-self: start; padding: 10px 16px; border: none; border-radius: 999px; background: #0f766e; color: white; font-weight: 700; cursor: pointer; }
         button:disabled { opacity: .55; cursor: not-allowed; }
+        .commercial-prod-test-admin-revoke { margin-left: 10px; padding: 5px 10px; background: #b91c1c; }
         .commercial-prod-test-admin-error { color: #b91c1c; }
         .commercial-prod-test-admin-success { color: #047857; }
         ul { padding-left: 18px; line-height: 1.5; }

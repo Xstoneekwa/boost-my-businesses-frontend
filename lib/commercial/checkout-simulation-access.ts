@@ -13,6 +13,7 @@ import {
 } from "./simulated-checkout-guard.ts";
 import {
   evaluateProdTestCheckoutAuthorization,
+  isProductionCheckoutEnvironment,
   prodTestCheckoutClientMessages,
   type ProdTestCheckoutDenyReason,
 } from "./prod-test-checkout-authorization.ts";
@@ -78,7 +79,9 @@ export async function evaluateCheckoutSimulationAccess(input: {
     };
   }
 
-  if (input.prodTestOnly) {
+  // Production has exactly one authority: the scoped, audited DB authorization.
+  // Legacy env allowlists remain available only to isolated non-production tests.
+  if (input.prodTestOnly || isProductionCheckoutEnvironment(input.env)) {
     const reason = prodTest.reason ?? "authorization_not_found";
     const messages = prodTestCheckoutClientMessages(reason);
     return {

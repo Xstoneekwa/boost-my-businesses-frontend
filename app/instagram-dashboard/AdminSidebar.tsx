@@ -155,6 +155,16 @@ const NAV_GROUPS: NavGroup[] = [
           </svg>
         ),
       },
+      {
+        key: "commercial-prod-test",
+        label: "Test Activation",
+        href: "/instagram-dashboard/commercial-prod-test",
+        icon: (
+          <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 3h6" /><path d="M10 9h4" /><path d="M10 3v5l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3" />
+          </svg>
+        ),
+      },
     ],
   },
 ];

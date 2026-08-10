@@ -43,7 +43,9 @@ export type ProdTestCheckoutDenyReason =
   | "account_limit_reached"
   | "client_already_linked";
 
-export type ProdTestCheckoutAuthorizationAction = "created" | "reused" | "renewed";
+export type ProdTestCheckoutAuthorizationAction = "created" | "reused" | "renewed" | "expanded";
+
+export type ProdTestCheckoutRevocationAction = "revoked" | "already_terminal";
 
 export function hashProdTestCheckoutEmail(email: string) {
   const normalized = normalizeCheckoutEmail(email);
@@ -65,6 +67,27 @@ export function isProductionCheckoutEnvironment(env: NodeJS.ProcessEnv = process
 
 export function prodTestCheckoutClientMessages(reason: ProdTestCheckoutDenyReason) {
   switch (reason) {
+    case "authorization_not_found":
+    case "flow_not_authorized":
+      return {
+        messageFr: "L'activation Test n'est pas autorisée pour ce parcours. Un Super Admin peut l'activer depuis Test Activation.",
+        messageEn: "Test activation is not authorized for this flow. A Super Admin can enable it from Test Activation.",
+      };
+    case "authorization_expired":
+      return {
+        messageFr: "L'autorisation d'activation Test a expiré. Un Super Admin peut la renouveler depuis Test Activation.",
+        messageEn: "The Test activation authorization has expired. A Super Admin can renew it from Test Activation.",
+      };
+    case "authorization_consumed":
+      return {
+        messageFr: "L'autorisation d'activation Test a atteint sa limite. Un Super Admin peut créer une nouvelle autorisation.",
+        messageEn: "The Test activation authorization reached its limit. A Super Admin can create a new authorization.",
+      };
+    case "authorization_revoked":
+      return {
+        messageFr: "L'activation Test a été désactivée par un Super Admin.",
+        messageEn: "Test activation was disabled by a Super Admin.",
+      };
     case "account_limit_reached":
       return {
         messageFr: "Le nombre maximum de comptes autorisés pour cette activation de test est atteint.",
@@ -92,6 +115,20 @@ export function prodTestCheckoutClientMessages(reason: ProdTestCheckoutDenyReaso
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+function appendAdminChangeHistory(
+  metadata: Record<string, unknown> | null | undefined,
+  change: Record<string, unknown>,
+) {
+  const existingHistory = Array.isArray(metadata?.admin_change_history)
+    ? metadata.admin_change_history.filter((item) => item && typeof item === "object").slice(-49)
+    : [];
+  return {
+    ...(metadata ?? {}),
+    last_admin_change: change,
+    admin_change_history: [...existingHistory, change],
+  };
 }
 
 export function isProdTestCheckoutAuthorizationExpired(row: ProdTestCheckoutAuthorizationRow, now = new Date()) {
@@ -360,8 +397,19 @@ export async function resolveProdTestCheckoutClientIdByEmail(
   return clientIds[0] ?? null;
 }
 
-function scopesAreCompatible(existing: ProdTestCheckoutAuthorizationRow, requested: ProdTestCheckoutFlow[]) {
-  return requested.every((flow) => existing.authorized_flows.includes(flow));
+function normalizeRequestedFlows(requested: ProdTestCheckoutFlow[]) {
+  return [...new Set(requested)].filter(
+    (flow): flow is ProdTestCheckoutFlow => flow === "first_purchase" || flow === "new_account",
+  );
+}
+
+function mergeAuthorizedFlows(existing: ProdTestCheckoutAuthorizationRow, requested: ProdTestCheckoutFlow[]) {
+  return normalizeRequestedFlows([
+    ...existing.authorized_flows.filter(
+      (flow): flow is ProdTestCheckoutFlow => flow === "first_purchase" || flow === "new_account",
+    ),
+    ...requested,
+  ]);
 }
 
 async function terminalizeAuthorization(input: {
@@ -408,7 +456,10 @@ export async function createProdTestCheckoutAuthorization(input: {
   }
 
   const now = input.now ?? new Date();
-  const requestedFlows = input.authorizedFlows ?? ["first_purchase", "new_account"];
+  const requestedFlows = normalizeRequestedFlows(input.authorizedFlows ?? ["first_purchase", "new_account"]);
+  if (requestedFlows.length === 0) {
+    throw new Error("authorization_scope_required");
+  }
   const requestedClientId = readString(input.clientId) || null;
   const existing = await findLatestProdTestCheckoutAuthorization(input.supabase, normalizedEmail);
   if (existing?.client_id && requestedClientId && existing.client_id !== requestedClientId) {
@@ -422,9 +473,6 @@ export async function createProdTestCheckoutAuthorization(input: {
     } else if (existing.entitlements_created_count >= existing.max_accounts) {
       await terminalizeAuthorization({ supabase: input.supabase, authorization: existing, status: "consumed", now });
     } else {
-      if (!scopesAreCompatible(existing, requestedFlows)) {
-        throw new Error("authorization_scope_mismatch");
-      }
       if (
         (existing.plan_key && existing.plan_key !== (input.planKey ?? null))
         || (existing.billing_interval_months != null
@@ -436,8 +484,30 @@ export async function createProdTestCheckoutAuthorization(input: {
       const requestedExpiry = input.expiresAt.getTime();
       const currentExpiry = new Date(existing.expires_at).getTime();
       const patch: Record<string, unknown> = {};
-      if (requestedExpiry > currentExpiry) patch.expires_at = input.expiresAt.toISOString();
-      if (!existing.client_id && requestedClientId) patch.client_id = requestedClientId;
+      const mergedFlows = mergeAuthorizedFlows(existing, requestedFlows);
+      const scopeExpanded = mergedFlows.length !== existing.authorized_flows.length
+        || mergedFlows.some((flow) => !existing.authorized_flows.includes(flow));
+      const expiryExtended = requestedExpiry > currentExpiry;
+      const clientLinked = !existing.client_id && Boolean(requestedClientId);
+      const limitIncreased = (input.maxAccounts ?? existing.max_accounts) > existing.max_accounts;
+      if (scopeExpanded) patch.authorized_flows = mergedFlows;
+      if (expiryExtended) patch.expires_at = input.expiresAt.toISOString();
+      if (clientLinked) patch.client_id = requestedClientId;
+      if (limitIncreased) {
+        patch.max_accounts = input.maxAccounts;
+      }
+
+      if (scopeExpanded || expiryExtended || clientLinked || limitIncreased) {
+        patch.metadata = appendAdminChangeHistory(existing.metadata, {
+            action: scopeExpanded ? "scope_expanded" : "renewed",
+            changed_at: now.toISOString(),
+            changed_by_auth_user_id: input.createdByAuthUserId,
+            previous_authorized_flows: existing.authorized_flows,
+            authorized_flows: mergedFlows,
+            previous_max_accounts: existing.max_accounts,
+            max_accounts: limitIncreased ? input.maxAccounts : existing.max_accounts,
+        });
+      }
 
       if (Object.keys(patch).length === 0) {
         return { authorization: redactProdTestAuthorizationStatus(existing), action: "reused" };
@@ -452,7 +522,10 @@ export async function createProdTestCheckoutAuthorization(input: {
         .select("*")
         .single<ProdTestCheckoutAuthorizationRow>();
       if (error || !data?.id) throw new Error("prod_test_authorization_renew_failed");
-      return { authorization: redactProdTestAuthorizationStatus(data), action: "renewed" };
+      return {
+        authorization: redactProdTestAuthorizationStatus(data),
+        action: scopeExpanded ? "expanded" : "renewed",
+      };
     }
   }
 
@@ -468,9 +541,16 @@ export async function createProdTestCheckoutAuthorization(input: {
     client_id: inheritedClientId,
     created_by_auth_user_id: input.createdByAuthUserId,
     admin_confirmation_acknowledged: true,
-    metadata: {
-      purpose: "agency_tenant_internal_test",
-    },
+    metadata: appendAdminChangeHistory(
+      { purpose: "agency_tenant_internal_test" },
+      {
+        action: "created",
+        changed_at: now.toISOString(),
+        changed_by_auth_user_id: input.createdByAuthUserId,
+        authorized_flows: requestedFlows,
+        max_accounts: input.maxAccounts ?? 1,
+      },
+    ),
   };
 
   const { data, error } = await input.supabase
@@ -484,4 +564,60 @@ export async function createProdTestCheckoutAuthorization(input: {
   }
 
   return { authorization: redactProdTestAuthorizationStatus(data), action: "created" };
+}
+
+export async function revokeProdTestCheckoutAuthorization(input: {
+  supabase: SupabaseClient;
+  authorizationId: string;
+  revokedByAuthUserId: string;
+  adminConfirmationAcknowledged: boolean;
+  env?: NodeJS.ProcessEnv;
+  now?: Date;
+}): Promise<{
+  authorization: RedactedProdTestAuthorizationStatus;
+  action: ProdTestCheckoutRevocationAction;
+}> {
+  if (!input.adminConfirmationAcknowledged) throw new Error("admin_confirmation_required");
+  if (!isProductionCheckoutEnvironment(input.env)) throw new Error("production_environment_required");
+
+  const authorizationId = readString(input.authorizationId);
+  if (!authorizationId) throw new Error("authorization_id_required");
+
+  const { data: existing, error: readError } = await input.supabase
+    .from("commercial_prod_test_checkout_authorizations")
+    .select("*")
+    .eq("id", authorizationId)
+    .limit(1)
+    .maybeSingle<ProdTestCheckoutAuthorizationRow>();
+  if (readError || !existing?.id) throw new Error("prod_test_authorization_not_found");
+
+  if (existing.status !== "active" || isProdTestCheckoutAuthorizationExpired(existing, input.now ?? new Date())) {
+    return {
+      authorization: redactProdTestAuthorizationStatus(existing),
+      action: "already_terminal",
+    };
+  }
+
+  const now = input.now ?? new Date();
+  const { data, error } = await input.supabase
+    .from("commercial_prod_test_checkout_authorizations")
+    .update({
+      status: "revoked",
+      updated_at: now.toISOString(),
+      metadata: appendAdminChangeHistory(existing.metadata, {
+          action: "revoked",
+          changed_at: now.toISOString(),
+          changed_by_auth_user_id: input.revokedByAuthUserId,
+      }),
+    })
+    .eq("id", existing.id)
+    .eq("status", "active")
+    .select("*")
+    .single<ProdTestCheckoutAuthorizationRow>();
+  if (error || !data?.id) throw new Error("prod_test_authorization_revoke_failed");
+
+  return {
+    authorization: redactProdTestAuthorizationStatus(data),
+    action: "revoked",
+  };
 }

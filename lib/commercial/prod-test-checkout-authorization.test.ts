@@ -8,6 +8,7 @@ import {
   PRODUCTION_CHECKOUT_ALLOWED_REF,
   recordProdTestCheckoutAuthorizationUsage,
   redactEmailHint,
+  revokeProdTestCheckoutAuthorization,
   validateProdTestCheckoutAuthorization,
 } from "./prod-test-checkout-authorization.ts";
 import { evaluateCheckoutSimulationAccess } from "./checkout-simulation-access.ts";
@@ -15,10 +16,11 @@ import { withInitialCheckoutAllowlist } from "./initial-checkout-test-env.ts";
 import { confirmCommercialPayment } from "./confirm-commercial-payment.ts";
 
 const PROD_ENV = {
+  NODE_ENV: "production",
   SUPABASE_URL: `https://${PRODUCTION_CHECKOUT_ALLOWED_REF}.supabase.co`,
   SIMULATED_CHECKOUT_ENABLED: "true",
   SIMULATED_CHECKOUT_EMAIL_ALLOWLIST: "isolated@example.invalid",
-};
+} satisfies NodeJS.ProcessEnv;
 
 const ISOLATED_ENV = withInitialCheckoutAllowlist(["isolated@example.invalid"]);
 
@@ -119,7 +121,25 @@ test("real email without authorization stays blocked on production", async () =>
     env: PROD_ENV,
   });
   assert.equal(access.allowed, false);
-  assert.match(access.messageFr ?? "", /fictives|indisponible/i);
+  assert.match(access.messageFr ?? "", /Super Admin|autorisation/i);
+});
+
+test("production legacy allowlist cannot bypass the canonical DB authorization", async () => {
+  const email = "legacy-allowlisted@company.com";
+  const access = await evaluateCheckoutSimulationAccess({
+    supabase: createMockSupabase(),
+    email,
+    flowType: "additional_account",
+    clientId: "client-agency",
+    env: {
+      ...PROD_ENV,
+      SIMULATED_CHECKOUT_EMAIL_ALLOWLIST: email,
+      SIMULATED_CHECKOUT_ALLOW_PRODUCTION: "true",
+    },
+  });
+  assert.equal(access.allowed, false);
+  assert.equal(access.reason, "authorization_not_found");
+  assert.match(access.messageFr ?? "", /Super Admin|autorisation/i);
 });
 
 test("authorized real email enables prod test checkout on production", async () => {
@@ -338,6 +358,10 @@ test("admin create stores hash and redacted hint only", async () => {
   assert.equal(created.action, "created");
   assert.equal(supabase._rows[0].email_hash, hashProdTestCheckoutEmail("liam.real@company.com"));
   assert.equal("email" in (supabase._rows[0] as object), false);
+  assert.equal(
+    ((supabase._rows[0].metadata as { admin_change_history?: unknown[] }).admin_change_history ?? []).length,
+    1,
+  );
 });
 
 test("stored active but expired authorization is reported precisely", async () => {
@@ -430,6 +454,15 @@ test("active compatible authorization can be prolonged without changing usage", 
   assert.equal(result.action, "renewed");
   assert.equal(supabase._rows.length, 1);
   assert.equal(supabase._rows[0].entitlements_created_count, 1);
+  assert.equal(
+    (supabase._rows[0].metadata as { last_admin_change?: { changed_by_auth_user_id?: string } })
+      .last_admin_change?.changed_by_auth_user_id,
+    "admin-user",
+  );
+  assert.equal(
+    ((supabase._rows[0].metadata as { admin_change_history?: unknown[] }).admin_change_history ?? []).length,
+    1,
+  );
 });
 
 test("consumed authorization keeps history and permits a fresh add-account grant", async () => {
@@ -485,7 +518,7 @@ test("third and fourth agency accounts are independent fresh authorization grant
   }
 });
 
-test("scope and tenant mismatches return exact reasons", async () => {
+test("tenant mismatch is rejected and a same-tenant active grant can expand its scope", async () => {
   const email = "mismatch@company.com";
   const base = authorizationRow({
     id: "active-mismatch",
@@ -506,18 +539,64 @@ test("scope and tenant mismatches return exact reasons", async () => {
     }),
     /authorization_tenant_mismatch/,
   );
-  await assert.rejects(
-    createProdTestCheckoutAuthorization({
-      supabase: createMockSupabase([base]),
-      email,
-      authorizedFlows: ["new_account"],
-      createdByAuthUserId: "admin-user",
-      expiresAt: new Date(Date.now() + 60_000),
-      adminConfirmationAcknowledged: true,
-      env: PROD_ENV,
-    }),
-    /authorization_scope_mismatch/,
+  const supabase = createMockSupabase([base]);
+  const expanded = await createProdTestCheckoutAuthorization({
+    supabase,
+    email,
+    clientId: "client-a",
+    authorizedFlows: ["new_account"],
+    createdByAuthUserId: "admin-user",
+    expiresAt: new Date(Date.now() + 60_000),
+    maxAccounts: 4,
+    adminConfirmationAcknowledged: true,
+    env: PROD_ENV,
+  });
+  assert.equal(expanded.action, "expanded");
+  assert.deepEqual(expanded.authorization.authorizedFlows, ["first_purchase", "new_account"]);
+  assert.equal(expanded.authorization.maxAccounts, 4);
+  assert.equal(
+    (supabase._rows[0].metadata as { last_admin_change?: { changed_by_auth_user_id?: string } })
+      .last_admin_change?.changed_by_auth_user_id,
+    "admin-user",
   );
+});
+
+test("superadmin revocation disables an active authorization and records its actor", async () => {
+  const email = "revoke@company.com";
+  const supabase = createMockSupabase([authorizationRow({
+    id: "active-revoke",
+    email,
+    clientId: "client-a",
+    flows: ["new_account"],
+  })]);
+  const revoked = await revokeProdTestCheckoutAuthorization({
+    supabase,
+    authorizationId: "active-revoke",
+    revokedByAuthUserId: "superadmin-1",
+    adminConfirmationAcknowledged: true,
+    env: PROD_ENV,
+  });
+  assert.equal(revoked.action, "revoked");
+  assert.equal(revoked.authorization.status, "revoked");
+  assert.equal(
+    (supabase._rows[0].metadata as { last_admin_change?: { changed_by_auth_user_id?: string } })
+      .last_admin_change?.changed_by_auth_user_id,
+    "superadmin-1",
+  );
+  assert.equal(
+    ((supabase._rows[0].metadata as { admin_change_history?: unknown[] }).admin_change_history ?? []).length,
+    1,
+  );
+
+  const access = await evaluateCheckoutSimulationAccess({
+    supabase,
+    email,
+    flowType: "additional_account",
+    clientId: "client-a",
+    env: PROD_ENV,
+  });
+  assert.equal(access.allowed, false);
+  assert.equal(access.reason, "authorization_revoked");
 });
 
 test("invalid email is refused before storage", async () => {

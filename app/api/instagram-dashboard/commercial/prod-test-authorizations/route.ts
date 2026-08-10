@@ -3,6 +3,7 @@ import { jsonError, jsonOk, readJsonBody, requireInstagramAdmin, getInstagramAdm
 import {
   createProdTestCheckoutAuthorization,
   redactProdTestAuthorizationStatus,
+  revokeProdTestCheckoutAuthorization,
   resolveProdTestCheckoutClientIdByEmail,
   type ProdTestCheckoutAuthorizationRow,
 } from "@/lib/commercial/prod-test-checkout-authorization";
@@ -119,11 +120,15 @@ export async function POST(request: Request) {
       action: result.action,
       message_fr: result.action === "created"
         ? "Autorisation de test créée. Aucun tenant ni checkout n'a été activé."
+        : result.action === "expanded"
+          ? "Autorisation de test étendue à ce parcours. Aucun checkout n'a été activé."
         : result.action === "renewed"
           ? "Autorisation de test prolongée. Aucun checkout n'a été activé."
           : "Autorisation active réutilisée. Aucun checkout n'a été activé.",
       message_en: result.action === "created"
         ? "Test authorization created. No tenant or checkout was activated."
+        : result.action === "expanded"
+          ? "Test authorization expanded to this flow. No checkout was activated."
         : result.action === "renewed"
           ? "Test authorization extended. No checkout was activated."
           : "Active authorization reused. No checkout was activated.",
@@ -147,5 +152,46 @@ export async function POST(request: Request) {
       return jsonError("Impossible de créer ou renouveler l'autorisation.", 409, { code: message });
     }
     return jsonError("Impossible de créer l'autorisation de test.", 500, { code: message });
+  }
+}
+
+type RevokeBody = {
+  authorization_id?: unknown;
+  admin_confirmation_acknowledged?: unknown;
+};
+
+export async function DELETE(request: Request) {
+  const unauthorized = await requireInstagramAdmin();
+  if (unauthorized) return unauthorized;
+
+  const adminContext = await getInstagramAdminUserContext();
+  if (!adminContext?.userId) return jsonError("Session admin indisponible.", 401);
+
+  const body = await readJsonBody<RevokeBody>(request);
+  const authorizationId = readString(body?.authorization_id);
+  const adminConfirmationAcknowledged = body?.admin_confirmation_acknowledged === true;
+  if (!authorizationId) return jsonError("Autorisation invalide.", 400, { code: "authorization_id_required" });
+  if (!adminConfirmationAcknowledged) {
+    return jsonError("Confirmation admin requise.", 400, { code: "admin_confirmation_required" });
+  }
+
+  try {
+    const result = await revokeProdTestCheckoutAuthorization({
+      supabase: createSupabaseClient(),
+      authorizationId,
+      revokedByAuthUserId: adminContext.userId,
+      adminConfirmationAcknowledged,
+    });
+    return jsonOk({
+      authorization: result.authorization,
+      action: result.action,
+      message_fr: result.action === "revoked"
+        ? "Activation Test désactivée. Aucun checkout ni abonnement n'a été modifié."
+        : "Cette autorisation était déjà inactive.",
+    });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "revoke_failed";
+    const status = code === "prod_test_authorization_not_found" ? 404 : code === "production_environment_required" ? 403 : 500;
+    return jsonError("Impossible de désactiver cette autorisation Test.", status, { code });
   }
 }
