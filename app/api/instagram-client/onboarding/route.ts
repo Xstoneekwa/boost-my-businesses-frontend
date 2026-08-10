@@ -17,6 +17,10 @@ import {
   requireClientInstagramSession,
 } from "@/lib/instagram-client/_utils";
 import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
+import {
+  onboardingBootstrapErrorCode,
+  onboardingBootstrapErrorStatus,
+} from "@/lib/instagram-onboarding/onboarding-bootstrap-error-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -114,7 +118,12 @@ export async function POST(request: Request) {
     return jsonOk({ onboarding });
   } catch (error) {
     const safe = safeError(error);
-    return jsonError(safe.clientMessage || "Could not start Instagram onboarding.", safe.status, { code: safe.code });
+    const code = onboardingBootstrapErrorCode(safe.code);
+    return jsonError(
+      safe.clientMessage || "Could not start Instagram onboarding.",
+      onboardingBootstrapErrorStatus(code),
+      { code },
+    );
   }
 }
 

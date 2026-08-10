@@ -10,6 +10,10 @@ import {
 } from "@/lib/instagram-onboarding/canonical-account-onboarding";
 import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
 import {
+  onboardingBootstrapErrorCode,
+  onboardingBootstrapErrorStatus,
+} from "@/lib/instagram-onboarding/onboarding-bootstrap-error-contract";
+import {
   jsonError,
   jsonOk,
   readJsonBody,
@@ -176,7 +180,12 @@ export async function POST(request: Request) {
     return jsonOk(safeCanonicalResponse(onboarding), 201);
   } catch (error) {
     const safe = safeError(error);
-    return jsonError(safe.clientMessage || "Could not start canonical onboarding.", safe.status, { code: safe.code });
+    const code = onboardingBootstrapErrorCode(safe.code);
+    return jsonError(
+      safe.clientMessage || "Could not start canonical onboarding.",
+      onboardingBootstrapErrorStatus(code),
+      { code },
+    );
   }
 }
 
