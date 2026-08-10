@@ -25,6 +25,14 @@ test("Manage maps active credentials separately from login status", () => {
   assert.match(manageSource, /pending_login/);
 });
 
+test("Manage transports canonical login identity proof into readiness and BotApp profiles", () => {
+  assert.match(manageSource, /login_identity_proof_status/);
+  assert.match(manageSource, /login_identity_profile_opened/);
+  assert.match(manageSource, /login_identity_username_match/);
+  assert.match(manageSource, /loginIdentityProofStatus: account\.loginIdentityProofStatus/);
+  assert.match(manageSource, /loginIdentityVerifiedAt: account\.loginIdentityVerifiedAt/);
+});
+
 test("Manage exposes server-side readiness projection without raw device or secret fields", () => {
   assert.match(manageSource, /buildAdminReadinessProjection/);
   assert.match(manageSource, /from\("account_dashboard_actions"\)/);

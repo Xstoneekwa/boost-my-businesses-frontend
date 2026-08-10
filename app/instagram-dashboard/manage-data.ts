@@ -50,6 +50,15 @@ export type ManageAccount = {
   loginStatus: string;
   provisioningStatus: string;
   onboardingStatus: string;
+  loginIdentityProofStatus?: string | null;
+  loginIdentityExpectedUsername?: string | null;
+  loginIdentityDetectedUsername?: string | null;
+  loginIdentityProfileOpened?: boolean | null;
+  loginIdentityUsernameMatch?: boolean | null;
+  loginIdentityVerifiedAt?: string | null;
+  loginIdentitySourceRunId?: string | null;
+  loginIdentityFailureReason?: string | null;
+  loginIdentityProofVersion?: number | null;
   passwordDisplay: string;
   twoFactorDisplay: string;
   last7dGrowth: number | null;
@@ -554,7 +563,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .limit(5000),
       supabase
         .from("client_instagram_accounts")
-        .select("account_id,login_status,provisioning_status,onboarding_status")
+        .select("account_id,login_status,provisioning_status,onboarding_status,login_identity_proof_status,login_identity_expected_username,login_identity_detected_username,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at,login_identity_source_run_id,login_identity_failure_reason,login_identity_proof_version")
         .in("account_id", accountIds)
         .limit(5000),
       supabase
@@ -706,6 +715,15 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         loginStatus: loginStatus === "unknown" && (credentialsStatus === "active" || credentialsStatus === "saved_pending_verification") ? "pending_login" : loginStatus,
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
+        loginIdentityProofStatus: readOptionalString(clientAccount, ["login_identity_proof_status"]) ?? account.loginIdentityProofStatus ?? null,
+        loginIdentityExpectedUsername: readOptionalString(clientAccount, ["login_identity_expected_username"]) ?? account.loginIdentityExpectedUsername ?? null,
+        loginIdentityDetectedUsername: readOptionalString(clientAccount, ["login_identity_detected_username"]) ?? account.loginIdentityDetectedUsername ?? null,
+        loginIdentityProfileOpened: readNullableBoolean(clientAccount, ["login_identity_profile_opened"]) ?? account.loginIdentityProfileOpened ?? null,
+        loginIdentityUsernameMatch: readNullableBoolean(clientAccount, ["login_identity_username_match"]) ?? account.loginIdentityUsernameMatch ?? null,
+        loginIdentityVerifiedAt: readIso(clientAccount, ["login_identity_verified_at"]) ?? account.loginIdentityVerifiedAt ?? null,
+        loginIdentitySourceRunId: readOptionalString(clientAccount, ["login_identity_source_run_id"]) ?? account.loginIdentitySourceRunId ?? null,
+        loginIdentityFailureReason: readOptionalString(clientAccount, ["login_identity_failure_reason"]) ?? account.loginIdentityFailureReason ?? null,
+        loginIdentityProofVersion: readNullableNumber(clientAccount, ["login_identity_proof_version"]) ?? account.loginIdentityProofVersion ?? null,
         phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
         deviceId: assignedDeviceId || readString(appInstance, ["device_id"], "") || account.deviceId || null,
         appInstanceId: assignedAppInstanceId || readString(appInstance, ["id"], "") || account.appInstanceId || null,
@@ -824,6 +842,10 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           loginStatus: account.loginStatus,
           provisioningStatus: account.provisioningStatus,
           onboardingStatus: account.onboardingStatus,
+          loginIdentityProofStatus: account.loginIdentityProofStatus ?? null,
+          loginIdentityProfileOpened: account.loginIdentityProfileOpened ?? null,
+          loginIdentityUsernameMatch: account.loginIdentityUsernameMatch ?? null,
+          loginIdentityVerifiedAt: account.loginIdentityVerifiedAt ?? null,
           assignmentStatus: account.assignmentStatus ?? null,
           assignmentStartsAt: account.assignmentStartsAt ?? null,
           scheduleMode: account.scheduleMode ?? null,
