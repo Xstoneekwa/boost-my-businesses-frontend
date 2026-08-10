@@ -11,7 +11,7 @@ import EmailVerificationActionBanner from "./EmailVerificationActionBanner";
 import InstagramDashboardButtons from "./InstagramDashboardButtons";
 import InstagramDashboardViewNav from "./InstagramDashboardViewNav";
 import RunControlStatusBanner from "./RunControlStatusBanner";
-import { getCredentialsActionsData } from "./credentials-actions-data";
+import { getCredentialsActionsData, type VerificationChannel } from "./credentials-actions-data";
 import {
   buildManageKpis,
   formatDateTime,
@@ -55,8 +55,9 @@ export default async function InstagramAutomationDashboardPage() {
       username: action.username,
       actionType: "enter_email_verification_code" as const,
       status: action.status,
-      title: action.title || "Email verification code required",
+      title: action.title || "Verification code required",
       description: action.description,
+      verificationChannel: (action.verificationChannel || "unknown") as VerificationChannel | "unknown",
     }));
 
   return (

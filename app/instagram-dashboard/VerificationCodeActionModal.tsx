@@ -13,7 +13,18 @@ type Props = {
   status: string;
   resumeStatus?: string | null;
   autoOpen?: boolean;
+  verificationChannel?: "email" | "sms" | "whatsapp" | "authenticator_app" | "unknown";
 };
+
+function channelLabel(channel: Props["verificationChannel"]) {
+  return {
+    email: "Email",
+    sms: "SMS",
+    whatsapp: "WhatsApp",
+    authenticator_app: "Authenticator app",
+    unknown: "Unknown",
+  }[channel ?? "unknown"];
+}
 
 function resumeMessage(status: string, resumeStatus?: string | null) {
   if (resumeStatus === "running") return "Login resume is running on the assigned device.";
@@ -24,7 +35,7 @@ function resumeMessage(status: string, resumeStatus?: string | null) {
     return "Instagram still needs a verification code. Enter the latest code.";
   }
   if (resumeStatus === "preflight_failed") {
-    return "Resume could not start because the device is not on the email code screen.";
+    return "Resume could not start because the device is not on the expected verification-code screen.";
   }
   return null;
 }
@@ -39,6 +50,7 @@ export default function VerificationCodeActionModal({
   status,
   resumeStatus = null,
   autoOpen = false,
+  verificationChannel = "unknown",
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -145,7 +157,7 @@ export default function VerificationCodeActionModal({
               <p>{statusMessage}</p>
             ) : (
               <>
-                <label htmlFor={`verification-code-${actionId}`}>Email verification code</label>
+                <label htmlFor={`verification-code-${actionId}`}>{channelLabel(verificationChannel)} verification code</label>
                 <input
                   id={`verification-code-${actionId}`}
                   type="text"

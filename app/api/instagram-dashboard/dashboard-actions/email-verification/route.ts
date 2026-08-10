@@ -30,6 +30,12 @@ const ACTIVE_EMAIL_CODE_STATUSES = ["pending", "acknowledged", "pending_verifica
 const EMAIL_CODE_ACTION_TTL_MS = 10 * 60 * 1000;
 const BLOCKED_ACCOUNT_STATUSES = new Set(["archived", "trashed", "cancelled", "canceled", "deleted"]);
 const NON_ACTIONABLE_RESUME_STATUSES = new Set(["completed", "failed", "preflight_failed"]);
+const VERIFICATION_CHANNELS = new Set(["email", "sms", "whatsapp", "authenticator_app"]);
+
+function verificationChannel(metadata: Record<string, unknown>) {
+  const channel = readString(metadata.verification_channel, readString(metadata.challenge_type, "")).toLowerCase();
+  return VERIFICATION_CHANNELS.has(channel) ? channel : "unknown";
+}
 
 function readMetadata(row: DashboardActionRow) {
   return row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
@@ -109,6 +115,7 @@ export async function GET() {
       const accountId = readString(row.account_id);
       const metadata = readMetadata(row);
       const resumeStatus = readString(metadata.resume_status, "");
+      const channel = verificationChannel(metadata);
       const account = accountById.get(accountId);
       return {
         id: readString(row.id),
@@ -118,8 +125,9 @@ export async function GET() {
         status: readString(row.status, "pending"),
         resumeStatus: resumeStatus || null,
         resumeRequestId: readString(metadata.resume_request_id, "") || null,
-        title: readString(row.title, "Email verification code required"),
-        description: readString(row.safe_client_message, "Instagram is waiting for an email verification code."),
+        verificationChannel: channel,
+        title: readString(row.title, "Instagram verification code required"),
+        description: readString(row.safe_client_message, "Instagram is waiting for a verification code."),
       };
     }),
   });

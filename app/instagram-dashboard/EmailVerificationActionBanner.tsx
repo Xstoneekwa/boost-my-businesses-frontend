@@ -14,6 +14,7 @@ type EmailVerificationAction = {
   resumeRequestId?: string | null;
   title: string;
   description: string;
+  verificationChannel: "email" | "sms" | "whatsapp" | "authenticator_app" | "unknown";
 };
 
 type Props = {
@@ -23,6 +24,16 @@ type Props = {
 const POLL_INTERVAL_MS = 15_000;
 const AUTO_OPEN_STORAGE_KEY = "instagram-dashboard-email-code-auto-opened-actions";
 export const EMAIL_VERIFICATION_REFRESH_EVENT = "instagram-dashboard:refresh-email-verification";
+
+function channelLabel(channel: EmailVerificationAction["verificationChannel"]) {
+  return {
+    email: "Email",
+    sms: "SMS",
+    whatsapp: "WhatsApp",
+    authenticator_app: "Authenticator app",
+    unknown: "Unknown",
+  }[channel];
+}
 
 function normalizeActions(value: unknown): EmailVerificationAction[] {
   if (!Array.isArray(value)) return [];
@@ -47,7 +58,14 @@ function normalizeActions(value: unknown): EmailVerificationAction[] {
         description:
           typeof row.description === "string" && row.description
             ? row.description
-            : "Instagram is waiting for an email verification code.",
+            : "Instagram is waiting for a verification code.",
+        verificationChannel:
+          row.verificationChannel === "email" ||
+          row.verificationChannel === "sms" ||
+          row.verificationChannel === "whatsapp" ||
+          row.verificationChannel === "authenticator_app"
+            ? row.verificationChannel
+            : "unknown",
       };
     })
     .filter((item): item is EmailVerificationAction => Boolean(item));
@@ -154,7 +172,7 @@ export default function EmailVerificationActionBanner({ initialActions = [] }: P
   }, [actions, autoOpenActionId]);
 
   async function dismissAction(action: EmailVerificationAction) {
-    const confirmed = window.confirm(`Remove stale email verification request for ${action.username}?`);
+    const confirmed = window.confirm(`Remove stale verification request for ${action.username}?`);
     if (!confirmed) return;
 
     setDeletingIds((current) => new Set(current).add(action.id));
@@ -192,8 +210,8 @@ export default function EmailVerificationActionBanner({ initialActions = [] }: P
         <span>{actionLabel}</span>
         <strong>
           {actions.length === 1
-            ? `Email verification code required for ${actions[0].username}`
-            : "Email verification codes required"}
+            ? `Verification code required for ${actions[0].username}`
+            : "Verification codes required"}
         </strong>
         <p>
           {actions.length === 1
@@ -206,7 +224,7 @@ export default function EmailVerificationActionBanner({ initialActions = [] }: P
           <article className="ig-email-verification-action" key={action.id}>
             <div>
               <strong>{action.username}</strong>
-              <small>{resumeStatusLabel(action)}</small>
+              <small>Channel: {channelLabel(action.verificationChannel)} · {resumeStatusLabel(action)}</small>
             </div>
             <div className="ig-email-verification-controls">
               <VerificationCodeActionModal
@@ -218,12 +236,13 @@ export default function EmailVerificationActionBanner({ initialActions = [] }: P
                 actionType="enter_email_verification_code"
                 status={action.status}
                 resumeStatus={action.resumeStatus}
+                verificationChannel={action.verificationChannel}
                 autoOpen={autoOpenActionId === action.id}
               />
               <button
                 type="button"
                 className="ig-email-verification-delete"
-                aria-label={`Remove stale email verification request for ${action.username}`}
+                aria-label={`Remove stale verification request for ${action.username}`}
                 disabled={deletingIds.has(action.id)}
                 onClick={() => void dismissAction(action)}
               >

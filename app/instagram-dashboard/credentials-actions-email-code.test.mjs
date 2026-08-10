@@ -6,13 +6,15 @@ function source(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("credentials actions keeps pending email code actions visible", () => {
+test("credentials actions keeps pending verification code actions and their channel visible", () => {
   const dataSource = source("./credentials-actions-data.ts");
 
   assert.match(dataSource, /enter_email_verification_code/);
   assert.match(dataSource, /Enter email verification code/);
   assert.match(dataSource, /"code_submitted"/);
   assert.match(dataSource, /account_dashboard_actions/);
+  assert.match(dataSource, /verificationChannel/);
+  assert.match(dataSource, /metadata\.verification_channel/);
 });
 
 test("credentials page shows a priority email code action with Enter code modal", () => {
@@ -35,6 +37,8 @@ test("verification modal accepts six digits and refreshes after safe submit", ()
   assert.match(modalSource, /setCode\(""\)/);
   assert.match(modalSource, /Code submitted\. Login resume queued\./);
   assert.match(modalSource, /autoOpen/);
+  assert.match(modalSource, /verificationChannel/);
+  assert.match(modalSource, /Authenticator app/);
   assert.match(modalSource, /setOpen\(true\)/);
   assert.match(modalSource, /setAutoOpenConsumed\(true\)/);
   assert.equal(modalSource.includes("console.log"), false);
@@ -91,8 +95,9 @@ test("dashboard email verification banner polls and exposes Enter code modal", (
   assert.match(bannerSource, /POLL_INTERVAL_MS = 15_000/);
   assert.match(bannerSource, /EMAIL_VERIFICATION_REFRESH_EVENT/);
   assert.match(bannerSource, /addEventListener\(EMAIL_VERIFICATION_REFRESH_EVENT/);
-  assert.match(bannerSource, /Email verification code required for/);
-  assert.match(bannerSource, /Email verification codes required/);
+  assert.match(bannerSource, /Verification code required for/);
+  assert.match(bannerSource, /Verification codes required/);
+  assert.match(bannerSource, /Channel:/);
   assert.match(bannerSource, /Choose the matching account before entering a code/);
   assert.match(bannerSource, /actions\.map/);
   assert.match(bannerSource, /1 action required/);
@@ -107,7 +112,7 @@ test("dashboard email verification banner polls and exposes Enter code modal", (
   assert.match(bannerSource, /autoOpen=\{autoOpenActionId === action\.id\}/);
   assert.match(bannerSource, /method: "DELETE"/);
   assert.match(bannerSource, /ig-email-verification-delete/);
-  assert.match(bannerSource, /Remove stale email verification request/);
+  assert.match(bannerSource, /Remove stale verification request/);
   assert.match(bannerSource, /if \(actions\.length === 0\) return null/);
   assert.match(bannerSource, /\/api\/instagram-dashboard\/dashboard-actions\/email-verification/);
   assert.match(manageSource, /EmailVerificationActionBanner/);
@@ -130,6 +135,8 @@ test("email verification polling route returns safe action metadata only", () =>
   assert.match(routeSource, /isAccountVisible/);
   assert.match(routeSource, /resumeStatus/);
   assert.match(routeSource, /resumeRequestId/);
+  assert.match(routeSource, /verificationChannel/);
+  assert.match(routeSource, /VERIFICATION_CHANNELS/);
   assert.match(routeSource, /requireInstagramAdmin/);
   assert.match(routeSource, /ig_accounts/);
   assert.match(routeSource, /export async function DELETE/);

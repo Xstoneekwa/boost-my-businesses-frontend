@@ -57,7 +57,10 @@ export type DashboardActionItem = {
   sourceLabel: string;
   deepLink: string | null;
   backendMutationStatus: BackendMutationStatus;
+  verificationChannel: VerificationChannel | null;
 };
+
+export type VerificationChannel = "email" | "sms" | "whatsapp" | "authenticator_app";
 
 export type DashboardActionSignal = {
   label: string;
@@ -86,6 +89,7 @@ export type DashboardActionGroup = {
   blockingCampaign: boolean;
   signals: DashboardActionSignal[];
   actionTypes: CredentialsActionType[];
+  verificationChannel: VerificationChannel | null;
 };
 
 export type CredentialsActionsSummary = {
@@ -138,7 +142,22 @@ type PersistedDashboardActionRow = {
   title?: unknown;
   safe_client_message?: unknown;
   action_deep_link?: unknown;
+  metadata?: unknown;
 };
+
+function asVerificationChannel(value: unknown): VerificationChannel | null {
+  const normalized = normalize(typeof value === "string" ? value : "");
+  if (normalized === "email" || normalized === "sms" || normalized === "whatsapp" || normalized === "authenticator_app") {
+    return normalized;
+  }
+  return null;
+}
+
+function readMetadata(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 function normalize(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
@@ -267,6 +286,7 @@ function action(
     sourceLabel: derivedSourceLabel,
     deepLink: `/instagram-dashboard/accounts/${encodeURIComponent(account.accountId || account.username)}?from=manage`,
     backendMutationStatus: "pending_backend",
+    verificationChannel: null,
   };
 }
 
@@ -341,7 +361,7 @@ async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
       .from("account_dashboard_actions")
-      .select("id,account_id,action_type,status,severity,audience,requires_client_action,blocking_campaign,title,safe_client_message,action_deep_link")
+      .select("id,account_id,action_type,status,severity,audience,requires_client_action,blocking_campaign,title,safe_client_message,action_deep_link,metadata")
       .in("account_id", accountIds)
       .in("status", activeDashboardActionStatuses)
       .order("created_at", { ascending: false })
@@ -356,6 +376,7 @@ async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[
         const account = byAccount.get(accountId);
         if (!account) return null;
 
+        const metadata = readMetadata(row.metadata);
         return {
           id: readText(row.id, `${accountId}-${readText(row.action_type, "dashboard_action")}`),
           accountId,
@@ -371,6 +392,7 @@ async function loadPersistedDashboardActions(accounts: CredentialsActionAccount[
           sourceLabel: persistedSourceLabel,
           deepLink: readText(row.action_deep_link) || `/instagram-dashboard/accounts/${encodeURIComponent(accountId)}`,
           backendMutationStatus: "connected",
+          verificationChannel: asVerificationChannel(metadata.verification_channel ?? metadata.challenge_type),
         };
       })
       .filter((action): action is DashboardActionItem => Boolean(action));
@@ -462,6 +484,7 @@ function actionGroupForAccount(account: CredentialsActionAccount, actions: Dashb
     blockingCampaign: account.blockingCampaign,
     signals,
     actionTypes: sortedActions.map((item) => item.actionType),
+    verificationChannel: mainAction.verificationChannel,
   };
 }
 

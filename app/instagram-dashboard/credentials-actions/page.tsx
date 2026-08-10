@@ -12,6 +12,7 @@ import {
   type CredentialsActionsSourceDetail,
   type DashboardActionGroup,
   type DashboardActionItem,
+  type VerificationChannel,
 } from "../credentials-actions-data";
 import { formatDateTime, formatInteger, getRadarData, statusTone } from "../radar-data";
 
@@ -35,8 +36,9 @@ export default async function InstagramCredentialsActionsPage() {
     username: action.username,
     actionType: "enter_email_verification_code" as const,
     status: action.status,
-    title: action.title || "Email verification code required",
+    title: action.title || "Verification code required",
     description: action.description,
+    verificationChannel: (action.verificationChannel || "unknown") as VerificationChannel | "unknown",
   }));
 
   return (
@@ -82,7 +84,7 @@ export default async function InstagramCredentialsActionsPage() {
             {emailVerificationActions.map((action) => (
               <article className="ig-email-code-action" key={action.id}>
                 <div>
-                  <span>Email verification code required</span>
+                  <span>Verification code required · Channel: {action.verificationChannel || "unknown"}</span>
                   <strong>{action.username}</strong>
                   <p>{action.description}</p>
                 </div>
@@ -90,10 +92,11 @@ export default async function InstagramCredentialsActionsPage() {
                   actionId={action.id}
                   accountId={action.accountId}
                   username={action.username}
-                  title={action.title || "Email verification code required"}
+                  title={action.title || "Verification code required"}
                   description={action.description}
                   actionType="enter_email_verification_code"
                   status={action.status}
+                  verificationChannel={action.verificationChannel || "unknown"}
                 />
               </article>
             ))}
