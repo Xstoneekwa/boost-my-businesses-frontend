@@ -45,11 +45,30 @@ test("EXPLICIT_NEW_LOGIN_REQUIRED_CAN_DOWNGRADE_CONNECTED", () => {
 test("connected without exact persisted identity proof fails closed", () => {
   assert.equal(hasCanonicalVerifiedLoginIdentity(verified()), true);
   for (const row of [
-    verified({ loginIdentityProofStatus: "historical_model_missing" }),
     verified({ loginIdentityProfileOpened: false }),
     verified({ loginIdentityUsernameMatch: false }),
     verified({ loginIdentityVerifiedAt: null }),
   ]) {
     assert.equal(projectCanonicalLoginStatus(row), "verification_pending");
   }
+});
+
+test("HISTORICAL_HEALTHY_ACCOUNT_IS_NOT_DOWNGRADED_BY_NEW_IDENTITY_SCHEMA", () => {
+  assert.equal(projectCanonicalLoginStatus(verified({
+    loginIdentityProofStatus: "historical_model_missing",
+    loginIdentityProfileOpened: null,
+    loginIdentityUsernameMatch: null,
+    loginIdentityVerifiedAt: null,
+    loginStateInvalidationReason: null,
+  })), "connected");
+});
+
+test("EXPLICIT_INVALIDATION_REQUIRES_LOGIN", () => {
+  assert.equal(projectCanonicalLoginStatus(verified({
+    loginIdentityProofStatus: "historical_model_missing",
+    loginIdentityProfileOpened: null,
+    loginIdentityUsernameMatch: null,
+    loginIdentityVerifiedAt: null,
+    loginStateInvalidationReason: "instagram_logged_out",
+  })), "verification_pending");
 });

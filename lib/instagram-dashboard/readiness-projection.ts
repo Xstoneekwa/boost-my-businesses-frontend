@@ -37,6 +37,7 @@ export type AdminReadinessInput = {
   loginIdentityProfileOpened?: boolean | null;
   loginIdentityUsernameMatch?: boolean | null;
   loginIdentityVerifiedAt?: string | null;
+  loginStateInvalidationReason?: string | null;
   assignmentStatus: string | null;
   assignmentStartsAt: string | null;
   scheduleMode?: string | null;
@@ -210,15 +211,21 @@ function autoLoginStatus(input: AdminReadinessInput): ComponentReadinessStatus {
   return "unknown";
 }
 
-function hasExplicitIdentityContract(input: AdminReadinessInput) {
-  return normalize(input.loginIdentityProofStatus) !== "";
-}
-
 function loginIdentityVerified(input: AdminReadinessInput) {
   return normalize(input.loginIdentityProofStatus) === "verified"
     && input.loginIdentityProfileOpened === true
     && input.loginIdentityUsernameMatch === true
     && Boolean(input.loginIdentityVerifiedAt);
+}
+
+function historicalIdentityIsNonBlocking(input: AdminReadinessInput) {
+  return normalize(input.loginIdentityProofStatus) === "historical_model_missing"
+    && normalize(input.loginStatus) === "connected"
+    && normalize(input.loginStateInvalidationReason) === "";
+}
+
+function loginIdentityAllowsReadiness(input: AdminReadinessInput) {
+  return loginIdentityVerified(input) || historicalIdentityIsNonBlocking(input);
 }
 
 function pendingBackendWiring(input: AdminReadinessInput) {
@@ -298,7 +305,7 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     overall = "needs_credentials";
     reason = input.reauthRequired ? "credentials_reauth_required" : "credentials_missing_or_inactive";
     nextClientAction = "submit_or_update_credentials";
-  } else if (hasExplicitIdentityContract(input) && !loginIdentityVerified(input)) {
+  } else if (!loginIdentityAllowsReadiness(input)) {
     overall = "needs_login_verification";
     reason = `login_identity_${normalize(input.loginIdentityProofStatus) || "missing"}`;
     nextAdminAction = "review_login_action";

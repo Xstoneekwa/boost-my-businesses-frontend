@@ -44,7 +44,7 @@ function readyInput(overrides: Partial<AdminReadinessInput> = {}): AdminReadines
 }
 
 test("explicit missing or failed identity proof prevents canonical readiness", () => {
-  for (const proofStatus of ["required_unverified", "failed", "proven_false_ready", "historical_model_missing"]) {
+  for (const proofStatus of ["required_unverified", "failed", "proven_false_ready"]) {
     const projection = buildAdminReadinessProjection(readyInput({
       loginIdentityProofStatus: proofStatus,
       loginIdentityProfileOpened: false,
@@ -54,6 +54,38 @@ test("explicit missing or failed identity proof prevents canonical readiness", (
     assert.equal(projection.overall_readiness_status, "needs_login_verification");
     assert.equal(projection.overall_readiness_reason, `login_identity_${proofStatus}`);
   }
+});
+
+test("LEGACY_CONNECTED_WITH_NO_NEW_PROOF_REMAINS_NON_BLOCKING_UNTIL_REVALIDATED", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    loginIdentityProofStatus: "historical_model_missing",
+    loginIdentityProfileOpened: null,
+    loginIdentityUsernameMatch: null,
+    loginIdentityVerifiedAt: null,
+    loginStateInvalidationReason: null,
+  }));
+  assert.equal(projection.overall_readiness_status, "ready");
+});
+
+test("NEW_ACCOUNT_WITH_NO_PROOF_FAILS_CLOSED", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    loginIdentityProofStatus: null,
+    loginIdentityProfileOpened: null,
+    loginIdentityUsernameMatch: null,
+    loginIdentityVerifiedAt: null,
+  }));
+  assert.equal(projection.overall_readiness_status, "needs_login_verification");
+});
+
+test("historical identity with explicit invalidation requires login", () => {
+  const projection = buildAdminReadinessProjection(readyInput({
+    loginIdentityProofStatus: "historical_model_missing",
+    loginIdentityProfileOpened: null,
+    loginIdentityUsernameMatch: null,
+    loginIdentityVerifiedAt: null,
+    loginStateInvalidationReason: "instagram_logged_out",
+  }));
+  assert.equal(projection.overall_readiness_status, "needs_login_verification");
 });
 
 test("verified identity is necessary but canonical readiness gates remain authoritative", () => {

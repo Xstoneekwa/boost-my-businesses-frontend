@@ -4,6 +4,7 @@ export type CanonicalLoginStateInput = {
   loginIdentityProfileOpened?: unknown;
   loginIdentityUsernameMatch?: unknown;
   loginIdentityVerifiedAt?: unknown;
+  loginStateInvalidationReason?: unknown;
 };
 
 function normalize(value: unknown): string {
@@ -17,8 +18,15 @@ export function hasCanonicalVerifiedLoginIdentity(input: CanonicalLoginStateInpu
     && Boolean(String(input.loginIdentityVerifiedAt ?? "").trim());
 }
 
+export function hasNonBlockingHistoricalLoginIdentity(input: CanonicalLoginStateInput): boolean {
+  return normalize(input.loginIdentityProofStatus) === "historical_model_missing"
+    && !normalize(input.loginStateInvalidationReason);
+}
+
 export function projectCanonicalLoginStatus(input: CanonicalLoginStateInput): string {
   const raw = normalize(input.loginStatus) || "unknown";
   if (raw !== "connected") return raw;
-  return hasCanonicalVerifiedLoginIdentity(input) ? "connected" : "verification_pending";
+  return hasCanonicalVerifiedLoginIdentity(input) || hasNonBlockingHistoricalLoginIdentity(input)
+    ? "connected"
+    : "verification_pending";
 }

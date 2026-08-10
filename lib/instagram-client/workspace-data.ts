@@ -110,7 +110,7 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
   const supabase = createSupabaseClient();
   const { data: links, error: linkError } = await supabase
     .from("client_instagram_accounts")
-    .select("account_id,onboarding_status,provisioning_status,login_status,login_identity_proof_status,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at")
+    .select("account_id,onboarding_status,provisioning_status,login_status,login_identity_proof_status,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at,login_state_invalidation_reason")
     .eq("client_id", clientId)
     .eq("active", true)
     .limit(100);
@@ -153,6 +153,7 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
         loginIdentityProfileOpened: link?.login_identity_profile_opened,
         loginIdentityUsernameMatch: link?.login_identity_username_match,
         loginIdentityVerifiedAt: link?.login_identity_verified_at,
+        loginStateInvalidationReason: link?.login_state_invalidation_reason,
       });
       const onboardingStatus = readString(link?.onboarding_status, "pending");
       const projected = projectClientAccountRow({

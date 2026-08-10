@@ -693,6 +693,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         loginIdentityProfileOpened,
         loginIdentityUsernameMatch,
         loginIdentityVerifiedAt,
+        loginStateInvalidationReason: readOptionalString(clientAccount, ["login_state_invalidation_reason"]) ?? account.loginStateInvalidationReason ?? null,
       });
       const assignedDeviceId = readString(assignment, ["device_id"], "");
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
@@ -863,6 +864,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           loginIdentityProfileOpened: account.loginIdentityProfileOpened ?? null,
           loginIdentityUsernameMatch: account.loginIdentityUsernameMatch ?? null,
           loginIdentityVerifiedAt: account.loginIdentityVerifiedAt ?? null,
+          loginStateInvalidationReason: account.loginStateInvalidationReason ?? null,
           assignmentStatus: account.assignmentStatus ?? null,
           assignmentStartsAt: account.assignmentStartsAt ?? null,
           scheduleMode: account.scheduleMode ?? null,
