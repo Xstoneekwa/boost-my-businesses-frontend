@@ -227,6 +227,10 @@ export function buildAutoRestartResumePlanMetadata(candidate: AutoRestartCandida
         welcome: candidate.plannedQuotaRemaining.welcome,
         outreach: candidate.plannedQuotaRemaining.outreach,
       },
+      // The Worker owns this opaque checkpoint contract. Auto Restart must
+      // transport it byte-for-byte so the next run reuses the frozen Daily
+      // Plan instead of rebuilding a fresh cohort from current eligibility.
+      unfollow_checkpoint: candidate.reliability.unfollowCheckpoint ?? null,
       prior_run_id: candidate.sourceRunId || null,
       source_run_id: candidate.sourceRunId || null,
       source_request_id: candidate.sourceRequestId ?? null,

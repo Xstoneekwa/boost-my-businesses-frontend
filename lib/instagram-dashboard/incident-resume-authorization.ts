@@ -113,7 +113,7 @@ export async function loadResumePlanForRun(
 ): Promise<Record<string, unknown> | null> {
   const result = await query(supabase, "account_session_resume_plans")
     .select(
-      "id,run_id,run_request_id,account_id,assignment_id,device_id,app_instance_id,resume_window_key,scheduled_window_start,scheduled_window_end,resume_stage,resume_state,restart_allowed,restart_block_reason,terminal_reason_code,attempts_in_window,test",
+      "id,run_id,run_request_id,account_id,assignment_id,device_id,app_instance_id,resume_window_key,scheduled_window_start,scheduled_window_end,resume_stage,resume_state,restart_allowed,restart_block_reason,terminal_reason_code,attempts_in_window,plan,test",
     )
     .eq("run_id", runId)
     .maybeSingle();

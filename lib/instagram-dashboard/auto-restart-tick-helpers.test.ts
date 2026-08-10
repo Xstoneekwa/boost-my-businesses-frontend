@@ -183,6 +183,14 @@ function recoverableCandidate(retryIndex: 0 | 1): AutoRestartCandidate {
       businessDaySast: "2026-07-22",
       phasesToRun: { welcome: false, follow: false, unfollow: true },
       quotaRemaining: { follow: 0, unfollow: 120, total: 120 },
+      unfollowCheckpoint: {
+        schema: "UNFOLLOW_CHECKPOINT_V1",
+        daily_plan: {
+          schema: "UNFOLLOW_DAILY_PLAN_V1",
+          plan_id: "udp1_existing_frozen_plan",
+          remaining_candidates: ["candidate_a", "candidate_b"],
+        },
+      },
       safeCheckpointAvailable: false,
       targetRotationSafeAfterScrollFailure: false,
       scrollFailureSurfaceAmbiguous: false,
@@ -214,6 +222,15 @@ test("retry request metadata preserves one business session and only remaining u
     follow: false,
     unfollow: true,
   });
+  assert.strictEqual(
+    retryOne.resume_plan.unfollow_checkpoint,
+    initial.reliability.unfollowCheckpoint,
+    "the opaque Worker checkpoint must not be rebuilt or normalized",
+  );
+  assert.equal(
+    (retryOne.resume_plan.unfollow_checkpoint as Record<string, unknown>)?.schema,
+    "UNFOLLOW_CHECKPOINT_V1",
+  );
 
   const firstRetryFailure = recoverableCandidate(1);
   const retryTwo = buildAutoRestartResumePlanMetadata(firstRetryFailure, new Date("2026-07-22T20:10:00.000Z"));

@@ -124,6 +124,12 @@ function readRows(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : [];
 }
 
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
 const ENQUEUE_ACTIVE_REQUEST_STATUSES = new Set(["queued", "claimed", "starting", "running"]);
 
 function query(supabase: SupabaseLike, table: string): QueryBuilder {
@@ -1518,6 +1524,15 @@ async function processHumanConfirmedResumes(
             strategy: candidate.safeRestartStrategy,
           },
         });
+        const storedPlanPayload = readRecord(storedPlan.plan);
+        const storedUnfollowCheckpoint = readRecord(storedPlanPayload?.unfollow_checkpoint)
+          ?? readRecord(readRecord(storedPlanPayload?.unfollow_outcome)?.checkpoint)
+          ?? null;
+        if (storedUnfollowCheckpoint) {
+          // Human authorization is tied to this exact source run. Prefer its
+          // persisted checkpoint over any later dashboard projection.
+          resumeMetadata.resume_plan.unfollow_checkpoint = storedUnfollowCheckpoint;
+        }
       }
       const planReason = validateCanonicalResumePlan(resumeMetadata.resume_plan as Record<string, unknown>);
       if (planReason) {

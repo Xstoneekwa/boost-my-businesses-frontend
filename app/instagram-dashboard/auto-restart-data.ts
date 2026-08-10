@@ -189,6 +189,7 @@ export type AutoRestartCandidate = {
     businessDaySast: string;
     phasesToRun: { welcome: boolean; follow: boolean; unfollow: boolean } | null;
     quotaRemaining: Record<string, number>;
+    unfollowCheckpoint?: Record<string, unknown> | null;
     safeCheckpointAvailable: boolean;
     targetRotationSafeAfterScrollFailure: boolean;
     scrollFailureSurfaceAmbiguous: boolean;
@@ -491,6 +492,7 @@ function reliabilityFromLatestRun(
       businessDaySast: "",
       phasesToRun: null,
       quotaRemaining: {},
+      unfollowCheckpoint: null,
       safeCheckpointAvailable: false,
       targetRotationSafeAfterScrollFailure: false,
       scrollFailureSurfaceAmbiguous: false,
@@ -516,6 +518,9 @@ function reliabilityFromLatestRun(
   const quotaDone = readRecord(resumePlan?.quota_done);
   const quotaTargets = readRecord(resumePlan?.quota_targets);
   const unfollowOutcome = readRecord(resumePlan?.unfollow_outcome);
+  const unfollowCheckpoint = readRecord(resumePlan?.unfollow_checkpoint)
+    ?? readRecord(unfollowOutcome?.checkpoint)
+    ?? null;
   const unsafeRaw = resumePlan?.unsafe_markers ?? performance?.unsafe_markers;
   const unsafeMarkers = Array.isArray(unsafeRaw)
     ? unsafeRaw.map((marker) => readString(marker)).filter(Boolean)
@@ -611,6 +616,7 @@ function reliabilityFromLatestRun(
         .filter(([, value]) => Number.isFinite(readNumber(value, Number.NaN)))
         .map(([key, value]) => [key, readNumber(value, 0)]),
     ),
+    unfollowCheckpoint,
     safeCheckpointAvailable: Boolean(
       readRecord(resumePlan?.safe_checkpoint)
       || readRecord(resumePlan?.checkpoint)

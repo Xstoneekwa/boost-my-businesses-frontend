@@ -8,6 +8,10 @@ import test from "node:test";
  * (no second scheduler, no direct worker call, no backend-launched run).
  */
 const tickSource = readFileSync(new URL("./auto-restart-tick.ts", import.meta.url), "utf8");
+const authorizationSource = readFileSync(
+  new URL("./incident-resume-authorization.ts", import.meta.url),
+  "utf8",
+);
 
 test("human-confirmed resumes run inside the canonical tick only", () => {
   assert.match(tickSource, /processHumanConfirmedResumes/);
@@ -123,6 +127,19 @@ test("resolved review gets one atomic retry credit without changing global budge
   assert.match(humanSection, /evaluateRunStartEligibility/);
   assert.match(humanSection, /validateCanonicalResumePlan/);
   assert.match(humanSection, /consumeAuthorizationAndCreateRequest\(supabase/);
+});
+
+test("human Unfollow resume transports the exact persisted Daily Plan checkpoint", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(authorizationSource, /attempts_in_window,plan,test/);
+  assert.match(humanSection, /storedPlanPayload = readRecord\(storedPlan\.plan\)/);
+  assert.match(humanSection, /storedPlanPayload\?\.unfollow_checkpoint/);
+  assert.match(humanSection, /resumeMetadata\.resume_plan\.unfollow_checkpoint = storedUnfollowCheckpoint/);
+  assert.ok(
+    humanSection.indexOf("resumeMetadata.resume_plan.unfollow_checkpoint = storedUnfollowCheckpoint")
+      < humanSection.indexOf("consumeAuthorizationAndCreateRequest(supabase"),
+    "the exact checkpoint must be attached before atomic request creation",
+  );
 });
 
 test("generic auto restart still enforces global retry budgets", () => {
