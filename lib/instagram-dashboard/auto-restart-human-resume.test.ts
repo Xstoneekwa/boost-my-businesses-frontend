@@ -52,7 +52,7 @@ test("only the audited account-scoped one-shot may preserve a frozen Follow-only
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
   assert.match(humanSection, /retry_generation,frozen_phase_plan,test/);
   assert.match(humanSection, /applyFollow60sOneShotFrozenPlan/);
-  assert.match(humanSection, /follow60sOneShot\?\.matched !== true/);
+  assert.match(humanSection, /follow60sOneShot\?\.matched\s*\?/);
   assert.match(humanSection, /follow60sOneShot\.metadata/);
 });
 
@@ -70,7 +70,8 @@ test("an armed Follow60 control overrides resolved-incident generic phases", () 
   assert.match(humanSection, /if \(follow60Resolution && !follow60Resolution\.ok\) \{\s*await blockResume\(follow60Resolution\.reason\)/);
   assert.match(humanSection, /projectArmedFollow60Candidate\(rebuiltGoldenCandidate, follow60Resolution\.control\)/);
   assert.match(humanSection, /attachArmedFollow60Contract\(/);
-  assert.match(humanSection, /!follow60Authority && follow60sOneShot\?\.matched !== true/);
+  assert.match(humanSection, /rebuiltCandidate && !follow60Authority/);
+  assert.match(humanSection, /follow60sOneShot\?\.matched\s*\?/);
 });
 
 test("expired window expires the authorization with a stable reason", () => {
@@ -112,12 +113,22 @@ test("a resolved human authorization must match the latest canonical run", () =>
   assert.match(humanSection, /await blockResume\(lineageVerdict\.reason\)/);
 });
 
-test("resolved review is evaluated next tick without bypassing safety gates", () => {
+test("resolved review gets one atomic retry credit without changing global budgets", () => {
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
   assert.doesNotMatch(humanSection, /restartDelayBlockReason\(candidate\.reliability\.nextRestartAt, now\)/);
-  assert.match(humanSection, /max_restarts_day/);
+  assert.match(humanSection, /authorizationRetryCreditScope = "one_shot_atomic_authorization"/);
+  assert.match(humanSection, /authorization_retry_credit_scope: authorizationRetryCreditScope/);
+  assert.doesNotMatch(humanSection, /await blockResume\("max_restarts_day"\)/);
+  assert.doesNotMatch(humanSection, /await blockResume\("max_restarts_window"\)/);
   assert.match(humanSection, /evaluateRunStartEligibility/);
   assert.match(humanSection, /validateCanonicalResumePlan/);
+  assert.match(humanSection, /consumeAuthorizationAndCreateRequest\(supabase/);
+});
+
+test("generic auto restart still enforces global retry budgets", () => {
+  const genericSection = tickSource.slice(0, tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(genericSection, /max_restarts_day/);
+  assert.match(genericSection, /max_restarts_window/);
 });
 
 test("every decision is audited in auto_restart_decisions", () => {

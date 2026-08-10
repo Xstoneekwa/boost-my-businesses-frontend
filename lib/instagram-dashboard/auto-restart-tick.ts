@@ -1435,40 +1435,14 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      if (!restrictionPreflight && candidate && !follow60Authority && follow60sOneShot?.matched !== true) {
-        // A resolved incident is the operator's explicit one-shot authorization
-        // for evaluation on the next natural tick.  The generic retry delay is
-        // not applied a second time; every live cap, warmup, phase, assignment,
-        // run/request, lock and restart-budget gate below remains authoritative.
-        const phaseKey = resumePhaseKey(candidate.plannedPhasesToRun);
-        const reasonKey = resumeReasonKey(candidate);
-        const lineageKey = resumeLineageBudgetKey(candidate);
-        const accountRestarts = input.restartCounts.byAccount.get(accountId) ?? 0;
-        const sessionRestarts = candidate.sourceBusinessSessionId
-          ? input.restartCounts.byBusinessSession.get(`${accountId}:${candidate.sourceBusinessSessionId}`) ?? 0
-          : 0;
-        const phaseRestarts = input.restartCounts.byPhase.get(`${accountId}:${phaseKey}`) ?? 0;
-        const reasonRestarts = input.restartCounts.byReason.get(`${accountId}:${reasonKey}`) ?? 0;
-        const lineageRestarts = input.restartCounts.byLineage.get(lineageKey) ?? 0;
-        const sourceRunRestarts = candidate.sourceRunId
-          ? input.restartCounts.bySourceRun.get(`${accountId}:${candidate.sourceRunId}`) ?? 0
-          : 0;
-        const budgetReason = input.maxRestartsPerDay > 0 && accountRestarts >= input.maxRestartsPerDay
-          ? "max_restarts_day"
-          : input.maxRestartsPerWindow > 0 && sessionRestarts >= input.maxRestartsPerWindow
-            ? "max_restarts_window"
-            : input.maxRestartsPerDay > 0 && phaseRestarts >= input.maxRestartsPerDay
-              ? "max_restarts_phase_business_day"
-              : input.maxRestartsPerDay > 0 && reasonRestarts >= input.maxRestartsPerDay
-                ? "max_restarts_reason_business_day"
-                : lineageRestarts > 0 || sourceRunRestarts > 0
-                  ? "resume_lineage_retry_budget_exhausted"
-                  : "";
-        if (budgetReason) {
-          await blockResume(budgetReason);
-          continue;
-        }
-      }
+      // The authorization row is itself the bounded retry credit: it is
+      // account/run/plan/worker scoped and is consumed atomically with request
+      // creation below. Historical automatic-restart counters remain intact
+      // and continue to gate the generic candidate path, but must not veto the
+      // single operator-authorized remediation they were created to permit.
+      // Every live cap, warmup, phase, assignment, active-run/request and lock
+      // gate remains authoritative.
+      const authorizationRetryCreditScope = "one_shot_atomic_authorization";
 
       const deviceId = readString(storedPlan.device_id) || candidate?.deviceId || null;
       let resumeMetadata: ReturnType<typeof buildAutoRestartResumePlanMetadata>
@@ -1522,6 +1496,7 @@ async function processHumanConfirmedResumes(
             ? follow60sOneShot.metadata
             : rebuiltMetadata;
         Object.assign(resumeMetadata.resume_plan, {
+          authorization_retry_credit_scope: authorizationRetryCreditScope,
           business_date: sastBusinessDay(now),
           resume_reason: "resolved_incident_human_authorized",
           resume_strategy: candidate.safeRestartStrategy,
