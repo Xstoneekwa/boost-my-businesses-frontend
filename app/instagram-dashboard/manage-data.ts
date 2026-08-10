@@ -16,6 +16,7 @@ import {
   type AccountAssignmentHealth,
   type AccountAssignmentHealthReason,
 } from "@/lib/instagram-dashboard/account-capacity-state";
+import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical-login-state";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -59,6 +60,9 @@ export type ManageAccount = {
   loginIdentitySourceRunId?: string | null;
   loginIdentityFailureReason?: string | null;
   loginIdentityProofVersion?: number | null;
+  loginStateSourceAt?: string | null;
+  loginStateVersion?: number | null;
+  loginStateInvalidationReason?: string | null;
   passwordDisplay: string;
   twoFactorDisplay: string;
   last7dGrowth: number | null;
@@ -563,7 +567,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .limit(5000),
       supabase
         .from("client_instagram_accounts")
-        .select("account_id,login_status,provisioning_status,onboarding_status,login_identity_proof_status,login_identity_expected_username,login_identity_detected_username,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at,login_identity_source_run_id,login_identity_failure_reason,login_identity_proof_version")
+        .select("account_id,login_status,provisioning_status,onboarding_status,login_identity_proof_status,login_identity_expected_username,login_identity_detected_username,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at,login_identity_source_run_id,login_identity_failure_reason,login_identity_proof_version,login_state_source_at,login_state_version,login_state_invalidation_reason")
         .in("account_id", accountIds)
         .limit(5000),
       supabase
@@ -679,7 +683,17 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
           credentialMetadataSafe: credentialMetadata,
         }),
       );
-      const loginStatus = readString(clientAccount, ["login_status"], account.loginStatus);
+      const loginIdentityProofStatus = readOptionalString(clientAccount, ["login_identity_proof_status"]) ?? account.loginIdentityProofStatus ?? null;
+      const loginIdentityProfileOpened = readNullableBoolean(clientAccount, ["login_identity_profile_opened"]) ?? account.loginIdentityProfileOpened ?? null;
+      const loginIdentityUsernameMatch = readNullableBoolean(clientAccount, ["login_identity_username_match"]) ?? account.loginIdentityUsernameMatch ?? null;
+      const loginIdentityVerifiedAt = readIso(clientAccount, ["login_identity_verified_at"]) ?? account.loginIdentityVerifiedAt ?? null;
+      const loginStatus = projectCanonicalLoginStatus({
+        loginStatus: readString(clientAccount, ["login_status"], account.loginStatus),
+        loginIdentityProofStatus,
+        loginIdentityProfileOpened,
+        loginIdentityUsernameMatch,
+        loginIdentityVerifiedAt,
+      });
       const assignedDeviceId = readString(assignment, ["device_id"], "");
       const assignedAppInstanceId = readString(assignment, ["app_instance_id"], "");
       const assignmentStartsAt = readIso(assignment, ["starts_at"]);
@@ -715,15 +729,18 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         loginStatus: loginStatus === "unknown" && (credentialsStatus === "active" || credentialsStatus === "saved_pending_verification") ? "pending_login" : loginStatus,
         provisioningStatus: readString(clientAccount, ["provisioning_status"], account.provisioningStatus),
         onboardingStatus: readString(clientAccount, ["onboarding_status"], account.onboardingStatus),
-        loginIdentityProofStatus: readOptionalString(clientAccount, ["login_identity_proof_status"]) ?? account.loginIdentityProofStatus ?? null,
+        loginIdentityProofStatus,
         loginIdentityExpectedUsername: readOptionalString(clientAccount, ["login_identity_expected_username"]) ?? account.loginIdentityExpectedUsername ?? null,
         loginIdentityDetectedUsername: readOptionalString(clientAccount, ["login_identity_detected_username"]) ?? account.loginIdentityDetectedUsername ?? null,
-        loginIdentityProfileOpened: readNullableBoolean(clientAccount, ["login_identity_profile_opened"]) ?? account.loginIdentityProfileOpened ?? null,
-        loginIdentityUsernameMatch: readNullableBoolean(clientAccount, ["login_identity_username_match"]) ?? account.loginIdentityUsernameMatch ?? null,
-        loginIdentityVerifiedAt: readIso(clientAccount, ["login_identity_verified_at"]) ?? account.loginIdentityVerifiedAt ?? null,
+        loginIdentityProfileOpened,
+        loginIdentityUsernameMatch,
+        loginIdentityVerifiedAt,
         loginIdentitySourceRunId: readOptionalString(clientAccount, ["login_identity_source_run_id"]) ?? account.loginIdentitySourceRunId ?? null,
         loginIdentityFailureReason: readOptionalString(clientAccount, ["login_identity_failure_reason"]) ?? account.loginIdentityFailureReason ?? null,
         loginIdentityProofVersion: readNullableNumber(clientAccount, ["login_identity_proof_version"]) ?? account.loginIdentityProofVersion ?? null,
+        loginStateSourceAt: readIso(clientAccount, ["login_state_source_at"]) ?? account.loginStateSourceAt ?? null,
+        loginStateVersion: readNullableNumber(clientAccount, ["login_state_version"]) ?? account.loginStateVersion ?? null,
+        loginStateInvalidationReason: readOptionalString(clientAccount, ["login_state_invalidation_reason"]) ?? account.loginStateInvalidationReason ?? null,
         phoneName: appLabel ? `${phoneLabel} · ${appLabel}` : phoneLabel,
         deviceId: assignedDeviceId || readString(appInstance, ["device_id"], "") || account.deviceId || null,
         appInstanceId: assignedAppInstanceId || readString(appInstance, ["id"], "") || account.appInstanceId || null,

@@ -29,8 +29,15 @@ test("Manage transports canonical login identity proof into readiness and BotApp
   assert.match(manageSource, /login_identity_proof_status/);
   assert.match(manageSource, /login_identity_profile_opened/);
   assert.match(manageSource, /login_identity_username_match/);
-  assert.match(manageSource, /loginIdentityProofStatus: account\.loginIdentityProofStatus/);
-  assert.match(manageSource, /loginIdentityVerifiedAt: account\.loginIdentityVerifiedAt/);
+  assert.match(manageSource, /loginIdentityProofStatus,/);
+  assert.match(manageSource, /loginIdentityVerifiedAt,/);
+  assert.match(manageSource, /login_state_source_at/);
+  assert.match(manageSource, /login_state_version/);
+  assert.match(manageSource, /login_state_invalidation_reason/);
+  assert.match(manageSource, /loginStateSourceAt:/);
+  assert.match(manageSource, /loginStateVersion:/);
+  assert.match(manageSource, /loginStateInvalidationReason:/);
+  assert.match(manageSource, /projectCanonicalLoginStatus/);
 });
 
 test("Manage exposes server-side readiness projection without raw device or secret fields", () => {

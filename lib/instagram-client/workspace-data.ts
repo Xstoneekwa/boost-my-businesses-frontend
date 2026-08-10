@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical-login-state";
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
 import { loadClientBillingPaymentSummary } from "@/lib/commercial/stripe/client-billing-service.ts";
 import { projectClientAccountRow } from "./account-projection";
@@ -109,7 +110,7 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
   const supabase = createSupabaseClient();
   const { data: links, error: linkError } = await supabase
     .from("client_instagram_accounts")
-    .select("account_id,onboarding_status,provisioning_status,login_status")
+    .select("account_id,onboarding_status,provisioning_status,login_status,login_identity_proof_status,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at")
     .eq("client_id", clientId)
     .eq("active", true)
     .limit(100);
@@ -146,7 +147,13 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
     .map((row) => {
       const accountId = readString(row.id);
       const link = linkByAccount.get(accountId);
-      const loginStatus = readString(link?.login_status, "unknown");
+      const loginStatus = projectCanonicalLoginStatus({
+        loginStatus: link?.login_status,
+        loginIdentityProofStatus: link?.login_identity_proof_status,
+        loginIdentityProfileOpened: link?.login_identity_profile_opened,
+        loginIdentityUsernameMatch: link?.login_identity_username_match,
+        loginIdentityVerifiedAt: link?.login_identity_verified_at,
+      });
       const onboardingStatus = readString(link?.onboarding_status, "pending");
       const projected = projectClientAccountRow({
         accountId,

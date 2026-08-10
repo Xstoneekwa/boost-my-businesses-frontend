@@ -6,6 +6,7 @@ import { loadClientConnectProgress } from "./load-client-connect-progress";
 import { isActiveClientConnectStatus, shouldSuppressPassiveReadyToConnect } from "./connect-operation-state";
 import { projectPassiveReadinessByAccountId } from "./project-client-workspace-readiness";
 import { isClientSelectableInstagramAccount } from "./client-account-visibility";
+import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical-login-state";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -49,7 +50,7 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
   const supabase = createSupabaseClient();
   const { data: links, error: linkError } = await supabase
     .from("client_instagram_accounts")
-    .select("account_id,onboarding_status,provisioning_status,login_status")
+    .select("account_id,onboarding_status,provisioning_status,login_status,login_identity_proof_status,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at")
     .eq("client_id", clientId)
     .eq("active", true)
     .limit(100);
@@ -79,7 +80,13 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
     .map((row) => {
       const accountId = readString(row.id);
       const link = linkByAccount.get(accountId);
-      const loginStatus = readString(link?.login_status, "unknown");
+      const loginStatus = projectCanonicalLoginStatus({
+        loginStatus: link?.login_status,
+        loginIdentityProofStatus: link?.login_identity_proof_status,
+        loginIdentityProfileOpened: link?.login_identity_profile_opened,
+        loginIdentityUsernameMatch: link?.login_identity_username_match,
+        loginIdentityVerifiedAt: link?.login_identity_verified_at,
+      });
       const onboardingStatus = readString(link?.onboarding_status, "pending");
       const packageSummary = packageSummaries.get(accountId);
       const assignmentStatus = assignmentMap.get(accountId)
