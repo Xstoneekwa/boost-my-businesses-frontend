@@ -74,11 +74,13 @@ test("credentials confirm stays separate from assign now", () => {
 test("connect is visible for login blockers and separate from assign now", () => {
   const login = { ok_to_start: false, reason: "login_not_connected", message: "Connect required." };
   const verification = { ok_to_start: false, reason: "login_verification_required", message: "Verification required." };
+  const identity = { ok_to_start: false, reason: "login_identity_not_verified", message: "Identity proof required." };
   const assignment = { ok_to_start: false, reason: "assignment_window_closed", message: "Window closed." };
   const ready = { ok_to_start: true, reason: "ready", message: "Manual run is ready." };
 
   assert.equal(shouldShowConnect(login), true);
   assert.equal(shouldShowConnect(verification), true);
+  assert.equal(shouldShowConnect(identity), true);
   assert.equal(shouldShowConnect(assignment), false);
   assert.equal(shouldShowAssignNow(login), false);
   assert.equal(shouldShowConnect(ready), false);

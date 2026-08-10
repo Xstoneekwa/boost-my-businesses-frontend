@@ -88,6 +88,7 @@ export type RunStartBlockReason =
   | "credentials_review_required"
   | "reauth_required"
   | "login_not_connected"
+  | "login_identity_not_verified"
   | "login_verification_required"
   | "identity_mismatch_review_required"
   | "welcome_template_missing"
@@ -1841,21 +1842,23 @@ export async function createLoginEmailCodeResumeRunRequest({
 
 export async function evaluateLoginConnectionStartGate(
   accountId: string,
-): Promise<Extract<RunStartBlockReason, "login_not_connected" | "login_verification_required" | "identity_mismatch_review_required" | "credentials_review_required" | "eligibility_query_failed"> | null> {
+): Promise<Extract<RunStartBlockReason, "login_not_connected" | "login_identity_not_verified" | "login_verification_required" | "identity_mismatch_review_required" | "credentials_review_required" | "eligibility_query_failed"> | null> {
   const supabase = createSupabaseClient();
-  const { data, error } = await supabase
-    .from("client_instagram_accounts")
-    .select("login_status,provisioning_status")
-    .eq("account_id", accountId)
-    .limit(1)
-    .maybeSingle<SupabaseRecord>();
+  const { data, error } = await supabase.rpc("evaluate_login_identity_gate_v1", {
+    p_account_id: accountId,
+  });
 
   if (error) return "eligibility_query_failed";
 
-  const loginStatus = readString(data?.login_status, "unknown").toLowerCase();
-  const provisioningStatus = readString(data?.provisioning_status, "unknown").toLowerCase();
-  if (CONNECTED_LOGIN_STATUSES.has(loginStatus) && READY_PROVISIONING_STATUSES.has(provisioningStatus)) {
+  const gate = (data ?? {}) as SupabaseRecord;
+  const identityReason = readString(gate.reason, "login_not_connected").toLowerCase();
+  const loginStatus = readString(gate.login_status, "unknown").toLowerCase();
+  const provisioningStatus = readString(gate.provisioning_status, "unknown").toLowerCase();
+  if (gate.ok === true && CONNECTED_LOGIN_STATUSES.has(loginStatus) && READY_PROVISIONING_STATUSES.has(provisioningStatus)) {
     return null;
+  }
+  if (identityReason === "login_identity_not_verified") {
+    return "login_identity_not_verified";
   }
   if (loginStatus === "mismatch") {
     return "identity_mismatch_review_required";
@@ -2400,6 +2403,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
       return "Credential re-authentication is required before manual run.";
     case "login_not_connected":
       return "Manual run is blocked until Instagram is connected on the assigned phone/app.";
+    case "login_identity_not_verified":
+      return "Manual run is blocked until the exact connected Instagram identity is verified from its own profile.";
     case "login_verification_required":
       return "Manual run is blocked because Instagram login needs verification first.";
     case "identity_mismatch_review_required":
@@ -2504,6 +2509,8 @@ export function runStartBlockMessage(reason: RunStartBlockReason) {
 
 export function runStartBlockDescription(reason: RunStartBlockReason) {
   switch (reason) {
+    case "login_identity_not_verified":
+      return "The account may look connected, but no modern exact own-profile identity proof is persisted. A technical login verification must succeed before campaign work can start.";
     case "welcome_real_send_disabled":
       return "Account settings are ready, but this run cannot start because Welcome DM is enabled and real sending is disabled by the ops safety flag.";
     case "assignment_window_closed":

@@ -75,6 +75,7 @@ export const SCHEDULER_REASON_CONTRACT: Record<string, ReasonDescriptor> = {
   no_eligible_accounts: { label: "no eligible accounts", kind: "business" },
   readiness_blocked: { label: "readiness blocked", kind: "business" },
   login_not_connected: { label: "login not connected", kind: "business" },
+  login_identity_not_verified: { label: "login identity not verified", kind: "business" },
   quota_reached: { label: "quota reached", kind: "business" },
   all_enabled_phase_work_completed: { label: "all enabled phase work completed", kind: "business" },
   open_incident_blocked: { label: "open incident", kind: "business" },

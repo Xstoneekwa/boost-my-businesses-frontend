@@ -50,6 +50,7 @@ const credentialsOrLoginReasons = new Set([
   "credentials_review_required",
   "reauth_required",
   "login_verification_required",
+  "login_identity_not_verified",
   "identity_mismatch_review_required",
   "account_needs_assistance",
 ]);

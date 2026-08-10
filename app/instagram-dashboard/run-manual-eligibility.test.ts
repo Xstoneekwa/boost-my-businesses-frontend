@@ -15,7 +15,7 @@ test("manual run button loads backend eligibility reason", () => {
 });
 
 test("manual run button is enabled only when backend eligibility is ok", () => {
-  assert.match(source, /const eligibilityPending = isRunEligibilityPending\(eligibilityLoading, eligibility\)/);
+  assert.match(source, /const eligibilityPending = isRunEligibilityPending\(eligibilityLoading, eligibility, hasHydrated\)/);
   assert.match(source, /const playDisabled = isPlayDisabled\(isStartingRun, eligibilityPending, eligibilityError, eligibility\)/);
   assert.doesNotMatch(source, /playDisabled = isStartingRun \|\| !health\?\.playEnabled/);
   assert.doesNotMatch(source, /!health\?\.healthy \|\| eligibility\?\.ok_to_start === false/);
@@ -26,6 +26,8 @@ test("manual run backend requires connected login provisioning before Play is re
   assert.match(runControlSource, /client_instagram_accounts/);
   assert.match(runControlSource, /login_not_connected/);
   assert.match(runControlSource, /login_verification_required/);
+  assert.match(runControlSource, /evaluate_login_identity_gate_v1/);
+  assert.match(runControlSource, /login_identity_not_verified/);
   assert.match(runControlSource, /CONNECTED_LOGIN_STATUSES/);
   assert.match(runControlSource, /READY_PROVISIONING_STATUSES/);
 });

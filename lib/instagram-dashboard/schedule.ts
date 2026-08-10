@@ -116,6 +116,7 @@ export const SCHEDULE_BLOCK_REASONS = [
   "assignment_profile_mismatch",
   "manual_only_runtime_disabled",
   "manual_only_requires_manual_trigger",
+  "login_identity_not_verified",
 ] as const;
 
 export type ScheduleBlockReason = (typeof SCHEDULE_BLOCK_REASONS)[number];
@@ -161,6 +162,8 @@ export function scheduleBlockMessage(reason: string) {
       return "Manual-only runtime is not enabled yet. This account has placement reserved but no Phase 2 manual run path.";
     case "manual_only_requires_manual_trigger":
       return "Run manually accounts only start when an admin or client explicitly clicks Start.";
+    case "login_identity_not_verified":
+      return "Run is blocked until the connected Instagram identity is verified from the account's own profile.";
     default:
       return "Manual run is blocked by schedule gates.";
   }

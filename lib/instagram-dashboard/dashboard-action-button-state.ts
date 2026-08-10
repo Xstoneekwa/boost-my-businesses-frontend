@@ -78,5 +78,7 @@ export function shouldShowCredentialsConfirm(eligibility: DashboardRunEligibilit
 
 export function shouldShowConnect(eligibility: DashboardRunEligibility | null) {
   if (!eligibility || eligibility.ok_to_start !== false) return false;
-  return eligibility.reason === "login_not_connected" || eligibility.reason === "login_verification_required";
+  return eligibility.reason === "login_not_connected"
+    || eligibility.reason === "login_verification_required"
+    || eligibility.reason === "login_identity_not_verified";
 }
