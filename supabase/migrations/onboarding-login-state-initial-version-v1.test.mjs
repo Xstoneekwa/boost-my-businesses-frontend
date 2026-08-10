@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const migration = readFileSync(new URL("./20260811005500_onboarding_login_state_initial_version_v1.sql", import.meta.url), "utf8");
-const rollback = readFileSync(new URL("../rollback/20260811005500_onboarding_login_state_initial_version_v1.down.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("./20260810230649_onboarding_login_state_initial_version_v1.sql", import.meta.url), "utf8");
+const rollback = readFileSync(new URL("../rollback/20260810230649_onboarding_login_state_initial_version_v1.down.sql", import.meta.url), "utf8");
 
 test("NEW_ACCOUNT_TEST_FLOW_STARTS_CANONICAL_ONBOARDING", () => {
   assert.match(migration, /client_instagram_accounts[\s\S]*login_state_version set default 1/i);
