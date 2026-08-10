@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 const migration = fs.readFileSync(
-  new URL("./20260810230000_login_preproof_transition_reconciliation_v1.sql", import.meta.url),
+  new URL("./20260810210246_login_preproof_transition_reconciliation_v1.sql", import.meta.url),
   "utf8",
 );
 
