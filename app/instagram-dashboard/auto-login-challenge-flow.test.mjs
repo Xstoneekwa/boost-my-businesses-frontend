@@ -56,6 +56,16 @@ test("admin code submission uses canonical write-only service and resumes same r
   assert.equal(submitRouteSource.includes("console.log"), false);
 });
 
+test("verification resume preserves email sms whatsapp and authenticator channels", () => {
+  assert.match(submitServiceSource, /actionMetadata\.verification_channel \?\? actionMetadata\.challenge_type/);
+  assert.match(submitServiceSource, /verificationChannel/);
+  for (const channel of ["email", "sms", "whatsapp", "authenticator_app"]) {
+    assert.match(runControlSource, new RegExp(`${channel}(?:_code_challenge)?`));
+  }
+  assert.match(runControlSource, /verification_code_challenge/);
+  assert.doesNotMatch(runControlSource, /challenge_type:\s*"email_code_challenge"/);
+});
+
 test("terminal admin Auto Login failure stays coherent and never maps to client connect progress", () => {
   assert.match(modalSource, /preflight_failed/);
   assert.match(modalSource, /needs_new_code/);

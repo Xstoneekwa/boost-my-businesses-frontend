@@ -84,6 +84,27 @@ existant et conserve le type initial dans
 qu'au moment d'une vraie soumission humaine : afficher la popup ou lire la
 progression ne modifie aucune action.
 
+### Canal de vérification canonique
+
+Le nom historique `enter_email_verification_code` reste un identifiant de
+compatibilité ; il ne signifie plus que le moteur peut remplacer le canal réel
+par email. Les canaux supportés sont `email`, `sms`, `whatsapp` et
+`authenticator_app`.
+
+- le provisioning publie le canal observé dans `verification_channel` et un
+  `challenge_type` cohérent ;
+- la soumission humaine transmet ce canal sans le recalculer côté interface ;
+- la request de reprise conserve le même canal jusqu'au Worker ;
+- le Worker compare ce contrat à l'écran Instagram courant avant de lire le
+  secret Vault ou de saisir le code ;
+- une ancienne action sans canal n'est jamais transformée silencieusement en
+  email : le Worker peut adopter le canal prouvé par l'UI courante, puis reste
+  fail-closed en cas d'absence de preuve ou de divergence.
+
+Ainsi, un challenge SMS, WhatsApp ou Authenticator ne peut pas être écrasé par
+le fallback email historique. Un libellé générique « Enter code » ne suffit pas
+à identifier un canal.
+
 Garanties :
 
 - code **write-only** (jamais relu côté UI après submit) ;

@@ -3,6 +3,7 @@ import {
   createLoginEmailCodeResumeRunRequest,
   evaluateLoginChallengeRunEligibility,
   isActiveResumeRequestStatus,
+  normalizeVerificationChannel,
 } from "@/lib/instagram-dashboard/run-control";
 import { readString } from "@/app/api/instagram-dashboard/_utils";
 import {
@@ -165,6 +166,7 @@ async function enqueueVerificationResume(input: {
   submissionId: string;
   actorId: string;
   resumeActorType: "admin" | "system";
+  verificationChannel: string | null;
 }) {
   try {
     const eligibility = await evaluateLoginChallengeRunEligibility(input.accountId, "login_email_code_resume");
@@ -185,6 +187,7 @@ async function enqueueVerificationResume(input: {
       submissionId: input.submissionId,
       actorId: input.actorId,
       actorType: input.resumeActorType,
+      verificationChannel: input.verificationChannel,
     });
 
     const resumeActive = Boolean(
@@ -229,6 +232,14 @@ export async function submitAccountVerificationCode(input: SubmitVerificationCod
   }
 
   const actionStatus = readString(actionCheck.row.status, "").toLowerCase();
+  const actionMetadata = actionCheck.row.metadata
+    && typeof actionCheck.row.metadata === "object"
+    && !Array.isArray(actionCheck.row.metadata)
+    ? actionCheck.row.metadata as Record<string, unknown>
+    : {};
+  const verificationChannel = normalizeVerificationChannel(
+    actionMetadata.verification_channel ?? actionMetadata.challenge_type,
+  );
   let submissionId = "";
   let persistedStatus = actionStatus;
 
@@ -280,6 +291,7 @@ export async function submitAccountVerificationCode(input: SubmitVerificationCod
     submissionId,
     actorId: input.actorId,
     resumeActorType: input.resumeActorType,
+    verificationChannel,
   });
 
   if (resume.resumeActive && resume.resumeRequestId) {

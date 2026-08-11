@@ -1315,22 +1315,42 @@ export function buildLoginEmailCodeResumeMetadata(input: {
   actionId: string;
   accountId: string;
   submissionId: string;
+  verificationChannel?: string | null;
   parentRequestId?: string | null;
   connectAttemptId?: string | null;
   source?: string;
 }) {
+  const verificationChannel = normalizeVerificationChannel(input.verificationChannel);
   const metadata: SupabaseRecord = {
     action_id: input.actionId,
     account_id: input.accountId,
     source: readString(input.source, "dashboard_code_submit"),
-    challenge_type: "email_code_challenge",
+    challenge_type: verificationChannel
+      ? `${verificationChannel}_code_challenge`
+      : "verification_code_challenge",
     submission_id: input.submissionId,
   };
+  if (verificationChannel) metadata.verification_channel = verificationChannel;
   const parentRequestId = readString(input.parentRequestId, "");
   const connectAttemptId = readString(input.connectAttemptId, "");
   if (parentRequestId) metadata.parent_request_id = parentRequestId;
   if (connectAttemptId) metadata.connect_attempt_id = connectAttemptId;
   return metadata;
+}
+
+export function normalizeVerificationChannel(value: unknown) {
+  const normalized = readString(value, "").trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    email: "email",
+    email_code_challenge: "email",
+    sms: "sms",
+    sms_code_challenge: "sms",
+    whatsapp: "whatsapp",
+    whatsapp_code_challenge: "whatsapp",
+    authenticator_app: "authenticator_app",
+    authenticator_app_code_challenge: "authenticator_app",
+  };
+  return aliases[normalized] ?? null;
 }
 
 export async function getActiveRunRequest(accountId: string) {
@@ -1673,6 +1693,7 @@ export async function createLoginEmailCodeResumeRunRequest({
   accountId,
   actionId,
   submissionId,
+  verificationChannel,
   actorId,
   actorType = "system",
   supabase = createSupabaseClient(),
@@ -1680,6 +1701,7 @@ export async function createLoginEmailCodeResumeRunRequest({
   accountId: string;
   actionId: string;
   submissionId: string;
+  verificationChannel?: string | null;
   actorId?: string | null;
   actorType?: "admin" | "assistant" | "ops" | "system" | "internal";
   supabase?: ReturnType<typeof createSupabaseClient>;
@@ -1747,6 +1769,7 @@ export async function createLoginEmailCodeResumeRunRequest({
     actionId: normalizedActionId,
     accountId,
     submissionId: normalizedSubmissionId,
+    verificationChannel,
     parentRequestId,
     connectAttemptId,
   });
