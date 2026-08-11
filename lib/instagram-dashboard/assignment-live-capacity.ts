@@ -456,7 +456,7 @@ export async function resolveLiveAssignmentTarget(
     return { ok: false, reason: "live_device_unavailable" };
   }
 
-  return { ok: false, reason: "no_available_slot" };
+  return { ok: false, reason: "NO_SAFE_PHONE_SCHEDULE_SLOT" };
 }
 
 export async function hasLiveAssignmentCapacity(

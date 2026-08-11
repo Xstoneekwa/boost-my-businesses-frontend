@@ -218,7 +218,7 @@ test("immediate assignment requires current window", async () => {
   });
   assert.equal(result.ok, false);
   if (result.ok) return;
-  assert.equal(result.reason, "no_available_slot");
+  assert.equal(result.reason, "NO_SAFE_PHONE_SCHEDULE_SLOT");
 });
 
 test("no admissible device returns capacity unavailable", async () => {

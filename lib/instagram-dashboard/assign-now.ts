@@ -56,7 +56,7 @@ function capacityUnavailable(reason: string, message: string): AssignNowResult {
 
 export function mapAssignAccountSlotFailure(errorMessage: string): AssignNowResult {
   const normalized = readString(errorMessage, "").toLowerCase();
-  if (normalized.includes("assignment_slot_conflict")) {
+  if (normalized.includes("assignment_slot_conflict") || normalized.includes("assignment_recurring_slot_conflict")) {
     return capacityUnavailable(
       "account_has_active_assignment_conflict",
       "The selected slot is already occupied on this phone.",
@@ -287,8 +287,8 @@ export async function assignNowForAccount(
       return capacityUnavailable("app_instance_capacity_unavailable", "No Instagram app instance is available on a connected phone.");
     }
     return capacityUnavailable(
-      liveResolution.reason === "no_available_slot" ? "no_available_slot_now" : "phone_capacity_unavailable",
-      liveResolution.reason === "no_available_slot"
+      liveResolution.reason === "NO_SAFE_PHONE_SCHEDULE_SLOT" ? "no_available_slot_now" : "phone_capacity_unavailable",
+      liveResolution.reason === "NO_SAFE_PHONE_SCHEDULE_SLOT"
         ? "No assignment slot is available for the current time window."
         : "No connected phone is available right now.",
     );

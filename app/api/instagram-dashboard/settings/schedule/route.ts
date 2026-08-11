@@ -586,7 +586,7 @@ export async function PATCH(request: Request) {
       if (isScheduleSchemaPending(error.message)) {
         return jsonError("Schedule slot assignment is unavailable until Schedule RPCs are applied.", 409);
       }
-      if (normalized.includes("assignment_slot_conflict")) {
+      if (normalized.includes("assignment_slot_conflict") || normalized.includes("assignment_recurring_slot_conflict")) {
         return jsonError(scheduleBlockMessage("assignment_slot_conflict"), 409);
       }
       if (normalized.includes("phone_rest_active")) {
