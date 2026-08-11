@@ -298,8 +298,32 @@ export default function ClientAccountsSection({
     return payload.data;
   }, [lang]);
 
-  const resumeActiveConnect = useCallback(async (account: ClientInstagramAccountView, openVerification = false) => {
-    const progress = await syncConnectProgress(account.accountId);
+  const ensureClientConnectAttempt = useCallback(async (accountId: string) => {
+    const retryResponse = await fetch(
+      `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/connect/retry-attempt`,
+      { method: "POST", headers: { Accept: "application/json" } },
+    );
+    const retryPayload = await parseClientApiResponse<{
+      connect_operation_token?: string | null;
+      request_id?: string | null;
+      message?: string;
+    }>(retryResponse, lang);
+    if (!retryResponse.ok || retryPayload.ok === false) {
+      throw new Error(
+        retryPayload.message
+        || retryPayload.error
+        || labelFor(lang, "Impossible de relancer la connexion.", "Could not restart the connection."),
+      );
+    }
+    return retryPayload.data?.connect_operation_token ?? null;
+  }, [lang]);
+
+  const resumeActiveConnect = useCallback(async (
+    account: ClientInstagramAccountView,
+    openVerification = false,
+    connectOperationToken?: string | null,
+  ) => {
+    const progress = await syncConnectProgress(account.accountId, connectOperationToken);
     if (!isActiveClientConnectStatus(progress.connect_status)) {
       setItems((current) => current.map((row) => (
         row.accountId === account.accountId
@@ -335,6 +359,7 @@ export default function ClientAccountsSection({
       },
       connectPhase: "polling",
       connectProgress: progress,
+      connectOperationToken: connectOperationToken ?? null,
       timedOut: false,
     });
     if (openVerification || progress.connect_status === "verification_required") {
@@ -472,22 +497,7 @@ export default function ClientAccountsSection({
       const accountId = processModal.accountId;
       let retryOperationToken = processModal.connectOperationToken ?? null;
       if (processModal.mode === "connect") {
-        const retryResponse = await fetch(
-          `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/connect/retry-attempt`,
-          { method: "POST", headers: { Accept: "application/json" } },
-        );
-        const retryPayload = await parseClientApiResponse<{
-          connect_operation_token?: string | null;
-          message?: string;
-        }>(retryResponse, lang);
-        if (!retryResponse.ok || retryPayload.ok === false) {
-          throw new Error(
-            retryPayload.message
-            || retryPayload.error
-            || labelFor(lang, "Impossible de relancer la connexion.", "Could not restart the connection."),
-          );
-        }
-        retryOperationToken = retryPayload.data?.connect_operation_token || retryOperationToken;
+        retryOperationToken = await ensureClientConnectAttempt(accountId) || retryOperationToken;
       }
       const connectProgress = processModal.mode === "connect"
         ? await syncConnectProgress(accountId, retryOperationToken)
@@ -533,7 +543,8 @@ export default function ClientAccountsSection({
     setActionKind("connect");
     setActionAccountId(account.accountId);
     try {
-      await resumeActiveConnect(account, true);
+      const connectOperationToken = await ensureClientConnectAttempt(account.accountId);
+      await resumeActiveConnect(account, true, connectOperationToken);
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible de rouvrir la vérification.", "Could not reopen verification."), "error");
     } finally {
