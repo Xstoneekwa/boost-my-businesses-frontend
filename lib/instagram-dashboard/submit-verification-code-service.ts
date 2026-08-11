@@ -5,10 +5,12 @@ import {
   isActiveResumeRequestStatus,
 } from "@/lib/instagram-dashboard/run-control";
 import { readString } from "@/app/api/instagram-dashboard/_utils";
+import {
+  isCanonicalVerificationCodeAction,
+} from "@/lib/instagram-client/verification-code-action-contract";
 
 export const VERIFICATION_CODE_RE = /^[A-Za-z0-9-]{4,32}$/;
 
-const EMAIL_CODE_ACTION = "enter_email_verification_code";
 const ACTIVE_EMAIL_CODE_STATUSES = new Set([
   "pending",
   "acknowledged",
@@ -67,7 +69,7 @@ function mapRpcError(errorMessage: string): { status: number; message: string; c
   return { status: 500, message: "Verification code submission failed.", code: "verification_code_submit_failed" };
 }
 
-export async function assertActiveEmailVerificationAction(input: {
+export async function assertActiveVerificationCodeAction(input: {
   supabase: ReturnType<typeof createSupabaseClient>;
   actionId: string;
   accountId: string;
@@ -77,7 +79,6 @@ export async function assertActiveEmailVerificationAction(input: {
     .select("id,account_id,action_type,status,metadata")
     .eq("id", input.actionId)
     .eq("account_id", input.accountId)
-    .eq("action_type", EMAIL_CODE_ACTION)
     .limit(1)
     .maybeSingle();
 
@@ -86,6 +87,9 @@ export async function assertActiveEmailVerificationAction(input: {
   }
   if (!data) {
     return { ok: false as const, status: 404, message: "Verification action not found.", code: "dashboard_action_not_found" };
+  }
+  if (!isCanonicalVerificationCodeAction(data as Record<string, unknown>)) {
+    return { ok: false as const, status: 409, message: "This verification action does not accept a code.", code: "dashboard_action_type_invalid" };
   }
   const status = readString((data as Record<string, unknown>).status).toLowerCase();
   if (!ACTIVE_EMAIL_CODE_STATUSES.has(status)) {
@@ -133,7 +137,6 @@ async function mergeActionResumeMetadata(
     .select("metadata")
     .eq("id", input.actionId)
     .eq("account_id", input.accountId)
-    .eq("action_type", EMAIL_CODE_ACTION)
     .limit(1)
     .maybeSingle();
 
@@ -153,8 +156,7 @@ async function mergeActionResumeMetadata(
       },
     })
     .eq("id", input.actionId)
-    .eq("account_id", input.accountId)
-    .eq("action_type", EMAIL_CODE_ACTION);
+    .eq("account_id", input.accountId);
 }
 
 async function enqueueVerificationResume(input: {
@@ -221,7 +223,7 @@ export async function submitAccountVerificationCode(input: SubmitVerificationCod
   }
 
   const supabase = createSupabaseClient();
-  const actionCheck = await assertActiveEmailVerificationAction({ supabase, actionId, accountId });
+  const actionCheck = await assertActiveVerificationCodeAction({ supabase, actionId, accountId });
   if (!actionCheck.ok) {
     return { ok: false, status: actionCheck.status, message: actionCheck.message, code: actionCheck.code };
   }

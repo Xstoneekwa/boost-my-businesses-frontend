@@ -69,6 +69,7 @@ type ProgressInput = {
     title?: string;
     message?: string;
     resume_status?: string | null;
+    accepts_verification_code?: boolean;
   } | null;
   steps?: Array<{
     id?: string;
@@ -208,12 +209,16 @@ export function projectClientConnectProgress(input: ProgressInput): ClientConnec
   });
   const verification = mapVerificationState(input.actionRequired);
   const actionStatus = readString(input.actionRequired?.status).toLowerCase();
+  const acceptsVerificationCode = input.actionRequired?.accepts_verification_code === true
+    || (input.actionRequired?.accepts_verification_code === undefined
+      && readString(input.actionRequired?.action_type).toLowerCase() === EMAIL_CODE_ACTION);
   const resumeStatus = resolveEffectiveResumeStatus(input) || null;
   const resumeState = resolveVerificationResumeState(input);
   const canSubmitCode = (verification.required || accountVerificationPending)
     && !resumeState.codeSubmitted
     && !resumeState.resumeActive
     && Boolean(readString(input.actionRequired?.id))
+    && acceptsVerificationCode
     && (SUBMITTABLE_ACTION_STATUSES.has(actionStatus) || actionStatus === "pending_verification");
 
   const actionRequired = input.actionRequired && (verification.required || accountVerificationPending) ? {

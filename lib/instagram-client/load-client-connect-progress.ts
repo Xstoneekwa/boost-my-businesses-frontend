@@ -7,6 +7,7 @@ import {
   evaluateConnectChallengeChainActive,
   findActiveVerificationAction,
 } from "./connect-challenge-chain";
+import { isCanonicalVerificationCodeAction } from "./verification-code-action-contract";
 
 const ACTION_REQUIRED_TYPES = new Set([
   "enter_email_verification_code",
@@ -95,6 +96,10 @@ function buildActionRequired(input: {
         : "Instagram requires verification before your account connection can finish.",
     ),
     resume_status: readString(metadata.resume_status, "") || null,
+    accepts_verification_code: isCanonicalVerificationCodeAction({
+      action_type: actionType,
+      metadata,
+    }),
   };
 }
 
