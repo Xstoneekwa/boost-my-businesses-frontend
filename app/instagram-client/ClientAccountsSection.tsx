@@ -470,8 +470,27 @@ export default function ClientAccountsSection({
     setProcessRefreshing(true);
     try {
       const accountId = processModal.accountId;
+      let retryOperationToken = processModal.connectOperationToken ?? null;
+      if (processModal.mode === "connect") {
+        const retryResponse = await fetch(
+          `/api/instagram-client/accounts/${encodeURIComponent(accountId)}/connect/retry-attempt`,
+          { method: "POST", headers: { Accept: "application/json" } },
+        );
+        const retryPayload = await parseClientApiResponse<{
+          connect_operation_token?: string | null;
+          message?: string;
+        }>(retryResponse, lang);
+        if (!retryResponse.ok || retryPayload.ok === false) {
+          throw new Error(
+            retryPayload.message
+            || retryPayload.error
+            || labelFor(lang, "Impossible de relancer la connexion.", "Could not restart the connection."),
+          );
+        }
+        retryOperationToken = retryPayload.data?.connect_operation_token || retryOperationToken;
+      }
       const connectProgress = processModal.mode === "connect"
-        ? await syncConnectProgress(accountId, processModal.connectOperationToken)
+        ? await syncConnectProgress(accountId, retryOperationToken)
         : processModal.connectProgress ?? null;
       const account = await syncProcessAccount(accountId);
       if (account) {
@@ -485,6 +504,7 @@ export default function ClientAccountsSection({
             ...current,
             account,
             connectProgress: current.mode === "connect" ? connectProgress : current.connectProgress,
+            connectOperationToken: current.mode === "connect" ? retryOperationToken : current.connectOperationToken,
             connectPhase: terminal ? "complete" : current.connectPhase,
             addPhase: terminal ? "complete" : current.addPhase,
             timedOut: terminal ? false : current.timedOut,

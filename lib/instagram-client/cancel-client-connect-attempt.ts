@@ -26,6 +26,7 @@ const DISMISSABLE_ACTION_STATUSES = [
   "code_submitted",
   "open",
 ] as const;
+const TERMINAL_LOGIN_REQUEST_STATUSES = ["completed", "failed", "canceled", "stopped"] as const;
 
 async function cancelActiveLoginRequests(
   supabase: SupabaseLike,
@@ -142,10 +143,62 @@ async function dismissChallengeActions(
   return dismissed;
 }
 
+async function dismissRetryableLoginReviewActions(
+  supabase: SupabaseLike,
+  accountId: string,
+) {
+  const { data: actionRows, error } = await supabase
+    .from("account_dashboard_actions")
+    .select("id,metadata")
+    .eq("account_id", accountId)
+    .eq("action_type", "operator_review_required")
+    .in("status", [...DISMISSABLE_ACTION_STATUSES])
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (error) throw new Error("client_connect_retry_review_actions_unavailable");
+
+  const now = new Date().toISOString();
+  let dismissed = 0;
+  for (const row of ((actionRows ?? []) as Record<string, unknown>[])) {
+    const actionId = readString(row.id);
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as Record<string, unknown>
+      : {};
+    const linkedRunId = readString(metadata.run_id);
+    if (!actionId || !linkedRunId) continue;
+
+    const { data: requestRow, error: requestError } = await supabase
+      .from("account_run_requests")
+      .select("id,status,requested_run_type")
+      .eq("account_id", accountId)
+      .eq("run_id", linkedRunId)
+      .in("requested_run_type", [...LOGIN_REQUEST_TYPES])
+      .in("status", [...TERMINAL_LOGIN_REQUEST_STATUSES])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (requestError || !requestRow) continue;
+
+    const { error: updateError } = await supabase
+      .from("account_dashboard_actions")
+      .update({
+        status: "dismissed",
+        resolved_at: now,
+        updated_at: now,
+      })
+      .eq("id", actionId)
+      .eq("account_id", accountId)
+      .in("status", [...DISMISSABLE_ACTION_STATUSES]);
+    if (!updateError) dismissed += 1;
+  }
+  return dismissed;
+}
+
 export async function cancelClientConnectAttempt(input: {
   accountId: string;
   reason?: string;
   actorUserId?: string | null;
+  dismissRetryableLoginReview?: boolean;
 }) {
   const accountId = readString(input.accountId);
   if (!accountId) throw new Error("account_id_required");
@@ -154,6 +207,9 @@ export async function cancelClientConnectAttempt(input: {
   const supabase = createSupabaseClient();
   const { canceledRequestIds, runIds } = await cancelActiveLoginRequests(supabase, accountId, reason);
   const dismissedActions = await dismissChallengeActions(supabase, accountId, runIds);
+  const dismissedRetryableReviews = input.dismissRetryableLoginReview === true
+    ? await dismissRetryableLoginReviewActions(supabase, accountId)
+    : 0;
   const projection = await clearStaleClientConnectChallengeProjection(supabase, accountId, reason);
   const now = new Date().toISOString();
 
@@ -169,6 +225,7 @@ export async function cancelClientConnectAttempt(input: {
         actor_user_id: readString(input.actorUserId, "") || null,
         canceled_request_ids: canceledRequestIds,
         dismissed_actions: dismissedActions,
+        dismissed_retryable_login_reviews: dismissedRetryableReviews,
         projection_cleared: projection.cleared === true,
       },
     });
@@ -177,9 +234,13 @@ export async function cancelClientConnectAttempt(input: {
   }
 
   return {
-    canceled: canceledRequestIds.length > 0 || projection.cleared === true || dismissedActions > 0,
+    canceled: canceledRequestIds.length > 0
+      || projection.cleared === true
+      || dismissedActions > 0
+      || dismissedRetryableReviews > 0,
     canceled_request_ids: canceledRequestIds,
     dismissed_actions: dismissedActions,
+    dismissed_retryable_login_reviews: dismissedRetryableReviews,
     projection_cleared: projection.cleared === true,
     login_status: projection.login_status ?? null,
     provisioning_status: projection.provisioning_status ?? null,
