@@ -17,6 +17,11 @@ import {
   type AccountAssignmentHealthReason,
 } from "@/lib/instagram-dashboard/account-capacity-state";
 import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical-login-state";
+import {
+  missingCanonicalClientAccountVisibilityRows,
+  type CanonicalClientAccountVisibilitySeed,
+  type CanonicalIgAccountVisibilitySeed,
+} from "@/lib/instagram-dashboard/canonical-client-account-visibility";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -1278,6 +1283,84 @@ export async function getManageDataFromAdminDashboardApi(): Promise<ManageOvervi
   }
 }
 
+async function reconcileWithCanonicalActiveClientAccounts(
+  overview: ManageOverview,
+  requireCanonicalComplete: boolean,
+): Promise<ManageOverview> {
+  try {
+    const supabase = createSupabaseClient();
+    const pageSize = 500;
+    const maxPages = 10;
+    const clientRows: SupabaseRecord[] = [];
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const start = page * pageSize;
+      const result = await supabase
+        .from("client_instagram_accounts")
+        .select("account_id,client_id,label,active,onboarding_rollback_at,login_status,provisioning_status,onboarding_status,created_at")
+        .eq("active", true)
+        .is("onboarding_rollback_at", null)
+        .order("created_at", { ascending: false })
+        .range(start, start + pageSize - 1);
+      if (result.error) throw result.error;
+      const pageRows = (result.data ?? []) as SupabaseRecord[];
+      clientRows.push(...pageRows);
+      if (pageRows.length < pageSize) break;
+      if (page === maxPages - 1) throw new Error("Canonical active client account scan exceeded 5000 rows");
+    }
+
+    const accountIds = [...new Set(clientRows.map((row) => readString(row, ["account_id"], "")).filter(Boolean))];
+    const igRows: SupabaseRecord[] = [];
+    for (let start = 0; start < accountIds.length; start += 200) {
+      const result = await supabase
+        .from("ig_accounts")
+        .select("id,username,display_name,status,admin_lifecycle_status,device_name,created_at")
+        .in("id", accountIds.slice(start, start + 200));
+      if (result.error) throw result.error;
+      igRows.push(...((result.data ?? []) as SupabaseRecord[]));
+    }
+
+    const clientAccounts: CanonicalClientAccountVisibilitySeed[] = clientRows.map((row) => ({
+      accountId: readString(row, ["account_id"], ""),
+      clientId: readOptionalString(row, ["client_id"]),
+      label: readOptionalString(row, ["label"]),
+      active: readBoolean(row, ["active"], false),
+      onboardingRollbackAt: readIso(row, ["onboarding_rollback_at"]),
+      loginStatus: readOptionalString(row, ["login_status"]),
+      provisioningStatus: readOptionalString(row, ["provisioning_status"]),
+      onboardingStatus: readOptionalString(row, ["onboarding_status"]),
+      createdAt: readIso(row, ["created_at"]),
+    }));
+    const igAccounts: CanonicalIgAccountVisibilitySeed[] = igRows.map((row) => ({
+      accountId: readString(row, ["id"], ""),
+      username: readOptionalString(row, ["username"]),
+      displayName: readOptionalString(row, ["display_name"]),
+      status: readOptionalString(row, ["status"]),
+      adminLifecycleStatus: readOptionalString(row, ["admin_lifecycle_status"]),
+      deviceName: readOptionalString(row, ["device_name"]),
+      createdAt: readIso(row, ["created_at"]),
+    }));
+    const missingRows = missingCanonicalClientAccountVisibilityRows({
+      existingAccountIds: overview.allAccounts.map((account) => account.accountId),
+      clientAccounts,
+      igAccounts,
+    });
+    if (!missingRows.length) return overview;
+    return overviewWithAccounts(overview, [
+      ...overview.allAccounts,
+      ...missingRows.map((row) => mapAdminDashboardAccount(row)),
+    ]);
+  } catch {
+    if (requireCanonicalComplete) {
+      throw new ManageApiError("Canonical active client account reconciliation failed");
+    }
+    return {
+      ...overview,
+      errors: ["Canonical active client account reconciliation unavailable.", ...overview.errors],
+    };
+  }
+}
+
 async function enrichWithOrphanRecovery(overview: ManageOverview): Promise<ManageOverview> {
   const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
   if (!accountIds.length) return overview;
@@ -1331,6 +1414,7 @@ export async function getManageData(options: {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
+  overview = await reconcileWithCanonicalActiveClientAccounts(overview, options.requireCanonicalComplete === true);
   const enriched = await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
   return includeOrphanRecovery ? await enrichWithOrphanRecovery(enriched) : enriched;
 }

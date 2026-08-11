@@ -447,7 +447,7 @@ export async function GET(request: Request) {
     const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
-    const manage = await getManageData();
+    const manage = await getManageData({ requireCanonicalComplete: true });
     const profiles = await enrichAccountsWithRuntime(manage.allAccounts as RecordValue[]);
     const byId = new Map(profiles.map((row) => [accountId(row as RecordValue), row]));
     const enrichLifecycle = (rows: unknown[]) => rows.map((row) => byId.get(accountId(row as RecordValue)) ?? row);

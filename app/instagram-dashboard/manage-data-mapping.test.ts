@@ -4,6 +4,7 @@ import test from "node:test";
 
 const manageSource = readFileSync(new URL("./manage-data.ts", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const profilesRouteSource = readFileSync(new URL("../api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
 
 test("Manage enriches legacy accounts with modern assignment phone and clone data", () => {
   assert.match(manageSource, /from\("account_assignments"\)/);
@@ -15,6 +16,16 @@ test("Manage enriches legacy accounts with modern assignment phone and clone dat
   assert.match(manageSource, /projectCanonicalAccountCapacityState/);
   assert.match(manageSource, /assignmentHealth/);
   assert.match(manageSource, /phoneName: appLabel \? `\$\{phoneLabel\} · \$\{appLabel\}` : phoneLabel/);
+});
+
+test("Manage reconciles canonical active client accounts before assignment and readiness enrichment", () => {
+  assert.match(manageSource, /missingCanonicalClientAccountVisibilityRows/);
+  assert.match(manageSource, /from\("client_instagram_accounts"\)/);
+  assert.match(manageSource, /\.eq\("active", true\)/);
+  assert.match(manageSource, /\.is\("onboarding_rollback_at", null\)/);
+  assert.match(manageSource, /reconcileWithCanonicalActiveClientAccounts\(overview/);
+  assert.match(manageSource, /Canonical active client account reconciliation failed/);
+  assert.match(profilesRouteSource, /getManageData\(\{ requireCanonicalComplete: true \}\)/);
 });
 
 test("Manage maps active credentials separately from login status", () => {
