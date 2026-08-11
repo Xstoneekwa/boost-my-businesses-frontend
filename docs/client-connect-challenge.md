@@ -175,3 +175,129 @@ Aucune étape ne demande au client d'ouvrir un autre dashboard ou d'attendre une
 La certification de cette baseline vérifie le contrat générique et les droits
 du RPC sans soumettre de code réel, sans créer de run/tick et sans toucher au
 Worker, à BotApp ou à un téléphone.
+
+---
+
+## Continuité client après soumission du code
+
+La soumission du code ne constitue pas la fin du parcours. Elle fait passer le
+compte dans un état de reprise durable, que le client doit pouvoir continuer
+sans recréer un onboarding ni perdre le canal de vérification.
+
+Deux CTA partagent désormais la même décision serveur :
+
+- **Actualiser** relit la progression et, si le code est enregistré mais que la
+  reprise physique n'est plus active, recrée uniquement la reprise bornée du
+  provisioning existant ;
+- **Vérifier et connecter** reprend également le provisioning existant avant
+  d'en créer un nouveau. Il est donc utilisable après un refresh, une fermeture
+  de popup ou un retour sur la carte du compte.
+
+Le contrat est idempotent : une request active est réutilisée, un challenge
+actif conserve son action et son canal, et une reprise n'est créée que si le
+backend prouve qu'elle manque. Aucun des deux CTA ne crée une session Growth,
+ne modifie les caps et ne contourne les gates d'identité.
+
+Implémentations de référence :
+
+- `e1d60c3` — **Actualiser** relance sûrement une reprise devenue absente ;
+- `05dd12e` — le CTA principal **Vérifier et connecter** sait continuer une
+  connexion déjà engagée.
+
+## Sortie du challenge Instagram et écran post-code
+
+Après acceptation du code, Instagram peut afficher l'écran de configuration
+« Set up on new device » / « To use Location services, allow Instagram to
+access your location ». Ce n'est ni un nouveau challenge, ni une preuve
+d'échec.
+
+Le Worker reconnaît cette famille d'écran dans les deux moteurs de
+provisioning actifs, ferme la surface avec un unique retour Android sûr, puis
+reprend la vérification du profil attendu. Il ne clique pas sur **Continue**,
+n'accepte aucune permission de localisation et ne marque pas le compte connecté
+sur la seule présence de cet écran.
+
+L'ordre de livraison Worker est conservé :
+
+- `2382113` — fermeture bornée après saisie du code ;
+- `ce79c15` — même garde avant la sortie `connected` ;
+- `bed6e63` — parité du moteur réellement dispatché et de l'adaptateur
+  historique.
+
+## Publication canonique `connected / ready / ready`
+
+Une réussite physique n'est pas suffisante tant qu'elle n'est pas publiée. Le
+chemin `already_connected_expected` doit appeler le publisher canonique au lieu
+de terminer localement avec `should_publish_status=false`.
+
+La publication `connected / ready / ready` est autorisée uniquement lorsque :
+
+- le profil Instagram attendu a été ouvert ;
+- `expected_username` et `actual_logged_in_username` correspondent après
+  normalisation ;
+- `expected_identity_verified=true` ;
+- `identity_verification_status=verified` ;
+- la provenance contient le `run_id` de la vérification physique.
+
+Le RPC canonique met alors à jour atomiquement :
+
+- `client_instagram_accounts.login_status=connected` ;
+- `provisioning_status=ready` ;
+- `onboarding_status=ready` ;
+- la preuve d'identité et sa provenance ;
+- `account_credentials.reauth_required=false` ;
+- les projections runtime et actions de dashboard associées.
+
+Le champ legacy `ig_accounts.status` n'est pas une source de vérité de login et
+ne doit pas être réécrit pour fabriquer la parité. La source canonique est
+`client_instagram_accounts`, enrichie par la preuve d'identité.
+
+Le correctif générique est le Worker `9859d66097e5c51463a17a08bb006912a23dd723`.
+Il couvre le moteur courant et l'adaptateur historique 07ee.
+
+## Parité DB, Client, Admin et BotApp
+
+Les trois surfaces consomment la même projection Backend :
+
+- le dashboard client charge `client_instagram_accounts`, applique
+  `projectCanonicalLoginStatus` et projette un compte connecté en
+  `already_connected` ;
+- l'admin charge les mêmes statuts et la même preuve d'identité avant de
+  calculer la readiness ;
+- l'endpoint BotApp `client-accounts` réutilise la projection d'opérations
+  Backend, sans recalcul local de `ready`.
+
+Règle produit :
+
+```text
+canonical login = connected
++ canonical provisioning = ready
++ canonical onboarding = ready
++ aucun blocker canonique
+=> Client, Admin et BotApp affichent connected + ready
+```
+
+Un refresh ou un restart de BotApp ne doit pas modifier ce résultat. Une
+invalidation explicite et plus récente peut en revanche faire repasser le
+compte en état d'assistance ; les snapshots sociaux, un vieux `can_start` ou un
+fallback UI ne le peuvent pas.
+
+## Baseline finale certifiée — 11 août 2026
+
+- Backend production : `05dd12e29e174415f548d761e8f1fba4ff215db1` ;
+- déploiement Vercel : `dpl_9UYRcgorN8SX8MywUcN2PZbmpn2e` ;
+- Worker actif : `9859d66097e5c51463a17a08bb006912a23dd723` ;
+- release : `/Users/admin/phonefarm-worker-releases/9859d66-login-ready-publish-v1` ;
+- dispatcher certifié unique depuis cette release ;
+- compte terrain `nab_youss` réconcilié depuis la preuve naturelle du run
+  `f38924b5-2b54-4860-b1a4-7cad0175286d` et de la request
+  `6f53889d-af3e-459f-b5e3-9fdddf8a3384` ;
+- état final observé : sept comptes sur sept en
+  `connected / ready / ready` dans la DB canonique ;
+- admin production : `nab_youss` affiché `Ready`, `connected`, motif
+  `all_required_readiness_checks_passed` ;
+- aucun code de vérification, secret Vault, XML, screenshot téléphone ou
+  donnée d'authentification n'est documenté.
+
+Le rapport détaillé et les invariants de livraison sont archivés dans
+[`checkpoints/2026-08-11-verification-resume-connected-ready-parity.md`](./checkpoints/2026-08-11-verification-resume-connected-ready-parity.md).
