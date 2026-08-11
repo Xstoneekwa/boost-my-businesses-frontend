@@ -22,7 +22,7 @@ Complète [`client-tenant-onboarding-e2e.md`](./client-tenant-onboarding-e2e.md)
 | `queued` | Request `login_provisioning` créée / en file |
 | `already_queued` | Request active déjà présente (idempotence) |
 | `running` | Dispatcher / worker en cours |
-| `verification_required` | Challenge Instagram actif (`login_status=verification_pending` et/ou action runtime `enter_email_verification_code`) |
+| `verification_required` | Challenge Instagram actif (`login_status=verification_pending` et/ou action runtime canonique soumettable ; voir contrat ci-dessous) |
 | `verification_code_submitted` | Code consommé, reprise provisioning en cours |
 | `connected` | `login_status=connected` confirmé côté backend |
 | `failed` | Échec terminal client-safe (hors challenge attendu) |
@@ -57,10 +57,40 @@ Route client autorisée (session client + ownership) :
 
 Délègue au service canonique partagé (`submitAccountVerificationCode`).
 
+### Taxonomie des actions soumettables
+
+La source de vérité est le prédicat partagé
+`isSubmittableVerificationAction`. Une action est soumettable uniquement si :
+
+- elle appartient au compte demandé et son statut est actif (`pending`,
+  `acknowledged`, `pending_verification` ou `code_submitted`) ;
+- son type est directement `enter_email_verification_code` ; ou
+- son type est `complete_two_factor`, `resolve_checkpoint` ou
+  `review_login_challenge` **et** ses métadonnées prouvent le contrat canonique
+  de publication :
+  - `source = login_dashboard_action_publisher` ;
+  - `stage = post_submit` ;
+  - `human_review_required = true`.
+
+Une action de review arbitraire, terminale, publiée par une autre source,
+rattachée à un autre compte ou portant un contrat incomplet reste fail-closed.
+Le frontend, la projection Connect et le service Backend utilisent le même
+prédicat ; ils ne doivent pas reconstruire localement une taxonomie différente.
+
+Lors d'une soumission valide issue d'un challenge générique, le RPC normalise
+atomiquement `action_type` vers `enter_email_verification_code` pour le consumer
+existant et conserve le type initial dans
+`metadata.verification_source_action_type`. Cette normalisation ne se produit
+qu'au moment d'une vraie soumission humaine : afficher la popup ou lire la
+progression ne modifie aucune action.
+
 Garanties :
 
 - code **write-only** (jamais relu côté UI après submit) ;
 - aucune valeur de code dans logs, audit, diagnostics, exports ;
+- stockage éphémère via le mécanisme Vault canonique existant ;
+- RPC `SECURITY DEFINER`, appelable uniquement par `service_role`, avec garde
+  interne `auth.role() = service_role` ; aucun droit `anon` ou `authenticated` ;
 - idempotence : reprise du **même** provisioning, pas de nouveau Connect ;
 - code invalide / expiré / déjà consommé → message JSON client-safe.
 
@@ -106,3 +136,21 @@ Pas de fallback navigateur dangereux.
 5. `connected` → fin du flow.
 
 Aucune étape ne demande au client d'ouvrir un autre dashboard ou d'attendre une action opérateur manuelle.
+
+---
+
+## Baseline production — Generic Login Verification Action Submit V1
+
+- Migration source :
+  `20260811023000_generic_login_verification_action_submit_v1.sql`.
+- Version enregistrée en production :
+  `20260811003315_generic_login_verification_action_submit_v1`.
+- Backend runtime : `df1abb0c8d28bf10d9f31d7dd766909c5c5ea8de`.
+- Déploiement : `dpl_DDynHEJk64cRNXGyzGzeQrUSF8HL` (`READY`, alias production
+  `www.boostmybusinesses.com`).
+- Rollback source :
+  `20260811023000_generic_login_verification_action_submit_v1.down.sql`.
+
+La certification de cette baseline vérifie le contrat générique et les droits
+du RPC sans soumettre de code réel, sans créer de run/tick et sans toucher au
+Worker, à BotApp ou à un téléphone.
