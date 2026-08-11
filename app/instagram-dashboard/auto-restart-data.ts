@@ -27,6 +27,7 @@ import {
   resolvePartialUnfollowLiveResume,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
+  resolveUnfollowTechnicalHoldRestartGate,
   type AutoRestartAccountSessionPhases,
   type PhaseCompletion,
 } from "@/lib/instagram-dashboard/auto-restart-phase-plan";
@@ -1068,11 +1069,24 @@ function planCandidate({
     quotaRemaining: outreachRemaining,
     eligibleWorkRemaining: null,
   });
+  const unfollowTechnicalHoldRestartGate = resolveUnfollowTechnicalHoldRestartGate({
+    unfollowPlanned: initialPlannedAccountSession.phases.unfollow,
+    otherExecutableWork: (
+      accountSessionPhaseCompletion.follow.executable
+      || accountSessionPhaseCompletion.welcome.executable
+      || outreachPhaseCompletion.executable
+    ),
+    actionableNow: unfollowBacklog.actionableRemaining,
+    technicalHoldTotal: unfollowBacklog.technicalHold,
+    nextCandidateRetryAt: unfollowBacklog.nextCandidateRetryAt,
+  });
   const allEnabledPhasesTerminal = [
     ...Object.values(accountSessionPhaseCompletion),
     outreachPhaseCompletion,
   ].every((phase) => phase.terminal);
-  if (
+  if (unfollowTechnicalHoldRestartGate.blocked) {
+    blockingReasons.push(unfollowTechnicalHoldRestartGate.reason);
+  } else if (
     partialUnfollowLiveResume.applies
     && !partialUnfollowLiveResume.authorized
   ) {
@@ -1178,7 +1192,8 @@ function planCandidate({
     unfollowPhaseCircuitReason: unfollowBacklog.phaseCircuitReason,
     unfollowPhaseCircuitNextRetryAt: unfollowBacklog.phaseCircuitNextRetryAt,
     unfollowBacklogTotal: partialUnfollowLiveResume.backlogTotal,
-    unfollowNextEvaluationAt: partialUnfollowLiveResume.nextEvaluationAt,
+    unfollowNextEvaluationAt: partialUnfollowLiveResume.nextEvaluationAt
+      ?? unfollowTechnicalHoldRestartGate.nextEvaluationAt,
     canonicalLiveUnfollowResumeAuthorized: restartNeed.canonicalLiveUnfollowOverride,
     sourceRequestId: reliability.sourceRequestId ?? null,
     canonicalAttemptId: reliability.canonicalAttemptId ?? null,

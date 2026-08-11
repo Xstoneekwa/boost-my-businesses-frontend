@@ -7,6 +7,7 @@ import {
   resolvePartialUnfollowLiveResume,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
+  resolveUnfollowTechnicalHoldRestartGate,
 } from "../../lib/instagram-dashboard/auto-restart-phase-plan.ts";
 
 test("a runtime session cap of zero remains zero and cannot fall back to the day cap", () => {
@@ -166,6 +167,30 @@ test("hold-only backlog outranks stale quota and circuit state", () => {
   });
   assert.equal(result.reason, "unfollow_backlog_on_cooldown");
   assert.equal(result.nextEvaluationAt, "2026-07-30T18:03:55.000Z");
+});
+
+test("a Mythyl-shaped Unfollow-only hold blocks enqueue even without explicit partial phase status", () => {
+  assert.deepEqual(resolveUnfollowTechnicalHoldRestartGate({
+    unfollowPlanned: true,
+    otherExecutableWork: false,
+    actionableNow: 0,
+    technicalHoldTotal: 1,
+    nextCandidateRetryAt: "2026-08-11T17:37:32.000Z",
+  }), {
+    blocked: true,
+    reason: "unfollow_backlog_on_cooldown",
+    nextEvaluationAt: "2026-08-11T17:37:32.000Z",
+  });
+});
+
+test("a technical hold does not suppress unrelated executable phase work", () => {
+  assert.equal(resolveUnfollowTechnicalHoldRestartGate({
+    unfollowPlanned: true,
+    otherExecutableWork: true,
+    actionableNow: 0,
+    technicalHoldTotal: 1,
+    nextCandidateRetryAt: "2026-08-11T17:37:32.000Z",
+  }).blocked, false);
 });
 
 test("terminal-only and empty backlogs outrank a stale circuit-open flag", () => {

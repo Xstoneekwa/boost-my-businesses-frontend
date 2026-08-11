@@ -53,6 +53,12 @@ export type PartialUnfollowLiveResume = {
   nextEvaluationAt: string | null;
 };
 
+export type UnfollowTechnicalHoldRestartGate = {
+  blocked: boolean;
+  reason: "unfollow_backlog_on_cooldown" | "not_unfollow_only_technical_hold";
+  nextEvaluationAt: string | null;
+};
+
 function normalized(value: string | null | undefined) {
   return String(value || "").trim().toLowerCase();
 }
@@ -179,6 +185,36 @@ export function resolvePartialUnfollowLiveResume(input: {
     return result("partial_resumable_live_unfollow_backlog", true, plannedQuota);
   }
   return result("unfollow_backlog_exhausted");
+}
+
+/**
+ * Fail closed on an Unfollow-only remainder whose candidates are all cooling
+ * down, even when an older Worker summary did not label the phase itself as
+ * partial.  The live backlog is authoritative for enqueue timing; lineage is
+ * still evaluated separately before any later resume authorization.
+ */
+export function resolveUnfollowTechnicalHoldRestartGate(input: {
+  unfollowPlanned: boolean;
+  otherExecutableWork: boolean;
+  actionableNow: number;
+  technicalHoldTotal: number;
+  nextCandidateRetryAt?: string | null;
+}): UnfollowTechnicalHoldRestartGate {
+  const blocked = input.unfollowPlanned
+    && !input.otherExecutableWork
+    && safeCount(input.actionableNow) === 0
+    && safeCount(input.technicalHoldTotal) > 0;
+  return blocked
+    ? {
+      blocked: true,
+      reason: "unfollow_backlog_on_cooldown",
+      nextEvaluationAt: validIso(input.nextCandidateRetryAt),
+    }
+    : {
+      blocked: false,
+      reason: "not_unfollow_only_technical_hold",
+      nextEvaluationAt: null,
+    };
 }
 
 export function resolvePhaseCompletion(input: {
