@@ -33,9 +33,46 @@ export function shouldBlockClientConnect(status: string | null | undefined) {
 }
 
 export function isTerminalClientConnectProgress(snapshot: ClientConnectProgressSnapshot | null | undefined) {
-  if (!snapshot) return true;
-  if (snapshot.connected || snapshot.failed) return true;
-  return !isActiveClientConnectStatus(snapshot.connect_status);
+  if (!snapshot) return false;
+  return isExplicitTerminalClientConnectProgress(snapshot);
+}
+
+export function isExplicitTerminalClientConnectProgress(
+  snapshot: ClientConnectProgressSnapshot | null | undefined,
+) {
+  if (!snapshot) return false;
+  return snapshot.connected
+    || snapshot.failed
+    || ["connected", "failed", "blocked", "cancelled"].includes(snapshot.connect_status);
+}
+
+export function hasCanonicalClientConnectLineage(
+  snapshot: ClientConnectProgressSnapshot | null | undefined,
+  operationToken?: string | null,
+) {
+  return Boolean(
+    readString(operationToken)
+    || readString(snapshot?.request_id)
+    || readString(snapshot?.action_required?.id),
+  );
+}
+
+export function reconcileClientConnectProgressLineage(input: {
+  previous: ClientConnectProgressSnapshot | null | undefined;
+  incoming: ClientConnectProgressSnapshot | null | undefined;
+  operationToken?: string | null;
+}) {
+  const { previous, incoming, operationToken } = input;
+  if (!incoming) return previous ?? null;
+  if (isActiveClientConnectStatus(incoming.connect_status)) return incoming;
+  if (isExplicitTerminalClientConnectProgress(incoming)) return incoming;
+  if (
+    incoming.connect_status === "not_created"
+    && hasCanonicalClientConnectLineage(previous, operationToken)
+  ) {
+    return previous ?? null;
+  }
+  return incoming;
 }
 
 export function labelForActiveConnectStatus(status: ClientConnectStatus, lang: "fr" | "en" = "fr") {

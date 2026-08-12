@@ -166,6 +166,7 @@ export function mapProgressToClientConnectStatus(input: ProgressInput): ClientCo
     }
   }
   if (overall === "failed" || runStatus === "failed" || requestStatus === "failed") return "failed";
+  if (["canceled", "cancelled"].includes(requestStatus) || ["canceled", "cancelled"].includes(overall)) return "cancelled";
   if (overall === "blocked" || requestStatus === "blocked") return "blocked";
   if (requestStatus === "queued" || overall === "queued") return "queued";
   if (["running", "claimed", "starting"].includes(requestStatus) || ["running", "claimed", "starting"].includes(overall) || ["running", "started", "in_progress"].includes(runStatus)) {

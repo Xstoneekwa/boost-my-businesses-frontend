@@ -61,6 +61,7 @@ export default function ClientAccountProcessModal({
     connectProgress?.failed
     || runtimeStatus === "failed"
     || runtimeStatus === "blocked"
+    || runtimeStatus === "cancelled"
     || runtimeStatus === "not_created",
   );
   const statusChip = runtimeStatus === "verification_required"

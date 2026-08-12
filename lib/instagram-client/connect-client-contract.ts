@@ -8,6 +8,7 @@ export const CLIENT_CONNECT_STATUSES = [
   "verification_code_submitted",
   "connected",
   "blocked",
+  "cancelled",
   "not_created",
   "failed",
 ] as const;
@@ -92,6 +93,7 @@ export function clientConnectMessage(status: ClientConnectStatus, lang: "fr" | "
     verification_code_submitted: "Vérification en cours. Nous reprenons la connexion automatiquement.",
     connected: "Compte connecté.",
     blocked: "La connexion nécessite une vérification de sécurité avant de pouvoir continuer.",
+    cancelled: "La tentative de connexion a été annulée.",
     not_created: "La connexion n'a pas pu être lancée pour le moment.",
     failed: "La connexion n'a pas pu démarrer. Réessayez plus tard.",
   };
@@ -105,6 +107,7 @@ export function clientConnectMessage(status: ClientConnectStatus, lang: "fr" | "
     verification_code_submitted: "Verification in progress. We are resuming the connection automatically.",
     connected: "Account connected.",
     blocked: "Security verification is required before the connection can continue.",
+    cancelled: "The connection attempt was cancelled.",
     not_created: "Connection could not be started right now.",
     failed: "Connection could not start. Try again later.",
   };

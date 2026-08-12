@@ -16,7 +16,12 @@ import {
   type ClientProcessMode,
 } from "@/lib/instagram-client/client-account-process-projection";
 import { parseClientApiResponse } from "@/lib/instagram-client/read-api-response";
-import { isActiveClientConnectStatus } from "@/lib/instagram-client/connect-operation-state";
+import {
+  hasCanonicalClientConnectLineage,
+  isActiveClientConnectStatus,
+  isExplicitTerminalClientConnectProgress,
+  reconcileClientConnectProgressLineage,
+} from "@/lib/instagram-client/connect-operation-state";
 
 export type ClientInstagramAccountView = {
   accountId: string;
@@ -60,8 +65,6 @@ type ProcessModalState = {
   connectOperationToken?: string | null;
 };
 
-const TERMINAL_CONNECT_STATUSES = new Set(["connected", "failed", "blocked", "not_created"]);
-
 const POLL_INTERVAL_MS = 8000;
 const POLL_MAX_ATTEMPTS = 12;
 
@@ -70,8 +73,7 @@ function labelFor(lang: "fr" | "en", fr: string, en: string) {
 }
 
 function isTerminalConnectProgress(snapshot: ClientConnectProgressSnapshot | null | undefined) {
-  if (!snapshot) return false;
-  return TERMINAL_CONNECT_STATUSES.has(snapshot.connect_status);
+  return isExplicitTerminalClientConnectProgress(snapshot);
 }
 
 function isTerminalProcessAccount(
@@ -79,7 +81,13 @@ function isTerminalProcessAccount(
   mode: ClientProcessMode,
   lang: "fr" | "en",
   connectProgress?: ClientConnectProgressSnapshot | null,
+  connectOperationToken?: string | null,
 ) {
+  if (
+    mode === "connect"
+    && hasCanonicalClientConnectLineage(connectProgress, connectOperationToken)
+    && !isTerminalConnectProgress(connectProgress)
+  ) return false;
   if (mode === "connect" && connectProgress) {
     if (connectProgress.connect_status === "connected") return true;
     if (connectProgress.failed) return true;
@@ -324,7 +332,13 @@ export default function ClientAccountsSection({
     connectOperationToken?: string | null,
   ) => {
     const progress = await syncConnectProgress(account.accountId, connectOperationToken);
-    if (!isActiveClientConnectStatus(progress.connect_status)) {
+    const reconciledProgress = reconcileClientConnectProgressLineage({
+      previous: null,
+      incoming: progress,
+      operationToken: connectOperationToken,
+    });
+    const hasLineage = hasCanonicalClientConnectLineage(reconciledProgress, connectOperationToken);
+    if (!isActiveClientConnectStatus(progress.connect_status) && !isTerminalConnectProgress(progress) && !hasLineage) {
       setItems((current) => current.map((row) => (
         row.accountId === account.accountId
           ? {
@@ -342,7 +356,9 @@ export default function ClientAccountsSection({
       row.accountId === account.accountId
         ? {
             ...row,
-            activeConnectStatus: progress.connect_status,
+            activeConnectStatus: isActiveClientConnectStatus(progress.connect_status)
+              ? progress.connect_status
+              : row.activeConnectStatus,
             operationPending: true,
             clientReadinessStatus: row.clientReadinessStatus === "ready_to_connect" ? null : row.clientReadinessStatus,
           }
@@ -354,18 +370,20 @@ export default function ClientAccountsSection({
       accountId: account.accountId,
       account: {
         ...account,
-        activeConnectStatus: progress.connect_status,
+        activeConnectStatus: isActiveClientConnectStatus(progress.connect_status)
+          ? progress.connect_status
+          : account.activeConnectStatus,
         operationPending: true,
       },
       connectPhase: "polling",
-      connectProgress: progress,
+      connectProgress: reconciledProgress,
       connectOperationToken: connectOperationToken ?? null,
       timedOut: false,
     });
-    if (openVerification || progress.connect_status === "verification_required") {
+    if (openVerification || reconciledProgress?.connect_status === "verification_required") {
       setVerificationDismissed(false);
     }
-    return progress;
+    return reconciledProgress;
   }, [syncConnectProgress]);
 
   useEffect(() => {
@@ -431,23 +449,25 @@ export default function ClientAccountsSection({
         if (!account) return;
         setProcessModal((current) => {
           if (!current || current.accountId !== accountId) return current;
+          const reconciledProgress = mode === "connect"
+            ? reconcileClientConnectProgressLineage({
+                previous: current.connectProgress,
+                incoming: connectProgress,
+                operationToken: current.connectOperationToken,
+              })
+            : current.connectProgress;
           const next: ProcessModalState = {
             ...current,
             account,
-            connectProgress: mode === "connect" ? connectProgress : current.connectProgress,
-            connectPhase: isActiveClientConnectStatus(connectProgress?.connect_status) ? "polling" : "polling",
+            connectProgress: reconciledProgress,
+            connectPhase: isTerminalConnectProgress(reconciledProgress) ? "complete" : "polling",
             addPhase: current.addPhase === "refreshing" ? "complete" : current.addPhase,
           };
-          if (mode === "connect" && connectProgress && !isActiveClientConnectStatus(connectProgress.connect_status)) {
-            stopProcessPolling();
-            setVerificationDismissed(true);
-            return null;
-          }
-          if (mode === "connect" && connectProgress?.connect_status === "verification_required") {
+          if (mode === "connect" && reconciledProgress?.connect_status === "verification_required") {
             setVerificationDismissed(false);
           }
-          if (mode === "connect" && connectProgress) {
-            const activeStatus = connectProgress.connect_status;
+          if (mode === "connect" && reconciledProgress) {
+            const activeStatus = reconciledProgress.connect_status;
             setItems((currentItems) => currentItems.map((row) => (
               row.accountId === accountId
                 ? {
@@ -458,11 +478,11 @@ export default function ClientAccountsSection({
                 : row
             )));
           }
-          if (isTerminalProcessAccount(account, mode, lang, connectProgress)) {
+          if (isTerminalProcessAccount(account, mode, lang, reconciledProgress, current.connectOperationToken)) {
             stopProcessPolling();
             return { ...next, connectPhase: "complete", addPhase: "complete", timedOut: false };
           }
-          if (mode === "connect" && isTerminalConnectProgress(connectProgress)) {
+          if (mode === "connect" && isTerminalConnectProgress(reconciledProgress)) {
             stopProcessPolling();
             return { ...next, connectPhase: "complete", timedOut: false };
           }
@@ -506,14 +526,27 @@ export default function ClientAccountsSection({
       if (account) {
         setProcessModal((current) => {
           if (!current) return current;
-          const terminal = isTerminalProcessAccount(account, current.mode, lang, connectProgress);
-          if (connectProgress?.connect_status === "verification_required") {
+          const reconciledProgress = current.mode === "connect"
+            ? reconcileClientConnectProgressLineage({
+                previous: current.connectProgress,
+                incoming: connectProgress,
+                operationToken: retryOperationToken,
+              })
+            : current.connectProgress;
+          const terminal = isTerminalProcessAccount(
+            account,
+            current.mode,
+            lang,
+            reconciledProgress,
+            retryOperationToken,
+          );
+          if (reconciledProgress?.connect_status === "verification_required") {
             setVerificationDismissed(false);
           }
           return {
             ...current,
             account,
-            connectProgress: current.mode === "connect" ? connectProgress : current.connectProgress,
+            connectProgress: reconciledProgress,
             connectOperationToken: current.mode === "connect" ? retryOperationToken : current.connectOperationToken,
             connectPhase: terminal ? "complete" : current.connectPhase,
             addPhase: terminal ? "complete" : current.addPhase,
@@ -674,16 +707,20 @@ export default function ClientAccountsSection({
         } catch {
           connectProgress = null;
         }
-        const terminal = connectProgress
-          ? isTerminalConnectProgress(connectProgress) || isTerminalProcessAccount(nextAccount, mode, lang, connectProgress)
-          : isTerminalProcessAccount(nextAccount, mode, lang);
+        const reconciledProgress = reconcileClientConnectProgressLineage({
+          previous: null,
+          incoming: connectProgress,
+          operationToken: connectOperationToken || null,
+        });
+        const terminal = isTerminalConnectProgress(reconciledProgress)
+          || isTerminalProcessAccount(nextAccount, mode, lang, reconciledProgress, connectOperationToken || null);
         setProcessModal({
           mode,
           username: nextAccount.username,
           accountId: nextAccount.accountId,
           account: nextAccount,
           connectPhase: terminal ? "complete" : "polling",
-          connectProgress,
+          connectProgress: reconciledProgress,
           connectOperationToken: connectOperationToken || null,
           timedOut: false,
         });
@@ -924,7 +961,14 @@ export default function ClientAccountsSection({
         onSubmitted={() => {
           if (!processModal?.accountId) return;
           void syncConnectProgress(processModal.accountId, processModal.connectOperationToken).then((snapshot) => {
-            setProcessModal((current) => current ? { ...current, connectProgress: snapshot } : current);
+            setProcessModal((current) => current ? {
+              ...current,
+              connectProgress: reconcileClientConnectProgressLineage({
+                previous: current.connectProgress,
+                incoming: snapshot,
+                operationToken: current.connectOperationToken,
+              }),
+            } : current);
           });
           void syncProcessAccount(processModal.accountId);
         }}
