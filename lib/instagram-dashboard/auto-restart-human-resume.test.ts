@@ -78,9 +78,14 @@ test("an armed Follow60 control overrides resolved-incident generic phases", () 
   assert.match(humanSection, /follow60sOneShot\?\.matched\s*\?/);
 });
 
-test("expired window expires the authorization with a stable reason", () => {
+test("database preflight is authoritative for authorization expiry", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(humanSection, /incident_resume_authorization_preflight_v2/);
+  assert.match(humanSection, /resume_authorization_preflight_unavailable/);
+  assert.match(humanSection, /preflightReason === "resume_authorization_expired"/);
   assert.match(tickSource, /markAuthorizationExpired\(supabase, authorizationId, now\)/);
   assert.match(tickSource, /resume_authorization_expired/);
+  assert.doesNotMatch(humanSection, /windowContainsNow\(/);
 });
 
 test("canonical run-start gates apply (manual_only excluded, no active run)", () => {

@@ -61,7 +61,6 @@ import {
   loadResumePlanForRun,
   markAuthorizationExpired,
   updateIncidentRecoveryState,
-  windowContainsNow,
 } from "./incident-resume-authorization";
 
 export async function getAutoRestartTickStatus(supabase: SupabaseLike) {
@@ -1342,12 +1341,24 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
-      const windowStart = readString(authorization.scheduled_window_start) || null;
-      const windowEnd = readString(authorization.expires_at) || readString(authorization.scheduled_window_end) || null;
-      if (!windowContainsNow(windowStart, windowEnd, now)) {
-        await markAuthorizationExpired(supabase, authorizationId, now);
-        await updateIncidentRecoveryState(supabase, incidentId, "resume_authorization_expired");
-        await blockResume("resume_authorization_expired");
+      // The database owns authorization time, assignment and lock semantics.
+      // Do not expire a valid row from a second JavaScript clock projection:
+      // the atomic consumption RPC enforces the same window again.
+      const preflightResult = await supabase.rpc("incident_resume_authorization_preflight_v2", {
+        p_authorization_id: authorizationId,
+      });
+      if (preflightResult.error) {
+        await blockResume("resume_authorization_preflight_unavailable");
+        continue;
+      }
+      const preflight = readRecord(preflightResult.data) ?? {};
+      if (!readBoolean(preflight.next_tick_eligible, false)) {
+        const preflightReason = readString(preflight.blocked_reason) || "resume_authorization_preflight_blocked";
+        if (preflightReason === "resume_authorization_expired") {
+          await markAuthorizationExpired(supabase, authorizationId, now);
+          await updateIncidentRecoveryState(supabase, incidentId, "resume_authorization_expired");
+        }
+        await blockResume(preflightReason);
         continue;
       }
 
