@@ -165,6 +165,64 @@ export function validateResumeAuthorizationLineage(input: {
   return { ok: true, reason: "" };
 }
 
+/**
+ * A dispatcher deployment may terminate an already-authorized child with
+ * SIGTERM before the Worker performs any business action.  That child is a
+ * continuation marker, not a competing business lineage.  Accept it only
+ * when every immutable link and every zero-action proof agrees.
+ */
+export function isZeroBusinessInfrastructureRetry(input: {
+  authorizationId: string;
+  authorizationRunId: string;
+  accountId: string;
+  latestRun?: Record<string, unknown> | null;
+  latestRequest?: Record<string, unknown> | null;
+  successfulBusinessActionObserved: boolean;
+}) {
+  const run = input.latestRun ?? {};
+  const request = input.latestRequest ?? {};
+  const metadata = record(request.metadata_safe) ?? {};
+  const resumePlan = record(metadata.resume_plan) ?? {};
+  const totals = record(run.totals) ?? {};
+  const performance = record(run.performance_summary) ?? {};
+  const linkedSourceRunId = clean(
+    metadata.source_run_id
+      ?? metadata.original_run_id
+      ?? metadata.prior_run_id
+      ?? metadata.previous_run_id
+      ?? resumePlan.source_run_id
+      ?? resumePlan.prior_run_id,
+  );
+  const zero = (value: unknown) => Number(value ?? 0) === 0;
+  const exitCode = Number(performance.exit_code);
+  return Boolean(
+    clean(input.authorizationId)
+    && clean(input.authorizationRunId)
+    && clean(input.accountId)
+    && clean(run.id)
+    && clean(run.account_id) === clean(input.accountId)
+    && clean(run.status).toLowerCase() === "failed"
+    && clean(request.id)
+    && clean(request.account_id) === clean(input.accountId)
+    && clean(request.run_id) === clean(run.id)
+    && clean(request.status).toLowerCase() === "failed"
+    && clean(request.error_code) === "worker_exit_nonzero"
+    && clean(metadata.authorization_id) === clean(input.authorizationId)
+    && clean(metadata.recovery_mode) === "human_confirmed_resume"
+    && linkedSourceRunId === clean(input.authorizationRunId)
+    && exitCode === 143
+    && zero(run.total_follow)
+    && zero(run.total_like)
+    && zero(run.total_dm)
+    && zero(run.total_story)
+    && zero(totals.total_follow)
+    && zero(totals.total_like)
+    && zero(totals.total_dm)
+    && zero(totals.total_story)
+    && input.successfulBusinessActionObserved === false
+  );
+}
+
 export function resumePhaseKey(phases: {
   welcome: boolean;
   follow: boolean;

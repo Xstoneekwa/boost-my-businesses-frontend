@@ -55,6 +55,7 @@ import {
   resumeLineageBudgetKey,
   resumePhaseKey,
   resumeReasonKey,
+  isZeroBusinessInfrastructureRetry,
   validateResumeAuthorizationLineage,
 } from "./auto-restart-lineage-policy";
 import {
@@ -1409,7 +1410,42 @@ async function processHumanConfirmedResumes(
         latestTerminationClass: candidate?.reliability.sessionTerminationClass || "",
         resolvedIncidentAuthorized: true,
       });
-      if (!restrictionPreflight && !lineageVerdict.ok) {
+      let infrastructureRetryContinuation = false;
+      if (
+        !restrictionPreflight
+        && !lineageVerdict.ok
+        && lineageVerdict.reason === "resume_source_run_superseded"
+        && candidate?.sourceRunId
+      ) {
+        const latestRunResult = await query(supabase, "ig_runs")
+          .select("id,account_id,status,total_follow,total_like,total_dm,total_story,totals,performance_summary")
+          .eq("id", candidate.sourceRunId)
+          .eq("account_id", accountId)
+          .maybeSingle();
+        const latestRequestResult = await query(supabase, "account_run_requests")
+          .select("id,account_id,run_id,status,error_code,metadata_safe")
+          .eq("run_id", candidate.sourceRunId)
+          .eq("account_id", accountId)
+          .maybeSingle();
+        const successfulActionResult = await query(supabase, "ig_action_logs")
+          .select("id")
+          .eq("run_id", candidate.sourceRunId)
+          .in("status", ["success", "completed", "verified", "persisted"])
+          .in("action_type", ["follow", "unfollow", "like", "dm", "welcome_dm", "outreach_dm"])
+          .limit(1);
+        infrastructureRetryContinuation = !latestRunResult.error
+          && !latestRequestResult.error
+          && !successfulActionResult.error
+          && isZeroBusinessInfrastructureRetry({
+            authorizationId,
+            authorizationRunId: originalRunId,
+            accountId,
+            latestRun: readRecord(latestRunResult.data),
+            latestRequest: readRecord(latestRequestResult.data),
+            successfulBusinessActionObserved: readRows(successfulActionResult.data).length > 0,
+          });
+      }
+      if (!restrictionPreflight && !lineageVerdict.ok && !infrastructureRetryContinuation) {
         await markAuthorizationExpired(supabase, authorizationId, now);
         await updateIncidentRecoveryState(supabase, incidentId, lineageVerdict.reason, {
           authorization_run_id: originalRunId || null,

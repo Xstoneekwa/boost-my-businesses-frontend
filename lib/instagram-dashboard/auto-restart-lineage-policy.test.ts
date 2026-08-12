@@ -9,6 +9,7 @@ import {
   resolveCanonicalNextRetryIndex,
   resumeLineageBudgetKey,
   validateResumeAuthorizationLineage,
+  isZeroBusinessInfrastructureRetry,
 } from "./auto-restart-lineage-policy.ts";
 
 test("the linked request is canonical when the run projection has a stale attempt", () => {
@@ -213,6 +214,52 @@ test("resolved review never bypasses exact latest-run lineage", () => {
     latestTerminationClass: "non_recoverable_failure",
     resolvedIncidentAuthorized: true,
   }), { ok: false, reason: "resume_source_run_superseded" });
+});
+
+test("an exact SIGTERM child with zero business actions preserves the authorized lineage", () => {
+  const base = {
+    authorizationId: "auth-1",
+    authorizationRunId: "run-source",
+    accountId: "account-1",
+    latestRun: {
+      id: "run-child",
+      account_id: "account-1",
+      status: "failed",
+      total_follow: 0,
+      total_like: 0,
+      total_dm: 0,
+      total_story: 0,
+      totals: { total_follow: 0, total_like: 0, total_dm: 0, total_story: 0 },
+      performance_summary: { exit_code: 143 },
+    },
+    latestRequest: {
+      id: "request-child",
+      account_id: "account-1",
+      run_id: "run-child",
+      status: "failed",
+      error_code: "worker_exit_nonzero",
+      metadata_safe: {
+        authorization_id: "auth-1",
+        recovery_mode: "human_confirmed_resume",
+        source_run_id: "run-source",
+      },
+    },
+    successfulBusinessActionObserved: false,
+  };
+  assert.equal(isZeroBusinessInfrastructureRetry(base), true);
+  assert.equal(isZeroBusinessInfrastructureRetry({ ...base, successfulBusinessActionObserved: true }), false);
+  assert.equal(isZeroBusinessInfrastructureRetry({
+    ...base,
+    latestRun: { ...base.latestRun, total_follow: 1 },
+  }), false);
+  assert.equal(isZeroBusinessInfrastructureRetry({
+    ...base,
+    latestRequest: { ...base.latestRequest, metadata_safe: { ...base.latestRequest.metadata_safe, authorization_id: "auth-other" } },
+  }), false);
+  assert.equal(isZeroBusinessInfrastructureRetry({
+    ...base,
+    latestRun: { ...base.latestRun, performance_summary: { exit_code: 1 } },
+  }), false);
 });
 
 test("configured delay reports exact authoritative remaining seconds", () => {
