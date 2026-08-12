@@ -5,6 +5,7 @@ import {
   persistAccountLoginEmail,
 } from "@/lib/instagram-dashboard/persist-account-login-email";
 import { resolveServerCredentialsConfig } from "@/lib/instagram-credentials/server-credentials-config";
+import { readOpaqueSecretString } from "@/lib/instagram-client/guards";
 import {
   getInstagramAdminUserContext,
   jsonError,
@@ -241,14 +242,14 @@ export async function POST(request: Request) {
     const payload = (await readJsonBody<CredentialsSubmitPayload>(request)) ?? {};
     const accountId = readString(payload.account_id, "").trim();
     const username = normalizeUsername(payload.username);
-    const password = readString(payload.password, "");
+    const password = readOpaqueSecretString(payload.password, "");
     const reason = safeReason(payload.reason);
     const dryRun = readBoolean(payload.dry_run, false);
     const emailSubmit = resolveEmailSubmitStatus(payload.email, dryRun);
 
     if (!uuidPattern.test(accountId)) return jsonError("account_id_invalid", 400);
     if (!usernamePattern.test(username) || username.includes("..")) return jsonError("username_invalid", 400);
-    if (!dryRun && (password.length < 6 || password.trim().length < 6)) return jsonError("password_invalid", 400);
+    if (!dryRun && password.length < 6) return jsonError("password_invalid", 400);
     if (emailSubmit.status === "invalid") return jsonError("email_invalid", 400);
     if (readBoolean(payload.login_after_save, false) || readBoolean(payload.provisioning_enabled, false) || readBoolean(payload.start_run, false)) {
       return jsonError("automation_flags_must_be_false", 400);

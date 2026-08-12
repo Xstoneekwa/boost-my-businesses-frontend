@@ -12,6 +12,7 @@ import {
   type InstagramOnboardingActorContext,
 } from "@/lib/instagram-onboarding/canonical-account-onboarding";
 import {
+  readOpaqueSecretString,
   readString,
   rejectTechnicalClientFields,
   requireClientInstagramSession,
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
   const idempotencyKey = readString(body.idempotency_key);
   const restartSessionId = readString(body.restart_session_id);
   const username = readString(body.username);
-  const password = readString(body.password);
+  const password = readOpaqueSecretString(body.password);
   const email = parseLoginEmailInput(body.email);
   if (!UUID_PATTERN.test(idempotencyKey)) return jsonError("Invalid onboarding request.", 400, { code: "idempotency_key_invalid" });
   if (restartSessionId) {
