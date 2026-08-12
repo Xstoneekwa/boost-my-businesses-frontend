@@ -319,7 +319,7 @@ export default function AddProfileWizard() {
 
   function canMoveNext() {
     if (step === 0) return UUID_PATTERN.test(form.client_id.trim()) && Boolean(selectedDevice);
-    if (step === 1) return Boolean(form.username.trim() && form.password.trim());
+    if (step === 1) return Boolean(form.username.trim() && form.password.length > 0);
     if (step === 2) return Boolean(selectedAppInstance?.selectable);
     if (step === 3) return Boolean(form.runtime_mode);
     if (step === 4) return Boolean(selectedScheduleSlot?.available);

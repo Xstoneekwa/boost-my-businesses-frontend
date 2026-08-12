@@ -31,7 +31,8 @@ test("Add Profile prefers free clones and disables unsafe primary selection", ()
 
 test("Add Profile requires write-only credentials for canonical begin", () => {
   assert.match(source, /Password \(write-only\)/);
-  assert.match(source, /form\.username\.trim\(\) && form\.password\.trim\(\)/);
+  assert.match(source, /form\.username\.trim\(\) && form\.password\.length > 0/);
+  assert.doesNotMatch(source, /form\.password\.trim\(\)/);
   assert.match(source, /value="credentials"/);
   assert.doesNotMatch(source, /value="manual"|No credentials will be stored now/);
 });

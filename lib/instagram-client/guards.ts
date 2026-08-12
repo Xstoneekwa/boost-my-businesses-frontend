@@ -5,6 +5,10 @@ export function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
+export function readOpaqueSecretString(value: unknown, fallback = "") {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
 export function readBoolean(value: unknown, fallback = false) {
   if (typeof value === "boolean") return value;
   const normalized = readString(value).toLowerCase();

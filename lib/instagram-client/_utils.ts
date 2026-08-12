@@ -1,12 +1,12 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { canAccessTenantPages, getInstagramUserContext } from "@/lib/restaurant-analytics/session";
-import { readBoolean, readString, rejectTechnicalClientFields, clientMaxAccountsLimit } from "./guards";
+import { readBoolean, readOpaqueSecretString, readString, rejectTechnicalClientFields, clientMaxAccountsLimit } from "./guards";
 
 export type ClientInstagramSession =
   | { ok: true; userId: string; clientId: string }
   | { ok: false; status: number; error: string };
 
-export { readBoolean, readString, rejectTechnicalClientFields, clientMaxAccountsLimit };
+export { readBoolean, readOpaqueSecretString, readString, rejectTechnicalClientFields, clientMaxAccountsLimit };
 
 export async function requireClientInstagramSession(): Promise<ClientInstagramSession> {
   const context = await getInstagramUserContext();

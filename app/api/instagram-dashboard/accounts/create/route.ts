@@ -9,6 +9,7 @@ import {
   type InstagramOnboardingSourceContext,
 } from "@/lib/instagram-onboarding/canonical-account-onboarding";
 import { parseLoginEmailInput } from "@/lib/instagram-dashboard/persist-account-login-email";
+import { readOpaqueSecretString } from "@/lib/instagram-client/guards";
 import {
   onboardingBootstrapErrorCode,
   onboardingBootstrapErrorStatus,
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
   const idempotencyKey = readString(body.idempotency_key);
   const restartSessionId = readString(body.restart_session_id);
   const username = readString(body.username);
-  const password = readString(body.password);
+  const password = readOpaqueSecretString(body.password);
   const email = parseLoginEmailInput(body.email);
   const dryRun = body.dry_run === true;
 
