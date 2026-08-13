@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
 import { GET as getLegacyProfiles } from "../route";
-import { selectCanonicalVisibleProfiles } from "./profile-visibility";
+import { selectCanonicalVisibleProfiles, unwrapJsonOkData } from "./profile-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     const legacyResponse = await getLegacyProfiles(request);
     if (!legacyResponse.ok) return legacyResponse;
 
-    const legacyPayload = await legacyResponse.json() as Row;
+    const legacyPayload = unwrapJsonOkData(await legacyResponse.json());
     const visibleProfiles = selectCanonicalVisibleProfiles(legacyPayload.profiles);
     const accountIds = visibleProfiles.map(accountId).filter(Boolean);
     const identityByAccount = new Map<string, Row>();

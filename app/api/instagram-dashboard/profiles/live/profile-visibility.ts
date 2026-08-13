@@ -49,6 +49,11 @@ function isRow(value: unknown): value is ProfileLifecycleRow {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function unwrapJsonOkData(value: unknown): ProfileLifecycleRow {
+  if (!isRow(value)) return {};
+  return isRow(value.data) ? value.data : value;
+}
+
 function normalizedStatus(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
