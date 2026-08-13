@@ -1,6 +1,7 @@
 import { jsonError, jsonOk } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
 import { GET as getLegacyProfiles } from "../route";
+import { selectCanonicalVisibleProfiles } from "./profile-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +27,8 @@ export async function GET(request: Request) {
     if (!legacyResponse.ok) return legacyResponse;
 
     const legacyPayload = await legacyResponse.json() as Row;
-    const activeProfiles = Array.isArray(legacyPayload.activeAccounts)
-      ? legacyPayload.activeAccounts.filter((row): row is Row => Boolean(row) && typeof row === "object" && !Array.isArray(row))
-      : [];
-    const accountIds = activeProfiles.map(accountId).filter(Boolean);
+    const visibleProfiles = selectCanonicalVisibleProfiles(legacyPayload.profiles);
+    const accountIds = visibleProfiles.map(accountId).filter(Boolean);
     const identityByAccount = new Map<string, Row>();
     let identitySource = "not_requested";
 
@@ -50,7 +49,7 @@ export async function GET(request: Request) {
       }
     }
 
-    const profiles = activeProfiles.map((profile) => {
+    const profiles = visibleProfiles.map((profile) => {
       const identity = identityByAccount.get(accountId(profile));
       return {
         ...profile,
@@ -69,7 +68,7 @@ export async function GET(request: Request) {
       removed_account_ids: [],
       archived_account_ids: [],
       query_count: accountIds.length ? 2 : 1,
-      source: "profiles_live_c0d66a5_native_v1",
+      source: "profiles_live_all_accounts_visible_v2",
       projection_mode: "full_snapshot",
     });
   } catch {
