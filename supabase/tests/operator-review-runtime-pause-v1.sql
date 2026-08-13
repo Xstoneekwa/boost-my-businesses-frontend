@@ -44,6 +44,7 @@ create table public.auto_restart_device_locks (
 );
 
 \ir ../migrations/20260813223000_operator_review_runtime_pause_v1.sql
+\ir ../migrations/20260813225934_operator_review_terminal_precedence_v2.sql
 
 do $$
 declare
@@ -104,6 +105,38 @@ begin
   v_result := public.incident_resume_authorization_preflight_v2(v_auth);
   if v_result ->> 'next_tick_eligible' <> 'true' then
     raise exception 'resolved_plus_active_not_eligible: %', v_result;
+  end if;
+
+  -- Stale updates to historical actions and periodic reconciliation must not
+  -- re-pause an explicitly active account after the incident is resolved.
+  update public.account_dashboard_actions
+  set status='pending_verification', blocking_campaign=true
+  where id=v_action;
+  if (select account_status from public.ig_account_settings where account_id=v_account)
+       <> 'active' then
+    raise exception 'resolved_incident_stale_action_repaused_runtime';
+  end if;
+  perform public.reconcile_operator_review_runtime_pauses_v1(v_account);
+  if (select account_status from public.ig_account_settings where account_id=v_account)
+       <> 'active' then
+    raise exception 'resolved_incident_reconciliation_repaused_runtime';
+  end if;
+
+  -- A terminal action is non-authoritative even when its incident is open.
+  update public.account_incidents set status='open', resolved_at=null where id=v_incident;
+  update public.account_dashboard_actions set status='resolved', blocking_campaign=true where id=v_action;
+  if (select account_status from public.ig_account_settings where account_id=v_account)
+       <> 'active' then
+    raise exception 'terminal_action_repaused_runtime';
+  end if;
+
+  -- A genuinely open incident plus an active blocking action may pause again.
+  update public.account_dashboard_actions
+  set status='pending_verification', blocking_campaign=true
+  where id=v_action;
+  if (select account_status from public.ig_account_settings where account_id=v_account)
+       <> 'paused_manual_review' then
+    raise exception 'new_open_blocker_did_not_pause_runtime';
   end if;
 end $$;
 
