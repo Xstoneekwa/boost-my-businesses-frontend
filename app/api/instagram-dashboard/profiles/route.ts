@@ -268,6 +268,7 @@ function safeSettingsSummary(
   };
   return {
     timezone: readString(settings?.timezone, ""),
+    accountRuntimeStatus: readString(settings?.account_status, "active"),
     currentRunStatus: readString(settings?.current_run_status, ""),
     countersToday: counters,
     counterProjection: {
