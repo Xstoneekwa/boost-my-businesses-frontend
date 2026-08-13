@@ -1,4 +1,5 @@
 import {
+  CLIENT_OVERVIEW_ACTION_COPY,
   resolveClientCampaignInteractionRule,
   shouldCountClientCampaignInteractionEvent,
 } from "./client-campaign-interaction-types.ts";
@@ -48,34 +49,12 @@ function normalizeUsername(value: unknown) {
   return raw || null;
 }
 
-function pluralFr(count: number, singular: string, plural: string) {
-  return count > 1 ? plural : singular;
-}
-
 export function resolveOverviewFeedActionKind(row: Record<string, unknown>): OverviewRecentFeedActionKind | null {
-  const eventType = readString(row.event_type ?? row.eventType, "").toLowerCase();
-  const interactionType = readString(row.interaction_type ?? row.interactionType, "").toLowerCase();
-  const tokens = [eventType, interactionType].filter(Boolean);
-
-  if (tokens.some((token) => token.includes("unfollow"))) return "unfollow";
-  if (tokens.some((token) => token.includes("story"))) return "story";
-  if (tokens.some((token) => token.includes("like"))) return "like";
-  if (tokens.some((token) => token.includes("dm"))) return "dm";
-  if (tokens.some((token) => token.includes("follow"))) return "follow";
-
   const rule = resolveClientCampaignInteractionRule({
     eventType: row.event_type ?? row.eventType,
     interactionType: row.interaction_type ?? row.interactionType,
   });
-  if (!rule?.countInCampaignInteractions) return null;
-
-  const actionType = readString(rule.actionType, "").toLowerCase();
-  if (actionType === "follow_sent") return "follow";
-  if (actionType === "unfollow_sent") return "unfollow";
-  if (actionType === "like_sent") return "like";
-  if (actionType === "dm_sent") return "dm";
-  if (actionType === "story_viewed") return "story";
-  return null;
+  return rule?.countInCampaignInteractions ? rule.overviewActionKind ?? null : null;
 }
 
 function iconKindForAction(actionKind: OverviewRecentFeedActionKind): ClientOverviewRecentFeedItem["iconKind"] {
@@ -87,14 +66,7 @@ function iconKindForAction(actionKind: OverviewRecentFeedActionKind): ClientOver
 }
 
 function categoryLabels(actionKind: OverviewRecentFeedActionKind) {
-  const map = {
-    follow: { fr: "Abonnements", en: "Follows" },
-    like: { fr: "J'aime", en: "Likes" },
-    dm: { fr: "Messages", en: "Messages" },
-    story: { fr: "Stories", en: "Stories" },
-    unfollow: { fr: "Retraits", en: "Removals" },
-  } as const;
-  return map[actionKind];
+  return CLIENT_OVERVIEW_ACTION_COPY[actionKind].category;
 }
 
 function buildSummary(
@@ -105,52 +77,10 @@ function buildSummary(
 ) {
   const source = sourceTargetUsername ? `@${sourceTargetUsername}` : null;
   const n = count.toLocaleString(lang === "fr" ? "fr-FR" : "en-US");
-
-  if (lang === "en") {
-    if (actionKind === "follow") {
-      return source
-        ? `${n} follow${count > 1 ? "s" : ""} sent from ${source}`
-        : `${n} follow${count > 1 ? "s" : ""} sent`;
-    }
-    if (actionKind === "like") {
-      return source
-        ? `${n} post${count > 1 ? "s" : ""} liked from ${source}`
-        : `${n} post${count > 1 ? "s" : ""} liked`;
-    }
-    if (actionKind === "dm") {
-      return source
-        ? `${n} message${count > 1 ? "s" : ""} sent from ${source}`
-        : `${n} message${count > 1 ? "s" : ""} sent`;
-    }
-    if (actionKind === "story") {
-      return source
-        ? `${n} stor${count > 1 ? "ies" : "y"} viewed from ${source}`
-        : `${n} stor${count > 1 ? "ies" : "y"} viewed`;
-    }
-    return `${n} account${count > 1 ? "s" : ""} removed from the campaign`;
-  }
-
-  if (actionKind === "follow") {
-    return source
-      ? `${n} ${pluralFr(count, "abonnement envoyé", "abonnements envoyés")} à partir de ${source}`
-      : `${n} ${pluralFr(count, "abonnement envoyé", "abonnements envoyés")}`;
-  }
-  if (actionKind === "like") {
-    return source
-      ? `${n} ${pluralFr(count, "publication aimée", "publications aimées")} à partir de ${source}`
-      : `${n} ${pluralFr(count, "publication aimée", "publications aimées")}`;
-  }
-  if (actionKind === "dm") {
-    return source
-      ? `${n} ${pluralFr(count, "message envoyé", "messages envoyés")} à partir de ${source}`
-      : `${n} ${pluralFr(count, "message envoyé", "messages envoyés")}`;
-  }
-  if (actionKind === "story") {
-    return source
-      ? `${n} ${pluralFr(count, "story consultée", "stories consultées")} à partir de ${source}`
-      : `${n} ${pluralFr(count, "story consultée", "stories consultées")}`;
-  }
-  return `${n} ${pluralFr(count, "compte retiré de la campagne", "comptes retirés de la campagne")}`;
+  const copy = CLIENT_OVERVIEW_ACTION_COPY[actionKind].summary[lang];
+  const summary = count > 1 ? copy[1] : copy[0];
+  if (!source || actionKind === "unfollow") return `${n} ${summary}`;
+  return lang === "fr" ? `${n} ${summary} à partir de ${source}` : `${n} ${summary} from ${source}`;
 }
 
 export function resolveOverviewFeedGroupKey(input: {
@@ -322,7 +252,6 @@ export function buildClientOverviewRecentFeed(
     activeBusinessDays?: number;
   } = {},
 ): ClientOverviewRecentFeedItem[] {
-  const lang = options.lang === "en" ? "en" : "fr";
   const limit = Math.min(Math.max(options.limit ?? OVERVIEW_RECENT_FEED_MAX_GROUPS, 1), OVERVIEW_RECENT_FEED_MAX_GROUPS);
 
   const groups = buildOverviewRecentFeedGroupDetails(rows, {

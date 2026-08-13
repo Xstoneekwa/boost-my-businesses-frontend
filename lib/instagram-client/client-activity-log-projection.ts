@@ -1,5 +1,9 @@
 import { readString } from "./guards.ts";
-import { businessDayRangeStartIso } from "@/lib/instagram-dashboard/business-timezone";
+import { businessDayRangeStartIso } from "../instagram-dashboard/business-timezone.ts";
+import {
+  isHiddenClientInteractionEventType,
+  resolveClientProductActionRule,
+} from "./client-campaign-interaction-types.ts";
 
 type Lang = "fr" | "en";
 type SafeRecord = Record<string, unknown>;
@@ -60,13 +64,6 @@ const FORBIDDEN_CLIENT_ACTIVITY_TERMS = [
   "request_id",
 ];
 
-const HIDDEN_INTERACTION_EVENT_TYPES = new Set([
-  "follow_verified",
-  "target_selected",
-  "target_budget_reached",
-  "follow_requested",
-]);
-
 function normalizeUsername(value: unknown) {
   const raw = readString(value, "").trim().replace(/^@+/, "");
   return raw ? `@${raw}` : null;
@@ -93,64 +90,8 @@ export function clientActivityActionLabel(
   const eventType = readString(input.eventType, "").toLowerCase();
   const operation = readString(input.operation, "").toLowerCase();
   const interactionType = readString(input.interactionType, "").toLowerCase();
-  const source = eventType || operation || interactionType;
-
-  const fr: Record<string, string> = {
-    follow_sent: "Compte suivi",
-    follow: "Compte suivi",
-    unfollow_sent: "Abonnement retiré",
-    unfollow: "Abonnement retiré",
-    like_sent: "Publication aimée",
-    post_like_success: "Publication aimée",
-    like: "Publication aimée",
-    story_viewed: "Story consultée",
-    story_view: "Story consultée",
-    dm_sent: "Message envoyé",
-    dm: "Message envoyé",
-    mute_success: "Compte mis en sourdine",
-    target_add_single: "Compte cible ajouté",
-    target_add_bulk: "Comptes cibles ajoutés",
-    target_archive: "Compte cible retiré",
-    target_restore: "Compte cible restauré",
-    target_reset: "Compte cible réinitialisé",
-    target_verify: "Compte cible vérifié",
-    target_quality_decision: "Décision sur compte cible",
-    target_runtime_error_non_exhaustion: "Action campagne",
-    profile_visit: "Profil consulté",
-  };
-
-  const en: Record<string, string> = {
-    follow_sent: "Account followed",
-    follow: "Account followed",
-    unfollow_sent: "Unfollowed",
-    unfollow: "Unfollowed",
-    like_sent: "Post liked",
-    post_like_success: "Post liked",
-    like: "Post liked",
-    story_viewed: "Story viewed",
-    story_view: "Story viewed",
-    dm_sent: "Message sent",
-    dm: "Message sent",
-    mute_success: "Account muted",
-    target_add_single: "Target account added",
-    target_add_bulk: "Target accounts added",
-    target_archive: "Target account removed",
-    target_restore: "Target account restored",
-    target_reset: "Target account reset",
-    target_verify: "Target account verified",
-    target_quality_decision: "Target account decision",
-    target_runtime_error_non_exhaustion: "Campaign action",
-    profile_visit: "Profile visited",
-  };
-
-  const labels = lang === "en" ? en : fr;
-  if (labels[source]) return { label: labels[source], key: source };
-  if (source.includes("follow")) return { label: labels.follow_sent, key: "follow_sent" };
-  if (source.includes("like")) return { label: labels.like_sent, key: "like_sent" };
-  if (source.includes("story")) return { label: labels.story_viewed, key: "story_viewed" };
-  if (source.includes("dm")) return { label: labels.dm_sent, key: "dm_sent" };
-  if (source.startsWith("target_add")) return { label: labels.target_add_single, key: "target_add_single" };
-  if (source.startsWith("target_archive")) return { label: labels.target_archive, key: "target_archive" };
+  const rule = resolveClientProductActionRule({ eventType, operation, interactionType });
+  if (rule) return { label: rule.activityLabel[lang], key: rule.activityKey };
   return { label: lang === "en" ? "Campaign activity" : "Activité campagne", key: "campaign_activity" };
 }
 
@@ -344,7 +285,15 @@ export function paginateClientActivityItems(items: InternalActivityRow[], query:
   const filtered = cursor
     ? sorted.filter((item) => item.sortKey < cursor)
     : sorted;
-  const page = filtered.slice(0, limit).map(({ sortKey: _sortKey, actionKey: _actionKey, resultKey: _resultKey, ...item }) => item);
+  const page = filtered.slice(0, limit).map((item) => ({
+    occurredAt: item.occurredAt,
+    instagramAccount: item.instagramAccount,
+    targetAccount: item.targetAccount,
+    touchedAccount: item.touchedAccount,
+    actionLabel: item.actionLabel,
+    resultLabel: item.resultLabel,
+    detailLabel: item.detailLabel,
+  }));
   const next = filtered.length > limit ? filtered[limit - 1]?.sortKey ?? null : null;
   return {
     items: page,
@@ -356,12 +305,17 @@ export function mapClientInteractionEvent(
   row: SafeRecord,
   accountUsername: string | null,
   lang: Lang = "fr",
+  expectedAccountId?: string | null,
 ): InternalActivityRow | null {
   const eventType = readString(row.event_type, "").toLowerCase();
-  if (HIDDEN_INTERACTION_EVENT_TYPES.has(eventType)) return null;
+  const rowAccountId = readString(row.account_id, "");
+  if (expectedAccountId && rowAccountId && rowAccountId !== expectedAccountId) return null;
+  if (isHiddenClientInteractionEventType(eventType)) return null;
 
   const eventStatus = readString(row.event_status, "").toLowerCase();
   const interactionType = readString(row.interaction_type, "") || null;
+  const actionRule = resolveClientProductActionRule({ eventType, interactionType });
+  if (!actionRule) return null;
   const { label: actionLabel, key: actionKey } = clientActivityActionLabel(
     { eventType, interactionType },
     lang,
@@ -408,7 +362,10 @@ export function mapClientTargetAuditEvent(
   accountUsername: string | null,
   targetUsername: string | null,
   lang: Lang = "fr",
-): InternalActivityRow {
+  expectedAccountId?: string | null,
+): InternalActivityRow | null {
+  const rowAccountId = readString(row.account_id, "");
+  if (expectedAccountId && rowAccountId && rowAccountId !== expectedAccountId) return null;
   const operation = readString(row.operation, "").toLowerCase();
   const result = readString(row.result, "").toLowerCase();
   const metadata = row.metadata_safe && typeof row.metadata_safe === "object"

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ClientActivityItem } from "@/lib/instagram-client/client-activity-log";
+import { clientActivityActionOptions } from "@/lib/instagram-client/client-campaign-interaction-types";
 
 type Lang = "fr" | "en";
 type Period = "7d" | "30d" | "90d";
@@ -28,7 +29,6 @@ type ActivityCopy = {
     touched: string;
   };
   periods: Record<Period, string>;
-  actions: Array<{ value: string; label: string }>;
   results: Array<{ value: string; label: string }>;
 };
 
@@ -55,16 +55,6 @@ const COPY: Record<Lang, ActivityCopy> = {
       touched: "Compte touché",
     },
     periods: { "7d": "7 jours", "30d": "30 jours", "90d": "90 jours" },
-    actions: [
-      { value: "all", label: "Toutes les actions" },
-      { value: "follow_sent", label: "Compte suivi" },
-      { value: "post_like_success", label: "Publication aimée" },
-      { value: "story_viewed", label: "Story consultée" },
-      { value: "dm_sent", label: "Message envoyé" },
-      { value: "target_add_single", label: "Compte cible ajouté" },
-      { value: "target_archive", label: "Compte cible retiré" },
-      { value: "mute_success", label: "Compte mis en sourdine" },
-    ],
     results: [
       { value: "all", label: "Tous les résultats" },
       { value: "success", label: "Réussi" },
@@ -95,16 +85,6 @@ const COPY: Record<Lang, ActivityCopy> = {
       touched: "Touched account",
     },
     periods: { "7d": "7 days", "30d": "30 days", "90d": "90 days" },
-    actions: [
-      { value: "all", label: "All actions" },
-      { value: "follow_sent", label: "Account followed" },
-      { value: "post_like_success", label: "Post liked" },
-      { value: "story_viewed", label: "Story viewed" },
-      { value: "dm_sent", label: "Message sent" },
-      { value: "target_add_single", label: "Target account added" },
-      { value: "target_archive", label: "Target account removed" },
-      { value: "mute_success", label: "Account muted" },
-    ],
     results: [
       { value: "all", label: "All results" },
       { value: "success", label: "Successful" },
@@ -147,6 +127,7 @@ export default function ClientActivityPanel({
   enabled: boolean;
 }) {
   const copy = COPY[lang];
+  const actionOptions = clientActivityActionOptions(lang);
   const [items, setItems] = useState<ClientActivityItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -252,7 +233,7 @@ export default function ClientActivityPanel({
         <label className="cd-act-filter">
           <span>{copy.actionLabel}</span>
           <select value={action} onChange={(event) => setAction(event.target.value)}>
-            {copy.actions.map((option) => (
+            {actionOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
