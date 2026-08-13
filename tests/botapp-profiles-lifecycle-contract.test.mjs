@@ -52,6 +52,7 @@ test("ten allAccounts with two terminal rows return exactly eight visible profil
 test("visibility is independent from login, identity, readiness, and runtime state", () => {
   for (const row of [
     { accountLifecycleStatus: "active", loginStatus: "connected" },
+    { accountLifecycleStatus: "active", adminStatus: "active", status: "inactive" },
     { accountLifecycleStatus: "active", loginStatus: "pending", provisioningStatus: "login_pending", connected: false },
     { accountLifecycleStatus: "pending", loginIdentityProofStatus: "required_unverified" },
     { accountLifecycleStatus: "ready_to_connect", readinessStatus: "growth_ready" },

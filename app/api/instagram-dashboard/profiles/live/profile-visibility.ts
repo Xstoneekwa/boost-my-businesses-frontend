@@ -16,14 +16,17 @@ const TERMINAL_LIFECYCLE_STATUSES = new Set([
   "trashed",
 ]);
 
-const LIFECYCLE_STATUS_FIELDS = [
+const CANONICAL_LIFECYCLE_STATUS_FIELDS = [
   "accountLifecycleStatus",
-  "accountStatus",
   "adminStatus",
   "account_lifecycle_status",
   "admin_lifecycle_status",
   "lifecycleStatus",
   "lifecycle_status",
+] as const;
+
+const FALLBACK_LIFECYCLE_STATUS_FIELDS = [
+  "accountStatus",
   "status",
   "state",
 ] as const;
@@ -48,9 +51,14 @@ function normalizedStatus(value: unknown) {
 }
 
 export function isCanonicalVisibleProfile(row: ProfileLifecycleRow) {
-  const hasTerminalStatus = LIFECYCLE_STATUS_FIELDS.some((field) => {
-    const status = normalizedStatus(row[field]);
-    return status ? TERMINAL_LIFECYCLE_STATUSES.has(status) : false;
+  const canonicalStatuses = CANONICAL_LIFECYCLE_STATUS_FIELDS
+    .map((field) => normalizedStatus(row[field]))
+    .filter(Boolean);
+  const lifecycleStatuses = canonicalStatuses.length
+    ? canonicalStatuses
+    : FALLBACK_LIFECYCLE_STATUS_FIELDS.map((field) => normalizedStatus(row[field])).filter(Boolean);
+  const hasTerminalStatus = lifecycleStatuses.some((status) => {
+    return TERMINAL_LIFECYCLE_STATUSES.has(status);
   });
   if (hasTerminalStatus) return false;
 
