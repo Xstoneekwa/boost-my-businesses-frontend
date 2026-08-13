@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   isCanonicalVisibleProfile,
   selectCanonicalVisibleProfiles,
+  unwrapJsonOkData,
 } from "../app/api/instagram-dashboard/profiles/live/profile-visibility.ts";
 
 const manageSource = readFileSync(new URL("../app/instagram-dashboard/manage-data.ts", import.meta.url), "utf8");
@@ -22,6 +23,7 @@ test("legacy lifecycle projection still owns the generic terminal states", () =>
 });
 
 test("live endpoint selects the all-account projection instead of activeAccounts", () => {
+  assert.match(liveSource, /unwrapJsonOkData\(await legacyResponse\.json\(\)\)/);
   assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.profiles\)/);
   assert.doesNotMatch(liveSource, /legacyPayload\.activeAccounts/);
   assert.match(liveSource, /profiles_live_all_accounts_visible_v2/);
@@ -41,7 +43,8 @@ test("ten allAccounts with two terminal rows return exactly eight visible profil
     { accountId: "cancelled", adminStatus: "cancelled", tombstonedAt: "2026-08-13T00:00:00.000Z" },
   ];
 
-  const visible = selectCanonicalVisibleProfiles(allAccounts);
+  const envelope = { ok: true, data: { profiles: allAccounts } };
+  const visible = selectCanonicalVisibleProfiles(unwrapJsonOkData(envelope).profiles);
   assert.equal(visible.length, 8);
   assert.ok(visible.some((row) => row.accountId === "login-pending"));
   assert.ok(visible.some((row) => row.accountId === "connected"));
