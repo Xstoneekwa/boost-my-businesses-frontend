@@ -57,6 +57,7 @@ test("visibility is independent from login, identity, readiness, and runtime sta
     { accountLifecycleStatus: "active", loginStatus: "connected" },
     { accountLifecycleStatus: "active", adminStatus: "active", status: "inactive" },
     { accountLifecycleStatus: "active", adminStatus: "inactive", loginStatus: "pending" },
+    { accountLifecycleStatus: "inactive", adminStatus: "active", loginStatus: "pending", provisioningStatus: "login_pending" },
     { accountLifecycleStatus: "active", loginStatus: "pending", provisioningStatus: "login_pending", connected: false },
     { accountLifecycleStatus: "pending", loginIdentityProofStatus: "required_unverified" },
     { accountLifecycleStatus: "ready_to_connect", readinessStatus: "growth_ready" },
