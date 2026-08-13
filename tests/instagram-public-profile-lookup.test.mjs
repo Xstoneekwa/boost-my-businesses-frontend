@@ -160,6 +160,8 @@ test("searchapi provider returns safe found profile", async () => {
       provider_mode: "searchapi",
       provider_status: "found",
       provider_engine: "instagram_profile",
+      profile_name: null,
+      biography: null,
       cache_hit: false,
       throttle_hit: false,
       rate_limited: false,
