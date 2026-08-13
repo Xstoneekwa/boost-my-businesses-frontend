@@ -247,6 +247,41 @@ begin
 
   -- Exact identity success supersedes only older login-specific failures.
   -- Business, restriction, security, and social incidents remain fail-closed.
+  -- Resolve the incident first. Its existing AFTER trigger synchronizes linked
+  -- operator-review actions exactly once. Resolving actions first would invoke
+  -- the legacy BEFORE trigger, update the incident, and then attempt to update
+  -- the same action tuple again inside the originating command.
+  update public.account_incidents i
+  set status = 'resolved',
+      resolved_at = coalesce(i.resolved_at, v_now),
+      resolution_reason = coalesce(i.resolution_reason, 'superseded_by_exact_identity_success'),
+      resolution_note = coalesce(i.resolution_note, 'A later exact assigned-account identity proof completed successfully.'),
+      action_required = null,
+      updated_at = v_now,
+      metadata = coalesce(i.metadata, '{}'::jsonb) || jsonb_build_object(
+        'superseded_by_exact_identity_success', true,
+        'identity_verified_at', v_client.login_identity_verified_at,
+        'reconciliation_source', v_source,
+        'blocking_campaign', false,
+        'operator_review_required', false,
+        'login_block_active', false
+      )
+  where i.account_id = p_account_id
+    and i.created_at <= v_client.login_identity_verified_at
+    and i.status in ('open', 'acknowledged', 'investigating')
+    and i.resolved_at is null
+    and i.archived_at is null
+    and coalesce(i.legal_hold, false) is false
+    and i.incident_type in (
+      'auto_login_failed',
+      'auto_login_identity_mismatch',
+      'login_identity_mismatch',
+      'login_package_mismatch',
+      'instagram_login_verification_required',
+      'login_verification_required'
+    );
+  get diagnostics v_incidents_resolved = row_count;
+
   update public.account_dashboard_actions a
   set status = 'resolved',
       blocking_campaign = false,
@@ -286,37 +321,6 @@ begin
       )
     );
   get diagnostics v_actions_resolved = row_count;
-
-  update public.account_incidents i
-  set status = 'resolved',
-      resolved_at = coalesce(i.resolved_at, v_now),
-      resolution_reason = coalesce(i.resolution_reason, 'superseded_by_exact_identity_success'),
-      resolution_note = coalesce(i.resolution_note, 'A later exact assigned-account identity proof completed successfully.'),
-      action_required = null,
-      updated_at = v_now,
-      metadata = coalesce(i.metadata, '{}'::jsonb) || jsonb_build_object(
-        'superseded_by_exact_identity_success', true,
-        'identity_verified_at', v_client.login_identity_verified_at,
-        'reconciliation_source', v_source,
-        'blocking_campaign', false,
-        'operator_review_required', false,
-        'login_block_active', false
-      )
-  where i.account_id = p_account_id
-    and i.created_at <= v_client.login_identity_verified_at
-    and i.status in ('open', 'acknowledged', 'investigating')
-    and i.resolved_at is null
-    and i.archived_at is null
-    and coalesce(i.legal_hold, false) is false
-    and i.incident_type in (
-      'auto_login_failed',
-      'auto_login_identity_mismatch',
-      'login_identity_mismatch',
-      'login_package_mismatch',
-      'instagram_login_verification_required',
-      'login_verification_required'
-    );
-  get diagnostics v_incidents_resolved = row_count;
 
   if exists (
     select 1 from public.account_dashboard_actions a
