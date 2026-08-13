@@ -1243,7 +1243,7 @@ export default function ClientDashboard({
                   <strong>{lang === "fr" ? "Mise à jour du mot de passe Instagram requise" : "Instagram password update required"}</strong>
                   <p>{notification.message}</p>
                 </div>
-                <button className="cd-btn cd-btn-primary" onClick={() => handleNavigate("account")}>
+                <button className="cd-btn cd-btn-primary" onClick={() => handleNotificationNavigate(notification.actionHref)}>
                   {lang === "fr" ? "Mettre à jour" : "Update password"}
                 </button>
               </article>

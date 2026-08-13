@@ -3,7 +3,7 @@ import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical
 import { getAccountPackageSummaries } from "@/app/instagram-dashboard/package-summary-data";
 import { loadClientBillingPaymentSummary } from "@/lib/commercial/stripe/client-billing-service.ts";
 import { projectClientAccountRow } from "./account-projection";
-import { isClientSelectableInstagramAccount } from "./client-account-visibility";
+import { filterClientSelectableInstagramAccounts } from "./client-account-visibility";
 import { readString, rejectTechnicalClientFields } from "./guards";
 import {
   loadClientCommercialSubscriptionRow,
@@ -139,11 +139,9 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
     .map((row): [string, SupabaseRecord] => [readString(row.account_id), row])
     .filter(([id]) => Boolean(id)));
 
-  return (Array.isArray(accounts) ? accounts as SupabaseRecord[] : [])
-    .filter((row) => isClientSelectableInstagramAccount({
-      adminLifecycleStatus: row.admin_lifecycle_status,
-      status: row.status,
-    }))
+  return filterClientSelectableInstagramAccounts(
+    Array.isArray(accounts) ? accounts as SupabaseRecord[] : [],
+  )
     .map((row) => {
       const accountId = readString(row.id);
       const link = linkByAccount.get(accountId);
