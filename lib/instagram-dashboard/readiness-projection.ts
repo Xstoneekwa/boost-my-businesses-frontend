@@ -1,5 +1,6 @@
 import { projectCredentialBusinessStatus } from "./account-status-projection.ts";
 import { CLIENT_ONBOARDING_TARGET_MINIMUM } from "../instagram-client/client-account-onboarding-policy.ts";
+import { NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD } from "./needs-more-target-accounts.ts";
 
 export type AdminReadinessStatus =
   | "ready"
@@ -74,7 +75,13 @@ export type AdminReadinessProjection = {
   runtime_gates_status: ComponentReadinessStatus;
   dm_settings_status: ComponentReadinessStatus;
   eligible_target_count: number | null;
+  /** @deprecated Initial-onboarding minimum; inspect target_gate_applies before using it. */
   required_eligible_target_count: number;
+  initial_onboarding_required_eligible_target_count: number;
+  target_gate_scope: "initial_onboarding";
+  target_gate_applies: boolean;
+  post_onboarding_low_stock_threshold: number;
+  post_onboarding_low_stock: boolean;
   target_readiness_status: ComponentReadinessStatus;
   dashboard_actions_count: number;
   blocking_actions_count: number;
@@ -192,6 +199,10 @@ function runtimeGatesStatus(input: AdminReadinessInput): ComponentReadinessStatu
 
 function targetReadinessStatus(input: AdminReadinessInput): ComponentReadinessStatus {
   if (input.eligibleTargetCount === null) return "pending_backend_wiring";
+  // The 15-target minimum is an initial onboarding gate. Once onboarding is
+  // complete, target depletion belongs to the lifecycle/low-stock contract and
+  // must not revoke an otherwise healthy account's growth readiness.
+  if (readyOnboardingStatuses.has(normalize(input.onboardingStatus))) return "ready";
   return input.eligibleTargetCount >= CLIENT_ONBOARDING_TARGET_MINIMUM ? "ready" : "blocked";
 }
 
@@ -279,6 +290,7 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
   const normalizedLogin = normalize(input.loginStatus);
   const normalizedProvisioning = normalize(input.provisioningStatus);
   const normalizedOnboarding = normalize(input.onboardingStatus);
+  const onboardingComplete = readyOnboardingStatuses.has(normalizedOnboarding);
   const normalizedCredentials = normalize(input.credentialsStatus);
   const pending = pendingBackendWiring(input);
   const [assignment_readiness, assignment_reason] = assignmentStatus(input);
@@ -385,6 +397,13 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     dm_settings_status: dm_readiness,
     eligible_target_count: input.eligibleTargetCount,
     required_eligible_target_count: CLIENT_ONBOARDING_TARGET_MINIMUM,
+    initial_onboarding_required_eligible_target_count: CLIENT_ONBOARDING_TARGET_MINIMUM,
+    target_gate_scope: "initial_onboarding",
+    target_gate_applies: !onboardingComplete,
+    post_onboarding_low_stock_threshold: NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
+    post_onboarding_low_stock: onboardingComplete
+      && input.eligibleTargetCount !== null
+      && input.eligibleTargetCount <= NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
     target_readiness_status: target_readiness,
     dashboard_actions_count: input.dashboardActionsCount,
     blocking_actions_count: input.blockingActionsCount,

@@ -5,6 +5,7 @@ import {
   CLIENT_ONBOARDING_TARGET_MINIMUM,
   hasClientOnboardingTargetMinimum,
 } from "../instagram-client/client-account-onboarding-policy.ts";
+import { NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD } from "./needs-more-target-accounts.ts";
 import type { createSupabaseClient } from "../supabase.ts";
 
 export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
@@ -404,11 +405,13 @@ export async function runReadinessNow(
     countBlockingDashboardActions(supabase, input.accountId),
   ]);
   const targetsRequired = accountPackageRequiresTargets(packageSummary);
-  const targetBlocker = targetsRequired && targetCounts.total <= 0
+  const onboardingComplete = normalize(clientStatus?.onboarding_status) === "ready";
+  const onboardingTargetGateApplies = targetsRequired && !onboardingComplete;
+  const targetBlocker = onboardingTargetGateApplies && targetCounts.total <= 0
     ? "missing_ct"
-    : targetsRequired && !hasClientOnboardingTargetMinimum(targetCounts.eligible) && targetCounts.pending > 0
+    : onboardingTargetGateApplies && !hasClientOnboardingTargetMinimum(targetCounts.eligible) && targetCounts.pending > 0
       ? "ct_pending_verification"
-      : targetsRequired && !hasClientOnboardingTargetMinimum(targetCounts.eligible)
+      : onboardingTargetGateApplies && !hasClientOnboardingTargetMinimum(targetCounts.eligible)
         ? "insufficient_eligible_targets"
         : null;
   const blockers = [
@@ -434,8 +437,15 @@ export async function runReadinessNow(
     ct_count_rejected: targetCounts.rejected,
     ct_count_archived: targetCounts.archived,
     ct_required: targetsRequired,
+    ct_onboarding_gate_applies: onboardingTargetGateApplies,
+    // Compatibility field: this minimum is scoped to the initial onboarding
+    // gate and must never be interpreted as an ongoing readiness threshold.
     ct_required_eligible_minimum: CLIENT_ONBOARDING_TARGET_MINIMUM,
+    ct_initial_onboarding_required_eligible_minimum: CLIENT_ONBOARDING_TARGET_MINIMUM,
+    ct_target_gate_scope: "initial_onboarding",
     ct_advisory_blocker: targetBlocker,
+    ct_post_onboarding_low_stock_threshold: NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
+    ct_post_onboarding_low_stock: onboardingComplete && targetCounts.eligible <= NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
     dm_settings_advisory: !dmSettingsRow,
     blocking_dashboard_action_count: blockingDashboardActionCount,
     no_blocking_dashboard_action: blockingDashboardActionCount === 0,
