@@ -38,6 +38,7 @@ import { resolveClientConnectionActionPanel } from "@/lib/instagram-client/clien
 import { readAccountProtectionListValidator } from "@/lib/instagram-dashboard/account-protection-list-http";
 import { protectionListRequestErrorMessage } from "@/lib/instagram-dashboard/account-protection-list-input";
 import { CLIENT_ONBOARDING_TARGET_MINIMUM } from "@/lib/instagram-client/client-account-onboarding-policy";
+import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -73,6 +74,47 @@ type ClientProgressSnapshot = {
   steps: Array<{ id: string; label: string; subtitle: string; status: "pending" | "running" | "done" | "failed" | "action_required" | "skipped" }>;
   process_log: Array<{ id: string; timestamp: string; phase: string; message: string }>;
 };
+
+function projectCanonicalConnectProgress(snapshot: ClientConnectProgressSnapshot): ClientProgressSnapshot {
+  const status: ClientProgressSnapshot["status"] = snapshot.connect_status === "connected"
+    ? "connected"
+    : snapshot.connect_status === "verification_required"
+      ? "action_required"
+      : snapshot.connect_status === "failed" || snapshot.connect_status === "blocked"
+        ? "failed"
+        : snapshot.connect_status === "cancelled"
+          ? "stopped"
+          : snapshot.connect_status === "queued"
+            ? "queued"
+            : snapshot.connect_status === "not_created"
+              ? "unknown"
+              : "running";
+  return {
+    account_id: snapshot.account_id,
+    request_id: snapshot.request_id,
+    run_id: null,
+    status,
+    reason: snapshot.message,
+    action_required: snapshot.action_required
+      ? {
+        title: snapshot.action_required.title,
+        message: snapshot.action_required.message,
+        status: snapshot.action_required.status,
+      }
+      : null,
+    steps: snapshot.steps.map((step) => ({
+      id: step.id,
+      label: step.label,
+      subtitle: step.subtitle,
+      status: (["pending", "running", "done", "failed", "action_required", "skipped"] as const).includes(
+        step.status as "pending" | "running" | "done" | "failed" | "action_required" | "skipped",
+      )
+        ? step.status as "pending" | "running" | "done" | "failed" | "action_required" | "skipped"
+        : "pending",
+    })),
+    process_log: [],
+  };
+}
 
 interface Props {
   userId: string;
@@ -519,7 +561,13 @@ export default function ClientDashboard({
   const [billingDrawerOpen, setBillingDrawerOpen] = useState(false);
   const [canonicalPaymentMethodDisplay, setCanonicalPaymentMethodDisplay] = useState<string | null>(null);
   const [loggingOut, setLoggingOut]     = useState(false);
-  const [connectProgress, setConnectProgress] = useState<{ account: ClientInstagramAccount; snapshot: ClientProgressSnapshot | null; message: string } | null>(null);
+  const [connectProgress, setConnectProgress] = useState<{
+    account: ClientInstagramAccount;
+    snapshot: ClientProgressSnapshot | null;
+    requestId: string | null;
+    refreshVersion: number;
+    message: string;
+  } | null>(null);
   const [workspace, setWorkspace] = useState<ClientWorkspaceView | null>(initialWorkspace);
   const agencyModeActive = initialAgencyModeActive;
   const agencyScopeStorageKey = `bmb_agency_scope_${_tenantId}`;
@@ -831,19 +879,28 @@ export default function ClientDashboard({
     const accountId = connectProgress?.account.accountId;
     if (!accountId) return undefined;
     const scopedAccountId = accountId;
+    const correlatedRequestId = connectProgress?.requestId || connectProgress?.snapshot?.request_id || "";
     let cancelled = false;
 
     async function pollClientProgress() {
       try {
-        const response = await fetch(`/api/instagram-dashboard/runs/progress?account_id=${encodeURIComponent(scopedAccountId)}&audience=client`, {
+        const params = new URLSearchParams({ lang });
+        if (correlatedRequestId) params.set("request_id", correlatedRequestId);
+        const response = await fetch(`/api/instagram-client/accounts/${encodeURIComponent(scopedAccountId)}/connect/progress?${params.toString()}`, {
           headers: { Accept: "application/json" },
         });
-        const payload = await response.json() as { ok?: boolean; data?: ClientProgressSnapshot; error?: string };
+        const payload = await response.json() as { ok?: boolean; data?: ClientConnectProgressSnapshot; error?: string };
         if (!response.ok || !payload.ok || !payload.data) {
           throw new Error(payload.error || "Could not load connection progress.");
         }
         if (!cancelled) {
-          setConnectProgress((current) => current ? { ...current, snapshot: payload.data ?? null, message: payload.data?.reason || current.message } : current);
+          const projected = projectCanonicalConnectProgress(payload.data);
+          setConnectProgress((current) => current ? {
+            ...current,
+            snapshot: projected,
+            requestId: payload.data?.request_id || current.requestId,
+            message: payload.data?.message || current.message,
+          } : current);
         }
       } catch (progressError) {
         if (!cancelled) {
@@ -864,7 +921,7 @@ export default function ClientDashboard({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [connectProgress?.account.accountId]);
+  }, [connectProgress?.account.accountId, connectProgress?.refreshVersion, lang]);
 
   useEffect(() => {
     const l = localStorage.getItem(LANG_KEY) as Lang|null;
@@ -1609,6 +1666,8 @@ export default function ClientDashboard({
                     onClick={() => setConnectProgress({
                       account: primaryAccount,
                       snapshot: null,
+                      requestId: null,
+                      refreshVersion: 0,
                       message: t.account.connectBody,
                     })}
                   >
@@ -1743,7 +1802,11 @@ export default function ClientDashboard({
               <button className="cd-btn cd-btn-soft" onClick={() => setConnectProgress(null)}>{lang === "fr" ? "Fermer" : "Close"}</button>
               <button
                 className="cd-btn cd-btn-primary"
-                onClick={() => setConnectProgress((current) => current ? { ...current, snapshot: null, message: t.account.connectBody } : current)}
+                onClick={() => setConnectProgress((current) => current ? {
+                  ...current,
+                  refreshVersion: current.refreshVersion + 1,
+                  message: t.account.connectBody,
+                } : current)}
               >
                 {t.account.connectCheck}
               </button>
