@@ -82,11 +82,13 @@ export async function POST(request: Request) {
 
     let runId = linkedRunId;
     let runStopped = false;
+    let runTerminalConfirmed = false;
     let orphanReconciled = false;
 
     if (linkedRunId) {
       const reconcileResult = await reconcileLinkedIgRunTerminal(linkedRunId, "stopped");
       runStopped = reconcileResult.reconciled;
+      runTerminalConfirmed = reconcileResult.reconciled || reconcileResult.reason === "already_terminal";
       orphanReconciled = reconcileResult.reconciled;
       if (reconcileResult.reconciled) {
         await insertManualRunAudit(
@@ -122,18 +124,46 @@ export async function POST(request: Request) {
       if (runId) {
         const reconcileResult = await reconcileLinkedIgRunTerminal(runId, "stopped");
         runStopped = reconcileResult.reconciled;
+        runTerminalConfirmed = reconcileResult.reconciled || reconcileResult.reason === "already_terminal";
         orphanReconciled = reconcileResult.reconciled;
       }
     }
 
-    if (canceledRequestId && linkedRunId) {
-      const { error: cancelRunningError } = await supabase.rpc("cancel_account_run_request", {
-        p_request_id: canceledRequestId,
-        p_reason: stopReason,
+    if (runId && !runTerminalConfirmed) {
+      return jsonError("Run stop could not be persisted. The run remains active.", 500, {
+        reason: "run_terminalization_not_persisted",
+        run_id: runId,
       });
-      if (cancelRunningError) {
-        return jsonError(sanitizeRunControlReason(cancelRunningError.message, "Could not cancel running request."), 500);
+    }
+
+    let requestTerminalConfirmed = canceledRequestStatus === "canceled";
+    if (canceledRequestId && !requestTerminalConfirmed) {
+      const now = new Date().toISOString();
+      const { data: requestTerminalData, error: requestTerminalError } = await supabase
+        .from("account_run_requests")
+        .update({
+          status: "canceled",
+          canceled_at: now,
+          completed_at: now,
+          lease_expires_at: null,
+          updated_at: now,
+        })
+        .eq("id", canceledRequestId)
+        .in("status", ["queued", "claimed", "starting", "running"])
+        .select("id,status")
+        .maybeSingle();
+      if (requestTerminalError) {
+        return jsonError(sanitizeRunControlReason(requestTerminalError.message, "Could not terminalize run request."), 500);
       }
+      requestTerminalConfirmed = readString(requestTerminalData?.status, "") === "canceled";
+      canceledRequestStatus = requestTerminalConfirmed ? "canceled" : canceledRequestStatus;
+    }
+
+    if (canceledRequestId && !requestTerminalConfirmed) {
+      return jsonError("Run request cancellation could not be persisted.", 500, {
+        reason: "request_terminalization_not_persisted",
+        request_id: canceledRequestId,
+      });
     }
 
     const { error: logError } = await supabase.from("ig_action_logs").insert({
@@ -169,16 +199,16 @@ export async function POST(request: Request) {
     }));
 
     return jsonOk({
-      stopped: runStopped || Boolean(runId),
-      canceled_request: Boolean(canceledRequestId),
+      stopped: runTerminalConfirmed,
+      canceled_request: requestTerminalConfirmed,
       request_status: canceledRequestStatus,
       orphan_reconciled: orphanReconciled,
       client_connect_projection_cleared: projectionCleanup.cleared === true,
       client_login_status: projectionCleanup.login_status ?? null,
       client_provisioning_status: projectionCleanup.provisioning_status ?? null,
-      message: runStopped
+      message: runTerminalConfirmed
         ? "Run stop requested."
-        : canceledRequestId
+        : requestTerminalConfirmed
           ? "Queued run request canceled."
           : "No active run found. Stop log added.",
     });
