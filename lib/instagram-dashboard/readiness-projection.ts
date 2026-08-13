@@ -1,4 +1,5 @@
 import { projectCredentialBusinessStatus } from "./account-status-projection.ts";
+import { CLIENT_ONBOARDING_TARGET_MINIMUM } from "../instagram-client/client-account-onboarding-policy.ts";
 
 export type AdminReadinessStatus =
   | "ready"
@@ -49,6 +50,7 @@ export type AdminReadinessInput = {
   dmSettingsPresent: boolean;
   welcomeSettingsPresent: boolean;
   unfollowSettingsPresent: boolean;
+  eligibleTargetCount: number | null;
   dashboardActionsCount: number;
   blockingActionsCount: number;
 };
@@ -71,6 +73,9 @@ export type AdminReadinessProjection = {
   app_instance_readiness_status: ComponentReadinessStatus;
   runtime_gates_status: ComponentReadinessStatus;
   dm_settings_status: ComponentReadinessStatus;
+  eligible_target_count: number | null;
+  required_eligible_target_count: number;
+  target_readiness_status: ComponentReadinessStatus;
   dashboard_actions_count: number;
   blocking_actions_count: number;
   next_scheduled_session_at: string | null;
@@ -185,6 +190,11 @@ function runtimeGatesStatus(input: AdminReadinessInput): ComponentReadinessStatu
   return "ready";
 }
 
+function targetReadinessStatus(input: AdminReadinessInput): ComponentReadinessStatus {
+  if (input.eligibleTargetCount === null) return "pending_backend_wiring";
+  return input.eligibleTargetCount >= CLIENT_ONBOARDING_TARGET_MINIMUM ? "ready" : "blocked";
+}
+
 function assignmentStatus(input: AdminReadinessInput): [ComponentReadinessStatus, string] {
   const status = normalize(input.assignmentStatus);
   const scheduleMode = normalize(input.scheduleMode);
@@ -278,6 +288,7 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
   const runtime_readiness = runtimeGatesStatus(input);
   const auto_login_readiness = autoLoginStatus(input);
   const package_readiness = packageStatus(input);
+  const target_readiness = targetReadinessStatus(input);
   let overall: AdminReadinessStatus = "unknown";
   let reason = "readiness_unknown";
   let nextAdminAction: string | null = null;
@@ -328,6 +339,14 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     overall = "waiting_auto_login_check";
     reason = loginVerificationPending ? "credentials_saved_pending_login_verification" : "login_preflight_pending";
     nextClientAction = "check_login_or_auto_login";
+  } else if (target_readiness === "blocked") {
+    overall = "blocked";
+    reason = "insufficient_eligible_targets";
+    nextAdminAction = "review_target_accounts";
+    nextClientAction = "add_target_accounts";
+  } else if (target_readiness === "pending_backend_wiring") {
+    overall = "pending_backend_wiring";
+    reason = "target_eligibility_projection_unavailable";
   } else if (pending.length > 0 || package_readiness !== "ready" || runtime_readiness !== "ready" || dm_readiness !== "ready") {
     overall = "pending_backend_wiring";
     reason = pending[0] || "runtime_projection_incomplete";
@@ -364,6 +383,9 @@ export function buildAdminReadinessProjection(input: AdminReadinessInput): Admin
     app_instance_readiness_status: app_readiness,
     runtime_gates_status: runtime_readiness,
     dm_settings_status: dm_readiness,
+    eligible_target_count: input.eligibleTargetCount,
+    required_eligible_target_count: CLIENT_ONBOARDING_TARGET_MINIMUM,
+    target_readiness_status: target_readiness,
     dashboard_actions_count: input.dashboardActionsCount,
     blocking_actions_count: input.blockingActionsCount,
     next_scheduled_session_at: input.assignmentStartsAt,

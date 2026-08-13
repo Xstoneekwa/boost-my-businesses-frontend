@@ -17,7 +17,7 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
     ig_account_settings: [{ account_id: accountId }],
     ig_account_filters: [{ account_id: accountId }],
     ig_account_dm_settings: [{ account_id: accountId }],
-    ig_targets: [{ account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" }],
+    ig_targets: Array.from({ length: 15 }, (_, index) => ({ id: `target-${index}`, account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" })),
     account_assignments: [{
       id: assignmentId,
       account_id: accountId,
@@ -136,6 +136,31 @@ test("connected account with no eligible CT is not projected ready", async () =>
   assert.equal(result.readiness_status, "retry_later");
   assert.equal(result.reason, "missing_ct");
   assert.equal(result.preflight_request_created, false);
+});
+
+test("connected account with 14 eligible CT is blocked by the canonical minimum", async () => {
+  const supabase = makeSupabase(baseRows({
+    client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
+    ig_targets: Array.from({ length: 14 }, (_, index) => ({ id: `target-${index}`, account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" })),
+  }));
+
+  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+  assert.equal(result.readiness_status, "retry_later");
+  assert.equal(result.reason, "insufficient_eligible_targets");
+});
+
+test("18 total targets with 15 canonically eligible CT is ready", async () => {
+  const eligible = Array.from({ length: 15 }, (_, index) => ({ id: `eligible-${index}`, account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" }));
+  const rejected = Array.from({ length: 3 }, (_, index) => ({ id: `rejected-${index}`, account_id: accountId, status: "rejected", quality_status: "rejected_low_followers", verification_status: "found" }));
+  const supabase = makeSupabase(baseRows({
+    client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
+    ig_targets: [...eligible, ...rejected],
+  }));
+
+  const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+  assert.equal(result.readiness_status, "ready");
+  assert.equal(result.checks?.ct_count_total, 18);
+  assert.equal(result.checks?.ct_count_eligible, 15);
 });
 
 test("connected account without an assignment is not projected ready", async () => {

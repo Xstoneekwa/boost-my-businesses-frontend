@@ -23,6 +23,11 @@ function readyInput(overrides: Partial<AdminReadinessInput> = {}): AdminReadines
     loginStatus: "connected",
     provisioningStatus: "ready",
     onboardingStatus: "ready",
+    loginIdentityProofStatus: "verified",
+    loginIdentityProfileOpened: true,
+    loginIdentityUsernameMatch: true,
+    loginIdentityVerifiedAt: "2026-06-09T07:59:00.000Z",
+    loginStateInvalidationReason: null,
     assignmentStatus: "active",
     assignmentStartsAt: "2026-06-09T08:00:00.000Z",
     phoneStatus: "online",
@@ -33,6 +38,7 @@ function readyInput(overrides: Partial<AdminReadinessInput> = {}): AdminReadines
     dmSettingsPresent: true,
     welcomeSettingsPresent: true,
     unfollowSettingsPresent: true,
+    eligibleTargetCount: 15,
     dashboardActionsCount: 0,
     blockingActionsCount: 0,
     ...overrides,
@@ -93,6 +99,23 @@ test("connected account with assignment and settings is ready", () => {
 
   assert.equal(projection.overall_readiness_status, "ready");
   assert.equal(projection.overall_readiness_reason, "all_required_readiness_checks_passed");
+});
+
+test("eligible target gate blocks at 14 and passes at 15", () => {
+  const below = buildAdminReadinessProjection(readyInput({ eligibleTargetCount: 14 }));
+  const exact = buildAdminReadinessProjection(readyInput({ eligibleTargetCount: 15 }));
+
+  assert.equal(below.overall_readiness_status, "blocked");
+  assert.equal(below.overall_readiness_reason, "insufficient_eligible_targets");
+  assert.equal(exact.overall_readiness_status, "ready");
+  assert.equal(exact.eligible_target_count, 15);
+  assert.equal(exact.required_eligible_target_count, 15);
+});
+
+test("18 total targets with exactly 15 eligible passes the canonical gate", () => {
+  const projection = buildAdminReadinessProjection(readyInput({ eligibleTargetCount: 15 }));
+  assert.equal(projection.target_readiness_status, "ready");
+  assert.equal(projection.overall_readiness_status, "ready");
 });
 
 test("connected account without unfollow add-on does not block on missing unfollow settings", () => {

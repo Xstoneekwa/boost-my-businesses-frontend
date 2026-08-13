@@ -1,6 +1,10 @@
 import { resolveOrphanLoginRecoveryProjection, clientSecurePreparationMessage } from "./orphan-login-recovery.ts";
 import { loadTargetEligibilityCountsForAccount } from "./account-target-eligibility.ts";
 import { loadPackageRuntimeContract } from "./package-runtime-contract.ts";
+import {
+  CLIENT_ONBOARDING_TARGET_MINIMUM,
+  hasClientOnboardingTargetMinimum,
+} from "../instagram-client/client-account-onboarding-policy.ts";
 import type { createSupabaseClient } from "../supabase.ts";
 
 export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
@@ -402,10 +406,10 @@ export async function runReadinessNow(
   const targetsRequired = accountPackageRequiresTargets(packageSummary);
   const targetBlocker = targetsRequired && targetCounts.total <= 0
     ? "missing_ct"
-    : targetsRequired && targetCounts.eligible <= 0 && targetCounts.pending > 0
+    : targetsRequired && !hasClientOnboardingTargetMinimum(targetCounts.eligible) && targetCounts.pending > 0
       ? "ct_pending_verification"
-      : targetsRequired && targetCounts.eligible <= 0
-        ? "no_eligible_ct"
+      : targetsRequired && !hasClientOnboardingTargetMinimum(targetCounts.eligible)
+        ? "insufficient_eligible_targets"
         : null;
   const blockers = [
     !packageSummary ? "missing_package" : null,
@@ -430,6 +434,7 @@ export async function runReadinessNow(
     ct_count_rejected: targetCounts.rejected,
     ct_count_archived: targetCounts.archived,
     ct_required: targetsRequired,
+    ct_required_eligible_minimum: CLIENT_ONBOARDING_TARGET_MINIMUM,
     ct_advisory_blocker: targetBlocker,
     dm_settings_advisory: !dmSettingsRow,
     blocking_dashboard_action_count: blockingDashboardActionCount,

@@ -37,6 +37,7 @@ function readyInput(overrides: Partial<AdminReadinessInput> = {}): AdminReadines
     dmSettingsPresent: true,
     welcomeSettingsPresent: true,
     unfollowSettingsPresent: true,
+    eligibleTargetCount: 15,
     dashboardActionsCount: 0,
     blockingActionsCount: 0,
     ...overrides,

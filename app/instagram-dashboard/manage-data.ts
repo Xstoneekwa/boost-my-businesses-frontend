@@ -17,6 +17,7 @@ import {
   type AccountAssignmentHealthReason,
 } from "@/lib/instagram-dashboard/account-capacity-state";
 import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical-login-state";
+import { loadTargetEligibilityCountsByAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
 import {
   missingCanonicalClientAccountVisibilityRows,
   type CanonicalClientAccountVisibilitySeed,
@@ -100,6 +101,9 @@ export type ManageAccount = {
   appInstanceLaunchable?: boolean | null;
   appInstanceUsableForAutoLogin?: boolean | null;
   readinessProjection?: AdminReadinessProjection;
+  readiness?: string;
+  eligibility?: string;
+  eligibilityReason?: string;
   profileImageUrl?: string | null;
   profileImageSource?: string | null;
   instagramVerificationStatus?: string | null;
@@ -792,7 +796,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
 
   try {
     const supabase = createSupabaseClient();
-    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult] = await Promise.all([
+    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount] = await Promise.all([
       supabase
         .from("account_dashboard_actions")
         .select("account_id,action_type,status,blocking_campaign")
@@ -809,6 +813,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         .select("account_id,unfollow_enabled,unfollow_mode")
         .in("account_id", accountIds)
         .limit(5000),
+      loadTargetEligibilityCountsByAccount(supabase, accountIds),
     ]);
 
     const errors = [...overview.errors];
@@ -854,11 +859,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         firstBlockingAction: account.primaryBlockReason ?? null,
       };
       const hasFreshActionCounts = actionCountsByAccount.has(account.accountId);
-      return {
-        ...account,
-        blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
-        primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
-        readinessProjection: buildAdminReadinessProjection({
+      const readinessProjection = buildAdminReadinessProjection({
           accountId: account.accountId,
           username: account.username,
           clientId: account.clientId,
@@ -892,9 +893,19 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           dmSettingsPresent: dmSettingsByAccount.has(account.accountId),
           welcomeSettingsPresent: welcomeSettingsByAccount.has(account.accountId),
           unfollowSettingsPresent: unfollowSettingsByAccount.has(account.accountId),
+          eligibleTargetCount: targetCountsByAccount.get(account.accountId)?.eligible ?? null,
           dashboardActionsCount: actionCounts.total,
           blockingActionsCount: actionCounts.blocking,
-        }),
+        });
+      const canonicalReady = readinessProjection.overall_readiness_status === "ready";
+      return {
+        ...account,
+        blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
+        primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
+        readiness: readinessProjection.overall_readiness_status,
+        eligibility: canonicalReady ? "can_start" : "blocked_now",
+        eligibilityReason: readinessProjection.overall_readiness_reason,
+        readinessProjection,
       };
     };
 
