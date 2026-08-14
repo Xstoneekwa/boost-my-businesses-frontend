@@ -1,5 +1,6 @@
 import { getRadarData, type NotificationItem } from "./radar-data";
 import AdminShell from "./AdminShell";
+import { resolveCommercialCrmAccess } from "@/lib/commercial/crm-access";
 
 export default async function InstagramDashboardLayout({
   children,
@@ -10,6 +11,7 @@ export default async function InstagramDashboardLayout({
   let serverCheckBadge = 0;
   let radarNotifications: NotificationItem[] = [];
   let serverCheckNotifications: NotificationItem[] = [];
+  let commercialAccess = false;
 
   try {
     const radarData = await getRadarData();
@@ -20,6 +22,9 @@ export default async function InstagramDashboardLayout({
   } catch {
     // Sidebar renders without badges if radar data is unavailable
   }
+
+  const commercialDecision = await resolveCommercialCrmAccess();
+  commercialAccess = commercialDecision.allowed;
 
   return (
     <>
@@ -35,6 +40,7 @@ export default async function InstagramDashboardLayout({
         serverCheckBadge={serverCheckBadge}
         radarNotifications={radarNotifications}
         serverCheckNotifications={serverCheckNotifications}
+        commercialAccess={commercialAccess}
       >
         {children}
       </AdminShell>

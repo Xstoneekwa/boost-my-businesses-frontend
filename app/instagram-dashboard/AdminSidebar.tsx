@@ -11,6 +11,7 @@ type NavItem = {
   href: string;
   exact?: boolean;
   icon: React.ReactNode;
+  ownerOnly?: boolean;
 };
 
 type NavGroup = {
@@ -29,6 +30,7 @@ interface AdminSidebarProps {
   serverCheckBadge?: number;
   radarNotifications?: NotificationItem[];
   serverCheckNotifications?: NotificationItem[];
+  commercialAccess?: boolean;
 }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -167,6 +169,24 @@ const NAV_GROUPS: NavGroup[] = [
       },
     ],
   },
+  {
+    label: "Business",
+    items: [
+      {
+        key: "commercial",
+        label: "Commercial",
+        href: "/instagram-dashboard/commercial",
+        ownerOnly: true,
+        icon: (
+          <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3v18h18" /><path d="m7 16 4-5 3 3 5-7" />
+            <circle cx="7" cy="16" r="1" fill="currentColor" stroke="none" /><circle cx="11" cy="11" r="1" fill="currentColor" stroke="none" />
+            <circle cx="14" cy="14" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="7" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        ),
+      },
+    ],
+  },
 ];
 
 function isActive(href: string, pathname: string, exact?: boolean): boolean {
@@ -197,6 +217,7 @@ export default function AdminSidebar({
   serverCheckBadge = 0,
   radarNotifications = [],
   serverCheckNotifications = [],
+  commercialAccess = false,
 }: AdminSidebarProps) {
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
@@ -280,6 +301,9 @@ export default function AdminSidebar({
   useEffect(() => { return () => clearCloseTimer(); }, []);
 
   const openItems = openKey ? (notificationItems[openKey] ?? []) : [];
+  const visibleGroups = NAV_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.ownerOnly || commercialAccess) }))
+    .filter((group) => group.items.length > 0);
 
   return (
   <>
@@ -372,7 +396,7 @@ export default function AdminSidebar({
         flexDirection: "column",
         gap: 1,
       }}>
-        {NAV_GROUPS.map((group, gi) => (
+        {visibleGroups.map((group, gi) => (
           <div key={group.label}>
             {/* Section label — hidden when collapsed */}
             {!collapsed && (

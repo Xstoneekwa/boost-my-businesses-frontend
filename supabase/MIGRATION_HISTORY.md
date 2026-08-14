@@ -236,6 +236,20 @@ and redeploy the updated `activate_commercial_plan_change` RPC from repo history
 3. Never add a repair/no-op duplicate for an already-applied change.
 4. Do **not** use the isolated plan-change test project (`nxntngkhkoynljcagmkq`) when validating main-production migration parity.
 
+## Commercial CRM Dashboard V1 — applied
+
+| Local filename | Role |
+|---|---|
+| `20260814212322_commercial_dashboard_read_model_v1.sql` | Service-role-only aggregate read RPC plus cohort/pagination indexes for the owner-only Commercial cockpit |
+
+**Status on main production:** applied as remote version `20260814214125` /
+`commercial_dashboard_read_model_v1` on project `zgafnshkjywfltxgbtzg`.
+Post-apply smoke confirmed the RPC and both indexes, `anon`/`authenticated`
+EXECUTE denied, `service_role` allowed, and all Commercial CRM row counts still
+zero. Security advisor returned no finding on the new objects. Performance only
+reports the two new indexes as unused, expected while the tables are empty. The
+migration changed no Commercial CRM rows and inserted no fixture data.
+
 ## Isolated test database
 
 The plan-change test project (`nxntngkhkoynljcagmkq`) is **out of scope** for this reconciliation. Do not apply these reconciled files there unless a dedicated harness explicitly requires it.

@@ -12,6 +12,7 @@ interface AdminShellProps {
   serverCheckBadge?: number;
   radarNotifications?: NotificationItem[];
   serverCheckNotifications?: NotificationItem[];
+  commercialAccess?: boolean;
 }
 
 export default function AdminShell({
@@ -20,6 +21,7 @@ export default function AdminShell({
   serverCheckBadge = 0,
   radarNotifications = [],
   serverCheckNotifications = [],
+  commercialAccess = false,
 }: AdminShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   // `ready` delays the CSS transition until after hydration to prevent
@@ -73,6 +75,7 @@ export default function AdminShell({
         serverCheckBadge={serverCheckBadge}
         radarNotifications={radarNotifications}
         serverCheckNotifications={serverCheckNotifications}
+        commercialAccess={commercialAccess}
       />
       <div
         style={{

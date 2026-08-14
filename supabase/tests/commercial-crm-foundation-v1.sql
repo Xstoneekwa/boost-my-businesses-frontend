@@ -40,6 +40,7 @@ insert into public.tenant_users (user_id, role) values
 
 \ir ../migrations/20260814210447_commercial_crm_foundation_v1.sql
 \ir ../migrations/20260814211105_commercial_crm_foundation_v1_fk_indexes.sql
+\ir ../migrations/20260814212322_commercial_dashboard_read_model_v1.sql
 
 create or replace function pg_temp.assert_true(p_condition boolean, p_message text)
 returns void language plpgsql as $$
@@ -79,6 +80,13 @@ select pg_temp.assert_true(
      )
      and c.relrowsecurity and c.relforcerowsecurity),
   'all seven tables have enabled and forced RLS'
+);
+
+select pg_temp.assert_true(
+  not has_function_privilege('anon', 'public.commercial_dashboard_read_model_v1(jsonb,integer,integer)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.commercial_dashboard_read_model_v1(jsonb,integer,integer)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.commercial_dashboard_read_model_v1(jsonb,integer,integer)', 'EXECUTE'),
+  'dashboard read RPC is service-role-only'
 );
 
 select pg_temp.assert_true(
@@ -209,6 +217,72 @@ select public.transition_commercial_lead_v1(
   '580d7856-d60f-4838-a5f9-3b405d6ae79b',
   'e0000000-0000-4000-8000-000000000001', 'approve', 'test-approve-1'
 );
+
+with fixture_businesses as (
+  insert into public.commercial_businesses (
+    business_name, country_code, city, vertical, subsegment, instagram_handle, source, metadata_safe
+  )
+  select
+    format('Synthetic Studio %s', n), 'SA',
+    case when n % 2 = 0 then 'Johannesburg' else 'Cape Town' end,
+    'beauty', case when n % 3 = 0 then 'Aesthetic Clinic' else 'Hair Salon' end,
+    format('@SyntheticStudio%s', n), 'test_fixture', jsonb_build_object('fixture_n', n)
+  from generate_series(2, 40) n
+  returning id, (metadata_safe->>'fixture_n')::integer as n
+)
+insert into public.commercial_leads (
+  campaign_id, business_id, qualification_status, score, priority,
+  city_snapshot, subsegment_snapshot, outreach_channel, message_angle, template_version
+)
+select
+  'c0000000-0000-4000-8000-000000000001', fb.id,
+  case when fb.n <= 20 then 'qualified' else 'discovered' end,
+  50 + fb.n,
+  case when fb.n % 5 = 0 then 'high' else 'normal' end,
+  case when fb.n % 2 = 0 then 'Johannesburg' else 'Cape Town' end,
+  case when fb.n % 3 = 0 then 'Aesthetic Clinic' else 'Hair Salon' end,
+  case when fb.n % 2 = 0 then 'email' else 'instagram' end,
+  case when fb.n % 2 = 0 then 'B' else 'A' end,
+  case when fb.n % 2 = 0 then 'EMAIL_BEAUTY_B_V1' else 'IG_BEAUTY_A_V1' end
+from fixture_businesses fb;
+
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,discovered}')::integer = 40,
+  'dashboard counts all 40 deterministic fixture leads'
+);
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,qualified}')::integer = 20
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,contacted}')::integer = 0
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,replies}')::integer = 0
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,hot_leads}')::integer = 0
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,demos}')::integer = 0
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,paid}')::integer = 0,
+  'pre-outreach KPI state is deterministic'
+);
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,paid_per_100_qualified}')::numeric = 0.0,
+  'paid per 100 is zero before a canonical conversion'
+);
+select pg_temp.assert_true(
+  jsonb_array_length(public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>'{queues,needs_approval}') = 8,
+  'needs approval queue is real and bounded'
+);
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 2, 10)#>>'{leads,total}')::integer = 40
+  and jsonb_array_length(public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 2, 10)#>'{leads,rows}') = 10,
+  'lead table pagination is bounded and retains exact total'
+);
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z","search":"Synthetic Beauty Studio"}'::jsonb, 1, 25)#>>'{leads,total}')::integer = 1,
+  'lead search filters business identity'
+);
+select pg_temp.assert_true(
+  jsonb_array_length(public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>'{breakdowns,channel}') = 2
+  and jsonb_array_length(public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>'{breakdowns,angle}') >= 2
+  and jsonb_array_length(public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>'{breakdowns,city}') = 2
+  and jsonb_array_length(public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>'{breakdowns,subsegment}') >= 2,
+  'channel angle city and subsegment breakdowns are present'
+);
 select pg_temp.assert_true(
   (public.transition_commercial_lead_v1(
     '580d7856-d60f-4838-a5f9-3b405d6ae79b',
@@ -279,6 +353,19 @@ select public.transition_commercial_lead_v1(
   'e0000000-0000-4000-8000-000000000001', 'mark_paid', 'test-paid-1',
   '{"fixture":true}'::jsonb, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   null, null, null, null, 'instagram_automation_v1'
+);
+
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,contacted}')::integer = 1
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,replies}')::integer = 1
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,hot_leads}')::integer = 1
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,demos}')::integer = 1
+  and (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,paid}')::integer = 1,
+  'advanced funnel stages reflect canonical state transitions'
+);
+select pg_temp.assert_true(
+  (public.commercial_dashboard_read_model_v1('{"date_from":"2000-01-01T00:00:00Z"}'::jsonb, 1, 25)#>>'{kpis,paid_per_100_qualified}')::numeric = 5.0,
+  'paid customers per 100 qualified is exact at the minimum sample'
 );
 
 select pg_temp.assert_true(
