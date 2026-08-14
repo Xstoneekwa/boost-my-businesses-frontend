@@ -175,6 +175,9 @@ body.dir-neon .rotator {
 }
 .hero p.lead { margin-top: 22px; font-size: 1.18rem; line-height: 1.5; color: var(--hero-ink-dim); max-width: 42ch; text-wrap: pretty; }
 .hero-cta { display: flex; gap: 14px; margin-top: 32px; flex-wrap: wrap; }
+.hero-offer { margin-top: 18px; display: grid; justify-items: center; gap: 4px; }
+.hero-offer strong { font-family: var(--font-display); font-size: 1rem; color: var(--hero-ink); }
+.hero-offer span { font-size: .9rem; color: var(--hero-ink-dim); }
 .hero-micro { margin-top: 18px; display: flex; gap: 18px; flex-wrap: wrap; color: var(--hero-ink-dim); font-size: .9rem; font-weight: 600; }
 .hero-micro span { display: inline-flex; align-items: center; gap: 7px; }
 .hero-micro .ck { color: var(--good); font-weight: 900; }
