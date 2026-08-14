@@ -9,8 +9,14 @@ import {
 import { shouldIncludeOutboxPreviewRow } from "./client-email-lifecycle-outbox-preview.ts";
 import { enrichEffectiveCandidateWithGateProjections } from "./client-email-lifecycle-outbox-gates.ts";
 import { selectEffectiveOutboxCandidates } from "./client-email-lifecycle-outbox-precedence.ts";
-import { isIntentMaterializeOperation } from "./client-email-outbox-materializer.ts";
-import { runNeedsMoreDispatchBatch } from "./client-email-outbox-dispatch.ts";
+import {
+  runLifecycleDispatchBatch,
+  runNeedsMoreDispatchBatch,
+} from "./client-email-outbox-dispatch.ts";
+import {
+  evaluateClientEmailLifecycleAutomationGate,
+  evaluateMaterializeLifecycleAutomationGate,
+} from "./client-email-lifecycle-automation-gates.ts";
 import {
   evaluateNeedsMoreMaterializePersistGate,
   evaluateNeedsMoreDispatchAutomationGate,
@@ -72,11 +78,6 @@ export type ClientEmailLifecycleCronResult = {
   incidentSignals: string[];
 };
 
-function readString(value: unknown, fallback = "") {
-  if (typeof value === "string") return value.trim() || fallback;
-  return fallback;
-}
-
 export function extractClientEmailLifecycleCronSecret(request: Request) {
   const authorization = request.headers.get(CRON_SECRET_HEADER)?.trim() ?? "";
   const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
@@ -128,7 +129,7 @@ async function loadRecipientEmailForClient(
   return resolved.ok ? resolved.email : null;
 }
 
-async function materializeNeedsMoreBatch(
+async function materializeLifecycleBatch(
   supabase: ClientEmailSupabase,
   input: {
     env: Record<string, string | undefined>;
@@ -148,12 +149,15 @@ async function materializeNeedsMoreBatch(
   const rawObservations = plan.rows.filter(shouldIncludeOutboxPreviewRow);
   const selection = selectEffectiveOutboxCandidates(rawObservations);
   const effectiveCandidates = selection.effectiveCandidates
-    .filter((row) => row.category === "needs_more_target_accounts")
     .map((row) => enrichEffectiveCandidateWithGateProjections(row, plan, input.env))
     .filter((row) =>
       row.isEffectiveCandidate === true
       && row.materializationEligible === true
-      && (row.decision === "would_create_initial_intent" || row.decision === "would_create_reminder_intent"),
+      && (
+        row.decision === "would_open_episode"
+        || row.decision === "would_create_initial_intent"
+        || row.decision === "would_create_reminder_intent"
+      ),
     );
 
   let materialized = 0;
@@ -161,7 +165,9 @@ async function materializeNeedsMoreBatch(
   let failed = 0;
 
   for (const candidate of effectiveCandidates) {
-    const recipientEmail = await loadRecipientEmailForClient(supabase, candidate.clientId);
+    const recipientEmail = candidate.decision === "would_open_episode"
+      ? null
+      : await loadRecipientEmailForClient(supabase, candidate.clientId);
     const template = candidate.activeTemplateId
       ? {
         id: candidate.activeTemplateId,
@@ -181,7 +187,7 @@ async function materializeNeedsMoreBatch(
       env: input.env,
     });
 
-    if (decision.status === "materialized" && isIntentMaterializeOperation(decision.operation)) {
+    if (decision.status === "materialized") {
       materialized += 1;
       continue;
     }
@@ -197,6 +203,21 @@ async function materializeNeedsMoreBatch(
     materialized,
     skipped,
     failed,
+  };
+}
+
+function combineBatchResults(
+  first: Awaited<ReturnType<typeof runNeedsMoreDispatchBatch>>,
+  second: Awaited<ReturnType<typeof runLifecycleDispatchBatch>>,
+) {
+  return {
+    dispatchGateOpen: first.dispatchGateOpen || second.dispatchGateOpen,
+    candidates: first.candidates + second.candidates,
+    submitted: first.submitted + second.submitted,
+    canceled: first.canceled + second.canceled,
+    failed: first.failed + second.failed,
+    uncertain: first.uncertain + second.uncertain,
+    skipped: first.skipped + second.skipped,
   };
 }
 
@@ -277,9 +298,12 @@ export async function runClientEmailLifecycleCron(input: {
     return { status: auth.status, result: { reason: auth.reason } };
   }
 
-  const automationGate = evaluateNeedsMoreMaterializePersistGate(env);
+  const needsMoreAutomationGate = evaluateNeedsMoreMaterializePersistGate(env);
+  const lifecycleAutomationGate = evaluateMaterializeLifecycleAutomationGate(env);
+  const automationGateOpen = needsMoreAutomationGate.allowed || lifecycleAutomationGate.allowed;
   const materializeGate = evaluateClientEmailMaterializationExecutionGate(env);
-  const dispatchGate = evaluateNeedsMoreDispatchAutomationGate(env);
+  const needsMoreDispatchGate = evaluateNeedsMoreDispatchAutomationGate(env);
+  const lifecycleDispatchGate = evaluateClientEmailLifecycleAutomationGate(env);
   const incidentSignals: string[] = [];
 
   const emptyReconcile = {
@@ -292,7 +316,7 @@ export async function runClientEmailLifecycleCron(input: {
     persistAllowed: false,
   };
 
-  if (!automationGate.allowed) {
+  if (!automationGateOpen) {
     await recordCronHeartbeat(input.supabase, {
       ok: true,
       invoker,
@@ -313,10 +337,10 @@ export async function runClientEmailLifecycleCron(input: {
         invoker,
         schedulerStatus,
         skipped: true,
-        skipReason: automationGate.reason,
+        skipReason: "all_lifecycle_automation_disabled",
         automationGateOpen: false,
         materializeGateOpen: materializeGate.enabled,
-        dispatchGateOpen: dispatchGate.allowed,
+        dispatchGateOpen: needsMoreDispatchGate.allowed || lifecycleDispatchGate.allowed,
         reconcile: emptyReconcile,
         materialize: { candidates: 0, materialized: 0, skipped: 0, failed: 0 },
         dispatch: {
@@ -334,22 +358,39 @@ export async function runClientEmailLifecycleCron(input: {
 
   let tickOk = true;
   try {
-    const snapshots = await loadAllNeedsMoreTargetsReconcileSnapshots(input.supabase);
-    const reconcile = await reconcileNeedsMoreTargetAccountEmailSequences(input.supabase, {
-      snapshots,
-      now,
-      env,
-    });
+    const snapshots = needsMoreAutomationGate.allowed
+      ? await loadAllNeedsMoreTargetsReconcileSnapshots(input.supabase)
+      : [];
+    const reconcile = needsMoreAutomationGate.allowed
+      ? await reconcileNeedsMoreTargetAccountEmailSequences(input.supabase, {
+        snapshots,
+        now,
+        env,
+      })
+      : emptyReconcile;
 
-    const materialize = materializeGate.enabled
-      ? await materializeNeedsMoreBatch(input.supabase, { env, now })
-      : { candidates: 0, materialized: 0, skipped: 0, failed: 0 };
+    let materialize = { candidates: 0, materialized: 0, skipped: 0, failed: 0 };
+    if (materializeGate.enabled) {
+      // Opening an episode and creating its initial intent are intentionally two
+      // idempotent materializations. A second plan pass lets the same natural
+      // cron complete that chain without a manual tick or duplicate sends.
+      const firstPass = await materializeLifecycleBatch(input.supabase, { env, now });
+      const secondPass = firstPass.materialized > 0
+        ? await materializeLifecycleBatch(input.supabase, { env, now })
+        : { candidates: 0, materialized: 0, skipped: 0, failed: 0 };
+      materialize = {
+        candidates: firstPass.candidates + secondPass.candidates,
+        materialized: firstPass.materialized + secondPass.materialized,
+        skipped: firstPass.skipped + secondPass.skipped,
+        failed: firstPass.failed + secondPass.failed,
+      };
+    }
 
-    const dispatch = await runNeedsMoreDispatchBatch(input.supabase, {
-      env,
-      now,
-      fetcher: input.fetcher,
-    });
+    const [needsMoreDispatch, lifecycleDispatch] = await Promise.all([
+      runNeedsMoreDispatchBatch(input.supabase, { env, now, fetcher: input.fetcher }),
+      runLifecycleDispatchBatch(input.supabase, { env, now, fetcher: input.fetcher }),
+    ]);
+    const dispatch = combineBatchResults(needsMoreDispatch, lifecycleDispatch);
 
     if (dispatch.uncertain > 0) {
       incidentSignals.push("dispatch_uncertain_present");

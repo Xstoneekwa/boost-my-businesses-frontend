@@ -3,6 +3,12 @@ import { loadTargetEligibilityCountsByAccount } from "./account-target-eligibili
 import { createPostmarkClientEmailAdapter } from "./client-email-postmark-adapter.ts";
 import { CLIENT_EMAIL_POSTMARK_STREAM } from "./client-email-provider.ts";
 import { evaluateNeedsMoreDispatchAutomationGate } from "./client-email-needs-more-targets-automation-config.ts";
+import { evaluateCategoryDispatchAutomationGate } from "./client-email-lifecycle-outbox-gates.ts";
+import {
+  isLifecycleCategoryStateActive,
+  type ClientEmailLifecycleEpisodeCategory,
+} from "./client-email-lifecycle-contract.ts";
+import type { ClientEmailTemplateCategory } from "./client-email-constants.ts";
 import {
   loadActiveNeedsMoreTargetAccountsAction,
   NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD,
@@ -16,6 +22,11 @@ const DISPATCHABLE_STATUSES = ["pending", "scheduled"] as const;
 const MAX_DISPATCH_ATTEMPTS = 8;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const DISPATCH_BATCH_LIMIT = 20;
+const LIFECYCLE_DISPATCH_CATEGORIES: ClientEmailLifecycleEpisodeCategory[] = [
+  "account_paused",
+  "account_canceled",
+  "needs_assistance",
+];
 
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
@@ -94,6 +105,71 @@ export async function revalidateNeedsMoreDispatchIntent(
   }
 
   void now;
+  return { ok: true };
+}
+
+export async function revalidateLifecycleDispatchIntent(
+  supabase: ClientEmailSupabase,
+  intent: SupabaseRecord,
+  now: Date,
+): Promise<DispatchRevalidationResult> {
+  const accountId = readString(intent.account_id, "");
+  const clientId = readString(intent.client_id, "");
+  const category = readString(intent.category, "") as ClientEmailLifecycleEpisodeCategory;
+  const episodeId = readString(intent.lifecycle_episode_id, "");
+  if (!accountId || !clientId || !episodeId || !LIFECYCLE_DISPATCH_CATEGORIES.includes(category)) {
+    return { ok: false, cancel: true, reason: "invalid_intent_scope" };
+  }
+
+  const { data: link, error: linkError } = await supabase
+    .from("client_instagram_accounts")
+    .select("client_id")
+    .eq("account_id", accountId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (linkError) throw new Error(linkError.message);
+  if (!link) return { ok: false, cancel: true, reason: "tenant_account_mismatch" };
+
+  const { data: episode, error: episodeError } = await supabase
+    .from("client_email_lifecycle_episodes")
+    .select("id,status,account_id,client_id,category")
+    .eq("id", episodeId)
+    .maybeSingle();
+  if (episodeError) throw new Error(episodeError.message);
+  if (!episode
+    || readString((episode as SupabaseRecord).status) !== "active"
+    || readString((episode as SupabaseRecord).account_id) !== accountId
+    || readString((episode as SupabaseRecord).client_id) !== clientId
+    || readString((episode as SupabaseRecord).category) !== category) {
+    return { ok: false, cancel: true, reason: "lifecycle_episode_inactive" };
+  }
+
+  const { data: account, error: accountError } = await supabase
+    .from("ig_accounts")
+    .select("admin_lifecycle_status")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (accountError) throw new Error(accountError.message);
+  if (!account || !isLifecycleCategoryStateActive(
+    category,
+    readString((account as SupabaseRecord).admin_lifecycle_status),
+  )) {
+    return { ok: false, cancel: true, reason: "lifecycle_state_cleared" };
+  }
+
+  const recipientEmail = readString(intent.recipient_email, "");
+  if (!recipientEmail) return { ok: false, cancel: true, reason: "missing_recipient_email" };
+  const intentId = readString(intent.id, "");
+  if (await isIntentRecipientSuppressed(supabase, intentId)) {
+    return { ok: false, cancel: true, reason: "recipient_suppressed" };
+  }
+  const scheduledFor = readString(intent.scheduled_for, "");
+  if (scheduledFor) {
+    const scheduledMs = new Date(scheduledFor).getTime();
+    if (!Number.isNaN(scheduledMs) && scheduledMs > now.getTime()) {
+      return { ok: false, cancel: true, reason: "not_yet_scheduled" };
+    }
+  }
   return { ok: true };
 }
 
@@ -253,6 +329,26 @@ export async function listNeedsMoreDispatchCandidates(
   return (data ?? []) as SupabaseRecord[];
 }
 
+export async function listLifecycleDispatchCandidates(
+  supabase: ClientEmailSupabase,
+  now: Date,
+  limit = DISPATCH_BATCH_LIMIT,
+) {
+  const nowIso = now.toISOString();
+  const { data, error } = await supabase
+    .from("client_email_send_intents")
+    .select("*")
+    .in("category", LIFECYCLE_DISPATCH_CATEGORIES)
+    .eq("intent_kind", "client")
+    .in("status", [...DISPATCHABLE_STATUSES])
+    .is("provider_message_id", null)
+    .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as SupabaseRecord[];
+}
+
 export type DispatchIntentResult =
   | { outcome: "skipped"; reason: string }
   | { outcome: "canceled"; reason: string }
@@ -338,6 +434,72 @@ export async function dispatchSingleNeedsMoreIntent(
   };
 }
 
+export async function dispatchSingleLifecycleIntent(
+  supabase: ClientEmailSupabase,
+  intentRow: SupabaseRecord,
+  input: {
+    env?: Record<string, string | undefined>;
+    now?: Date;
+    fetcher?: typeof fetch;
+  } = {},
+): Promise<DispatchIntentResult> {
+  const env = input.env ?? process.env;
+  const now = input.now ?? new Date();
+  const category = readString(intentRow.category, "") as ClientEmailTemplateCategory;
+  const dispatchGate = evaluateCategoryDispatchAutomationGate(category, env);
+  if (!dispatchGate.allowed) return { outcome: "skipped", reason: dispatchGate.reason };
+
+  const intentId = readString(intentRow.id, "");
+  if (!intentId) return { outcome: "skipped", reason: "missing_intent_id" };
+  const claimed = await claimNeedsMoreDispatchIntent(supabase, intentId, now);
+  if (!claimed) return { outcome: "skipped", reason: "claim_lost" };
+
+  const revalidation = await revalidateLifecycleDispatchIntent(supabase, claimed, now);
+  if (!revalidation.ok) {
+    await cancelDispatchIntent(supabase, intentId, revalidation.reason, now);
+    return { outcome: "canceled", reason: revalidation.reason };
+  }
+
+  const adapter = createPostmarkClientEmailAdapter(env, input.fetcher);
+  const reminderIndexRaw = claimed.reminder_index;
+  let sendResult;
+  try {
+    sendResult = await adapter.send({
+      intentId,
+      fromEmail: readString(claimed.from_email_snapshot || claimed.from_email, ""),
+      recipientEmail: readString(claimed.recipient_email, ""),
+      subject: readString(claimed.snapshot_subject, ""),
+      bodyText: readString(claimed.snapshot_body_text, ""),
+      bodyHtml: readString(claimed.snapshot_body_html, ""),
+      messageStream: CLIENT_EMAIL_POSTMARK_STREAM,
+      category,
+      accountId: readString(claimed.account_id, ""),
+      trigger: readString(claimed.trigger, "automatic_initial") as "automatic_initial",
+      reminderIndex: typeof reminderIndexRaw === "number" ? reminderIndexRaw : null,
+    });
+  } catch {
+    await finalizeDispatchIntentUncertain(supabase, intentId, "provider_timeout", now);
+    return { outcome: "dispatch_uncertain", intentId, reason: "provider_timeout" };
+  }
+
+  const attemptCount = readNumber(claimed.dispatch_attempt_count, 1);
+  if (!sendResult.ok) {
+    if (sendResult.reason === "sending_disabled" || sendResult.reason === "provider_not_configured") {
+      await cancelDispatchIntent(supabase, intentId, sendResult.reason, now);
+      return { outcome: "canceled", reason: sendResult.reason };
+    }
+    await finalizeDispatchIntentFailed(supabase, intentId, sendResult.reason, now, {
+      attemptCount,
+      releaseForRetry: sendResult.reason !== "invalid_from_email"
+        && sendResult.reason !== "invalid_recipient_email",
+    });
+    return { outcome: "failed", intentId, reason: sendResult.reason };
+  }
+
+  await finalizeDispatchIntentSent(supabase, intentId, sendResult.providerMessageId, now);
+  return { outcome: "submitted", intentId, providerMessageId: sendResult.providerMessageId };
+}
+
 export async function runNeedsMoreDispatchBatch(
   supabase: ClientEmailSupabase,
   input: {
@@ -369,6 +531,53 @@ export async function runNeedsMoreDispatchBatch(
     results.push(await dispatchSingleNeedsMoreIntent(supabase, candidate, { env, now, fetcher: input.fetcher }));
   }
 
+  return {
+    dispatchGateOpen: true,
+    gateReason: null,
+    candidates: candidates.length,
+    submitted: results.filter((item) => item.outcome === "submitted").length,
+    canceled: results.filter((item) => item.outcome === "canceled").length,
+    failed: results.filter((item) => item.outcome === "failed").length,
+    uncertain: results.filter((item) => item.outcome === "dispatch_uncertain").length,
+    skipped: results.filter((item) => item.outcome === "skipped").length,
+    results,
+  };
+}
+
+export async function runLifecycleDispatchBatch(
+  supabase: ClientEmailSupabase,
+  input: {
+    env?: Record<string, string | undefined>;
+    now?: Date;
+    fetcher?: typeof fetch;
+  } = {},
+) {
+  const env = input.env ?? process.env;
+  const now = input.now ?? new Date();
+  const dispatchGateOpen = LIFECYCLE_DISPATCH_CATEGORIES.some((category) =>
+    evaluateCategoryDispatchAutomationGate(category, env).allowed);
+  if (!dispatchGateOpen) {
+    return {
+      dispatchGateOpen: false,
+      gateReason: "lifecycle_dispatch_disabled",
+      candidates: 0,
+      submitted: 0,
+      canceled: 0,
+      failed: 0,
+      uncertain: 0,
+      skipped: 0,
+      results: [] as DispatchIntentResult[],
+    };
+  }
+  const candidates = await listLifecycleDispatchCandidates(supabase, now);
+  const results: DispatchIntentResult[] = [];
+  for (const candidate of candidates) {
+    results.push(await dispatchSingleLifecycleIntent(supabase, candidate, {
+      env,
+      now,
+      fetcher: input.fetcher,
+    }));
+  }
   return {
     dispatchGateOpen: true,
     gateReason: null,

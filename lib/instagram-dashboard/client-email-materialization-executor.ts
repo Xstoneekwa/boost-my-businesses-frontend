@@ -8,7 +8,6 @@ import type { ClientEmailOutboxDecision } from "./client-email-lifecycle-outbox-
 import type { OutboxEffectiveCandidateRow } from "./client-email-lifecycle-outbox-precedence.ts";
 import {
   buildMaterializeCandidateCommand,
-  isIntentMaterializeOperation,
   materializeClientEmailOutboxCandidateInternal,
   resolveStrictMaterializeOperation,
   validateMaterializeEffectiveCandidate,
@@ -75,8 +74,10 @@ export type SingleClientEmailMaterializationExecutorInput = {
 
 function isExecutableMaterializationDecision(
   decision: ClientEmailOutboxDecision,
-): decision is "would_create_initial_intent" | "would_create_reminder_intent" {
-  return decision === "would_create_initial_intent" || decision === "would_create_reminder_intent";
+): decision is "would_open_episode" | "would_create_initial_intent" | "would_create_reminder_intent" {
+  return decision === "would_open_episode"
+    || decision === "would_create_initial_intent"
+    || decision === "would_create_reminder_intent";
 }
 
 export function revalidateSingleMaterializationCandidate(input: {
@@ -107,9 +108,7 @@ export function revalidateSingleMaterializationCandidate(input: {
     return {
       status: "revalidation_failed",
       code: "invalid_decision",
-      reason: candidate.decision === "would_open_episode"
-        ? "execute_initial_must_not_use_open_operation"
-        : "decision_not_materializable",
+      reason: "decision_not_materializable",
     };
   }
 
@@ -132,11 +131,11 @@ export function revalidateSingleMaterializationCandidate(input: {
     reminderIndex: candidate.reminderIndex,
     parentId: candidate.parentId,
   });
-  if (!operation || !isIntentMaterializeOperation(operation)) {
+  if (!operation) {
     return {
       status: "revalidation_failed",
       code: "invalid_operation",
-      reason: "execute_requires_create_intent_operation",
+      reason: "unsupported_materialize_operation",
     };
   }
 
@@ -155,14 +154,6 @@ export function revalidateSingleMaterializationCandidate(input: {
       status: "revalidation_failed",
       code: commandResult.code,
       reason: commandResult.reason,
-    };
-  }
-
-  if (!isIntentMaterializeOperation(commandResult.command.operation)) {
-    return {
-      status: "revalidation_failed",
-      code: "invalid_operation",
-      reason: "execute_requires_create_intent_operation",
     };
   }
 

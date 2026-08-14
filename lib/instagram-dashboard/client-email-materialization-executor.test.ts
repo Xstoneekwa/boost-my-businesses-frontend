@@ -221,15 +221,18 @@ test("missing recipient email fails revalidation", () => {
   assert.equal(revalidation.code, "missing_recipient_email");
 });
 
-test("would_open_episode candidate is rejected for execute initial path", () => {
+test("would_open_episode candidate materializes without recipient because no send exists yet", () => {
   const revalidation = revalidateSingleMaterializationCandidate({
     candidate: buildEffectiveRow({ decision: "would_open_episode" }),
-    recipientEmail: "client@example.com",
+    recipientEmail: null,
     deliverySettings,
     env: materializeReadyEnv,
   });
-  assert.equal(revalidation.status, "revalidation_failed");
-  assert.equal(revalidation.reason, "execute_initial_must_not_use_open_operation");
+  assert.equal("valid" in revalidation && revalidation.valid, true);
+  if ("valid" in revalidation && revalidation.valid) {
+    assert.equal(revalidation.command.operation, "open_lifecycle_episode");
+    assert.equal(revalidation.command.recipientEmail, null);
+  }
 });
 
 test("needs-more reminder requires active sequence parent", () => {
