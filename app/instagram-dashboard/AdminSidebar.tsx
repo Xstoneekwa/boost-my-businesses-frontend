@@ -427,6 +427,7 @@ export default function AdminSidebar({
                 <Link
                   href={item.href}
                   title={collapsed ? item.label : undefined}
+                  aria-label={collapsed ? item.label : undefined}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -518,6 +519,7 @@ export default function AdminSidebar({
           target="_blank"
           rel="noopener noreferrer"
           title={collapsed ? "Service page" : undefined}
+          aria-label={collapsed ? "Service page" : undefined}
           style={{
             display: "flex",
             alignItems: "center",

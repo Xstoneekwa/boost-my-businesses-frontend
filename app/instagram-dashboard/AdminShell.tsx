@@ -1,10 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import AdminSidebar from "./AdminSidebar";
 import type { NotificationItem } from "./radar-data";
 
 const COLLAPSE_KEY = "iad_sidebar_collapsed";
+const MOBILE_SIDEBAR_QUERY = "(max-width: 760px)";
+
+function subscribeToMobileSidebar(callback: () => void) {
+  const query = window.matchMedia(MOBILE_SIDEBAR_QUERY);
+  query.addEventListener("change", callback);
+  return () => query.removeEventListener("change", callback);
+}
+
+function getMobileSidebarSnapshot() {
+  return window.matchMedia(MOBILE_SIDEBAR_QUERY).matches;
+}
+
+function getMobileSidebarServerSnapshot() {
+  return false;
+}
 
 interface AdminShellProps {
   children: React.ReactNode;
@@ -24,6 +39,12 @@ export default function AdminShell({
   commercialAccess = false,
 }: AdminShellProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const mobileSidebar = useSyncExternalStore(
+    subscribeToMobileSidebar,
+    getMobileSidebarSnapshot,
+    getMobileSidebarServerSnapshot,
+  );
+  const effectiveCollapsed = collapsed || mobileSidebar;
   // `ready` delays the CSS transition until after hydration to prevent
   // an animate-on-load flash when restoring a collapsed state from localStorage.
   const [ready, setReady] = useState(false);
@@ -57,7 +78,7 @@ export default function AdminShell({
         position: "fixed",
         inset: 0,
         display: "grid",
-        gridTemplateColumns: collapsed ? "48px 1fr" : "234px 1fr",
+        gridTemplateColumns: effectiveCollapsed ? "48px minmax(0, 1fr)" : "234px minmax(0, 1fr)",
         height: "100vh",
         overflow: "hidden",
         background: "#0c0d10",
@@ -69,8 +90,8 @@ export default function AdminShell({
       }}
     >
       <AdminSidebar
-        collapsed={collapsed}
-        onToggle={() => setCollapsed((c) => !c)}
+        collapsed={effectiveCollapsed}
+        onToggle={mobileSidebar ? undefined : () => setCollapsed((c) => !c)}
         radarBadge={radarBadge}
         serverCheckBadge={serverCheckBadge}
         radarNotifications={radarNotifications}
