@@ -30,6 +30,7 @@ type AccountContext = {
   entitlementId: string | null;
   stripeSubscriptionId: string | null;
   commercialState: CommercialLifecycleState;
+  pausedAt: string | null;
   pauseExpiresAt: string | null;
   stripeBillingPaused: boolean;
   resolutionIssue: string | null;
@@ -128,6 +129,7 @@ async function loadAccountContext(
     entitlementId,
     stripeSubscriptionId,
     commercialState: readCommercialState(stateRow),
+    pausedAt: readString(stateRow?.paused_at) || null,
     pauseExpiresAt: readString(stateRow?.pause_expires_at) || null,
     stripeBillingPaused: stateRow?.stripe_billing_paused === true,
     resolutionIssue,
@@ -197,6 +199,23 @@ async function reconcileOperationalProjection(
     throw new Error(readString(result.reason, "operational_projection_reconciliation_blocked"));
   }
   return result;
+}
+
+async function reconcileCommercialResumeBlockers(
+  supabase: SupabaseClient,
+  accountId: string,
+) {
+  const { data, error } = await supabase.rpc("reconcile_commercial_resume_blockers_v1", {
+    p_account_id: accountId,
+    p_source: "commercial_resume_preflight",
+  });
+  if (error) throw new Error(error.message || "commercial_resume_preflight_failed");
+  const result = data && typeof data === "object" && !Array.isArray(data) ? data as Row : {};
+  return {
+    ok: result.ok === true,
+    reason: readString(result.reason, "commercial_resume_preflight_blocked"),
+    reconciledCount: Number(result.reconciled_count ?? 0),
+  };
 }
 
 async function markEntitlementCancelled(
@@ -622,6 +641,37 @@ export async function executeCommercialAccountLifecycle(input: {
         throw new Error("pause_expired");
       }
 
+      const blockerPreflight = await reconcileCommercialResumeBlockers(supabase, accountId);
+      if (!blockerPreflight.ok) {
+        await finishOperation(supabase, claim.operationId, "failed", blockerPreflight.reason);
+        await auditLifecycle(supabase, {
+          accountId,
+          action: "commercial_resume_preflight_blocked",
+          actor: input.actor,
+          payload: {
+            reason: blockerPreflight.reason,
+            reconciled_count: blockerPreflight.reconciledCount,
+            stripe_mutated: false,
+            lifecycle_mutated: false,
+          },
+        });
+        return buildResult({
+          ok: false,
+          accountId,
+          operationType,
+          commercialState: ctx.commercialState,
+          idempotencyKey,
+          operationId: claim.operationId,
+          converged: false,
+          actionRequired: true,
+          actionRequiredReason: blockerPreflight.reason,
+          pauseExpiresAt: ctx.pauseExpiresAt,
+          stripeBillingPaused: ctx.stripeBillingPaused,
+          capacityReleaseStatus: "not_applicable",
+          runtimeQuiesced: true,
+        });
+      }
+
       await upsertLifecycleState(supabase, {
         accountId,
         commercialState: "resume_requested",
@@ -658,30 +708,94 @@ export async function executeCommercialAccountLifecycle(input: {
         });
       }
 
-      await setAdminLifecycleStatus(supabase, accountId, "active");
-      await reconcileOperationalProjection(
-        supabase,
-        accountId,
-        "commercial_resume",
-        input.actor.actorId,
-      );
-      await upsertLifecycleState(supabase, {
-        accountId,
-        entitlementId: ctx.entitlementId,
-        stripeSubscriptionId: ctx.stripeSubscriptionId,
-        commercialState: "active",
-        pauseExpiresAt: null,
-        pausedAt: null,
-        stripeBillingPaused: false,
-        actionRequiredReason: null,
-        lastOperationId: claim.operationId,
-        lastIdempotencyKey: idempotencyKey,
-      });
-      await updateStripeProjectionBilling(supabase, ctx.stripeSubscriptionId, {
-        billingPaused: false,
-        pauseCollectionBehavior: null,
-      });
-      await reconcileClientAccountNotificationsForAccount(supabase, accountId);
+      try {
+        await setAdminLifecycleStatus(supabase, accountId, "active");
+        await reconcileOperationalProjection(
+          supabase,
+          accountId,
+          "commercial_resume",
+          input.actor.actorId,
+        );
+        await upsertLifecycleState(supabase, {
+          accountId,
+          entitlementId: ctx.entitlementId,
+          stripeSubscriptionId: ctx.stripeSubscriptionId,
+          commercialState: "active",
+          pauseExpiresAt: null,
+          pausedAt: null,
+          stripeBillingPaused: false,
+          actionRequiredReason: null,
+          lastOperationId: claim.operationId,
+          lastIdempotencyKey: idempotencyKey,
+        });
+        await updateStripeProjectionBilling(supabase, ctx.stripeSubscriptionId, {
+          billingPaused: false,
+          pauseCollectionBehavior: null,
+        });
+        await reconcileClientAccountNotificationsForAccount(supabase, accountId);
+      } catch (postResumeError) {
+        const reason = postResumeError instanceof Error
+          ? postResumeError.message
+          : "commercial_resume_post_stripe_failed";
+        const compensationKey = `${idempotencyKey}:compensate`.slice(0, 200);
+        try {
+          await getStripe().pauseCollectionVoid(ctx.stripeSubscriptionId, compensationKey);
+          await setAdminLifecycleStatus(supabase, accountId, "paused");
+          await upsertLifecycleState(supabase, {
+            accountId,
+            entitlementId: ctx.entitlementId,
+            stripeSubscriptionId: ctx.stripeSubscriptionId,
+            commercialState: "paused",
+            pausedAt: ctx.pausedAt,
+            pauseExpiresAt: ctx.pauseExpiresAt,
+            stripeBillingPaused: true,
+            actionRequiredReason: null,
+            lastOperationId: claim.operationId,
+            lastIdempotencyKey: idempotencyKey,
+          });
+          await updateStripeProjectionBilling(supabase, ctx.stripeSubscriptionId, {
+            billingPaused: true,
+            pauseCollectionBehavior: "void",
+          });
+          await finishOperation(supabase, claim.operationId, "failed", reason.slice(0, 240));
+          await auditLifecycle(supabase, {
+            accountId,
+            action: "commercial_resume_compensated",
+            actor: input.actor,
+            payload: { reason, commercial_state: "paused", stripe_billing_paused: true },
+          });
+          return buildResult({
+            ok: false,
+            accountId,
+            operationType,
+            commercialState: "paused",
+            idempotencyKey,
+            operationId: claim.operationId,
+            converged: false,
+            actionRequired: true,
+            actionRequiredReason: reason,
+            pauseExpiresAt: ctx.pauseExpiresAt,
+            stripeBillingPaused: true,
+            capacityReleaseStatus: "not_applicable",
+            runtimeQuiesced: true,
+          });
+        } catch (compensationError) {
+          const compensationReason = compensationError instanceof Error
+            ? compensationError.message
+            : "resume_compensation_failed";
+          await failLifecycleActionRequired(supabase, {
+            accountId,
+            operationType,
+            idempotencyKey,
+            operationId: claim.operationId,
+            reason: "resume_compensation_failed",
+            pauseExpiresAt: ctx.pauseExpiresAt,
+            stripeBillingPaused: false,
+            runtimeQuiesced: true,
+          });
+          throw new Error(`resume_compensation_failed:${compensationReason}`);
+        }
+      }
       await finishOperation(supabase, claim.operationId, "completed");
       await auditLifecycle(supabase, { accountId, action: "commercial_resume_completed", actor: input.actor, payload: {} });
 
@@ -883,6 +997,80 @@ export async function executeCommercialAccountLifecycle(input: {
     }
     throw error;
   }
+}
+
+export async function recoverFailedCommercialResumeToPaused(input: {
+  supabase: SupabaseClient;
+  accountId: string;
+  pausedAt: string;
+  pauseExpiresAt: string;
+  actor: CommercialLifecycleActor;
+  stripeGateway?: AccountLifecycleStripeGateway;
+  env?: NodeJS.ProcessEnv;
+}): Promise<{ recovered: boolean; reason: string }> {
+  const accountId = readString(input.accountId);
+  const pausedAt = readString(input.pausedAt);
+  const pauseExpiresAt = readString(input.pauseExpiresAt);
+  if (!accountId || !pausedAt || !pauseExpiresAt) throw new Error("invalid_resume_recovery_input");
+
+  const ctx = await loadAccountContext(input.supabase, accountId);
+  if (ctx.commercialState === "paused" && ctx.stripeBillingPaused) {
+    return { recovered: false, reason: "already_paused" };
+  }
+  if (ctx.commercialState !== "resume_requested") {
+    throw new Error("resume_recovery_not_allowed_from_state");
+  }
+
+  const { data: lifecycleState } = await input.supabase
+    .from("commercial_account_lifecycle_states")
+    .select("last_operation_id")
+    .eq("account_id", accountId)
+    .maybeSingle<Row>();
+  const lastOperationId = readString(lifecycleState?.last_operation_id);
+  if (!lastOperationId) throw new Error("resume_recovery_failed_operation_missing");
+
+  const { data: operation } = await input.supabase
+    .from("commercial_account_lifecycle_operations")
+    .select("id,state,operation_type,error_redacted")
+    .eq("id", lastOperationId)
+    .maybeSingle<Row>();
+  if (readString(operation?.operation_type) !== "resume" || readString(operation?.state) !== "failed") {
+    throw new Error("resume_recovery_requires_failed_resume_operation");
+  }
+  if (!ctx.stripeSubscriptionId) throw new Error("commercial_subscription_missing");
+
+  const recoveryKey = `resume-recovery:${accountId}:${readString(operation?.id)}`.slice(0, 200);
+  const stripe = input.stripeGateway ?? getAccountLifecycleStripeGateway(input.env);
+  await stripe.pauseCollectionVoid(ctx.stripeSubscriptionId, recoveryKey);
+  await setAdminLifecycleStatus(input.supabase, accountId, "paused");
+  await upsertLifecycleState(input.supabase, {
+    accountId,
+    entitlementId: ctx.entitlementId,
+    stripeSubscriptionId: ctx.stripeSubscriptionId,
+    commercialState: "paused",
+    pausedAt,
+    pauseExpiresAt,
+    stripeBillingPaused: true,
+    actionRequiredReason: null,
+    lastOperationId: readString(operation?.id),
+    lastIdempotencyKey: recoveryKey,
+  });
+  await updateStripeProjectionBilling(input.supabase, ctx.stripeSubscriptionId, {
+    billingPaused: true,
+    pauseCollectionBehavior: "void",
+  });
+  await auditLifecycle(input.supabase, {
+    accountId,
+    action: "commercial_failed_resume_recovered_to_paused",
+    actor: input.actor,
+    payload: {
+      failed_operation_id: readString(operation?.id),
+      original_error: readString(operation?.error_redacted),
+      paused_at: pausedAt,
+      pause_expires_at: pauseExpiresAt,
+    },
+  });
+  return { recovered: true, reason: "failed_resume_recovered_to_paused" };
 }
 
 export async function processExpiredCommercialPauses(input: {
