@@ -96,6 +96,28 @@ The production contract is implemented by migration
 access remains least-privilege: `service_role` only; `public`, `anon` and
 `authenticated` have no execute privilege.
 
+### Atomic operator-review runtime reactivation V3 (14 August 2026)
+
+`Resolve after verification` also closes the runtime pause in the same
+canonical transition. When the resolved non-security incident was the sole
+reason for `account_status=paused_manual_review`, the linked action resolution
+atomically restores only that runtime projection to `active`. The operator does
+not need a second, hidden `Active` control.
+
+The transition is generic and contains no account allowlist. It remains
+fail-closed when another open blocking operator-review incident exists, for an
+explicit security incident, or when the current account status was not created
+by the operator-review pause. It never changes the schedule, package,
+commercial lifecycle, manual-stop state, or another account, and it never
+creates a request, run, tick, or device action. Repeated resolution and
+reconciliation are idempotent and emit at most one runtime-reactivation audit
+event per actual paused-to-active transition.
+
+Migration `incident_resolution_atomic_runtime_reactivation_v3` installs the
+resolved-action trigger, a service-role-only reconciliation RPC, and a bounded
+one-time repair for accounts stranded by the former two-step contract. The
+production migration version recorded by Supabase is `20260814001446`.
+
 Acknowledgment and notes do not notify, avoiding review spam. A resolution
 prepares one unique event-scoped delivery key per enabled/configured channel.
 The database commits before provider delivery, so a Slack success and Discord
