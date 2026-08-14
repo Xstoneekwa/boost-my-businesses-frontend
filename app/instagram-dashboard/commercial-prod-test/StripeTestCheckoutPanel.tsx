@@ -26,6 +26,8 @@ export default function StripeTestCheckoutPanel() {
   const [mappings, setMappings] = useState<CatalogMapping[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [targetAccountId, setTargetAccountId] = useState("");
   const [planKey, setPlanKey] = useState("pro");
   const [months, setMonths] = useState(1);
   const [outreach, setOutreach] = useState("");
@@ -98,8 +100,12 @@ export default function StripeTestCheckoutPanel() {
           billing_interval_months: months,
           outreach_addon_key: outreach || null,
           purchaser_email: email,
-          password,
-          flow_type: "first_purchase",
+          password: targetAccountId ? null : password,
+          flow_type: targetAccountId ? "additional_account" : "first_purchase",
+          client_id: targetAccountId ? clientId : null,
+          target_account_id: targetAccountId || null,
+          billing_source: targetAccountId ? "stripe_test_modern" : null,
+          commercial_migration_reason: targetAccountId ? "lifecycle_e2e_certification" : null,
           idempotency_key: idempotencyKey,
         }),
       });
@@ -176,14 +182,25 @@ export default function StripeTestCheckoutPanel() {
       <form className="commercial-prod-test-stripe-form" onSubmit={(event) => void launchCheckout(event)}>
         <h3>Launch Stripe Test checkout</h3>
         <label>
+          Existing client ID (optional)
+          <input value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder="uuid" />
+        </label>
+        <label>
+          Existing Instagram account ID (optional)
+          <input value={targetAccountId} onChange={(event) => setTargetAccountId(event.target.value)} placeholder="uuid" />
+        </label>
+        <label>
           Authorized purchaser email
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required={!targetAccountId} />
         </label>
         <label>
           Password (used once for identity prep; never stored in commercial records)
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required={!targetAccountId} />
         </label>
-        <button type="submit" disabled={loading || !email || !password}>
+        <button
+          type="submit"
+          disabled={loading || (targetAccountId ? !clientId : !email || !password)}
+        >
           Create Stripe Test checkout session
         </button>
       </form>

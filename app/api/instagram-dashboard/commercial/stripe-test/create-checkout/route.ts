@@ -11,6 +11,7 @@ import {
   resolveStripeTestCheckoutRedirectOrigin,
   StripeFoundationError,
 } from "@/lib/commercial/stripe/stripe-config.ts";
+import { resolveExistingAccountCheckoutEmail } from "@/lib/commercial/stripe/stripe-existing-account-binding.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,16 +35,27 @@ export async function POST(request: Request) {
       return jsonError("Authenticated admin identity is required.", 401, { code: "admin_identity_required" });
     }
     const origin = resolveStripeTestCheckoutRedirectOrigin(request.url);
-    const result = await createStripeSubscriptionCheckoutSession(createSupabaseClient(), {
+    const supabase = createSupabaseClient();
+    const targetAccountId = readString(body.target_account_id) || null;
+    const clientId = readString(body.client_id) || null;
+    let purchaserEmail = readString(body.purchaser_email);
+    if (targetAccountId && clientId && !purchaserEmail) {
+      const resolvedEmail = await resolveExistingAccountCheckoutEmail(supabase, clientId);
+      if (!resolvedEmail.ok) {
+        return jsonError("Canonical client billing email is required.", 409, { code: resolvedEmail.code });
+      }
+      purchaserEmail = resolvedEmail.email;
+    }
+    const result = await createStripeSubscriptionCheckoutSession(supabase, {
       planKey: readString(body.plan_key, "pro"),
       billingIntervalMonths: Number(body.billing_interval_months ?? 1),
       outreachAddonKey: readString(body.outreach_addon_key) || null,
-      purchaserEmail: readString(body.purchaser_email),
+      purchaserEmail,
       flowType: readString(body.flow_type) === "additional_account" ? "additional_account" : "first_purchase",
       idempotencyKey: readString(body.idempotency_key) || crypto.randomUUID(),
-      clientId: readString(body.client_id) || null,
+      clientId,
       authUserId: adminContext.userId,
-      targetAccountId: readString(body.target_account_id) || null,
+      targetAccountId,
       billingSource: readString(body.billing_source) || null,
       commercialMigrationReason: readString(body.commercial_migration_reason) || null,
       password: readString(body.password) || null,

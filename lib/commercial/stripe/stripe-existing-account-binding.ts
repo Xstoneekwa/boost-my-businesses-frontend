@@ -93,6 +93,32 @@ export async function assertExistingAccountStripeCheckoutTarget(
   return { ok: true as const, clientId, accountId };
 }
 
+export async function resolveExistingAccountCheckoutEmail(
+  supabase: SupabaseClient,
+  clientIdInput: string,
+) {
+  const clientId = readString(clientIdInput);
+  if (!clientId) return { ok: false as const, code: "target_client_required" as const };
+
+  const { data: client, error } = await supabase
+    .from("clients")
+    .select("id,metadata")
+    .eq("id", clientId)
+    .limit(1)
+    .maybeSingle<Row>();
+  if (error || !client?.id) {
+    return { ok: false as const, code: "target_client_not_found" as const };
+  }
+  const metadata = client.metadata && typeof client.metadata === "object"
+    ? client.metadata as Row
+    : {};
+  const email = readString(metadata.contact_email, readString(metadata.primary_contact_email)).toLowerCase();
+  if (!email.includes("@")) {
+    return { ok: false as const, code: "target_client_email_missing" as const };
+  }
+  return { ok: true as const, email };
+}
+
 export async function bindActivatedEntitlementToExistingAccount(
   supabase: SupabaseClient,
   input: { entitlementId: string; accountId: string; clientId: string },
