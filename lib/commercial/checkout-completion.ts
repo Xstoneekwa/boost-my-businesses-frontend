@@ -7,6 +7,12 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
+const CHECKOUT_TENANT_MEMBERSHIP_ROLES = new Set(["tenant", "superadmin"]);
+
+export function isCanonicalCheckoutTenantMembershipRole(value: unknown) {
+  return CHECKOUT_TENANT_MEMBERSHIP_ROLES.has(readString(value));
+}
+
 export type ActivationCompletionSnapshot = {
   authUserId: string;
   clientId: string;
@@ -61,7 +67,9 @@ export async function verifyActivationCompletion(
   if (authUser.error || !authUser.data.user?.id) return { ok: false as const, reason: "auth_missing" };
   if (!client.data?.id || readString(client.data.status) !== "active") return { ok: false as const, reason: "client_missing" };
   if (!tenantUser.data?.user_id) return { ok: false as const, reason: "tenant_user_missing" };
-  if (readString(tenantUser.data.role) !== "tenant") return { ok: false as const, reason: "tenant_user_role_invalid" };
+  if (!isCanonicalCheckoutTenantMembershipRole(tenantUser.data.role)) {
+    return { ok: false as const, reason: "tenant_user_role_invalid" };
+  }
   if (!clientUser.data?.id) return { ok: false as const, reason: "client_user_missing" };
   if (!subscription.data?.id) return { ok: false as const, reason: "subscription_missing" };
   if (!entitlement.data?.id || readString(entitlement.data.status) !== "entitlement_reserved") {
