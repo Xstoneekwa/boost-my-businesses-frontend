@@ -26,6 +26,7 @@ import { assertStripeTestLivemode } from "./stripe-config.ts";
 import { reconcilePaidStripeSubscriptionProjection } from "./stripe-subscription-webhook-reconciliation.ts";
 import { STRIPE_ATTEMPT_STATUS, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
 import { isValidStripePriceId } from "./stripe-catalog.ts";
+import { bindActivatedEntitlementToExistingAccount } from "./stripe-existing-account-binding.ts";
 
 type Row = Record<string, unknown>;
 
@@ -189,6 +190,10 @@ async function fulfillSubscriptionAttempt(
     pendingPassword = credential.password;
   }
 
+  const targetAccountId = readString(input.attempt.account_id)
+    || readString((checkoutSession.metadata as Row | null)?.target_account_id)
+    || null;
+
   const activation = await activateClientAccountEntitlementFromCheckout(supabase, {
     planKey: readString(checkoutSession.plan_key),
     billingIntervalMonths: Number(checkoutSession.billing_interval_months ?? 1),
@@ -215,6 +220,19 @@ async function fulfillSubscriptionAttempt(
     );
   }
 
+  if (targetAccountId) {
+    await bindActivatedEntitlementToExistingAccount(supabase, {
+      entitlementId: activation.entitlementId,
+      accountId: targetAccountId,
+      clientId: activation.clientId,
+    });
+    await updateStripeCheckoutAttemptStatus(supabase, input.attempt.id, {
+      status: STRIPE_ATTEMPT_STATUS.FULFILLMENT_PROCESSING,
+      clientAccountEntitlementId: activation.entitlementId,
+      accountId: targetAccountId,
+    });
+  }
+
   if (readString(checkoutSession.flow_type) === "first_purchase") {
     await clearCheckoutPendingSignupCredentialIdempotent(supabase, checkoutSessionId);
   }
@@ -231,7 +249,7 @@ async function fulfillSubscriptionAttempt(
       stripeCustomerId: input.customerId,
       stripePriceId: null,
       clientAccountEntitlementId: activation.entitlementId,
-      accountId: null,
+      accountId: targetAccountId,
       commercialCheckoutSessionId: readString(checkoutSession.id),
       commercialMode: readString(checkoutSession.commercial_mode) === "outreach_only" ? "outreach_only" : "full_cycle",
       pricingMode: "public_catalog",

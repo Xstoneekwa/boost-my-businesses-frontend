@@ -891,6 +891,15 @@ export async function activateClientAccountEntitlementFromCheckout(
     }
 
     if (input.mode === "stripe" && input.precreatedCheckoutSessionId && checkoutSessionId) {
+      const { data: precreatedCheckoutSession } = await supabase
+        .from("commercial_checkout_sessions")
+        .select("metadata")
+        .eq("id", checkoutSessionId)
+        .maybeSingle<Row>();
+      const existingCheckoutMetadata = precreatedCheckoutSession?.metadata
+        && typeof precreatedCheckoutSession.metadata === "object"
+        ? precreatedCheckoutSession.metadata as Row
+        : {};
       const { error: checkoutUpdateError } = await supabase
         .from("commercial_checkout_sessions")
         .update({
@@ -898,6 +907,7 @@ export async function activateClientAccountEntitlementFromCheckout(
           client_id: clientId,
           auth_user_id: authUserId,
           metadata: {
+            ...existingCheckoutMetadata,
             mode: "stripe_test",
             checkout_source: checkoutProvenance,
             payment_provider: "stripe",

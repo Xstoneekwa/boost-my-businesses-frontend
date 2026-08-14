@@ -119,9 +119,8 @@ async function loadSubscriptionProjectionLinkages(
 ) {
   const { data: attempt } = await supabase
     .from("commercial_stripe_checkout_attempts")
-    .select("commercial_checkout_session_id,status")
+    .select("commercial_checkout_session_id,client_account_entitlement_id,account_id,status")
     .eq("stripe_subscription_id", input.stripeSubscriptionId)
-    .eq("status", "fulfilled")
     .maybeSingle<Row>();
 
   const checkoutSessionId = readString(attempt?.commercial_checkout_session_id) || null;
@@ -140,19 +139,22 @@ async function loadSubscriptionProjectionLinkages(
     pricingSnapshotFingerprint = readString((checkoutSession?.pricing_snapshot as Row | null)?.version) || null;
   }
 
-  const { data: entitlementRows } = await supabase
-    .from("client_account_entitlements")
-    .select("id,status,created_at")
-    .eq("client_id", input.clientId)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  const entitlementId = readString(entitlementRows?.[0]?.id) || null;
+  let entitlementId = readString(attempt?.client_account_entitlement_id) || null;
+  if (!entitlementId && checkoutSessionId) {
+    const { data: entitlementRows } = await supabase
+      .from("client_account_entitlements")
+      .select("id")
+      .eq("client_id", input.clientId)
+      .eq("checkout_session_id", checkoutSessionId)
+      .limit(1);
+    entitlementId = readString(entitlementRows?.[0]?.id) || null;
+  }
 
   return {
-    checkoutFulfilled: Boolean(attempt?.commercial_checkout_session_id),
+    checkoutFulfilled: readString(attempt?.status) === "fulfilled",
     commercialCheckoutSessionId: checkoutSessionId,
     clientAccountEntitlementId: entitlementId,
+    accountId: readString(attempt?.account_id) || null,
     commercialMode,
     pricingMode: checkoutSessionId ? "public_catalog" : null,
     pricingSnapshotFingerprint,
@@ -366,7 +368,7 @@ export async function reconcilePaidStripeSubscriptionProjection(
       stripeCustomerId: input.stripeCustomerId,
       stripePriceId: (latestSnapshot?.stripe_price_id ?? readString(existing?.stripe_price_id)) || null,
       clientAccountEntitlementId: linkages.clientAccountEntitlementId,
-      accountId: readString(existing?.account_id) || null,
+      accountId: linkages.accountId || readString(existing?.account_id) || null,
       commercialCheckoutSessionId: linkages.commercialCheckoutSessionId,
       commercialMode: linkages.commercialMode,
       pricingMode: linkages.pricingMode,

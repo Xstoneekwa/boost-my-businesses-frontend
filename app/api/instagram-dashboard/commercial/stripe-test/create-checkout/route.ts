@@ -1,4 +1,9 @@
-import { readJsonBody, jsonError, jsonOk } from "@/app/api/instagram-dashboard/_utils";
+import {
+  getInstagramAdminUserContext,
+  readJsonBody,
+  jsonError,
+  jsonOk,
+} from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
 import { requireInstagramAdmin } from "@/app/api/instagram-dashboard/_utils";
 import { createStripeSubscriptionCheckoutSession } from "@/lib/commercial/stripe/stripe-subscription-checkout.ts";
@@ -24,6 +29,10 @@ export async function POST(request: Request) {
     if (!body) {
       return jsonError("Invalid Stripe test checkout payload.", 400, { code: "invalid_payload" });
     }
+    const adminContext = await getInstagramAdminUserContext();
+    if (!adminContext?.userId) {
+      return jsonError("Authenticated admin identity is required.", 401, { code: "admin_identity_required" });
+    }
     const origin = resolveStripeTestCheckoutRedirectOrigin(request.url);
     const result = await createStripeSubscriptionCheckoutSession(createSupabaseClient(), {
       planKey: readString(body.plan_key, "pro"),
@@ -33,6 +42,10 @@ export async function POST(request: Request) {
       flowType: readString(body.flow_type) === "additional_account" ? "additional_account" : "first_purchase",
       idempotencyKey: readString(body.idempotency_key) || crypto.randomUUID(),
       clientId: readString(body.client_id) || null,
+      authUserId: adminContext.userId,
+      targetAccountId: readString(body.target_account_id) || null,
+      billingSource: readString(body.billing_source) || null,
+      commercialMigrationReason: readString(body.commercial_migration_reason) || null,
       password: readString(body.password) || null,
       successUrl: `${origin}/commercial/stripe-test/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/commercial/stripe-test/cancel`,

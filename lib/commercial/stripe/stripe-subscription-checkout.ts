@@ -40,6 +40,7 @@ import {
   type StripeBillingComponent,
 } from "./stripe-per-entitlement-billing.ts";
 import { upsertStripeBillingProfile } from "./stripe-subscription-projection.ts";
+import { assertExistingAccountStripeCheckoutTarget } from "./stripe-existing-account-binding.ts";
 
 export type CreateStripeSubscriptionCheckoutInput = {
   commercialMode?: string | null;
@@ -52,6 +53,9 @@ export type CreateStripeSubscriptionCheckoutInput = {
   idempotencyKey: string;
   clientId?: string | null;
   authUserId?: string | null;
+  targetAccountId?: string | null;
+  billingSource?: string | null;
+  commercialMigrationReason?: string | null;
   password?: string | null;
   passwordConfirmation?: string | null;
   successUrl: string;
@@ -322,6 +326,23 @@ export async function createStripeSubscriptionCheckoutSession(
 
   const flowType = input.flowType === "additional_account" ? "additional_account" : "first_purchase";
 
+  const targetAccountId = readString(input.targetAccountId) || null;
+  const billingSource = readString(input.billingSource) || null;
+  const commercialMigrationReason = readString(input.commercialMigrationReason) || null;
+  if (targetAccountId) {
+    if (flowType !== "additional_account" || !input.clientId || !planKey) {
+      return { ok: false, status: 400, code: "target_account_binding_invalid", messageEn: "Existing account checkout binding is invalid." };
+    }
+    const target = await assertExistingAccountStripeCheckoutTarget(supabase, {
+      clientId: input.clientId,
+      accountId: targetAccountId,
+      planKey,
+    });
+    if (!target.ok) {
+      return { ok: false, status: 409, code: target.code, messageEn: "Existing account is not eligible for Stripe checkout binding." };
+    }
+  }
+
   if (flowType === "first_purchase") {
     const secretResult = requireCheckoutSignupCredentialSecret(env);
     if (!secretResult.ok) {
@@ -424,6 +445,9 @@ export async function createStripeSubscriptionCheckoutSession(
     metadataSafe: {
       prod_test_authorization_id: simulationAccess.prodTestAuthorizationId,
       checkout_access_source: simulationAccess.source,
+      target_account_id: targetAccountId,
+      billing_source: billingSource,
+      commercial_migration_reason: commercialMigrationReason,
     },
   });
   if (!pendingSession.ok) {
@@ -446,9 +470,13 @@ export async function createStripeSubscriptionCheckoutSession(
   const metadata = buildSafeStripeMetadata({
     internal_attempt_id: idempotencyKey,
     internal_checkout_session_id: pendingSession.checkoutSessionId,
+    client_id: clientId,
     flow_type: flowType,
     commercial_mode: commercialMode,
     pricing_snapshot_fingerprint: quote.pricingSnapshot.version,
+    target_account_id: targetAccountId,
+    billing_source: billingSource,
+    commercial_migration_reason: commercialMigrationReason,
   });
   rejectUnsafeStripeMetadataKeys(metadata);
 
@@ -517,6 +545,7 @@ export async function createStripeSubscriptionCheckoutSession(
     authUserId,
     stripeCustomerId: typeof stripeSession.customer === "string" ? stripeSession.customer : customer.customerId,
     clientAccountEntitlementId: "entitlementId" in pendingSession ? readString(pendingSession.entitlementId) || null : null,
+    accountId: targetAccountId,
     commercialMode,
     pricingSnapshotFingerprint: quote.pricingSnapshot.version,
     metadataSafe: metadata,

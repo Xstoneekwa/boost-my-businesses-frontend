@@ -263,6 +263,8 @@ export async function updateStripeCheckoutAttemptStatus(
     paymentConfirmedAt?: string | null;
     fulfilledAt?: string | null;
     fulfillmentErrorRedacted?: string | null;
+    clientAccountEntitlementId?: string | null;
+    accountId?: string | null;
   },
 ) {
   const patch: Row = {
@@ -282,6 +284,8 @@ export async function updateStripeCheckoutAttemptStatus(
       ? String(input.fulfillmentErrorRedacted).slice(0, 500)
       : null;
   }
+  if (input.clientAccountEntitlementId !== undefined) patch.client_account_entitlement_id = input.clientAccountEntitlementId;
+  if (input.accountId !== undefined) patch.account_id = input.accountId;
 
   await supabase
     .from("commercial_stripe_checkout_attempts")
@@ -346,6 +350,14 @@ export async function markCommercialCheckoutSessionPaid(
   supabase: SupabaseClient,
   checkoutSessionId: string,
 ) {
+  const { data: existing } = await supabase
+    .from("commercial_checkout_sessions")
+    .select("metadata")
+    .eq("id", checkoutSessionId)
+    .maybeSingle<Row>();
+  const existingMetadata = existing?.metadata && typeof existing.metadata === "object"
+    ? existing.metadata as Row
+    : {};
   await supabase
     .from("commercial_checkout_sessions")
     .update({
@@ -353,6 +365,7 @@ export async function markCommercialCheckoutSessionPaid(
       activated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       metadata: {
+        ...existingMetadata,
         mode: "stripe_test",
         payment_provider: "stripe",
         payment_status: "confirmed",
