@@ -39,6 +39,7 @@ import { readAccountProtectionListValidator } from "@/lib/instagram-dashboard/ac
 import { protectionListRequestErrorMessage } from "@/lib/instagram-dashboard/account-protection-list-input";
 import { CLIENT_ONBOARDING_TARGET_MINIMUM } from "@/lib/instagram-client/client-account-onboarding-policy";
 import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
+import { projectCommercialLifecyclePresentation } from "@/lib/instagram-dashboard/lifecycle-communication-registry";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lang = "fr" | "en";
@@ -329,13 +330,14 @@ function smoothPath(pts: [number,number][]) {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function formatLinkedAccountLine(account: ClientLinkedInstagramAccount, lang: Lang) {
-  const status = account.connected
+  const lifecycleStatus = projectCommercialLifecyclePresentation(account.accountStatus, lang);
+  const status = lifecycleStatus?.label ?? (account.connected
     ? (lang === "fr" ? "Connecté" : "Connected")
     : account.statusLabel === "Ready"
       ? (lang === "fr" ? "Prêt" : "Ready")
       : account.statusLabel === "Verification required"
         ? (lang === "fr" ? "Vérification requise" : "Verification required")
-        : (lang === "fr" ? "Configuration en cours" : "Setup pending");
+        : (lang === "fr" ? "Configuration en cours" : "Setup pending"));
   return `@${account.username} · ${account.packageLabel} · ${status}`;
 }
 
@@ -630,13 +632,14 @@ export default function ClientDashboard({
         packageLabel: account.packageLabel,
         statusLabel: account.connected ? "Connected" : account.readinessLabel,
         connected: account.connected,
+        accountStatus: account.accountStatus,
       }));
   const primaryAccount = linkedAccountsForAccountTab[0]
     ? {
         accountId: linkedAccountsForAccountTab[0].accountId,
         username: linkedAccountsForAccountTab[0].username,
         packageLabel: linkedAccountsForAccountTab[0].packageLabel,
-        accountStatus: "",
+        accountStatus: linkedAccountsForAccountTab[0].accountStatus,
         onboardingStatus: "",
         provisioningStatus: "",
         loginStatus: linkedAccountsForAccountTab[0].connected ? "connected" : "unknown",

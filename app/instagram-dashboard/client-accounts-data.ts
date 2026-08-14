@@ -4,6 +4,11 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { loadTargetEligibilityCountsByAccount } from "@/lib/instagram-dashboard/account-target-eligibility";
 import { loadNeedsMoreTargetAccountsProjectionForAccounts } from "@/lib/instagram-dashboard/needs-more-target-accounts";
 import {
+  ACCOUNT_LIFECYCLE_ACTION_MATRIX,
+  lifecycleActionCopy,
+  type AccountLifecycleActionMatrixState,
+} from "@/lib/instagram-dashboard/lifecycle-communication-registry";
+import {
   projectClientContactEmailDisplay,
   resolveClientCommunicationEmail,
   type ClientCommunicationEmailSource,
@@ -237,8 +242,8 @@ function operationsStatus(account: ManageAccount, needsAssistance: boolean): { s
   const combined = `${admin} ${customer} ${subscription} ${onboarding} ${provisioning}`;
 
   if (includesAny(combined, ["cancelled", "canceled"])) return { status: "cancelled", reason: "cancelled_raw_status" };
-  if (needsAssistance) return { status: "needs_assistance", reason: "assistance_required" };
   if (includesAny(admin, ["paused"])) return { status: "paused", reason: "admin_paused" };
+  if (needsAssistance) return { status: "needs_assistance", reason: "assistance_required" };
   if (lifecycle === "archived" || lifecycle === "trashed") return { status: "archived", reason: `lifecycle_${lifecycle}` };
   if (includesAny(onboarding, ["onboarding"])) return { status: "onboarding", reason: "onboarding_status" };
   if (includesAny(combined, ["pending"])) return { status: "pending", reason: "pending_raw_status" };
@@ -323,48 +328,55 @@ function lifecycleActionAvailability(account: ManageAccount, status: ClientAccou
   const readiness = account.readinessProjection;
   const hasAssignment = Boolean(account.assignmentStatus);
   const reactivateBlockedByAssistance = Boolean(needsAssistanceReason && needsAssistanceReason !== "admin_lifecycle_needs_assistance");
-  const reactivateBlockedByLifecycle = lifecycle !== "active";
+  const inactiveLifecycle = lifecycle === "archived" || lifecycle === "trashed";
+  const matrixState: AccountLifecycleActionMatrixState = status === "cancelled" || status === "archived"
+    ? "cancelled"
+    : status === "paused" ? "paused" : "active";
+  const matrix = ACCOUNT_LIFECYCLE_ACTION_MATRIX[matrixState];
+  const copy = (action: ClientAccountLifecycleActionKey) => lifecycleActionCopy("en", action);
 
   return [
     {
       action: "pause",
-      disabled: status === "paused" || status === "cancelled" || status === "archived",
+      disabled: !matrix.pause,
       disabledReason: status === "paused"
-        ? "Account is already paused."
+        ? copy("pause").alreadyActive
         : status === "cancelled" || status === "archived"
-          ? "Inactive accounts cannot be paused."
+          ? copy("pause").disabledForState
           : null,
     },
     {
       action: "cancel",
-      disabled: status === "cancelled" || status === "archived",
+      disabled: !matrix.cancel,
       disabledReason: status === "cancelled" || status === "archived"
-        ? "Account is already inactive."
+        ? copy("cancel").alreadyActive
         : null,
     },
     {
       action: "mark_needs_assistance",
-      disabled: status === "needs_assistance" || status === "cancelled" || status === "archived",
+      disabled: !matrix.mark_needs_assistance || status === "needs_assistance",
       disabledReason: status === "needs_assistance"
-        ? "Account already needs assistance."
+        ? copy("mark_needs_assistance").alreadyActive
         : status === "cancelled" || status === "archived"
-          ? "Inactive accounts cannot be marked for support."
+          ? copy("mark_needs_assistance").disabledForState
           : null,
     },
     {
       action: "reactivate",
-      disabled: status === "active" || reactivateBlockedByLifecycle || reactivateBlockedByAssistance || !hasAssignment,
+      disabled: !matrix.reactivate || inactiveLifecycle || reactivateBlockedByAssistance || !hasAssignment,
       disabledReason: status === "active"
-        ? "Account is already active."
-        : reactivateBlockedByLifecycle
+        ? copy("reactivate").alreadyActive
+        : inactiveLifecycle
           ? "Restore the archived account lifecycle first."
-          : reactivateBlockedByAssistance
-            ? `Resolve blocker first: ${needsAssistanceReason}.`
-            : !hasAssignment
-              ? "Assignment is missing."
-              : readiness?.overall_readiness_status === "cancelled"
-                ? "Cancelled account cannot be reactivated from this state."
-                : null,
+          : status !== "paused"
+            ? copy("reactivate").disabledForState
+            : reactivateBlockedByAssistance
+              ? `Resolve blocker first: ${needsAssistanceReason}.`
+              : !hasAssignment
+                ? "Assignment is missing."
+                : readiness?.overall_readiness_status === "cancelled"
+                  ? "Cancelled account cannot be reactivated from this state."
+                  : null,
     },
   ];
 }

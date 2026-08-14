@@ -4,6 +4,10 @@ import {
   evaluateClientEmailMaterializationExecutionGate,
   type ClientEmailMaterializationExecutionGateReason,
 } from "./client-email-materialization-execution-gate.ts";
+import {
+  evaluateMaterializeLifecycleAutomationGate,
+  evaluateMaterializeNeedsMoreAutomationGate,
+} from "./client-email-lifecycle-automation-gates.ts";
 import type { ClientEmailOutboxDecision } from "./client-email-lifecycle-outbox-plan.ts";
 import type { OutboxEffectiveCandidateRow } from "./client-email-lifecycle-outbox-precedence.ts";
 import {
@@ -33,7 +37,7 @@ export type MaterializationExecutorRevalidationFailure = {
 
 export type MaterializationExecutorDisabled = {
   status: "execution_disabled";
-  gateReason: ClientEmailMaterializationExecutionGateReason;
+  gateReason: ClientEmailMaterializationExecutionGateReason | "automation_disabled" | "watermark_not_configured";
 };
 
 export type MaterializationExecutorMaterialized = {
@@ -176,6 +180,35 @@ export async function executeSingleClientEmailMaterializationInternal(
     };
   }
 
+  return executeRevalidatedClientEmailMaterializationInternal(input);
+}
+
+/**
+ * Cron-only executor. The natural lifecycle worker is governed by the
+ * category-specific automation gate and watermark, not by the legacy manual
+ * materialization switch. Direct/manual materialization remains fail-closed
+ * behind executeSingleClientEmailMaterializationInternal.
+ */
+export async function executeCronClientEmailMaterializationInternal(
+  input: SingleClientEmailMaterializationExecutorInput,
+): Promise<MaterializationExecutorDecision> {
+  const env = input.env ?? process.env;
+  const gate = input.candidate.category === "needs_more_target_accounts"
+    ? evaluateMaterializeNeedsMoreAutomationGate(env)
+    : evaluateMaterializeLifecycleAutomationGate(env);
+  if (!gate.allowed) {
+    return {
+      status: "execution_disabled",
+      gateReason: gate.reason,
+    };
+  }
+
+  return executeRevalidatedClientEmailMaterializationInternal(input);
+}
+
+async function executeRevalidatedClientEmailMaterializationInternal(
+  input: SingleClientEmailMaterializationExecutorInput,
+): Promise<MaterializationExecutorDecision> {
   const revalidation = revalidateSingleMaterializationCandidate(input);
   if ("status" in revalidation) {
     return revalidation;

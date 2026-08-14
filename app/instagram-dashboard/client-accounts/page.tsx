@@ -813,6 +813,7 @@ function ActionList({ item }: { item: ClientAccountOperationsItem }) {
         username={item.username}
         operationsStatus={item.operationsStatus}
         actions={item.lifecycleActions}
+        locale="en"
       />
     </div>
   );

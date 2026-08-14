@@ -1,8 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { resolveClientCommunicationEmail } from "./client-communication-email.ts";
 import { resolveTransactionalDeliverySettings } from "./client-email-delivery-settings.ts";
-import { evaluateClientEmailMaterializationExecutionGate } from "./client-email-materialization-execution-gate.ts";
-import { executeSingleClientEmailMaterializationInternal } from "./client-email-materialization-executor.ts";
+import { executeCronClientEmailMaterializationInternal } from "./client-email-materialization-executor.ts";
 import {
   buildClientEmailLifecycleOutboxPlan,
 } from "./client-email-lifecycle-outbox-plan.ts";
@@ -136,11 +135,6 @@ async function materializeLifecycleBatch(
     now: Date;
   },
 ) {
-  const executionGate = evaluateClientEmailMaterializationExecutionGate(input.env);
-  if (!executionGate.enabled) {
-    return { candidates: 0, materialized: 0, skipped: 0, failed: 0 };
-  }
-
   const [plan, deliverySettings] = await Promise.all([
     buildClientEmailLifecycleOutboxPlan(supabase, { now: input.now, env: input.env }),
     resolveTransactionalDeliverySettings(supabase),
@@ -178,7 +172,7 @@ async function materializeLifecycleBatch(
       }
       : undefined;
 
-    const decision = await executeSingleClientEmailMaterializationInternal({
+    const decision = await executeCronClientEmailMaterializationInternal({
       supabase,
       candidate,
       recipientEmail,
@@ -301,7 +295,6 @@ export async function runClientEmailLifecycleCron(input: {
   const needsMoreAutomationGate = evaluateNeedsMoreMaterializePersistGate(env);
   const lifecycleAutomationGate = evaluateMaterializeLifecycleAutomationGate(env);
   const automationGateOpen = needsMoreAutomationGate.allowed || lifecycleAutomationGate.allowed;
-  const materializeGate = evaluateClientEmailMaterializationExecutionGate(env);
   const needsMoreDispatchGate = evaluateNeedsMoreDispatchAutomationGate(env);
   const lifecycleDispatchGate = evaluateClientEmailLifecycleAutomationGate(env);
   const incidentSignals: string[] = [];
@@ -339,7 +332,7 @@ export async function runClientEmailLifecycleCron(input: {
         skipped: true,
         skipReason: "all_lifecycle_automation_disabled",
         automationGateOpen: false,
-        materializeGateOpen: materializeGate.enabled,
+        materializeGateOpen: false,
         dispatchGateOpen: needsMoreDispatchGate.allowed || lifecycleDispatchGate.allowed,
         reconcile: emptyReconcile,
         materialize: { candidates: 0, materialized: 0, skipped: 0, failed: 0 },
@@ -370,7 +363,7 @@ export async function runClientEmailLifecycleCron(input: {
       : emptyReconcile;
 
     let materialize = { candidates: 0, materialized: 0, skipped: 0, failed: 0 };
-    if (materializeGate.enabled) {
+    if (automationGateOpen) {
       // Opening an episode and creating its initial intent are intentionally two
       // idempotent materializations. A second plan pass lets the same natural
       // cron complete that chain without a manual tick or duplicate sends.
@@ -424,7 +417,7 @@ export async function runClientEmailLifecycleCron(input: {
         skipped: false,
         skipReason: null,
         automationGateOpen: true,
-        materializeGateOpen: materializeGate.enabled,
+        materializeGateOpen: automationGateOpen,
         dispatchGateOpen: dispatch.dispatchGateOpen,
         reconcile: {
           accounts: snapshots.length,

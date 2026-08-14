@@ -8,6 +8,7 @@ import {
   CLIENT_EMAIL_MATERIALIZE_ENABLED_ENV,
 } from "./client-email-materialization-execution-gate.ts";
 import {
+  executeCronClientEmailMaterializationInternal,
   executeSingleClientEmailMaterializationInternal,
   revalidateSingleMaterializationCandidate,
 } from "./client-email-materialization-executor.ts";
@@ -155,6 +156,75 @@ test("execution gate closed returns execution_disabled without materializer call
     recipientEmail: "client@example.com",
     deliverySettings,
     env: gateClosedEnv,
+    materializeInternal: async () => {
+      materializerCalls += 1;
+      throw new Error("materializer should not run");
+    },
+  });
+  assert.equal(decision.status, "execution_disabled");
+  assert.equal(materializerCalls, 0);
+});
+
+test("natural lifecycle cron uses its category gate when the legacy manual gate is closed", async () => {
+  let materializerCalls = 0;
+  const decision = await executeCronClientEmailMaterializationInternal({
+    supabase: createMockSupabase(),
+    candidate: buildEffectiveRow({}, gateClosedEnv),
+    recipientEmail: "client@example.com",
+    deliverySettings,
+    env: gateClosedEnv,
+    materializeInternal: async (_supabase, command) => {
+      materializerCalls += 1;
+      return {
+        ok: true,
+        parent: { id: "episode-1", kind: "lifecycle_episode", created: true },
+        intent: {
+          id: "intent-1",
+          created: true,
+          status: "pending",
+          idempotencyKey: command.idempotencyKey ?? "",
+        },
+      };
+    },
+  });
+  assert.equal(decision.status, "materialized");
+  assert.equal(materializerCalls, 1);
+});
+
+test("natural lifecycle cron fails closed when its category automation is disabled", async () => {
+  let materializerCalls = 0;
+  const env = {
+    ...gateClosedEnv,
+    CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED: "false",
+  };
+  const decision = await executeCronClientEmailMaterializationInternal({
+    supabase: createMockSupabase(),
+    candidate: buildEffectiveRow({}, env),
+    recipientEmail: "client@example.com",
+    deliverySettings,
+    env,
+    materializeInternal: async () => {
+      materializerCalls += 1;
+      throw new Error("materializer should not run");
+    },
+  });
+  assert.equal(decision.status, "execution_disabled");
+  assert.equal(decision.gateReason, "automation_disabled");
+  assert.equal(materializerCalls, 0);
+});
+
+test("natural needs-more cron remains governed by its independent category gate", async () => {
+  let materializerCalls = 0;
+  const env = {
+    ...gateClosedEnv,
+    CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED: "false",
+  };
+  const decision = await executeCronClientEmailMaterializationInternal({
+    supabase: createMockSupabase(),
+    candidate: buildEffectiveRow({ category: "needs_more_target_accounts" }, env),
+    recipientEmail: "client@example.com",
+    deliverySettings,
+    env,
     materializeInternal: async () => {
       materializerCalls += 1;
       throw new Error("materializer should not run");

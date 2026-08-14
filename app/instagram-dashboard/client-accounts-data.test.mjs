@@ -7,6 +7,8 @@ const manageSource = readFileSync(new URL("./manage-data.ts", import.meta.url), 
 const pageSource = readFileSync(new URL("./client-accounts/page.tsx", import.meta.url), "utf8");
 const routeSource = readFileSync(new URL("../api/instagram-dashboard/client-accounts/route.ts", import.meta.url), "utf8");
 const statusRouteSource = readFileSync(new URL("../api/instagram-dashboard/accounts/status/route.ts", import.meta.url), "utf8");
+const actionMenuSource = readFileSync(new URL("./client-accounts/AccountStatusActionMenu.tsx", import.meta.url), "utf8");
+const lifecycleRegistrySource = readFileSync(new URL("../../lib/instagram-dashboard/lifecycle-communication-registry.ts", import.meta.url), "utf8");
 
 test("client accounts normalize needs assistance as its own non-active status", () => {
   assert.match(dataSource, /"needs_assistance"/);
@@ -17,6 +19,14 @@ test("client accounts normalize needs assistance as its own non-active status", 
   assert.match(pageSource, /function statusSubtext\(item: ClientAccountOperationsItem\)/);
   assert.match(pageSource, /needs assistance · \$\{reason\}/);
   assert.doesNotMatch(pageSource, /item\.needsAssistance \? "needs assistance" : item\.operationsStatus/);
+});
+
+test("paused lifecycle has priority over assistance and readiness projections", () => {
+  const pausedBoundary = dataSource.indexOf('if (includesAny(admin, ["paused"]))');
+  const assistanceBoundary = dataSource.indexOf('if (needsAssistance) return { status: "needs_assistance"');
+  assert.ok(pausedBoundary >= 0);
+  assert.ok(assistanceBoundary >= 0);
+  assert.ok(pausedBoundary < assistanceBoundary);
 });
 
 test("client accounts email projection uses safe DB sources and copy UI", () => {
@@ -47,7 +57,16 @@ test("client accounts lifecycle actions are real and expose disabled reasons", (
   assert.match(pageSource, /actions=\{item\.lifecycleActions\}/);
   assert.match(statusRouteSource, /reactivateBlockReason/);
   assert.match(statusRouteSource, /Resolve credential reauth before reactivation/);
-  assert.match(statusRouteSource, /Cannot cancel while a run or run request is active/);
+  assert.match(statusRouteSource, /executeCommercialAccountLifecycle/);
+  assert.match(dataSource, /ACCOUNT_LIFECYCLE_ACTION_MATRIX/);
+  assert.match(actionMenuSource, /lifecycleActionCopy/);
+  assert.match(actionMenuSource, /locale = "en"/);
+  assert.match(pageSource, /locale="en"/);
+  assert.doesNotMatch(actionMenuSource, /Suspendre la campagne/);
+  assert.doesNotMatch(actionMenuSource, /Résilier le service du compte/);
+  assert.match(lifecycleRegistrySource, /active: \{ pause: true, cancel: true, mark_needs_assistance: true, reactivate: false \}/);
+  assert.match(lifecycleRegistrySource, /paused: \{ pause: false, cancel: true, mark_needs_assistance: true, reactivate: true \}/);
+  assert.match(lifecycleRegistrySource, /cancelled: \{ pause: false, cancel: false, mark_needs_assistance: false, reactivate: false \}/);
 });
 
 test("client accounts relay projects needs more targets fields", () => {

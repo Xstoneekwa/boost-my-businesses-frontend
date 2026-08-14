@@ -4,6 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LifeBuoy, PauseCircle, RotateCcw, SlidersHorizontal, XCircle } from "lucide-react";
 import type { ClientAccountLifecycleActionAvailability, ClientAccountLifecycleActionKey } from "../client-accounts-data";
+import {
+  lifecycleActionCopy,
+  type LifecycleLocale,
+} from "@/lib/instagram-dashboard/lifecycle-communication-registry";
 
 type AccountStatusAction = ClientAccountLifecycleActionKey;
 
@@ -12,38 +16,29 @@ type AccountStatusActionMenuProps = {
   username: string;
   operationsStatus: string;
   actions: ClientAccountLifecycleActionAvailability[];
+  locale?: LifecycleLocale;
 };
 
-const actions: Array<{
+const actionIcons: Array<{
   action: AccountStatusAction;
-  label: string;
-  description: string;
   tone?: "danger";
   Icon: typeof PauseCircle;
 }> = [
   {
     action: "pause",
-    label: "Suspendre la campagne",
-    description: "Suspend billing and campaign activity for this account. Slot and clone stay reserved.",
     Icon: PauseCircle,
   },
   {
     action: "cancel",
-    label: "Résilier le service du compte",
-    description: "Cancel Stripe billing, close entitlement, and release slot when runtime is terminal.",
     tone: "danger",
     Icon: XCircle,
   },
   {
     action: "mark_needs_assistance",
-    label: "Mark needs assistance",
-    description: "Blocks runs but keeps assignment for support review.",
     Icon: LifeBuoy,
   },
   {
     action: "reactivate",
-    label: "Reprendre la campagne",
-    description: "Resume Stripe billing and campaign eligibility when pause has not expired.",
     Icon: RotateCcw,
   },
 ];
@@ -53,6 +48,7 @@ export default function AccountStatusActionMenu({
   username,
   operationsStatus,
   actions: actionAvailability,
+  locale = "en",
 }: AccountStatusActionMenuProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -84,22 +80,26 @@ export default function AccountStatusActionMenu({
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Could not update account status.");
       }
-      const actionLabel = actions.find((item) => item.action === action)?.label ?? "Status";
+      const actionLabel = lifecycleActionCopy(locale, action).label;
       if (payload.action_required) {
-        setMessage(`${actionLabel} — convergence en cours (${payload.action_required_reason || "action_required"}).`);
+        setMessage(locale === "fr"
+          ? `${actionLabel} — convergence en cours (${payload.action_required_reason || "action_required"}).`
+          : `${actionLabel} — convergence in progress (${payload.action_required_reason || "action_required"}).`);
         router.refresh();
         return;
       }
       if (payload.converged === false) {
-        setMessage(`${actionLabel} — convergence en cours.`);
+        setMessage(locale === "fr" ? `${actionLabel} — convergence en cours.` : `${actionLabel} — convergence in progress.`);
         router.refresh();
         return;
       }
       setIsOpen(false);
-      setMessage(`${actionLabel} confirmé.`);
+      setMessage(locale === "fr" ? `${actionLabel} confirmé.` : `${actionLabel} confirmed.`);
       router.refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not update account status.");
+      setMessage(error instanceof Error
+        ? error.message
+        : locale === "fr" ? "Impossible de mettre à jour le statut du compte." : "Could not update account status.");
     } finally {
       setIsSaving(false);
     }
@@ -110,8 +110,8 @@ export default function AccountStatusActionMenu({
       <button
         type="button"
         className="ig-client-accounts-action-link"
-        title="Status actions"
-        aria-label={`Status actions for ${username}`}
+        title={locale === "fr" ? "Actions de statut" : "Status actions"}
+        aria-label={locale === "fr" ? `Actions de statut pour ${username}` : `Status actions for ${username}`}
         aria-expanded={isOpen}
         onClick={() => setIsOpen((value) => !value)}
       >
@@ -119,7 +119,8 @@ export default function AccountStatusActionMenu({
       </button>
       {isOpen ? (
         <span className="ig-client-accounts-status-popover" role="menu">
-          {actions.map(({ action, label, description, tone, Icon }) => {
+          {actionIcons.map(({ action, tone, Icon }) => {
+            const { label, description } = lifecycleActionCopy(locale, action);
             const availability = actionAvailability.find((item) => item.action === action);
             const disabled = isSaving || availability?.disabled === true;
             const title = availability?.disabledReason ?? description;

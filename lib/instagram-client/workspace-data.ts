@@ -10,6 +10,7 @@ import {
   projectClientSubscriptionDisplay,
   type ClientBillingDisplayMode,
 } from "./client-subscription-projection";
+import { projectCommercialLifecyclePresentation } from "../instagram-dashboard/lifecycle-communication-registry";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -19,6 +20,7 @@ export type ClientLinkedInstagramAccount = {
   packageLabel: string;
   statusLabel: string;
   connected: boolean;
+  accountStatus: string;
 };
 
 export type ClientBillingSummary = {
@@ -106,7 +108,10 @@ function clientFriendlyLinkStatus(loginStatus: string, onboardingStatus: string)
   return "Setup pending";
 }
 
-async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLinkedInstagramAccount[]> {
+async function loadLinkedInstagramAccounts(
+  clientId: string,
+  preferredLanguage: "fr" | "en",
+): Promise<ClientLinkedInstagramAccount[]> {
   const supabase = createSupabaseClient();
   const { data: links, error: linkError } = await supabase
     .from("client_instagram_accounts")
@@ -168,8 +173,10 @@ async function loadLinkedInstagramAccounts(clientId: string): Promise<ClientLink
         accountId: projected.accountId,
         username: projected.username,
         packageLabel: projected.packageLabel,
-        statusLabel: clientFriendlyLinkStatus(loginStatus, onboardingStatus),
+        statusLabel: projectCommercialLifecyclePresentation(projected.accountStatus, preferredLanguage)?.label
+          ?? clientFriendlyLinkStatus(loginStatus, onboardingStatus),
         connected: projected.connected,
+        accountStatus: projected.accountStatus,
       } satisfies ClientLinkedInstagramAccount;
     })
     .filter((row) => Boolean(row.accountId && row.username))
@@ -216,7 +223,7 @@ export async function getClientWorkspaceView(clientId: string, loginEmail = ""):
     : null;
   const subscriptionStartsAt = readString(subscription?.starts_at) || null;
 
-  const linkedInstagramAccountsRaw = await loadLinkedInstagramAccounts(clientId);
+  const linkedInstagramAccountsRaw = await loadLinkedInstagramAccounts(clientId, preferredLanguage);
   const packageSummaries = linkedInstagramAccountsRaw.length
     ? await getAccountPackageSummaries(linkedInstagramAccountsRaw.map((row) => row.accountId))
     : new Map();

@@ -16,6 +16,7 @@ import {
   type ClientProcessMode,
 } from "@/lib/instagram-client/client-account-process-projection";
 import { parseClientApiResponse } from "@/lib/instagram-client/read-api-response";
+import { projectCommercialLifecyclePresentation } from "@/lib/instagram-dashboard/lifecycle-communication-registry";
 import {
   hasCanonicalClientConnectLineage,
   isActiveClientConnectStatus,
@@ -819,13 +820,20 @@ export default function ClientAccountsSection({
                 activeConnectStatus: account.activeConnectStatus,
                 operationPending: account.operationPending,
               }, lang);
+              const lifecycle = projectCommercialLifecyclePresentation(account.accountStatus, lang);
               return (
                 <article className="cd-account-row" key={account.accountId}>
                   <div className="cd-account-main">
                     <strong>@{account.username}</strong>
                     <small>{account.packageLabel}</small>
-                    <span className={`cd-account-pill cd-account-pill-${ui.badgeTone}`}>{ui.badgeLabel}</span>
-                    {ui.subtext ? <p className="cd-account-subtext">{ui.subtext}</p> : null}
+                    <span className={`cd-account-pill cd-account-pill-${lifecycle?.tone ?? ui.badgeTone}`}>
+                      {lifecycle?.label ?? ui.badgeLabel}
+                    </span>
+                    {lifecycle ? (
+                      <p className="cd-account-subtext">
+                        {labelFor(lang, `Statut de connexion : ${ui.badgeLabel}`, `Connection status: ${ui.badgeLabel}`)}
+                      </p>
+                    ) : ui.subtext ? <p className="cd-account-subtext">{ui.subtext}</p> : null}
                   </div>
                   <div className="cd-account-actions">
                     {ui.showRefresh ? (

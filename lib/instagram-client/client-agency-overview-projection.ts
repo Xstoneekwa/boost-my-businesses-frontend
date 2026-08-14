@@ -3,6 +3,7 @@ import { resolveClientAccountConnectionUi } from "./client-account-connection-ui
 import type { ClientAccountNotificationView } from "./client-account-notifications";
 import { NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD } from "../instagram-dashboard/needs-more-target-accounts";
 import type { ClientOverviewRecentFeedItem } from "./client-overview-recent-feed-projection";
+import { projectCommercialLifecyclePresentation } from "../instagram-dashboard/lifecycle-communication-registry";
 import {
   buildAgencyOverviewSummary,
   buildAgencyPackageSummary,
@@ -83,6 +84,8 @@ export function projectAgencyOverviewAccountRow(input: {
   ));
   const actionRequired = hasNotificationAction || input.passwordActionAccountIds.has(input.account.accountId);
   const campaignActive = input.account.accountStatus.toLowerCase() === "active" && input.account.connected;
+  const lifecycleFr = projectCommercialLifecyclePresentation(input.account.accountStatus, "fr");
+  const lifecycleEn = projectCommercialLifecyclePresentation(input.account.accountStatus, "en");
 
   return {
     accountId: input.account.accountId,
@@ -93,10 +96,10 @@ export function projectAgencyOverviewAccountRow(input: {
     preparationLabelFr: ui.readinessLabel,
     preparationLabelEn: uiEn.readinessLabel,
     campaignActive,
-    campaignLabelFr: campaignActive
+    campaignLabelFr: lifecycleFr?.label ?? (campaignActive
       ? label("fr", "Campagne active", "Campaign active")
-      : label("fr", "Campagne inactive", "Campaign inactive"),
-    campaignLabelEn: campaignActive ? "Campaign active" : "Campaign inactive",
+      : label("fr", "Campagne inactive", "Campaign inactive")),
+    campaignLabelEn: lifecycleEn?.label ?? (campaignActive ? "Campaign active" : "Campaign inactive"),
     needsTargets,
     needsTargetsLabelFr: needsTargets ? label("fr", "Cibles à compléter", "Targets to complete") : null,
     needsTargetsLabelEn: needsTargets ? "Targets to complete" : null,
