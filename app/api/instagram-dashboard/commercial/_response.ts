@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { CommercialCrmAccessError } from "@/lib/commercial/crm-access";
+import { CommercialReviewError } from "@/lib/commercial/lead-review";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 
@@ -11,6 +12,12 @@ export function commercialApiError(error: unknown) {
   if (error instanceof CommercialCrmAccessError) {
     return NextResponse.json(
       { ok: false, error: "Commercial access denied.", code: error.code },
+      { status: error.status, headers: noStore },
+    );
+  }
+  if (error instanceof CommercialReviewError) {
+    return NextResponse.json(
+      { ok: false, error: "Commercial review request failed.", code: error.code },
       { status: error.status, headers: noStore },
     );
   }

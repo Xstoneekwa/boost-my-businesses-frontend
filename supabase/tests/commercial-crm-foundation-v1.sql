@@ -36,11 +36,13 @@ insert into public.tenant_users (user_id, role) values
   ('580d7856-d60f-4838-a5f9-3b405d6ae79b', 'superadmin'),
   ('11111111-1111-4111-8111-111111111111', 'tenant'),
   ('22222222-2222-4222-8222-222222222222', 'superadmin'),
-  ('33333333-3333-4333-8333-333333333333', 'superadmin');
+  ('33333333-3333-4333-8333-333333333333', 'superadmin'),
+  ('44444444-4444-4444-8444-444444444444', 'admin');
 
 \ir ../migrations/20260814210447_commercial_crm_foundation_v1.sql
 \ir ../migrations/20260814211105_commercial_crm_foundation_v1_fk_indexes.sql
 \ir ../migrations/20260814212322_commercial_dashboard_read_model_v1.sql
+\ir ../migrations/20260814224316_commercial_lead_review_workflow_v1.sql
 
 create or replace function pg_temp.assert_true(p_condition boolean, p_message text)
 returns void language plpgsql as $$
@@ -153,7 +155,7 @@ select pg_temp.assert_true(
   'revoked grant denied');
 select pg_temp.assert_true(
   not public.commercial_crm_actor_authorized_v1('44444444-4444-4444-8444-444444444444'),
-  'BotApp-like unmapped operator denied');
+  'ordinary admin denied');
 
 begin;
 
@@ -203,7 +205,7 @@ insert into public.commercial_leads (
   'b0000000-0000-4000-8000-000000000001',
   'd0000000-0000-4000-8000-000000000001',
   'qualified', 92, 'high', 'Cape Town', 'beauty_studio', 'instagram',
-  'reduce missed Instagram inquiries', 'v1'
+  'A', 'v1'
 );
 
 insert into public.commercial_events (
@@ -380,7 +382,7 @@ select pg_temp.assert_true(
 );
 select pg_temp.assert_true(
   (select attribution_snapshot_safe ->> 'campaign_id' = 'c0000000-0000-4000-8000-000000000001'
-          and attribution_snapshot_safe ->> 'message_angle' = 'reduce missed Instagram inquiries'
+          and attribution_snapshot_safe ->> 'message_angle' = 'A'
    from public.commercial_conversions
    where lead_id = 'e0000000-0000-4000-8000-000000000001'),
   'conversion freezes campaign and message attribution'
@@ -436,6 +438,8 @@ select pg_temp.assert_true(
    from public.commercial_leads where id = 'e0000000-0000-4000-8000-000000000002'),
   'reject transition is coherent'
 );
+
+\ir commercial-lead-review-workflow-v1.sql
 
 reset role;
 select pg_temp.expect_error(

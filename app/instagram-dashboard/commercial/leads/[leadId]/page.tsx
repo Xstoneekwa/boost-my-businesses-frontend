@@ -28,9 +28,16 @@ function SafeContext({ value }: { value: Record<string, unknown> }) {
   return <dl className="commercial-context">{entries.slice(0, 12).map(([key, raw]) => <div key={key}><dt>{pretty(key)}</dt><dd>{typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean" ? String(raw) : "Structured context available"}</dd></div>)}</dl>;
 }
 
-function LeadDetail({ lead }: { lead: CommercialLeadDetail }) {
+function safeReturnPath(value: string | string[] | undefined) {
+  const candidate = typeof value === "string" ? value : "";
+  return candidate.startsWith("/instagram-dashboard/commercial") && !candidate.startsWith("//")
+    ? candidate
+    : "/instagram-dashboard/commercial#review-queue";
+}
+
+function LeadDetail({ lead, returnPath }: { lead: CommercialLeadDetail; returnPath: string }) {
   return <main className="commercial-detail-page">
-    <Link className="commercial-back" href="/instagram-dashboard/commercial">← Commercial dashboard</Link>
+    <Link className="commercial-back" href={returnPath}>← Back to review queue</Link>
     <DashboardPageHeader eyebrow={`${lead.campaign.code} · Lead detail`} title={lead.business.name} description="Complete owner-only CRM projection, conversion linkage, and bounded event timeline." badges={[pretty(lead.qualification.status), pretty(lead.sales.status)]} />
     <section className="commercial-detail-columns">
       <AnalyticsSectionCard eyebrow="Business" title="Company"><DetailGrid items={[
@@ -60,7 +67,7 @@ function LeadDetail({ lead }: { lead: CommercialLeadDetail }) {
   </main>;
 }
 
-export default async function CommercialLeadPage({ params }: { params: Promise<{ leadId: string }> }) {
+export default async function CommercialLeadPage({ params, searchParams }: { params: Promise<{ leadId: string }>; searchParams?: Promise<{ return_to?: string | string[] }> }) {
   let lead: CommercialLeadDetail | null = null;
   try {
     await requireCommercialCrmAccess();
@@ -72,5 +79,6 @@ export default async function CommercialLeadPage({ params }: { params: Promise<{
     throw error;
   }
   if (!lead) notFound();
-  return <LeadDetail lead={lead} />;
+  const returnPath = safeReturnPath((await searchParams)?.return_to);
+  return <LeadDetail lead={lead} returnPath={returnPath} />;
 }
