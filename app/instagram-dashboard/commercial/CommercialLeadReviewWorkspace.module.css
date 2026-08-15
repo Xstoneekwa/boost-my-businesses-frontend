@@ -672,6 +672,15 @@
   .detailScore { font-size: 19px; }
   .recommendationGrid { display: grid; }
   .decisionBar { gap: 6px; padding: 10px 12px; }
+  .detailBody { padding-bottom: 76px; }
+  .decisionBar {
+    position: fixed;
+    z-index: 80;
+    right: 0;
+    bottom: 0;
+    left: 48px;
+    box-shadow: 0 -16px 36px rgba(0,0,0,.38);
+  }
   .decisionBar button { flex: 1 1 30%; min-height: 44px; }
   .decisionBar span { flex: 1 0 100%; margin-left: 0; text-align: center; }
   .readySummary { display: grid; }
