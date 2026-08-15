@@ -12,6 +12,7 @@ import {
   extractBookingEvidence,
   extractObservedUrls,
   filterCommercialAudiences,
+  isSharedCommercialPlatformUrl,
   resolveCommercialLocation,
   type AudienceSuggestion,
 } from "./discovery-reliability";
@@ -145,20 +146,21 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const website = await enrichWebsite({ websiteUrl: observedWebsite });
     const directBooking = extractBookingEvidence(bioLinks, profileTexts);
     const booking = directBooking.bookingUrl ? directBooking : { bookingUrl: website.bookingUrl, bookingProvider: website.bookingProvider, evidence: website.bookingEvidence };
+    const businessWebsite = website.websiteUrl && !isSharedCommercialPlatformUrl(website.websiteUrl) ? website.websiteUrl : null;
     location = resolveCommercialLocation({ requestedCity: city, signals: { provider: providerTexts, instagram: profileTexts, website: [website.address, website.description], booking: [booking.evidence], structured_metadata: [website.address] } });
     precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
     if (precheck.decision !== "PRECHECK_PASS") {
       const terminal = { ...precheck, decision: "PRECHECK_REJECT" as const, reason: precheck.reason === "location_requires_enrichment" ? "location_unresolved_after_enrichment" : precheck.reason };
-      await recordPrecheckDecision(supabase, item, terminal, location, { website_url: website.websiteUrl, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider,
+      await recordPrecheckDecision(supabase, item, terminal, location, { website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider,
         booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website }, duration_ms: Date.now() - started }); return;
     }
-    await recordPrecheckDecision(supabase, item, precheck, location, { stage: "ENRICHED", website_url: website.websiteUrl, booking_url: booking.bookingUrl,
+    await recordPrecheckDecision(supabase, item, precheck, location, { stage: "ENRICHED", website_url: businessWebsite, booking_url: booking.bookingUrl,
       booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website }, enriched_at: new Date().toISOString() });
 
     const businessName = text(profile.metadata.profile_name).trim() || candidate.title?.replace(/\s*[|(@-].*$/u, "").trim() || candidate.instagramHandle;
     const { data: preflightData, error: preflightError } = await supabase.rpc("preflight_commercial_discovery_candidate_v1", { p_run_id: text(item.run_id), p_provider: candidate.provider,
-      p_external_id: candidate.providerExternalId, p_instagram_handle: profile.canonical_username, p_website: website.websiteUrl, p_business_name: businessName });
+      p_external_id: candidate.providerExternalId, p_instagram_handle: profile.canonical_username, p_website: businessWebsite, p_business_name: businessName });
     if (preflightError) throw new Error("preflight_failed");
     const dbPreflight = row(preflightData);
     if (text(dbPreflight.status) !== "clear" && !(item.force_rescore === true && text(dbPreflight.status) === "duplicate")) {
@@ -168,7 +170,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
 
     const compactEvidence = { businessName, requestedCity: city, requestedSubsegment: nullableText(item.subsegment), instagram: { username: profile.canonical_username,
       followers: profile.followers_count, posts: profile.posts_count, category: profile.official_category, biography: profile.metadata.biography,
-      recentCaptions: recentCaptions.slice(0, 4) }, website: { url: website.websiteUrl, description: website.description, bookingProvider: booking.bookingProvider },
+      recentCaptions: recentCaptions.slice(0, 4) }, website: { url: businessWebsite, description: website.description, bookingProvider: booking.bookingProvider },
       deterministic: { location, precheck, publicProfile: profile.is_private === false } };
     const enrichmentHash = commercialSnapshotHash(compactEvidence);
     const knownBusinessId = nullableText(dbPreflight.business_id);
@@ -198,7 +200,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage }, score_breakdown_safe: score.breakdown,
       personalization_context_safe: { observed_evidence: ai.analysis.evidence, reasoning: ai.analysis.reasoning }, audience_context_safe: { source: "deterministically_filtered_discovery_peers", suggestions: audiences },
       business_name: businessName, country_code: "ZA", city, vertical: "Beauty/Aesthetics", subsegment: ai.analysis.subsegment, instagram_handle: profile.canonical_username,
-      website: website.websiteUrl, email: website.email, phone: website.phone, address_safe: website.address, business_description: website.description ?? ai.analysis.reasoning,
+      website: businessWebsite, email: website.email, phone: website.phone, address_safe: website.address, business_description: website.description ?? ai.analysis.reasoning,
       booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, business_status: ai.analysis.signals.appearsClosed ? "closed" : "unknown",
       qualification_status: score.qualificationStatus, item_status: score.itemStatus, lead_score: score.score, score_percent: score.scorePercent, priority: score.crmPriority,
       score_priority: score.scorePriority, recommended_channel: ai.analysis.recommendedChannel, recommended_angle: ai.analysis.recommendedAngle, scoring_model_version: score.scoringModelVersion,

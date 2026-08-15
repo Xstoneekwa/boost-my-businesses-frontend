@@ -11,6 +11,14 @@ select pg_temp.assert_true(
   'new discovery tables force RLS'
 );
 
+select pg_temp.assert_true(
+  public.commercial_crm_identity_domain_v2('https://www.fresha.com/book-now/example/services?pId=1') is null
+  and public.commercial_crm_identity_domain_v2('https://wa.me/27123456789') is null
+  and public.commercial_crm_identity_domain_v2('https://bio.site/example') is null
+  and public.commercial_crm_identity_domain_v2('https://glowclinic.co.za/book') = 'glowclinic.co.za',
+  'shared booking and bio platforms cannot become business identity domains'
+);
+
 select public.create_commercial_discovery_run_v2(
   '580d7856-d60f-4838-a5f9-3b405d6ae79b','Johannesburg','Hair Salon',3,'reliability-run-3',false
 );

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deterministicCommercialPrecheck, enrichCommercialWebsite, extractBookingEvidence, filterCommercialAudiences, resolveCommercialLocation } from "./discovery-reliability.ts";
+import { deterministicCommercialPrecheck, enrichCommercialWebsite, extractBookingEvidence, filterCommercialAudiences, isSharedCommercialPlatformUrl, resolveCommercialLocation } from "./discovery-reliability.ts";
 
 test("precheck passes a proven local beauty business and rejects an agency before AI", () => {
   const location = resolveCommercialLocation({ requestedCity: "Johannesburg", signals: { provider: ["Hair salon Johannesburg"], instagram: ["Rosebank hair specialists"] } });
@@ -33,6 +33,13 @@ test("website enrichment is bounded and extracts contact plus booking evidence",
 test("booking extraction is provider-agnostic", () => {
   const result = extractBookingEvidence([{ title: "Appointments", url: "https://clinic.example/book-now" }]);
   assert.equal(result.bookingProvider, "website_booking"); assert.equal(result.bookingUrl, "https://clinic.example/book-now");
+});
+
+test("shared booking and bio platforms are never business identity websites", () => {
+  assert.equal(isSharedCommercialPlatformUrl("https://www.fresha.com/book-now/a/services?pId=1"), true);
+  assert.equal(isSharedCommercialPlatformUrl("https://wa.me/27123456789"), true);
+  assert.equal(isSharedCommercialPlatformUrl("https://bio.site/example"), true);
+  assert.equal(isSharedCommercialPlatformUrl("https://glowclinic.co.za/book"), false);
 });
 
 test("audience filter removes apps and agencies and keeps a local competitor", () => {

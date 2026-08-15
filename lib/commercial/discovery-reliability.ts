@@ -146,6 +146,12 @@ function bookingProvider(url: string) {
 }
 
 const bookingPattern = /\b(book(?:ing|ings)?|appointment|schedule|reserve|fresha|treatwell|calendly|booksy|whatsapp)\b/i;
+const sharedCommercialPlatformHostPattern = /^(?:www\.)?(?:fresha\.com|booksy\.(?:com|info)|treatwell\.[a-z.]+|calendly\.com|wa\.me|whatsapp\.com|linktr\.ee|beacons\.ai|bio\.site|setmore\.com|glossgenius\.com|vagaro\.com)$/i;
+
+export function isSharedCommercialPlatformUrl(value: unknown) {
+  try { return sharedCommercialPlatformHostPattern.test(new URL(clean(value, 2000)).hostname); }
+  catch { return false; }
+}
 
 export function extractBookingEvidence(links: Array<{ url?: unknown; title?: unknown }>, fallbackTexts: unknown[] = []) {
   const candidates = links.map((link) => ({ url: normalizedUrl(clean(link.url, 2000)), label: clean(link.title) })).filter((link): link is { url: string; label: string } => Boolean(link.url));
