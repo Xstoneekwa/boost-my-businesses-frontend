@@ -72,6 +72,7 @@ function createMockSupabase(input: {
       return makeQuery(table);
     },
     _events: events,
+    _intents: intents,
   };
 }
 
@@ -117,6 +118,84 @@ test("bounce webhook is idempotent", async () => {
   assert.equal(second.ok, true);
   assert.equal(second.ok && second.action, "duplicate");
   assert.equal(supabase._events.length, 1);
+  assert.equal(supabase._intents[0]?.status, "canceled");
+  assert.equal(supabase._intents[0]?.claim_token, null);
+  assert.equal(supabase._intents[0]?.claimed_at, null);
+  assert.equal(supabase._intents[0]?.claim_expires_at, null);
+});
+
+test("delivery repairs a claimed intent and clears the full lease", async () => {
+  const supabase = createMockSupabase({
+    intents: [{
+      id: "intent-claimed",
+      recipient_email: "owner@example.com",
+      client_id: "client-a",
+      status: "claimed",
+      claim_token: "lease-token",
+      claimed_at: "2026-08-15T10:16:07.586Z",
+      claim_expires_at: "2026-08-15T10:21:07.586Z",
+      provider_message_id: null,
+    }],
+    events: [],
+  });
+
+  const result = await ingestPostmarkWebhookEvent(supabase as never, {
+    RecordType: "Delivery",
+    MessageStream: "outbound",
+    MessageID: "postmark-delivered-1",
+    Recipient: "owner@example.com",
+    DeliveredAt: "2026-08-15T10:16:16.000Z",
+    Metadata: { intent_id: "intent-claimed" },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.action, "stored");
+  assert.equal(supabase._intents[0]?.status, "sent");
+  assert.equal(supabase._intents[0]?.provider_message_id, "postmark-delivered-1");
+  assert.equal(supabase._intents[0]?.claim_token, null);
+  assert.equal(supabase._intents[0]?.claimed_at, null);
+  assert.equal(supabase._intents[0]?.claim_expires_at, null);
+});
+
+test("duplicate delivery retries canonical intent repair idempotently", async () => {
+  const payload = {
+    RecordType: "Delivery",
+    MessageStream: "outbound",
+    MessageID: "postmark-delivered-duplicate",
+    Recipient: "owner@example.com",
+    DeliveredAt: "2026-08-15T10:16:16.000Z",
+    Metadata: { intent_id: "intent-duplicate-repair" },
+  };
+  const supabase = createMockSupabase({
+    intents: [{
+      id: "intent-duplicate-repair",
+      recipient_email: "owner@example.com",
+      client_id: "client-a",
+      status: "claimed",
+      claim_token: "lease-token",
+      claimed_at: "2026-08-15T10:16:07.586Z",
+      claim_expires_at: "2026-08-15T10:21:07.586Z",
+    }],
+    events: [],
+  });
+
+  const first = await ingestPostmarkWebhookEvent(supabase as never, payload);
+  assert.equal(first.ok, true);
+  Object.assign(supabase._intents[0]!, {
+    status: "claimed",
+    claim_token: "stale-token",
+    claimed_at: "2026-08-15T10:16:07.586Z",
+    claim_expires_at: "2026-08-15T10:21:07.586Z",
+  });
+
+  const duplicate = await ingestPostmarkWebhookEvent(supabase as never, payload);
+  assert.equal(duplicate.ok, true);
+  assert.equal(duplicate.ok && duplicate.action, "duplicate");
+  assert.equal(supabase._events.length, 1);
+  assert.equal(supabase._intents[0]?.status, "sent");
+  assert.equal(supabase._intents[0]?.claim_token, null);
+  assert.equal(supabase._intents[0]?.claimed_at, null);
+  assert.equal(supabase._intents[0]?.claim_expires_at, null);
 });
 
 test("unknown record type is ignored without crash", async () => {

@@ -234,6 +234,7 @@ export async function cancelDispatchIntent(
       status: "canceled",
       resolved_at: nowIso,
       claim_token: null,
+      claimed_at: null,
       claim_expires_at: null,
       dispatch_last_error_code: reason.slice(0, 120),
     })
@@ -257,6 +258,7 @@ export async function finalizeDispatchIntentSent(
       provider_accepted_at: nowIso,
       provider_message_id: providerMessageId,
       claim_token: null,
+      claimed_at: null,
       claim_expires_at: null,
       dispatch_last_error_code: null,
     })
@@ -280,6 +282,7 @@ export async function finalizeDispatchIntentFailed(
       status: terminal ? "failed" : "pending",
       resolved_at: terminal ? nowIso : null,
       claim_token: null,
+      claimed_at: null,
       claim_expires_at: null,
       dispatch_last_error_code: errorCode.slice(0, 120),
     })
@@ -301,6 +304,7 @@ export async function finalizeDispatchIntentUncertain(
       status: "dispatch_uncertain",
       dispatch_uncertain_at: nowIso,
       claim_token: null,
+      claimed_at: null,
       claim_expires_at: null,
       dispatch_last_error_code: errorCode.slice(0, 120),
     })
@@ -366,7 +370,7 @@ export async function dispatchSingleNeedsMoreIntent(
   } = {},
 ): Promise<DispatchIntentResult> {
   const env = input.env ?? process.env;
-  const now = input.now ?? new Date();
+  const claimNow = input.now ?? new Date();
   const dispatchGate = evaluateNeedsMoreDispatchAutomationGate(env);
   if (!dispatchGate.allowed) {
     return { outcome: "skipped", reason: dispatchGate.reason };
@@ -375,12 +379,12 @@ export async function dispatchSingleNeedsMoreIntent(
   const intentId = readString(intentRow.id, "");
   if (!intentId) return { outcome: "skipped", reason: "missing_intent_id" };
 
-  const claimed = await claimNeedsMoreDispatchIntent(supabase, intentId, now);
+  const claimed = await claimNeedsMoreDispatchIntent(supabase, intentId, claimNow);
   if (!claimed) return { outcome: "skipped", reason: "claim_lost" };
 
-  const revalidation = await revalidateNeedsMoreDispatchIntent(supabase, claimed, now);
+  const revalidation = await revalidateNeedsMoreDispatchIntent(supabase, claimed, claimNow);
   if (!revalidation.ok) {
-    await cancelDispatchIntent(supabase, intentId, revalidation.reason, now);
+    await cancelDispatchIntent(supabase, intentId, revalidation.reason, input.now ?? new Date());
     return { outcome: "canceled", reason: revalidation.reason };
   }
 
@@ -404,14 +408,14 @@ export async function dispatchSingleNeedsMoreIntent(
   try {
     sendResult = await adapter.send(payload);
   } catch {
-    await finalizeDispatchIntentUncertain(supabase, intentId, "provider_timeout", now);
+    await finalizeDispatchIntentUncertain(supabase, intentId, "provider_timeout", input.now ?? new Date());
     return { outcome: "dispatch_uncertain", intentId, reason: "provider_timeout" };
   }
 
   const attemptCount = readNumber(claimed.dispatch_attempt_count, 1);
   if (!sendResult.ok) {
     if (sendResult.reason === "sending_disabled" || sendResult.reason === "provider_not_configured") {
-      await cancelDispatchIntent(supabase, intentId, sendResult.reason, now);
+      await cancelDispatchIntent(supabase, intentId, sendResult.reason, input.now ?? new Date());
       return { outcome: "canceled", reason: sendResult.reason };
     }
     const releaseForRetry = sendResult.reason !== "invalid_from_email"
@@ -420,13 +424,18 @@ export async function dispatchSingleNeedsMoreIntent(
       supabase,
       intentId,
       sendResult.reason,
-      now,
+      input.now ?? new Date(),
       { attemptCount, releaseForRetry },
     );
     return { outcome: "failed", intentId, reason: sendResult.reason };
   }
 
-  await finalizeDispatchIntentSent(supabase, intentId, sendResult.providerMessageId, now);
+  await finalizeDispatchIntentSent(
+    supabase,
+    intentId,
+    sendResult.providerMessageId,
+    input.now ?? new Date(),
+  );
   return {
     outcome: "submitted",
     intentId,
@@ -444,19 +453,19 @@ export async function dispatchSingleLifecycleIntent(
   } = {},
 ): Promise<DispatchIntentResult> {
   const env = input.env ?? process.env;
-  const now = input.now ?? new Date();
+  const claimNow = input.now ?? new Date();
   const category = readString(intentRow.category, "") as ClientEmailTemplateCategory;
   const dispatchGate = evaluateCategoryDispatchAutomationGate(category, env);
   if (!dispatchGate.allowed) return { outcome: "skipped", reason: dispatchGate.reason };
 
   const intentId = readString(intentRow.id, "");
   if (!intentId) return { outcome: "skipped", reason: "missing_intent_id" };
-  const claimed = await claimNeedsMoreDispatchIntent(supabase, intentId, now);
+  const claimed = await claimNeedsMoreDispatchIntent(supabase, intentId, claimNow);
   if (!claimed) return { outcome: "skipped", reason: "claim_lost" };
 
-  const revalidation = await revalidateLifecycleDispatchIntent(supabase, claimed, now);
+  const revalidation = await revalidateLifecycleDispatchIntent(supabase, claimed, claimNow);
   if (!revalidation.ok) {
-    await cancelDispatchIntent(supabase, intentId, revalidation.reason, now);
+    await cancelDispatchIntent(supabase, intentId, revalidation.reason, input.now ?? new Date());
     return { outcome: "canceled", reason: revalidation.reason };
   }
 
@@ -478,17 +487,17 @@ export async function dispatchSingleLifecycleIntent(
       reminderIndex: typeof reminderIndexRaw === "number" ? reminderIndexRaw : null,
     });
   } catch {
-    await finalizeDispatchIntentUncertain(supabase, intentId, "provider_timeout", now);
+    await finalizeDispatchIntentUncertain(supabase, intentId, "provider_timeout", input.now ?? new Date());
     return { outcome: "dispatch_uncertain", intentId, reason: "provider_timeout" };
   }
 
   const attemptCount = readNumber(claimed.dispatch_attempt_count, 1);
   if (!sendResult.ok) {
     if (sendResult.reason === "sending_disabled" || sendResult.reason === "provider_not_configured") {
-      await cancelDispatchIntent(supabase, intentId, sendResult.reason, now);
+      await cancelDispatchIntent(supabase, intentId, sendResult.reason, input.now ?? new Date());
       return { outcome: "canceled", reason: sendResult.reason };
     }
-    await finalizeDispatchIntentFailed(supabase, intentId, sendResult.reason, now, {
+    await finalizeDispatchIntentFailed(supabase, intentId, sendResult.reason, input.now ?? new Date(), {
       attemptCount,
       releaseForRetry: sendResult.reason !== "invalid_from_email"
         && sendResult.reason !== "invalid_recipient_email",
@@ -496,7 +505,12 @@ export async function dispatchSingleLifecycleIntent(
     return { outcome: "failed", intentId, reason: sendResult.reason };
   }
 
-  await finalizeDispatchIntentSent(supabase, intentId, sendResult.providerMessageId, now);
+  await finalizeDispatchIntentSent(
+    supabase,
+    intentId,
+    sendResult.providerMessageId,
+    input.now ?? new Date(),
+  );
   return { outcome: "submitted", intentId, providerMessageId: sendResult.providerMessageId };
 }
 
@@ -528,7 +542,11 @@ export async function runNeedsMoreDispatchBatch(
   const candidates = await listNeedsMoreDispatchCandidates(supabase, now);
   const results: DispatchIntentResult[] = [];
   for (const candidate of candidates) {
-    results.push(await dispatchSingleNeedsMoreIntent(supabase, candidate, { env, now, fetcher: input.fetcher }));
+    results.push(await dispatchSingleNeedsMoreIntent(supabase, candidate, {
+      env,
+      now: input.now,
+      fetcher: input.fetcher,
+    }));
   }
 
   return {
@@ -574,7 +592,7 @@ export async function runLifecycleDispatchBatch(
   for (const candidate of candidates) {
     results.push(await dispatchSingleLifecycleIntent(supabase, candidate, {
       env,
-      now,
+      now: input.now,
       fetcher: input.fetcher,
     }));
   }

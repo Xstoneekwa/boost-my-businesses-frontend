@@ -278,6 +278,7 @@ export async function runClientEmailLifecycleCron(input: {
   cronTelemetry?: { xVercelCronPresent?: boolean };
   env?: Record<string, string | undefined>;
   now?: Date;
+  dispatchNow?: Date;
   fetcher?: typeof fetch;
 }): Promise<
   | { status: 401 | 403 | 503; result: { reason: ClientEmailLifecycleCronAuthReason } }
@@ -380,8 +381,16 @@ export async function runClientEmailLifecycleCron(input: {
     }
 
     const [needsMoreDispatch, lifecycleDispatch] = await Promise.all([
-      runNeedsMoreDispatchBatch(input.supabase, { env, now, fetcher: input.fetcher }),
-      runLifecycleDispatchBatch(input.supabase, { env, now, fetcher: input.fetcher }),
+      runNeedsMoreDispatchBatch(input.supabase, {
+        env,
+        now: input.dispatchNow,
+        fetcher: input.fetcher,
+      }),
+      runLifecycleDispatchBatch(input.supabase, {
+        env,
+        now: input.dispatchNow,
+        fetcher: input.fetcher,
+      }),
     ]);
     const dispatch = combineBatchResults(needsMoreDispatch, lifecycleDispatch);
 
