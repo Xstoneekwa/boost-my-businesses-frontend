@@ -15,7 +15,11 @@ import {
   type SafeBoundaryTarget,
   type SafeRestartStrategy,
 } from "@/lib/instagram-dashboard/auto-restart-candidate-policy";
-import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
+import {
+  phoneRestOverrideBlocksAssignment,
+  type AssignedAppInstanceReadiness,
+  type PhoneRestOverride,
+} from "@/lib/instagram-dashboard/auto-restart-lifecycle";
 import {
   canonicalResumePlanForLatestRun,
   resolveCanonicalAttemptIdentity,
@@ -843,6 +847,7 @@ function planCandidate({
   assignment,
   restWindows,
   phoneRestOverride,
+  assignedAppInstance,
   deviceLockActive,
   eligibleFollowTargetCount,
   eligibleFollowTargets,
@@ -865,6 +870,7 @@ function planCandidate({
   assignment: SupabaseRecord | undefined;
   restWindows: ScheduleRestWindowProjection[];
   phoneRestOverride?: PhoneRestOverride;
+  assignedAppInstance?: AssignedAppInstanceReadiness;
   deviceLockActive?: boolean;
   eligibleFollowTargetCount: number;
   eligibleFollowTargets: SafeBoundaryTarget[];
@@ -955,7 +961,13 @@ function planCandidate({
   );
   const windowActive = startsAt && endsAt ? assignmentWindowContainsNow(startsAt, endsAt) : false;
   const phoneRestActive = phoneRestOverride?.status === "paused"
-    ? true
+    ? phoneRestOverrideBlocksAssignment({
+      override: phoneRestOverride,
+      accountId: account.accountId,
+      deviceId: readString(assignment?.device_id, ""),
+      appInstanceId: readString(assignment?.app_instance_id, ""),
+      appInstance: assignedAppInstance,
+    })
     : phoneRestOverride?.status === "resumed"
       ? false
       : phoneRestActiveNow(restWindows, new Date(), deviceTimezone);
@@ -965,7 +977,9 @@ function planCandidate({
       ? "in_window"
       : "outside_window";
   const phoneRestStatus = phoneRestOverride?.status === "paused"
-    ? "override_paused"
+    ? phoneRestActive
+      ? "override_paused"
+      : "override_migration_assignment_ready"
     : phoneRestOverride?.status === "resumed"
       ? "override_resumed"
       : phoneRestActive
@@ -1310,6 +1324,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     followSourceSettingsResult,
     targetsResult,
     assignmentsResult,
+    assignedAppInstancesResult,
     restWindowsResult,
     phoneRestOverridesResult,
     deviceLocksResult,
@@ -1343,6 +1358,10 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
       .select("id,account_id,assignment_type,slot_kind,status,starts_at,ends_at,assignment_source,device_id,app_instance_id,schedule_mode,phone_devices(name,timezone,status)")
       .in("account_id", accountIds)
       .in("status", ["pending", "reserved", "active"])
+      .limit(5000),
+    supabase
+      .from("phone_app_instances")
+      .select("id,device_id,status,is_launchable,usable_for_auto_login,current_account_id")
       .limit(5000),
     supabase
       .from("phone_rest_windows")
@@ -1395,6 +1414,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     followSourceSettingsResult.error,
     targetsResult.error,
     assignmentsResult.error,
+    assignedAppInstancesResult.error,
     openIncidentsResult.error,
     resumePlansResult.error,
     unfollowBacklogResult.error,
@@ -1525,6 +1545,19 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const safeTargetsByAccount = safeBoundaryTargetsByAccount((targetsResult.data ?? []) as SupabaseRecord[]);
   const priorTargetByRun = latestTargetSelectionByRun(targetSelectionRows as SupabaseRecord[]);
   const assignmentsByAccount = mapByAccount((assignmentsResult.data ?? []) as SupabaseRecord[]);
+  const assignedAppInstancesById = new Map<string, AssignedAppInstanceReadiness>();
+  for (const row of (assignedAppInstancesResult.data ?? []) as SupabaseRecord[]) {
+    const id = readString(row.id);
+    if (!id) continue;
+    assignedAppInstancesById.set(id, {
+      id,
+      deviceId: readString(row.device_id),
+      currentAccountId: readString(row.current_account_id),
+      status: readString(row.status),
+      isLaunchable: readBoolean(row.is_launchable, false),
+      usableForAutoLogin: readBoolean(row.usable_for_auto_login, false),
+    });
+  }
   const restWindowsByDevice = groupByAccount((restWindowsResult.data ?? []) as SupabaseRecord[], "device_id");
   const phoneRestOverridesByDevice = new Map<string, PhoneRestOverride>();
   for (const row of (phoneRestOverridesResult.data ?? []) as SupabaseRecord[]) {
@@ -1582,6 +1615,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         assignment,
         restWindows,
         phoneRestOverride: phoneRestOverridesByDevice.get(deviceId),
+        assignedAppInstance: assignedAppInstancesById.get(readString(assignment?.app_instance_id, "")),
         deviceLockActive: activeDeviceLocks.has(deviceId),
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         eligibleFollowTargets: safeTargetsByAccount.get(account.accountId) ?? [],
