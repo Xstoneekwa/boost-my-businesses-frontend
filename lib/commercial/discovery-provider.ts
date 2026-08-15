@@ -1,5 +1,8 @@
 import { runTargetAiGoogleSerpDiscovery } from "@/lib/instagram-client/target-ai-google-serp-discovery";
 import type { CommercialDiscoveryCity, CommercialDiscoverySubsegment } from "./discovery-contract";
+import { buildCommercialDiscoveryQueries } from "./discovery-query-portfolio";
+
+export { buildCommercialDiscoveryQueries } from "./discovery-query-portfolio";
 
 export type CommercialDiscoveryCandidate = {
   provider: "searchapi";
@@ -18,14 +21,6 @@ export type CommercialDiscoveryProviderResult = {
   queries: string[];
   diagnostic: Record<string, unknown>;
 };
-
-export function buildCommercialDiscoveryQueries(city: CommercialDiscoveryCity, subsegment?: CommercialDiscoverySubsegment) {
-  const segments = subsegment ? [subsegment] : ["aesthetic clinic", "skin clinic", "med spa", "beauty salon", "hair salon", "nail lash brow studio"];
-  return segments.flatMap((segment) => [
-    `site:instagram.com/ "${segment}" "${city}" South Africa`,
-    `site:instagram.com/ "${segment}" "${city}" booking`,
-  ]).slice(0, subsegment ? 2 : 10);
-}
 
 export async function discoverCommercialCandidates(input: { city: CommercialDiscoveryCity; subsegment?: CommercialDiscoverySubsegment; maxCandidates: number; fetcher?: typeof fetch }): Promise<CommercialDiscoveryProviderResult> {
   const queries = buildCommercialDiscoveryQueries(input.city, input.subsegment);
