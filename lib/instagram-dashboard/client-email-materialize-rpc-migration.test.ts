@@ -196,7 +196,7 @@ test("base migration preserved without from_email consistency guard", () => {
 
 test("lifecycle arity migration repairs only the duplicated sender snapshot expression", () => {
   assert.match(lifecycleArityMigrationSql, /pg_get_functiondef/);
-  assert.match(lifecycleArityMigrationSql, /regexp_replace/);
+  assert.match(lifecycleArityMigrationSql, /replace\(v_definition, v_bad_fragment, v_good_fragment\)/);
   assert.match(lifecycleArityMigrationSql, /client_email_materialize_sender_arity_not_canonical/);
   assert.match(lifecycleArityMigrationSql, /grant execute[\s\S]*to service_role/i);
   assert.doesNotMatch(lifecycleArityMigrationSql, /create\s+table/i);

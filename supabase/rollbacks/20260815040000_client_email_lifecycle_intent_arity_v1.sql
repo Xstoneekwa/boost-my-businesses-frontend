@@ -6,15 +6,14 @@ declare
     'public.materialize_client_email_outbox_candidate_v1(uuid,uuid,text,text,text,timestamp with time zone,uuid,integer,text,text,text,smallint,uuid,integer,text,text,text,text,text,text,uuid)'
   );
   v_definition text;
+  v_bad_fragment constant text := E'btrim(p_from_email_snapshot),\n      btrim(p_from_email_snapshot),\n      btrim(p_support_email_snapshot)';
 begin
   if v_function is null then
     raise exception 'client_email_materialize_function_missing';
   end if;
 
   select pg_get_functiondef(v_function) into v_definition;
-  if v_definition ~
-    'btrim\(p_from_email_snapshot\),\s*btrim\(p_from_email_snapshot\),\s*btrim\(p_support_email_snapshot\)'
-  then
+  if position(v_bad_fragment in v_definition) > 0 then
     raise exception 'client_email_materialize_unsafe_rollback_refused';
   end if;
 end
