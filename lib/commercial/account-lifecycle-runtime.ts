@@ -82,7 +82,8 @@ async function cancelExpiredEmailIntentClaimsForAccount(
       .from("client_email_send_intents")
       .update({
         status: "canceled",
-        last_error: "lifecycle_quiesce_expired_claim",
+        dispatch_last_error_code: "lifecycle_quiesce_expired_claim",
+        claim_token: null,
         claimed_at: null,
         claim_expires_at: null,
         updated_at: new Date().toISOString(),

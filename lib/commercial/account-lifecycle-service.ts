@@ -528,7 +528,25 @@ export async function executeCommercialAccountLifecycle(input: {
       });
       await setAdminLifecycleStatus(supabase, accountId, "paused");
 
-      const runtime = await quiesceAccountRuntime(supabase, accountId, input.reason);
+      let runtime: Awaited<ReturnType<typeof quiesceAccountRuntime>>;
+      try {
+        runtime = await quiesceAccountRuntime(supabase, accountId, input.reason);
+      } catch (runtimeError) {
+        await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
+        await upsertLifecycleState(supabase, {
+          accountId,
+          entitlementId: ctx.entitlementId,
+          stripeSubscriptionId: ctx.stripeSubscriptionId,
+          commercialState: ctx.commercialState,
+          pausedAt: ctx.pausedAt,
+          pauseExpiresAt: ctx.pauseExpiresAt,
+          stripeBillingPaused: ctx.stripeBillingPaused,
+          actionRequiredReason: null,
+          lastOperationId: claim.operationId,
+          lastIdempotencyKey: idempotencyKey,
+        });
+        throw runtimeError;
+      }
       if (runtime.stillActive) {
         await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
         await upsertLifecycleState(supabase, {
