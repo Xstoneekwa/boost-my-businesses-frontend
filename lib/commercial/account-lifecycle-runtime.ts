@@ -86,7 +86,6 @@ async function cancelExpiredEmailIntentClaimsForAccount(
         claim_token: null,
         claimed_at: null,
         claim_expires_at: null,
-        updated_at: new Date().toISOString(),
       })
       .in("id", expiredIds);
     if (updateError) throw new Error(updateError.message || "client_email_send_intents_reconciliation_failed");
