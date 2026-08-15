@@ -28,6 +28,40 @@ export type PhoneRestOverride = {
   updatedAt: string | null;
 };
 
+export type AssignedAppInstanceReadiness = {
+  id: string;
+  deviceId: string;
+  currentAccountId: string;
+  status: string;
+  isLaunchable: boolean;
+  usableForAutoLogin: boolean;
+};
+
+const APP_INSTANCE_MIGRATION_PAUSE_REASON = "app_instance_migration_in_progress";
+
+export function phoneRestOverrideBlocksAssignment(input: {
+  override: PhoneRestOverride | undefined;
+  accountId: string;
+  deviceId: string;
+  appInstanceId: string;
+  appInstance?: AssignedAppInstanceReadiness;
+}) {
+  const { override, accountId, deviceId, appInstanceId, appInstance } = input;
+  if (override?.status !== "paused") return false;
+
+  // Explicit phone rests remain device-wide. Only the migration pause is
+  // assignment-scoped because app instances on the same phone can complete
+  // reprovisioning independently.
+  if (override.reason !== APP_INSTANCE_MIGRATION_PAUSE_REASON) return true;
+  if (!appInstance) return true;
+
+  const runnableStatus = ["assigned", "occupied"].includes(appInstance.status.toLowerCase());
+  const exactBinding = appInstance.id === appInstanceId
+    && appInstance.deviceId === deviceId
+    && appInstance.currentAccountId === accountId;
+  return !(exactBinding && runnableStatus && appInstance.isLaunchable && appInstance.usableForAutoLogin);
+}
+
 export function phoneRestOverrideBlocksRestart(override: PhoneRestOverride | undefined) {
   return override?.status === "paused";
 }
