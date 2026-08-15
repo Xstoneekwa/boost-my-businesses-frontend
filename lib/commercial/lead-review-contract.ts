@@ -64,10 +64,74 @@ export type CommercialReviewLead = {
   updatedAt: string;
 };
 
-export type CommercialReviewQueue = {
-  needsApproval: { rows: CommercialReviewLead[]; total: number; page: number; pageSize: number };
-  readyForOutreach: { rows: CommercialReviewLead[]; total: number; page: number; pageSize: number };
+export const COMMERCIAL_REVIEW_SORTS = ["priority", "score", "newest", "oldest"] as const;
+export type CommercialReviewSort = (typeof COMMERCIAL_REVIEW_SORTS)[number];
+
+export type CommercialReviewQueueItem = Omit<
+  CommercialReviewLead,
+  "personalizationContext" | "audienceContext" | "website"
+> & {
+  reasoningExcerpt: string | null;
 };
+
+export type CommercialReviewReadFilters = {
+  priority?: CommercialReviewPriority;
+  city?: string;
+  subsegment?: string;
+  channel?: CommercialReviewChannel;
+  angle?: CommercialReviewAngle;
+  minimumScore?: number;
+  sort: CommercialReviewSort;
+  page: number;
+  pageSize: number;
+  selectedLeadId?: string;
+  search?: string;
+};
+
+export type CommercialReviewReadModel = {
+  items: CommercialReviewQueueItem[];
+  selectedLead: CommercialReviewLead | null;
+  filters: CommercialReviewReadFilters;
+  pagination: { total: number; page: number; pageSize: number; pageCount: number };
+  metrics: { p1: number; p2: number; readyForOutreach: number };
+};
+
+type ReviewQueryValue = string | string[] | undefined;
+
+function firstQueryValue(value: ReviewQueryValue) {
+  return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
+}
+
+function cleanQueryText(value: ReviewQueryValue, max = 120) {
+  return firstQueryValue(value).normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, max);
+}
+
+export function parseCommercialReviewReadFilters(params: Record<string, ReviewQueryValue>): CommercialReviewReadFilters {
+  const rawPriority = firstQueryValue(params.review_priority);
+  const rawChannel = firstQueryValue(params.review_channel);
+  const rawAngle = firstQueryValue(params.review_angle);
+  const rawSort = firstQueryValue(params.review_sort);
+  const rawPage = Number(firstQueryValue(params.review_page));
+  const rawScore = Number(firstQueryValue(params.review_score));
+  const rawLead = firstQueryValue(params.review_lead);
+  const city = cleanQueryText(params.review_city);
+  const subsegment = cleanQueryText(params.review_subsegment);
+  const search = cleanQueryText(params.review_search);
+
+  return {
+    priority: COMMERCIAL_REVIEW_PRIORITIES.includes(rawPriority as CommercialReviewPriority) ? rawPriority as CommercialReviewPriority : undefined,
+    city: city || undefined,
+    subsegment: subsegment || undefined,
+    channel: COMMERCIAL_REVIEW_CHANNELS.includes(rawChannel as CommercialReviewChannel) ? rawChannel as CommercialReviewChannel : undefined,
+    angle: COMMERCIAL_REVIEW_ANGLES.includes(rawAngle as CommercialReviewAngle) ? rawAngle as CommercialReviewAngle : undefined,
+    minimumScore: [60, 70, 80, 90].includes(rawScore) ? rawScore : undefined,
+    sort: COMMERCIAL_REVIEW_SORTS.includes(rawSort as CommercialReviewSort) ? rawSort as CommercialReviewSort : "priority",
+    page: Number.isInteger(rawPage) && rawPage > 0 ? Math.min(rawPage, 100_000) : 1,
+    pageSize: 24,
+    selectedLeadId: /^[0-9a-f-]{36}$/i.test(rawLead) ? rawLead : undefined,
+    search: search || undefined,
+  };
+}
 
 export type CommercialReviewMutationResult = {
   ok: true;

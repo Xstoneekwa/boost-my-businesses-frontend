@@ -1,7 +1,6 @@
 import "server-only";
 
 import { requireCommercialCrmAccess } from "./crm-access";
-import { commercialFiltersToRpc } from "./dashboard-query";
 import type { CommercialDashboardFilters } from "./dashboard-read-model-types";
 import {
   COMMERCIAL_REJECTION_REASONS,
@@ -12,7 +11,9 @@ import {
   type CommercialReviewMutation,
   type CommercialReviewMutationResult,
   type CommercialReviewPatch,
-  type CommercialReviewQueue,
+  type CommercialReviewQueueItem,
+  type CommercialReviewReadFilters,
+  type CommercialReviewReadModel,
 } from "./lead-review-contract";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -32,10 +33,6 @@ export class CommercialReviewError extends Error {
 
 function object(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
-}
-
-function rows(value: unknown): Row[] {
-  return Array.isArray(value) ? value.filter((item): item is Row => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
 }
 
 function text(value: unknown, fallback = ""): string {
@@ -80,21 +77,36 @@ function reviewLead(value: unknown): CommercialReviewLead {
   };
 }
 
-function queuePart(value: unknown) {
-  const part = object(value);
-  return {
-    rows: rows(part.rows).map(reviewLead),
-    total: Math.max(0, integer(part.total)),
-    page: Math.max(1, integer(part.page, 1)),
-    pageSize: Math.max(1, integer(part.page_size, 12)),
-  };
+function firstContextValue(value: Record<string, unknown>): string | null {
+  for (const [key, raw] of Object.entries(value)) {
+    if (key === "review_note") continue;
+    if (typeof raw === "string" && raw.trim()) return raw.trim().slice(0, 180);
+    if (typeof raw === "number" || typeof raw === "boolean") return String(raw);
+  }
+  return null;
 }
 
-export function normalizeCommercialReviewQueue(value: unknown): CommercialReviewQueue {
-  const root = object(value);
+function queueItem(lead: CommercialReviewLead): CommercialReviewQueueItem {
   return {
-    needsApproval: queuePart(root.needs_approval),
-    readyForOutreach: queuePart(root.ready_for_outreach),
+    id: lead.id,
+    campaignId: lead.campaignId,
+    campaignName: lead.campaignName,
+    businessName: lead.businessName,
+    city: lead.city,
+    subsegment: lead.subsegment,
+    instagramHandle: lead.instagramHandle,
+    score: lead.score,
+    priority: lead.priority,
+    qualificationStatus: lead.qualificationStatus,
+    outreachStatus: lead.outreachStatus,
+    outreachChannel: lead.outreachChannel,
+    messageAngle: lead.messageAngle,
+    lastActivityType: lead.lastActivityType,
+    lastActivityAt: lead.lastActivityAt,
+    version: lead.version,
+    createdAt: lead.createdAt,
+    updatedAt: lead.updatedAt,
+    reasoningExcerpt: firstContextValue(lead.personalizationContext),
   };
 }
 
@@ -171,20 +183,203 @@ function rpcError(message: string): CommercialReviewError {
   return new CommercialReviewError("commercial_review_unavailable", 503);
 }
 
+const REVIEW_LEAD_FIELDS = "id,campaign_id,business_id,city_snapshot,subsegment_snapshot,score,priority,qualification_status,outreach_status,outreach_channel,message_angle,version,created_at,updated_at";
+
 export async function getCommercialReviewQueueReadModel(
   filters: CommercialDashboardFilters,
-  page = 1,
-  pageSize = 12,
-): Promise<CommercialReviewQueue> {
+  reviewFilters: CommercialReviewReadFilters,
+): Promise<CommercialReviewReadModel> {
   await requireCommercialCrmAccess();
   const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.rpc("commercial_review_queue_read_model_v1", {
-    p_filters: commercialFiltersToRpc(filters),
-    p_page: page,
-    p_page_size: pageSize,
+  const city = reviewFilters.city ?? filters.city;
+  const subsegment = reviewFilters.subsegment ?? filters.subsegment;
+  const search = reviewFilters.search ?? filters.search;
+  const needsBusinessFilter = Boolean(filters.country || filters.vertical || city || subsegment || search);
+
+  const buildBusinessQuery = (searchField?: "business_name" | "instagram_handle") => {
+    let query = supabase
+      .from("commercial_businesses")
+      .select("id,business_name,city,subsegment,instagram_handle,website");
+    if (filters.country) query = query.eq("country_code", filters.country);
+    if (filters.vertical) query = query.eq("vertical", filters.vertical);
+    if (city) query = query.eq("city", city);
+    if (subsegment) query = query.eq("subsegment", subsegment);
+    if (search && searchField) query = query.ilike(searchField, `%${search}%`);
+    return query.range(0, 9999);
+  };
+
+  let matchingBusinesses: Row[] | null = null;
+  if (needsBusinessFilter) {
+    if (search) {
+      const [nameResult, instagramResult] = await Promise.all([
+        buildBusinessQuery("business_name"),
+        buildBusinessQuery("instagram_handle"),
+      ]);
+      if (nameResult.error || instagramResult.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+      const unique = new Map<string, Row>();
+      for (const candidate of [...(nameResult.data ?? []), ...(instagramResult.data ?? [])]) {
+        const business = object(candidate);
+        if (text(business.id)) unique.set(text(business.id), business);
+      }
+      matchingBusinesses = [...unique.values()];
+    } else {
+      const result = await buildBusinessQuery();
+      if (result.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+      matchingBusinesses = (result.data ?? []).map(object);
+    }
+  }
+  const matchingBusinessIds = matchingBusinesses?.map((business) => text(business.id)).filter(Boolean) ?? null;
+
+  const buildLeadQuery = ({
+    approved = false,
+    priority,
+    includeReviewPriority = true,
+    head = false,
+  }: {
+    approved?: boolean;
+    priority?: string;
+    includeReviewPriority?: boolean;
+    head?: boolean;
+  } = {}) => {
+    let query = supabase.from("commercial_leads").select(head ? "id" : REVIEW_LEAD_FIELDS, { count: "exact", head });
+    if (approved) query = query.eq("qualification_status", "approved").eq("outreach_status", "not_started");
+    else query = query.eq("qualification_status", "qualified").is("approved_at", null);
+    if (filters.campaign) query = query.eq("campaign_id", filters.campaign);
+    if (filters.dateFrom) query = query.gte("created_at", filters.dateFrom);
+    if (filters.dateTo) query = query.lt("created_at", filters.dateTo);
+    const channel = reviewFilters.channel ?? filters.channel;
+    const angle = reviewFilters.angle ?? filters.messageAngle;
+    if (channel) query = query.eq("outreach_channel", channel);
+    if (angle) query = query.eq("message_angle", angle);
+    if (reviewFilters.minimumScore !== undefined) query = query.gte("score", reviewFilters.minimumScore);
+    if (matchingBusinessIds) query = query.in("business_id", matchingBusinessIds.length ? matchingBusinessIds : ["00000000-0000-0000-0000-000000000000"]);
+    if (priority) query = query.eq("priority", priority);
+    else if (includeReviewPriority && reviewFilters.priority) query = query.eq("priority", reviewFilters.priority);
+    return query;
+  };
+
+  const priorityOrder = reviewFilters.priority ? [reviewFilters.priority] : [...COMMERCIAL_REVIEW_PRIORITIES];
+  const [priorityCounts, p1Result, p2Result, readyResult] = await Promise.all([
+    Promise.all(priorityOrder.map(async (priority) => {
+      const result = await buildLeadQuery({ priority, includeReviewPriority: false, head: true });
+      if (result.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+      return { priority, count: result.count ?? 0 };
+    })),
+    buildLeadQuery({ priority: "urgent", includeReviewPriority: false, head: true }),
+    buildLeadQuery({ priority: "high", includeReviewPriority: false, head: true }),
+    buildLeadQuery({ approved: true, head: true }),
+  ]);
+  if (p1Result.error || p2Result.error || readyResult.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+
+  const offset = (reviewFilters.page - 1) * reviewFilters.pageSize;
+  let pageRows: Row[] = [];
+  let total = priorityCounts.reduce((sum, item) => sum + item.count, 0);
+  if (reviewFilters.sort === "priority") {
+    let remainingOffset = offset;
+    let remainingLimit = reviewFilters.pageSize;
+    for (const group of priorityCounts) {
+      if (remainingLimit <= 0) break;
+      if (remainingOffset >= group.count) {
+        remainingOffset -= group.count;
+        continue;
+      }
+      const take = Math.min(remainingLimit, group.count - remainingOffset);
+      const result = await buildLeadQuery({ priority: group.priority, includeReviewPriority: false })
+        .order("score", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(remainingOffset, remainingOffset + take - 1);
+      if (result.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+      pageRows.push(...(result.data ?? []).map(object));
+      remainingLimit -= take;
+      remainingOffset = 0;
+    }
+  } else {
+    let query = buildLeadQuery();
+    if (reviewFilters.sort === "score") {
+      query = query.order("score", { ascending: false, nullsFirst: false }).order("created_at", { ascending: true });
+    } else {
+      query = query.order("created_at", { ascending: reviewFilters.sort === "oldest" });
+    }
+    const result = await query.order("id", { ascending: true }).range(offset, offset + reviewFilters.pageSize - 1);
+    if (result.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+    pageRows = (result.data ?? []).map(object);
+    total = result.count ?? total;
+  }
+
+  const businessIds = [...new Set(pageRows.map((lead) => text(lead.business_id)).filter(Boolean))];
+  const campaignIds = [...new Set(pageRows.map((lead) => text(lead.campaign_id)).filter(Boolean))];
+  const leadIds = pageRows.map((lead) => text(lead.id)).filter(Boolean);
+  const cachedBusinesses = new Map((matchingBusinesses ?? []).map((business) => [text(business.id), business]));
+  const [businessesResult, campaignsResult, eventsResult] = await Promise.all([
+    businessIds.length
+      ? supabase.from("commercial_businesses").select("id,business_name,city,subsegment,instagram_handle,website").in("id", businessIds)
+      : Promise.resolve({ data: [], error: null }),
+    campaignIds.length
+      ? supabase.from("commercial_campaigns").select("id,name").in("id", campaignIds)
+      : Promise.resolve({ data: [], error: null }),
+    leadIds.length
+      ? supabase.from("commercial_events").select("id,lead_id,event_type,occurred_at").in("lead_id", leadIds).order("occurred_at", { ascending: false }).order("id", { ascending: false }).limit(reviewFilters.pageSize * 20)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (businessesResult.error || campaignsResult.error || eventsResult.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+  for (const candidate of businessesResult.data ?? []) {
+    const business = object(candidate);
+    cachedBusinesses.set(text(business.id), business);
+  }
+  const campaigns = new Map((campaignsResult.data ?? []).map((candidate) => {
+    const campaign = object(candidate);
+    return [text(campaign.id), campaign];
+  }));
+  const latestEvents = new Map<string, Row>();
+  for (const candidate of eventsResult.data ?? []) {
+    const event = object(candidate);
+    const leadId = text(event.lead_id);
+    if (leadId && !latestEvents.has(leadId)) latestEvents.set(leadId, event);
+  }
+
+  const enrichedRows = pageRows.map((lead) => {
+    const business = cachedBusinesses.get(text(lead.business_id)) ?? {};
+    const campaign = campaigns.get(text(lead.campaign_id)) ?? {};
+    const event = latestEvents.get(text(lead.id)) ?? {};
+    return {
+      ...lead,
+      campaign_name: text(campaign.name),
+      business_name: text(business.business_name, "Unknown business"),
+      city: nullableText(lead.city_snapshot) ?? nullableText(business.city),
+      subsegment: nullableText(lead.subsegment_snapshot) ?? nullableText(business.subsegment),
+      instagram_handle: nullableText(business.instagram_handle),
+      website: nullableText(business.website),
+      last_activity_type: nullableText(event.event_type),
+      last_activity_at: nullableText(event.occurred_at),
+    };
   });
-  if (error) throw rpcError(error.message);
-  return normalizeCommercialReviewQueue(data);
+  const summaries = enrichedRows.map((lead) => queueItem(reviewLead(lead)));
+  const selectedSummary = summaries.find((lead) => lead.id === reviewFilters.selectedLeadId) ?? summaries[0] ?? null;
+  let selectedLead: CommercialReviewLead | null = null;
+  if (selectedSummary) {
+    const detailResult = await supabase
+      .from("commercial_leads")
+      .select("personalization_context_safe,audience_context_safe")
+      .eq("id", selectedSummary.id)
+      .single<Row>();
+    if (detailResult.error) throw new CommercialReviewError("commercial_review_unavailable", 503);
+    const selectedRow = enrichedRows.find((lead) => text((lead as Row).id) === selectedSummary.id) ?? {};
+    selectedLead = reviewLead({ ...selectedRow, ...object(detailResult.data) });
+  }
+
+  return {
+    items: summaries,
+    selectedLead,
+    filters: reviewFilters,
+    pagination: {
+      total,
+      page: reviewFilters.page,
+      pageSize: reviewFilters.pageSize,
+      pageCount: total ? Math.ceil(total / reviewFilters.pageSize) : 0,
+    },
+    metrics: { p1: p1Result.count ?? 0, p2: p2Result.count ?? 0, readyForOutreach: readyResult.count ?? 0 },
+  };
 }
 
 export async function reviewCommercialLead(

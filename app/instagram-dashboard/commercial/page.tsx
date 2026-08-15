@@ -11,7 +11,7 @@ import { CommercialReadModelError, getCommercialDashboardReadModel } from "@/lib
 import { CommercialReviewError, getCommercialReviewQueueReadModel } from "@/lib/commercial/lead-review";
 import { parseCommercialDashboardFilters, type CommercialDashboardSearchParams } from "@/lib/commercial/dashboard-query";
 import type { CommercialBreakdownRow, CommercialDashboardReadModel, CommercialQueueLead } from "@/lib/commercial/dashboard-read-model-types";
-import type { CommercialReviewQueue } from "@/lib/commercial/lead-review-contract";
+import { parseCommercialReviewReadFilters, type CommercialReviewReadModel } from "@/lib/commercial/lead-review-contract";
 import { getCommercialDiscoveryReadModel } from "@/lib/commercial/discovery-service";
 import type { CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
 import { CommercialOutreachError, getCommercialOutreachReadModel } from "@/lib/commercial/outreach-service";
@@ -125,7 +125,7 @@ function DashboardFilters({ model }: { model: CommercialDashboardReadModel }) {
   );
 }
 
-function Dashboard({ model, reviewQueue, reviewPage, discovery, outreach }: { model: CommercialDashboardReadModel; reviewQueue: CommercialReviewQueue; reviewPage: number; discovery: CommercialDiscoveryReadModel; outreach: CommercialOutreachReadModel }) {
+function Dashboard({ model, reviewQueue, discovery, outreach }: { model: CommercialDashboardReadModel; reviewQueue: CommercialReviewReadModel; discovery: CommercialDiscoveryReadModel; outreach: CommercialOutreachReadModel }) {
   const kpiCards = [
     ["Discovered", model.kpis.discovered], ["Qualified", model.kpis.qualified], ["Approved", model.kpis.approved],
     ["Contacted", model.kpis.contacted], ["Replies", model.kpis.replies], ["Hot Leads", model.kpis.hotLeads],
@@ -140,7 +140,24 @@ function Dashboard({ model, reviewQueue, reviewPage, discovery, outreach }: { mo
       <CommercialDiscoveryPanel initialModel={discovery} />
 
       <section className="commercial-section-title"><small>WHAT NEEDS ME</small><h2>Liam queue</h2></section>
-      <CommercialLeadReviewQueue initialQueue={reviewQueue} returnPath={queryHref(model, { page: model.leads.page, review_page: reviewPage }).replace("#leads", "#review-queue")} />
+      <CommercialLeadReviewQueue
+        initialModel={reviewQueue}
+        cities={model.facets.cities}
+        subsegments={model.facets.subsegments}
+        returnPath={queryHref(model, {
+          page: model.leads.page,
+          review_page: reviewQueue.filters.page,
+          review_lead: reviewQueue.selectedLead?.id,
+          review_priority: reviewQueue.filters.priority,
+          review_city: reviewQueue.filters.city,
+          review_subsegment: reviewQueue.filters.subsegment,
+          review_channel: reviewQueue.filters.channel,
+          review_angle: reviewQueue.filters.angle,
+          review_score: reviewQueue.filters.minimumScore,
+          review_sort: reviewQueue.filters.sort,
+          review_search: reviewQueue.filters.search,
+        }).replace("#leads", "#review-queue")}
+      />
       <CommercialOutreachQueue initialModel={outreach} />
       <section className="commercial-queues">
         <QueueCard eyebrow="Respond" title="Hot Responses" rows={model.queues.hotResponses} empty="No sales-qualified response is waiting." />
@@ -194,11 +211,10 @@ function CommercialStyles() {
 export default async function CommercialDashboardPage({ searchParams }: { searchParams?: Promise<CommercialDashboardSearchParams> }) {
   const rawSearchParams = (await searchParams) ?? {};
   const filters = parseCommercialDashboardFilters(rawSearchParams);
+  const reviewFilters = parseCommercialReviewReadFilters(rawSearchParams);
   const outreachFilters = parseCommercialOutreachReadFilters(rawSearchParams);
-  const rawReviewPage = Array.isArray(rawSearchParams.review_page) ? rawSearchParams.review_page[0] : rawSearchParams.review_page;
-  const reviewPage = typeof rawReviewPage === "string" && /^\d+$/.test(rawReviewPage) ? Math.min(Math.max(Number(rawReviewPage), 1), 100000) : 1;
   let model: CommercialDashboardReadModel | null = null;
-  let reviewQueue: CommercialReviewQueue | null = null;
+  let reviewQueue: CommercialReviewReadModel | null = null;
   let discovery: CommercialDiscoveryReadModel | null = null;
   let outreach: CommercialOutreachReadModel | null = null;
   let loadFailed = false;
@@ -206,7 +222,7 @@ export default async function CommercialDashboardPage({ searchParams }: { search
     await requireCommercialCrmAccess();
     [model, reviewQueue, discovery, outreach] = await Promise.all([
       getCommercialDashboardReadModel(filters),
-      getCommercialReviewQueueReadModel(filters, reviewPage),
+      getCommercialReviewQueueReadModel(filters, reviewFilters),
       getCommercialDiscoveryReadModel(),
       getCommercialOutreachReadModel(outreachFilters),
     ]);
@@ -216,5 +232,5 @@ export default async function CommercialDashboardPage({ searchParams }: { search
     else throw error;
   }
   if (loadFailed || !model || !reviewQueue || !discovery || !outreach) return <main className="commercial-page"><DashboardPageHeader eyebrow="Founder cockpit" title="Commercial" description="The owner-only CRM read model could not be loaded." /><div className="commercial-empty" role="alert">Commercial data is temporarily unavailable. No outreach or CRM state was changed.</div><CommercialStyles /></main>;
-  return <Dashboard model={model} reviewQueue={reviewQueue} reviewPage={reviewPage} discovery={discovery} outreach={outreach} />;
+  return <Dashboard model={model} reviewQueue={reviewQueue} discovery={discovery} outreach={outreach} />;
 }
