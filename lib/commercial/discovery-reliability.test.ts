@@ -18,6 +18,9 @@ test("one location source is medium and missing location remains ambiguous", () 
   const low = resolveCommercialLocation({ requestedCity: "Cape Town", signals: { instagram: ["Skin and beauty clinic"] } });
   assert.equal(low.confidence, "LOW");
   assert.equal(deterministicCommercialPrecheck({ requestedCity: "Cape Town", title: "Skin Clinic", profileFound: true, isPrivate: false, location: low }).decision, "PRECHECK_AMBIGUOUS");
+  assert.deepEqual(deterministicCommercialPrecheck({ requestedCity: "Cape Town", title: "Missing Skin Clinic", profileFound: false, location: low }), {
+    decision: "PRECHECK_REJECT", reason: "instagram_profile_not_found", evidence: [],
+  });
 });
 
 test("website enrichment is bounded and extracts contact plus booking evidence", async () => {
@@ -51,4 +54,14 @@ test("audience filter does not give hair salons to a skin clinic", () => {
     { ...base, profile_url: "https://instagram.com/chelseaskinpeer", name: "Chelsea Skin Peer", instagram_handle: "chelseaskinpeer", category: "Medical skin and aesthetic clinic", reason: "Cape Town beauty business" },
   ], "Cape Town", "Chelsea medical skin and aesthetic clinic");
   assert.deepEqual(result.map((item) => item.instagram_handle), ["chelseaskinpeer"]);
+});
+
+test("audience location cannot be proven only by the source query", () => {
+  const result = filterCommercialAudiences([{
+    profile_url: "https://instagram.com/remote_lashes", source: "searchapi_google_serp",
+    source_query: 'site:instagram.com/ "lash studio" "Johannesburg" booking', confidence: "high",
+    location: null, name: "Remote Lashes", instagram_handle: "remote_lashes",
+    category: "Lash technician and extensions", reason: "Found by a Johannesburg query",
+  }], "Johannesburg", "Lash Studio");
+  assert.deepEqual(result, []);
 });

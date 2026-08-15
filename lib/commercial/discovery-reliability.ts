@@ -223,7 +223,7 @@ export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, 
     const combined = `${candidate.name} ${candidate.instagram_handle} ${candidate.category} ${candidate.reason} ${candidate.source_query}`;
     const normalizedHandle = clean(candidate.instagram_handle, 200).toLowerCase().replace(/^@/, "");
     if (disallowedAudienceHandlePattern.test(normalizedHandle) || disallowedAudiencePattern.test(combined) || !beautyPattern.test(combined)) return [];
-    const sameCity = cityPatterns[requestedCity].test(`${candidate.location ?? ""} ${candidate.source_query} ${candidate.reason}`);
+    const sameCity = cityPatterns[requestedCity].test(candidate.location ?? "");
     if (!sameCity) return [];
     const candidateVertical = audienceVertical(`${candidate.name} ${candidate.category} ${candidate.source_query}`);
     const exactVertical = targetVertical === candidateVertical;

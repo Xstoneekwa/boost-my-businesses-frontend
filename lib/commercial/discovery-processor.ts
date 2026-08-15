@@ -100,11 +100,11 @@ async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city:
     const peer = row(raw); const source = row(peer.source_snapshot_safe); const handle = text(source.instagram_handle) || text(peer.provider_external_id);
     if (!handle || handle === ownHandle) return [];
     const title = text(source.title) || handle; const snippet = text(source.snippet); const sourceQuery = text(source.source_query) || text(peer.source_query);
-    const location = resolveCommercialLocation({ requestedCity: city, signals: { provider: [title, snippet, sourceQuery] } });
+    const location = resolveCommercialLocation({ requestedCity: city, signals: { provider: [title, snippet] } });
     const category = snippet || title;
     const suggestion: Omit<AudienceSuggestion, "audience_relevance_score"> = { name: title.slice(0, 160), instagram_handle: handle, category: category.slice(0, 160),
-      location: location.city, reason: `Same-city Beauty/Aesthetics profile found by verified query: ${sourceQuery}`.slice(0, 320), profile_url: text(source.profile_url) || text(peer.source_url),
-      source: "searchapi_google_serp", source_query: sourceQuery, confidence: source.extraction_mode === "loose" ? "medium" : "high" };
+      location: location.city, reason: `Beauty/Aesthetics profile found by source query: ${sourceQuery}`.slice(0, 320), profile_url: `https://www.instagram.com/${handle}/`,
+      source: "searchapi_google_serp", source_query: sourceQuery, confidence: location.confidence.toLowerCase() as "high" | "medium" | "low" };
     return [suggestion];
   });
   return filterCommercialAudiences(candidates, city, targetContext);
@@ -117,6 +117,12 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const profile = await lookupProfile(candidate.instagramHandle);
     if (!profile.ok || profile.status !== "found") {
       const code = `profile_${profile.status}`; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
+      if (profile.status === "not_found") {
+        const location = resolveCommercialLocation({ requestedCity: city, signals: { provider: [candidate.title, candidate.snippet] } });
+        const precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileFound: false, location });
+        await recordPrecheckDecision(supabase, item, precheck, location, { duration_ms: Date.now() - started });
+        return;
+      }
       await updateItem(supabase, text(item.id), { status: canRetry ? "retry_scheduled" : "failed", stage: "FAILED", error_code: code,
         next_attempt_at: canRetry ? nextCommercialAttemptAt((dependencies.now ?? (() => new Date()))(), num(item.attempt_count)) : null,
         completed_at: canRetry ? null : new Date().toISOString(), duration_ms: Date.now() - started });
@@ -124,7 +130,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     }
     const recentCaptions = profile.recent_post_captions ?? [];
     const profileTexts = [profile.metadata.profile_name, profile.metadata.biography, profile.official_category, ...recentCaptions];
-    const providerTexts = [candidate.title, candidate.snippet, candidate.sourceQuery];
+    const providerTexts = [candidate.title, candidate.snippet];
     let location = resolveCommercialLocation({ requestedCity: city, signals: { provider: providerTexts, instagram: profileTexts } });
     let precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
