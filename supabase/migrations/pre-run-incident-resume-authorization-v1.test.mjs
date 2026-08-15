@@ -13,6 +13,8 @@ test("pre-run recovery is generic, lineage-bound, and preserves consumed history
   assert.match(migration, /old_auth\.resume_plan_id = p\.id/);
   assert.match(migration, /old_auth\.run_id = p\.run_id/);
   assert.match(migration, /current_auth\.id <> old_auth\.id/);
+  assert.match(migration, /restart_block_reason = ''/);
+  assert.doesNotMatch(migration, /restart_block_reason = null/i);
   assert.match(migration, /left\(lower\(coalesce\(i\.incident_type, ''\)\), 9\) <> 'security_'/);
   assert.match(migration, /original_schedule_key_preserved/);
   assert.doesNotMatch(migration, /delete\s+from\s+public\.incident_resume_authorizations/i);

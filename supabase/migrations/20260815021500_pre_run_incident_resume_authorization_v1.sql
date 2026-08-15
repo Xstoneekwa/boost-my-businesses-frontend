@@ -107,7 +107,7 @@ begin
     update public.account_session_resume_plans
     set resume_state = 'awaiting_human_resume_authorization',
         restart_allowed = true,
-        restart_block_reason = null,
+        restart_block_reason = '',
         assignment_id = v_assignment.id,
         device_id = v_assignment.device_id,
         app_instance_id = v_assignment.app_instance_id,
