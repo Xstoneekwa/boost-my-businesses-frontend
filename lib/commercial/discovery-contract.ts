@@ -7,8 +7,8 @@ export const COMMERCIAL_DISCOVERY_SUBSEGMENTS = [
 
 export const COMMERCIAL_DISCOVERY_MAX_PROSPECTS = 30;
 export const COMMERCIAL_DISCOVERY_CANARY_MAX = 3;
-export const COMMERCIAL_SCORING_MODEL_VERSION = "BMB_SCORING_MODEL_V1";
-export const COMMERCIAL_AI_PROMPT_VERSION = "BMB_COMMERCIAL_AI_V1";
+export const COMMERCIAL_SCORING_MODEL_VERSION = "BMB_SCORING_MODEL_V2";
+export const COMMERCIAL_AI_PROMPT_VERSION = "BMB_COMMERCIAL_AI_V2";
 export const COMMERCIAL_AI_FORMAT_NAME = "bmb_commercial_analysis_v1";
 
 export type CommercialDiscoveryCity = (typeof COMMERCIAL_DISCOVERY_CITIES)[number];
@@ -53,9 +53,10 @@ export type CommercialDiscoveryTrigger = {
   subsegment?: CommercialDiscoverySubsegment;
   maxProspects: number;
   idempotencyKey: string;
+  forceRescore: boolean;
 };
 
-export type CommercialDiscoveryRunStatus = "queued" | "running" | "completed" | "partial" | "failed";
+export type CommercialDiscoveryRunStatus = "queued" | "running" | "completed" | "completed_with_errors" | "failed" | "cancelled";
 export type CommercialDiscoveryRun = {
   id: string;
   city: CommercialDiscoveryCity;
@@ -72,7 +73,10 @@ export type CommercialDiscoveryRun = {
   p2Count: number;
   p3Count: number;
   hardRejectedCount: number;
+  precheckRejectedCount: number;
+  aiPendingCount: number;
   errorCount: number;
+  elapsedMs: number;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -99,5 +103,6 @@ export function parseCommercialDiscoveryTrigger(value: unknown): CommercialDisco
   }
   const idempotencyKey = typeof row.idempotencyKey === "string" ? row.idempotencyKey.trim() : "";
   if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("commercial_discovery_idempotency_invalid");
-  return { city: row.city, ...(row.subsegment ? { subsegment: row.subsegment as CommercialDiscoverySubsegment } : {}), maxProspects, idempotencyKey };
+  if (row.forceRescore !== undefined && typeof row.forceRescore !== "boolean") throw new Error("commercial_discovery_force_rescore_invalid");
+  return { city: row.city, ...(row.subsegment ? { subsegment: row.subsegment as CommercialDiscoverySubsegment } : {}), maxProspects, idempotencyKey, forceRescore: row.forceRescore === true };
 }

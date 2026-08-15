@@ -39,3 +39,8 @@ test("low AI confidence is penalized and cannot reach Liam queue", () => {
   const result = scoreCommercialProspect({ analysis: analysis(8, { confidence: 0.4 }), isPrivate: false, profileFound: true, businessStatus: "open" });
   assert.equal(result.score, 6.5); assert.equal(result.needsManualReview, false);
 });
+
+test("low deterministic location confidence cannot become P1", () => {
+  const result = scoreCommercialProspect({ analysis: analysis(10), isPrivate: false, profileFound: true, businessStatus: "open", deterministicLocationConfidence: "LOW" });
+  assert.notEqual(result.scorePriority, "P1"); assert.equal(result.needsManualReview, false);
+});

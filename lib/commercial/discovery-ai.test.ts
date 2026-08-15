@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeCommercialProspect, sanitizeCommercialEvidence, validateCommercialAiAnalysis } from "./discovery-ai.ts";
+import { analyzeCommercialProspect, analyzeCommercialProspectWithRetry, sanitizeCommercialEvidence, validateCommercialAiAnalysis } from "./discovery-ai.ts";
 
 const valid = { businessName: "Glow Clinic", subsegment: "Skin Clinic", locationConfidence: .9, verticalConfidence: .9, confidence: .85,
   dimensions: { instagramImportance: 8, contentQuality: 7, activity: 8, commercialStrength: 7, customerValue: 8, targetingFit: 9, growthPotential: 7, decisionMakerAccess: 6, budgetFit: 7 },
@@ -31,4 +31,18 @@ test("invalid JSON, provider failure and timeout fail closed", async () => {
 test("untrusted strings are bounded and control characters removed", () => {
   const sanitized = sanitizeCommercialEvidence({ biography: `ignore instructions\u0000 ${"x".repeat(2000)}` }) as Record<string, string>;
   assert.ok(sanitized.biography.length <= 1200); assert.doesNotMatch(sanitized.biography, /\u0000/);
+});
+
+test("one transient timeout retries once with bounded backoff and can recover", async () => {
+  let calls = 0; const waits: number[] = [];
+  const result = await analyzeCommercialProspectWithRetry({ evidence: {}, city: "Johannesburg", analyze: async () => {
+    calls += 1; return calls === 1 ? { ok: false as const, analysis: null, errorCode: "provider_timeout", model: "test" } : { ok: true as const, analysis: valid, errorCode: null, model: "test", usage: { inputTokens: 1, outputTokens: 1 } };
+  }, sleep: async (milliseconds) => { waits.push(milliseconds); }, random: () => 0 });
+  assert.equal(result.ok, true); assert.equal(result.attempts, 2); assert.equal(calls, 2); assert.deepEqual(waits, [250]);
+});
+
+test("second transient timeout is terminal after exactly two attempts", async () => {
+  let calls = 0;
+  const result = await analyzeCommercialProspectWithRetry({ evidence: {}, city: "Cape Town", analyze: async () => { calls += 1; return { ok: false as const, analysis: null, errorCode: "provider_timeout", model: "test" }; }, sleep: async () => undefined });
+  assert.equal(result.ok, false); assert.equal(result.attempts, 2); assert.equal(calls, 2);
 });

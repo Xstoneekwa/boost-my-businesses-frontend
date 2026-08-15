@@ -10,6 +10,7 @@ export type CommercialScoringInput = {
   isPrivate: boolean | null;
   profileFound: boolean;
   businessStatus: "unknown" | "open" | "closed";
+  deterministicLocationConfidence?: "HIGH" | "MEDIUM" | "LOW";
 };
 
 export type CommercialScoringResult = {
@@ -45,9 +46,11 @@ export function scoreCommercialProspect(input: CommercialScoringInput): Commerci
   ];
   const hardRejected = hardGateCodes.length > 0;
   const confidencePenalty = input.analysis.confidence < 0.7 ? Math.min(1.5, (0.7 - input.analysis.confidence) * 5) : 0;
-  const score = hardRejected ? 0 : Number(clamp(rawScore - confidencePenalty).toFixed(1));
+  const locationPenalty = input.deterministicLocationConfidence === "LOW" ? 2 : input.deterministicLocationConfidence === "MEDIUM" ? 0.4 : 0;
+  const adjustedScore = clamp(rawScore - confidencePenalty - locationPenalty);
+  const score = hardRejected ? 0 : Number((input.deterministicLocationConfidence === "LOW" ? Math.min(adjustedScore, 7.9) : adjustedScore).toFixed(1));
   const scorePriority = score >= 8 ? "P1" : score >= 6.5 ? "P2" : "P3";
-  const needsManualReview = !hardRejected && ((scorePriority === "P1" && input.analysis.confidence >= 0.72)
+  const needsManualReview = !hardRejected && input.deterministicLocationConfidence !== "LOW" && ((scorePriority === "P1" && input.analysis.confidence >= 0.72)
     || (scorePriority === "P2" && score >= 7.2 && input.analysis.confidence >= 0.8));
   return {
     score,

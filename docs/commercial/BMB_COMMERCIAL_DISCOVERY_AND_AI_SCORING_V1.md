@@ -6,7 +6,7 @@ V1 is internal founder tooling for Liam's owner-only Commercial CRM. Its product
 
 The pipeline is:
 
-`SearchAPI discovery → public Instagram enrichment → exact client/lead dedupe → structured AI analysis → deterministic 0–10 score → P1/P2/P3 → optional Needs Approval → stop`
+`SearchAPI discovery → persist every candidate → deterministic precheck → public Instagram + bounded website enrichment → exact client/lead dedupe → structured AI analysis → deterministic 0–10 score → P1/P2/P3 → optional Needs Approval → stop`
 
 No step approves a lead, queues outreach, sends an email/DM, invokes Phone Farm, modifies client CT targeting, or writes to the Restaurant prospecting system.
 
@@ -55,9 +55,27 @@ The page, API route and server service each invoke the canonical Commercial CRM 
 
 The browser never receives a Supabase service key and never calls Supabase directly.
 
+## Reliability & Scale V1
+
+Every provider result is persisted before processing, including candidates beyond the requested limit. Selected items are classified `PRECHECK_PASS`, `PRECHECK_REJECT` or `PRECHECK_AMBIGUOUS` before AI. Obvious agencies, SaaS/booking apps, unrelated businesses, private profiles, closed businesses and out-of-market evidence stop without an AI call. Ambiguous evidence may continue only through bounded website enrichment; unresolved ambiguity is rejected with a persisted reason and audit event.
+
+Location resolution combines provider text, Instagram biography/category/captions, website/contact evidence, booking evidence and structured address evidence. It stores country, city, HIGH/MEDIUM/LOW confidence and source-labelled evidence. The runtime remains restricted to Johannesburg or Cape Town. LOW confidence is capped below P1 and cannot enter Needs Approval.
+
+Website enrichment follows at most three redirects, downloads at most 512 KB per page, waits at most eight seconds per request and visits at most three same-domain root/contact/booking/about pages. It extracts observed description, address, public business email/phone and booking links. Booking detection is provider-agnostic; known providers get a stable label and all other evidenced booking pages use `website_booking`.
+
+Audience suggestions remain real candidates from the run ledger. A deterministic post-filter excludes marketing agencies, SaaS/apps, directories, media, suppliers and insufficiently local/unrelated profiles. Each persisted suggestion has name, handle, category, location, reason, source, confidence and a separate relevance score. Insufficient evidence means no suggestion.
+
+AI receives compact observed facts rather than redoing city parsing, category filtering, URL extraction or deduplication. It has an 18-second bounded request and one transient retry after 250–500 ms jitter. A second timeout becomes `AI_ANALYSIS_FAILED` for that item while the run continues. Scores are cached by `(business_id, enrichment_snapshot_hash, scoring_model_version, prompt_version)`. Cache bypass requires owner-only `forceRescore`; an explicit rescore appends an event with previous and new values.
+
+The owner POST returns HTTP 202. `after()` only accelerates the first batch. Durable state lives in run/items tables and a trusted `CRON_SECRET` cron resumes it every minute. Atomic `FOR UPDATE SKIP LOCKED` claims select at most five items; configurable enrichment and AI concurrency default to 3 and 2. Transient retries are capped, terminal errors are isolated, and final states are `completed`, `completed_with_errors`, `failed` or `cancelled`. Owner cancel prevents new claims while preserving completed leads and history.
+
+Historical canary `cc616c2b-a27e-4dec-a472-533e24925a9b` found eight candidates but V1 persisted only three: Eli Natural Hair Salon (`elinaturalhair`, 8.3/P1), Mashilo Digital Agency (`mashilodigitalagency`, AI timeout after incorrect admission), and DR K Medical & Aesthetic Hub (`drk.medical_aesthetics_hub`, 8.0/P1). Three more handles survive only in the shared audience snapshot (`soph.aesthetic.clinic`, `bookaspot_app`, `prhairsalon`). Two identities and per-item timings for the five unprocessed candidates were never recorded and cannot be truthfully reconstructed. V2 closes that audit boundary by persisting all candidates first.
+
+Production validation is strictly `3 → inspect → 10 → inspect → 30`; a failed stage blocks the next. Technical readiness and human quality are separate gates. Human approval/agreement metrics stay `NOT_YET_MEASURABLE` until Liam makes real review decisions.
+
 ## Canary and scale gate
 
-The schema supports the requested future ceiling of 30 prospects per run. Production V1 is code-locked to three prospects per trigger. Increasing the runtime ceiling requires a reviewed follow-up change after inspecting:
+The schema and owner UI expose only the certified 3, 10 and 30 stages. Liam must not skip a failed earlier gate. Inspect after every stage:
 
 - source validity and strict market fit;
 - duplicate and existing-client exclusion;
@@ -66,18 +84,18 @@ The schema supports the requested future ceiling of 30 prospects per run. Produc
 - P1/P2 precision in Liam's actual approvals/rejections;
 - provider latency, throttle and cost.
 
-Until that review, a request above three receives `commercial_discovery_canary_limit` and no run is created.
+Even after a successful controlled 30, automatic outreach remains disabled and requires a separate explicit GO.
 
 ## Runbook
 
 1. Liam opens the owner-only Commercial dashboard.
 2. Select Johannesburg or Cape Town and optionally one approved subsegment.
-3. Click `Run Discovery`. The canary always processes at most three candidates.
-4. Watch Queued/Running/Completed/Partial/Failed and the bounded counts.
+3. Click `Run Discovery`, starting with 3. Use 10 and then 30 only after the previous gate passes.
+4. Watch Queued/Running/Completed/Completed with errors/Failed/Cancelled, progress, precheck rejects, AI pending, priorities, failures and elapsed time.
 5. Inspect every created lead's source, public snapshot, score breakdown, confidence, why-this-lead, channel, angle and sourced audiences.
 6. Approve, reject or edit only through the existing Liam review workflow. Discovery itself stops.
 
-Cost controls are a three-candidate production cap, bounded SERP pages/query count, serialized public-profile throttle, 12-second AI timeout, one transient retry and token usage persisted in the item analysis snapshot. There is no recurring cron.
+Cost controls are the explicit scale selector, bounded SERP pages/query count, five-item continuation batches, bounded provider concurrency, an 18-second AI timeout, one transient retry and persisted usage. The trusted minute cron resumes durable work.
 
 ## Troubleshooting
 

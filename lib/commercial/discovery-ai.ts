@@ -54,7 +54,7 @@ export async function analyzeCommercialProspect(input: { evidence: unknown; city
   const apiKey = input.apiKey ?? process.env.OPENAI_API_KEY?.trim() ?? "";
   const model = input.model ?? process.env.COMMERCIAL_DISCOVERY_AI_MODEL?.trim() ?? process.env.COMPASS_AI_MODEL?.trim() ?? "gpt-4o-mini-2024-07-18";
   if (!apiKey) return { ok: false as const, analysis: null, errorCode: "provider_key_missing", model };
-  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), input.timeoutMs ?? 12_000);
+  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), input.timeoutMs ?? 18_000);
   try {
     const response = await (input.fetchImpl ?? fetch)(`${(process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com").replace(/\/+$/, "")}/v1/responses`, { method: "POST", cache: "no-store", signal: controller.signal,
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, store: false, max_output_tokens: 1400,
@@ -70,4 +70,20 @@ export async function analyzeCommercialProspect(input: { evidence: unknown; city
     return analysis ? { ok: true as const, analysis, errorCode: null, model, usage: { inputTokens: numberIn(usage.input_tokens, 0, Number.MAX_SAFE_INTEGER), outputTokens: numberIn(usage.output_tokens, 0, Number.MAX_SAFE_INTEGER) } } : { ok: false as const, analysis: null, errorCode: "schema_invalid", model };
   } catch (error) { return { ok: false as const, analysis: null, errorCode: error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_unavailable", model }; }
   finally { clearTimeout(timeout); }
+}
+
+const transientAiErrors = new Set(["provider_rate_limited", "provider_temporary_failure", "provider_timeout", "provider_unavailable"]);
+
+export async function analyzeCommercialProspectWithRetry(input: Parameters<typeof analyzeCommercialProspect>[0] & {
+  analyze?: typeof analyzeCommercialProspect;
+  sleep?: (milliseconds: number) => Promise<void>;
+  random?: () => number;
+}) {
+  const analyze = input.analyze ?? analyzeCommercialProspect;
+  const { sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)), random = Math.random, ...request } = input;
+  const first = await analyze(request);
+  if (first.ok || !transientAiErrors.has(first.errorCode)) return { ...first, attempts: 1 };
+  await sleep(250 + Math.floor(random() * 250));
+  const second = await analyze(request);
+  return { ...second, attempts: 2 };
 }
