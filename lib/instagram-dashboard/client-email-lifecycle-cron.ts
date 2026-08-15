@@ -149,6 +149,8 @@ async function materializeLifecycleBatch(
       && row.materializationEligible === true
       && (
         row.decision === "would_open_episode"
+        || row.decision === "would_close_episode"
+        || row.decision === "would_cancel_episode"
         || row.decision === "would_create_initial_intent"
         || row.decision === "would_create_reminder_intent"
       ),
@@ -159,9 +161,10 @@ async function materializeLifecycleBatch(
   let failed = 0;
 
   for (const candidate of effectiveCandidates) {
-    const recipientEmail = candidate.decision === "would_open_episode"
-      ? null
-      : await loadRecipientEmailForClient(supabase, candidate.clientId);
+    const recipientEmail = candidate.decision === "would_create_initial_intent"
+      || candidate.decision === "would_create_reminder_intent"
+      ? await loadRecipientEmailForClient(supabase, candidate.clientId)
+      : null;
     const template = candidate.activeTemplateId
       ? {
         id: candidate.activeTemplateId,

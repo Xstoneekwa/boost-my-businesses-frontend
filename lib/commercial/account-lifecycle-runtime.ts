@@ -50,6 +50,49 @@ const JOB_CANCEL_SPECS: JobCancelSpec[] = [
   { table: "auto_restart_decisions", statusColumn: "status", cancelStatus: "canceled" },
 ];
 
+function emailIntentClaimIsLive(row: SupabaseRecord, nowMs = Date.now()) {
+  if (readString(row.status).toLowerCase() !== "claimed") return false;
+  const expiresAtMs = Date.parse(readString(row.claim_expires_at));
+  return Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+}
+
+async function cancelExpiredEmailIntentClaimsForAccount(
+  supabase: SupabaseClient,
+  accountId: string,
+) {
+  if (!await tableExists(supabase, "client_email_send_intents")) return 0;
+  let reconciled = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("client_email_send_intents")
+      .select("id,status,claim_expires_at")
+      .eq("account_id", accountId)
+      .eq("status", "claimed")
+      .limit(500);
+    if (error) throw new Error(error.message || "client_email_send_intents_unavailable");
+
+    const nowMs = Date.now();
+    const expiredIds = ((data ?? []) as SupabaseRecord[])
+      .filter((row) => !emailIntentClaimIsLive(row, nowMs))
+      .map((row) => readString(row.id))
+      .filter(Boolean);
+    if (!expiredIds.length) return reconciled;
+
+    const { error: updateError } = await supabase
+      .from("client_email_send_intents")
+      .update({
+        status: "canceled",
+        dispatch_last_error_code: "lifecycle_quiesce_expired_claim",
+        claim_token: null,
+        claimed_at: null,
+        claim_expires_at: null,
+      })
+      .in("id", expiredIds);
+    if (updateError) throw new Error(updateError.message || "client_email_send_intents_reconciliation_failed");
+    reconciled += expiredIds.length;
+  }
+}
+
 async function cancelRunRequest(
   supabase: SupabaseClient,
   input: { requestId?: string; accountId?: string; reason: string },
@@ -152,6 +195,10 @@ async function cancelPendingJobsForAccount(
   reason: string,
 ) {
   const counts: Record<string, number> = {};
+  counts.client_email_send_intents_expired_claims = await cancelExpiredEmailIntentClaimsForAccount(
+    supabase,
+    accountId,
+  );
   for (const spec of JOB_CANCEL_SPECS) {
     if (!await tableExists(supabase, spec.table)) continue;
     const { data } = await supabase
@@ -185,13 +232,23 @@ export async function accountHasActiveJobs(
 ) {
   for (const spec of JOB_CANCEL_SPECS) {
     if (!await tableExists(supabase, spec.table)) continue;
+    const selectedColumns = spec.table === "client_email_send_intents"
+      ? "id,status,claim_expires_at"
+      : `id,${spec.statusColumn}`;
     const { data } = await supabase
       .from(spec.table)
-      .select("id")
+      .select(selectedColumns)
       .eq("account_id", accountId)
       .in(spec.statusColumn, ACTIVE_JOB_STATUSES)
-      .limit(1);
-    if ((data ?? []).length > 0) return true;
+      .limit(500);
+    const rows = (data ?? []) as unknown as SupabaseRecord[];
+    if (spec.table === "client_email_send_intents") {
+      if (rows.some((row) => readString(row.status).toLowerCase() !== "claimed" || emailIntentClaimIsLive(row))) {
+        return true;
+      }
+      continue;
+    }
+    if (rows.length > 0) return true;
   }
   return false;
 }

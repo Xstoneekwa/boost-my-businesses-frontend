@@ -218,6 +218,49 @@ async function reconcileCommercialResumeBlockers(
   };
 }
 
+async function terminalizeActivePauseEmailEpisodesAfterResume(
+  supabase: SupabaseClient,
+  input: { accountId: string; clientId: string | null },
+) {
+  if (!input.clientId) throw new Error("commercial_client_missing");
+
+  const { data, error } = await supabase
+    .from("client_email_lifecycle_episodes")
+    .select("id,episode_key,status")
+    .eq("account_id", input.accountId)
+    .eq("client_id", input.clientId)
+    .eq("category", "account_paused")
+    .eq("status", "active");
+  if (error) throw new Error(error.message || "pause_email_episode_lookup_failed");
+
+  for (const episode of (data ?? []) as Row[]) {
+    const episodeId = readString(episode.id);
+    const episodeKey = readString(episode.episode_key);
+    if (!episodeId || !episodeKey) throw new Error("pause_email_episode_identity_missing");
+
+    const { data: terminalized, error: terminalizeError } = await supabase.rpc(
+      "terminalize_client_email_lifecycle_episode_v1",
+      {
+        p_account_id: input.accountId,
+        p_client_id: input.clientId,
+        p_category: "account_paused",
+        p_operation: "close_lifecycle_episode",
+        p_parent_episode_key: episodeKey,
+        p_parent_id: episodeId,
+      },
+    );
+    if (terminalizeError) {
+      throw new Error(terminalizeError.message || "pause_email_episode_terminalization_failed");
+    }
+    const result = terminalized && typeof terminalized === "object" && !Array.isArray(terminalized)
+      ? terminalized as Row
+      : {};
+    if (result.ok !== true) {
+      throw new Error(readString(result.code, "pause_email_episode_terminalization_failed"));
+    }
+  }
+}
+
 async function markEntitlementCancelled(
   supabase: SupabaseClient,
   entitlementId: string,
@@ -528,8 +571,27 @@ export async function executeCommercialAccountLifecycle(input: {
       });
       await setAdminLifecycleStatus(supabase, accountId, "paused");
 
-      const runtime = await quiesceAccountRuntime(supabase, accountId, input.reason);
+      let runtime: Awaited<ReturnType<typeof quiesceAccountRuntime>>;
+      try {
+        runtime = await quiesceAccountRuntime(supabase, accountId, input.reason);
+      } catch (runtimeError) {
+        await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
+        await upsertLifecycleState(supabase, {
+          accountId,
+          entitlementId: ctx.entitlementId,
+          stripeSubscriptionId: ctx.stripeSubscriptionId,
+          commercialState: ctx.commercialState,
+          pausedAt: ctx.pausedAt,
+          pauseExpiresAt: ctx.pauseExpiresAt,
+          stripeBillingPaused: ctx.stripeBillingPaused,
+          actionRequiredReason: null,
+          lastOperationId: claim.operationId,
+          lastIdempotencyKey: idempotencyKey,
+        });
+        throw runtimeError;
+      }
       if (runtime.stillActive) {
+        await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
         await upsertLifecycleState(supabase, {
           accountId,
           commercialState: "action_required",
@@ -560,6 +622,7 @@ export async function executeCommercialAccountLifecycle(input: {
         await getStripe().pauseCollectionVoid(ctx.stripeSubscriptionId, idempotencyKey);
       } catch (stripeError) {
         const message = stripeError instanceof Error ? stripeError.message : "stripe_pause_failed";
+        await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
         await upsertLifecycleState(supabase, {
           accountId,
           commercialState: "action_required",
@@ -731,6 +794,10 @@ export async function executeCommercialAccountLifecycle(input: {
         await updateStripeProjectionBilling(supabase, ctx.stripeSubscriptionId, {
           billingPaused: false,
           pauseCollectionBehavior: null,
+        });
+        await terminalizeActivePauseEmailEpisodesAfterResume(supabase, {
+          accountId,
+          clientId: ctx.clientId,
         });
         await reconcileClientAccountNotificationsForAccount(supabase, accountId);
       } catch (postResumeError) {

@@ -54,8 +54,9 @@ const EFFECTIVE_DECISION_RANK: Record<ClientEmailOutboxDecision, number> = {
   blocked_legacy_pre_watermark: 5,
   blocked_missing_client_email: 6,
   blocked_template_unavailable: 7,
-  blocked_delivery_gate: 8,
-  no_action: 9,
+  blocked_render_context_incomplete: 8,
+  blocked_delivery_gate: 9,
+  no_action: 10,
 };
 
 export function outboxCategoryPrecedenceRank(category: ClientEmailTemplateCategory) {

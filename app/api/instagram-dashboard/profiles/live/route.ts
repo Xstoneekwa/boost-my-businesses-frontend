@@ -27,7 +27,10 @@ export async function GET(request: Request) {
     if (!legacyResponse.ok) return legacyResponse;
 
     const legacyPayload = unwrapJsonOkData(await legacyResponse.json());
-    const visibleProfiles = selectCanonicalVisibleProfiles(legacyPayload.profiles);
+    // The canonical Profiles endpoint exposes its full snapshot as
+    // `activeAccounts`. Reading the retired `profiles` alias makes every
+    // authenticated BotApp refresh fail after the response is unwrapped.
+    const visibleProfiles = selectCanonicalVisibleProfiles(legacyPayload.activeAccounts);
     const accountIds = visibleProfiles.map(accountId).filter(Boolean);
     const identityByAccount = new Map<string, Row>();
     let identitySource = "not_requested";

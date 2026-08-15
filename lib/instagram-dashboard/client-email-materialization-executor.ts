@@ -78,8 +78,10 @@ export type SingleClientEmailMaterializationExecutorInput = {
 
 function isExecutableMaterializationDecision(
   decision: ClientEmailOutboxDecision,
-): decision is "would_open_episode" | "would_create_initial_intent" | "would_create_reminder_intent" {
+): decision is "would_open_episode" | "would_close_episode" | "would_cancel_episode" | "would_create_initial_intent" | "would_create_reminder_intent" {
   return decision === "would_open_episode"
+    || decision === "would_close_episode"
+    || decision === "would_cancel_episode"
     || decision === "would_create_initial_intent"
     || decision === "would_create_reminder_intent";
 }

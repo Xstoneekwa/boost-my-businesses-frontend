@@ -23,6 +23,7 @@ import { buildTemplatePreview } from "./client-email-template-render.ts";
 import { normalizeCommunicationEmail } from "./client-communication-email.ts";
 
 export const MATERIALIZE_CLIENT_EMAIL_OUTBOX_RPC = "materialize_client_email_outbox_candidate_v1" as const;
+export const TERMINALIZE_CLIENT_EMAIL_LIFECYCLE_EPISODE_RPC = "terminalize_client_email_lifecycle_episode_v1" as const;
 
 export const CLIENT_EMAIL_IDEMPOTENCY_IDENTITY_CONFLICT = "client_email_idempotency_identity_conflict" as const;
 export const CLIENT_EMAIL_ACCOUNT_CLIENT_OWNERSHIP_MISMATCH =
@@ -30,6 +31,8 @@ export const CLIENT_EMAIL_ACCOUNT_CLIENT_OWNERSHIP_MISMATCH =
 
 export type MaterializeOutboxOperation =
   | "open_lifecycle_episode"
+  | "close_lifecycle_episode"
+  | "cancel_lifecycle_episode"
   | "create_lifecycle_initial_intent"
   | "open_needs_more_sequence"
   | "create_needs_more_initial_intent"
@@ -99,6 +102,8 @@ type ActiveTemplate = {
 
 const LIFECYCLE_OPERATIONS = new Set<MaterializeOutboxOperation>([
   "open_lifecycle_episode",
+  "close_lifecycle_episode",
+  "cancel_lifecycle_episode",
   "create_lifecycle_initial_intent",
 ]);
 
@@ -131,6 +136,8 @@ export function resolveStrictMaterializeOperation(input: {
     if (decision === "would_create_reminder_intent") return null;
     if (reminderIndex !== 0) return null;
     if (decision === "would_open_episode") return "open_lifecycle_episode";
+    if (decision === "would_close_episode" && parentId) return "close_lifecycle_episode";
+    if (decision === "would_cancel_episode" && parentId) return "cancel_lifecycle_episode";
     if (decision === "would_create_initial_intent") return "create_lifecycle_initial_intent";
     return null;
   }
@@ -154,6 +161,10 @@ export function isIntentMaterializeOperation(operation: MaterializeOutboxOperati
   return operation === "create_lifecycle_initial_intent"
     || operation === "create_needs_more_initial_intent"
     || operation === "create_needs_more_reminder_intent";
+}
+
+export function isLifecycleTerminalizeOperation(operation: MaterializeOutboxOperation) {
+  return operation === "close_lifecycle_episode" || operation === "cancel_lifecycle_episode";
 }
 
 export function buildMaterializeIntentBusinessIdentity(input: {
@@ -440,6 +451,17 @@ export function projectMaterializeRpcPayload(command: MaterializeCandidateComman
   };
 }
 
+export function projectTerminalizeLifecycleEpisodeRpcPayload(command: MaterializeCandidateCommand) {
+  return {
+    p_account_id: command.accountId,
+    p_client_id: command.clientId,
+    p_category: command.category,
+    p_operation: command.operation,
+    p_parent_episode_key: command.parentEpisodeKey,
+    p_parent_id: command.parentId,
+  };
+}
+
 function parseMaterializeRpcResult(data: unknown): MaterializeRpcResult | MaterializeRpcError {
   const record = (data ?? {}) as Record<string, unknown>;
   if (record.ok === false) {
@@ -482,8 +504,14 @@ export async function materializeClientEmailOutboxCandidateInternal(
     }
   }
 
-  const payload = projectMaterializeRpcPayload(command);
-  const { data, error } = await supabase.rpc(MATERIALIZE_CLIENT_EMAIL_OUTBOX_RPC, payload);
+  const terminalize = isLifecycleTerminalizeOperation(command.operation);
+  const payload = terminalize
+    ? projectTerminalizeLifecycleEpisodeRpcPayload(command)
+    : projectMaterializeRpcPayload(command);
+  const { data, error } = await supabase.rpc(
+    terminalize ? TERMINALIZE_CLIENT_EMAIL_LIFECYCLE_EPISODE_RPC : MATERIALIZE_CLIENT_EMAIL_OUTBOX_RPC,
+    payload,
+  );
   if (error) {
     const message = readErrorMessage(error);
     if (message.includes(CLIENT_EMAIL_IDEMPOTENCY_IDENTITY_CONFLICT)) {

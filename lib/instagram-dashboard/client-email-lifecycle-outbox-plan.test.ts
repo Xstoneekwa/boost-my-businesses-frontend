@@ -39,8 +39,8 @@ const template = {
   id: "tpl-1",
   category: "account_paused" as const,
   version: 3,
-  subject: "Paused {{client_name}}",
-  bodyText: "Support: {{support_email}}",
+  subject: "{{account_status}} — {{client_name}}",
+  bodyText: "Compte: {{instagram_username}}\nDashboard: {{dashboard_url}}\nSupport: {{support_email}}",
 };
 
 const baseLifecycleInput = {
@@ -323,6 +323,49 @@ test("future intent snapshot uses growth sender and never support@ alias", () =>
   assert.equal(intentRow.futureIntentSnapshot.supportEmailSnapshot, "growth@boostmybusinesses.com");
   assert.doesNotMatch(intentRow.futureIntentSnapshot.supportEmailSnapshot, /support@boostmybusinesses.com/);
   assert.doesNotMatch(intentRow.futureIntentSnapshot.snapshotBodyText, /support@boostmybusinesses.com/);
+});
+
+test("production lifecycle snapshot is rendered from the exact canonical account context", () => {
+  const rows = mapLifecyclePreviewToOutboxDecisions(baseLifecycleInput);
+  const snapshot = rows.find((row) => row.futureIntentSnapshot)?.futureIntentSnapshot;
+  assert.ok(snapshot);
+  assert.equal(snapshot.snapshotSubject, "En pause — Client One");
+  assert.match(snapshot.snapshotBodyText, /Compte: user1/);
+  assert.match(snapshot.snapshotBodyText, /account=acct-1/);
+  assert.doesNotMatch(`${snapshot.snapshotSubject}\n${snapshot.snapshotBodyText}`, /Acme Growth Co\.|xstonekwa_backup_acc|preview-account/);
+});
+
+test("missing canonical lifecycle identity blocks materialization and cannot create a provider-bound snapshot", () => {
+  const rows = mapLifecyclePreviewToOutboxDecisions({
+    ...baseLifecycleInput,
+    instagramUsername: null,
+  });
+  const blocked = rows.find((row) => row.decision === "blocked_render_context_incomplete");
+  assert.ok(blocked);
+  assert.match(blocked.reason, /lifecycle_email_render_context_incomplete: missing=instagram_username/);
+  assert.equal(blocked.futureIntentSnapshot, null);
+  assert.equal(rows.some((row) => row.decision === "would_create_initial_intent"), false);
+});
+
+test("replanning another tenant does not mutate or contaminate an immutable prior snapshot", () => {
+  const firstRows = mapLifecyclePreviewToOutboxDecisions(baseLifecycleInput);
+  const first = firstRows.find((row) => row.futureIntentSnapshot)?.futureIntentSnapshot;
+  assert.ok(first);
+  const frozenFirst = JSON.stringify(first);
+
+  const secondRows = mapLifecyclePreviewToOutboxDecisions({
+    ...baseLifecycleInput,
+    accountId: "acct-2",
+    clientId: "client-2",
+    instagramUsername: "user2",
+    clientLabel: "Client Two",
+  });
+  const second = secondRows.find((row) => row.futureIntentSnapshot)?.futureIntentSnapshot;
+  assert.ok(second);
+  assert.equal(JSON.stringify(first), frozenFirst);
+  assert.doesNotMatch(frozenFirst, /Client Two|user2|acct-2|client-2/);
+  assert.match(`${second.snapshotSubject}\n${second.snapshotBodyText}`, /Client Two|user2|acct-2/);
+  assert.doesNotMatch(`${second.snapshotSubject}\n${second.snapshotBodyText}`, /Client One|user1|acct-1/);
 });
 
 test("needs-more idempotency key stable across identical replan", () => {
