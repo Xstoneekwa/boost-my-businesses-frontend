@@ -66,6 +66,16 @@ test("audience filter does not give hair salons to a skin clinic", () => {
   assert.deepEqual(result.map((item) => item.instagram_handle), ["chelseaskinpeer"]);
 });
 
+test("makeup audience evidence names the correct commercial cluster", () => {
+  const result = filterCommercialAudiences([{
+    profile_url: "https://instagram.com/joburg_mua", source: "searchapi_google_serp",
+    source_query: 'site:instagram.com/ "makeup artist" "Johannesburg" booking', confidence: "high",
+    location: "Johannesburg", name: "Joburg MUA", instagram_handle: "joburg_mua",
+    category: "Professional makeup artist in Johannesburg", reason: "Local makeup artist",
+  }], "Johannesburg", "Makeup Artist");
+  assert.match(result[0].reason, /Direct local makeup\/nails\/lashes\/brows competitor in Johannesburg/);
+});
+
 test("audience location cannot be proven only by the source query", () => {
   const result = filterCommercialAudiences([{
     profile_url: "https://instagram.com/remote_lashes", source: "searchapi_google_serp",

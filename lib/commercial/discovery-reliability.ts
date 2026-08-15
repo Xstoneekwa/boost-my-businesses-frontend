@@ -56,7 +56,7 @@ function audienceVertical(value: unknown): AudienceVertical {
 
 function audienceVerticalLabel(vertical: AudienceVertical) {
   if (vertical === "skin_aesthetics") return "skin/aesthetics";
-  if (vertical === "nails_lashes_brows") return "nails/lashes/brows";
+  if (vertical === "nails_lashes_brows") return "makeup/nails/lashes/brows";
   return vertical === "hair" ? "hair" : "Beauty/Aesthetics";
 }
 
