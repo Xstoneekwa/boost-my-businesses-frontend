@@ -1,6 +1,6 @@
 import {
-  CLIENT_EMAIL_NEEDS_MORE_CAMPAIGN_READY_THRESHOLD,
   CLIENT_EMAIL_TEMPLATE_CATEGORIES,
+  type ClientEmailAllowedVariable,
   type ClientEmailSendTrigger,
   type ClientEmailTemplateCategory,
 } from "./client-email-constants.ts";
@@ -10,11 +10,15 @@ import {
   resolveClientCommunicationEmail,
 } from "./client-communication-email.ts";
 import {
-  buildClientEmailDemoValues,
   buildIntentDeliverySnapshotFields,
   resolveTransactionalDeliverySettings,
   type ResolvedTransactionalDeliverySettings,
 } from "./client-email-delivery-settings.ts";
+import {
+  buildCanonicalClientEmailRenderContext,
+  resolveClientEmailLocale,
+  type ClientEmailLocale,
+} from "./client-email-render-context.ts";
 import type { ClientEmailIntentParentType } from "./client-email-intent-parent-contract.ts";
 import {
   isNeedsMoreSignalEligibleAfterWatermark,
@@ -49,7 +53,6 @@ import {
   planNeedsMoreTargetsEpisodeReconciliation,
   type NeedsMoreTargetsSequenceRecord,
 } from "./client-email-needs-more-targets-sequence.ts";
-import { buildNeedsMoreTargetingDashboardUrl } from "./client-email-needs-more-targeting-url.ts";
 import {
   probeNeedsMoreTargetsSequenceSchema,
   projectSequenceRecord,
@@ -79,6 +82,7 @@ export type ClientEmailOutboxDecision =
   | "blocked_legacy_pre_watermark"
   | "blocked_missing_client_email"
   | "blocked_template_unavailable"
+  | "blocked_render_context_incomplete"
   | "blocked_delivery_gate"
   | "no_action";
 
@@ -217,9 +221,9 @@ function buildFutureIntentSnapshot(input: {
   idempotencyKey: string;
   template: ActiveTemplate;
   deliverySettings: ResolvedTransactionalDeliverySettings;
-  demoValues: ReturnType<typeof buildClientEmailDemoValues>;
+  templateValues: Record<ClientEmailAllowedVariable, string>;
 }): ClientEmailOutboxFutureIntentSnapshot {
-  const preview = buildTemplatePreview(input.template.subject, input.template.bodyText, input.demoValues);
+  const preview = buildTemplatePreview(input.template.subject, input.template.bodyText, input.templateValues);
   const deliveryFields = buildIntentDeliverySnapshotFields(input.deliverySettings);
   return {
     templateId: input.template.id,
@@ -245,6 +249,7 @@ export function mapLifecyclePreviewToOutboxDecisions(input: {
   clientId: string;
   instagramUsername: string | null;
   clientLabel: string | null;
+  locale?: ClientEmailLocale;
   clientEmailMasked: string | null;
   adminLifecycleStatus: string;
   automationEnabledAt: Date | null;
@@ -429,7 +434,33 @@ export function mapLifecyclePreviewToOutboxDecisions(input: {
       return rows;
     }
 
-    const demoValues = buildClientEmailDemoValues(input.deliverySettings);
+    const renderContext = buildCanonicalClientEmailRenderContext({
+      category: input.category,
+      accountId: input.accountId,
+      clientId: input.clientId,
+      instagramUsername: input.instagramUsername,
+      clientLabel: input.clientLabel,
+      adminLifecycleStatus: input.adminLifecycleStatus,
+      locale: input.locale ?? "fr",
+      deliverySettings: input.deliverySettings,
+    });
+    if (!renderContext.ok) {
+      pushRow({
+        parentType: "lifecycle_episode",
+        parentKey: episodeKey,
+        parentId: input.activeEpisode?.id ?? null,
+        trigger: "automatic_initial",
+        reminderIndex: 0,
+        businessState: input.adminLifecycleStatus,
+        decision: "blocked_render_context_incomplete",
+        reason: `${renderContext.code}: missing=${renderContext.missing.join(",")}`,
+        idempotencyKey,
+        activeTemplateId: input.template.id,
+        activeTemplateVersion: input.template.version,
+        futureIntentSnapshot: null,
+      });
+      return rows;
+    }
     pushRow({
       parentType: "lifecycle_episode",
       parentKey: episodeKey,
@@ -451,7 +482,7 @@ export function mapLifecyclePreviewToOutboxDecisions(input: {
         idempotencyKey,
         template: input.template,
         deliverySettings: input.deliverySettings,
-        demoValues,
+        templateValues: renderContext.values,
       }),
     });
     return rows;
@@ -479,6 +510,7 @@ export function mapNeedsMorePlanToOutboxRows(input: {
   clientId: string;
   instagramUsername: string | null;
   clientLabel: string | null;
+  locale?: ClientEmailLocale;
   clientEmailMasked: string | null;
   adminLifecycleStatus: string;
   eligibleTargetCount: number;
@@ -672,14 +704,34 @@ export function mapNeedsMorePlanToOutboxRows(input: {
       continue;
     }
 
-    const demoValues = buildClientEmailDemoValues(input.deliverySettings);
-    const templateValues = {
-      ...demoValues,
-      eligible_target_count: String(input.eligibleTargetCount),
-      target_threshold: String(CLIENT_EMAIL_NEEDS_MORE_CAMPAIGN_READY_THRESHOLD),
-      dashboard_url: buildNeedsMoreTargetingDashboardUrl(input.accountId),
-      instagram_username: input.instagramUsername ?? demoValues.instagram_username,
-    };
+    const renderContext = buildCanonicalClientEmailRenderContext({
+      category: "needs_more_target_accounts",
+      accountId: input.accountId,
+      clientId: input.clientId,
+      instagramUsername: input.instagramUsername,
+      clientLabel: input.clientLabel,
+      adminLifecycleStatus: input.adminLifecycleStatus,
+      locale: input.locale ?? "fr",
+      deliverySettings: input.deliverySettings,
+      eligibleTargetCount: input.eligibleTargetCount,
+    });
+    if (!renderContext.ok) {
+      pushRow({
+        parentType: "sequence",
+        parentKey: episodeKey,
+        parentId: input.activeEpisode?.id ?? null,
+        trigger: send.trigger,
+        reminderIndex: send.reminderIndex,
+        businessState: `eligible_targets=${input.eligibleTargetCount};signal_active=${input.needsMoreSignalActive}`,
+        decision: "blocked_render_context_incomplete",
+        reason: `${renderContext.code}: missing=${renderContext.missing.join(",")}`,
+        idempotencyKey: send.idempotencyKey,
+        activeTemplateId: input.template.id,
+        activeTemplateVersion: input.template.version,
+        futureIntentSnapshot: null,
+      });
+      continue;
+    }
     pushRow({
       parentType: "sequence",
       parentKey: episodeKey,
@@ -703,7 +755,7 @@ export function mapNeedsMorePlanToOutboxRows(input: {
         idempotencyKey: send.idempotencyKey,
         template: input.template,
         deliverySettings: input.deliverySettings,
-        demoValues: templateValues,
+        templateValues: renderContext.values,
       }),
     });
   }
@@ -939,6 +991,7 @@ export async function buildClientEmailLifecycleOutboxPlan(
     const adminLifecycleStatus = readString(account.admin_lifecycle_status, "active");
     const instagramUsername = readString(account.username, "") || null;
     const clientLabel = readString(clientRow?.name, "") || null;
+    const locale = resolveClientEmailLocale(clientRow?.metadata);
     const resolvedEmail = resolveClientCommunicationEmail({ client: clientRow, workspaceAuthEmail: null });
     const projectedEmail = projectClientContactEmailDisplay(resolvedEmail);
     const clientEmailMasked = projectedEmail.available
@@ -956,6 +1009,7 @@ export async function buildClientEmailLifecycleOutboxPlan(
         clientId,
         instagramUsername,
         clientLabel,
+        locale,
         clientEmailMasked,
         adminLifecycleStatus,
         automationEnabledAt: lifecycleWatermark,
@@ -993,6 +1047,7 @@ export async function buildClientEmailLifecycleOutboxPlan(
         clientId,
         instagramUsername,
         clientLabel,
+        locale,
         clientEmailMasked,
         adminLifecycleStatus,
         eligibleTargetCount,

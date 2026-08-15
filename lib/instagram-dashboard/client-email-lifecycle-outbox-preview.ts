@@ -29,6 +29,7 @@ export type ClientEmailOutboxPreviewDeliveryState =
   | "blocked_legacy_pre_watermark"
   | "blocked_missing_client_email"
   | "blocked_template_unavailable"
+  | "blocked_render_context_incomplete"
   | "blocked_delivery_gate"
   | "blocked_account_canceled"
   | "suppressed_by_precedence"
@@ -92,6 +93,7 @@ export type ClientEmailOutboxPreviewSummary = {
   blockedLegacyPreWatermark: number;
   blockedMissingClientEmail: number;
   blockedTemplateUnavailable: number;
+  blockedRenderContextIncomplete: number;
   blockedDeliveryGate: number;
   noAction: number;
   wouldMaterializeTheoretical: number;
@@ -122,6 +124,7 @@ const OUTBOX_DECISION_LABELS: Record<ClientEmailOutboxDecision, string> = {
   blocked_legacy_pre_watermark: "Blocked: legacy pre-watermark",
   blocked_missing_client_email: "Blocked: missing client email",
   blocked_template_unavailable: "Blocked: template unavailable",
+  blocked_render_context_incomplete: "Blocked: render context incomplete",
   blocked_delivery_gate: "Blocked: delivery gate closed",
   no_action: "No action",
 };
@@ -132,6 +135,7 @@ const DELIVERY_STATE_LABELS: Record<ClientEmailOutboxPreviewDeliveryState, strin
   blocked_legacy_pre_watermark: "Blocked by missing watermark",
   blocked_missing_client_email: "Blocked: missing client email",
   blocked_template_unavailable: "Blocked: template unavailable",
+  blocked_render_context_incomplete: "Blocked: render context incomplete",
   blocked_delivery_gate: "Blocked: delivery gate closed",
   blocked_account_canceled: "Blocked: account canceled",
   suppressed_by_precedence: "Suppressed by lifecycle priority",
@@ -166,6 +170,8 @@ export function deriveOutboxPreviewDeliveryState(
       return "blocked_missing_client_email";
     case "blocked_template_unavailable":
       return "blocked_template_unavailable";
+    case "blocked_render_context_incomplete":
+      return "blocked_render_context_incomplete";
     case "would_cancel_episode":
       return "blocked_account_canceled";
     default:
@@ -270,6 +276,7 @@ export function summarizeOutboxPreviewRows(input: {
     blockedLegacyPreWatermark: count("blocked_legacy_pre_watermark", effective),
     blockedMissingClientEmail: count("blocked_missing_client_email", effective),
     blockedTemplateUnavailable: count("blocked_template_unavailable", effective),
+    blockedRenderContextIncomplete: count("blocked_render_context_incomplete", effective),
     blockedDeliveryGate: effective.filter((row) => row.dispatchGateState === "closed" && row.dispatchBlockingReasons.length > 0).length,
     noAction: count("no_action", effective),
     wouldMaterializeTheoretical: effective.filter((row) => row.materializationEligible).length,
