@@ -11,7 +11,7 @@ Transactional email V1 uses **Postmark** with a single locked sender:
 | Variable | Production expectation |
 |----------|------------------------|
 | `CLIENT_EMAIL_PROVIDER` | `postmark` |
-| `CLIENT_EMAIL_SENDING_ENABLED` | `false` (client lifecycle sends) |
+| `CLIENT_EMAIL_SENDING_ENABLED` | Explicit production gate; readiness follows `evaluateClientEmailSendingGate()` |
 | `CLIENT_EMAIL_TEST_SENDING_ENABLED` | `false` (allowlisted internal test sends) |
 | `CLIENT_EMAIL_TEST_RECIPIENT` | unset until an explicit test-send GO |
 | `POSTMARK_SERVER_TOKEN` | configured in Vercel Production only |
@@ -60,7 +60,7 @@ Until the migration is applied, the resolver falls back to `growth@boostmybusine
 | Test env + allowlist gate | `lib/instagram-dashboard/client-email-test-config.ts` |
 | Test delivery orchestration | `lib/instagram-dashboard/client-email-test-delivery.ts` |
 | Postmark test send | `lib/instagram-dashboard/client-email-postmark-test-send.ts` |
-| Postmark client adapter (lifecycle blocked) | `lib/instagram-dashboard/client-email-postmark-adapter.ts` |
+| Postmark client adapter | `lib/instagram-dashboard/client-email-postmark-adapter.ts` |
 | Webhook auth | `lib/instagram-dashboard/client-email-postmark-webhook-auth.ts` |
 | Webhook ingestion | `lib/instagram-dashboard/client-email-postmark-webhook.ts` |
 | Test delivery HTTP route | `app/api/instagram-dashboard/email-test-delivery/route.ts` |
@@ -79,9 +79,9 @@ Central read-only planner: `buildClientEmailLifecycleOutboxPlan()` — no episod
 
 | Gate | Production expectation |
 |------|------------------------|
-| `CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED` | `false` until explicit GO |
-| `CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED_AT` | unset until explicit GO (anti-backfill watermark) |
-| `CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT` | unset until explicit GO |
+| `CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED` | Explicit gate; production readiness reads its effective value |
+| `CLIENT_EMAIL_LIFECYCLE_AUTOMATION_ENABLED_AT` | Required anti-backfill watermark |
+| `CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED_AT` | Required independent anti-backfill watermark |
 
 ### Intent parent linkage (local migration, not applied)
 

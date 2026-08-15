@@ -8,7 +8,7 @@ Generic lifecycle email episodes for:
 
 `needs_more_target_accounts` remains on `client_email_needs_more_targets_sequences` and is out of scope here.
 
-## Canonical sources (read-only preview)
+## Canonical sources
 
 | Category | Start / active signal | Resolve signal | Transition audit |
 |----------|----------------------|----------------|------------------|
@@ -40,10 +40,14 @@ Client communication email uses `resolveClientCommunicationEmail` only (client m
 | API route | `app/api/instagram-dashboard/email-lifecycle/preview/route.ts` |
 | Readiness API route | `app/api/instagram-dashboard/email-lifecycle/readiness/route.ts` |
 | Intent parent contract | `lib/instagram-dashboard/client-email-intent-parent-contract.ts` |
-| Migration (local, not applied) | `supabase/migrations/20260630120000_client_email_lifecycle_episodes.sql` |
-| Intent parent migration (local, not applied) | `supabase/migrations/20260702120000_client_email_intent_episode_links.sql` |
+| Episode migration | `supabase/migrations/20260630120000_client_email_lifecycle_episodes.sql` |
+| Intent parent migration | `supabase/migrations/20260702120000_client_email_intent_episode_links.sql` |
+| Production arity reconciliation | `supabase/migrations/20260815040000_client_email_lifecycle_intent_arity_v1.sql` |
 
-## Blockers noted
+## Operational notes
 
 - No `paused_at` / `cancelled_at` / `needs_assistance_at` on `ig_accounts`; transition timing relies on `ig_action_logs.created_at`.
 - `needs_assistance` has no dedicated `account_dashboard_actions` action_type; lifecycle status is the canonical signal.
+- Readiness is derived from the canonical lifecycle scheduler heartbeat. It does
+  not report historical hard-coded “writer disconnected” placeholders.
+- A configured and allowed production sending gate is readiness, not a blocker.

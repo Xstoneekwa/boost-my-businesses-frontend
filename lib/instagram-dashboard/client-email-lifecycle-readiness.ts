@@ -98,6 +98,7 @@ export async function loadClientEmailLifecycleReadiness(
   const lifecycleAutomationEnabled = readClientEmailLifecycleAutomationEnabled(env);
   const needsMoreAutomationEnabled = readClientEmailNeedsMoreTargetsAutomationEnabled(env);
   const testSendingEnabled = readClientEmailTestEnv(env).testSendingEnabled;
+  const schedulerHealth = await loadClientEmailLifecycleSchedulerHealth(supabase, { env });
 
   const senderConfigured = Boolean(deliverySettings.activeFromEmail);
   const supportEmailConfigured = Boolean(deliverySettings.supportEmail);
@@ -132,11 +133,8 @@ export async function loadClientEmailLifecycleReadiness(
   if (!needsMoreAutomationEnabled) {
     materializationBlockingReasons.push("Needs-more-targets email automation is disabled by CLIENT_EMAIL_NEEDS_MORE_TARGETS_AUTOMATION_ENABLED.");
   }
-  if (lifecycleAutomationEnabled) {
-    materializationBlockingReasons.push("Lifecycle automation gate is open; materialize writer is not connected yet.");
-  }
-  if (needsMoreAutomationEnabled) {
-    materializationBlockingReasons.push("Needs-more automation gate is open; verify native scheduler health.");
+  if (schedulerHealth.status !== "healthy") {
+    materializationBlockingReasons.push(schedulerHealth.reason);
   }
 
   if (!senderConfigured) {
@@ -151,17 +149,8 @@ export async function loadClientEmailLifecycleReadiness(
   if (!sendingGate.allowed) {
     dispatchBlockingReasons.push(sendingGate.message);
   }
-  if (providerEnv.sendingEnabled) {
-    dispatchBlockingReasons.push("Global client sending gate is open; production expects it closed until explicit GO.");
-  }
   if (testSendingEnabled) {
     dispatchBlockingReasons.push("Test sending gate is open; production expects it closed.");
-  }
-  if (lifecycleAutomationEnabled) {
-    dispatchBlockingReasons.push("Lifecycle automation gate is open; scheduler is not connected yet.");
-  }
-  if (needsMoreAutomationEnabled) {
-    dispatchBlockingReasons.push("Needs-more automation gate is open; verify native scheduler health.");
   }
   if (!lifecycleWatermarkConfigured) {
     dispatchBlockingReasons.push("Lifecycle anti-backfill watermark is not configured.");
@@ -170,7 +159,6 @@ export async function loadClientEmailLifecycleReadiness(
     dispatchBlockingReasons.push("Needs-more anti-backfill watermark is not configured.");
   }
 
-  const schedulerHealth = await loadClientEmailLifecycleSchedulerHealth(supabase, { env });
   if (schedulerHealth.status !== "healthy") {
     dispatchBlockingReasons.push(schedulerHealth.reason);
   }
