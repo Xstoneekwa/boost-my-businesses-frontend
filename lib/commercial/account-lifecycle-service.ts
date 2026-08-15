@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readString, type SupabaseRecord } from "@/app/api/instagram-dashboard/_utils";
 import { reconcileClientAccountNotificationsForAccount } from "@/lib/instagram-client/client-account-notifications";
+import {
+  runImmediateLifecycleEmailHandoff,
+  type ImmediateLifecycleEmailHandoffResult,
+} from "@/lib/instagram-dashboard/client-email-lifecycle-immediate-handoff";
 import { insertCheckoutAuditEvent } from "./entitlements.ts";
 import {
   accountHasActiveRuntime,
@@ -484,6 +488,12 @@ export async function executeCommercialAccountLifecycle(input: {
   knownEntitlementId?: string | null;
   knownStripeSubscriptionId?: string | null;
   skipStripeCancel?: boolean;
+  lifecycleEmailHandoff?: (input: {
+    supabase: SupabaseClient;
+    accountId: string;
+    category: "account_paused";
+    env?: Record<string, string | undefined>;
+  }) => Promise<ImmediateLifecycleEmailHandoffResult>;
 }): Promise<CommercialLifecycleResult> {
   const supabase = input.supabase;
   const accountId = readString(input.accountId);
@@ -677,6 +687,36 @@ export async function executeCommercialAccountLifecycle(input: {
       await reconcileClientAccountNotificationsForAccount(supabase, accountId);
       await finishOperation(supabase, claim.operationId, "completed");
       await auditLifecycle(supabase, { accountId, action: "commercial_pause_completed", actor: input.actor, payload: { pause_expires_at: pauseExpiresAt } });
+
+      try {
+        const handoff = input.lifecycleEmailHandoff ?? runImmediateLifecycleEmailHandoff;
+        const emailResult = await handoff({
+          supabase,
+          accountId,
+          category: "account_paused",
+          env: input.env,
+        });
+        await auditLifecycle(supabase, {
+          accountId,
+          action: "commercial_pause_email_handoff_completed",
+          actor: input.actor,
+          payload: {
+            materialized: emailResult.materialize.materialized,
+            submitted: emailResult.dispatch.submitted,
+            dispatch_candidates: emailResult.dispatch.candidates,
+          },
+        });
+      } catch (emailError) {
+        await auditLifecycle(supabase, {
+          accountId,
+          action: "commercial_pause_email_handoff_deferred",
+          actor: input.actor,
+          payload: {
+            recovery: "periodic_cron",
+            reason: emailError instanceof Error ? emailError.message.slice(0, 200) : "pause_email_handoff_failed",
+          },
+        });
+      }
 
       return buildResult({
         ok: true,

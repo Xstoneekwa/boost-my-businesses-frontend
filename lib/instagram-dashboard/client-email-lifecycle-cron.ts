@@ -128,11 +128,15 @@ async function loadRecipientEmailForClient(
   return resolved.ok ? resolved.email : null;
 }
 
-async function materializeLifecycleBatch(
+export async function materializeLifecycleBatch(
   supabase: ClientEmailSupabase,
   input: {
     env: Record<string, string | undefined>;
     now: Date;
+    scope?: {
+      accountId: string;
+      category: string;
+    };
   },
 ) {
   const [plan, deliverySettings] = await Promise.all([
@@ -147,6 +151,13 @@ async function materializeLifecycleBatch(
     .filter((row) =>
       row.isEffectiveCandidate === true
       && row.materializationEligible === true
+      && (
+        !input.scope
+        || (
+          row.accountId === input.scope.accountId
+          && row.category === input.scope.category
+        )
+      )
       && (
         row.decision === "would_open_episode"
         || row.decision === "would_close_episode"

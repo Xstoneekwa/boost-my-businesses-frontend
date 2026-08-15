@@ -337,12 +337,16 @@ export async function listLifecycleDispatchCandidates(
   supabase: ClientEmailSupabase,
   now: Date,
   limit = DISPATCH_BATCH_LIMIT,
+  scope?: LifecycleEmailDispatchScope,
 ) {
   const nowIso = now.toISOString();
-  const { data, error } = await supabase
+  let query = supabase
     .from("client_email_send_intents")
-    .select("*")
-    .in("category", LIFECYCLE_DISPATCH_CATEGORIES)
+    .select("*");
+  query = scope
+    ? query.eq("account_id", scope.accountId).eq("category", scope.category)
+    : query.in("category", LIFECYCLE_DISPATCH_CATEGORIES);
+  const { data, error } = await query
     .eq("intent_kind", "client")
     .in("status", [...DISPATCHABLE_STATUSES])
     .is("provider_message_id", null)
@@ -352,6 +356,11 @@ export async function listLifecycleDispatchCandidates(
   if (error) throw new Error(error.message);
   return (data ?? []) as SupabaseRecord[];
 }
+
+export type LifecycleEmailDispatchScope = {
+  accountId: string;
+  category: ClientEmailLifecycleEpisodeCategory;
+};
 
 export type DispatchIntentResult =
   | { outcome: "skipped"; reason: string }
@@ -568,12 +577,15 @@ export async function runLifecycleDispatchBatch(
     env?: Record<string, string | undefined>;
     now?: Date;
     fetcher?: typeof fetch;
+    scope?: LifecycleEmailDispatchScope;
   } = {},
 ) {
   const env = input.env ?? process.env;
   const now = input.now ?? new Date();
-  const dispatchGateOpen = LIFECYCLE_DISPATCH_CATEGORIES.some((category) =>
-    evaluateCategoryDispatchAutomationGate(category, env).allowed);
+  const dispatchGateOpen = input.scope
+    ? evaluateCategoryDispatchAutomationGate(input.scope.category, env).allowed
+    : LIFECYCLE_DISPATCH_CATEGORIES.some((category) =>
+      evaluateCategoryDispatchAutomationGate(category, env).allowed);
   if (!dispatchGateOpen) {
     return {
       dispatchGateOpen: false,
@@ -587,7 +599,7 @@ export async function runLifecycleDispatchBatch(
       results: [] as DispatchIntentResult[],
     };
   }
-  const candidates = await listLifecycleDispatchCandidates(supabase, now);
+  const candidates = await listLifecycleDispatchCandidates(supabase, now, DISPATCH_BATCH_LIMIT, input.scope);
   const results: DispatchIntentResult[] = [];
   for (const candidate of candidates) {
     results.push(await dispatchSingleLifecycleIntent(supabase, candidate, {

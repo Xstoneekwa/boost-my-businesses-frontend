@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { revalidateLifecycleDispatchIntent } from "./client-email-outbox-dispatch.ts";
+import {
+  listLifecycleDispatchCandidates,
+  revalidateLifecycleDispatchIntent,
+} from "./client-email-outbox-dispatch.ts";
 
 type RecordValue = Record<string, unknown> | null;
 
@@ -108,4 +111,38 @@ test("resolved or historical episode cannot be resurrected by refresh", async ()
     new Date("2026-08-14T18:01:00.000Z"),
   );
   assert.deepEqual(result, { ok: false, cancel: true, reason: "lifecycle_episode_inactive" });
+});
+
+test("immediate dispatch candidate lookup is scoped to one account and lifecycle category", async () => {
+  const calls: Array<{ method: string; column?: string; value?: unknown }> = [];
+  const chain = {
+    select: () => chain,
+    eq: (column: string, value: unknown) => {
+      calls.push({ method: "eq", column, value });
+      return chain;
+    },
+    in: (column: string, value: unknown) => {
+      calls.push({ method: "in", column, value });
+      return chain;
+    },
+    is: (column: string, value: unknown) => {
+      calls.push({ method: "is", column, value });
+      return chain;
+    },
+    or: () => chain,
+    order: () => chain,
+    limit: async () => ({ data: [], error: null }),
+  };
+  const supabase = { from: () => chain };
+
+  await listLifecycleDispatchCandidates(
+    supabase as never,
+    new Date("2026-08-15T20:49:42.881Z"),
+    25,
+    { accountId: "account-1", category: "account_paused" },
+  );
+
+  assert.ok(calls.some((call) => call.method === "eq" && call.column === "account_id" && call.value === "account-1"));
+  assert.ok(calls.some((call) => call.method === "eq" && call.column === "category" && call.value === "account_paused"));
+  assert.equal(calls.some((call) => call.method === "in" && call.column === "category"), false);
 });
