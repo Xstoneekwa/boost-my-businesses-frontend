@@ -1286,7 +1286,7 @@ async function processHumanConfirmedResumes(
     throw new Error(restoration.error.message || "resume_retry_credit_reconciliation_failed");
   }
   const armedResult = await (query(supabase, "incident_resume_authorizations")
-    .select("id,incident_id,account_id,run_id,source_run_id,source_request_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,expires_at,status,retry_generation,frozen_phase_plan,test,expected_worker_sha,cause_fixed_version,idempotency_key") as QueryBuilder)
+    .select("id,incident_id,account_id,run_id,source_run_id,source_request_id,resume_plan_id,resume_window_key,scheduled_window_start,scheduled_window_end,expires_at,status,retry_generation,frozen_phase_plan,test,expected_worker_sha,cause_fixed_version,idempotency_key,armed_source,metadata_safe") as QueryBuilder)
     .eq("status", "armed")
     .order("armed_at", { ascending: true })
     .limit(100) as unknown as QueryResult;
@@ -1384,7 +1384,7 @@ async function processHumanConfirmedResumes(
       }
 
       const incidentResult = await query(supabase, "account_incidents")
-        .select("id,account_id,run_id,incident_type,status")
+        .select("id,account_id,run_id,incident_type,status,metadata")
         .eq("id", incidentId)
         .eq("account_id", accountId)
         .maybeSingle();
@@ -1402,6 +1402,16 @@ async function processHumanConfirmedResumes(
         continue;
       }
 
+      const authorizationMetadata = readRecord(authorization.metadata_safe) ?? {};
+      const incidentMetadata = readRecord(incident.metadata) ?? {};
+      const authorizationSourceRequestId = readString(authorization.source_request_id);
+      const preRunIncidentLineageProven = readString(authorization.armed_source) === "resolved_pre_run_incident_reconciliation"
+        && readBoolean(authorizationMetadata.generic_pre_run_recovery, false)
+        && !readString(incident.run_id)
+        && Boolean(authorizationSourceRequestId)
+        && authorizationSourceRequestId === readString(incidentMetadata.run_request_id)
+        && authorizationSourceRequestId === readString(authorizationMetadata.failed_request_id)
+        && originalRunId === readString(authorizationMetadata.source_run_id);
       const lineageVerdict = validateResumeAuthorizationLineage({
         authorizationRunId: originalRunId,
         incidentRunId: readString(incident.run_id),
@@ -1409,6 +1419,7 @@ async function processHumanConfirmedResumes(
         latestCanonicalRunId: candidate?.sourceRunId || "",
         latestTerminationClass: candidate?.reliability.sessionTerminationClass || "",
         resolvedIncidentAuthorized: true,
+        preRunIncidentLineageProven,
       });
       let infrastructureRetryContinuation = false;
       if (

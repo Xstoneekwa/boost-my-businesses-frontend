@@ -194,6 +194,35 @@ test("a resolved exact incident authorizes one new boundary after a non-recovera
   }), { ok: true, reason: "" });
 });
 
+test("an explicitly proven pre-run incident may use its request-bound source run", () => {
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-1",
+    incidentRunId: "",
+    storedPlanRunId: "run-1",
+    latestCanonicalRunId: "run-1",
+    latestTerminationClass: "non_recoverable_failure",
+    resolvedIncidentAuthorized: true,
+    preRunIncidentLineageProven: true,
+  }), { ok: true, reason: "" });
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-1",
+    incidentRunId: "",
+    storedPlanRunId: "run-1",
+    latestCanonicalRunId: "run-1",
+    latestTerminationClass: "non_recoverable_failure",
+    resolvedIncidentAuthorized: true,
+  }), { ok: false, reason: "resume_lineage_mismatch" });
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-1",
+    incidentRunId: "",
+    storedPlanRunId: "run-2",
+    latestCanonicalRunId: "run-1",
+    latestTerminationClass: "non_recoverable_failure",
+    resolvedIncidentAuthorized: true,
+    preRunIncidentLineageProven: true,
+  }), { ok: false, reason: "resume_lineage_mismatch" });
+});
+
 test("a non-recoverable stop without resolved-incident authorization remains blocked", () => {
   assert.deepEqual(validateResumeAuthorizationLineage({
     authorizationRunId: "run-mythyl",

@@ -133,18 +133,16 @@ export function validateResumeAuthorizationLineage(input: {
   latestCanonicalRunId: string;
   latestTerminationClass: string;
   resolvedIncidentAuthorized?: boolean;
+  preRunIncidentLineageProven?: boolean;
 }): ResumeLineageVerdict {
   const authorizationRunId = clean(input.authorizationRunId);
   const incidentRunId = clean(input.incidentRunId);
   const storedPlanRunId = clean(input.storedPlanRunId);
   const latestCanonicalRunId = clean(input.latestCanonicalRunId);
-  if (
-    !authorizationRunId
-    || !incidentRunId
-    || !storedPlanRunId
-    || authorizationRunId !== incidentRunId
-    || authorizationRunId !== storedPlanRunId
-  ) {
+  const incidentLineageMatches = incidentRunId
+    ? authorizationRunId === incidentRunId
+    : input.preRunIncidentLineageProven === true;
+  if (!authorizationRunId || !storedPlanRunId || !incidentLineageMatches || authorizationRunId !== storedPlanRunId) {
     return { ok: false, reason: "resume_lineage_mismatch" };
   }
   if (!latestCanonicalRunId || authorizationRunId !== latestCanonicalRunId) {
