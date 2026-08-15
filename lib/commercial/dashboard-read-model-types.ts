@@ -141,6 +141,12 @@ export type CommercialLeadDetail = {
     vertical: string;
     subsegment: string | null;
     source: string;
+    description: string | null;
+    bookingUrl: string | null;
+    status: string;
+    enrichment: Record<string, unknown>;
+    provenance: Record<string, unknown>;
+    lastEnrichedAt: string | null;
   };
   contact: {
     id: string;
@@ -158,6 +164,16 @@ export type CommercialLeadDetail = {
     audienceContext: Record<string, unknown>;
     approvedBy: string | null;
     approvedAt: string | null;
+    leadScore: number | null;
+    scorePriority: string | null;
+    scoringModelVersion: string | null;
+    scoreBreakdown: Record<string, unknown>;
+    aiConfidence: number | null;
+    aiModel: string | null;
+    aiPromptVersion: string | null;
+    scoredAt: string | null;
+    needsManualReview: boolean;
+    hardGateCodes: string[];
   };
   outreach: {
     channel: string | null;

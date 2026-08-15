@@ -20,11 +20,20 @@ create table public.tenant_users (
   role text not null
 );
 create table public.clients (id uuid primary key);
+alter table public.clients add column status text not null default 'active';
+create table public.ig_accounts (id uuid primary key, username text);
+create table public.client_instagram_accounts (
+  client_id uuid not null references public.clients(id),
+  account_id uuid not null references public.ig_accounts(id),
+  active boolean not null default true,
+  primary key (client_id, account_id)
+);
 create table public.commercial_checkout_sessions (id uuid primary key);
 create table public.client_account_entitlements (id uuid primary key);
 create table public.commercial_stripe_billing_profiles (id uuid primary key);
 create table public.commercial_stripe_subscriptions (id uuid primary key);
 grant select, insert on table public.clients to service_role;
+grant select, insert on table public.ig_accounts, public.client_instagram_accounts to service_role;
 
 insert into auth.users (id) values
   ('580d7856-d60f-4838-a5f9-3b405d6ae79b'),
@@ -42,7 +51,8 @@ insert into public.tenant_users (user_id, role) values
 \ir ../migrations/20260814210447_commercial_crm_foundation_v1.sql
 \ir ../migrations/20260814211105_commercial_crm_foundation_v1_fk_indexes.sql
 \ir ../migrations/20260814212322_commercial_dashboard_read_model_v1.sql
-\ir ../migrations/20260814224316_commercial_lead_review_workflow_v1.sql
+\ir ../migrations/20260814225656_commercial_lead_review_workflow_v1.sql
+\ir ../migrations/20260814233231_commercial_discovery_enrichment_ai_scoring_v1.sql
 
 create or replace function pg_temp.assert_true(p_condition boolean, p_message text)
 returns void language plpgsql as $$
@@ -440,6 +450,7 @@ select pg_temp.assert_true(
 );
 
 \ir commercial-lead-review-workflow-v1.sql
+\ir commercial-discovery-enrichment-ai-scoring-v1.sql
 
 reset role;
 select pg_temp.expect_error(
@@ -451,7 +462,7 @@ select pg_temp.expect_error(
 rollback;
 
 select pg_temp.assert_true(
-  (select count(*) = 0 from public.commercial_campaigns)
+  (select count(*) = 1 from public.commercial_campaigns where campaign_code = 'BMB_ZA_BEAUTY_V1')
   and (select count(*) = 0 from public.commercial_businesses)
   and (select count(*) = 0 from public.commercial_contacts)
   and (select count(*) = 0 from public.commercial_leads)

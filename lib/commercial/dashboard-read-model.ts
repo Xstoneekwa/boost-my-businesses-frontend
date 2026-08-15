@@ -221,7 +221,7 @@ export async function getCommercialLeadDetail(leadId: string): Promise<Commercia
   const supabase = createSupabaseAdminClient();
   const { data: leadData, error: leadError } = await supabase
     .from("commercial_leads")
-    .select("id,campaign_id,business_id,primary_contact_id,qualification_status,outreach_status,sales_status,score,priority,outreach_channel,message_angle,template_version,personalization_context_safe,audience_context_safe,approved_by,approved_at,sales_owner_auth_user_id,created_at,updated_at")
+    .select("id,campaign_id,business_id,primary_contact_id,qualification_status,outreach_status,sales_status,score,priority,outreach_channel,message_angle,template_version,personalization_context_safe,audience_context_safe,approved_by,approved_at,sales_owner_auth_user_id,lead_score,score_priority,scoring_model_version,score_breakdown_safe,ai_confidence,ai_model,ai_prompt_version,scored_at,needs_manual_review,hard_gate_codes,created_at,updated_at")
     .eq("id", leadId)
     .maybeSingle<Row>();
   if (leadError) throw new CommercialReadModelError("Commercial lead detail is unavailable.");
@@ -229,7 +229,7 @@ export async function getCommercialLeadDetail(leadId: string): Promise<Commercia
 
   const [campaignResult, businessResult, contactResult, conversionResult, eventsResult] = await Promise.all([
     supabase.from("commercial_campaigns").select("id,name,campaign_code").eq("id", text(leadData.campaign_id)).single<Row>(),
-    supabase.from("commercial_businesses").select("id,business_name,website,instagram_handle,city,country_code,vertical,subsegment,source").eq("id", text(leadData.business_id)).single<Row>(),
+    supabase.from("commercial_businesses").select("id,business_name,website,instagram_handle,city,country_code,vertical,subsegment,source,business_description,booking_url,business_status,enrichment_snapshot_safe,enrichment_provenance_safe,last_enriched_at").eq("id", text(leadData.business_id)).single<Row>(),
     leadData.primary_contact_id
       ? supabase.from("commercial_contacts").select("id,full_name,job_title,email,instagram_handle,preferred_channel").eq("id", text(leadData.primary_contact_id)).maybeSingle<Row>()
       : Promise.resolve({ data: null, error: null }),
@@ -258,6 +258,9 @@ export async function getCommercialLeadDetail(leadId: string): Promise<Commercia
       instagramHandle: nullableText(business.instagram_handle), city: nullableText(business.city),
       country: text(business.country_code), vertical: text(business.vertical), subsegment: nullableText(business.subsegment),
       source: text(business.source),
+      description: nullableText(business.business_description), bookingUrl: nullableText(business.booking_url),
+      status: text(business.business_status, "unknown"), enrichment: object(business.enrichment_snapshot_safe),
+      provenance: object(business.enrichment_provenance_safe), lastEnrichedAt: nullableText(business.last_enriched_at),
     },
     contact: contact ? {
       id: text(contact.id), name: nullableText(contact.full_name), role: nullableText(contact.job_title),
@@ -268,6 +271,11 @@ export async function getCommercialLeadDetail(leadId: string): Promise<Commercia
       score: nullableNumber(leadData.score), priority: text(leadData.priority), status: text(leadData.qualification_status),
       personalizationContext: object(leadData.personalization_context_safe), audienceContext: object(leadData.audience_context_safe),
       approvedBy: nullableText(leadData.approved_by), approvedAt: nullableText(leadData.approved_at),
+      leadScore: nullableNumber(leadData.lead_score), scorePriority: nullableText(leadData.score_priority),
+      scoringModelVersion: nullableText(leadData.scoring_model_version), scoreBreakdown: object(leadData.score_breakdown_safe),
+      aiConfidence: nullableNumber(leadData.ai_confidence), aiModel: nullableText(leadData.ai_model),
+      aiPromptVersion: nullableText(leadData.ai_prompt_version), scoredAt: nullableText(leadData.scored_at),
+      needsManualReview: boolean(leadData.needs_manual_review), hardGateCodes: stringArray(leadData.hard_gate_codes),
     },
     outreach: {
       channel: nullableText(leadData.outreach_channel), angle: nullableText(leadData.message_angle),
