@@ -10,11 +10,17 @@ const projection = readFileSync(
   new URL("../lib/instagram-dashboard/profiles-live-projection.ts", import.meta.url),
   "utf8",
 );
+const canonicalProfilesRoute = readFileSync(
+  new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url),
+  "utf8",
+);
 
 test("live endpoint is dynamic, private no-store, and selects canonical revision", () => {
   assert.match(route, /dynamic\s*=\s*"force-dynamic"/);
   assert.match(route, /Cache-Control", "private, no-store"/);
-  assert.match(route, /total_story,live_counter_revision,created_at/);
+  assert.match(route, /GET as getLegacyProfiles/);
+  assert.match(route, /legacyPayload\.activeAccounts/);
+  assert.match(canonicalProfilesRoute, /total_story,live_counter_revision,created_at/);
 });
 
 test("live payload is account and run scoped with canonical ack metadata", () => {

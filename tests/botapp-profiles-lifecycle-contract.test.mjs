@@ -22,10 +22,10 @@ test("legacy lifecycle projection still owns the generic terminal states", () =>
   assert.match(manageSource, /inactiveStatuses\.has\(accountStatus\) \|\| inactiveStatuses\.has\(adminStatus\)/);
 });
 
-test("live endpoint selects the all-account projection instead of activeAccounts", () => {
+test("live endpoint selects the canonical activeAccounts projection", () => {
   assert.match(liveSource, /unwrapJsonOkData\(await legacyResponse\.json\(\)\)/);
-  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.profiles\)/);
-  assert.doesNotMatch(liveSource, /legacyPayload\.activeAccounts/);
+  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.activeAccounts\)/);
+  assert.doesNotMatch(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.profiles\)/);
   assert.match(liveSource, /profiles_live_all_accounts_visible_v2/);
 });
 
