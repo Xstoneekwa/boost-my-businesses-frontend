@@ -15,7 +15,7 @@ import type { CommercialReviewQueue } from "@/lib/commercial/lead-review-contrac
 import { getCommercialDiscoveryReadModel } from "@/lib/commercial/discovery-service";
 import type { CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
 import { CommercialOutreachError, getCommercialOutreachReadModel } from "@/lib/commercial/outreach-service";
-import type { CommercialOutreachReadModel } from "@/lib/commercial/outreach-contract";
+import { parseCommercialOutreachReadFilters, type CommercialOutreachReadModel } from "@/lib/commercial/outreach-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -194,6 +194,7 @@ function CommercialStyles() {
 export default async function CommercialDashboardPage({ searchParams }: { searchParams?: Promise<CommercialDashboardSearchParams> }) {
   const rawSearchParams = (await searchParams) ?? {};
   const filters = parseCommercialDashboardFilters(rawSearchParams);
+  const outreachFilters = parseCommercialOutreachReadFilters(rawSearchParams);
   const rawReviewPage = Array.isArray(rawSearchParams.review_page) ? rawSearchParams.review_page[0] : rawSearchParams.review_page;
   const reviewPage = typeof rawReviewPage === "string" && /^\d+$/.test(rawReviewPage) ? Math.min(Math.max(Number(rawReviewPage), 1), 100000) : 1;
   let model: CommercialDashboardReadModel | null = null;
@@ -207,7 +208,7 @@ export default async function CommercialDashboardPage({ searchParams }: { search
       getCommercialDashboardReadModel(filters),
       getCommercialReviewQueueReadModel(filters, reviewPage),
       getCommercialDiscoveryReadModel(),
-      getCommercialOutreachReadModel(),
+      getCommercialOutreachReadModel(outreachFilters),
     ]);
   } catch (error) {
     if (error instanceof CommercialCrmAccessError) notFound();

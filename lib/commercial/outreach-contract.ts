@@ -16,12 +16,17 @@ export const COMMERCIAL_OUTREACH_STATES = [
   "generation_failed",
 ] as const;
 
+export const COMMERCIAL_OUTREACH_STATUS_TABS = ["ready", "approved", "failed", "cancelled", "all"] as const;
+export const COMMERCIAL_OUTREACH_SORTS = ["newest", "confidence"] as const;
+
 export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_prompt_v2_exact_target_salutation";
 
 export type CommercialOutreachChannel = (typeof COMMERCIAL_OUTREACH_CHANNELS)[number];
 export type CommercialOutreachAngle = (typeof COMMERCIAL_OUTREACH_ANGLES)[number];
 export type CommercialOutreachTemplateKey = (typeof COMMERCIAL_OUTREACH_TEMPLATE_KEYS)[number];
 export type CommercialOutreachState = (typeof COMMERCIAL_OUTREACH_STATES)[number];
+export type CommercialOutreachStatusTab = (typeof COMMERCIAL_OUTREACH_STATUS_TABS)[number];
+export type CommercialOutreachSort = (typeof COMMERCIAL_OUTREACH_SORTS)[number];
 
 export type CommercialOutreachFact = {
   key: string;
@@ -48,6 +53,7 @@ export type CommercialOutreachItem = {
   city: string | null;
   subsegment: string | null;
   priority: string;
+  score: number | null;
   channel: CommercialOutreachChannel;
   angle: CommercialOutreachAngle;
   templateKey: CommercialOutreachTemplateKey;
@@ -62,18 +68,58 @@ export type CommercialOutreachItem = {
   attemptCount: number;
   maxAttempts: number;
   generationModel: string | null;
+  generationPromptVersion: string | null;
   generatedAt: string | null;
   approvedAt: string | null;
   ownerEdited: boolean;
   version: number;
   createdAt: string;
   updatedAt: string;
+  instagramHandle: string | null;
+  website: string | null;
+  bookingUrl: string | null;
+  instagramBio: string | null;
+  personalizationContext: Array<{ label: string; value: string }>;
+  audienceContext: Array<{ label: string; value: string }>;
   history: Array<{
     id: string;
     eventType: string;
     actorType: string;
     occurredAt: string;
   }>;
+};
+
+export type CommercialOutreachQueueItem = {
+  id: string;
+  businessName: string;
+  city: string | null;
+  subsegment: string | null;
+  priority: string;
+  score: number | null;
+  channel: CommercialOutreachChannel;
+  angle: CommercialOutreachAngle;
+  templateKey: CommercialOutreachTemplateKey;
+  templateVersion: string;
+  state: CommercialOutreachState;
+  confidence: number | null;
+  attemptCount: number;
+  maxAttempts: number;
+  messageExcerpt: string | null;
+  ownerEdited: boolean;
+  version: number;
+  updatedAt: string;
+};
+
+export type CommercialOutreachReadFilters = {
+  status: CommercialOutreachStatusTab;
+  channel?: CommercialOutreachChannel;
+  angle?: CommercialOutreachAngle;
+  template?: CommercialOutreachTemplateKey;
+  sort: CommercialOutreachSort;
+  page: number;
+  pageSize: number;
+  selectedItemId?: string;
+  search?: string;
 };
 
 export type CommercialOutreachMetrics = {
@@ -88,7 +134,15 @@ export type CommercialOutreachMetrics = {
 };
 
 export type CommercialOutreachReadModel = {
-  items: CommercialOutreachItem[];
+  items: CommercialOutreachQueueItem[];
+  selectedItem: CommercialOutreachItem | null;
+  filters: CommercialOutreachReadFilters;
+  pagination: { page: number; pageSize: number; pageCount: number; total: number };
+  facets: {
+    channels: CommercialOutreachChannel[];
+    angles: CommercialOutreachAngle[];
+    templates: CommercialOutreachTemplateKey[];
+  };
   metrics: CommercialOutreachMetrics;
   delivery: {
     realEmailSend: false;
@@ -96,6 +150,34 @@ export type CommercialOutreachReadModel = {
     phoneFarmDmExecution: false;
   };
 };
+
+type OutreachQueryValue = string | string[] | undefined;
+
+function firstQueryValue(value: OutreachQueryValue) {
+  return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
+}
+
+export function parseCommercialOutreachReadFilters(params: Record<string, OutreachQueryValue>): CommercialOutreachReadFilters {
+  const rawStatus = firstQueryValue(params.outreach_tab);
+  const rawChannel = firstQueryValue(params.outreach_channel);
+  const rawAngle = firstQueryValue(params.outreach_angle);
+  const rawTemplate = firstQueryValue(params.outreach_template);
+  const rawSort = firstQueryValue(params.outreach_sort);
+  const rawPage = Number(firstQueryValue(params.outreach_page));
+  const rawItem = firstQueryValue(params.outreach_item);
+  const rawSearch = firstQueryValue(params.outreach_search).normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 120);
+  return {
+    status: COMMERCIAL_OUTREACH_STATUS_TABS.includes(rawStatus as CommercialOutreachStatusTab) ? rawStatus as CommercialOutreachStatusTab : "ready",
+    channel: COMMERCIAL_OUTREACH_CHANNELS.includes(rawChannel as CommercialOutreachChannel) ? rawChannel as CommercialOutreachChannel : undefined,
+    angle: COMMERCIAL_OUTREACH_ANGLES.includes(rawAngle as CommercialOutreachAngle) ? rawAngle as CommercialOutreachAngle : undefined,
+    template: COMMERCIAL_OUTREACH_TEMPLATE_KEYS.includes(rawTemplate as CommercialOutreachTemplateKey) ? rawTemplate as CommercialOutreachTemplateKey : undefined,
+    sort: COMMERCIAL_OUTREACH_SORTS.includes(rawSort as CommercialOutreachSort) ? rawSort as CommercialOutreachSort : "newest",
+    page: Number.isInteger(rawPage) && rawPage > 0 ? Math.min(rawPage, 100_000) : 1,
+    pageSize: 24,
+    selectedItemId: /^[0-9a-f-]{36}$/i.test(rawItem) ? rawItem : undefined,
+    search: rawSearch || undefined,
+  };
+}
 
 export type CommercialOutreachMutationAction =
   | "approve_message"
