@@ -2,6 +2,7 @@ import { createSupabaseClient } from "@/lib/supabase";
 import { assignmentWindowContainsNow, phoneRestActiveNow, type ScheduleRestWindowProjection } from "@/lib/instagram-dashboard/schedule";
 import { computeAutoRestartOperationalState } from "@/lib/instagram-dashboard/auto-restart-operational";
 import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-restart-scheduler-state";
+import { canonicalManualStopContinuationAuthorized } from "@/lib/instagram-dashboard/auto-restart-manual-stop-continuation";
 import type { PhoneRestOverride } from "@/lib/instagram-dashboard/auto-restart-lifecycle";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
@@ -78,6 +79,9 @@ export type AutoRestartCandidate = {
     sessionTerminationClass: string;
     lastRunId: string;
     lastRunStatus: string;
+    operatorStopContinuation: boolean;
+    operatorStopReason: string;
+    sourceRequestId: string;
     sourceLabel: string;
   };
   quotas: {
@@ -312,6 +316,7 @@ function latestSessionRunByAccount(rows: SupabaseRecord[]) {
 
 function reliabilityFromLatestRun(
   latestRun: SupabaseRecord | undefined,
+  latestRequest: SupabaseRecord | undefined,
   rules: AutoRestartRulePreview,
 ): AutoRestartCandidate["reliability"] {
   if (!latestRun) {
@@ -326,6 +331,9 @@ function reliabilityFromLatestRun(
       sessionTerminationClass: "",
       lastRunId: "",
       lastRunStatus: "",
+      operatorStopContinuation: false,
+      operatorStopReason: "",
+      sourceRequestId: "",
       sourceLabel: "no_recent_run",
     };
   }
@@ -345,7 +353,7 @@ function reliabilityFromLatestRun(
     ? new Date(new Date(finishedAt).getTime() + rules.restartDelayMinutes * 60_000).toISOString()
     : null;
 
-  return {
+  const reliability: AutoRestartCandidate["reliability"] = {
     restartAllowed,
     // CP1: a run without any resume-plan verdict is a real, explainable state
     // (the worker never produced a restart decision for it) — expose the
@@ -365,7 +373,43 @@ function reliabilityFromLatestRun(
     ),
     lastRunId: readString(latestRun.id),
     lastRunStatus: readString(latestRun.status),
+    operatorStopContinuation: false,
+    operatorStopReason: "",
+    sourceRequestId: "",
     sourceLabel: resumePlan ? "ig_runs.performance_summary.resume_plan" : "ig_runs.performance_summary",
+  };
+
+  const requestMetadata = readRecord(latestRequest?.metadata_safe);
+  const attemptId = readNumber(requestMetadata?.attempt_id, 0);
+  const operatorStopContinuation = canonicalManualStopContinuationAuthorized({
+    runId: readString(latestRun.id),
+    runAccountId: readString(latestRun.account_id),
+    runStatus: readString(latestRun.status),
+    requestId: readString(latestRequest?.id),
+    requestRunId: readString(latestRequest?.run_id),
+    requestAccountId: readString(latestRequest?.account_id),
+    requestStatus: readString(latestRequest?.status),
+    cancelRequestedAt: readString(latestRequest?.cancel_requested_at),
+    cancelReason: readString(latestRequest?.cancel_reason),
+    attemptId,
+    restartAllowed: reliability.restartAllowed,
+    restartBlockReason: reliability.restartBlockReason,
+    unsafeMarkers: reliability.unsafeMarkers,
+  });
+
+  if (!operatorStopContinuation) return reliability;
+
+  return {
+    ...reliability,
+    restartAllowed: true,
+    restartBlockReason: "operator_canceled",
+    currentAttempt: String(attemptId),
+    nextAttempt: String(attemptId + 1),
+    sessionTerminationClass: "partial_safe_stopped",
+    operatorStopContinuation: true,
+    operatorStopReason: "botapp_manual_stop",
+    sourceRequestId: readString(latestRequest?.id),
+    sourceLabel: "canonical_botapp_manual_stop_request",
   };
 }
 
@@ -713,6 +757,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     runsResult,
     sessionRunsResult,
     requestsResult,
+    latestRequestsResult,
     runtimeEventsResult,
     canonicalDecisionsResult,
     workerHeartbeatsResult,
@@ -735,6 +780,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     supabase.from("ig_runs").select("id,account_id,status,created_at,updated_at").in("account_id", accountIds).in("status", [...ACTIVE_RUN_STATUSES]).limit(500),
     supabase.from("ig_runs").select("id,account_id,status,finished_at,updated_at,performance_summary").in("account_id", accountIds).order("created_at", { ascending: false }).limit(500),
     supabase.from("account_run_requests").select("id,account_id,status,requested_run_type,created_at,metadata_safe").in("account_id", accountIds).in("status", [...ACTIVE_REQUEST_STATUSES]).limit(500),
+    supabase.from("account_run_requests").select("id,account_id,run_id,status,created_at,cancel_requested_at,cancel_reason,metadata_safe").in("account_id", accountIds).order("created_at", { ascending: false }).limit(500),
     supabase.from("runtime_events").select("id,created_at,event_type,reason,source,job_id,metadata").ilike("event_type", "%restart%").order("created_at", { ascending: false }).limit(10),
     supabase.from("auto_restart_decisions").select("id,created_at,account_id,action,reason,actor,mode,request_id,new_request_id,metadata_safe").order("created_at", { ascending: false }).limit(20),
     supabase.from("worker_heartbeats").select("worker_id,status,last_seen_at").order("last_seen_at", { ascending: false }).limit(20),
@@ -783,6 +829,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     runsResult.error,
     sessionRunsResult.error,
     requestsResult.error,
+    latestRequestsResult.error,
     runtimeEventsResult.error,
     canonicalDecisionsResult.error,
     workerHeartbeatsResult.error,
@@ -807,6 +854,9 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const activeRunsByAccount = mapByAccount((runsResult.data ?? []) as SupabaseRecord[]);
   const latestSessionRunsByAccount = latestSessionRunByAccount((sessionRunsResult.data ?? []) as SupabaseRecord[]);
   const activeRequestsByAccount = mapByAccount((requestsResult.data ?? []) as SupabaseRecord[]);
+  // The query is newest-first; preserve its first row per account. mapByAccount
+  // intentionally overwrites and would therefore select the oldest request.
+  const latestRequestsByAccount = latestSessionRunByAccount((latestRequestsResult.data ?? []) as SupabaseRecord[]);
   const packageSummaryByAccount = mapByAccount((packageSummaryResult.data ?? []) as SupabaseRecord[]);
   const followFilterSettingsByAccount = mapByAccount((followFilterSettingsResult.data ?? []) as SupabaseRecord[]);
   const eligibleTargetsByAccount = eligibleFollowTargetCounts((targetsResult.data ?? []) as SupabaseRecord[]);
@@ -868,7 +918,11 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
         deviceLockActive: activeDeviceLocks.has(deviceId),
         eligibleFollowTargetCount: eligibleTargetsByAccount.get(account.accountId) ?? 0,
         rules,
-        reliability: reliabilityFromLatestRun(latestSessionRunsByAccount.get(account.accountId), rules),
+        reliability: reliabilityFromLatestRun(
+          latestSessionRunsByAccount.get(account.accountId),
+          latestRequestsByAccount.get(account.accountId),
+          rules,
+        ),
         hasOpenIncident: openIncidentsByAccount.has(account.accountId),
       });
     })
