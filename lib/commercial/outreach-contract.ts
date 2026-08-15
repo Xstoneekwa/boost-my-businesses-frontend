@@ -16,7 +16,7 @@ export const COMMERCIAL_OUTREACH_STATES = [
   "generation_failed",
 ] as const;
 
-export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_prompt_v1";
+export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_prompt_v2_exact_target_salutation";
 
 export type CommercialOutreachChannel = (typeof COMMERCIAL_OUTREACH_CHANNELS)[number];
 export type CommercialOutreachAngle = (typeof COMMERCIAL_OUTREACH_ANGLES)[number];
