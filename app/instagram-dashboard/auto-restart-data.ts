@@ -572,7 +572,9 @@ function reliabilityFromLatestRun(
     sourceRequestStatus,
     cancelRequestedAt: readString(sourceRequest?.cancel_requested_at, ""),
     cancelReason: operatorStopReason,
+    restartAllowed,
     restartBlockReason,
+    unsafeMarkers,
   });
 
   return {
