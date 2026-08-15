@@ -232,8 +232,8 @@ export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, 
     const verticalScore = exactVertical ? 0.25 : broadOverlap ? 0.15 : 0.05;
     const customerOverlapScore = exactVertical ? 0.12 : broadOverlap ? 0.08 : 0.02;
     const sourceEvidenceScore = clean(candidate.source_query).length >= 12 ? 0.05 : 0;
-    const canonicalInstagramScore = /instagram\.com\/[a-z0-9._]+\/?$/i.test(clean(candidate.profile_url, 1000)) ? 0.05 : 0;
-    const score = Math.min(1, Number((0.25 + 0.15 + confidenceScore + verticalScore + customerOverlapScore + sourceEvidenceScore + canonicalInstagramScore + 0.03).toFixed(2)));
+    const canonicalInstagramScore = /instagram\.com\/[a-z0-9._]+\/?$/i.test(clean(candidate.profile_url, 1000)) ? 0.02 : 0;
+    const score = Math.min(1, Number((0.15 + 0.2 + confidenceScore + verticalScore + customerOverlapScore + sourceEvidenceScore + canonicalInstagramScore).toFixed(2)));
     if (score < 0.8) return [];
     const relation = exactVertical
       ? `Direct local ${audienceVerticalLabel(candidateVertical)} competitor`

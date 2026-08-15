@@ -44,6 +44,7 @@ test("audience filter removes apps and agencies and keeps a local competitor", (
     { ...base, name: "Glow Aesthetics", instagram_handle: "glowaesthetics", category: "Aesthetic Clinic", reason: "Direct aesthetic competitor in Sandton offering similar treatments" },
   ], "Johannesburg", "Medical skin and aesthetic clinic");
   assert.deepEqual(result.map((item) => item.instagram_handle), ["glowaesthetics"]); assert.ok(result[0].audience_relevance_score >= 0.72);
+  assert.ok(result[0].audience_relevance_score < 1);
   assert.match(result[0].reason, /Direct local skin\/aesthetics competitor in Johannesburg/);
 });
 

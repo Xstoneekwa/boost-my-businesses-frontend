@@ -95,7 +95,9 @@ async function recordPrecheckDecision(supabase: SupabaseAdmin, item: Row, decisi
 }
 
 async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string, targetContext: string) {
-  const { data } = await supabase.from("commercial_discovery_items").select("provider_external_id,source_url,source_query,source_snapshot_safe").eq("run_id", text(item.run_id)).limit(90);
+  const { data } = await supabase.from("commercial_discovery_items").select("provider_external_id,source_url,source_query,source_snapshot_safe")
+    .eq("run_id", text(item.run_id)).eq("selected_for_processing", true).eq("status", "completed")
+    .eq("precheck_decision", "PRECHECK_PASS").not("lead_id", "is", null).limit(90);
   const candidates = (data ?? []).flatMap((raw) => {
     const peer = row(raw); const source = row(peer.source_snapshot_safe); const handle = text(source.instagram_handle) || text(peer.provider_external_id);
     if (!handle || handle === ownHandle) return [];
