@@ -161,3 +161,16 @@ test("blocked legacy pre-watermark is not relabeled as delivery gate", () => {
   assert.equal(enriched.materializationEligible, false);
   assert.equal(enriched.dispatchEligible, false);
 });
+
+test("incomplete canonical render context cannot materialize or dispatch", () => {
+  const row = buildPlanRow({
+    decision: "blocked_render_context_incomplete",
+    reason: "lifecycle_email_render_context_incomplete: missing=instagram_username",
+    futureIntentSnapshot: null,
+  });
+  const enriched = enrichEffectiveCandidateWithGateProjections(row, basePlan(), dispatchReadyEnv);
+  assert.equal(enriched.materializationEligible, false);
+  assert.equal(enriched.materializationGateState, "not_applicable");
+  assert.equal(enriched.dispatchEligible, false);
+  assert.equal(enriched.dispatchGateState, "not_applicable");
+});
