@@ -52,7 +52,7 @@ insert into public.tenant_users (user_id, role) values
 \ir ../migrations/20260814211105_commercial_crm_foundation_v1_fk_indexes.sql
 \ir ../migrations/20260814212322_commercial_dashboard_read_model_v1.sql
 \ir ../migrations/20260814225656_commercial_lead_review_workflow_v1.sql
-\ir ../migrations/20260814233231_commercial_discovery_enrichment_ai_scoring_v1.sql
+\ir ../migrations/20260815000234_commercial_discovery_enrichment_ai_scoring_v1.sql
 
 create or replace function pg_temp.assert_true(p_condition boolean, p_message text)
 returns void language plpgsql as $$
