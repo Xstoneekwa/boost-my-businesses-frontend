@@ -9,7 +9,8 @@ test("live route exists and reuses the production Profiles projection", () => {
   assert.match(routeSource, /export async function GET\(request: Request\)/);
   assert.match(routeSource, /GET as getLegacyProfiles/);
   assert.match(routeSource, /legacyPayload\.activeAccounts/);
-  assert.match(routeSource, /profiles_live_c0d66a5_native_v1/);
+  assert.doesNotMatch(routeSource, /legacyPayload\.profiles\b/);
+  assert.match(routeSource, /profiles_live_all_accounts_visible_v2/);
   assert.match(routeSource, /Cache-Control", "private, no-store"/);
 });
 
