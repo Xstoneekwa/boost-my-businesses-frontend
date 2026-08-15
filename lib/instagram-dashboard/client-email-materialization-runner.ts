@@ -70,6 +70,8 @@ export type MaterializationRunPlan = {
 
 export type MaterializationShadowOperationSummary = {
   open_lifecycle_episode: number;
+  close_lifecycle_episode: number;
+  cancel_lifecycle_episode: number;
   create_lifecycle_initial_intent: number;
   open_needs_more_sequence: number;
   create_needs_more_initial_intent: number;
@@ -270,6 +272,8 @@ function buildShadowContext(plan: ClientEmailLifecycleOutboxPlan, env: Record<st
 function summarizeShadowOperations(items: MaterializationRunPlanItem[]): MaterializationShadowOperationSummary {
   const summary: MaterializationShadowOperationSummary = {
     open_lifecycle_episode: 0,
+    close_lifecycle_episode: 0,
+    cancel_lifecycle_episode: 0,
     create_lifecycle_initial_intent: 0,
     open_needs_more_sequence: 0,
     create_needs_more_initial_intent: 0,

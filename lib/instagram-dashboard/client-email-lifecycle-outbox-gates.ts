@@ -25,6 +25,8 @@ export type OutboxLayerReadiness = {
 
 const MATERIALIZATION_CANDIDATE_DECISIONS = new Set<ClientEmailOutboxDecision>([
   "would_open_episode",
+  "would_close_episode",
+  "would_cancel_episode",
   "would_create_initial_intent",
   "would_create_reminder_intent",
 ]);
