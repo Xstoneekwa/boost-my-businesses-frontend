@@ -257,6 +257,43 @@ test("client email filter combined with category trigger and status", async () =
   assert.equal(projection.items[0].deliveryStatus, "delivered");
 });
 
+test("delivered provider event remains visible even if an old intent lease was left claimed", async () => {
+  const supabase = createMockSupabase({
+    intents: [{
+      id: "intent-stale-claimed",
+      created_at: "2026-08-15T10:16:10.951Z",
+      client_id: "client-a",
+      account_id: "acct-a",
+      category: "account_paused",
+      recipient_email: "owner@example.com",
+      from_email: "growth@boostmybusinesses.com",
+      trigger: "automatic_initial",
+      reminder_index: 0,
+      status: "claimed",
+      template_version: 1,
+    }],
+    accounts: [{ id: "acct-a", username: "tracker" }],
+    clients: [{ id: "client-a", name: "Client A" }],
+    events: [{
+      intent_id: "intent-stale-claimed",
+      status: "delivered",
+      occurred_at: "2026-08-15T10:16:16.000Z",
+    }],
+  });
+
+  const projection = await loadClientEmailHistoryProjection(supabase as never, {
+    clientEmail: "owner@example.com",
+    from: new Date("2026-08-15T00:00:00.000Z"),
+    to: new Date("2026-08-16T00:00:00.000Z"),
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(projection.items.length, 1);
+  assert.equal(projection.items[0]?.intentStatus, "claimed");
+  assert.equal(projection.items[0]?.deliveryStatus, "delivered");
+});
+
 test("client with multiple accounts returns all matching intents for same email", async () => {
   const supabase = createMockSupabase({
     intents: baseIntents,

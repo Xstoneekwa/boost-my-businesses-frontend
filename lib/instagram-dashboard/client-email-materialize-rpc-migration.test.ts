@@ -17,6 +17,16 @@ const atomicMigrationSql = readFileSync(
   "utf8",
 );
 
+const lifecycleArityMigrationSql = readFileSync(
+  new URL("../../supabase/migrations/20260815040000_client_email_lifecycle_intent_arity_v1.sql", import.meta.url),
+  "utf8",
+);
+
+const lifecycleArityRollbackSql = readFileSync(
+  new URL("../../supabase/rollbacks/20260815040000_client_email_lifecycle_intent_arity_v1.sql", import.meta.url),
+  "utf8",
+);
+
 const migrationSql = atomicMigrationSql;
 
 const contractDoc = readFileSync(
@@ -182,4 +192,22 @@ test("materialize RPC signature remains 21 parameters with jsonb return", () => 
 test("base migration preserved without from_email consistency guard", () => {
   assert.doesNotMatch(baseMigrationSql, /client_email_from_email_snapshot_mismatch/);
   assert.doesNotMatch(baseMigrationSql, /client_email_from_email_snapshot_missing/);
+});
+
+test("lifecycle arity migration repairs only the duplicated sender snapshot expression", () => {
+  assert.match(lifecycleArityMigrationSql, /pg_get_functiondef/);
+  assert.match(lifecycleArityMigrationSql, /replace\(v_definition, v_bad_fragment, v_good_fragment\)/);
+  assert.match(lifecycleArityMigrationSql, /client_email_materialize_sender_arity_not_canonical/);
+  assert.match(lifecycleArityMigrationSql, /grant execute[\s\S]*to service_role/i);
+  assert.doesNotMatch(lifecycleArityMigrationSql, /create\s+table/i);
+  assert.doesNotMatch(lifecycleArityMigrationSql, /alter\s+table/i);
+  assert.doesNotMatch(lifecycleArityMigrationSql, /select\s+public\.materialize_client_email_outbox_candidate_v1\s*\(/i);
+  assert.doesNotMatch(lifecycleArityMigrationSql, /insert\s+into/i);
+});
+
+test("lifecycle arity rollback refuses to restore the malformed definition", () => {
+  assert.match(lifecycleArityRollbackSql, /unsafe_rollback_refused/);
+  assert.match(lifecycleArityRollbackSql, /grant execute[\s\S]*to service_role/i);
+  assert.doesNotMatch(lifecycleArityRollbackSql, /regexp_replace/i);
+  assert.doesNotMatch(lifecycleArityRollbackSql, /insert\s+into/i);
 });

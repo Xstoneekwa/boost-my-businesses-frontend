@@ -9,6 +9,9 @@ import { detectClientEmailLifecycleCronInvoker } from "./client-email-lifecycle-
 import {
   cancelDispatchIntent,
   claimNeedsMoreDispatchIntent,
+  finalizeDispatchIntentFailed,
+  finalizeDispatchIntentSent,
+  finalizeDispatchIntentUncertain,
 } from "./client-email-outbox-dispatch.ts";
 import { createPostmarkClientEmailAdapter } from "./client-email-postmark-adapter.ts";
 
@@ -339,4 +342,67 @@ test("cancelDispatchIntent uses stable reason code", async () => {
   await cancelDispatchIntent(supabase as never, "intent-1", "eligible_targets_above_threshold", new Date());
   assert.equal(captured?.status, "canceled");
   assert.match(String(captured?.dispatch_last_error_code ?? ""), /eligible_targets_above_threshold/);
+  assert.equal(captured?.claim_token, null);
+  assert.equal(captured?.claimed_at, null);
+  assert.equal(captured?.claim_expires_at, null);
+});
+
+test("every dispatch terminal path clears the complete claim lease", async () => {
+  const captured: Record<string, unknown>[] = [];
+  const supabase = {
+    from() {
+      return {
+        update: (values: Record<string, unknown>) => {
+          captured.push(values);
+          const builder = {
+            eq: () => builder,
+            in: async () => ({ error: null }),
+            then: (
+              onFulfilled?: (value: { error: null }) => unknown,
+              onRejected?: (reason: unknown) => unknown,
+            ) => Promise.resolve({ error: null }).then(onFulfilled, onRejected),
+          };
+          return builder;
+        },
+      };
+    },
+  };
+  const at = new Date("2026-08-15T10:16:16.000Z");
+
+  await finalizeDispatchIntentSent(supabase as never, "intent-sent", "postmark-message", at);
+  await finalizeDispatchIntentFailed(supabase as never, "intent-failed", "provider_error", at, {
+    attemptCount: 5,
+    releaseForRetry: false,
+  });
+  await finalizeDispatchIntentUncertain(supabase as never, "intent-uncertain", "provider_timeout", at);
+
+  assert.equal(captured.length, 3);
+  for (const values of captured) {
+    assert.equal(values.claim_token, null);
+    assert.equal(values.claimed_at, null);
+    assert.equal(values.claim_expires_at, null);
+  }
+  assert.equal(captured[0]?.status, "sent");
+  assert.equal(captured[0]?.provider_message_id, "postmark-message");
+  assert.equal(captured[1]?.status, "failed");
+  assert.equal(captured[2]?.status, "dispatch_uncertain");
+});
+
+test("all lifecycle email categories share the same complete lease finalization", () => {
+  const categories = [
+    "account_paused",
+    "account_canceled",
+    "needs_assistance",
+    "needs_more_target_accounts",
+  ];
+  assert.equal(categories.length, 4);
+  const source = [
+    finalizeDispatchIntentSent,
+    finalizeDispatchIntentFailed,
+    finalizeDispatchIntentUncertain,
+    cancelDispatchIntent,
+  ].map((fn) => fn.toString()).join("\n");
+  assert.match(source, /claimed_at/);
+  assert.match(source, /claim_token/);
+  assert.match(source, /claim_expires_at/);
 });

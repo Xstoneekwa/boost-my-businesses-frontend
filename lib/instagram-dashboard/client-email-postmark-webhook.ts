@@ -189,9 +189,7 @@ export async function ingestPostmarkWebhookEvent(
     }
     return { ok: false, reason: "invalid_payload", message: "Could not verify webhook idempotency." };
   }
-  if (duplicateCheck.data?.id) {
-    return { ok: true, action: "duplicate" };
-  }
+  const isDuplicate = Boolean(duplicateCheck.data);
 
   const intentResult = await intentsTable(supabase)
     .select("id,recipient_email,client_id")
@@ -213,64 +211,80 @@ export async function ingestPostmarkWebhookEvent(
     return { ok: true, action: "ignored", reason: "recipient_snapshot_mismatch" };
   }
 
-  const insertResult = await deliveryEventsTable(supabase).insert({
-    intent_id: parsed.intentId,
-    provider: CLIENT_EMAIL_POSTMARK_PROVIDER,
-    provider_message_id: parsed.providerMessageId,
-    webhook_event_id: parsed.providerEventId,
-    status: parsed.deliveryStatus,
-    occurred_at: parsed.occurredAt,
-    last_error_redacted: parsed.lastErrorRedacted,
-    metadata_redacted: parsed.metadataRedacted,
-  });
+  if (!isDuplicate) {
+    const insertResult = await deliveryEventsTable(supabase).insert({
+      intent_id: parsed.intentId,
+      provider: CLIENT_EMAIL_POSTMARK_PROVIDER,
+      provider_message_id: parsed.providerMessageId,
+      webhook_event_id: parsed.providerEventId,
+      status: parsed.deliveryStatus,
+      occurred_at: parsed.occurredAt,
+      last_error_redacted: parsed.lastErrorRedacted,
+      metadata_redacted: parsed.metadataRedacted,
+    });
 
-  if (insertResult.error) {
-    if (isClientEmailInfrastructureTableMissingError(insertResult.error)) {
-      return { ok: false, reason: "infrastructure_unavailable", message: "Email delivery tables are unavailable." };
+    if (insertResult.error) {
+      if (isClientEmailInfrastructureTableMissingError(insertResult.error)) {
+        return { ok: false, reason: "infrastructure_unavailable", message: "Email delivery tables are unavailable." };
+      }
+      const message = typeof insertResult.error === "object"
+        && insertResult.error
+        && "message" in insertResult.error
+        && typeof (insertResult.error as { message?: unknown }).message === "string"
+        ? (insertResult.error as { message: string }).message.toLowerCase()
+        : "";
+      if (!message.includes("duplicate") && !message.includes("unique")) {
+        return { ok: false, reason: "invalid_payload", message: "Could not store Postmark delivery event." };
+      }
     }
-    const message = typeof insertResult.error === "object"
-      && insertResult.error
-      && "message" in insertResult.error
-      && typeof (insertResult.error as { message?: unknown }).message === "string"
-      ? (insertResult.error as { message: string }).message.toLowerCase()
-      : "";
-    if (message.includes("duplicate") || message.includes("unique")) {
-      return { ok: true, action: "duplicate" };
-    }
-    return { ok: false, reason: "invalid_payload", message: "Could not store Postmark delivery event." };
   }
 
-  await syncIntentStatusFromWebhookEvent(supabase, parsed);
+  const syncError = await syncIntentStatusFromWebhookEvent(supabase, parsed);
+  if (syncError) {
+    return { ok: false, reason: "infrastructure_unavailable", message: "Could not synchronize email intent status." };
+  }
 
-  return { ok: true, action: "stored" };
+  return { ok: true, action: isDuplicate ? "duplicate" : "stored" };
 }
 
 async function syncIntentStatusFromWebhookEvent(
   supabase: ClientEmailSupabase,
   event: ParsedPostmarkWebhookEvent,
 ) {
-  if (!event.intentId) return;
+  if (!event.intentId) return null;
   const nowIso = new Date().toISOString();
 
   if (event.deliveryStatus === "delivered") {
-    await supabase
+    const { error } = await supabase
       .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
       .update({
         status: "sent",
         sent_at: event.occurredAt,
+        provider_accepted_at: event.occurredAt,
+        provider_message_id: event.providerMessageId,
+        claim_token: null,
+        claimed_at: null,
+        claim_expires_at: null,
+        dispatch_last_error_code: null,
       })
       .eq("id", event.intentId);
-    return;
+    return error ?? null;
   }
 
   if (["bounced", "complained", "suppressed"].includes(event.deliveryStatus)) {
-    await supabase
+    const { error } = await supabase
       .from(CLIENT_EMAIL_SEND_INTENTS_TABLE)
       .update({
         status: "canceled",
         resolved_at: nowIso,
+        provider_message_id: event.providerMessageId,
+        claim_token: null,
+        claimed_at: null,
+        claim_expires_at: null,
         dispatch_last_error_code: event.deliveryStatus,
       })
       .eq("id", event.intentId);
+    return error ?? null;
   }
+  return null;
 }

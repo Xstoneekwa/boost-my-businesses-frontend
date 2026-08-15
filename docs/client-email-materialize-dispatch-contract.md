@@ -1,6 +1,6 @@
 # Client email — Materialize / Dispatch contract (TASK 11B)
 
-**Status:** design-only, not implemented.  
+**Status:** production pipeline implemented; lifecycle materialization arity reconciliation added in `20260815040000_client_email_lifecycle_intent_arity_v1.sql`.
 **Database:** main production only (`zgafnshkjywfltxgbtzg`).  
 **Scope:** locks the future writer/dispatcher contract before any migration or runtime code.
 
@@ -53,14 +53,14 @@ Same three values appear in:
                                 │ effective candidate (theoretical)
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  MATERIALIZE — future writer (episodes/sequences + intents)     │
+│  MATERIALIZE — writer (episodes/sequences + intents)            │
 │  Gates: automation + watermark + category + business validity   │
 │  NEVER depends on CLIENT_EMAIL_SENDING_ENABLED                  │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ durable intent (pending/scheduled)
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  DISPATCH — future worker (claim → revalidate → Postmark)       │
+│  DISPATCH — worker (claim → revalidate → Postmark)              │
 │  ONLY layer that may call Postmark for client lifecycle         │
 │  REQUIRES CLIENT_EMAIL_SENDING_ENABLED=true                     │
 └───────────────────────────────┬─────────────────────────────────┘
@@ -102,7 +102,7 @@ Preview and readiness now expose separate materialization vs dispatch eligibilit
 
 ---
 
-### 3.2 Materialize (future writer)
+### 3.2 Materialize
 
 **Purpose:** create or retrieve episode/sequence + exactly one durable intent per business event.
 
@@ -145,7 +145,7 @@ CLIENT_EMAIL_SENDING_ENABLED=false
 
 ---
 
-### 3.3 Dispatch (future worker)
+### 3.3 Dispatch
 
 **Purpose:** claim a ready intent, revalidate, call Postmark once, persist provider correlation.
 
@@ -191,6 +191,11 @@ CLIENT_EMAIL_SENDING_ENABLED=false
 - `supabase/migrations/20260706120000_client_email_materialize_atomic_preparent_validation.sql` — TASK 14E pre-parent validation (see §4.8) — **applied main prod `20260627165132`**
 
 **Function:** `materialize_client_email_outbox_candidate_v1(...)`
+
+The `20260815040000` reconciliation is definition-only: it repairs a production
+drift where the lifecycle intent branch supplied the sender snapshot twice. It
+does not insert an episode or intent, replay a transition, or backfill an
+existing lifecycle state. Rollback refuses to reinstall the malformed shape.
 
 **Server module (no route):** `lib/instagram-dashboard/client-email-outbox-materializer.ts`
 
