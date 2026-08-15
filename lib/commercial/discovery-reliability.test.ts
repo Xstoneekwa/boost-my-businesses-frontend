@@ -39,6 +39,8 @@ test("shared booking and bio platforms are never business identity websites", ()
   assert.equal(isSharedCommercialPlatformUrl("https://www.fresha.com/book-now/a/services?pId=1"), true);
   assert.equal(isSharedCommercialPlatformUrl("https://wa.me/27123456789"), true);
   assert.equal(isSharedCommercialPlatformUrl("https://bio.site/example"), true);
+  assert.equal(isSharedCommercialPlatformUrl("https://www.tiktok.com/@example"), true);
+  assert.equal(isSharedCommercialPlatformUrl("https://g.co/kgs/example"), true);
   assert.equal(isSharedCommercialPlatformUrl("https://glowclinic.co.za/book"), false);
 });
 

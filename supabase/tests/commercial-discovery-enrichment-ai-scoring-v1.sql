@@ -89,15 +89,15 @@ select pg_temp.assert_true(
   public.preflight_commercial_discovery_candidate_v1(
     (select id from public.commercial_discovery_runs where idempotency_key = 'discovery-run-fixture'),
     'searchapi', 'new-id', 'different_handle', null, 'Fixture Glow Clinic'
-  )->>'status' = 'duplicate',
-  'same normalized name and city is duplicate before AI'
+  )->>'status' = 'clear',
+  'same display name with a distinct canonical handle is not identity'
 );
 select pg_temp.assert_true(
   public.preflight_commercial_discovery_candidate_v1(
     (select id from public.commercial_discovery_runs where idempotency_key = 'discovery-run-fixture'),
     'searchapi', 'ambiguous-id', 'ambiguous_handle', null, 'Fixture Glow Clinic Sandton'
-  )->>'status' = 'possible_duplicate',
-  'ambiguous same-city name is held without silent merge'
+  )->>'status' = 'clear',
+  'same-city name prefix cannot block a distinct canonical handle'
 );
 
 insert into public.commercial_businesses (business_name,country_code,city,vertical,subsegment,instagram_handle)

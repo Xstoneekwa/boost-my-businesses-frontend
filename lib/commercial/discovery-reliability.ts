@@ -146,7 +146,7 @@ function bookingProvider(url: string) {
 }
 
 const bookingPattern = /\b(book(?:ing|ings)?|appointment|schedule|reserve|fresha|treatwell|calendly|booksy|whatsapp)\b/i;
-const sharedCommercialPlatformHostPattern = /^(?:www\.)?(?:fresha\.com|booksy\.(?:com|info)|treatwell\.[a-z.]+|calendly\.com|wa\.me|whatsapp\.com|linktr\.ee|beacons\.ai|bio\.site|setmore\.com|glossgenius\.com|vagaro\.com)$/i;
+const sharedCommercialPlatformHostPattern = /^(?:www\.)?(?:fresha\.com|booksy\.(?:com|info)|treatwell\.[a-z.]+|calendly\.com|wa\.me|whatsapp\.com|linktr\.ee|beacons\.ai|bio\.site|setmore\.com|glossgenius\.com|vagaro\.com|tiktok\.com|instagram\.com|facebook\.com|fb\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|pinterest\.[a-z.]+|g\.co|maps\.app\.goo\.gl)$/i;
 
 export function isSharedCommercialPlatformUrl(value: unknown) {
   try { return sharedCommercialPlatformHostPattern.test(new URL(clean(value, 2000)).hostname); }

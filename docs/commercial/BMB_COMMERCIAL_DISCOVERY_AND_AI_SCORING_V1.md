@@ -23,7 +23,7 @@ External provider content is evidence, never executable instruction. Provider, J
 
 `CommercialDiscoveryProvider` emits a provider identity, Instagram handle/profile URL, public search title/snippet, source query, position and extraction mode. The run ledger stores bounded counts and safe provider diagnostics. Item rows retain source, enrichment and analysis snapshots without secrets.
 
-Before AI, the service checks active BMB clients, converted businesses, provider ID, normalized Instagram handle, website domain and normalized name plus city. A close same-city name becomes `possible_duplicate`; it is never automatically merged. The ingestion RPC repeats exact checks atomically. Run and item idempotency keys, business identifiers and existing-lead exclusion prevent replayed score events or audience snapshots.
+Before AI, the service checks active BMB clients, converted businesses and strong identity only: provider ID, normalized Instagram handle, or a first-party website domain. Display-name equality or prefix similarity is evidence for review, never canonical identity. Shared booking, bio-link, messaging, social-media and redirect domains are excluded from website identity. The ingestion RPC repeats exact checks atomically. Run and item idempotency keys, business identifiers and existing-lead exclusion prevent replayed score events or audience snapshots.
 
 ## Score contract
 
@@ -62,6 +62,8 @@ Every provider result is persisted before processing, including candidates beyon
 Location resolution combines provider text, Instagram biography/category/captions, website/contact evidence, booking evidence and structured address evidence. It stores country, city, HIGH/MEDIUM/LOW confidence and source-labelled evidence. The runtime remains restricted to Johannesburg or Cape Town. LOW confidence is capped below P1 and cannot enter Needs Approval.
 
 Website enrichment follows at most three redirects, downloads at most 512 KB per page, waits at most eight seconds per request and visits at most three same-domain root/contact/booking/about pages. It extracts observed description, address, public business email/phone and booking links. Booking detection is provider-agnostic; known providers get a stable label and all other evidenced booking pages use `website_booking`.
+
+Deduplication is deliberately conservative: a canonical provider identifier, exact Instagram handle, or dedicated first-party domain may match an existing business. Generic names such as a city plus service, name prefixes, TikTok/Facebook/Instagram profiles, Google redirect URLs and shared booking or bio-link platforms cannot merge or block distinct prospects.
 
 Audience suggestions remain real candidates from the run ledger. A deterministic post-filter excludes marketing agencies, SaaS/apps, directories, media, suppliers and insufficiently local/unrelated profiles. Each persisted suggestion has name, handle, category, location, reason, source, confidence and a separate relevance score. Insufficient evidence means no suggestion.
 
@@ -102,7 +104,7 @@ Cost controls are the explicit scale selector, bounded SERP pages/query count, f
 - `provider_not_configured` / `provider_key_missing`: verify canonical server environment variables; never add keys to client code.
 - `provider_rate_limited`: wait for provider recovery. The run becomes partial or failed; retries are capped.
 - `schema_invalid` / `invalid_json`: inspect prompt/model version and safe item error code. Do not weaken strict schema validation.
-- `possible_duplicate`: compare identifiers manually. Do not force a merge from the Discovery UI.
+- historical `possible_duplicate`: compare strong identifiers manually. New discovery runs do not block a distinct canonical handle from display-name similarity alone.
 - empty Needs Approval with created leads: P3 and lower P2 are intentionally stored outside Liam's default queue.
 - stuck queued/running: inspect Vercel function logs using the run ID; do not manually mark leads approved or queue outreach.
 

@@ -15,8 +15,10 @@ select pg_temp.assert_true(
   public.commercial_crm_identity_domain_v2('https://www.fresha.com/book-now/example/services?pId=1') is null
   and public.commercial_crm_identity_domain_v2('https://wa.me/27123456789') is null
   and public.commercial_crm_identity_domain_v2('https://bio.site/example') is null
+  and public.commercial_crm_identity_domain_v2('https://www.tiktok.com/@example') is null
+  and public.commercial_crm_identity_domain_v2('https://g.co/kgs/example') is null
   and public.commercial_crm_identity_domain_v2('https://glowclinic.co.za/book') = 'glowclinic.co.za',
-  'shared booking and bio platforms cannot become business identity domains'
+  'shared booking, bio, social, and redirect platforms cannot become business identity domains'
 );
 
 select public.create_commercial_discovery_run_v2(
@@ -30,6 +32,19 @@ select pg_temp.assert_true(
 select * from public.claim_commercial_discovery_runs_v2(1,'sql-test-worker');
 update public.commercial_discovery_runs set discovery_status='completed', discovered_count=8, discovered_at=now(), worker_locked_at=null, worker_locked_by=null
 where idempotency_key='reliability-run-3';
+
+insert into public.commercial_businesses(business_name,country_code,city,vertical,instagram_handle,source)
+values ('Johannesburg Makeup Artist','ZA','Johannesburg','Beauty/Aesthetics','distinct_existing_handle','sql_reliability_test');
+insert into public.commercial_leads(campaign_id,business_id,qualification_status)
+select c.id,b.id,'qualified' from public.commercial_campaigns c cross join public.commercial_businesses b
+where b.instagram_handle_normalized='distinct_existing_handle' order by c.created_at limit 1;
+select pg_temp.assert_true(
+  public.preflight_commercial_discovery_candidate_v1(
+    (select id from public.commercial_discovery_runs where idempotency_key='reliability-run-3'),
+    'searchapi','distinct_new_provider_id','distinct_new_handle',null,'Johannesburg Makeup Artist'
+  )->>'status' = 'clear',
+  'generic display-name equality cannot override distinct canonical Instagram identity'
+);
 
 insert into public.commercial_discovery_items(run_id,provider,provider_external_id,source_url,status,stage,selected_for_processing,candidate_rank,idempotency_key,source_snapshot_safe)
 select r.id,'searchapi','reliability_candidate_'||g,'https://instagram.com/reliability_candidate_'||g,
