@@ -16,7 +16,7 @@ import {
   type AudienceSuggestion,
 } from "./discovery-reliability";
 import { scoreCommercialProspect } from "./discovery-scoring";
-import { boundedCommercialBatchSize, boundedCommercialConcurrency, mapWithBoundedConcurrency, nextCommercialAttemptAt } from "./discovery-execution";
+import { boundedCommercialBatchSize, boundedCommercialConcurrency, mapWithBoundedConcurrency, nextCommercialAttemptAt, retryCommercialWrite } from "./discovery-execution";
 
 type Row = Record<string, unknown>;
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
@@ -38,6 +38,14 @@ function nullableText(value: unknown) { const valueText = text(value).trim(); re
 function num(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function array(value: unknown) { return Array.isArray(value) ? value : []; }
 function sleep(milliseconds: number) { return new Promise<void>((resolve) => setTimeout(resolve, milliseconds)); }
+function safeDatabaseError(error: unknown, attempts: number) {
+  const value = row(error); const code = text(value.code).slice(0, 64);
+  const category = /^23/.test(code) ? "constraint_violation" : /^08/.test(code) ? "connection_error" : /^PGRST/i.test(code) ? "postgrest_error" : "database_error";
+  return { provider: "supabase", code: code || "unknown", category, attempts };
+}
+class CommercialDiscoveryItemUpdateError extends Error {
+  constructor(readonly safeDetail: Row) { super("commercial_discovery_item_update_failed"); }
+}
 function candidateFromItem(item: Row): CommercialDiscoveryCandidate {
   const source = row(item.source_snapshot_safe);
   return {
@@ -73,8 +81,8 @@ async function discoverAndPersistRun(supabase: SupabaseAdmin, run: Row, discover
 
 async function updateItem(supabase: SupabaseAdmin, itemId: string, values: Row) {
   const releaseLock = terminalItemStatuses.has(text(values.status)) || values.status === "retry_scheduled";
-  const { error } = await supabase.from("commercial_discovery_items").update({ ...values, ...(releaseLock ? { locked_at: null, locked_by: null } : {}) }).eq("id", itemId).neq("status", "cancelled");
-  if (error) throw new Error("commercial_discovery_item_update_failed");
+  const outcome = await retryCommercialWrite(() => supabase.from("commercial_discovery_items").update({ ...values, ...(releaseLock ? { locked_at: null, locked_by: null } : {}) }).eq("id", itemId).neq("status", "cancelled"));
+  if (outcome.result.error) throw new CommercialDiscoveryItemUpdateError(safeDatabaseError(outcome.result.error, outcome.attempts));
 }
 
 async function recordPrecheckDecision(supabase: SupabaseAdmin, item: Row, decision: ReturnType<typeof deterministicCommercialPrecheck>, location: ReturnType<typeof resolveCommercialLocation>, extra: Row = {}) {
@@ -193,6 +201,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
   } catch (error) {
     const code = error instanceof Error ? error.message : "processor_error"; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
     await updateItem(supabase, text(item.id), { status: canRetry ? "retry_scheduled" : "failed", stage: "FAILED", error_code: code,
+      error_detail_safe: error instanceof CommercialDiscoveryItemUpdateError ? error.safeDetail : {},
       next_attempt_at: canRetry ? nextCommercialAttemptAt((dependencies.now ?? (() => new Date()))(), num(item.attempt_count)) : null,
       completed_at: canRetry ? null : new Date().toISOString(), duration_ms: Date.now() - started });
   }

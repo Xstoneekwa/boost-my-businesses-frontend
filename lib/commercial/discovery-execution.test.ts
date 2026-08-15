@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapWithBoundedConcurrency, nextCommercialAttemptAt, planCommercialBatch } from "./discovery-execution.ts";
+import { mapWithBoundedConcurrency, nextCommercialAttemptAt, planCommercialBatch, retryCommercialWrite } from "./discovery-execution.ts";
 
 test("30 items require six bounded continuations and never one invocation", async () => {
   let remaining = Array.from({ length: 30 }, (_, index) => index); let continuations = 0; let active = 0; let peak = 0; const completed: number[] = [];
@@ -15,4 +15,19 @@ test("resume starts with remaining durable items and retry backoff is finite", (
   const durable = Array.from({ length: 30 }, (_, index) => ({ id: index, status: index < 10 ? "completed" : "pending" }));
   assert.deepEqual(planCommercialBatch(durable.filter((item) => item.status === "pending"), 5).map((item) => item.id), [10, 11, 12, 13, 14]);
   assert.equal(nextCommercialAttemptAt(new Date("2026-08-15T00:00:00Z"), 1), "2026-08-15T00:01:00.000Z");
+});
+
+test("a transient commercial write is retried once and can recover", async () => {
+  let calls = 0; const waits: number[] = [];
+  const outcome = await retryCommercialWrite(async () => ({ error: ++calls === 1 ? { code: "PGRST000" } : null }), {
+    delayMs: 150,
+    wait: async (delayMs) => { waits.push(delayMs); },
+  });
+  assert.equal(calls, 2); assert.equal(outcome.attempts, 2); assert.equal(outcome.result.error, null); assert.deepEqual(waits, [150]);
+});
+
+test("a deterministic commercial write failure remains bounded", async () => {
+  let calls = 0;
+  const outcome = await retryCommercialWrite(async () => { calls += 1; return { error: { code: "23514" } }; }, { wait: async () => undefined });
+  assert.equal(calls, 2); assert.equal(outcome.attempts, 2); assert.deepEqual(outcome.result.error, { code: "23514" });
 });

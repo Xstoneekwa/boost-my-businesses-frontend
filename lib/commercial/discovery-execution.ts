@@ -24,3 +24,20 @@ export function nextCommercialAttemptAt(now: Date, attemptCount: number) {
 export function planCommercialBatch<T>(claimable: T[], batchSize: unknown = 5) {
   return claimable.slice(0, boundedCommercialBatchSize(batchSize));
 }
+
+export async function retryCommercialWrite<T extends { error?: unknown }>(
+  operation: () => PromiseLike<T>,
+  options: { maxAttempts?: number; delayMs?: number; wait?: (delayMs: number) => Promise<void> } = {},
+) {
+  const maxAttempts = Math.min(Math.max(Math.trunc(options.maxAttempts ?? 2), 1), 2);
+  const delayMs = Math.min(Math.max(Math.trunc(options.delayMs ?? 150), 0), 500);
+  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let result = await operation();
+  let attempts = 1;
+  while (result.error && attempts < maxAttempts) {
+    if (delayMs) await wait(delayMs);
+    result = await operation();
+    attempts += 1;
+  }
+  return { result, attempts };
+}
