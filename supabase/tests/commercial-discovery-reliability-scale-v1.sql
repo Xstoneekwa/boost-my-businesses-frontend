@@ -59,11 +59,22 @@ select r.id,'searchapi','terminal_candidate_'||g,
   case g when 1 then 'rejected' when 2 then 'failed' else 'duplicate' end,
   case g when 1 then 'REJECTED' when 2 then 'FAILED' else 'REJECTED' end,true,g,r.id||':terminal_candidate_'||g,'{}'::jsonb
 from public.commercial_discovery_runs r cross join generate_series(1,3) g where r.idempotency_key='reliability-run-30';
+
+insert into public.commercial_businesses(business_name,country_code,city,vertical,instagram_handle,instagram_handle_normalized,source)
+values ('Reliability Metric Business','ZA','Cape Town','Beauty/Aesthetics','reliability.metric.business','reliability.metric.business','sql_reliability_test');
+insert into public.commercial_leads(campaign_id,business_id,qualification_status,lead_score,score_priority)
+select c.id,b.id,'qualified',8.1,'P1' from public.commercial_campaigns c cross join public.commercial_businesses b
+where b.instagram_handle_normalized='reliability.metric.business' order by c.created_at limit 1;
+update public.commercial_discovery_items i set lead_id=l.id
+from public.commercial_leads l join public.commercial_businesses b on b.id=l.business_id
+where i.run_id=(select id from public.commercial_discovery_runs where idempotency_key='reliability-run-30')
+  and i.provider_external_id='terminal_candidate_3' and b.instagram_handle_normalized='reliability.metric.business';
 select public.refresh_commercial_discovery_run_v2((select id from public.commercial_discovery_runs where idempotency_key='reliability-run-30'));
 select pg_temp.assert_true(
   (select status='completed_with_errors' and max_prospects=30 and force_rescore and error_count=1 and precheck_rejected_count=0
+   and qualified_count=0 and p1_count=0 and scored_count=0
    from public.commercial_discovery_runs where idempotency_key='reliability-run-30'),
-  'partial item failure completes with errors and owner force-rescore intent is durable'
+  'partial failure is durable and duplicate leads do not inflate scored or priority metrics'
 );
 
 select pg_temp.assert_true(
