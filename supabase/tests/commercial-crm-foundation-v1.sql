@@ -57,6 +57,7 @@ insert into public.tenant_users (user_id, role) values
 \ir ../migrations/20260815015500_commercial_discovery_run_metric_integrity_v1.sql
 \ir ../migrations/20260815024608_commercial_shared_platform_identity_guard_v1.sql
 \ir ../migrations/20260815031204_commercial_strong_identity_dedup_v1.sql
+\ir ../migrations/20260815112508_commercial_outreach_orchestration_v1.sql
 
 create or replace function pg_temp.assert_true(p_condition boolean, p_message text)
 returns void language plpgsql as $$
@@ -456,6 +457,7 @@ select pg_temp.assert_true(
 \ir commercial-lead-review-workflow-v1.sql
 \ir commercial-discovery-enrichment-ai-scoring-v1.sql
 \ir commercial-discovery-reliability-scale-v1.sql
+\ir commercial-outreach-orchestration-v1.sql
 
 reset role;
 select pg_temp.expect_error(

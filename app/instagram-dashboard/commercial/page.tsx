@@ -5,6 +5,7 @@ import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSec
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import CommercialLeadReviewQueue from "./CommercialLeadReviewQueue";
 import CommercialDiscoveryPanel from "./CommercialDiscoveryPanel";
+import CommercialOutreachQueue from "./CommercialOutreachQueue";
 import { CommercialCrmAccessError, requireCommercialCrmAccess } from "@/lib/commercial/crm-access";
 import { CommercialReadModelError, getCommercialDashboardReadModel } from "@/lib/commercial/dashboard-read-model";
 import { CommercialReviewError, getCommercialReviewQueueReadModel } from "@/lib/commercial/lead-review";
@@ -13,6 +14,8 @@ import type { CommercialBreakdownRow, CommercialDashboardReadModel, CommercialQu
 import type { CommercialReviewQueue } from "@/lib/commercial/lead-review-contract";
 import { getCommercialDiscoveryReadModel } from "@/lib/commercial/discovery-service";
 import type { CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
+import { CommercialOutreachError, getCommercialOutreachReadModel } from "@/lib/commercial/outreach-service";
+import type { CommercialOutreachReadModel } from "@/lib/commercial/outreach-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +125,7 @@ function DashboardFilters({ model }: { model: CommercialDashboardReadModel }) {
   );
 }
 
-function Dashboard({ model, reviewQueue, reviewPage, discovery }: { model: CommercialDashboardReadModel; reviewQueue: CommercialReviewQueue; reviewPage: number; discovery: CommercialDiscoveryReadModel }) {
+function Dashboard({ model, reviewQueue, reviewPage, discovery, outreach }: { model: CommercialDashboardReadModel; reviewQueue: CommercialReviewQueue; reviewPage: number; discovery: CommercialDiscoveryReadModel; outreach: CommercialOutreachReadModel }) {
   const kpiCards = [
     ["Discovered", model.kpis.discovered], ["Qualified", model.kpis.qualified], ["Approved", model.kpis.approved],
     ["Contacted", model.kpis.contacted], ["Replies", model.kpis.replies], ["Hot Leads", model.kpis.hotLeads],
@@ -138,6 +141,7 @@ function Dashboard({ model, reviewQueue, reviewPage, discovery }: { model: Comme
 
       <section className="commercial-section-title"><small>WHAT NEEDS ME</small><h2>Liam queue</h2></section>
       <CommercialLeadReviewQueue initialQueue={reviewQueue} returnPath={queryHref(model, { page: model.leads.page, review_page: reviewPage }).replace("#leads", "#review-queue")} />
+      <CommercialOutreachQueue initialModel={outreach} />
       <section className="commercial-queues">
         <QueueCard eyebrow="Respond" title="Hot Responses" rows={model.queues.hotResponses} empty="No sales-qualified response is waiting." />
         <QueueCard eyebrow="Prepare" title="Upcoming Demos" rows={model.queues.upcomingDemos} empty="No demo is currently booked in the CRM." />
@@ -195,19 +199,21 @@ export default async function CommercialDashboardPage({ searchParams }: { search
   let model: CommercialDashboardReadModel | null = null;
   let reviewQueue: CommercialReviewQueue | null = null;
   let discovery: CommercialDiscoveryReadModel | null = null;
+  let outreach: CommercialOutreachReadModel | null = null;
   let loadFailed = false;
   try {
     await requireCommercialCrmAccess();
-    [model, reviewQueue, discovery] = await Promise.all([
+    [model, reviewQueue, discovery, outreach] = await Promise.all([
       getCommercialDashboardReadModel(filters),
       getCommercialReviewQueueReadModel(filters, reviewPage),
       getCommercialDiscoveryReadModel(),
+      getCommercialOutreachReadModel(),
     ]);
   } catch (error) {
     if (error instanceof CommercialCrmAccessError) notFound();
-    if (error instanceof CommercialReadModelError || error instanceof CommercialReviewError) loadFailed = true;
+    if (error instanceof CommercialReadModelError || error instanceof CommercialReviewError || error instanceof CommercialOutreachError) loadFailed = true;
     else throw error;
   }
-  if (loadFailed || !model || !reviewQueue || !discovery) return <main className="commercial-page"><DashboardPageHeader eyebrow="Founder cockpit" title="Commercial" description="The owner-only CRM read model could not be loaded." /><div className="commercial-empty" role="alert">Commercial data is temporarily unavailable. No outreach or CRM state was changed.</div><CommercialStyles /></main>;
-  return <Dashboard model={model} reviewQueue={reviewQueue} reviewPage={reviewPage} discovery={discovery} />;
+  if (loadFailed || !model || !reviewQueue || !discovery || !outreach) return <main className="commercial-page"><DashboardPageHeader eyebrow="Founder cockpit" title="Commercial" description="The owner-only CRM read model could not be loaded." /><div className="commercial-empty" role="alert">Commercial data is temporarily unavailable. No outreach or CRM state was changed.</div><CommercialStyles /></main>;
+  return <Dashboard model={model} reviewQueue={reviewQueue} reviewPage={reviewPage} discovery={discovery} outreach={outreach} />;
 }

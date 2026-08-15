@@ -1,0 +1,191 @@
+import "server-only";
+
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { requireCommercialCrmAccess } from "./crm-access";
+import {
+  COMMERCIAL_OUTREACH_ANGLES,
+  COMMERCIAL_OUTREACH_CHANNELS,
+  COMMERCIAL_OUTREACH_STATES,
+  COMMERCIAL_OUTREACH_TEMPLATE_KEYS,
+  type CommercialOutreachAngle,
+  type CommercialOutreachChannel,
+  type CommercialOutreachItem,
+  type CommercialOutreachMutation,
+  type CommercialOutreachMutationAction,
+  type CommercialOutreachReadModel,
+  type CommercialOutreachState,
+  type CommercialOutreachTemplateKey,
+} from "./outreach-contract";
+import { buildCommercialOutreachFactLedger } from "./outreach-facts";
+import { commercialOutreachContentHash, validateCommercialOutreachMessage } from "./outreach-validation";
+
+type Row = Record<string, unknown>;
+
+export class CommercialOutreachError extends Error {
+  readonly status: 400 | 404 | 409 | 503;
+  readonly code: string;
+  constructor(code: string, status: 400 | 404 | 409 | 503 = 503) {
+    super(code); this.name = "CommercialOutreachError"; this.code = code; this.status = status;
+  }
+}
+
+function row(value: unknown): Row { return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {}; }
+function text(value: unknown) { return typeof value === "string" ? value : ""; }
+function nullableText(value: unknown) { const clean = text(value).trim(); return clean || null; }
+function number(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
+function stringArray(value: unknown) { return Array.isArray(value) ? value.map(text).filter(Boolean) : []; }
+function oneOf<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
+  return typeof value === "string" && allowed.includes(value as T[number]) ? value as T[number] : null;
+}
+
+function parseFacts(value: unknown) {
+  return Array.isArray(value) ? value.flatMap((candidate) => {
+    const fact = row(candidate); const key = text(fact.key).trim(); const factValue = text(fact.value).trim();
+    return key && factValue ? [{ key, value: factValue }] : [];
+  }).slice(0, 5) : [];
+}
+
+function cleanPatchText(value: unknown, max: number, required = false) {
+  if (value === undefined || value === null) {
+    if (required) throw new CommercialOutreachError("commercial_outreach_patch_required", 400);
+    return value === null ? null : undefined;
+  }
+  if (typeof value !== "string") throw new CommercialOutreachError("commercial_outreach_patch_invalid", 400);
+  const clean = value.normalize("NFKC").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim();
+  if ((required && !clean) || clean.length > max) throw new CommercialOutreachError("commercial_outreach_patch_invalid", 400);
+  return clean;
+}
+
+export function parseCommercialOutreachMutation(value: unknown): CommercialOutreachMutation {
+  const source = row(value); const patch = row(source.patch);
+  const action = oneOf(source.action, ["approve_message", "regenerate", "cancel", "change_selection", "edit_message"] as const) as CommercialOutreachMutationAction | null;
+  const expectedVersion = Math.trunc(number(source.expectedVersion));
+  const idempotencyKey = text(source.idempotencyKey).trim();
+  if (!action || expectedVersion < 1 || !idempotencyKey || idempotencyKey.length > 200) throw new CommercialOutreachError("commercial_outreach_mutation_invalid", 400);
+  const parsed: CommercialOutreachMutation = { action, expectedVersion, idempotencyKey, patch: {} };
+  if (action === "change_selection") {
+    const channel = oneOf(patch.channel, COMMERCIAL_OUTREACH_CHANNELS);
+    const angle = oneOf(patch.angle, COMMERCIAL_OUTREACH_ANGLES);
+    if (!channel || !angle) throw new CommercialOutreachError("commercial_outreach_selection_invalid", 400);
+    parsed.patch.channel = channel; parsed.patch.angle = angle;
+  }
+  if (action === "edit_message") {
+    parsed.patch.subject = cleanPatchText(patch.subject, 120) as string | null | undefined;
+    parsed.patch.body = cleanPatchText(patch.body, 2000, true) as string;
+  }
+  if (action === "cancel") parsed.patch.reason = cleanPatchText(patch.reason, 200) as string | undefined;
+  return parsed;
+}
+
+function rpcError(message: string) {
+  if (/not_found/i.test(message)) return new CommercialOutreachError("commercial_outreach_item_not_found", 404);
+  if (/stale|claim_mismatch|idempotency/i.test(message)) return new CommercialOutreachError("commercial_outreach_conflict", 409);
+  if (/invalid|required|not_ready|not_approved|already_cancelled/i.test(message)) return new CommercialOutreachError("commercial_outreach_request_invalid", 400);
+  return new CommercialOutreachError("commercial_outreach_unavailable", 503);
+}
+
+export async function getCommercialOutreachReadModel(): Promise<CommercialOutreachReadModel> {
+  await requireCommercialCrmAccess();
+  const supabase = createSupabaseAdminClient();
+  const [itemsResult, generatedResult, failedResult, readyResult, approvedResult, cancelledResult, dimensionsResult] = await Promise.all([
+    supabase.from("commercial_outreach_items").select("id,lead_id,campaign_id,channel,angle,template_key,template_version,state,subject,body,personalization_summary,facts_used,confidence,validation_codes,generation_attempt_count,max_generation_attempts,generation_model,generated_at,approved_at,owner_edited,version,created_at,updated_at").order("updated_at", { ascending: false }).limit(40),
+    supabase.from("commercial_outreach_items").select("id", { count: "exact", head: true }).not("generated_at", "is", null),
+    supabase.from("commercial_outreach_items").select("id", { count: "exact", head: true }).eq("state", "generation_failed"),
+    supabase.from("commercial_outreach_items").select("id", { count: "exact", head: true }).eq("state", "ready_for_review"),
+    supabase.from("commercial_outreach_items").select("id", { count: "exact", head: true }).eq("state", "queued_dry_run"),
+    supabase.from("commercial_outreach_items").select("id", { count: "exact", head: true }).eq("state", "cancelled"),
+    supabase.from("commercial_outreach_items").select("channel,angle,template_key").limit(5000),
+  ]);
+  if (itemsResult.error || generatedResult.error || failedResult.error || readyResult.error || approvedResult.error || cancelledResult.error || dimensionsResult.error) throw new CommercialOutreachError("commercial_outreach_read_unavailable", 503);
+  const itemRows = (itemsResult.data ?? []).map(row);
+  const itemIds = itemRows.map((item) => text(item.id)).filter(Boolean);
+  const { data: eventsData, error: eventsError } = itemIds.length
+    ? await supabase.from("commercial_outreach_events").select("id,item_id,event_type,actor_type,occurred_at").in("item_id", itemIds).order("occurred_at", { ascending: false }).limit(400)
+    : { data: [], error: null };
+  if (eventsError) throw new CommercialOutreachError("commercial_outreach_read_unavailable", 503);
+  const events = new Map<string, Array<{ id: string; eventType: string; actorType: string; occurredAt: string }>>();
+  for (const value of eventsData ?? []) {
+    const event = row(value); const itemId = text(event.item_id); const current = events.get(itemId) ?? [];
+    if (current.length < 10) current.push({ id: text(event.id), eventType: text(event.event_type), actorType: text(event.actor_type), occurredAt: text(event.occurred_at) });
+    events.set(itemId, current);
+  }
+  const leadIds = [...new Set(itemRows.map((item) => text(item.lead_id)).filter(Boolean))];
+  const { data: leadsData, error: leadsError } = leadIds.length
+    ? await supabase.from("commercial_leads").select("id,business_id,priority,city_snapshot,subsegment_snapshot").in("id", leadIds)
+    : { data: [], error: null };
+  if (leadsError) throw new CommercialOutreachError("commercial_outreach_read_unavailable", 503);
+  const leads = new Map((leadsData ?? []).map((value) => { const lead = row(value); return [text(lead.id), lead]; }));
+  const businessIds = [...new Set([...leads.values()].map((lead) => text(lead.business_id)).filter(Boolean))];
+  const { data: businessesData, error: businessesError } = businessIds.length
+    ? await supabase.from("commercial_businesses").select("id,business_name,city,subsegment").in("id", businessIds)
+    : { data: [], error: null };
+  if (businessesError) throw new CommercialOutreachError("commercial_outreach_read_unavailable", 503);
+  const businesses = new Map((businessesData ?? []).map((value) => { const business = row(value); return [text(business.id), business]; }));
+  const items: CommercialOutreachItem[] = itemRows.map((item) => {
+    const lead = leads.get(text(item.lead_id)) ?? {}; const business = businesses.get(text(lead.business_id)) ?? {};
+    return {
+      id: text(item.id), leadId: text(item.lead_id), campaignId: text(item.campaign_id), businessName: text(business.business_name) || "Unknown business",
+      city: nullableText(lead.city_snapshot || business.city), subsegment: nullableText(lead.subsegment_snapshot || business.subsegment), priority: text(lead.priority) || "normal",
+      channel: oneOf(item.channel, COMMERCIAL_OUTREACH_CHANNELS) ?? "instagram", angle: oneOf(item.angle, COMMERCIAL_OUTREACH_ANGLES) ?? "A",
+      templateKey: oneOf(item.template_key, COMMERCIAL_OUTREACH_TEMPLATE_KEYS) ?? "IG_BEAUTY_ANGLE_A_V1", templateVersion: text(item.template_version) || "V1",
+      state: oneOf(item.state, COMMERCIAL_OUTREACH_STATES) as CommercialOutreachState ?? "generation_failed", subject: nullableText(item.subject), body: nullableText(item.body),
+      personalizationSummary: nullableText(item.personalization_summary), factsUsed: parseFacts(item.facts_used), confidence: item.confidence === null ? null : number(item.confidence),
+      validationCodes: stringArray(item.validation_codes), attemptCount: number(item.generation_attempt_count), maxAttempts: number(item.max_generation_attempts), generationModel: nullableText(item.generation_model),
+      generatedAt: nullableText(item.generated_at), approvedAt: nullableText(item.approved_at), ownerEdited: item.owner_edited === true, version: number(item.version), createdAt: text(item.created_at), updatedAt: text(item.updated_at), history: events.get(text(item.id)) ?? [],
+    };
+  });
+  const byChannel: Record<string, number> = {}; const byAngle: Record<string, number> = {}; const byTemplate: Record<string, number> = {};
+  for (const raw of dimensionsResult.data ?? []) {
+    const dimension = row(raw); const channel = text(dimension.channel); const angle = text(dimension.angle); const template = text(dimension.template_key);
+    if (channel) byChannel[channel] = (byChannel[channel] ?? 0) + 1;
+    if (angle) byAngle[angle] = (byAngle[angle] ?? 0) + 1;
+    if (template) byTemplate[template] = (byTemplate[template] ?? 0) + 1;
+  }
+  return { items, metrics: { generated: generatedResult.count ?? 0, generationFailed: failedResult.count ?? 0, readyForReview: readyResult.count ?? 0, approvedDryRun: approvedResult.count ?? 0, cancelled: cancelledResult.count ?? 0, byChannel, byAngle, byTemplate }, delivery: { realEmailSend: false, realInstagramDmSend: false, phoneFarmDmExecution: false } };
+}
+
+async function validateOwnerEdit(itemId: string, mutation: CommercialOutreachMutation) {
+  const supabase = createSupabaseAdminClient();
+  const { data: itemData, error: itemError } = await supabase.from("commercial_outreach_items").select("id,lead_id,channel,angle,template_key,facts_used").eq("id", itemId).single<Row>();
+  if (itemError || !itemData) throw rpcError(itemError?.message ?? "not_found");
+  const item = row(itemData);
+  const { data: leadData, error: leadError } = await supabase.from("commercial_leads").select("id,business_id,city_snapshot,subsegment_snapshot").eq("id", text(item.lead_id)).single<Row>();
+  if (leadError || !leadData) throw new CommercialOutreachError("commercial_outreach_edit_context_unavailable", 503);
+  const lead = row(leadData);
+  const [{ data: businessData, error: businessError }, { data: otherBusinesses }] = await Promise.all([
+    supabase.from("commercial_businesses").select("id,business_name,city,subsegment,instagram_handle,website,booking_url,booking_provider,enrichment_snapshot_safe").eq("id", text(lead.business_id)).single<Row>(),
+    supabase.from("commercial_businesses").select("business_name").neq("id", text(lead.business_id)).limit(250),
+  ]);
+  if (businessError || !businessData) throw new CommercialOutreachError("commercial_outreach_edit_context_unavailable", 503);
+  const business = row(businessData); const verifiedFacts = buildCommercialOutreachFactLedger({ lead, business });
+  const result = validateCommercialOutreachMessage({
+    message: {
+      subject: mutation.patch.subject ?? null, body: mutation.patch.body ?? "", channel: text(item.channel) as CommercialOutreachChannel,
+      angle: text(item.angle) as CommercialOutreachAngle, template_version: text(item.template_key) as CommercialOutreachTemplateKey,
+      personalization_summary: "Owner-edited from a previously validated preview.", facts_used: parseFacts(item.facts_used), confidence: 1,
+    },
+    businessName: text(business.business_name), city: nullableText(lead.city_snapshot || business.city), verifiedFacts,
+    otherBusinessNames: (otherBusinesses ?? []).map((candidate) => text(row(candidate).business_name)).filter(Boolean),
+  });
+  if (!result.ok) throw new CommercialOutreachError(`commercial_outreach_edit_rejected:${result.codes.join(",")}`, 400);
+  mutation.patch.contentHash = commercialOutreachContentHash(mutation.patch.subject ?? null, mutation.patch.body ?? "");
+}
+
+export async function mutateCommercialOutreachItem(itemId: string, mutation: CommercialOutreachMutation) {
+  const actor = await requireCommercialCrmAccess();
+  if (!/^[0-9a-f-]{36}$/i.test(itemId)) throw new CommercialOutreachError("commercial_outreach_item_not_found", 404);
+  if (mutation.action === "edit_message") await validateOwnerEdit(itemId, mutation);
+  const patch: Row = {};
+  if (mutation.patch.channel) patch.channel = mutation.patch.channel;
+  if (mutation.patch.angle) patch.angle = mutation.patch.angle;
+  if (mutation.patch.subject !== undefined) patch.subject = mutation.patch.subject;
+  if (mutation.patch.body !== undefined) patch.body = mutation.patch.body;
+  if (mutation.patch.reason !== undefined) patch.reason = mutation.patch.reason;
+  if (mutation.patch.contentHash !== undefined) patch.content_hash = mutation.patch.contentHash;
+  const { data, error } = await createSupabaseAdminClient().rpc("mutate_commercial_outreach_item_v1", {
+    p_actor_user_id: actor.userId, p_item_id: itemId, p_action: mutation.action, p_expected_version: mutation.expectedVersion,
+    p_idempotency_key: mutation.idempotencyKey, p_patch: patch,
+  });
+  if (error) throw rpcError(error.message);
+  return row(data);
+}
