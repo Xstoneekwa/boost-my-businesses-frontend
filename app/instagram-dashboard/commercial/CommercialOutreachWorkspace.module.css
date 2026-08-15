@@ -38,6 +38,11 @@
   text-transform: uppercase;
 }
 
+.eyebrow,
+.panelEyebrow {
+  display: block;
+}
+
 .heading h2 {
   margin-top: 5px;
   font: 750 24px "Syne", sans-serif;
