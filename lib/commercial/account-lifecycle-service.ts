@@ -530,6 +530,7 @@ export async function executeCommercialAccountLifecycle(input: {
 
       const runtime = await quiesceAccountRuntime(supabase, accountId, input.reason);
       if (runtime.stillActive) {
+        await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
         await upsertLifecycleState(supabase, {
           accountId,
           commercialState: "action_required",
@@ -560,6 +561,7 @@ export async function executeCommercialAccountLifecycle(input: {
         await getStripe().pauseCollectionVoid(ctx.stripeSubscriptionId, idempotencyKey);
       } catch (stripeError) {
         const message = stripeError instanceof Error ? stripeError.message : "stripe_pause_failed";
+        await setAdminLifecycleStatus(supabase, accountId, ctx.adminLifecycleStatus);
         await upsertLifecycleState(supabase, {
           accountId,
           commercialState: "action_required",
