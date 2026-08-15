@@ -32,6 +32,7 @@ export type AudienceSuggestion = {
 
 const beautyPattern = /\b(aesthetic|aesthetics|beauty|hair|salon|skin|spa|clinic|laser|lash|brow|nail|makeup|wellness|cosmetic|derma|facial|injectable|stylist|barber)\b/i;
 const disallowedAudiencePattern = /\b(digital|marketing|agency|software|saas|app|platform|directory|marketplace|media|magazine|supplier|wholesale|academy|course|training)\b/i;
+const disallowedAudienceHandlePattern = /(digital|marketing|agency|software|saas|platform|directory|marketplace|media|magazine|supplier|wholesale|academy|training)|(?:^|_)(?:app)(?:_|$)|app$/i;
 const closedPattern = /\b(permanently closed|business closed|no longer trading|ceased trading)\b/i;
 const cityPatterns: Record<CommercialDiscoveryCity, RegExp> = {
   Johannesburg: /\b(johannesburg|joburg|jozi|sandton|rosebank|midrand|randburg|fourways|soweto|centurion|gauteng)\b/i,
@@ -202,7 +203,8 @@ export async function enrichCommercialWebsite(input: { websiteUrl: string | null
 export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, "audience_relevance_score">>, requestedCity: CommercialDiscoveryCity) {
   return input.flatMap((candidate) => {
     const combined = `${candidate.name} ${candidate.instagram_handle} ${candidate.category} ${candidate.reason} ${candidate.source_query}`;
-    if (disallowedAudiencePattern.test(combined) || !beautyPattern.test(combined)) return [];
+    const normalizedHandle = clean(candidate.instagram_handle, 200).toLowerCase().replace(/^@/, "");
+    if (disallowedAudienceHandlePattern.test(normalizedHandle) || disallowedAudiencePattern.test(combined) || !beautyPattern.test(combined)) return [];
     const sameCity = cityPatterns[requestedCity].test(`${candidate.location ?? ""} ${candidate.source_query} ${candidate.reason}`);
     if (!sameCity) return [];
     const score = Math.min(1, Number((0.45 + 0.25 + (candidate.confidence === "high" ? 0.2 : candidate.confidence === "medium" ? 0.12 : 0.04) + (/competitor|similar|same/i.test(candidate.reason) ? 0.1 : 0)).toFixed(2)));

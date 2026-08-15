@@ -36,6 +36,8 @@ test("audience filter removes apps and agencies and keeps a local competitor", (
   const base = { profile_url: "https://instagram.com/example", source: "searchapi_google_serp", source_query: "beauty Johannesburg", confidence: "high" as const, location: "Johannesburg" };
   const result = filterCommercialAudiences([
     { ...base, name: "Book A Spot App", instagram_handle: "bookaspot_app", category: "Booking app platform", reason: "Booking platform used by salons in Johannesburg" },
+    { ...base, name: "Aesthetic clinic owners, your competitors are booking", instagram_handle: "mashilodigitalagency", category: "Aesthetic Clinic", reason: "Same-city beauty profile found by an aesthetic Johannesburg query" },
+    { ...base, name: "Beauty bookings for local salons", instagram_handle: "bookaspot_app", category: "Beauty Salon", reason: "Same-city beauty profile found by a salon Johannesburg query" },
     { ...base, name: "Glow Aesthetics", instagram_handle: "glowaesthetics", category: "Aesthetic Clinic", reason: "Direct aesthetic competitor in Sandton offering similar treatments" },
   ], "Johannesburg");
   assert.deepEqual(result.map((item) => item.instagram_handle), ["glowaesthetics"]); assert.ok(result[0].audience_relevance_score >= 0.72);
