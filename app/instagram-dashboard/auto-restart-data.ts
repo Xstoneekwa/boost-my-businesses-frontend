@@ -546,7 +546,9 @@ function reliabilityFromLatestRun(
     runProjectionAttemptId: performance?.attempt_id
       ?? performance?.current_attempt_id
       ?? runResumeProjection?.attempt_id
-      ?? runResumeProjection?.current_attempt_id,
+      ?? runResumeProjection?.current_attempt_id
+      ?? canonicalPlan?.attempt_id
+      ?? canonicalPlan?.current_attempt_id,
   });
   const canonicalAttemptId = attemptIdentity.canonicalAttemptId;
   const projectedRetryIndex = readString(resumePlan?.retry_index, "—") || "—";

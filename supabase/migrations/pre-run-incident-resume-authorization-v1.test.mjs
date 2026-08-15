@@ -4,6 +4,8 @@ import test from "node:test";
 
 const migration = readFileSync(new URL("./20260815021500_pre_run_incident_resume_authorization_v1.sql", import.meta.url), "utf8");
 const rearm = readFileSync(new URL("./20260815030500_pre_run_incident_resume_rearm_v1.sql", import.meta.url), "utf8");
+const supersession = readFileSync(new URL("./20260815033500_pre_run_incident_resume_supersession_v1.sql", import.meta.url), "utf8");
+const candidateProjection = readFileSync(new URL("../../app/instagram-dashboard/auto-restart-data.ts", import.meta.url), "utf8");
 
 test("pre-run recovery is generic, lineage-bound, and preserves consumed history", () => {
   assert.match(migration, /q\.status = 'failed'/);
@@ -36,4 +38,19 @@ test("the forward re-arm is generic, window-bound, and never revives consumed hi
   assert.match(rearm, /now\(\) < aa\.ends_at/);
   assert.match(rearm, /status = 'armed'/);
   assert.doesNotMatch(rearm, /rex_gen_boost_ai|nab_youss/i);
+});
+
+test("pre-run authorization survives legacy source-incident supersession generically", () => {
+  assert.match(supersession, /rearm_resolved_pre_run_incident_authorizations_v1/);
+  assert.match(supersession, /resume_incident_superseded/);
+  assert.match(supersession, /resume_source_run_superseded/);
+  assert.match(supersession, /a\.consumed_at is null/);
+  assert.match(supersession, /a\.consumed_by_request_id is null/);
+  assert.match(supersession, /v_rearmed := public\.rearm_resolved_pre_run_incident_authorizations_v1\(\)/);
+  assert.doesNotMatch(supersession, /delete\s+from\s+public\./i);
+  assert.doesNotMatch(supersession, /rex_gen_boost_ai|nab_youss/i);
+});
+
+test("operator-stop attempt identity falls back to the canonical plan projection", () => {
+  assert.match(candidateProjection, /runResumeProjection\?\.current_attempt_id\s*\n\s*\?\? canonicalPlan\?\.attempt_id\s*\n\s*\?\? canonicalPlan\?\.current_attempt_id/);
 });
