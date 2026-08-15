@@ -33,6 +33,12 @@ export type AudienceSuggestion = {
 const beautyPattern = /\b(aesthetic|aesthetics|beauty|hair|salon|skin|spa|clinic|laser|lash|brow|nail|makeup|wellness|cosmetic|derma|facial|injectable|stylist|barber)\b/i;
 const disallowedAudiencePattern = /\b(digital|marketing|agency|software|saas|app|platform|directory|marketplace|media|magazine|supplier|wholesale|academy|course|training)\b/i;
 const disallowedAudienceHandlePattern = /(digital|marketing|agency|software|saas|platform|directory|marketplace|media|magazine|supplier|wholesale|academy|training)|(?:^|_)(?:app)(?:_|$)|app$/i;
+type AudienceVertical = "hair" | "skin_aesthetics" | "nails_lashes_brows" | "beauty_general";
+const audienceVerticalPatterns: Array<[Exclude<AudienceVertical, "beauty_general">, RegExp]> = [
+  ["hair", /\b(hair|hairstyle|hairdresser|barber|braid|wig|balayage|blonde|colourist|stylist)\b/i],
+  ["skin_aesthetics", /\b(skin|aesthetic|clinic|medical|med spa|laser|cosmetic|inject|derma|facial|peel|microneedling)\b/i],
+  ["nails_lashes_brows", /\b(nail|lash|brow|makeup|pmu|manicure|pedicure)\b/i],
+];
 const closedPattern = /\b(permanently closed|business closed|no longer trading|ceased trading)\b/i;
 const cityPatterns: Record<CommercialDiscoveryCity, RegExp> = {
   Johannesburg: /\b(johannesburg|joburg|jozi|sandton|rosebank|midrand|randburg|fourways|soweto|centurion|gauteng)\b/i,
@@ -41,6 +47,17 @@ const cityPatterns: Record<CommercialDiscoveryCity, RegExp> = {
 
 function clean(value: unknown, limit = 600) {
   return typeof value === "string" ? value.normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, limit) : "";
+}
+
+function audienceVertical(value: unknown): AudienceVertical {
+  const evidence = clean(value, 2000);
+  return audienceVerticalPatterns.find(([, pattern]) => pattern.test(evidence))?.[0] ?? "beauty_general";
+}
+
+function audienceVerticalLabel(vertical: AudienceVertical) {
+  if (vertical === "skin_aesthetics") return "skin/aesthetics";
+  if (vertical === "nails_lashes_brows") return "nails/lashes/brows";
+  return vertical === "hair" ? "hair" : "Beauty/Aesthetics";
 }
 
 export function resolveCommercialLocation(input: {
@@ -200,16 +217,29 @@ export async function enrichCommercialWebsite(input: { websiteUrl: string | null
     bookingEvidence: first("evidence") as string | null, evidence };
 }
 
-export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, "audience_relevance_score">>, requestedCity: CommercialDiscoveryCity) {
+export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, "audience_relevance_score">>, requestedCity: CommercialDiscoveryCity, targetContext: unknown = "") {
+  const targetVertical = audienceVertical(targetContext);
   return input.flatMap((candidate) => {
     const combined = `${candidate.name} ${candidate.instagram_handle} ${candidate.category} ${candidate.reason} ${candidate.source_query}`;
     const normalizedHandle = clean(candidate.instagram_handle, 200).toLowerCase().replace(/^@/, "");
     if (disallowedAudienceHandlePattern.test(normalizedHandle) || disallowedAudiencePattern.test(combined) || !beautyPattern.test(combined)) return [];
     const sameCity = cityPatterns[requestedCity].test(`${candidate.location ?? ""} ${candidate.source_query} ${candidate.reason}`);
     if (!sameCity) return [];
-    const score = Math.min(1, Number((0.45 + 0.25 + (candidate.confidence === "high" ? 0.2 : candidate.confidence === "medium" ? 0.12 : 0.04) + (/competitor|similar|same/i.test(candidate.reason) ? 0.1 : 0)).toFixed(2)));
-    if (score < 0.72 || clean(candidate.reason).length < 24) return [];
-    return [{ ...candidate, audience_relevance_score: score }];
+    const candidateVertical = audienceVertical(`${candidate.name} ${candidate.category} ${candidate.source_query}`);
+    const exactVertical = targetVertical === candidateVertical;
+    const broadOverlap = targetVertical === "beauty_general" || candidateVertical === "beauty_general";
+    const confidenceScore = candidate.confidence === "high" ? 0.15 : candidate.confidence === "medium" ? 0.1 : 0.05;
+    const verticalScore = exactVertical ? 0.25 : broadOverlap ? 0.15 : 0.05;
+    const customerOverlapScore = exactVertical ? 0.12 : broadOverlap ? 0.08 : 0.02;
+    const sourceEvidenceScore = clean(candidate.source_query).length >= 12 ? 0.05 : 0;
+    const canonicalInstagramScore = /instagram\.com\/[a-z0-9._]+\/?$/i.test(clean(candidate.profile_url, 1000)) ? 0.05 : 0;
+    const score = Math.min(1, Number((0.25 + 0.15 + confidenceScore + verticalScore + customerOverlapScore + sourceEvidenceScore + canonicalInstagramScore + 0.03).toFixed(2)));
+    if (score < 0.8) return [];
+    const relation = exactVertical
+      ? `Direct local ${audienceVerticalLabel(candidateVertical)} competitor`
+      : `Local ${audienceVerticalLabel(candidateVertical)} business with adjacent customer overlap`;
+    const reason = `${relation} in ${requestedCity}; verified by source query: ${candidate.source_query}`.slice(0, 320);
+    return [{ ...candidate, reason, audience_relevance_score: score }];
   }).sort((a, b) => b.audience_relevance_score - a.audience_relevance_score).slice(0, 5);
 }
 

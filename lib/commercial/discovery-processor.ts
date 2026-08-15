@@ -94,7 +94,7 @@ async function recordPrecheckDecision(supabase: SupabaseAdmin, item: Row, decisi
     reason_code: decision.reason, metadata_safe: { decision: decision.decision, location_confidence: location.confidence } });
 }
 
-async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string) {
+async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string, targetContext: string) {
   const { data } = await supabase.from("commercial_discovery_items").select("provider_external_id,source_url,source_query,source_snapshot_safe").eq("run_id", text(item.run_id)).limit(90);
   const candidates = (data ?? []).flatMap((raw) => {
     const peer = row(raw); const source = row(peer.source_snapshot_safe); const handle = text(source.instagram_handle) || text(peer.provider_external_id);
@@ -107,7 +107,7 @@ async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city:
       source: "searchapi_google_serp", source_query: sourceQuery, confidence: source.extraction_mode === "loose" ? "medium" : "high" };
     return [suggestion];
   });
-  return filterCommercialAudiences(candidates, city);
+  return filterCommercialAudiences(candidates, city, targetContext);
 }
 
 async function processCommercialItem(supabase: SupabaseAdmin, item: Row, dependencies: ProcessorDependencies) {
@@ -183,7 +183,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         completed_at: new Date().toISOString(), duration_ms: Date.now() - started });
       return;
     }
-    const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle);
+    const audienceTargetContext = [businessName, profile.official_category, candidate.title].filter(Boolean).join(" ");
+    const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext);
     const payload = { provider: candidate.provider, provider_external_id: candidate.providerExternalId, source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
       source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
       analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage }, score_breakdown_safe: score.breakdown,

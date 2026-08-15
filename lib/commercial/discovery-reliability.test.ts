@@ -39,6 +39,16 @@ test("audience filter removes apps and agencies and keeps a local competitor", (
     { ...base, name: "Aesthetic clinic owners, your competitors are booking", instagram_handle: "mashilodigitalagency", category: "Aesthetic Clinic", reason: "Same-city beauty profile found by an aesthetic Johannesburg query" },
     { ...base, name: "Beauty bookings for local salons", instagram_handle: "bookaspot_app", category: "Beauty Salon", reason: "Same-city beauty profile found by a salon Johannesburg query" },
     { ...base, name: "Glow Aesthetics", instagram_handle: "glowaesthetics", category: "Aesthetic Clinic", reason: "Direct aesthetic competitor in Sandton offering similar treatments" },
-  ], "Johannesburg");
+  ], "Johannesburg", "Medical skin and aesthetic clinic");
   assert.deepEqual(result.map((item) => item.instagram_handle), ["glowaesthetics"]); assert.ok(result[0].audience_relevance_score >= 0.72);
+  assert.match(result[0].reason, /Direct local skin\/aesthetics competitor in Johannesburg/);
+});
+
+test("audience filter does not give hair salons to a skin clinic", () => {
+  const base = { profile_url: "https://instagram.com/example", source: "searchapi_google_serp", source_query: "beauty Cape Town", confidence: "high" as const, location: "Cape Town" };
+  const result = filterCommercialAudiences([
+    { ...base, profile_url: "https://instagram.com/excentriconkloof", name: "Excentric Hair", instagram_handle: "excentriconkloof", category: "Hair salon and colour specialist", reason: "Cape Town beauty business" },
+    { ...base, profile_url: "https://instagram.com/chelseaskinpeer", name: "Chelsea Skin Peer", instagram_handle: "chelseaskinpeer", category: "Medical skin and aesthetic clinic", reason: "Cape Town beauty business" },
+  ], "Cape Town", "Chelsea medical skin and aesthetic clinic");
+  assert.deepEqual(result.map((item) => item.instagram_handle), ["chelseaskinpeer"]);
 });
