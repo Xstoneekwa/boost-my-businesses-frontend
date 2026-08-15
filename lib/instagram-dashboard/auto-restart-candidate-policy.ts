@@ -48,15 +48,23 @@ export function canonicalOperatorStopContinuationAuthorized(input: {
   sourceRequestStatus: string;
   cancelRequestedAt: string;
   cancelReason: string;
+  restartAllowed: boolean | null;
   restartBlockReason: string;
+  unsafeMarkers: string[];
 }) {
-  return input.sourcePlanLineageValid
+  const blockReason = normalized(input.restartBlockReason);
+  const missingRunPlanFallback = !input.sourcePlanLineageValid
+    && input.restartAllowed === null
+    && blockReason === "resume_plan_missing"
+    && input.unsafeMarkers.length === 0;
+  const canonicalRunPlan = input.sourcePlanLineageValid
+    && blockReason === "operator_canceled";
+  return (canonicalRunPlan || missingRunPlanFallback)
     && input.attemptLineageValid
     && ["stopped", "canceled"].includes(normalized(input.lastRunStatus))
     && normalized(input.sourceRequestStatus) === "canceled"
     && Boolean(input.cancelRequestedAt.trim())
-    && normalized(input.cancelReason) === "botapp_manual_stop"
-    && normalized(input.restartBlockReason) === "operator_canceled";
+    && normalized(input.cancelReason) === "botapp_manual_stop";
 }
 
 export function isPartialResumeClass(value: string) {

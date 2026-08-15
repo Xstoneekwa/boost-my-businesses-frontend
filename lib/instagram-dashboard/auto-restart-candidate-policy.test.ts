@@ -295,7 +295,9 @@ test("operator-stop provenance accepts only the exact canonical BotApp cancellat
     sourceRequestStatus: "canceled",
     cancelRequestedAt: "2026-08-01T12:00:00.000Z",
     cancelReason: "botapp_manual_stop",
+    restartAllowed: false,
     restartBlockReason: "operator_canceled",
+    unsafeMarkers: [],
   };
   assert.equal(canonicalOperatorStopContinuationAuthorized(canonical), true);
   for (const mutation of [
@@ -309,4 +311,23 @@ test("operator-stop provenance accepts only the exact canonical BotApp cancellat
   ]) {
     assert.equal(canonicalOperatorStopContinuationAuthorized({ ...canonical, ...mutation }), false);
   }
+});
+
+test("an exact request-bound BotApp stop survives a missing run-side resume projection", () => {
+  const fallback = {
+    sourcePlanLineageValid: false,
+    attemptLineageValid: true,
+    lastRunStatus: "stopped",
+    sourceRequestStatus: "canceled",
+    cancelRequestedAt: "2026-08-15T17:44:39.970606Z",
+    cancelReason: "botapp_manual_stop",
+    restartAllowed: null,
+    restartBlockReason: "resume_plan_missing",
+    unsafeMarkers: [],
+  };
+  assert.equal(canonicalOperatorStopContinuationAuthorized(fallback), true);
+  assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, attemptLineageValid: false }), false);
+  assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, unsafeMarkers: ["challenge_blocked"] }), false);
+  assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, restartAllowed: false }), false);
+  assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, restartBlockReason: "cleanup_not_completed" }), false);
 });
