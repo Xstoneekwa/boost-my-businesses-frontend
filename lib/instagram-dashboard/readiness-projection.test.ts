@@ -101,16 +101,31 @@ test("connected account with assignment and settings is ready", () => {
   assert.equal(projection.overall_readiness_reason, "all_required_readiness_checks_passed");
 });
 
-test("eligible target gate blocks at 14 and passes at 15", () => {
-  const below = buildAdminReadinessProjection(readyInput({ eligibleTargetCount: 14 }));
-  const exact = buildAdminReadinessProjection(readyInput({ eligibleTargetCount: 15 }));
+test("initial onboarding target gate blocks at 14 and passes at 15", () => {
+  const below = buildAdminReadinessProjection(readyInput({ onboardingStatus: "pending", eligibleTargetCount: 14 }));
+  const exact = buildAdminReadinessProjection(readyInput({ onboardingStatus: "pending", eligibleTargetCount: 15 }));
 
   assert.equal(below.overall_readiness_status, "blocked");
   assert.equal(below.overall_readiness_reason, "insufficient_eligible_targets");
-  assert.equal(exact.overall_readiness_status, "ready");
+  assert.equal(exact.target_readiness_status, "ready");
   assert.equal(exact.eligible_target_count, 15);
   assert.equal(exact.required_eligible_target_count, 15);
+  assert.equal(exact.initial_onboarding_required_eligible_target_count, 15);
+  assert.equal(exact.target_gate_scope, "initial_onboarding");
+  assert.equal(exact.target_gate_applies, true);
 });
+
+for (const eligibleTargetCount of [14, 10, 5, 0]) {
+  test(`completed onboarding preserves target readiness at ${eligibleTargetCount} eligible CT`, () => {
+    const projection = buildAdminReadinessProjection(readyInput({ eligibleTargetCount }));
+    assert.equal(projection.target_readiness_status, "ready");
+    assert.equal(projection.overall_readiness_status, "ready");
+    assert.equal(projection.overall_readiness_reason, "all_required_readiness_checks_passed");
+    assert.equal(projection.target_gate_applies, false);
+    assert.equal(projection.post_onboarding_low_stock_threshold, 5);
+    assert.equal(projection.post_onboarding_low_stock, eligibleTargetCount <= 5);
+  });
+}
 
 test("18 total targets with exactly 15 eligible passes the canonical gate", () => {
   const projection = buildAdminReadinessProjection(readyInput({ eligibleTargetCount: 15 }));

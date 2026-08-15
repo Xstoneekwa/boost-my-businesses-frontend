@@ -125,7 +125,7 @@ test("connected account remains not ready when canonical package settings are in
   assert.equal(result.preflight_request_created, false);
 });
 
-test("connected account with no eligible CT is not projected ready", async () => {
+test("completed onboarding with no eligible CT remains ready and reports low stock", async () => {
   const supabase = makeSupabase(baseRows({
     client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
     ig_targets: [],
@@ -133,21 +133,30 @@ test("connected account with no eligible CT is not projected ready", async () =>
 
   const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
 
-  assert.equal(result.readiness_status, "retry_later");
-  assert.equal(result.reason, "missing_ct");
+  assert.equal(result.readiness_status, "ready");
+  assert.equal(result.reason, "already_connected_ready");
+  assert.equal(result.checks?.ct_onboarding_gate_applies, false);
+  assert.equal(result.checks?.ct_target_gate_scope, "initial_onboarding");
+  assert.equal(result.checks?.ct_initial_onboarding_required_eligible_minimum, 15);
+  assert.equal(result.checks?.ct_post_onboarding_low_stock, true);
+  assert.equal(result.checks?.ct_post_onboarding_low_stock_threshold, 5);
   assert.equal(result.preflight_request_created, false);
 });
 
-test("connected account with 14 eligible CT is blocked by the canonical minimum", async () => {
+for (const eligibleTargetCount of [14, 10, 5]) {
+test(`completed onboarding with ${eligibleTargetCount} eligible CT preserves growth readiness`, async () => {
   const supabase = makeSupabase(baseRows({
     client_instagram_accounts: [{ account_id: accountId, login_status: "connected", provisioning_status: "ready", onboarding_status: "ready" }],
-    ig_targets: Array.from({ length: 14 }, (_, index) => ({ id: `target-${index}`, account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" })),
+    ig_targets: Array.from({ length: eligibleTargetCount }, (_, index) => ({ id: `target-${index}`, account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" })),
   }));
 
   const result = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
-  assert.equal(result.readiness_status, "retry_later");
-  assert.equal(result.reason, "insufficient_eligible_targets");
+  assert.equal(result.readiness_status, "ready");
+  assert.equal(result.reason, "already_connected_ready");
+  assert.equal(result.checks?.ct_onboarding_gate_applies, false);
+  assert.equal(result.checks?.ct_post_onboarding_low_stock, eligibleTargetCount <= 5);
 });
+}
 
 test("18 total targets with 15 canonically eligible CT is ready", async () => {
   const eligible = Array.from({ length: 15 }, (_, index) => ({ id: `eligible-${index}`, account_id: accountId, status: "valid", quality_status: "eligible", verification_status: "found" }));
