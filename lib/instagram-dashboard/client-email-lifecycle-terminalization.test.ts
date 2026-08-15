@@ -11,7 +11,7 @@ import {
 } from "./client-email-outbox-materializer.ts";
 
 const migration = readFileSync(
-  new URL("../../supabase/migrations/20260815123000_client_email_lifecycle_episode_terminalization_v1.sql", import.meta.url),
+  new URL("../../supabase/migrations/20260815194227_client_email_lifecycle_episode_terminalization_v1.sql", import.meta.url),
   "utf8",
 );
 
