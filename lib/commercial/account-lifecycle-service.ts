@@ -491,7 +491,7 @@ export async function executeCommercialAccountLifecycle(input: {
   lifecycleEmailHandoff?: (input: {
     supabase: SupabaseClient;
     accountId: string;
-    category: "account_paused";
+    category: "account_paused" | "account_canceled";
     env?: Record<string, string | undefined>;
   }) => Promise<ImmediateLifecycleEmailHandoffResult>;
 }): Promise<CommercialLifecycleResult> {
@@ -1081,6 +1081,36 @@ export async function executeCommercialAccountLifecycle(input: {
     await reconcileClientAccountNotificationsForAccount(supabase, accountId);
     await finishOperation(supabase, claim.operationId, "completed");
     await auditLifecycle(supabase, { accountId, action: "commercial_cancel_completed", actor: input.actor, payload: { capacity_release_status: capacityReleaseStatus } });
+
+    try {
+      const handoff = input.lifecycleEmailHandoff ?? runImmediateLifecycleEmailHandoff;
+      const emailResult = await handoff({
+        supabase,
+        accountId,
+        category: "account_canceled",
+        env: input.env,
+      });
+      await auditLifecycle(supabase, {
+        accountId,
+        action: "commercial_cancel_email_handoff_completed",
+        actor: input.actor,
+        payload: {
+          materialized: emailResult.materialize.materialized,
+          submitted: emailResult.dispatch.submitted,
+          dispatch_candidates: emailResult.dispatch.candidates,
+        },
+      });
+    } catch (emailError) {
+      await auditLifecycle(supabase, {
+        accountId,
+        action: "commercial_cancel_email_handoff_deferred",
+        actor: input.actor,
+        payload: {
+          recovery: "periodic_cron",
+          reason: emailError instanceof Error ? emailError.message.slice(0, 200) : "cancel_email_handoff_failed",
+        },
+      });
+    }
 
     return buildResult({
       ok: true,

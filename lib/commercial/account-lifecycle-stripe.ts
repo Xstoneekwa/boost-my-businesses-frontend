@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { COMMERCIAL_CANCEL_CONTRACT } from "./account-lifecycle-cancel-contract.ts";
 import { getStripeClient, setStripeClientForTests } from "./stripe/stripe-client.ts";
 
 export type AccountLifecycleStripeGateway = {
@@ -26,7 +27,11 @@ export function createAccountLifecycleStripeGateway(stripe: Stripe): AccountLife
       return { billingPaused: false };
     },
     async cancelSubscriptionImmediately(subscriptionId, idempotencyKey) {
-      const sub = await stripe.subscriptions.cancel(subscriptionId, { idempotencyKey });
+      const sub = await stripe.subscriptions.cancel(
+        subscriptionId,
+        COMMERCIAL_CANCEL_CONTRACT.stripeCancelParams,
+        { idempotencyKey },
+      );
       return { status: sub.status };
     },
   };
