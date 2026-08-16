@@ -145,6 +145,28 @@ is then the only switch left to govern automatic starts.
 8. Atomic RPC guard at insert (`scheduler_disabled` counted as
    `skipped_scheduler_disabled_count`, never fatal)
 
+## Resolved incident and mandatory-phase continuation
+
+`Resolve after verification` authorizes one bounded continuation of the exact
+latest request/run lineage. Resolution never invents work: the next natural
+Auto Restart tick rebuilds the plan exclusively from live canonical quotas,
+current actionable candidates, package rules and safety gates.
+
+A legacy contradictory projection may report the whole session as
+`completed` while its authoritative Unfollow phase is explicitly `failed`.
+That session is recoverable only when all of the following remain true:
+
+- the source request, canonical attempt and latest run lineage match exactly;
+- Unfollow is enabled, has remaining quota and actionable live backlog;
+- the Unfollow circuit is closed and no security/account/device hold exists;
+- the resolved-incident authorization is current and one-shot.
+
+The continuation is Unfollow-only and uses a safe non-Follow boundary. A
+session whose Unfollow phase is actually complete, has no actionable backlog,
+has only terminal/held candidates, or has a superseded lineage remains
+terminal. The resolved incident therefore removes a stale operational block
+without weakening account safety or replay/idempotency guarantees.
+
 ## CP1 — Stable reasons and Scheduler observability
 
 Canonical nomenclature: `lib/instagram-dashboard/scheduler-reasons.ts`.

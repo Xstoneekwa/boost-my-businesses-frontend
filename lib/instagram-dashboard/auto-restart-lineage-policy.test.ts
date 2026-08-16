@@ -183,6 +183,28 @@ test("only an aligned latest partial lineage is accepted", () => {
   }), { ok: true, reason: "" });
 });
 
+test("resolved incident repairs only a completed session with canonical failed Unfollow backlog", () => {
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-1",
+    incidentRunId: "run-1",
+    storedPlanRunId: "run-1",
+    latestCanonicalRunId: "run-1",
+    latestTerminationClass: "completed",
+    resolvedIncidentAuthorized: true,
+    canonicalLiveUnfollowResumeAuthorized: true,
+  }), { ok: true, reason: "" });
+
+  assert.deepEqual(validateResumeAuthorizationLineage({
+    authorizationRunId: "run-1",
+    incidentRunId: "run-1",
+    storedPlanRunId: "run-1",
+    latestCanonicalRunId: "run-1",
+    latestTerminationClass: "completed",
+    resolvedIncidentAuthorized: true,
+    canonicalLiveUnfollowResumeAuthorized: false,
+  }), { ok: false, reason: "resume_authorization_stale" });
+});
+
 test("a resolved exact incident authorizes one new boundary after a non-recoverable stop", () => {
   assert.deepEqual(validateResumeAuthorizationLineage({
     authorizationRunId: "run-mythyl",

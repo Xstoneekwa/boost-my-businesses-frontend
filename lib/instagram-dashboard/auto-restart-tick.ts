@@ -1420,6 +1420,8 @@ async function processHumanConfirmedResumes(
         latestTerminationClass: candidate?.reliability.sessionTerminationClass || "",
         resolvedIncidentAuthorized: true,
         preRunIncidentLineageProven,
+        canonicalLiveUnfollowResumeAuthorized:
+          candidate?.canonicalLiveUnfollowResumeAuthorized === true,
       });
       let infrastructureRetryContinuation = false;
       if (

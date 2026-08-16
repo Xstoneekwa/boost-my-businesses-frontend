@@ -134,6 +134,7 @@ export function validateResumeAuthorizationLineage(input: {
   latestTerminationClass: string;
   resolvedIncidentAuthorized?: boolean;
   preRunIncidentLineageProven?: boolean;
+  canonicalLiveUnfollowResumeAuthorized?: boolean;
 }): ResumeLineageVerdict {
   const authorizationRunId = clean(input.authorizationRunId);
   const incidentRunId = clean(input.incidentRunId);
@@ -151,10 +152,17 @@ export function validateResumeAuthorizationLineage(input: {
   const terminationClass = clean(input.latestTerminationClass).toLowerCase();
   const terminalSuccess = ["completed", "success", "completed_all_phases"].includes(terminationClass);
   // Resolving the exact incident is an explicit human authorization for one
-  // new account-session boundary.  It may recover a run that was intentionally
-  // classified non-recoverable before review, but it can never revive a
-  // superseded lineage or an already completed session.
-  if (input.resolvedIncidentAuthorized === true && !terminalSuccess) {
+  // new account-session boundary. It may recover a run that was intentionally
+  // classified non-recoverable before review, but never a superseded lineage.
+  // A terminal session label is not authoritative when the canonical phase
+  // projection proves that mandatory Unfollow failed and still has actionable
+  // live backlog. This narrow contradiction uses the same bounded,
+  // request-linked continuation; a genuinely completed session cannot obtain
+  // this authorization and therefore remains terminal.
+  if (
+    input.resolvedIncidentAuthorized === true
+    && (!terminalSuccess || input.canonicalLiveUnfollowResumeAuthorized === true)
+  ) {
     return { ok: true, reason: "" };
   }
   if (!["partial_resumable", "partial_safe_stopped"].includes(terminationClass)) {
