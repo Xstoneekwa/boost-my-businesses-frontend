@@ -240,6 +240,22 @@ test("canonical live Unfollow backlog overrides a stale restart_not_needed snaps
   });
 });
 
+test("failed mandatory Unfollow backlog overrides only the contradictory session_completed projection", () => {
+  assert.deepEqual(resolveRestartNeed({
+    lastRunId: "completed-session-failed-unfollow",
+    sessionTerminationClass: "completed",
+    restartAllowed: false,
+    restartBlockReason: "session_completed",
+    totalRemainingQuota: 80,
+    canonicalLiveUnfollowResumeAuthorized: true,
+  }), {
+    needed: true,
+    reason: "partial_live_unfollow_backlog_resume_needed",
+    historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: true,
+  });
+});
+
 test("canonical live Unfollow backlog never overrides a critical Worker block", () => {
   const result = resolveRestartNeed({
     lastRunId: "run-critical",

@@ -139,6 +139,32 @@ test("a planned but never-started Unfollow phase cannot convert a Follow partial
   assert.equal(result.reason, "not_partial_unfollow_lineage");
 });
 
+test("a failed mandatory Unfollow phase repairs a contradictory completed session from live backlog", () => {
+  const result = partialUnfollow({
+    sessionTerminationClass: "completed",
+    unfollowPhaseStatus: "failed",
+    actionableNow: 87,
+    technicalHoldTotal: 0,
+    dailyQuotaRemaining: 80,
+    sessionQuotaRemaining: 80,
+  });
+  assert.equal(result.applies, true);
+  assert.equal(result.authorized, true);
+  assert.equal(result.reason, "failed_mandatory_unfollow_live_backlog");
+  assert.equal(result.plannedQuota, 80);
+});
+
+test("a genuinely completed Unfollow phase never rebuilds a continuation", () => {
+  const result = partialUnfollow({
+    sessionTerminationClass: "completed",
+    unfollowPhaseStatus: "completed",
+    actionableNow: 87,
+  });
+  assert.equal(result.applies, false);
+  assert.equal(result.authorized, false);
+  assert.equal(result.reason, "not_partial_unfollow_lineage");
+});
+
 test("a stale or superseded source lineage fails closed", () => {
   assert.equal(partialUnfollow({ lineageValid: false }).reason, "resume_source_run_superseded");
   assert.equal(partialUnfollow({ lineageValid: false }).authorized, false);

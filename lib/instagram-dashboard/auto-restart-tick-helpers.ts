@@ -247,19 +247,26 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
   if (canonicalLiveUnfollowOverride) {
     const phases = candidate.plannedPhasesToRun;
     const remaining = candidate.plannedQuotaRemaining;
-    const partial = ["partial_resumable", "partial_safe_stopped"]
-      .includes(reliability.sessionTerminationClass.toLowerCase());
+    const sessionClass = reliability.sessionTerminationClass.toLowerCase();
+    const phaseStatus = String(reliability.unfollowPhaseStatus || "").toLowerCase();
+    const partial = ["partial_resumable", "partial_safe_stopped"].includes(sessionClass)
+      && ["partial_resumable", "partial_safe_stopped"].includes(phaseStatus);
+    const failedMandatoryUnfollow = ["completed", "success", "completed_all_phases"]
+      .includes(sessionClass) && phaseStatus === "failed";
     if (
-      !partial
-      || !["partial_resumable", "partial_safe_stopped"]
-        .includes(String(reliability.unfollowPhaseStatus || "").toLowerCase())
+      (!partial && !failedMandatoryUnfollow)
       || candidate.sourceLineageValid !== true
       || !candidate.sourceRequestId
       || !Number.isSafeInteger(candidate.canonicalAttemptId)
       || Number(candidate.canonicalAttemptId) < 1
       || (
         reliability.restartAllowed !== true
-        && !["restart_not_needed", "auto_restart_retries_exhausted"]
+        && ![
+          "restart_not_needed",
+          "auto_restart_retries_exhausted",
+          "session_completed",
+          "restart_not_allowed_for_termination_class",
+        ]
           .includes(reliability.restartBlockReason.toLowerCase())
       )
       || candidate.unfollowPhaseCircuitOpen === true
@@ -321,13 +328,18 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
   if ((!sessionClass || sessionClass === "unknown") && !operatorStopContinuation) {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }
-  if (["completed", "success", "completed_all_phases"].includes(sessionClass) && !operatorStopContinuation) {
+  if (
+    ["completed", "success", "completed_all_phases"].includes(sessionClass)
+    && !operatorStopContinuation
+    && !canonicalLiveUnfollowOverride
+  ) {
     return { ok: false as const, reason: "no_partial_run_to_resume" };
   }
   if (
     !["partial_safe_stopped", "partial_resumable"].includes(sessionClass)
     && reliability.restartAllowed !== true
     && !operatorStopContinuation
+    && !canonicalLiveUnfollowOverride
   ) {
     return { ok: false as const, reason: "resume_runtime_not_supported" };
   }

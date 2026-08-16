@@ -166,6 +166,32 @@ test("live continuation cannot be forged without an explicit partial Unfollow ou
   assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: false, reason: "resume_plan_invalid" });
 });
 
+test("completed session with explicitly failed Unfollow is runtime-supported from exact live backlog", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.sessionTerminationClass = "completed";
+  candidate.reliability.unfollowPhaseStatus = "failed";
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "session_completed";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-failed-unfollow";
+  candidate.canonicalAttemptId = 1;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+});
+
+test("completed session with completed Unfollow remains terminal even if an override flag is forged", () => {
+  const candidate = exactBacklogCandidate();
+  candidate.reliability.sessionTerminationClass = "completed";
+  candidate.reliability.unfollowPhaseStatus = "completed";
+  candidate.reliability.restartAllowed = false;
+  candidate.reliability.restartBlockReason = "session_completed";
+  candidate.canonicalLiveUnfollowResumeAuthorized = true;
+  candidate.sourceLineageValid = true;
+  candidate.sourceRequestId = "request-completed-unfollow";
+  candidate.canonicalAttemptId = 1;
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: false, reason: "resume_plan_invalid" });
+});
+
 test("live continuation never bypasses a critical Worker restart block", () => {
   const candidate = exactBacklogCandidate();
   candidate.reliability.restartAllowed = false;

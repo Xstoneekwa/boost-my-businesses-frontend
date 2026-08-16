@@ -37,6 +37,7 @@ export type PartialUnfollowLiveResumeReason =
   | "unfollow_quota_reached"
   | "unfollow_phase_circuit_open"
   | "partial_resumable_live_unfollow_backlog"
+  | "failed_mandatory_unfollow_live_backlog"
   | "unfollow_backlog_on_cooldown"
   | "unfollow_backlog_terminal_only"
   | "unfollow_backlog_exhausted";
@@ -92,8 +93,9 @@ export function resolveBoundedSessionQuota(input: {
 
 /**
  * Reconciles a stale Worker phase snapshot with the canonical live Unfollow
- * backlog.  This override is intentionally narrow: only the latest proven
- * partial Unfollow lineage may rebuild an Unfollow-only continuation.
+ * backlog. This override is intentionally narrow: the latest proven partial
+ * Unfollow lineage, or a contradictory terminal session whose Unfollow phase
+ * is explicitly failed, may rebuild an Unfollow-only continuation.
  */
 export function resolvePartialUnfollowLiveResume(input: {
   sessionTerminationClass: string;
@@ -116,12 +118,15 @@ export function resolvePartialUnfollowLiveResume(input: {
   const backlogTotal = actionableNow + technicalHoldTotal + terminalTotal;
   const partial = ["partial_resumable", "partial_safe_stopped"]
     .includes(normalized(input.sessionTerminationClass));
+  const completedSession = ["completed", "success", "completed_all_phases"]
+    .includes(normalized(input.sessionTerminationClass));
   const phaseStatus = normalized(input.unfollowPhaseStatus);
   // A planned Unfollow flag or raw quota is not proof that the phase actually
   // started. Require the terminal Unfollow outcome itself to be partial.
   const explicitUnfollowLineage = ["partial_resumable", "partial_safe_stopped"]
     .includes(phaseStatus);
-  const applies = partial && explicitUnfollowLineage;
+  const failedMandatoryUnfollow = completedSession && phaseStatus === "failed";
+  const applies = (partial && explicitUnfollowLineage) || failedMandatoryUnfollow;
   const result = (
     reason: PartialUnfollowLiveResumeReason,
     authorized = false,
@@ -182,7 +187,13 @@ export function resolvePartialUnfollowLiveResume(input: {
     sessionRemaining,
   );
   if (plannedQuota > 0) {
-    return result("partial_resumable_live_unfollow_backlog", true, plannedQuota);
+    return result(
+      failedMandatoryUnfollow
+        ? "failed_mandatory_unfollow_live_backlog"
+        : "partial_resumable_live_unfollow_backlog",
+      true,
+      plannedQuota,
+    );
   }
   return result("unfollow_backlog_exhausted");
 }
