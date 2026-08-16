@@ -158,6 +158,7 @@ export function resolveRestartNeed(input: RestartNeedInput) {
       "restart_not_needed",
       "auto_restart_retries_exhausted",
       "session_completed",
+      "resolved_incident_live_plan_rebuild",
       "restart_not_allowed_for_termination_class",
     ].includes(blockReason)
   ) {

@@ -268,6 +268,10 @@ explicitly `failed`, the source lineage is still canonical, the account and
 Unfollow Auto Restart gates are enabled, and the live actionable backlog is
 positive. A genuinely completed Unfollow phase never qualifies. The rebuilt
 quota is bounded by the live backlog and current package/day/session limits.
+The non-security resolution projection
+`resolved_incident_live_plan_rebuild` is an authorized continuation reason
+under that same exact proof; it is not a safety bypass and remains invalid
+without the failed phase, canonical lineage, live backlog, and quota gates.
 Incident resolution or a safe manual stop authorizes only the next natural
 tick; it never creates a request synchronously and never reuses a consumed
 schedule key.
