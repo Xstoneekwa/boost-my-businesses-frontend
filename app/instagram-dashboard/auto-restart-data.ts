@@ -29,6 +29,7 @@ import {
   pruneTerminalAccountSessionPhases,
   resolveBoundedSessionQuota,
   resolvePartialUnfollowLiveResume,
+  resolvePersistedUnfollowPhaseStatus,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
   resolveUnfollowTechnicalHoldRestartGate,
@@ -648,10 +649,11 @@ function reliabilityFromLatestRun(
       || readNumber(unfollowOutcome?.persisted_count, 0) > 0
       || readNumber(unfollowOutcome?.verified_count, 0) > 0
     ),
-    unfollowPhaseStatus: readString(
-      unfollowOutcome?.phase_status,
-      readString(resumePlan?.unfollow_phase_status, ""),
-    ),
+    unfollowPhaseStatus: resolvePersistedUnfollowPhaseStatus({
+      outcomePhaseStatus: readString(unfollowOutcome?.phase_status),
+      planPhaseStatus: readString(resumePlan?.unfollow_phase_status),
+      performancePhaseStatus: readString(performance?.unfollow_phase_status),
+    }),
     unfollowSessionTarget: readNumber(
       unfollowOutcome?.planned_candidate_count,
       readNumber(

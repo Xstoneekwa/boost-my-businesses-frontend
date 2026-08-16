@@ -252,6 +252,26 @@ windows (48h)" card with honest states (`open now`, `planned`,
 `awaiting roll-forward`) — no false "growth waiting", no silent expired
 window, manual-only accounts never listed.
 
+## Mandatory Unfollow continuation after a resolved incident
+
+Auto Restart derives the authoritative Unfollow phase status in this strict
+precedence order:
+
+1. `resume_plan.unfollow_outcome.phase_status`;
+2. `resume_plan.unfollow_phase_status`;
+3. `ig_runs.performance_summary.unfollow_phase_status`.
+
+The third source is the canonical Worker fallback and must not be ignored when
+the optional nested resume projections are absent. A session projected as
+`completed` may rebuild an Unfollow-only continuation only when that status is
+explicitly `failed`, the source lineage is still canonical, the account and
+Unfollow Auto Restart gates are enabled, and the live actionable backlog is
+positive. A genuinely completed Unfollow phase never qualifies. The rebuilt
+quota is bounded by the live backlog and current package/day/session limits.
+Incident resolution or a safe manual stop authorizes only the next natural
+tick; it never creates a request synchronously and never reuses a consumed
+schedule key.
+
 ## Future Admin Dashboard relay contract (not implemented in 19B)
 
 Admin Dashboard remains **read-mostly** and must never spawn local processes from the browser.

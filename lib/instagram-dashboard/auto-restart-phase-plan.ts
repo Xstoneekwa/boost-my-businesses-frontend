@@ -73,6 +73,18 @@ function validIso(value: string | null | undefined) {
   return Number.isFinite(Date.parse(value)) ? value : null;
 }
 
+export function resolvePersistedUnfollowPhaseStatus(input: {
+  outcomePhaseStatus?: string | null;
+  planPhaseStatus?: string | null;
+  performancePhaseStatus?: string | null;
+}) {
+  return [
+    input.outcomePhaseStatus,
+    input.planPhaseStatus,
+    input.performancePhaseStatus,
+  ].map(normalized).find(Boolean) ?? "";
+}
+
 export function resolveBoundedSessionQuota(input: {
   doneToday: number;
   capDay: number;

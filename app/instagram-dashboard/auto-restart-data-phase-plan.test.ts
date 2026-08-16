@@ -5,10 +5,32 @@ import {
   pruneTerminalAccountSessionPhases,
   resolveBoundedSessionQuota,
   resolvePartialUnfollowLiveResume,
+  resolvePersistedUnfollowPhaseStatus,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
   resolveUnfollowTechnicalHoldRestartGate,
 } from "../../lib/instagram-dashboard/auto-restart-phase-plan.ts";
+
+test("root Worker Unfollow phase status remains authoritative when plan copies are absent", () => {
+  assert.equal(resolvePersistedUnfollowPhaseStatus({
+    outcomePhaseStatus: null,
+    planPhaseStatus: null,
+    performancePhaseStatus: "failed",
+  }), "failed");
+});
+
+test("more specific Unfollow phase projections retain precedence", () => {
+  assert.equal(resolvePersistedUnfollowPhaseStatus({
+    outcomePhaseStatus: "completed",
+    planPhaseStatus: "failed",
+    performancePhaseStatus: "partial_resumable",
+  }), "completed");
+  assert.equal(resolvePersistedUnfollowPhaseStatus({
+    outcomePhaseStatus: "",
+    planPhaseStatus: "partial_resumable",
+    performancePhaseStatus: "failed",
+  }), "partial_resumable");
+});
 
 test("a runtime session cap of zero remains zero and cannot fall back to the day cap", () => {
   assert.deepEqual(resolveBoundedSessionQuota({
