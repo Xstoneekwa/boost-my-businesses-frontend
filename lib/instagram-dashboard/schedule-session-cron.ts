@@ -15,6 +15,7 @@ import {
   resolveWelcomeTemplateMissingIncidents,
   WELCOME_TEMPLATE_MISSING_REASON,
 } from "./schedule-session-configuration-incidents.ts";
+import { resolveCanonicalBusinessActionDeadline } from "./business-session-deadline.ts";
 
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
@@ -464,6 +465,9 @@ async function queueScheduledSession(
   },
 ) {
   const baseIdempotencyKey = scheduleSessionIdempotencyKey(input.assignmentId, input.startsAt);
+  const businessActionDeadline = resolveCanonicalBusinessActionDeadline({
+    scheduleWindowEndsAt: input.endsAt,
+  });
   const { data, error } = await supabase.rpc("create_account_run_request", {
     p_account_id: input.accountId,
     p_requested_by: null,
@@ -479,6 +483,8 @@ async function queueScheduledSession(
       worker_id: input.workerId,
       scheduled_session_at: input.startsAt,
       scheduled_session_ends_at: input.endsAt,
+      business_action_deadline: businessActionDeadline,
+      business_action_deadline_source: "scheduler_canonical_device_window_v1",
       device_timezone: input.deviceTimezone,
     },
   });
