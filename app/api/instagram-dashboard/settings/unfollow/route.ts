@@ -333,6 +333,23 @@ export async function PATCH(request: Request) {
     }
 
     const actorContext = await getInstagramAdminUserContext();
+    if (fieldsChanged.includes("unfollow_enabled")) {
+      const { error: enablementOverrideError } = await supabase.rpc("set_account_unfollow_enablement_override_v1", {
+        p_account_id: accountId,
+        p_override_enabled: after.unfollowEnabled,
+        p_source: "admin",
+        p_source_surface: "instagram_dashboard_settings",
+        p_updated_by: actorContext?.userId ?? null,
+        p_reason: "explicit_settings_save",
+      });
+      if (enablementOverrideError) {
+        return jsonError(
+          sanitizeRunControlReason(enablementOverrideError.message, "Could not save Unfollow enablement provenance."),
+          500,
+        );
+      }
+    }
+
     const limitFieldsChanged = fieldsChanged.some((field) =>
       field === "unfollow_per_session_limit" || field === "unfollow_per_day_limit"
     );
@@ -357,7 +374,10 @@ export async function PATCH(request: Request) {
     const { error } = await supabase.from("ig_account_unfollow_settings").upsert(
       {
         account_id: accountId,
-        unfollow_enabled: after.unfollowEnabled,
+        // The provenance RPC is authoritative for enablement. Omitting this
+        // field prevents an explicit true from granting a package capability
+        // that the account does not have.
+        ...(fieldsChanged.includes("unfollow_enabled") ? {} : { unfollow_enabled: after.unfollowEnabled }),
         unfollow_mode: after.unfollowMode,
         unfollow_per_session_limit: after.unfollowPerSessionLimit,
         unfollow_per_day_limit: after.unfollowPerDayLimit,
