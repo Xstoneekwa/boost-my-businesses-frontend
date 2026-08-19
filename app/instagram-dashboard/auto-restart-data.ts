@@ -998,7 +998,10 @@ function planCandidate({
   if (incidentBlockReason) blockingReasons.push(incidentBlockReason);
   if (!rules.enabled) blockingReasons.push("scheduler_disabled");
   if (scheduleMode === "manual_only") blockingReasons.push("manual_only");
-  if (readBoolean(settings?.manual_stop_requested, false)) blockingReasons.push("manual_stop_requested");
+  // `manual_stop_requested` is a command-edge flag, never durable eligibility
+  // state. Active lineage still blocks above/below; once the canonical BotApp
+  // stop is terminal, provenance decides whether a fresh-boundary continuation
+  // is safe. The stale boolean must not disqualify future natural ticks.
   if (activeRun) blockingReasons.push("active_run_exists");
   if (activeRequest) blockingReasons.push("active_run_request_exists");
   if (isBlockingAccount(account) && !incidentBlockReason) blockingReasons.push("account_blocking_action_or_credentials");

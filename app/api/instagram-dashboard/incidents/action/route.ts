@@ -80,7 +80,7 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseClient();
-    const { data, error } = await supabase.rpc("transition_account_incident_human_review_v2", {
+    const { data, error } = await supabase.rpc("transition_account_incident_human_review_v3", {
       p_incident_id: incidentId,
       p_action: action,
       p_expected_version: expectedVersion,
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
 
     const detail = await loadIncidentDetail(incidentId);
     return jsonOk({
-      contractVersion: "incident_human_review_action_v2",
+      contractVersion: "incident_human_review_action_v3",
       action,
       eventId: transition.event_id ?? null,
       incidentId,
@@ -149,6 +149,12 @@ export async function POST(request: Request) {
       blocked_reason: transition.blocked_reason ?? null,
       expected_worker_sha: transition.expected_worker_sha ?? null,
       cause_fixed_version: transition.cause_fixed_version ?? null,
+      equivalent_incidents_resolved: transition.equivalent_incidents_resolved ?? 0,
+      remaining_operator_review_blockers: transition.remaining_operator_review_blockers ?? null,
+      runtime_reactivated: transition.runtime_reactivated === true,
+      runtime_status: transition.runtime_status ?? null,
+      runtime_restore_blocked_reason: transition.runtime_restore_blocked_reason ?? null,
+      manual_stop_persistent_block: false,
       deliveries,
       detail,
     });
