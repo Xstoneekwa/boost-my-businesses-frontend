@@ -44,7 +44,8 @@ test("stats history reconciles post-follow likes from ig_runs totals", () => {
 test("stats history restores canonical persisted Unfollows including continuation runs", () => {
   assert.match(source, /ig_interacted_users/);
   assert.match(source, /unfollow_result", "success"/);
-  assert.match(source, /verifiedUnfollowRowsAsInteractionEvents/);
+  assert.match(source, /mergeCanonicalInteractionEventsWithUnfollowFallback/);
+  assert.match(source, /select\("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload"\)/);
   assert.match(source, /last_run_id/);
   assert.match(source, /ig_interacted_users\.unfollowed_at where unfollow_result=success/);
 });

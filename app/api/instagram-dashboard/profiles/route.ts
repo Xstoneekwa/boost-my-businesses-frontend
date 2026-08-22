@@ -5,7 +5,7 @@ import {
   reconcileSocialCounters,
   runTotalsCounters,
   TOTAL_INTERACTIONS_DEFINITION,
-  verifiedUnfollowRowsAsInteractionEvents,
+  mergeCanonicalInteractionEventsWithUnfollowFallback,
 } from "@/lib/instagram-dashboard/social-counters";
 import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/profile-counter-business-day";
 import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
@@ -349,7 +349,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
-      supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
+      supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
@@ -392,12 +392,11 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       latestRunByAccount.set(id, row);
     }
     const interactionEventsByAccount = new Map<string, RecordValue[]>();
-    for (const row of (interactionEventsResult.data ?? []) as RecordValue[]) {
-      const id = readString(row.account_id, "");
-      if (!id) continue;
-      interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
-    }
-    for (const row of verifiedUnfollowRowsAsInteractionEvents((unfollowsResult.data ?? []) as RecordValue[])) {
+    const canonicalInteractionEvents = mergeCanonicalInteractionEventsWithUnfollowFallback(
+      (interactionEventsResult.data ?? []) as RecordValue[],
+      (unfollowsResult.data ?? []) as RecordValue[],
+    );
+    for (const row of canonicalInteractionEvents) {
       const id = readString(row.account_id, "");
       if (!id) continue;
       interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);

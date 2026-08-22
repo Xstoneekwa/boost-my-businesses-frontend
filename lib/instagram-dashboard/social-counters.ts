@@ -247,11 +247,30 @@ export function verifiedUnfollowRowsAsInteractionEvents(rows: RecordValue[]): Re
       created_at: unfollowedAt,
       payload: {
         target_username: username,
+        interaction_row_id: readString(row.id, ""),
         evidence_source: "ig_interacted_users.unfollowed_at",
       },
     });
   }
   return [...verified.values()];
+}
+
+export function mergeCanonicalInteractionEventsWithUnfollowFallback(
+  nativeEvents: RecordValue[],
+  unfollowRows: RecordValue[],
+): RecordValue[] {
+  const nativeUnfollowInteractionRowIds = new Set<string>();
+  for (const row of nativeEvents) {
+    if (!shouldCountInteractionEvent(row) || verifiedInteractionKind(row) !== "unfollows") continue;
+    const interactionRowId = readString(readRecord(row.payload)?.interaction_row_id, "");
+    if (interactionRowId) nativeUnfollowInteractionRowIds.add(interactionRowId);
+  }
+
+  const historicalFallback = verifiedUnfollowRowsAsInteractionEvents(unfollowRows).filter((row) => {
+    const interactionRowId = readString(readRecord(row.payload)?.interaction_row_id, "");
+    return !interactionRowId || !nativeUnfollowInteractionRowIds.has(interactionRowId);
+  });
+  return [...nativeEvents, ...historicalFallback];
 }
 
 export function lastVerifiedInteractionAt(eventRows: RecordValue[]) {

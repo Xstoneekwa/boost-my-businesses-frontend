@@ -4,7 +4,7 @@ import {
   reconcileStatsDaySocialCounters,
   socialActionKindFromLog,
   toStatsDaySocialCounters,
-  verifiedUnfollowRowsAsInteractionEvents,
+  mergeCanonicalInteractionEventsWithUnfollowFallback,
   TOTAL_INTERACTIONS_DEFINITION,
   STATS_TOTAL_INTERACTIONS_DEFINITION,
 } from "@/lib/instagram-dashboard/social-counters";
@@ -251,7 +251,7 @@ export async function GET(
         .limit(500),
       supabase
         .from("ig_interaction_events")
-        .select("event_type,event_status,interaction_type,event_at,payload")
+        .select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload")
         .eq("account_id", normalizedAccountId)
         .gte("event_at", since)
         .order("event_at", { ascending: false })
@@ -323,10 +323,10 @@ export async function GET(
       runTotalsByDay.set(date, totals);
     }
 
-    const canonicalInteractionEvents = [
-      ...((interactionEventsResult.data ?? []) as SupabaseRecord[]),
-      ...verifiedUnfollowRowsAsInteractionEvents((unfollowsResult.data ?? []) as SupabaseRecord[]),
-    ];
+    const canonicalInteractionEvents = mergeCanonicalInteractionEventsWithUnfollowFallback(
+      (interactionEventsResult.data ?? []) as SupabaseRecord[],
+      (unfollowsResult.data ?? []) as SupabaseRecord[],
+    );
     const interactionEventsByDay = interactionEventCountersByDay(
       canonicalInteractionEvents,
       socialSnapshots.timezone,

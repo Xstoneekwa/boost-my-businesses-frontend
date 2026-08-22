@@ -8,7 +8,7 @@ import {
   projectVerifiedRunCounters,
   reconcileSocialCounters,
   runTotalsCounters,
-  verifiedUnfollowRowsAsInteractionEvents,
+  mergeCanonicalInteractionEventsWithUnfollowFallback,
 } from "./social-counters.ts";
 
 type Row = Record<string, unknown>;
@@ -119,10 +119,10 @@ export function projectProfilesLive(input: {
   const requestsByAccount = grouped(input.requests);
   const runsByAccount = grouped(input.runs);
   const logsByAccount = grouped(input.actionLogs);
-  const eventsByAccount = grouped([
-    ...input.interactionEvents,
-    ...verifiedUnfollowRowsAsInteractionEvents(input.unfollowRows ?? []),
-  ]);
+  const eventsByAccount = grouped(mergeCanonicalInteractionEventsWithUnfollowFallback(
+    input.interactionEvents,
+    input.unfollowRows ?? [],
+  ));
   const actionsByAccount = grouped(input.dashboardActions);
   const snapshotsByAccount = grouped(input.socialProfileSnapshots);
 
