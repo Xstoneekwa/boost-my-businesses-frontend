@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ClientAccountNotificationView, ClientAccountNotificationsProjection } from "@/lib/instagram-client/client-account-notifications";
+import type { ClientAccountNotificationView, ClientAccountNotificationsProjection, ClientAccountTransitionView } from "@/lib/instagram-client/client-account-notifications";
 
 type Lang = "fr" | "en";
 
@@ -103,6 +103,20 @@ function NotificationCard({
   );
 }
 
+function TransitionCard({ transition, lang }: { transition: ClientAccountTransitionView; lang: Lang }) {
+  const username = transition.username.startsWith("@") ? transition.username : `@${transition.username}`;
+  return (
+    <article className={`cd-client-notif is-resolved${transition.actionable ? " is-actionable" : ""}`}>
+      <div className="cd-client-notif-hd">
+        <span className="cd-client-notif-cat">{lang === "fr" ? "Progression" : "Progress"}</span>
+        <span className="cd-client-notif-date">{formatDate(transition.updatedAt, lang)}</span>
+      </div>
+      <strong className="cd-client-notif-account">{username}</strong>
+      <p>{transition.message}</p>
+    </article>
+  );
+}
+
 export default function ClientNotificationsPanel({
   lang,
   projection,
@@ -114,12 +128,14 @@ export default function ClientNotificationsPanel({
         title: "Notifications",
         active: "Actives",
         history: "Historique récent",
+        transitions: "Progression récente",
         empty: "Aucune notification active pour le moment.",
       }
     : {
         title: "Notifications",
         active: "Active",
         history: "Recent history",
+        transitions: "Recent progress",
         empty: "No active notifications right now.",
       };
 
@@ -164,6 +180,17 @@ export default function ClientNotificationsPanel({
                 onNavigate={onNavigate}
                 resolved
               />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {projection.recentTransitions.length > 0 ? (
+        <div className="cd-client-notifs-section">
+          <h3>{copy.transitions}</h3>
+          <div className="cd-client-notifs-list">
+            {projection.recentTransitions.map((transition) => (
+              <TransitionCard key={transition.id} transition={transition} lang={lang} />
             ))}
           </div>
         </div>

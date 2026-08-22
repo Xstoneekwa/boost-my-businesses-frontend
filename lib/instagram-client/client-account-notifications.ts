@@ -10,6 +10,11 @@ import {
   probeClientAccountNotificationsTable,
 } from "./client-account-notifications-schema-guard.ts";
 import type { ClientAccountNotificationsSupabase } from "./client-account-notifications-supabase.ts";
+import {
+  clientTransitionCopy,
+  loadAccountSessionTransitions,
+  type AccountSessionTransitionState,
+} from "../account-session-transitions.ts";
 
 export type { ClientAccountNotificationsSupabase } from "./client-account-notifications-supabase.ts";
 
@@ -61,10 +66,21 @@ export type ClientAccountNotificationsProjection = {
   featureAvailable: boolean;
   active: ClientAccountNotificationView[];
   recentResolved: ClientAccountNotificationView[];
+  recentTransitions: ClientAccountTransitionView[];
   /** Number of unresolved active notifications — used for topbar/panel badges. */
   activeCount: number;
   /** Subset of actives not yet marked read — visual distinction only. */
   unreadActiveCount: number;
+};
+
+export type ClientAccountTransitionView = {
+  id: string;
+  accountId: string;
+  username: string;
+  state: AccountSessionTransitionState;
+  message: string;
+  updatedAt: string;
+  actionable: boolean;
 };
 
 type SupabaseRecord = Record<string, unknown>;
@@ -420,7 +436,8 @@ export async function loadClientAccountNotificationsForClient(
 
   const lang = input.lang ?? "fr";
   const resolvedLimit = input.resolvedLimit ?? 20;
-  const [{ data: activeRows, error: activeError }, { data: resolvedRows, error: resolvedError }] = await Promise.all([
+  const accountIds = await loadAccountIdsForClient(supabase, clientId);
+  const [{ data: activeRows, error: activeError }, { data: resolvedRows, error: resolvedError }, transitions, { data: accountRows }] = await Promise.all([
     supabase
       .from("client_account_notifications")
       .select("id,account_id,category,status,metadata_safe,created_at,resolved_at,read_at")
@@ -435,6 +452,10 @@ export async function loadClientAccountNotificationsForClient(
       .eq("status", "resolved")
       .order("resolved_at", { ascending: false })
       .limit(resolvedLimit),
+    loadAccountSessionTransitions(supabase, accountIds, 20),
+    accountIds.length
+      ? supabase.from("ig_accounts").select("id,username").in("id", accountIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (activeError) throw new Error(activeError.message);
@@ -442,10 +463,21 @@ export async function loadClientAccountNotificationsForClient(
 
   const active = (activeRows ?? []).map((row) => projectNotificationRow(row, lang));
   const recentResolved = (resolvedRows ?? []).map((row) => projectNotificationRow(row, lang));
+  const usernames = new Map((accountRows ?? []).map((row) => [readString(row.id, ""), readString(row.username, "Instagram account")]));
+  const recentTransitions = transitions.map((row) => ({
+    id: row.id,
+    accountId: row.accountId,
+    username: usernames.get(row.accountId) ?? "Instagram account",
+    state: row.state,
+    message: clientTransitionCopy(row.state, lang),
+    updatedAt: row.updatedAt,
+    actionable: row.state === "blocked" && Boolean(row.actionableReason),
+  }));
   return {
     featureAvailable: true,
     active,
     recentResolved,
+    recentTransitions,
     activeCount: active.length,
     unreadActiveCount: active.filter((row) => !row.readAt).length,
   } satisfies ClientAccountNotificationsProjection;

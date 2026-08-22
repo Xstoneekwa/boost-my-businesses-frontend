@@ -71,6 +71,16 @@ const NAV_GROUPS: NavGroup[] = [
           </svg>
         ),
       },
+      {
+        key: "transitions",
+        label: "Transitions",
+        href: "/instagram-dashboard/transitions",
+        icon: (
+          <svg viewBox="0 0 24 24" width={14} height={14} stroke="currentColor" fill="none" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 7h11" /><path d="m12 4 3 3-3 3" /><path d="M20 17H9" /><path d="m12 14-3 3 3 3" />
+          </svg>
+        ),
+      },
     ],
   },
   {

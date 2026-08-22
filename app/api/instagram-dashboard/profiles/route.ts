@@ -10,6 +10,7 @@ import {
 import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/profile-counter-business-day";
 import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
 import { createSupabaseClient } from "@/lib/supabase";
+import { projectAccountSessionTransitionRow } from "@/lib/account-session-transitions";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -341,7 +342,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
       supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
@@ -351,6 +352,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
       supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
+      supabase.from("account_session_transitions").select("id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at").in("account_id", ids).order("updated_at", { ascending: false }).limit(1000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -402,6 +404,14 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       if (!id) continue;
       interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
     }
+    const latestTransitionByAccount = new Map<string, ReturnType<typeof projectAccountSessionTransitionRow>>();
+    if (!transitionsResult.error) {
+      for (const row of (transitionsResult.data ?? []) as RecordValue[]) {
+        const id = readString(row.account_id, "");
+        if (!id || latestTransitionByAccount.has(id)) continue;
+        latestTransitionByAccount.set(id, projectAccountSessionTransitionRow(row));
+      }
+    }
     return accounts.map((account) => {
       const id = accountId(account);
       const runtimeSummary = safeSettingsSummary(
@@ -426,6 +436,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
           interactionEventsByAccount.get(id) ?? [],
         ),
         runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
+        latestBusinessTransition: latestTransitionByAccount.get(id) ?? null,
         ...activeRunControlProjection(activeRequest, activeRun),
       };
     });

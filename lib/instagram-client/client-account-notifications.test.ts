@@ -560,6 +560,7 @@ test("missing notifications table returns neutral projection without writes", as
     featureAvailable: false,
     active: [],
     recentResolved: [],
+    recentTransitions: [],
     activeCount: 0,
     unreadActiveCount: 0,
   });

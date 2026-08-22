@@ -43,6 +43,7 @@ export function emptyClientAccountNotificationsProjection(featureAvailable: bool
     featureAvailable,
     active: [],
     recentResolved: [],
+    recentTransitions: [],
     activeCount: 0,
     unreadActiveCount: 0,
   };

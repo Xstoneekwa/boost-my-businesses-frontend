@@ -547,7 +547,7 @@ export default function ClientDashboard({
   tenantId: _tenantId,
   loginEmail = "",
   initialNotifications = [],
-  initialAccountNotifications = { featureAvailable: true, active: [], recentResolved: [], activeCount: 0, unreadActiveCount: 0 },
+  initialAccountNotifications = { featureAvailable: true, active: [], recentResolved: [], recentTransitions: [], activeCount: 0, unreadActiveCount: 0 },
   initialAccounts = [],
   initialWorkspace = null,
   initialAccountInsights = null,
