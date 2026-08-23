@@ -9,6 +9,7 @@ import {
 } from "@/lib/instagram-dashboard/social-counters";
 import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/profile-counter-business-day";
 import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
+import { projectUnfollowAttemptAttribution } from "@/lib/instagram-dashboard/unfollow-attempt-attribution";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
@@ -346,10 +347,10 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
       supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
-      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
+      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,metadata_safe,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
-      supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
+      supabase.from("ig_interaction_events").select("id,account_id,run_id,request_id,username,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
     ]);
     const settingsByAccount = new Map(
@@ -368,10 +369,16 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       ((accountResult.data ?? []) as RecordValue[]).map((row) => [readString(row.id, ""), row]),
     );
     const activeRequestByAccount = new Map<string, RecordValue>();
+    const requestsByAccount = new Map<string, RecordValue[]>();
     for (const row of (requestsResult.data ?? []) as RecordValue[]) {
       const id = readString(row.account_id, "");
-      if (!id || activeRequestByAccount.has(id)) continue;
-      activeRequestByAccount.set(id, row);
+      if (!id) continue;
+      requestsByAccount.set(id, [...(requestsByAccount.get(id) ?? []), row]);
+      const status = readString(row.status, "").toLowerCase();
+      if (
+        !activeRequestByAccount.has(id)
+        && ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"].includes(status)
+      ) activeRequestByAccount.set(id, row);
     }
     const activeRunByAccount = new Map<string, RecordValue>();
     for (const row of (runsResult.data ?? []) as RecordValue[]) {
@@ -424,6 +431,11 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
           sessionRunsByAccount.get(id) ?? [],
           interactionEventsByAccount.get(id) ?? [],
         ),
+        unfollowAttemptAttribution: projectUnfollowAttemptAttribution({
+          events: interactionEventsByAccount.get(id) ?? [],
+          requests: requestsByAccount.get(id) ?? [],
+          runs: sessionRunsByAccount.get(id) ?? [],
+        }),
         runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
         ...activeRunControlProjection(activeRequest, activeRun),
       };
