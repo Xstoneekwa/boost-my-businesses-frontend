@@ -35,6 +35,7 @@ type AccountContext = {
   stripeBillingPaused: boolean;
   resolutionIssue: string | null;
   terminalOperationId: string | null;
+  terminalCancelledAt: string | null;
 };
 
 function nowIso() {
@@ -67,6 +68,36 @@ async function loadAccountContext(
     .eq("account_id", accountId)
     .maybeSingle<Row>();
 
+  const stickyTerminalOperationId = readString(stateRow?.terminal_cancel_operation_id) || null;
+  const stickyTerminalEntitlementId = readString(stateRow?.terminal_cancel_entitlement_id) || null;
+  const stickyTerminalSubscriptionId = readString(stateRow?.terminal_cancel_stripe_subscription_id) || null;
+  const stickyTerminalCancelledAt = readString(stateRow?.terminal_cancelled_at) || null;
+  if (stickyTerminalOperationId && stickyTerminalEntitlementId
+    && stickyTerminalSubscriptionId && stickyTerminalCancelledAt) {
+    const { data: terminalOperation } = await supabase
+      .from("commercial_account_lifecycle_operations")
+      .select("id,state,operation_type")
+      .eq("id", stickyTerminalOperationId)
+      .eq("account_id", accountId)
+      .eq("operation_type", "cancel")
+      .eq("state", "completed")
+      .maybeSingle<Row>();
+    return {
+      accountId,
+      clientId: null,
+      adminLifecycleStatus: readString(accountRow.admin_lifecycle_status, "active"),
+      entitlementId: stickyTerminalEntitlementId,
+      stripeSubscriptionId: stickyTerminalSubscriptionId,
+      commercialState: "cancelled",
+      pausedAt: readString(stateRow?.paused_at) || null,
+      pauseExpiresAt: null,
+      stripeBillingPaused: false,
+      resolutionIssue: terminalOperation?.id ? null : "terminal_cancellation_incomplete",
+      terminalOperationId: terminalOperation?.id ? stickyTerminalOperationId : null,
+      terminalCancelledAt: stickyTerminalCancelledAt,
+    };
+  }
+
   const { data: entitlementRows } = await supabase
     .from("client_account_entitlements")
     .select("id,client_id,status,account_id,consumed_at,created_at")
@@ -78,12 +109,10 @@ async function loadAccountContext(
   const entitlements = ((entitlementRows ?? []) as Row[]);
   const overrideEntitlementId = readString(override?.entitlementId);
   const overrideSubscriptionId = readString(override?.stripeSubscriptionId) || readString(stateRow?.stripe_subscription_id);
-  const stateOperationId = readString(stateRow?.last_operation_id) || null;
   const terminalIntent = readString(accountRow.admin_lifecycle_status) === "cancelled"
     && (["cancelled", "action_required"].includes(readCommercialState(stateRow)))
     && (readCommercialState(stateRow) !== "action_required"
       || readString(stateRow?.action_required_reason) === "commercial_subscription_missing");
-  let terminalOperationId: string | null = null;
   const candidateEntitlements = overrideEntitlementId
     ? entitlements.filter((row) => readString(row.id) === overrideEntitlementId)
     : entitlements;
@@ -126,27 +155,6 @@ async function loadAccountContext(
       entitlementId = readString(pairs[0].entitlement.id);
       clientId = readString(pairs[0].entitlement.client_id) || null;
       stripeSubscriptionId = readString(pairs[0].projection.stripe_subscription_id) || null;
-      if (terminalIntent) {
-        const entitlementStatus = readString(pairs[0].entitlement.status);
-        const projectionStatus = readString(pairs[0].projection.status).toLowerCase();
-        const { data: terminalOperation } = stateOperationId
-          ? await supabase
-            .from("commercial_account_lifecycle_operations")
-            .select("id,state,operation_type")
-            .eq("id", stateOperationId)
-            .eq("account_id", accountId)
-            .eq("operation_type", "cancel")
-            .eq("state", "completed")
-            .maybeSingle<Row>()
-          : { data: null };
-        if (entitlementStatus === "entitlement_cancelled"
-          && TERMINAL_SUBSCRIPTION_STATUSES.has(projectionStatus)
-          && terminalOperation?.id) {
-          terminalOperationId = readString(terminalOperation.id);
-        } else {
-          resolutionIssue = "terminal_cancellation_incomplete";
-        }
-      }
     }
   }
 
@@ -156,13 +164,31 @@ async function loadAccountContext(
     adminLifecycleStatus: readString(accountRow.admin_lifecycle_status, "active"),
     entitlementId,
     stripeSubscriptionId,
-    commercialState: terminalOperationId ? "cancelled" : readCommercialState(stateRow),
+    commercialState: readCommercialState(stateRow),
     pausedAt: readString(stateRow?.paused_at) || null,
     pauseExpiresAt: readString(stateRow?.pause_expires_at) || null,
     stripeBillingPaused: stateRow?.stripe_billing_paused === true,
     resolutionIssue,
-    terminalOperationId,
+    terminalOperationId: null,
+    terminalCancelledAt: null,
   };
+}
+
+async function recordCommercialCancelTerminal(
+  supabase: SupabaseClient,
+  input: { accountId: string; operationId: string; entitlementId: string; stripeSubscriptionId: string },
+) {
+  const { data, error } = await supabase.rpc("record_commercial_cancel_terminal_v1", {
+    p_account_id: input.accountId,
+    p_operation_id: input.operationId,
+    p_entitlement_id: input.entitlementId,
+    p_stripe_subscription_id: input.stripeSubscriptionId,
+  });
+  if (error) throw new Error(error.message || "commercial_cancel_terminal_record_failed");
+  const row = data && typeof data === "object" ? data as Row : {};
+  if (row.ok !== true || !["recorded", "already_recorded"].includes(readString(row.status))) {
+    throw new Error(readString(row.reason, "commercial_cancel_terminal_record_failed"));
+  }
 }
 
 async function releaseCommercialAccountCapacity(
@@ -313,6 +339,17 @@ async function releaseCapacityIfSafe(
   return "released";
 }
 
+async function releaseTerminalCommercialCapacity(
+  supabase: SupabaseClient,
+  input: { accountId: string; operationId: string; reason: string; actorId: string | null },
+): Promise<CommercialLifecycleResult["capacityReleaseStatus"]> {
+  // Keep the operational release contract (schedule slot / app instance) and
+  // the commercial capacity projection as two explicit, idempotent steps.
+  // The sticky terminal operation remains the sole authority for the latter.
+  await releaseCapacityIfSafe(supabase, input.accountId, input.actorId);
+  return releaseCommercialAccountCapacity(supabase, input);
+}
+
 async function claimOperation(
   supabase: SupabaseClient,
   input: {
@@ -351,6 +388,19 @@ async function claimOperation(
     return readString(row.operation_type) !== input.operationType
       || readString(row.state) === "in_progress";
   });
+  const convergent = ((openOperations ?? []) as Row[]).find((row) =>
+    input.operationType === "cancel"
+    && readString(row.operation_type) === input.operationType
+    && readString(row.state) === "in_progress",
+  );
+  if (convergent?.id) {
+    return {
+      operationId: readString(convergent.id),
+      replay: true,
+      state: "in_progress",
+      operationType: input.operationType,
+    };
+  }
   if (incompatible?.id) {
     throw new Error("lifecycle_operation_conflict");
   }
@@ -374,13 +424,61 @@ async function claimOperation(
     .select("id")
     .maybeSingle<Row>();
 
-  if (error) throw new Error(error.message || "operation_claim_failed");
+  if (error) {
+    // Two requests can both observe an empty open-operation set before the
+    // database's one-open-operation constraint accepts only one insert. For
+    // the same terminal transition, converge on the winner instead of
+    // surfacing a false conflict or issuing a second Stripe cancellation.
+    if (input.operationType === "cancel") {
+      const { data: racedOperations } = await supabase
+        .from("commercial_account_lifecycle_operations")
+        .select("id,operation_type,state,idempotency_key")
+        .eq("account_id", input.accountId)
+        .eq("operation_type", "cancel")
+        .in("state", ["pending", "in_progress"])
+        .limit(2);
+      const winner = ((racedOperations ?? []) as Row[]).find((row) => readString(row.id));
+      if (winner?.id) {
+        return {
+          operationId: readString(winner.id),
+          replay: true,
+          state: readString(winner.state, "in_progress"),
+          operationType: "cancel" as const,
+        };
+      }
+    }
+    throw new Error(error.message || "operation_claim_failed");
+  }
   return {
     operationId: readString(data?.id),
     replay: false,
     state: "in_progress",
     operationType: input.operationType,
   };
+}
+
+async function waitForConvergentTerminalCancel(
+  supabase: SupabaseClient,
+  input: { accountId: string; operationId: string },
+): Promise<AccountContext> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { data: operation } = await supabase
+      .from("commercial_account_lifecycle_operations")
+      .select("state")
+      .eq("id", input.operationId)
+      .maybeSingle<Row>();
+    const state = readString(operation?.state);
+    if (state === "completed") {
+      const context = await loadAccountContext(supabase, input.accountId, {
+        allowTerminalSubscription: true,
+      });
+      if (!context.terminalOperationId) throw new Error("terminal_cancel_provenance_missing_after_convergence");
+      return context;
+    }
+    if (state === "failed") throw new Error("concurrent_terminal_cancel_failed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("concurrent_terminal_cancel_timeout");
 }
 
 async function failLifecycleActionRequired(
@@ -508,6 +606,63 @@ export async function executeCommercialAccountLifecycle(input: {
     reason: input.reason,
     actor: input.actor,
   });
+
+  if (operationType === "cancel" && claim.replay && claim.state === "in_progress") {
+    const converged = await waitForConvergentTerminalCancel(supabase, {
+      accountId,
+      operationId: claim.operationId,
+    });
+    const capacityReleaseStatus = await releaseTerminalCommercialCapacity(supabase, {
+      accountId,
+      operationId: converged.terminalOperationId!,
+      reason: "commercial_cancel_completed",
+      actorId: input.actor.actorId,
+    });
+    return buildResult({
+      ok: true,
+      accountId,
+      operationType,
+      commercialState: "cancelled",
+      idempotencyKey,
+      operationId: claim.operationId,
+      converged: true,
+      actionRequired: false,
+      actionRequiredReason: null,
+      pauseExpiresAt: null,
+      stripeBillingPaused: false,
+      capacityReleaseStatus,
+      runtimeQuiesced: true,
+    });
+  }
+
+  // Sticky terminal provenance dominates every later retry. This branch is
+  // deliberately before replay/resolution/Stripe handling: a cancelled account
+  // can only replay its terminal capacity release, never resolve or mutate a
+  // subscription again.
+  if (operationType === "cancel" && ctx.terminalOperationId) {
+    const capacityReleaseStatus = await releaseTerminalCommercialCapacity(supabase, {
+      accountId,
+      operationId: ctx.terminalOperationId,
+      reason: "commercial_cancel_completed",
+      actorId: input.actor.actorId,
+    });
+    await finishOperation(supabase, claim.operationId, "completed");
+    return buildResult({
+      ok: true,
+      accountId,
+      operationType,
+      commercialState: "cancelled",
+      idempotencyKey,
+      operationId: claim.operationId,
+      converged: true,
+      actionRequired: false,
+      actionRequiredReason: null,
+      pauseExpiresAt: null,
+      stripeBillingPaused: false,
+      capacityReleaseStatus,
+      runtimeQuiesced: true,
+    });
+  }
 
   if (claim.replay && claim.state === "completed") {
     const refreshed = await loadAccountContext(supabase, accountId);
@@ -897,6 +1052,40 @@ export async function executeCommercialAccountLifecycle(input: {
     }
     if (ctx.commercialState === "cancelled") {
       if (!ctx.terminalOperationId) {
+        // Crash recovery is permitted only for the exact original cancel
+        // operation. A later technical attempt must never manufacture or
+        // replace terminal provenance.
+        if (claim.replay && claim.state === "in_progress"
+          && ctx.entitlementId && ctx.stripeSubscriptionId) {
+          await recordCommercialCancelTerminal(supabase, {
+            accountId,
+            operationId: claim.operationId,
+            entitlementId: ctx.entitlementId,
+            stripeSubscriptionId: ctx.stripeSubscriptionId,
+          });
+          const capacityReleaseStatus = await releaseTerminalCommercialCapacity(supabase, {
+            accountId,
+            operationId: claim.operationId,
+            reason: "commercial_cancel_completed",
+            actorId: input.actor.actorId,
+          });
+          await finishOperation(supabase, claim.operationId, "completed");
+          return buildResult({
+            ok: true,
+            accountId,
+            operationType,
+            commercialState: "cancelled",
+            idempotencyKey,
+            operationId: claim.operationId,
+            converged: true,
+            actionRequired: false,
+            actionRequiredReason: null,
+            pauseExpiresAt: null,
+            stripeBillingPaused: false,
+            capacityReleaseStatus,
+            runtimeQuiesced: true,
+          });
+        }
         return failLifecycleActionRequired(supabase, {
           accountId,
           operationType,
@@ -907,24 +1096,11 @@ export async function executeCommercialAccountLifecycle(input: {
           stripeBillingPaused: false,
         });
       }
-      // Persist the terminal dominance reconciliation before asking the DB to
-      // release capacity. The RPC independently verifies this state and every
-      // other terminal artifact, so a partially cancelled chain stays closed.
-      await upsertLifecycleState(supabase, {
-        accountId,
-        entitlementId: ctx.entitlementId,
-        stripeSubscriptionId: ctx.stripeSubscriptionId,
-        commercialState: "cancelled",
-        pauseExpiresAt: null,
-        pausedAt: ctx.pausedAt,
-        stripeBillingPaused: false,
-        actionRequiredReason: null,
-        lastOperationId: ctx.terminalOperationId,
-      });
-      const capacityReleaseStatus = await releaseCommercialAccountCapacity(supabase, {
+      const capacityReleaseStatus = await releaseTerminalCommercialCapacity(supabase, {
         accountId,
         operationId: ctx.terminalOperationId,
         reason: "commercial_cancel_completed",
+        actorId: input.actor.actorId,
       });
       await finishOperation(supabase, claim.operationId, "completed");
       return buildResult({
@@ -1018,35 +1194,6 @@ export async function executeCommercialAccountLifecycle(input: {
       pauseCollectionBehavior: null,
       status: "canceled",
     });
-    const capacityReleaseStatus = await releaseCapacityIfSafe(supabase, accountId, input.actor.actorId);
-    if (capacityReleaseStatus !== "released") {
-      await upsertLifecycleState(supabase, {
-        accountId,
-        entitlementId: ctx.entitlementId,
-        stripeSubscriptionId: ctx.stripeSubscriptionId,
-        commercialState: "action_required",
-        actionRequiredReason: "capacity_release_pending",
-        stripeBillingPaused: false,
-        lastOperationId: claim.operationId,
-        lastIdempotencyKey: idempotencyKey,
-      });
-      await finishOperation(supabase, claim.operationId, "failed", "capacity_release_pending");
-      return buildResult({
-        ok: false,
-        accountId,
-        operationType,
-        commercialState: "action_required",
-        idempotencyKey,
-        operationId: claim.operationId,
-        converged: false,
-        actionRequired: true,
-        actionRequiredReason: "capacity_release_pending",
-        pauseExpiresAt: null,
-        stripeBillingPaused: false,
-        capacityReleaseStatus,
-        runtimeQuiesced: runtime.quiesced,
-      });
-    }
     await setAdminLifecycleStatus(supabase, accountId, "cancelled");
     await upsertLifecycleState(supabase, {
       accountId,
@@ -1060,10 +1207,20 @@ export async function executeCommercialAccountLifecycle(input: {
       lastOperationId: claim.operationId,
       lastIdempotencyKey: idempotencyKey,
     });
-    await releaseCommercialAccountCapacity(supabase, {
+    if (!ctx.entitlementId || !ctx.stripeSubscriptionId) {
+      throw new Error("terminal_cancellation_evidence_incomplete");
+    }
+    await recordCommercialCancelTerminal(supabase, {
+      accountId,
+      operationId: claim.operationId,
+      entitlementId: ctx.entitlementId,
+      stripeSubscriptionId: ctx.stripeSubscriptionId,
+    });
+    const capacityReleaseStatus = await releaseTerminalCommercialCapacity(supabase, {
       accountId,
       operationId: claim.operationId,
       reason: "commercial_cancel_completed",
+      actorId: input.actor.actorId,
     });
     if (ctx.entitlementId) {
       await insertCheckoutAuditEvent(supabase, {
