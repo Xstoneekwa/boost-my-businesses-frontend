@@ -81,7 +81,8 @@ export async function countReservedEntitlementsForClient(supabase: SupabaseClien
     .from("client_account_entitlements")
     .select("id", { count: "exact", head: true })
     .eq("client_id", clientId)
-    .eq("status", "entitlement_reserved");
+    .eq("status", "entitlement_reserved")
+    .is("account_id", null);
   if (error) throw new Error("entitlement_count_failed");
   return count ?? 0;
 }
@@ -91,7 +92,8 @@ export async function countLinkedInstagramAccountsForClient(supabase: SupabaseCl
     .from("client_instagram_accounts")
     .select("id", { count: "exact", head: true })
     .eq("client_id", clientId)
-    .eq("active", true);
+    .eq("active", true)
+    .eq("capacity_status", "occupied");
   if (error) throw new Error("client_account_count_failed");
   return count ?? 0;
 }
