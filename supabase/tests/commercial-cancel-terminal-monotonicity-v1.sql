@@ -17,7 +17,7 @@ insert into public.commercial_account_lifecycle_operations values
  ('71a1fa41-58e3-4cf3-a5b5-3a47ae45c01c','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','resume','failed','2026-08-21 10:00Z'),
  ('50000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000002','cancel','failed','2026-08-20 10:00Z');
 insert into public.commercial_account_lifecycle_states values
- ('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','sub_tracker','action_required','commercial_subscription_missing','71a1fa41-58e3-4cf3-a5b5-3a47ae45c01c',now()),
+ ('20000000-0000-0000-0000-000000000001',null,null,'action_required','commercial_subscription_missing','71a1fa41-58e3-4cf3-a5b5-3a47ae45c01c',now()),
  ('20000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000002','sub_partial','cancelled',null,'50000000-0000-0000-0000-000000000002',now()),
  ('20000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000003','sub_active','active',null,null,now());
 insert into public.commercial_stripe_subscriptions values
@@ -30,7 +30,8 @@ insert into public.client_instagram_accounts(client_id,account_id,active) values
  ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000003',true);
 
 \ir ../migrations/20260824120000_commercial_account_capacity_projection_v1.sql
-\ir ../migrations/20260824194942_commercial_cancel_terminal_monotonicity_v1.sql
+\ir ../migrations/20260824204235_commercial_cancel_terminal_monotonicity_v1.sql
+\ir ../migrations/20260824205819_commercial_cancel_historical_provenance_reconciliation_v1.sql
 
 do $$
 declare v jsonb;
@@ -39,6 +40,12 @@ begin
       <> '9040c023-a3ec-45f1-a3aa-387e3a06559f'::uuid then raise exception 'K backfill did not select successful cancel'; end if;
   if (select last_operation_id from public.commercial_account_lifecycle_states where account_id='20000000-0000-0000-0000-000000000001')
       <> '71a1fa41-58e3-4cf3-a5b5-3a47ae45c01c'::uuid then raise exception 'F last_operation_id was not preserved'; end if;
+  if (select entitlement_id from public.commercial_account_lifecycle_states where account_id='20000000-0000-0000-0000-000000000001')
+      <> '30000000-0000-0000-0000-000000000001'::uuid then raise exception 'K canonical entitlement pointer not restored'; end if;
+  if (select stripe_subscription_id from public.commercial_account_lifecycle_states where account_id='20000000-0000-0000-0000-000000000001')
+      <> 'sub_tracker' then raise exception 'K canonical subscription pointer not restored'; end if;
+  if (select capacity_release_reason from public.client_instagram_accounts where account_id='20000000-0000-0000-0000-000000000001')
+      <> 'terminal_cancel_historical_provenance_v1' then raise exception 'K historical release provenance missing'; end if;
   if (select capacity_status from public.client_instagram_accounts where account_id='20000000-0000-0000-0000-000000000001') <> 'released_terminal' then raise exception 'G capacity not released'; end if;
   if (select terminal_cancel_operation_id from public.commercial_account_lifecycle_states where account_id='20000000-0000-0000-0000-000000000002') is not null then raise exception 'H partial cancel invented provenance'; end if;
 

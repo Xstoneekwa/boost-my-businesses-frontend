@@ -40,12 +40,12 @@ psql -h "$TMP_DIR" -p "$PORT" -U postgres -d terminal_v1 -v ON_ERROR_STOP=1 -f "
 createdb -h "$TMP_DIR" -p "$PORT" -U postgres rollback_v1
 create_schema rollback_v1
 psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/migrations/20260824120000_commercial_account_capacity_projection_v1.sql" >/dev/null
-psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/migrations/20260824194942_commercial_cancel_terminal_monotonicity_v1.sql" >/dev/null
-psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/rollback/20260824194942_commercial_cancel_terminal_monotonicity_v1.down.sql" >/dev/null
-psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/migrations/20260824194942_commercial_cancel_terminal_monotonicity_v1.sql" >/dev/null
+psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/migrations/20260824204235_commercial_cancel_terminal_monotonicity_v1.sql" >/dev/null
+psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/rollback/20260824204235_commercial_cancel_terminal_monotonicity_v1.down.sql" >/dev/null
+psql -h "$TMP_DIR" -p "$PORT" -U postgres -d rollback_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/migrations/20260824204235_commercial_cancel_terminal_monotonicity_v1.sql" >/dev/null
 
 # A populated terminal ledger must make rollback fail closed.
-if psql -h "$TMP_DIR" -p "$PORT" -U postgres -d terminal_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/rollback/20260824194942_commercial_cancel_terminal_monotonicity_v1.down.sql" >/dev/null 2>&1; then
+if psql -h "$TMP_DIR" -p "$PORT" -U postgres -d terminal_v1 -v ON_ERROR_STOP=1 -f "$ROOT_DIR/supabase/rollback/20260824204235_commercial_cancel_terminal_monotonicity_v1.down.sql" >/dev/null 2>&1; then
   echo "rollback unexpectedly accepted terminal provenance" >&2
   exit 1
 fi
