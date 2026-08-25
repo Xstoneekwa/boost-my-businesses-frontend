@@ -56,6 +56,7 @@ import {
   resumePhaseKey,
   resumeReasonKey,
   isZeroBusinessInfrastructureRetry,
+  validateUnfollowAttemptAdmission,
   validateResumeAuthorizationLineage,
 } from "./auto-restart-lineage-policy";
 import {
@@ -725,6 +726,12 @@ export async function runAutoRestartTick(
         ? { ok: true as const, reason: "" }
         : resumePlanRuntimeSupported(candidate);
       if (!resumeSupport.ok) blockReasons.push(resumeSupport.reason);
+
+      // Mutation admission barrier: reject invalid/out-of-range Unfollow
+      // continuations before any request, run, device lock or Worker work can
+      // be created. Read-model validation intentionally remains separate.
+      const attemptAdmission = validateUnfollowAttemptAdmission(candidate);
+      if (!attemptAdmission.ok) blockReasons.push(attemptAdmission.reason);
 
       const delayReason = restartDelayBlockReason(candidate.reliability.nextRestartAt, now);
       if (delayReason) blockReasons.push(delayReason);
@@ -1487,6 +1494,13 @@ async function processHumanConfirmedResumes(
       const rebuiltCandidate = rebuiltGoldenCandidate && follow60Authority && follow60Resolution?.control
         ? projectArmedFollow60Candidate(rebuiltGoldenCandidate, follow60Resolution.control)
         : rebuiltGoldenCandidate;
+      if (rebuiltCandidate) {
+        const attemptAdmission = validateUnfollowAttemptAdmission(rebuiltCandidate);
+        if (!attemptAdmission.ok) {
+          await blockResume(attemptAdmission.reason);
+          continue;
+        }
+      }
       const follow60sOneShot = rebuiltCandidate && !follow60Authority
         ? applyFollow60sOneShotFrozenPlan({
           baseMetadata: buildAutoRestartResumePlanMetadata(rebuiltCandidate, now),

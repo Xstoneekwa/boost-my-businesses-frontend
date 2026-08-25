@@ -10,6 +10,7 @@ import {
   resumeLineageBudgetKey,
   validateResumeAuthorizationLineage,
   isZeroBusinessInfrastructureRetry,
+  validateUnfollowAttemptAdmission,
 } from "./auto-restart-lineage-policy.ts";
 
 test("the linked request is canonical when the run projection has a stale attempt", () => {
@@ -18,7 +19,7 @@ test("the linked request is canonical when the run projection has a stale attemp
     sourceRequest: {
       id: "request-mythyl",
       run_id: "run-mythyl",
-      metadata_safe: { attempt_id: 2 },
+      metadata_safe: { attempt_id: 2, root_business_session_id: "root-mythyl" },
     },
     runProjectionAttemptId: 1,
   }), {
@@ -29,6 +30,8 @@ test("the linked request is canonical when the run projection has a stale attemp
     attemptSource: "account_run_requests.metadata_safe.attempt_id",
     divergence: true,
     attemptContractMissing: false,
+    rootBusinessSessionId: "root-mythyl",
+    rootBusinessSessionDivergence: false,
     lineageValid: true,
   });
   assert.equal(resolveCanonicalNextRetryIndex({
@@ -93,7 +96,11 @@ test("resume_plan.current_attempt_id is accepted as the request-linked canonical
       run_id: "run-retry",
       metadata_safe: {
         resume_plan_version: 2,
-        resume_plan: { current_attempt_id: 2 },
+        root_business_session_id: "root-retry",
+        resume_plan: {
+          current_attempt_id: 2,
+          root_business_session_id: "root-retry",
+        },
       },
     },
     runProjectionAttemptId: 1,
@@ -101,6 +108,108 @@ test("resume_plan.current_attempt_id is accepted as the request-linked canonical
   assert.equal(identity.canonicalAttemptId, 2);
   assert.equal(identity.divergence, true);
   assert.equal(identity.lineageValid, true);
+});
+
+test("Unfollow admission permits S2 and S3 but rejects S4 before request creation", () => {
+  const base = candidate();
+  assert.deepEqual(validateUnfollowAttemptAdmission(base), {
+    ok: true,
+    reason: "",
+    nextAttemptOrdinal: 2,
+  });
+  const s3 = {
+    ...base,
+    canonicalAttemptId: 2,
+    nextRetryIndex: 2,
+  };
+  assert.deepEqual(validateUnfollowAttemptAdmission(s3), {
+    ok: true,
+    reason: "",
+    nextAttemptOrdinal: 3,
+  });
+  const s4 = {
+    ...base,
+    canonicalAttemptId: 3,
+    nextRetryIndex: 3,
+  };
+  assert.deepEqual(validateUnfollowAttemptAdmission(s4), {
+    ok: false,
+    reason: "unfollow_attempts_exhausted",
+    nextAttemptOrdinal: 4,
+  });
+});
+
+test("invalid source lineage is a hard Unfollow admission NO-GO", () => {
+  const invalid = { ...candidate(), sourceLineageValid: false };
+  assert.deepEqual(validateUnfollowAttemptAdmission(invalid), {
+    ok: false,
+    reason: "unfollow_source_lineage_invalid",
+    nextAttemptOrdinal: null,
+  });
+});
+
+test("the root business session is immutable across S2 and S3 metadata", () => {
+  const s2 = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-s2",
+    sourceRequest: {
+      id: "request-s2",
+      run_id: "run-s2",
+      metadata_safe: {
+        attempt_id: 2,
+        root_business_session_id: "root-s1",
+        resume_plan: { attempt_id: 2, root_business_session_id: "root-s1" },
+      },
+    },
+  });
+  const s3 = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-s3",
+    sourceRequest: {
+      id: "request-s3",
+      run_id: "run-s3",
+      metadata_safe: {
+        attempt_id: 3,
+        root_business_session_id: "root-s1",
+        resume_plan: { attempt_id: 3, root_business_session_id: "root-s1" },
+      },
+    },
+  });
+  assert.equal(s2.rootBusinessSessionId, "root-s1");
+  assert.equal(s3.rootBusinessSessionId, "root-s1");
+  assert.equal(s2.lineageValid, true);
+  assert.equal(s3.lineageValid, true);
+});
+
+test("a future natural S1 derives a new root from its own run", () => {
+  const naturalS1 = resolveCanonicalAttemptIdentity({
+    sourceRunId: "new-natural-run",
+    sourceRequest: {
+      id: "new-natural-request",
+      run_id: "new-natural-run",
+      metadata_safe: {},
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(naturalS1.canonicalAttemptId, 1);
+  assert.equal(naturalS1.rootBusinessSessionId, "new-natural-run");
+  assert.equal(naturalS1.lineageValid, true);
+});
+
+test("a root rewrite between request and resume plan fails closed", () => {
+  const drifted = resolveCanonicalAttemptIdentity({
+    sourceRunId: "run-s3",
+    sourceRequest: {
+      id: "request-s3",
+      run_id: "run-s3",
+      metadata_safe: {
+        attempt_id: 3,
+        root_business_session_id: "root-s1",
+        resume_plan: { attempt_id: 3, root_business_session_id: "run-s2" },
+      },
+    },
+  });
+  assert.equal(drifted.rootBusinessSessionDivergence, true);
+  assert.equal(drifted.lineageValid, false);
+  assert.equal(drifted.canonicalAttemptId, null);
 });
 
 test("a retry request missing its canonical attempt fails closed instead of falling back to run attempt 1", () => {
@@ -362,6 +471,8 @@ function candidate(): AutoRestartCandidate {
     enqueueAllowed: true,
     sourceRunId: "run-new",
     sourceBusinessSessionId: "business-session-1",
+    sourceLineageValid: true,
+    canonicalAttemptId: 1,
     priorTargetId: null,
     nextTargetId: null,
     nextRetryIndex: 1,

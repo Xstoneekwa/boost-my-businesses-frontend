@@ -141,6 +141,9 @@ function candidate(retryIndex: 0 | 1 | 2): AutoRestartCandidate {
     historicalSafeBoundaryFallback: false,
     enqueueAllowed: true,
     sourceRunId: lastRunId,
+    sourceRequestId: `source-request-${retryIndex + 1}`,
+    canonicalAttemptId: retryIndex + 1,
+    sourceLineageValid: true,
     sourceBusinessSessionId: "business-session-1",
     priorTargetId: null,
     nextTargetId: null,
@@ -252,7 +255,7 @@ test("persisted business progress cannot bypass the configured restart window bu
   assert.equal(supabase.requests.length, 0);
 });
 
-test("canonical live Unfollow backlog continues after legacy retries exhaust", async () => {
+test("canonical live Unfollow backlog remains preserved but cannot manufacture S4", async () => {
   const supabase = new FakeSupabase();
   supabase.rows("auto_restart_decisions").push(
     ...[1, 2].map((index) => ({
@@ -288,10 +291,10 @@ test("canonical live Unfollow backlog continues after legacy retries exhaust", a
     evaluateEligibility: async () => ({ ok: true, reason: "" }),
   });
 
-  assert.equal(result.result.enqueued_count, 1, JSON.stringify(result.result));
-  assert.equal(result.result.blocked_count, 0);
-  assert.equal(supabase.requests.length, 1);
-  assert.match(String(supabase.requests[0].p_idempotency_key), /source:retry-run-2:retry:3/);
+  assert.equal(result.result.enqueued_count, 0, JSON.stringify(result.result));
+  assert.equal(result.result.blocked_count, 1);
+  assert.equal(result.result.blocked[0].reason, "unfollow_attempts_exhausted");
+  assert.equal(supabase.requests.length, 0);
 });
 
 test("canonical live Unfollow continuation still obeys the account daily cap", async () => {

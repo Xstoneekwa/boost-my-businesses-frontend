@@ -1,5 +1,8 @@
 import type { AutoRestartCandidate } from "@/app/instagram-dashboard/auto-restart-data";
 
+export const UNFOLLOW_MAX_ATTEMPT_ORDINAL = 3;
+export const UNFOLLOW_MAX_RETRY_INDEX = UNFOLLOW_MAX_ATTEMPT_ORDINAL - 1;
+
 export type ResumeLineageVerdict =
   | { ok: true; reason: "" }
   | {
@@ -63,8 +66,22 @@ export function resolveCanonicalAttemptIdentity(input: {
     || metadata?.retry_index !== undefined
     || metadata?.previous_run_id !== undefined
     || metadata?.prior_run_id !== undefined;
+  const metadataRootBusinessSessionId = clean(
+    metadata?.root_business_session_id ?? metadata?.business_session_id,
+  );
+  const planRootBusinessSessionId = clean(
+    resumePlan?.root_business_session_id ?? resumePlan?.business_session_id,
+  );
+  const rootBusinessSessionDivergence = Boolean(
+    metadataRootBusinessSessionId
+    && planRootBusinessSessionId
+    && metadataRootBusinessSessionId !== planRootBusinessSessionId
+  );
   const attemptContractMissing = retryContractPresent && requestAttemptId === null;
   const resolvedAttemptId = requestAttemptId ?? runProjectionAttemptId;
+  const rootBusinessSessionId = metadataRootBusinessSessionId
+    || planRootBusinessSessionId
+    || (resolvedAttemptId === 1 ? sourceRunId : "");
   const lineageValid = Boolean(
     sourceRunId
     && requestId
@@ -72,6 +89,9 @@ export function resolveCanonicalAttemptIdentity(input: {
     && (!sourceAccountId || requestAccountId === sourceAccountId)
     && !attemptContractMissing
     && resolvedAttemptId !== null
+    && resolvedAttemptId <= UNFOLLOW_MAX_ATTEMPT_ORDINAL
+    && rootBusinessSessionId
+    && !rootBusinessSessionDivergence
   );
   const canonicalAttemptId = lineageValid
     ? resolvedAttemptId
@@ -92,8 +112,62 @@ export function resolveCanonicalAttemptIdentity(input: {
       && runProjectionAttemptId !== null
       && requestAttemptId !== runProjectionAttemptId,
     attemptContractMissing,
+    rootBusinessSessionId: lineageValid ? rootBusinessSessionId : null,
+    rootBusinessSessionDivergence,
     lineageValid,
   } as const;
+}
+
+export type UnfollowAttemptAdmissionVerdict =
+  | { ok: true; reason: ""; nextAttemptOrdinal: number | null }
+  | {
+    ok: false;
+    reason:
+      | "unfollow_source_lineage_invalid"
+      | "unfollow_attempt_lineage_invalid"
+      | "unfollow_attempts_exhausted";
+    nextAttemptOrdinal: number | null;
+  };
+
+/**
+ * Hard admission barrier for automatic Unfollow continuations. This helper is
+ * evaluated before request creation and before device/session lock acquisition.
+ * Natural S1 scheduling is outside this recovery-only path.
+ */
+export function validateUnfollowAttemptAdmission(candidate: Pick<
+  AutoRestartCandidate,
+  | "plannedPhasesToRun"
+  | "operatorStopContinuation"
+  | "sourceLineageValid"
+  | "canonicalAttemptId"
+  | "nextRetryIndex"
+  | "sourceBusinessSessionId"
+>): UnfollowAttemptAdmissionVerdict {
+  if (candidate.plannedPhasesToRun?.unfollow !== true || candidate.operatorStopContinuation === true) {
+    return { ok: true, reason: "", nextAttemptOrdinal: null };
+  }
+  if (candidate.sourceLineageValid !== true || !clean(candidate.sourceBusinessSessionId)) {
+    return { ok: false, reason: "unfollow_source_lineage_invalid", nextAttemptOrdinal: null };
+  }
+  const currentAttempt = positiveAttempt(candidate.canonicalAttemptId);
+  const retryIndex = Number(candidate.nextRetryIndex);
+  if (
+    currentAttempt === null
+    || !Number.isSafeInteger(retryIndex)
+    || retryIndex < 1
+    || retryIndex !== currentAttempt
+  ) {
+    return { ok: false, reason: "unfollow_attempt_lineage_invalid", nextAttemptOrdinal: null };
+  }
+  const nextAttemptOrdinal = retryIndex + 1;
+  if (
+    currentAttempt >= UNFOLLOW_MAX_ATTEMPT_ORDINAL
+    || retryIndex > UNFOLLOW_MAX_RETRY_INDEX
+    || nextAttemptOrdinal > UNFOLLOW_MAX_ATTEMPT_ORDINAL
+  ) {
+    return { ok: false, reason: "unfollow_attempts_exhausted", nextAttemptOrdinal };
+  }
+  return { ok: true, reason: "", nextAttemptOrdinal };
 }
 
 export function resolveCanonicalNextRetryIndex(input: {

@@ -177,6 +177,7 @@ export type AutoRestartCandidate = {
     lastRestartError: string;
     sessionTerminationClass: string;
     businessSessionId: string;
+    rootBusinessSessionId?: string | null;
     attemptId: string;
     canonicalAttemptId?: number | null;
     sourceRequestId?: string | null;
@@ -598,6 +599,7 @@ function reliabilityFromLatestRun(
       readString(performance?.session_termination_class, ""),
     ),
     businessSessionId: readString(resumePlan?.business_session_id, ""),
+    rootBusinessSessionId: attemptIdentity.rootBusinessSessionId,
     attemptId: canonicalAttemptId === null ? "—" : String(canonicalAttemptId),
     canonicalAttemptId,
     sourceRequestId: attemptIdentity.sourceRequestId,
@@ -1182,7 +1184,7 @@ function planCandidate({
   });
   const sourceBusinessSessionId = operatorStopContinuation
     ? `operator-stop:${reliability.lastRunId}`
-    : reliability.businessSessionId || reliability.lastRunId;
+    : reliability.rootBusinessSessionId || reliability.businessSessionId || reliability.lastRunId;
 
   return {
     accountId: account.accountId,
