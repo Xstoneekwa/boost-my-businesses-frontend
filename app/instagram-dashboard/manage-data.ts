@@ -11,6 +11,7 @@ import {
 } from "@/lib/instagram-dashboard/resolve-account-email";
 import { getAccountPackageSummaries } from "./package-summary-data";
 import { resolveOrphanLoginRecoveryProjection } from "@/lib/instagram-dashboard/orphan-login-recovery";
+import { classifyOperationalProfileLifecycle } from "@/lib/instagram-dashboard/profile-operational-visibility";
 import {
   projectCanonicalAccountCapacityState,
   type AccountAssignmentHealth,
@@ -437,21 +438,7 @@ function isCredentialIssue(account: ManageAccount) {
 }
 
 function lifecycleStatus(account: ManageAccount) {
-  const accountStatus = normalize(account.accountLifecycleStatus || "");
-  const adminStatus = normalize(account.adminStatus || "");
-  if (accountStatus === "archived" || account.archivedAt) return "archived";
-  if (accountStatus === "trashed" || accountStatus === "trash" || account.trashedAt) return "trashed";
-  const inactiveStatuses = new Set([
-    "cancelled",
-    "canceled",
-    "deleted",
-    "inactive",
-    "deactivated",
-    "rolled_back_test_onboarding",
-    "onboarding_rollback",
-  ]);
-  if (inactiveStatuses.has(accountStatus) || inactiveStatuses.has(adminStatus)) return "inactive";
-  return "active";
+  return classifyOperationalProfileLifecycle(account);
 }
 
 function isRolledBackOnboardingAccount(account: ManageAccount) {

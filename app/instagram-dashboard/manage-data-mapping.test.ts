@@ -72,13 +72,12 @@ test("Manage renders account avatar with canonical username fallback", () => {
   assert.match(pageSource, /instagramCanonicalUsername/);
 });
 
-test("Manage buckets account lifecycle from ig_accounts status, not admin ops status", () => {
+test("Manage buckets account lifecycle through the shared operational visibility contract", () => {
   assert.match(manageSource, /accountLifecycleStatus/);
-  assert.match(manageSource, /const accountStatus = normalize\(account\.accountLifecycleStatus/);
+  assert.match(manageSource, /classifyOperationalProfileLifecycle\(account\)/);
   assert.match(manageSource, /activeAccounts: accounts\.filter\(\(account\) => lifecycleStatus\(account\) === "active"\)/);
   assert.match(manageSource, /archivedAccounts: accounts\.filter\(\(account\) => lifecycleStatus\(account\) === "archived"\)/);
   assert.match(manageSource, /trashedAccounts: accounts\.filter\(\(account\) => lifecycleStatus\(account\) === "trashed"\)/);
-  assert.doesNotMatch(manageSource, /const status = normalize\(account\.adminStatus\)/);
 });
 
 test("Admin Manage renders separate Active, Archives, and Trash buckets", () => {

@@ -6,6 +6,10 @@ import {
   selectCanonicalVisibleProfiles,
   unwrapJsonOkData,
 } from "../app/api/instagram-dashboard/profiles/live/profile-visibility.ts";
+import {
+  classifyOperationalProfileLifecycle,
+  operationalTerminalStatuses,
+} from "../lib/instagram-dashboard/profile-operational-visibility.ts";
 
 const manageSource = readFileSync(new URL("../app/instagram-dashboard/manage-data.ts", import.meta.url), "utf8");
 const profilesSource = readFileSync(new URL("../app/api/instagram-dashboard/profiles/route.ts", import.meta.url), "utf8");
@@ -15,11 +19,9 @@ test("legacy Profiles keeps the all-account lifecycle ledger", () => {
   assert.match(profilesSource, /enrichAccountsWithRuntime\(manage\.allAccounts/);
 });
 
-test("legacy lifecycle projection still owns the generic terminal states", () => {
-  for (const status of ["cancelled", "canceled", "deleted", "inactive", "deactivated", "rolled_back_test_onboarding", "onboarding_rollback"]) {
-    assert.match(manageSource, new RegExp(`"${status}"`));
-  }
-  assert.match(manageSource, /inactiveStatuses\.has\(accountStatus\) \|\| inactiveStatuses\.has\(adminStatus\)/);
+test("manage activeAccounts and live selection share the operational lifecycle contract", () => {
+  assert.match(manageSource, /classifyOperationalProfileLifecycle\(account\)/);
+  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.activeAccounts\)/);
 });
 
 test("live endpoint selects the canonical activeAccounts projection", () => {
@@ -66,6 +68,38 @@ test("visibility is independent from login, identity, readiness, and runtime sta
   }
 });
 
+test("pre-login raw inactive is visible only with an explicit nonterminal lifecycle", () => {
+  const automAtism = {
+    accountId: "autom-atism",
+    accountLifecycleStatus: "inactive",
+    adminStatus: "active",
+    onboardingStatus: "configured",
+    provisioningStatus: "login_pending",
+    loginStatus: "pending",
+    packageLabel: "Premium",
+    assignmentStatus: "reserved",
+    credentialsStatus: "active",
+    connected: false,
+  };
+  assert.equal(classifyOperationalProfileLifecycle(automAtism), "active");
+  assert.equal(isCanonicalVisibleProfile(automAtism), true);
+  assert.equal(isCanonicalVisibleProfile({ accountLifecycleStatus: "inactive" }), false);
+  assert.equal(isCanonicalVisibleProfile({ status: "inactive" }), false);
+});
+
+test("phone busy and remediation states remain visible without changing runtime eligibility", () => {
+  for (const row of [
+    { adminStatus: "active", accountLifecycleStatus: "inactive", readinessReason: "skipped_phone_busy", runtimeEligible: false },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", loginStatus: "ready_to_connect", runtimeEligible: false },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", loginStatus: "instagram_credentials_rejected", runtimeEligible: false },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", credentialsStatus: "credentials_reauth_required", runtimeEligible: false },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", loginStatus: "human_confirmation_required", runtimeEligible: false },
+  ]) {
+    assert.equal(isCanonicalVisibleProfile(row), true);
+    assert.equal(row.runtimeEligible, false);
+  }
+});
+
 test("terminal lifecycle values and terminal timestamps are excluded generically", () => {
   for (const status of ["rolled_back_test_onboarding", "cancelled", "canceled", "deleted", "tombstoned", "archived", "trashed"]) {
     assert.equal(isCanonicalVisibleProfile({ accountLifecycleStatus: status }), false);
@@ -74,6 +108,57 @@ test("terminal lifecycle values and terminal timestamps are excluded generically
   for (const field of ["archivedAt", "deletedAt", "tombstonedAt", "trashedAt"]) {
     assert.equal(isCanonicalVisibleProfile({ accountLifecycleStatus: "active", [field]: "2026-08-13T00:00:00.000Z" }), false);
   }
+});
+
+test("terminal predicate remains exact and does not classify raw inactive as terminal", () => {
+  assert.deepEqual(
+    [...operationalTerminalStatuses].sort(),
+    ["cancelled", "canceled", "deleted", "onboarding_rollback", "rolled_back", "rolled_back_test_onboarding", "tombstone", "tombstoned"].sort(),
+  );
+  assert.ok(!operationalTerminalStatuses.includes("inactive"));
+  assert.ok(!operationalTerminalStatuses.includes("deactivated"));
+});
+
+test("connected transition stays continuously visible", () => {
+  const before = { accountLifecycleStatus: "inactive", adminStatus: "active", loginStatus: "pending" };
+  const after = { accountLifecycleStatus: "active", adminStatus: "active", loginStatus: "connected" };
+  assert.equal(isCanonicalVisibleProfile(before), true);
+  assert.equal(isCanonicalVisibleProfile(after), true);
+});
+
+test("full refresh and live full snapshot retain the same pre-login account", () => {
+  const fullProfiles = [{
+    accountId: "autom-atism",
+    accountLifecycleStatus: "inactive",
+    adminStatus: "active",
+    onboardingStatus: "configured",
+    provisioningStatus: "login_pending",
+    loginStatus: "pending",
+  }];
+  const activeAccounts = fullProfiles.filter(isCanonicalVisibleProfile);
+  const liveProfiles = selectCanonicalVisibleProfiles(activeAccounts);
+  assert.deepEqual(activeAccounts.map((row) => row.accountId), ["autom-atism"]);
+  assert.deepEqual(liveProfiles.map((row) => row.accountId), ["autom-atism"]);
+});
+
+test("rolled-back test account and cancelled tracker stay outside the operational list", () => {
+  const historical = [
+    {
+      accountId: "old-autom-atism",
+      accountLifecycleStatus: "rolled_back_test_onboarding",
+      adminStatus: "cancelled",
+      active: false,
+      capacityStatus: "released_terminal",
+    },
+    {
+      accountId: "tracker",
+      accountLifecycleStatus: "inactive",
+      adminStatus: "cancelled",
+      clientActive: true,
+      capacityStatus: "released_terminal",
+    },
+  ];
+  assert.deepEqual(selectCanonicalVisibleProfiles(historical), []);
 });
 
 test("canonical login and readiness fields survive selection unchanged", () => {
