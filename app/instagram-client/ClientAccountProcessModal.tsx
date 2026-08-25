@@ -3,6 +3,10 @@
 import type { ClientProcessProjection } from "@/lib/instagram-client/client-account-process-projection";
 import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
 import {
+  canSubmitVerificationCode,
+  PASSWORD_UPDATE_ACTION,
+} from "@/lib/instagram-client/connect-progress-projection";
+import {
   isActiveClientConnectStatus,
   labelForActiveConnectStatus,
 } from "@/lib/instagram-client/connect-operation-state";
@@ -19,6 +23,7 @@ type Props = {
   onConfirmConnect?: () => void;
   onClose: () => void;
   onOpenVerification?: () => void;
+  onUpdatePassword?: () => void;
 };
 
 function labelFor(lang: "fr" | "en", fr: string, en: string) {
@@ -44,6 +49,7 @@ export default function ClientAccountProcessModal({
   onConfirmConnect,
   onClose,
   onOpenVerification,
+  onUpdatePassword,
 }: Props) {
   if (!open || !projection) return null;
 
@@ -57,6 +63,10 @@ export default function ClientAccountProcessModal({
       }))
     : projection.steps;
   const runtimeStatus = connectProgress?.connect_status;
+  const actionRequired = connectProgress?.action_required;
+  const isWrongPassword = runtimeStatus === "wrong_password"
+    || actionRequired?.action_type === PASSWORD_UPDATE_ACTION;
+  const canEnterCode = canSubmitVerificationCode(actionRequired);
   const isTerminalConnectError = Boolean(
     connectProgress?.failed
     || runtimeStatus === "failed"
@@ -64,7 +74,9 @@ export default function ClientAccountProcessModal({
     || runtimeStatus === "cancelled"
     || runtimeStatus === "not_created",
   );
-  const statusChip = runtimeStatus === "verification_required"
+  const statusChip = isWrongPassword
+    ? labelFor(lang, "Mot de passe requis", "Password required")
+    : runtimeStatus === "verification_required"
     ? labelFor(lang, "Vérification requise", "Verification required")
     : runtimeStatus === "verification_resume_active" || runtimeStatus === "verification_code_submitted"
       ? labelFor(lang, "Vérification en cours", "Verification in progress")
@@ -77,7 +89,9 @@ export default function ClientAccountProcessModal({
           : isActiveClientConnectStatus(runtimeStatus)
             ? labelForActiveConnectStatus(runtimeStatus, lang)
             : projection.statusChip;
-  const statusToneClass = runtimeStatus === "verification_required"
+  const statusToneClass = isWrongPassword
+    ? "action_required"
+    : runtimeStatus === "verification_required"
     ? "action_required"
     : runtimeStatus === "verification_resume_active" || runtimeStatus === "verification_code_submitted" || runtimeStatus === "verification_code_accepted"
       ? "action_required"
@@ -94,12 +108,23 @@ export default function ClientAccountProcessModal({
                 : projection.statusTone === "error"
                   ? "failed"
                   : "running";
-  const finalMessage = connectProgress?.message || projection.finalMessage;
+  const modalTitle = isWrongPassword
+    ? actionRequired?.title || labelFor(lang, "Mot de passe Instagram à mettre à jour", "Instagram password update required")
+    : projection.title;
+  const modalSubtitle = isWrongPassword
+    ? actionRequired?.message || labelFor(
+      lang,
+      "Instagram a refusé les identifiants de ce compte. Mettez à jour le mot de passe pour reprendre la connexion en toute sécurité.",
+      "Instagram rejected this account's credentials. Update the password to resume the connection securely.",
+    )
+    : projection.subtitle;
+  const finalMessage = isWrongPassword ? null : connectProgress?.message || projection.finalMessage;
 
   return (
     <div className="cd-progress-overlay" role="presentation" onMouseDown={() => canClose && onClose()}>
       <section
         className="cd-progress-modal"
+        data-modal-type={isWrongPassword ? "wrong_password" : undefined}
         role="dialog"
         aria-modal="true"
         aria-labelledby="cd-client-process-title"
@@ -108,8 +133,8 @@ export default function ClientAccountProcessModal({
         <header className="cd-progress-header">
           <div>
             {username ? <span>@{username} · Instagram</span> : null}
-            <h3 id="cd-client-process-title">{projection.title}</h3>
-            <p>{projection.subtitle}</p>
+            <h3 id="cd-client-process-title">{modalTitle}</h3>
+            <p>{modalSubtitle}</p>
           </div>
           <em className={`status-${statusToneClass}`}>
             {statusChip}
@@ -142,7 +167,12 @@ export default function ClientAccountProcessModal({
                 : labelFor(lang, "Connecter maintenant", "Connect now")}
             </button>
           ) : null}
-          {connectProgress?.connect_status === "verification_required" && onOpenVerification ? (
+          {isWrongPassword && onUpdatePassword ? (
+            <button type="button" className="cd-btn cd-btn-primary" onClick={onUpdatePassword}>
+              {labelFor(lang, "Mettre à jour le mot de passe", "Update password")}
+            </button>
+          ) : null}
+          {!isWrongPassword && canEnterCode && onOpenVerification ? (
             <button type="button" className="cd-btn cd-btn-primary" onClick={onOpenVerification}>
               {labelFor(lang, "Saisir le code", "Enter code")}
             </button>
