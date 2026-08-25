@@ -69,6 +69,18 @@ export function projectAccountSessionTransitionRow(row: Row): AccountSessionTran
   };
 }
 
+export function selectCurrentAccountSessionTransition(
+  rows: Row[],
+  activeRunId: string,
+): AccountSessionTransitionView | null {
+  if (!activeRunId) return null;
+  const current = rows
+    .map((row) => projectAccountSessionTransitionRow(row))
+    .filter((transition) => transition.runId === activeRunId && transition.state === "initiated")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  return current ?? null;
+}
+
 const TRANSITION_SELECT = "id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at";
 
 export async function loadAccountSessionTransitions(

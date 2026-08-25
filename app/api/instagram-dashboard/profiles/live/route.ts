@@ -66,7 +66,9 @@ export async function GET(request: Request) {
     });
 
     return liveJsonOk({
-      generated_at: new Date().toISOString(),
+      generated_at: legacyPayload.generated_at,
+      projection_generated_at: legacyPayload.projection_generated_at,
+      projection_revision: legacyPayload.projection_revision,
       profiles,
       removed_account_ids: [],
       archived_account_ids: [],

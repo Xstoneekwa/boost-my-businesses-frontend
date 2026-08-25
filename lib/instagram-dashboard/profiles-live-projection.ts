@@ -5,10 +5,10 @@ import { businessDayWindow } from "./business-timezone.ts";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
+  mergeCanonicalInteractionEventsWithUnfollowFallback,
   projectVerifiedRunCounters,
   reconcileSocialCounters,
   runTotalsCounters,
-  verifiedUnfollowRowsAsInteractionEvents,
 } from "./social-counters.ts";
 
 type Row = Record<string, unknown>;
@@ -119,10 +119,10 @@ export function projectProfilesLive(input: {
   const requestsByAccount = grouped(input.requests);
   const runsByAccount = grouped(input.runs);
   const logsByAccount = grouped(input.actionLogs);
-  const eventsByAccount = grouped([
-    ...input.interactionEvents,
-    ...verifiedUnfollowRowsAsInteractionEvents(input.unfollowRows ?? []),
-  ]);
+  const eventsByAccount = grouped(mergeCanonicalInteractionEventsWithUnfollowFallback(
+    input.interactionEvents,
+    input.unfollowRows ?? [],
+  ));
   const actionsByAccount = grouped(input.dashboardActions);
   const snapshotsByAccount = grouped(input.socialProfileSnapshots);
 
@@ -189,6 +189,8 @@ export function projectProfilesLive(input: {
         businessDate: projection.businessDate,
         businessTimezone: projection.timezone,
         computedAt: input.now,
+        generatedAt: input.now,
+        revision: input.now,
         source: "canonical_persisted_actions_sast_v1",
       },
       interactionsToday: projectedCounters.projectedDisplayCount.interactionsTotal,

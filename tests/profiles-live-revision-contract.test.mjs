@@ -21,6 +21,9 @@ test("live endpoint is dynamic, private no-store, and selects canonical revision
   assert.match(route, /GET as getLegacyProfiles/);
   assert.match(route, /legacyPayload\.activeAccounts/);
   assert.match(canonicalProfilesRoute, /total_story,live_counter_revision,created_at/);
+  assert.match(canonicalProfilesRoute, /projection_revision:\s*projectionGeneratedAt/);
+  assert.match(route, /projection_revision:\s*legacyPayload\.projection_revision/);
+  assert.doesNotMatch(route, /generated_at:\s*new Date\(\)\.toISOString\(\)/);
 });
 
 test("live payload is account and run scoped with canonical ack metadata", () => {

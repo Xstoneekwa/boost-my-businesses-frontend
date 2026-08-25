@@ -3,9 +3,33 @@ import test from "node:test";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
+  mergeCanonicalInteractionEventsWithUnfollowFallback,
   reconcileSocialCounters,
   runTotalsCounters,
 } from "../lib/instagram-dashboard/social-counters.ts";
+
+function nativeUnfollow(id, interactionRowId, runId = "native-run", username = "candidate") {
+  return {
+    id,
+    account_id: "account-1",
+    run_id: runId,
+    username,
+    event_type: "unfollow_verified",
+    event_status: "success",
+    payload: { interaction_row_id: interactionRowId, target_username: username },
+  };
+}
+
+function syntheticUnfollow(id, runId = "synthetic-run", username = "candidate") {
+  return {
+    id,
+    account_id: "account-1",
+    last_run_id: runId,
+    username,
+    unfollowed_at: "2026-08-25T12:00:00.000Z",
+    unfollow_result: "success",
+  };
+}
 
 test("reconcileSocialCounters keeps post-follow likes from ig_runs and interaction events", () => {
   const logs = actionCountersFromLogs([
@@ -72,3 +96,49 @@ test("legacy and persisted-v1 Follow receipts dedupe the same physical action", 
   assert.equal(counters.follows, 2);
   assert.equal(counters.interactionsTotal, 2);
 });
+
+test("native and synthetic Unfollow evidence converge by immutable interaction row id across run attribution", () => {
+  for (const syntheticRunId of ["native-run", "different-run"]) {
+    const rows = mergeCanonicalInteractionEventsWithUnfollowFallback(
+      [nativeUnfollow("event-1", "interaction-1")],
+      [syntheticUnfollow("interaction-1", syntheticRunId)],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(interactionEventCounters(rows).unfollows, 1);
+  }
+});
+
+test("native-only and synthetic-only Unfollow evidence each count once", () => {
+  assert.equal(interactionEventCounters(
+    mergeCanonicalInteractionEventsWithUnfollowFallback([nativeUnfollow("event-1", "interaction-1")], []),
+  ).unfollows, 1);
+  assert.equal(interactionEventCounters(
+    mergeCanonicalInteractionEventsWithUnfollowFallback([], [syntheticUnfollow("interaction-1")]),
+  ).unfollows, 1);
+});
+
+test("two truly distinct native Unfollow actions for the same username remain distinct", () => {
+  const rows = mergeCanonicalInteractionEventsWithUnfollowFallback([
+    nativeUnfollow("event-1", "interaction-1"),
+    nativeUnfollow("event-2", "interaction-2"),
+  ], []);
+  assert.equal(interactionEventCounters(rows).unfollows, 2);
+});
+
+for (const fixture of [
+  { label: "J", canonical: 29, duplicateFallback: 19 },
+  { label: "BMY", canonical: 42, duplicateFallback: 42 },
+  { label: "NAB", canonical: 80, duplicateFallback: 66 },
+  { label: "Growth", canonical: 80, duplicateFallback: 66 },
+]) {
+  test(`${fixture.label} field replay converges to canonical native Unfollow total`, () => {
+    const native = Array.from({ length: fixture.canonical }, (_, index) => (
+      nativeUnfollow(`event-${index}`, `interaction-${index}`, `native-run-${index % 3}`, `candidate-${index}`)
+    ));
+    const fallback = Array.from({ length: fixture.duplicateFallback }, (_, index) => (
+      syntheticUnfollow(`interaction-${index}`, `synthetic-run-${index % 2}`, `candidate-${index}`)
+    ));
+    const rows = mergeCanonicalInteractionEventsWithUnfollowFallback(native, fallback);
+    assert.equal(interactionEventCounters(rows).unfollows, fixture.canonical);
+  });
+}

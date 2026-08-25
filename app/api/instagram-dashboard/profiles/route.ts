@@ -2,15 +2,15 @@ import { getManageData } from "@/app/instagram-dashboard/manage-data";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
+  mergeCanonicalInteractionEventsWithUnfollowFallback,
   reconcileSocialCounters,
   runTotalsCounters,
   TOTAL_INTERACTIONS_DEFINITION,
-  verifiedUnfollowRowsAsInteractionEvents,
 } from "@/lib/instagram-dashboard/social-counters";
 import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/profile-counter-business-day";
 import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
 import { createSupabaseClient } from "@/lib/supabase";
-import { projectAccountSessionTransitionRow } from "@/lib/account-session-transitions";
+import { selectCurrentAccountSessionTransition } from "@/lib/account-session-transitions";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -231,8 +231,9 @@ function safeSettingsSummary(
   accountRow: RecordValue | undefined,
   runs: RecordValue[] = [],
   interactionEvents: RecordValue[] = [],
+  projectionGeneratedAt = new Date().toISOString(),
 ) {
-  const computedAt = new Date().toISOString();
+  const computedAt = projectionGeneratedAt;
   const projection = businessDayWindow(new Date(computedAt));
   const counters = reconcileSocialCounters(
     actionCountersFromLogs(logs),
@@ -276,6 +277,8 @@ function safeSettingsSummary(
       businessDate: projection.businessDate,
       businessTimezone: projection.timezone,
       computedAt,
+      generatedAt: computedAt,
+      revision: computedAt,
       source: "canonical_persisted_actions_sast_v1",
     },
     capsToday,
@@ -336,7 +339,7 @@ function safeSettingsSummary(
   };
 }
 
-async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
+async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGeneratedAt: string) {
   const ids = accounts.map(accountId).filter(Boolean);
   if (!ids.length) return accounts;
   try {
@@ -350,7 +353,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
       supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
-      supabase.from("ig_interaction_events").select("account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
+      supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
       supabase.from("account_session_transitions").select("id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at").in("account_id", ids).order("updated_at", { ascending: false }).limit(1000),
     ]);
@@ -393,23 +396,22 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
       if (!id || latestRunByAccount.has(id)) continue;
       latestRunByAccount.set(id, row);
     }
+    const mergedInteractionEvents = mergeCanonicalInteractionEventsWithUnfollowFallback(
+      (interactionEventsResult.data ?? []) as RecordValue[],
+      (unfollowsResult.data ?? []) as RecordValue[],
+    );
     const interactionEventsByAccount = new Map<string, RecordValue[]>();
-    for (const row of (interactionEventsResult.data ?? []) as RecordValue[]) {
+    for (const row of mergedInteractionEvents) {
       const id = readString(row.account_id, "");
       if (!id) continue;
       interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
     }
-    for (const row of verifiedUnfollowRowsAsInteractionEvents((unfollowsResult.data ?? []) as RecordValue[])) {
-      const id = readString(row.account_id, "");
-      if (!id) continue;
-      interactionEventsByAccount.set(id, [...(interactionEventsByAccount.get(id) ?? []), row]);
-    }
-    const latestTransitionByAccount = new Map<string, ReturnType<typeof projectAccountSessionTransitionRow>>();
+    const transitionsByAccount = new Map<string, RecordValue[]>();
     if (!transitionsResult.error) {
       for (const row of (transitionsResult.data ?? []) as RecordValue[]) {
         const id = readString(row.account_id, "");
-        if (!id || latestTransitionByAccount.has(id)) continue;
-        latestTransitionByAccount.set(id, projectAccountSessionTransitionRow(row));
+        if (!id) continue;
+        transitionsByAccount.set(id, [...(transitionsByAccount.get(id) ?? []), row]);
       }
     }
     return accounts.map((account) => {
@@ -422,6 +424,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
         accountById.get(id),
         sessionRunsByAccount.get(id) ?? [],
         interactionEventsByAccount.get(id) ?? [],
+        projectionGeneratedAt,
       );
       const activeRequest = activeRequestByAccount.get(id);
       const activeRun = activeRunByAccount.get(id);
@@ -436,7 +439,10 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[]) {
           interactionEventsByAccount.get(id) ?? [],
         ),
         runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
-        latestBusinessTransition: latestTransitionByAccount.get(id) ?? null,
+        latestBusinessTransition: selectCurrentAccountSessionTransition(
+          transitionsByAccount.get(id) ?? [],
+          runId,
+        ),
         ...activeRunControlProjection(activeRequest, activeRun),
       };
     });
@@ -456,15 +462,18 @@ async function requireRelayOrAdmin(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const projectionGeneratedAt = new Date().toISOString();
     const unauthorizedResponse = await requireRelayOrAdmin(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const manage = await getManageData({ requireCanonicalComplete: true });
-    const profiles = await enrichAccountsWithRuntime(manage.allAccounts as RecordValue[]);
+    const profiles = await enrichAccountsWithRuntime(manage.allAccounts as RecordValue[], projectionGeneratedAt);
     const byId = new Map(profiles.map((row) => [accountId(row as RecordValue), row]));
     const enrichLifecycle = (rows: unknown[]) => rows.map((row) => byId.get(accountId(row as RecordValue)) ?? row);
     return jsonOk({
-      generated_at: new Date().toISOString(),
+      generated_at: projectionGeneratedAt,
+      projection_generated_at: projectionGeneratedAt,
+      projection_revision: projectionGeneratedAt,
       profiles,
       activeAccounts: enrichLifecycle(manage.activeAccounts as unknown[]),
       archivedAccounts: enrichLifecycle(manage.archivedAccounts as unknown[]),

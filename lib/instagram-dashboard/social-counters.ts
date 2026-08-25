@@ -132,6 +132,13 @@ function verifiedInteractionKind(row: RecordValue): SocialCounterKind | null {
 function verifiedInteractionIdentity(row: RecordValue, kind: SocialCounterKind) {
   const accountId = readString(row.account_id, "no_account");
   const payload = readRecord(row.payload);
+  const syntheticUnfollowFallback = readString(payload?.evidence_source, "") === "ig_interacted_users.unfollowed_at";
+  if (kind === "unfollows" && !syntheticUnfollowFallback) {
+    const actionId = readString(payload?.action_id, "");
+    if (actionId) return `${accountId}:${kind}:action:${actionId}`;
+    const eventId = readString(row.id, "");
+    if (eventId) return `${accountId}:${kind}:event:${eventId}`;
+  }
   const runId = readString(row.run_id, "no_run");
   const username = readString(row.username, readString(payload?.target_username, readString(payload?.username, ""))).toLowerCase();
   if (username) return `${accountId}:${runId}:${kind}:${username}`;
@@ -247,11 +254,37 @@ export function verifiedUnfollowRowsAsInteractionEvents(rows: RecordValue[]): Re
       created_at: unfollowedAt,
       payload: {
         target_username: username,
+        interaction_row_id: readString(row.id, ""),
         evidence_source: "ig_interacted_users.unfollowed_at",
       },
     });
   }
   return [...verified.values()];
+}
+
+/**
+ * Native canonical events are authoritative. A synthetic
+ * ig_interacted_users fallback is admitted only when its immutable row id is
+ * not already referenced by a native event. Run attribution and username are
+ * deliberately excluded from this cross-source identity.
+ */
+export function mergeCanonicalInteractionEventsWithUnfollowFallback(
+  nativeEvents: RecordValue[],
+  unfollowRows: RecordValue[],
+): RecordValue[] {
+  const nativeInteractionRowIds = new Set<string>();
+  for (const event of nativeEvents) {
+    const payload = readRecord(event.payload);
+    const interactionRowId = readString(payload?.interaction_row_id, "");
+    if (interactionRowId) nativeInteractionRowIds.add(interactionRowId);
+  }
+  const syntheticFallback = verifiedUnfollowRowsAsInteractionEvents(unfollowRows)
+    .filter((event) => {
+      const payload = readRecord(event.payload);
+      const interactionRowId = readString(payload?.interaction_row_id, "");
+      return !interactionRowId || !nativeInteractionRowIds.has(interactionRowId);
+    });
+  return [...nativeEvents, ...syntheticFallback];
 }
 
 export function lastVerifiedInteractionAt(eventRows: RecordValue[]) {
