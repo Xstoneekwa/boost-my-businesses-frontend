@@ -477,6 +477,7 @@ export function projectReadinessProcess(input: ConnectProcessInput): ClientProce
   const errored = phase === "error";
   const automaticPreparationInProgress = clientReadinessIsAutomaticPreparationInProgress(readinessStatus);
   const preparationBlocked = clientReadinessIsBlocked(readinessStatus);
+  const temporarySystemWait = readinessStatus === "temporary_system_wait";
 
   const accountStepStatus: ProcessStepStatus = "done";
   const configStepStatus: ProcessStepStatus = running
@@ -552,12 +553,16 @@ export function projectReadinessProcess(input: ConnectProcessInput): ClientProce
     return {
       title: label(lang, "Vérification de la préparation", "Readiness check"),
       subtitle: automaticPreparationInProgress
-        ? label(lang, "La préparation automatique est en cours.", "Automatic setup is in progress.")
+        ? temporarySystemWait
+          ? label(lang, "La préparation est en attente.", "Setup is waiting.")
+          : label(lang, "La préparation automatique est en cours.", "Automatic setup is in progress.")
         : preparationBlocked
           ? label(lang, "Une action est nécessaire avant la connexion.", "An action is required before connection.")
           : label(lang, "La préparation n'est pas encore complète.", "Setup is not complete yet."),
       statusChip: automaticPreparationInProgress
-        ? label(lang, "En cours", "In progress")
+        ? temporarySystemWait
+          ? label(lang, "Préparation en attente", "Setup waiting")
+          : label(lang, "En cours", "In progress")
         : label(lang, "À compléter", "Pending"),
       statusTone: automaticPreparationInProgress ? "running" : "warning",
       steps,
@@ -565,7 +570,7 @@ export function projectReadinessProcess(input: ConnectProcessInput): ClientProce
       showRefresh: automaticPreparationInProgress,
       isComplete: true,
       isAsyncPending: automaticPreparationInProgress,
-      outcome: "action_required",
+      outcome: automaticPreparationInProgress ? "running" : "action_required",
     };
   }
 

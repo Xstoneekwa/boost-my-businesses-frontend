@@ -3,6 +3,7 @@ import type { ReadinessNowResult } from "../instagram-dashboard/readiness-now.ts
 export type ClientReadinessStatus =
   | "ready_to_connect"
   | "preparation_pending"
+  | "temporary_system_wait"
   | "preparation_blocked"
   | "secure_preparation_in_progress"
   | "credentials_need_attention"
@@ -18,6 +19,10 @@ const CLIENT_READINESS_MESSAGES: Record<ClientReadinessStatus, { fr: string; en:
   preparation_pending: {
     fr: "Nous préparons votre compte automatiquement. Actualisez cette vérification dans quelques instants.",
     en: "We're preparing your account automatically. Refresh this check in a moment.",
+  },
+  temporary_system_wait: {
+    fr: "Le téléphone est temporairement occupé. La préparation reprendra automatiquement.",
+    en: "The phone is temporarily busy. Setup will resume automatically.",
   },
   preparation_blocked: {
     fr: "La préparation est temporairement bloquée. Contactez le support si cela persiste.",
@@ -81,6 +86,12 @@ export function projectClientReadinessStatus(readiness: ReadinessNowResult): Cli
   if (readiness.client_status === "capacity_unavailable") {
     return "device_temporarily_unavailable";
   }
+  if (readiness.reason === "skipped_phone_busy") {
+    return "temporary_system_wait";
+  }
+  if (readiness.reason === "account_busy") {
+    return "secure_preparation_in_progress";
+  }
   if (readiness.client_status === "try_again_later") {
     return "preparation_blocked";
   }
@@ -97,7 +108,9 @@ export function clientReadinessAllowsConnect(status: ClientReadinessStatus) {
 
 export function clientReadinessIsAutomaticPreparationInProgress(status: ClientReadinessStatus | string | null | undefined) {
   const normalized = String(status || "").trim().toLowerCase();
-  return normalized === "preparation_pending" || normalized === "secure_preparation_in_progress";
+  return normalized === "preparation_pending"
+    || normalized === "temporary_system_wait"
+    || normalized === "secure_preparation_in_progress";
 }
 
 export function clientReadinessIsBlocked(status: ClientReadinessStatus | string | null | undefined) {

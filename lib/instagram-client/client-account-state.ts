@@ -337,6 +337,7 @@ export function resolveClientAccountState(
 
   const readinessPrepared = clientReadinessStatus === "ready_to_connect";
   const automaticPreparationInProgress = clientReadinessIsAutomaticPreparationInProgress(clientReadinessStatus);
+  const temporarySystemWait = clientReadinessStatus === "temporary_system_wait";
   const readinessChecked = Boolean(clientReadinessStatus)
     && !automaticPreparationInProgress;
   const pendingSubtext = clientReadinessSubtext(input.clientReadinessStatus, lang);
@@ -365,7 +366,9 @@ export function resolveClientAccountState(
   return {
     phase: "added",
     badgeLabel: automaticPreparationInProgress
-      ? label(lang, "Préparation en cours", "Setup in progress")
+      ? temporarySystemWait
+        ? label(lang, "Préparation en attente", "Setup waiting")
+        : label(lang, "Préparation en cours", "Setup in progress")
       : label(lang, "Compte ajouté", "Account added"),
     badgeTone: "neutral",
     subtext: pendingSubtext,
