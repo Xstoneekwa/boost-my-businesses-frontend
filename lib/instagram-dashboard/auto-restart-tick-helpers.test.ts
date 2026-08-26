@@ -436,6 +436,34 @@ test("canonical BotApp stop does not require the legacy termination-class projec
   assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
 });
 
+test("canonical BotApp stop supports the fail-closed missing-plan fallback", () => {
+  const candidate = operatorStopCandidate();
+  candidate.reliability.restartBlockReason = "resume_plan_missing";
+  candidate.reliability.restartAllowed = null;
+  candidate.reliability.unsafeMarkers = [];
+  assert.deepEqual(resumePlanRuntimeSupported(candidate), { ok: true, reason: "" });
+});
+
+test("missing-plan BotApp stop fallback rejects unsafe evidence or a contradictory verdict", () => {
+  const unsafe = operatorStopCandidate();
+  unsafe.reliability.restartBlockReason = "resume_plan_missing";
+  unsafe.reliability.restartAllowed = null;
+  unsafe.reliability.unsafeMarkers = ["cleanup_uncertain"];
+  assert.deepEqual(resumePlanRuntimeSupported(unsafe), {
+    ok: false,
+    reason: "operator_stop_continuation_invalid",
+  });
+
+  const contradictory = operatorStopCandidate();
+  contradictory.reliability.restartBlockReason = "resume_plan_missing";
+  contradictory.reliability.restartAllowed = false;
+  contradictory.reliability.unsafeMarkers = [];
+  assert.deepEqual(resumePlanRuntimeSupported(contradictory), {
+    ok: false,
+    reason: "operator_stop_continuation_invalid",
+  });
+});
+
 test("operator-stop continuation fails closed for a non-BotApp reason", () => {
   const candidate = operatorStopCandidate();
   candidate.operatorStopReason = "operator_stop_hotfix";

@@ -225,12 +225,17 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
   const operatorStopContinuation = candidate.operatorStopContinuation === true;
   if (operatorStopContinuation) {
     const lastRunStatus = String(reliability.lastRunStatus || "").toLowerCase();
+    const restartBlockReason = reliability.restartBlockReason.toLowerCase();
+    const canonicalOperatorStopVerdict = restartBlockReason === "operator_canceled";
+    const missingPlanOperatorStopFallback = restartBlockReason === "resume_plan_missing"
+      && reliability.restartAllowed === null
+      && reliability.unsafeMarkers.length === 0;
     if (
       reliability.operatorStopContinuation !== true
       || reliability.operatorStopReason !== "botapp_manual_stop"
       || candidate.operatorStopReason !== "botapp_manual_stop"
       || !["stopped", "canceled"].includes(lastRunStatus)
-      || reliability.restartBlockReason.toLowerCase() !== "operator_canceled"
+      || (!canonicalOperatorStopVerdict && !missingPlanOperatorStopFallback)
       || candidate.sourceLineageValid !== true
       || !candidate.sourceRequestId
       || !Number.isSafeInteger(candidate.canonicalAttemptId)
