@@ -56,11 +56,10 @@ test("lifecycle route blocks automation flags and active runtime", () => {
   assert.match(source, /login_started:\s*false/);
 });
 
-test("manage projection buckets lifecycle from accountLifecycleStatus not admin ops status", () => {
+test("manage projection buckets lifecycle through the shared operational visibility contract", () => {
   assert.match(manageSource, /accountLifecycleStatus/);
   assert.match(manageSource, /enrichWithIgAccountLifecycle/);
-  assert.match(manageSource, /const accountStatus = normalize\(account\.accountLifecycleStatus/);
-  assert.doesNotMatch(manageSource, /const status = normalize\(account\.adminStatus\)/);
+  assert.match(manageSource, /classifyOperationalProfileLifecycle\(account\)/);
 });
 
 test("client projection buckets lifecycle from accountLifecycleStatus", () => {

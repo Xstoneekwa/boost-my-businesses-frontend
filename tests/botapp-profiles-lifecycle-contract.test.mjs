@@ -77,6 +77,8 @@ test("pre-login raw inactive is visible only with an explicit nonterminal lifecy
     provisioningStatus: "login_pending",
     loginStatus: "pending",
     packageLabel: "Premium",
+    customerStatus: "active",
+    subscriptionStatus: "active",
     assignmentStatus: "reserved",
     credentialsStatus: "active",
     connected: false,
@@ -113,10 +115,21 @@ test("terminal lifecycle values and terminal timestamps are excluded generically
 test("terminal predicate remains exact and does not classify raw inactive as terminal", () => {
   assert.deepEqual(
     [...operationalTerminalStatuses].sort(),
-    ["cancelled", "canceled", "deleted", "onboarding_rollback", "rolled_back", "rolled_back_test_onboarding", "tombstone", "tombstoned"].sort(),
+    ["cancelled", "canceled", "deleted", "onboarding_rollback", "released-terminal", "released_terminal", "rolled_back", "rolled_back_test_onboarding", "tombstone", "tombstoned"].sort(),
   );
   assert.ok(!operationalTerminalStatuses.includes("inactive"));
   assert.ok(!operationalTerminalStatuses.includes("deactivated"));
+});
+
+test("commercial and released-terminal states remain excluded even when admin is active", () => {
+  for (const row of [
+    { adminStatus: "active", accountLifecycleStatus: "inactive", capacityStatus: "released_terminal" },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", assignmentStatus: "released-terminal" },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", customerStatus: "cancelled" },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", subscriptionStatus: "canceled" },
+  ]) {
+    assert.equal(isCanonicalVisibleProfile(row), false);
+  }
 });
 
 test("connected transition stays continuously visible", () => {
@@ -124,6 +137,25 @@ test("connected transition stays continuously visible", () => {
   const after = { accountLifecycleStatus: "active", adminStatus: "active", loginStatus: "connected" };
   assert.equal(isCanonicalVisibleProfile(before), true);
   assert.equal(isCanonicalVisibleProfile(after), true);
+});
+
+test("live active account retains the Golden counter projection unchanged", () => {
+  const liveActive = {
+    accountId: "live-active",
+    accountLifecycleStatus: "active",
+    adminStatus: "active",
+    followCount: 42,
+    unfollowCount: 17,
+    likeCount: 9,
+    commentCount: 3,
+    dmCount: 2,
+  };
+  const [selected] = selectCanonicalVisibleProfiles([liveActive]);
+  assert.strictEqual(selected, liveActive);
+  assert.deepEqual(
+    [selected.followCount, selected.unfollowCount, selected.likeCount, selected.commentCount, selected.dmCount],
+    [42, 17, 9, 3, 2],
+  );
 });
 
 test("full refresh and live full snapshot retain the same pre-login account", () => {
