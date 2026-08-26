@@ -166,12 +166,36 @@ backend. Slack and Discord are inspected separately; retry only a failed
 channel. Never treat a provider delivery as proof that the incident itself is
 resolved, and never close historical incidents in bulk.
 
+### Equivalent incident generations and natural-tick eligibility
+
+`Resolve after verification` uses
+`transition_account_incident_human_review_v3`. After resolving the selected
+non-security incident, it also resolves only stale occurrences for the same
+account with the same `incident_type` and the same normalized causal reason.
+Every bundled occurrence receives an append-only review event linked to the
+canonical incident. An incident with another cause, another type, another
+account, or any security marker remains independent and blocking.
+
+When no independent operator-review blocker remains, the same atomic contract
+restores `paused_manual_review` to `active`. It does not alter the schedule,
+commercial lifecycle, package, phone assignment, or create a run/tick. The
+account is therefore eligible for its next natural open-window tick without a
+second reconciliation gesture.
+
+A canonical BotApp manual stop is command-edge state: it terminates the active
+request/run lineage but never becomes a persistent Auto Restart exclusion.
+While the lineage is active, the ordinary active-run/request locks still
+block. Once terminal, the existing provenance checks authorize only a fresh
+safe-boundary continuation; security and unsafe-marker gates remain unchanged.
+
 ## Obsolete blocker procedure
 
-Never close incidents in bulk. For each candidate, record incident/action IDs,
-account, original reason, run/request, subsequent successful evidence, current
-account state, and the exact resolution reason. Resolve only the proven object
-and its linked action. Re-check Profiles to confirm no resolved blocker remains.
+Never issue an unscoped bulk closure. For each candidate, record
+incident/action IDs, account, original reason, run/request, subsequent
+successful evidence, current account state, and the exact resolution reason.
+The generation-aware resolver may bundle only the exact account/type/cause
+equivalence class described above. Re-check Profiles to confirm no independent
+unresolved blocker remains.
 
 ## Golden addendum
 
