@@ -11,6 +11,7 @@ import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/pro
 import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
 import { createSupabaseClient } from "@/lib/supabase";
 import { selectCurrentAccountSessionTransition } from "@/lib/account-session-transitions";
+import { executionPhaseIsActive, projectExecutionPhase } from "@/lib/instagram-dashboard/execution-phase";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
 
@@ -74,12 +75,17 @@ function fallbackPackageCaps(packageLabel: string) {
 function activeRunControlProjection(
   activeRequest: RecordValue | undefined,
   activeRun: RecordValue | undefined,
+  capsule: RecordValue | undefined,
+  latestRun: RecordValue | undefined,
 ) {
-  if (!activeRequest && !activeRun) return {};
+  const executionPhase = projectExecutionPhase({ activeRequest, activeRun, capsule, latestRun });
+  if (!activeRequest && !activeRun) return { executionPhase };
   const reason = activeRun ? "already_running" : "already_requested";
+  const active = executionPhaseIsActive(executionPhase);
   return {
-    runStatus: "running",
-    currentRunStatus: "running",
+    executionPhase,
+    runStatus: active ? "running" : executionPhase.toLowerCase(),
+    currentRunStatus: active ? "running" : executionPhase.toLowerCase(),
     eligibility: "blocked_now",
     eligibility_status: "blocked_now",
     eligibilityReason: reason,
@@ -163,13 +169,15 @@ function runScopedCounters(
 function runtimeIndicatorProjection(
   activeRequest: RecordValue | undefined,
   activeRun: RecordValue | undefined,
+  capsule: RecordValue | undefined,
   latestRun: RecordValue | undefined,
   logs: RecordValue[],
 ) {
   if (activeRequest || activeRun) {
+    const executionPhase = projectExecutionPhase({ activeRequest, activeRun, capsule, latestRun });
     return {
-      state: "active",
-      reason: activeRun ? "active_run" : "active_request",
+      state: executionPhaseIsActive(executionPhase) ? "active" : "idle",
+      reason: `execution_phase_${executionPhase.toLowerCase()}`,
       lastRunId: latestRun ? readString(latestRun.id, "") : null,
     };
   }
@@ -345,7 +353,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult, capsulesResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
       supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
@@ -356,6 +364,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
       supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
       supabase.from("account_session_transitions").select("id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at").in("account_id", ids).order("updated_at", { ascending: false }).limit(1000),
+      supabase.from("account_session_resume_plans").select("account_id,run_id,run_request_id,resume_state,irreversible_work_state,worker_spawned_at,runner_started_at,device_activity_started_at,device_connected_at,instagram_launch_requested_at,instagram_foreground_verified_at,last_updated_at").in("account_id", ids).order("last_updated_at", { ascending: false }).limit(1000),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -383,6 +392,14 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
       const id = readString(row.account_id, "");
       if (!id || activeRunByAccount.has(id)) continue;
       activeRunByAccount.set(id, row);
+    }
+    const capsuleByRun = new Map<string, RecordValue>();
+    const capsuleByRequest = new Map<string, RecordValue>();
+    for (const row of (capsulesResult.data ?? []) as RecordValue[]) {
+      const runId = readString(row.run_id, "");
+      const requestId = readString(row.run_request_id, "");
+      if (runId && !capsuleByRun.has(runId)) capsuleByRun.set(runId, row);
+      if (requestId && !capsuleByRequest.has(requestId)) capsuleByRequest.set(requestId, row);
     }
     const sessionRunsByAccount = new Map<string, RecordValue[]>();
     for (const row of (sessionRunsResult.data ?? []) as RecordValue[]) {
@@ -429,6 +446,8 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
       const activeRequest = activeRequestByAccount.get(id);
       const activeRun = activeRunByAccount.get(id);
       const runId = activeRunId(activeRequest, activeRun);
+      const capsule = capsuleByRun.get(runId)
+        ?? capsuleByRequest.get(readString(activeRequest?.id, ""));
       return {
         ...account,
         ...runtimeSummary,
@@ -438,12 +457,12 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
           sessionRunsByAccount.get(id) ?? [],
           interactionEventsByAccount.get(id) ?? [],
         ),
-        runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
+        runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, capsule, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
         latestBusinessTransition: selectCurrentAccountSessionTransition(
           transitionsByAccount.get(id) ?? [],
           runId,
         ),
-        ...activeRunControlProjection(activeRequest, activeRun),
+        ...activeRunControlProjection(activeRequest, activeRun, capsule, latestRunByAccount.get(id)),
       };
     });
   } catch {
