@@ -7,6 +7,7 @@ import { resolveSchedulerCheckState } from "@/lib/instagram-dashboard/auto-resta
 import { resolveUnfollowRuntimeCap } from "@/lib/instagram-dashboard/run-control";
 import {
   canonicalOperatorStopContinuationAuthorized,
+  canonicalSourceLineageValid,
   exactViewportResumeEvidence,
   resolveAccountRestartEligibility,
   resolveAutoRestartDecisionOutcome,
@@ -584,6 +585,11 @@ function reliabilityFromLatestRun(
     restartBlockReason,
     unsafeMarkers,
   });
+  const sourceLineageValid = canonicalSourceLineageValid({
+    sourcePlanLineageValid,
+    attemptLineageValid: attemptIdentity.lineageValid,
+    operatorStopContinuationAuthorized: operatorStopContinuation,
+  });
 
   return {
     restartAllowed,
@@ -614,7 +620,7 @@ function reliabilityFromLatestRun(
     attemptSource: attemptIdentity.attemptSource,
     attemptProjectionId: attemptIdentity.runProjectionAttemptId,
     attemptProjectionDivergence: attemptIdentity.divergence,
-    sourceLineageValid: sourcePlanLineageValid && attemptIdentity.lineageValid,
+    sourceLineageValid,
     retryIndex: canonicalRetryIndex,
     nextRetryIndex: canonicalNextRetryIndex,
     previousRunId: readString(resumePlan?.previous_run_id, ""),

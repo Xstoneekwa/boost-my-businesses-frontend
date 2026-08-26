@@ -67,6 +67,18 @@ export function canonicalOperatorStopContinuationAuthorized(input: {
     && normalized(input.cancelReason) === "botapp_manual_stop";
 }
 
+export function canonicalSourceLineageValid(input: {
+  sourcePlanLineageValid: boolean;
+  attemptLineageValid: boolean;
+  operatorStopContinuationAuthorized: boolean;
+}) {
+  return input.attemptLineageValid
+    && (
+      input.sourcePlanLineageValid
+      || input.operatorStopContinuationAuthorized
+    );
+}
+
 export function isPartialResumeClass(value: string) {
   return ["partial_resumable", "partial_safe_stopped"].includes(normalized(value));
 }

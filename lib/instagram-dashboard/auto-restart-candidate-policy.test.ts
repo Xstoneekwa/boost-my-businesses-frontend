@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canonicalOperatorStopContinuationAuthorized,
+  canonicalSourceLineageValid,
   exactViewportResumeEvidence,
   resolveAccountRestartEligibility,
   resolveAutoRestartDecisionOutcome,
@@ -362,4 +363,38 @@ test("an exact request-bound BotApp stop survives a missing run-side resume proj
   assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, unsafeMarkers: ["challenge_blocked"] }), false);
   assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, restartAllowed: false }), false);
   assert.equal(canonicalOperatorStopContinuationAuthorized({ ...fallback, restartBlockReason: "cleanup_not_completed" }), false);
+});
+
+test("an authorized request-bound BotApp stop supplies canonical lineage without a run-bound plan", () => {
+  assert.equal(canonicalSourceLineageValid({
+    sourcePlanLineageValid: false,
+    attemptLineageValid: true,
+    operatorStopContinuationAuthorized: true,
+  }), true);
+});
+
+test("missing run-bound lineage remains fail-closed without exact BotApp-stop authorization", () => {
+  for (const mutation of [
+    { attemptLineageValid: false, operatorStopContinuationAuthorized: true },
+    { attemptLineageValid: true, operatorStopContinuationAuthorized: false },
+    { attemptLineageValid: false, operatorStopContinuationAuthorized: false },
+  ]) {
+    assert.equal(canonicalSourceLineageValid({
+      sourcePlanLineageValid: false,
+      ...mutation,
+    }), false);
+  }
+});
+
+test("a canonical run-bound plan still requires valid request-attempt lineage", () => {
+  assert.equal(canonicalSourceLineageValid({
+    sourcePlanLineageValid: true,
+    attemptLineageValid: true,
+    operatorStopContinuationAuthorized: false,
+  }), true);
+  assert.equal(canonicalSourceLineageValid({
+    sourcePlanLineageValid: true,
+    attemptLineageValid: false,
+    operatorStopContinuationAuthorized: true,
+  }), false);
 });
