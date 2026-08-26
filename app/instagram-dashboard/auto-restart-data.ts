@@ -208,6 +208,9 @@ export type AutoRestartCandidate = {
     sourceLabel: string;
     operatorStopContinuation?: boolean;
     operatorStopReason?: string;
+    resumeState?: string;
+    zeroWorkContractVersion?: number | null;
+    irreversibleWorkState?: string;
   };
   quotas: {
     follow: AutoRestartQuotaPreview;
@@ -511,6 +514,9 @@ function reliabilityFromLatestRun(
       sourceLabel: "no_recent_run",
       operatorStopContinuation: false,
       operatorStopReason: "",
+      resumeState: "",
+      zeroWorkContractVersion: null,
+      irreversibleWorkState: "",
     };
   }
 
@@ -544,7 +550,8 @@ function reliabilityFromLatestRun(
     sourceRunId: readString(latestRun.id),
     sourceAccountId: readString(latestRun.account_id),
     sourceRequest,
-    runProjectionAttemptId: performance?.attempt_id
+    runProjectionAttemptId: sourceRequest?.execution_attempt_no
+      ?? performance?.attempt_id
       ?? performance?.current_attempt_id
       ?? runResumeProjection?.attempt_id
       ?? runResumeProjection?.current_attempt_id
@@ -597,7 +604,10 @@ function reliabilityFromLatestRun(
       resumePlan?.session_termination_class,
       readString(performance?.session_termination_class, ""),
     ),
-    businessSessionId: readString(resumePlan?.business_session_id, ""),
+    businessSessionId: readString(
+      sourceRequest?.root_business_session_id,
+      readString(resumePlan?.business_session_id, ""),
+    ),
     attemptId: canonicalAttemptId === null ? "—" : String(canonicalAttemptId),
     canonicalAttemptId,
     sourceRequestId: attemptIdentity.sourceRequestId,
@@ -683,6 +693,11 @@ function reliabilityFromLatestRun(
         : "ig_runs.performance_summary",
     operatorStopContinuation,
     operatorStopReason,
+    resumeState: readString(canonicalPlanRow?.resume_state, ""),
+    zeroWorkContractVersion: canonicalPlanRow?.zero_work_contract_version == null
+      ? null
+      : readNumber(canonicalPlanRow.zero_work_contract_version, 0),
+    irreversibleWorkState: readString(canonicalPlanRow?.irreversible_work_state, ""),
   };
 }
 
@@ -1449,7 +1464,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
   const sourceRunRequestsPromise = Promise.all(
     chunked(latestRunIds, 100).map((runIdBatch) => supabase
       .from("account_run_requests")
-      .select("id,account_id,run_id,status,created_at,cancel_reason,cancel_requested_at,metadata_safe")
+      .select("id,account_id,run_id,status,created_at,cancel_reason,cancel_requested_at,metadata_safe,root_business_session_id,execution_attempt_no,retry_index")
       .in("run_id", runIdBatch)
       .order("created_at", { ascending: false })
       .limit(1000)),

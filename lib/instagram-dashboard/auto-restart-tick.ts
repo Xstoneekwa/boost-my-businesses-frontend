@@ -523,6 +523,20 @@ async function consumeAuthorizationAndCreateRequest(
   return data as Record<string, unknown> | null;
 }
 
+async function certifyZeroWorkAndEnqueueRecoveryV1(
+  supabase: SupabaseLike,
+  input: { sourceRunId: string; sourceRequestId: string; workerId: string; leaseSeconds: number },
+) {
+  const { data, error } = await supabase.rpc("certify_zero_work_and_enqueue_recovery_v1", {
+    p_source_run_id: input.sourceRunId,
+    p_source_request_id: input.sourceRequestId,
+    p_worker_id: input.workerId,
+    p_lease_seconds: input.leaseSeconds,
+  });
+  if (error) throw new Error(error.message || "zero_work_recovery_rpc_failed");
+  return readRecord(data) ?? { ok: false, reason: "zero_work_recovery_empty_response" };
+}
+
 export type AutoRestartTickSummary = {
   tick_id: string;
   worker_id: string;
@@ -678,6 +692,66 @@ export async function runAutoRestartTick(
         ? projectArmedFollow60Candidate(rawCandidate, follow60Resolution.control)
         : rawCandidate;
       const follow60Authority = follow60Resolution.ok && follow60Resolution.control !== null;
+      const zeroWorkRecoveryV1 =
+        candidate.plannedRunType !== "outreach_session"
+        && candidate.reliability.zeroWorkContractVersion === 1
+        && candidate.reliability.irreversibleWorkState === "PRE_DEVICE"
+        && ["run_active", "pre_device_stopped"].includes(candidate.reliability.resumeState ?? "")
+        && Boolean(candidate.sourceRunId)
+        && Boolean(candidate.reliability.sourceRequestId);
+      if (zeroWorkRecoveryV1) {
+        summary.eligible_candidates += 1;
+        if (forceDryRun) {
+          summary.enqueued_count += 1;
+          summary.enqueued.push({
+            account_id: candidate.accountId,
+            username: candidate.username,
+            request_id: null,
+          });
+          continue;
+        }
+        const recovery = await certifyZeroWorkAndEnqueueRecoveryV1(supabase, {
+          sourceRunId: candidate.sourceRunId,
+          sourceRequestId: candidate.reliability.sourceRequestId || "",
+          workerId: options.workerId,
+          leaseSeconds: env.deviceLockLeaseSeconds,
+        });
+        if (!readBoolean(recovery.ok, false)) {
+          const reason = readString(recovery.reason, "zero_work_recovery_blocked");
+          summary.blocked_count += 1;
+          summary.blocked.push({ account_id: candidate.accountId, username: candidate.username, reason });
+          continue;
+        }
+        const newRequestId = readString(recovery.request_id, "") || null;
+        summary.enqueued_count += 1;
+        if (readBoolean(recovery.deduplicated, false)) summary.deduplicated_count += 1;
+        summary.enqueued.push({
+          account_id: candidate.accountId,
+          username: candidate.username,
+          request_id: newRequestId,
+        });
+        await writeDecision(supabase, {
+          requestId,
+          idempotencyKey: `${tickId}:${candidate.accountId}:zero-work-v1`,
+          actor: options.actor || "system",
+          accountId: candidate.accountId,
+          deviceId: candidate.deviceId || null,
+          action: "control_plane_zero_work_recovery_v1",
+          decision: "enqueued",
+          reason: readBoolean(recovery.deduplicated, false) ? "deduplicated" : "certified_zero_work",
+          mode: extendedRules.mode,
+          metadata: {
+            zero_work_contract_version: 1,
+            irreversible_work_state: "PRE_DEVICE",
+            source_request_id: candidate.reliability.sourceRequestId,
+            execution_attempt_no: recovery.execution_attempt_no,
+          },
+          priorRunId: candidate.sourceRunId,
+          newRequestId,
+          businessSessionId: candidate.sourceBusinessSessionId || null,
+        });
+        continue;
+      }
       if (!candidate.restartEligible) {
         const decision = candidate.decisionOutcome === "not_needed" ? "not_needed" : "blocked";
         if (decision === "not_needed") {
