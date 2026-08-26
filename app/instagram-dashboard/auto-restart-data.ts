@@ -36,6 +36,9 @@ import {
   type AutoRestartAccountSessionPhases,
   type PhaseCompletion,
 } from "@/lib/instagram-dashboard/auto-restart-phase-plan";
+import {
+  resolveRunActiveProof,
+} from "@/lib/instagram-dashboard/resume-state-contract";
 import { getManageData, type ManageAccount } from "./manage-data";
 import { getRadarData } from "./radar-data";
 
@@ -170,6 +173,7 @@ export type AutoRestartCandidate = {
   reliability: {
     restartAllowed: boolean | null;
     restartBlockReason: string;
+    resumeState?: string;
     unsafeMarkers: string[];
     currentAttempt: string;
     nextAttempt: string;
@@ -180,6 +184,7 @@ export type AutoRestartCandidate = {
     attemptId: string;
     canonicalAttemptId?: number | null;
     sourceRequestId?: string | null;
+    sourceRequestStatus?: string;
     attemptSource?: string;
     attemptProjectionId?: number | null;
     attemptProjectionDivergence?: boolean;
@@ -473,6 +478,7 @@ function reliabilityFromLatestRun(
     return {
       restartAllowed: null,
       restartBlockReason: "no_recent_run",
+      resumeState: "",
       unsafeMarkers: [],
       currentAttempt: "—",
       nextAttempt: "—",
@@ -483,6 +489,7 @@ function reliabilityFromLatestRun(
       attemptId: "—",
       canonicalAttemptId: null,
       sourceRequestId: null,
+      sourceRequestStatus: "",
       attemptSource: "missing",
       attemptProjectionId: null,
       attemptProjectionDivergence: false,
@@ -584,6 +591,7 @@ function reliabilityFromLatestRun(
     // (the worker never produced a restart decision for it) — expose the
     // stable canonical reason instead of the former literal "unknown".
     restartBlockReason,
+    resumeState: readString(canonicalPlanRow?.resume_state, ""),
     unsafeMarkers,
     currentAttempt: canonicalAttemptId === null
       ? readString(resumePlan?.current_attempt_id, "—") || "—"
@@ -601,6 +609,7 @@ function reliabilityFromLatestRun(
     attemptId: canonicalAttemptId === null ? "—" : String(canonicalAttemptId),
     canonicalAttemptId,
     sourceRequestId: attemptIdentity.sourceRequestId,
+    sourceRequestStatus,
     attemptSource: attemptIdentity.attemptSource,
     attemptProjectionId: attemptIdentity.runProjectionAttemptId,
     attemptProjectionDivergence: attemptIdentity.divergence,
@@ -959,6 +968,15 @@ function planCandidate({
   });
 
   const blockingReasons: string[] = [];
+  const runActiveProof = resolveRunActiveProof({
+    resumeState: reliability.resumeState || "",
+    sourceRunStatus: reliability.lastRunStatus,
+    sourceRequestStatus: reliability.sourceRequestStatus || "",
+    activeRunExists: readString(activeRun?.id, "") === reliability.lastRunId,
+    activeRequestExists: readString(activeRequest?.id, "") === reliability.sourceRequestId,
+    liveDeviceLockExists: deviceLockActive === true,
+  });
+  if (!runActiveProof.proven) blockingReasons.push(runActiveProof.reason);
   const startsAt = readString(assignment?.starts_at, "");
   const endsAt = readString(assignment?.ends_at, "");
   const deviceTimezone = readString(

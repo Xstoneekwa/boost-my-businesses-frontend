@@ -90,6 +90,17 @@ class FakeSupabase {
   from(table: string) { return new Query(this, table); }
 
   async rpc(name: string, args: Row) {
+    if (name === "reconcile_stale_account_session_resume_plans_v1") {
+      return {
+        data: {
+          reconciled_count: 0,
+          ambiguous_count: 0,
+          reconciled: [],
+          ambiguous: [],
+        },
+        error: null,
+      };
+    }
     if (name === "reconcile_resolved_incident_resume_windows_v1") {
       return { data: { armed_count: 0 }, error: null };
     }

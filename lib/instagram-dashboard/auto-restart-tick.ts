@@ -535,6 +535,10 @@ export type AutoRestartTickSummary = {
   blocked_count: number;
   not_needed_count: number;
   deduplicated_count: number;
+  reconciled_plan_count: number;
+  ambiguous_stale_plan_count: number;
+  reconciled_plan_run_ids: string[];
+  ambiguous_stale_plan_run_ids: string[];
   blocked: Array<{ account_id: string; username: string; reason: string }>;
   enqueued: Array<{ account_id: string; username: string; request_id: string | null }>;
 };
@@ -648,6 +652,35 @@ export async function runAutoRestartTick(
   summary.dry_run = forceDryRun;
 
   try {
+    if (!forceDryRun && !options.manual) {
+      const reconciliationResult = await supabase.rpc(
+        "reconcile_stale_account_session_resume_plans_v1",
+        { p_limit: 100 },
+      );
+      if (reconciliationResult.error) {
+        throw new Error(
+          reconciliationResult.error.message || "stale_resume_plan_reconciliation_failed",
+        );
+      }
+      const reconciliation = readRecord(reconciliationResult.data) ?? {};
+      const reconciled = readRows(reconciliation.reconciled);
+      const ambiguous = readRows(reconciliation.ambiguous);
+      summary.reconciled_plan_count = readNumber(
+        reconciliation.reconciled_count,
+        reconciled.length,
+      );
+      summary.ambiguous_stale_plan_count = readNumber(
+        reconciliation.ambiguous_count,
+        ambiguous.length,
+      );
+      summary.reconciled_plan_run_ids = reconciled
+        .map((row) => readString(row.run_id))
+        .filter(Boolean);
+      summary.ambiguous_stale_plan_run_ids = ambiguous
+        .map((row) => readString(row.run_id))
+        .filter(Boolean);
+    }
+
     const overview = options.overview
       ? { candidates: options.overview.candidates as never[], enabled: true, mode: extendedRules.mode } as unknown as Awaited<ReturnType<typeof getAutoRestartData>>
       : await getAutoRestartData();
@@ -1238,6 +1271,10 @@ function emptySummary(workerId: string, dryRun: boolean, reason: string | null):
     blocked_count: 0,
     not_needed_count: 0,
     deduplicated_count: 0,
+    reconciled_plan_count: 0,
+    ambiguous_stale_plan_count: 0,
+    reconciled_plan_run_ids: [],
+    ambiguous_stale_plan_run_ids: [],
     blocked: [],
     enqueued: [],
   };
