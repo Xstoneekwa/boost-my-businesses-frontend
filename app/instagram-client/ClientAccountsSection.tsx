@@ -6,7 +6,10 @@ import ClientAccountProcessModal from "./ClientAccountProcessModal";
 import ClientVerificationModal from "./ClientVerificationModal";
 import ClientInstagramOnboardingWizard from "./ClientInstagramOnboardingWizard";
 import { resolveClientAccountConnectionUi } from "@/lib/instagram-client/client-account-connection-ui";
-import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
+import {
+  canSubmitVerificationCode,
+  type ClientConnectProgressSnapshot,
+} from "@/lib/instagram-client/connect-progress-projection";
 import { operationPendingFromConnectResult, operationPendingFromReadinessResult } from "@/lib/instagram-client/client-account-state";
 import {
   clientSafeProcessErrorMessage,
@@ -75,6 +78,14 @@ function labelFor(lang: "fr" | "en", fr: string, en: string) {
 
 function isTerminalConnectProgress(snapshot: ClientConnectProgressSnapshot | null | undefined) {
   return isExplicitTerminalClientConnectProgress(snapshot);
+}
+
+function shouldOpenVerificationModal(snapshot: ClientConnectProgressSnapshot | null | undefined) {
+  if (!snapshot?.action_required) return false;
+  if (canSubmitVerificationCode(snapshot.action_required)) return true;
+  return snapshot.connect_status === "verification_code_accepted"
+    || snapshot.connect_status === "verification_resume_active"
+    || snapshot.connect_status === "verification_code_submitted";
 }
 
 function isTerminalProcessAccount(
@@ -329,7 +340,6 @@ export default function ClientAccountsSection({
 
   const resumeActiveConnect = useCallback(async (
     account: ClientInstagramAccountView,
-    openVerification = false,
     connectOperationToken?: string | null,
   ) => {
     const progress = await syncConnectProgress(account.accountId, connectOperationToken);
@@ -381,7 +391,7 @@ export default function ClientAccountsSection({
       connectOperationToken: connectOperationToken ?? null,
       timedOut: false,
     });
-    if (openVerification || reconciledProgress?.connect_status === "verification_required") {
+    if (shouldOpenVerificationModal(reconciledProgress)) {
       setVerificationDismissed(false);
     }
     return reconciledProgress;
@@ -396,7 +406,7 @@ export default function ClientAccountsSection({
     connectHydratedRef.current = true;
     let cancelled = false;
 
-    void resumeActiveConnect(candidate, true).catch(() => {
+    void resumeActiveConnect(candidate).catch(() => {
       if (!cancelled) connectHydratedRef.current = false;
     });
 
@@ -412,12 +422,7 @@ export default function ClientAccountsSection({
 
   const verificationModalOpen = Boolean(
     processModal?.mode === "connect"
-    && (
-      processModal.connectProgress?.connect_status === "verification_required"
-      || processModal.connectProgress?.connect_status === "verification_code_accepted"
-      || processModal.connectProgress?.connect_status === "verification_resume_active"
-    )
-    && processModal.connectProgress.action_required
+    && shouldOpenVerificationModal(processModal.connectProgress)
     && !verificationDismissed,
   );
 
@@ -464,7 +469,7 @@ export default function ClientAccountsSection({
             connectPhase: isTerminalConnectProgress(reconciledProgress) ? "complete" : "polling",
             addPhase: current.addPhase === "refreshing" ? "complete" : current.addPhase,
           };
-          if (mode === "connect" && reconciledProgress?.connect_status === "verification_required") {
+          if (mode === "connect" && shouldOpenVerificationModal(reconciledProgress)) {
             setVerificationDismissed(false);
           }
           if (mode === "connect" && reconciledProgress) {
@@ -541,7 +546,7 @@ export default function ClientAccountsSection({
             reconciledProgress,
             retryOperationToken,
           );
-          if (reconciledProgress?.connect_status === "verification_required") {
+          if (shouldOpenVerificationModal(reconciledProgress)) {
             setVerificationDismissed(false);
           }
           return {
@@ -564,7 +569,7 @@ export default function ClientAccountsSection({
 
   function closeProcessModal() {
     stopProcessPolling();
-    if (processModal?.connectProgress?.connect_status === "verification_required") {
+    if (shouldOpenVerificationModal(processModal?.connectProgress)) {
       setVerificationDismissed(true);
     } else {
       setVerificationDismissed(false);
@@ -578,7 +583,7 @@ export default function ClientAccountsSection({
     setActionAccountId(account.accountId);
     try {
       const connectOperationToken = await ensureClientConnectAttempt(account.accountId);
-      await resumeActiveConnect(account, true, connectOperationToken);
+      await resumeActiveConnect(account, connectOperationToken);
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible de rouvrir la vérification.", "Could not reopen verification."), "error");
     } finally {
@@ -956,6 +961,10 @@ export default function ClientAccountsSection({
         }
         onClose={closeProcessModal}
         onOpenVerification={() => setVerificationDismissed(false)}
+        onUpdatePassword={() => {
+          closeProcessModal();
+          router.push("/instagram-client?view=account");
+        }}
       />
 
       <ClientVerificationModal

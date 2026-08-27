@@ -24,6 +24,10 @@ import {
   type CanonicalClientAccountVisibilitySeed,
   type CanonicalIgAccountVisibilitySeed,
 } from "@/lib/instagram-dashboard/canonical-client-account-visibility";
+import {
+  projectCurrentPasswordUpdateActions,
+  type PasswordUpdateOperationalState,
+} from "@/lib/instagram-dashboard/password-update-operational-state";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -79,6 +83,8 @@ export type ManageAccount = {
   pendingActionsCount: number;
   blockingCampaign: boolean;
   primaryBlockReason?: string | null;
+  primaryOperationalState?: "PASSWORD_UPDATE_REQUIRED" | null;
+  passwordUpdateAction?: PasswordUpdateOperationalState | null;
   latestIncidentSeverity: string;
   lastSafeUpdate: string | null;
   phoneName: string;
@@ -783,12 +789,18 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
 
   try {
     const supabase = createSupabaseClient();
-    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount] = await Promise.all([
+    const [dashboardActionsResult, incidentsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount] = await Promise.all([
       supabase
         .from("account_dashboard_actions")
-        .select("account_id,action_type,status,blocking_campaign")
+        .select("id,incident_id,account_id,action_type,status,blocking_campaign,requires_client_action,created_at,updated_at,metadata,metadata_safe")
         .in("account_id", accountIds)
         .in("status", ["pending", "acknowledged", "pending_verification"])
+        .limit(5000),
+      supabase
+        .from("account_incidents")
+        .select("id,account_id,status,run_id,reason,failure_reason,created_at,updated_at,metadata")
+        .in("account_id", accountIds)
+        .in("status", ["open", "acknowledged", "investigating"])
         .limit(5000),
       supabase
         .from("ig_account_dm_settings")
@@ -804,9 +816,14 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
     ]);
 
     const errors = [...overview.errors];
-    if (dashboardActionsResult.error || dmSettingsResult.error || unfollowSettingsResult.error) {
+    if (dashboardActionsResult.error || incidentsResult.error || dmSettingsResult.error || unfollowSettingsResult.error) {
       errors.unshift("Readiness projection partially unavailable.");
     }
+
+    const currentPasswordActions = projectCurrentPasswordUpdateActions(
+      (dashboardActionsResult.data ?? []) as SupabaseRecord[],
+      (incidentsResult.data ?? []) as SupabaseRecord[],
+    );
 
     const actionCountsByAccount = new Map<string, { total: number; blocking: number; firstBlockingAction: string | null }>();
     for (const row of ((dashboardActionsResult.data ?? []) as SupabaseRecord[])) {
@@ -885,10 +902,13 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           blockingActionsCount: actionCounts.blocking,
         });
       const canonicalReady = readinessProjection.overall_readiness_status === "ready";
+      const passwordUpdateAction = currentPasswordActions.get(account.accountId) ?? null;
       return {
         ...account,
         blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
         primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
+        primaryOperationalState: passwordUpdateAction ? "PASSWORD_UPDATE_REQUIRED" : null,
+        passwordUpdateAction,
         readiness: readinessProjection.overall_readiness_status,
         eligibility: canonicalReady ? "can_start" : "blocked_now",
         eligibilityReason: readinessProjection.overall_readiness_reason,

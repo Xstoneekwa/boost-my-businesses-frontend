@@ -43,7 +43,7 @@ export function isExplicitTerminalClientConnectProgress(
   if (!snapshot) return false;
   return snapshot.connected
     || snapshot.failed
-    || ["connected", "failed", "blocked", "cancelled"].includes(snapshot.connect_status);
+    || ["connected", "wrong_password", "failed", "blocked", "cancelled"].includes(snapshot.connect_status);
 }
 
 export function hasCanonicalClientConnectLineage(

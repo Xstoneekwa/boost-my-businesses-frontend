@@ -80,7 +80,7 @@ export default function ClientVerificationModal({
     }
   }, [open]);
 
-  if (!open || !action) return null;
+  if (!open || !action || (!canSubmitCode && !resumeInProgress)) return null;
 
   async function submitCode() {
     if (!action?.id || !canSubmitCode) return;
