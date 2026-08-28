@@ -41,6 +41,7 @@ export function commercialOutreachGreeting(input: { businessName: string; city?:
 export function outreachCopyInstructions(channel: CommercialOutreachChannel, angle: CommercialOutreachAngle) {
   return [
     "Never emit unresolved placeholders, bracketed tokens, Your Name, TODO or TBD. Omit unavailable information instead.",
+    "Write the observation in everyday language. Never expose field labels or CRM taxonomy such as subsegment, qualification score or fact ledger. Do not praise expertise, vibrancy, engagement or performance without evidence; a plain verified location or service observation is enough.",
     "Core proposition: Your next customers are already on Instagram. BMB helps bring them to you.",
     "Explain briefly that BMB identifies relevant Instagram audiences, including audiences of competitors or similar businesses, to help attract qualified potential customers. Describe a capability, not guaranteed outcomes or facts about a named competitor.",
     angle === "A" ? "Angle A: growth, visibility alongside similar businesses/competitors, reaching relevant potential customers." : "Angle B: acquisition, finding potential customers in relevant Instagram audiences.",

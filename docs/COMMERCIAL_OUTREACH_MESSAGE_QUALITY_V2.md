@@ -48,9 +48,14 @@ deployment. Old bodies remain in cancelled items, linked by `supersedes_item_id`
 Do not approve messages or fabricate human ratings during verification.
 
 Measure the four deterministic quality rates on the ten final V2 previews.
-First-pass success = ready on attempt 1 / ten requested previews.
-Regeneration rate = previews needing a second V2 generation attempt / ten.
+First-pass success = valid final content produced on the first V2 generation / ten.
+Regeneration rate = leads needing another V2 generation / ten. Sum attempts over
+the full `supersedes_item_id` chain: a manual regeneration resets the per-item
+counter and must not erase a quality correction from these metrics.
 The planned replacement of ten V1 previews is separately 10/10, not a retry rate.
+The production canary surfaced one CRM taxonomy leak (`Hair Salon subsegment`)
+on first inspection. V2 also rejects taxonomy words as internal content; this
+preview is regenerated once and counted as a second generation, not first-pass.
 Report failures in the denominator. Technical quality is NOT human sendability
 and is NOT evidence of conversion performance. Liam reviews these ten messages
 before moving to the five P2 leads.

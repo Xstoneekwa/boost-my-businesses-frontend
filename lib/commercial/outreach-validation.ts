@@ -5,7 +5,7 @@ import type {
   CommercialOutreachGeneratedMessage,
 } from "./outreach-contract";
 
-const internalPattern = /system prompt|developer message|internal instruction|debug output|json payload|```|"(?:channel|angle|facts_used|confidence)"\s*:/i;
+const internalPattern = /system prompt|developer message|internal instruction|debug output|json payload|\b(?:subsegment|qualification score|fact ledger)\b|```|"(?:channel|angle|facts_used|confidence)"\s*:/i;
 const unsupportedClaimPattern = /(?:your|you have|you've had|you are doing)\s+(?:revenue|ad spend|customer count|growth rate|\d+\s+customers)|you spend\s+[^.]*\s+on ads|your owner|your monthly sales|your conversion rate/i;
 const emailFormattingPattern = /^(?:subject|to|from):/im;
 const knownCities = ["Johannesburg", "Cape Town", "Pretoria", "Durban"];
