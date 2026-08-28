@@ -51,7 +51,8 @@ Historical approvals/rejections and non-cohort leads never enter the denominator
 No decisions => rates and timing are null (`—`), not fabricated zero percentages.
 
 - Approval rates: approved / reviewed, grouped by original AI P1/P2 and score band.
-- Agreement: unchanged original vs final channel/angle / comparable completed reviews.
+- Agreement: unchanged original vs final channel/angle / comparable **approved**
+  reviews. Rejection is not an implicit endorsement of the unchanged recommendation.
 - Edit rate: reviews with a meaningful saved change / completed reviews.
 - Median/P90: continuous interpolated percentile of server elapsed durations.
 - Top rejection reasons derive from completed rejected reviews.
@@ -111,6 +112,9 @@ is not claimed. Authenticated production smoke requires Liam's own session.
 Release order: validate → scoped commit → apply schema (cohort not enrolled yet)
 → deploy production → enroll once as the audited owner → read-only production
 smoke. Enrollment must never call start/review/approval RPCs.
+
+Production migration ledger version: `20260828214422`. The local migration filename
+matches that assigned version; its SQL is unchanged from the tested/applied migration.
 
 ## Post-canary addendum (deferred, not implemented in V1)
 

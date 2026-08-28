@@ -28,7 +28,8 @@ export function buildHumanReviewFeedback(events: FeedbackEvent[], items: Feedbac
     return feedbackRate(group.filter((e) => e.metadata_safe.human_decision === "approved").length, group.length);
   };
   const agreement = (original: string, final: string, valid: string[]) => {
-    const group = completed.filter((e) => valid.includes(String(enrolled.get(e.lead_id)?.metadata_safe[original])) && valid.includes(String(e.metadata_safe[final])));
+    // Rejecting fit is not an endorsement of an unchanged channel or angle.
+    const group = approved.filter((e) => valid.includes(String(enrolled.get(e.lead_id)?.metadata_safe[original])) && valid.includes(String(e.metadata_safe[final])));
     return feedbackRate(group.filter((e) => enrolled.get(e.lead_id)?.metadata_safe[original] === e.metadata_safe[final]).length, group.length);
   };
   const durations = completed.map((e) => e.metadata_safe.review_duration_seconds).filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0);

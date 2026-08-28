@@ -2,8 +2,8 @@ import type { FeedbackRate, HumanReviewFeedback } from "@/lib/commercial/human-r
 import { COMMERCIAL_REJECTION_REASONS } from "@/lib/commercial/lead-review-contract";
 import styles from "./CommercialReviewQuality.module.css";
 
-function Rate({ value }: { value: FeedbackRate }) {
-  return <><strong>{value.percent === null ? "—" : `${Math.round(value.percent)}%`}</strong><small>{value.count}/{value.total} decisions</small></>;
+function Rate({ value, unit = "decisions" }: { value: FeedbackRate; unit?: string }) {
+  return <><strong>{value.percent === null ? "—" : `${Math.round(value.percent)}%`}</strong><small>{value.count}/{value.total} {unit}</small></>;
 }
 const seconds = (value: number | null) => value === null ? "—" : `${Math.round(value)}s`;
 
@@ -14,7 +14,7 @@ export default function CommercialReviewQuality({ model }: { model: HumanReviewF
     <div className={styles.totals}><span><b>{model.reviewed}</b> Reviewed</span><span><b>{model.pending}</b> Pending</span><span><b>{model.approved}</b> Approved</span><span><b>{model.rejected}</b> Rejected</span></div>
     <dl className={styles.metrics}>
       <div><dt>P1 approval</dt><dd><Rate value={model.p1} /></dd></div><div><dt>P2 approval</dt><dd><Rate value={model.p2} /></dd></div>
-      <div><dt>Channel agreement</dt><dd><Rate value={model.channelAgreement} /></dd></div><div><dt>Angle agreement</dt><dd><Rate value={model.angleAgreement} /></dd></div>
+      <div><dt>Channel agreement</dt><dd><Rate value={model.channelAgreement} unit="approved leads" /></dd></div><div><dt>Angle agreement</dt><dd><Rate value={model.angleAgreement} unit="approved leads" /></dd></div>
       <div><dt>Decision time</dt><dd><strong>{seconds(model.medianSeconds)}</strong><small>Median · P90 {seconds(model.p90Seconds)}</small></dd></div><div><dt>Edit rate</dt><dd><Rate value={model.editRate} /></dd></div>
     </dl>
     {model.reviewed === 0 ? <p className={styles.note}>Awaiting your decisions. No historical approvals are counted. Start review in the lead detail when you are ready.</p> : <p className={styles.note}>Approval {Math.round(model.approveRate.percent ?? 0)}% · rejection {Math.round(model.rejectRate.percent ?? 0)}% · elapsed time includes breaks, across {model.timedReviews} timed decisions.</p>}
