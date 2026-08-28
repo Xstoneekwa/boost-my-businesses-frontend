@@ -1,4 +1,5 @@
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
+import { canonicalSocialSnapshotProjection, readCanonicalSocialSnapshots } from "@/lib/instagram-dashboard/canonical-social-snapshot-read";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
@@ -234,7 +235,6 @@ function safeSettingsSummary(
   settings: RecordValue | undefined,
   packageSummary: RecordValue | undefined,
   logs: RecordValue[],
-  accountRow: RecordValue | undefined,
   runs: RecordValue[] = [],
   interactionEvents: RecordValue[] = [],
   projectionGeneratedAt = new Date().toISOString(),
@@ -288,15 +288,6 @@ function safeSettingsSummary(
       source: "canonical_persisted_actions_sast_v1",
     },
     capsToday,
-    followerDelta3d: {
-      value: null,
-      currentFollowers: readNumber(accountRow, ["followers_count"], null),
-      previousFollowers: null,
-      from: null,
-      to: new Date().toISOString(),
-      source: "pending_account_follower_snapshots",
-      freshness: "no_snapshot_table",
-    },
     quotas: {
       follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
       unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events+ig_interacted_users" },
@@ -351,11 +342,10 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult, capsulesResult] = await Promise.all([
+    const [settingsResult, logsResult, packageResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult, capsulesResult, socialSnapshotsResult] = await Promise.all([
       supabase.from("ig_account_settings").select("*").in("account_id", ids),
       supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
       supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
-      supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
       supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,root_business_session_id,execution_attempt_no,retry_index,updated_at").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]).order("updated_at", { ascending: false }).limit(ids.length * 3),
       supabase.from("ig_runs").select("id,account_id,status,updated_at").in("account_id", ids).in("status", ["pending", "running", "stopping"]).order("updated_at", { ascending: false }).limit(ids.length * 3),
       supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
@@ -363,6 +353,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
       supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
       supabase.from("account_session_transitions").select("id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at").in("account_id", ids).order("updated_at", { ascending: false }).limit(1000),
       supabase.from("account_session_resume_plans").select("run_id,run_request_id,account_id,resume_state,irreversible_work_state,zero_work_certified_at,device_activity_started_at,device_connected_at,instagram_launch_requested_at,instagram_foreground_verified_at,last_updated_at").in("account_id", ids).order("last_updated_at", { ascending: false }).limit(ids.length * 3),
+      readCanonicalSocialSnapshots(supabase, { accountIds: ids, since: new Date(Date.parse(projectionGeneratedAt) - 30 * 86400_000).toISOString(), until: projectionGeneratedAt }),
     ]);
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
@@ -375,9 +366,6 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
     }
     const packageByAccount = new Map(
       ((packageResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
-    );
-    const accountById = new Map(
-      ((accountResult.data ?? []) as RecordValue[]).map((row) => [readString(row.id, ""), row]),
     );
     const activeRequestByAccount = new Map<string, RecordValue>();
     for (const row of (requestsResult.data ?? []) as RecordValue[]) {
@@ -436,7 +424,6 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
         settingsByAccount.get(id),
         packageByAccount.get(id),
         logsByAccount.get(id) ?? [],
-        accountById.get(id),
         sessionRunsByAccount.get(id) ?? [],
         interactionEventsByAccount.get(id) ?? [],
         projectionGeneratedAt,
@@ -457,6 +444,8 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
       return {
         ...account,
         ...runtimeSummary,
+        followerDelta3d: canonicalSocialSnapshotProjection(socialSnapshotsResult.data, id, new Date(projectionGeneratedAt)).followerDelta3d,
+        socialSnapshotReadStatus: socialSnapshotsResult.error ? "unavailable" : "complete",
         currentRunCounters: runScopedCounters(
           runId,
           logsByAccount.get(id) ?? [],

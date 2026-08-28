@@ -14,10 +14,7 @@ import {
   DEFAULT_BUSINESS_TIMEZONE,
   formatBusinessTimestamp,
 } from "@/lib/instagram-dashboard/business-timezone";
-import {
-  projectSocialProfileSnapshots,
-  type SocialProfileSnapshotRow,
-} from "@/lib/instagram-dashboard/social-profile-snapshot-contract";
+import { canonicalSocialSnapshotProjection, readCanonicalSocialSnapshots } from "@/lib/instagram-dashboard/canonical-social-snapshot-read";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../../../_utils";
 import { verifyCompassRelayKey } from "../../../compass/relay-auth";
@@ -264,14 +261,7 @@ export async function GET(
         .gte("unfollowed_at", since)
         .order("unfollowed_at", { ascending: false })
         .limit(10000),
-      supabase
-        .from("ig_account_social_profile_snapshots")
-        .select("account_id,username_normalized,followers_count,following_count,posts_count,observed_at,snapshot_local_date,account_timezone,timezone_source,source_provider,source_trigger,source_event_id,source_run_id,source_business_session_id,lookup_status,freshness_status,idempotency_key")
-        .eq("account_id", normalizedAccountId)
-        .eq("lookup_status", "found")
-        .gte("observed_at", since)
-        .order("observed_at", { ascending: true })
-        .limit(5000),
+      readCanonicalSocialSnapshots(supabase, { accountIds: [normalizedAccountId], since, until: now.toISOString() }),
       supabase
         .from("ig_account_settings")
         .select("total_likes_limit,max_dm_per_run")
@@ -290,9 +280,7 @@ export async function GET(
     if (firstError) return jsonError(firstError.message, 500);
 
     const byDay = new Map<string, DayCounters>();
-    const socialSnapshots = projectSocialProfileSnapshots({
-      rows: (socialSnapshotsResult.data ?? []) as SocialProfileSnapshotRow[],
-    });
+    const socialSnapshots = canonicalSocialSnapshotProjection(socialSnapshotsResult.data, normalizedAccountId, now).stats;
     const ensureDay = (date: string) => {
       const existing = byDay.get(date);
       if (existing) return existing;

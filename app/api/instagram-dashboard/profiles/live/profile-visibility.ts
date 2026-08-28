@@ -19,3 +19,20 @@ export function selectCanonicalVisibleProfiles(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.filter(isRow).filter(isCanonicalVisibleProfile);
 }
+
+export function canonicalProfilesMembership(payload: ProfileLifecycleRow, requestedIds: string[]) {
+  const ledger = payload.profiles;
+  const active = payload.activeAccounts;
+  const revision = payload.projection_revision;
+  const id = (row: ProfileLifecycleRow) => String(row.accountId || row.account_id || row.id || "");
+  if (!Array.isArray(ledger) || !Array.isArray(active) || !Array.isArray(payload.errors) || payload.errors.length
+    || typeof revision !== "string" || !Number.isFinite(Date.parse(revision))) return undefined;
+  for (const rows of [ledger, active]) {
+    if (rows.some(row => !isRow(row) || !id(row)) || new Set(rows.map(id)).size !== rows.length) return undefined;
+  }
+  const visible = selectCanonicalVisibleProfiles(ledger).map(id).sort();
+  const activeIds = active.map(id).sort();
+  if (JSON.stringify(visible) !== JSON.stringify(activeIds)) return undefined;
+  return { schema: "profiles_membership_v1", revision,
+    removedAccountIds: [...new Set(requestedIds)].filter(key => !visible.includes(key)) };
+}

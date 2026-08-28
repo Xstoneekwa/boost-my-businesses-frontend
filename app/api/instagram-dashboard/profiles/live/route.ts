@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/app/api/instagram-dashboard/_utils";
 import { createSupabaseClient } from "@/lib/supabase";
 import { GET as getLegacyProfiles } from "../route";
-import { selectCanonicalVisibleProfiles, unwrapJsonOkData } from "./profile-visibility";
+import { canonicalProfilesMembership, selectCanonicalVisibleProfiles, unwrapJsonOkData } from "./profile-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +27,18 @@ export async function GET(request: Request) {
     if (!legacyResponse.ok) return legacyResponse;
 
     const legacyPayload = unwrapJsonOkData(await legacyResponse.json());
+    if (!Array.isArray(legacyPayload.activeAccounts) || !Array.isArray(legacyPayload.profiles)) {
+      return jsonError("Canonical Profiles membership unavailable.", 503);
+    }
     // The canonical Profiles endpoint exposes its full snapshot as
     // `activeAccounts`. Reading the retired `profiles` alias makes every
     // authenticated BotApp refresh fail after the response is unwrapped.
     const visibleProfiles = selectCanonicalVisibleProfiles(legacyPayload.activeAccounts);
     const accountIds = visibleProfiles.map(accountId).filter(Boolean);
+    // Only the authenticated complete canonical inventory can affirm removals.
+    // A sparse Live payload alone never implies deletion on the client.
+    const requestedIds = (new URL(request.url).searchParams.get("account_ids") || "").split(",").filter(Boolean).slice(0, 200);
+    const membership = canonicalProfilesMembership(legacyPayload, requestedIds);
     const identityByAccount = new Map<string, Row>();
     let identitySource = "not_requested";
 
@@ -70,6 +77,7 @@ export async function GET(request: Request) {
       projection_generated_at: legacyPayload.projection_generated_at,
       projection_revision: legacyPayload.projection_revision,
       profiles,
+      membership,
       removed_account_ids: [],
       archived_account_ids: [],
       query_count: accountIds.length ? 2 : 1,
