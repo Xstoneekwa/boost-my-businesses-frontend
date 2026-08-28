@@ -33,6 +33,9 @@ export function canonicalProfilesMembership(payload: ProfileLifecycleRow, reques
   const visible = selectCanonicalVisibleProfiles(ledger).map(id).sort();
   const activeIds = active.map(id).sort();
   if (JSON.stringify(visible) !== JSON.stringify(activeIds)) return undefined;
+  // Absence is not a lifecycle event, even in an apparently complete response.
+  // Only a present canonical row explicitly excluded by lifecycle is removal proof.
+  const excluded = new Set(ledger.filter(row => !isCanonicalVisibleProfile(row)).map(id));
   return { schema: "profiles_membership_v1", revision,
-    removedAccountIds: [...new Set(requestedIds)].filter(key => !visible.includes(key)) };
+    removedAccountIds: [...new Set(requestedIds)].filter(key => excluded.has(key)) };
 }
