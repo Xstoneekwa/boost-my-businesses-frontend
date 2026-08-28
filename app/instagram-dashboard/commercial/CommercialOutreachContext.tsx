@@ -62,7 +62,7 @@ export default function CommercialOutreachContext({
     <header className={styles.contextHeader}><h3>Context & decision</h3><button type="button" className={styles.iconButton} onClick={onClose} aria-label="Close context panel">✕</button></header>
     {item ? <>
       {editing ? <div className={styles.editor}>
-        <small className={styles.panelEyebrow}>EDIT PREVIEW</small>
+        <small className={styles.panelEyebrow}>MINOR_EDIT · EDIT PREVIEW</small>
         {item.channel === "email" ? <label><span className={styles.fieldLabel}>Subject</span><input maxLength={120} value={subject} onChange={(event) => setSubject(event.target.value)} disabled={pending} /></label> : null}
         <label><span className={styles.fieldLabel}>Message</span><textarea maxLength={item.channel === "instagram" ? 900 : 2000} rows={10} value={body} onChange={(event) => setBody(event.target.value)} disabled={pending} /></label>
         <div className={styles.editorActions}><button type="button" className={styles.primaryButton} onClick={() => onMutate(item, "edit_message", { subject: item.channel === "email" ? subject : null, body })} disabled={pending || !body.trim()}>Validate & save edit</button><button type="button" className={styles.quietButton} onClick={() => setEditing(false)} disabled={pending}>Close</button></div>
@@ -75,6 +75,10 @@ export default function CommercialOutreachContext({
       </div> : null}
 
       <div className={styles.contextBody}>
+        <section className={styles.contextSection}>
+          <h4>Message quality review</h4>
+          <p className={styles.contextValue}>SENDABLE_AS_IS approves this preview for dry run only. MINOR_EDIT opens the editor; save your change to record it. REJECT cancels this preview, not the approved lead. No message is sent.</p>
+        </section>
         <section className={styles.contextSection}>
           <h4>Lead snapshot</h4>
           <ContextRows rows={[["Business", item.businessName], ["City", item.city], ["Subsegment", item.subsegment], ["Priority", outreachStateLabel(item.priority)], ["AI score", item.score], ["Instagram bio", item.instagramBio]]} />
@@ -105,12 +109,12 @@ export default function CommercialOutreachContext({
       </div>
 
       <div className={styles.actionBar} aria-label="Selected preview actions">
-        {availability.approve ? <button type="button" className={styles.primaryButton} onClick={() => onMutate(item, "approve_message")} disabled={pending}>Approve dry run</button> : null}
-        {availability.edit ? <button type="button" className={styles.secondaryButton} onClick={() => setEditing((current) => !current)} disabled={pending}>Edit</button> : null}
+        {availability.approve ? <button type="button" className={styles.primaryButton} onClick={() => onMutate(item, "approve_message")} disabled={pending}>SENDABLE_AS_IS · Approve dry run</button> : null}
+        {availability.edit ? <button type="button" className={styles.secondaryButton} onClick={() => setEditing((current) => !current)} disabled={pending}>MINOR_EDIT</button> : null}
         {availability.changeSelection ? <button type="button" className={styles.secondaryButton} onClick={() => setChangingSelection((current) => !current)} disabled={pending}>Channel / angle</button> : null}
         {availability.regenerate ? <button type="button" className={styles.secondaryButton} onClick={() => onMutate(item, "regenerate")} disabled={pending}>Regenerate</button> : null}
-        {availability.cancel && !confirmCancel ? <button type="button" className={styles.dangerButton} onClick={() => setConfirmCancel(true)} disabled={pending}>Cancel</button> : null}
-        {availability.cancel && confirmCancel ? <><button type="button" className={styles.dangerButton} onClick={() => onMutate(item, "cancel", { reason: "owner_cancelled" })} disabled={pending}>Confirm cancel</button><button type="button" className={styles.quietButton} onClick={() => setConfirmCancel(false)} disabled={pending}>Keep</button></> : null}
+        {availability.cancel && !confirmCancel ? <button type="button" className={styles.dangerButton} onClick={() => setConfirmCancel(true)} disabled={pending}>REJECT · Cancel preview</button> : null}
+        {availability.cancel && confirmCancel ? <><button type="button" className={styles.dangerButton} onClick={() => onMutate(item, "cancel", { reason: "message_quality_reject" })} disabled={pending}>Confirm reject</button><button type="button" className={styles.quietButton} onClick={() => setConfirmCancel(false)} disabled={pending}>Keep</button></> : null}
       </div>
     </> : <div className={styles.empty}><p>Select a preview to inspect the lead context and audit history.</p></div>}
   </aside>;

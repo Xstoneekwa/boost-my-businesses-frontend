@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
+import { inspectCommercialOutreachQuality } from "./outreach-quality";
 import type {
   CommercialOutreachFact,
   CommercialOutreachGeneratedMessage,
 } from "./outreach-contract";
 
-const placeholderPattern = /\{\{[^}]+\}\}|\[\s*(?:name|business|city|company|insert|placeholder)[^\]]*\]|<[^>]*(?:name|business|city|company)[^>]*>/i;
 const internalPattern = /system prompt|developer message|internal instruction|debug output|json payload|```|"(?:channel|angle|facts_used|confidence)"\s*:/i;
 const unsupportedClaimPattern = /(?:your|you have|you've had|you are doing)\s+(?:revenue|ad spend|customer count|growth rate|\d+\s+customers)|you spend\s+[^.]*\s+on ads|your owner|your monthly sales|your conversion rate/i;
 const emailFormattingPattern = /^(?:subject|to|from):/im;
@@ -52,8 +52,10 @@ export function validateCommercialOutreachMessage(input: {
     if (body.length < 20 || body.length > 2000) codes.add("email_body_length_invalid");
   }
 
-  if (!contains(combined, input.businessName)) codes.add("business_name_missing_or_mismatched");
-  if (placeholderPattern.test(combined)) codes.add("unresolved_placeholder");
+  const quality = inspectCommercialOutreachQuality({ ...input, ...message });
+  for (const code of quality.codes) codes.add(code);
+  // Bind the intended recipient to a verified canonical fact, not an SEO name
+  // forced into the salutation. Greeting itself must match the server policy.
   if (internalPattern.test(combined)) codes.add("internal_or_debug_content");
   if (unsupportedClaimPattern.test(combined)) codes.add("unsupported_commercial_claim");
   if (/^\s*[\[{][\s\S]*[\]}]\s*$/.test(body)) codes.add("raw_json_body");
@@ -73,6 +75,7 @@ export function validateCommercialOutreachMessage(input: {
 
   const verified = new Map(input.verifiedFacts.map((fact) => [`${normalized(fact.key)}\u0000${normalized(fact.value)}`, fact]));
   const factsUsed = Array.isArray(message.facts_used) ? message.facts_used.map(stringRecord).filter((fact): fact is { key: string; value: string } => Boolean(fact)) : [];
+  if (!factsUsed.some((fact) => fact.key === "business_name" && normalized(fact.value) === normalized(input.businessName))) codes.add("business_name_missing_or_mismatched");
   if (!Array.isArray(message.facts_used) || factsUsed.length !== message.facts_used.length) codes.add("facts_used_shape_invalid");
   if (factsUsed.length === 0) codes.add("verified_personalization_missing");
   for (const fact of factsUsed) {

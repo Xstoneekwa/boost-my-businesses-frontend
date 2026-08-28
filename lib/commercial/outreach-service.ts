@@ -190,9 +190,9 @@ export async function getCommercialOutreachReadModel(filters: CommercialOutreach
   };
 }
 
-async function validateOwnerEdit(itemId: string, mutation: CommercialOutreachMutation) {
+async function validateOwnerMessage(itemId: string, mutation: CommercialOutreachMutation) {
   const supabase = createSupabaseAdminClient();
-  const { data: itemData, error: itemError } = await supabase.from("commercial_outreach_items").select("id,lead_id,channel,angle,template_key,facts_used").eq("id", itemId).single<Row>();
+  const { data: itemData, error: itemError } = await supabase.from("commercial_outreach_items").select("id,lead_id,channel,angle,template_key,facts_used,subject,body,confidence").eq("id", itemId).single<Row>();
   if (itemError || !itemData) throw rpcError(itemError?.message ?? "not_found");
   const item = row(itemData);
   const { data: leadData, error: leadError } = await supabase.from("commercial_leads").select("id,business_id,city_snapshot,subsegment_snapshot").eq("id", text(item.lead_id)).single<Row>();
@@ -204,23 +204,26 @@ async function validateOwnerEdit(itemId: string, mutation: CommercialOutreachMut
   ]);
   if (businessError || !businessData) throw new CommercialOutreachError("commercial_outreach_edit_context_unavailable", 503);
   const business = row(businessData); const verifiedFacts = buildCommercialOutreachFactLedger({ lead, business });
+  const editing = mutation.action === "edit_message";
+  const subject = editing ? mutation.patch.subject ?? null : nullableText(item.subject);
+  const body = editing ? mutation.patch.body ?? "" : text(item.body);
   const result = validateCommercialOutreachMessage({
     message: {
-      subject: mutation.patch.subject ?? null, body: mutation.patch.body ?? "", channel: text(item.channel) as CommercialOutreachChannel,
+      subject, body, channel: text(item.channel) as CommercialOutreachChannel,
       angle: text(item.angle) as CommercialOutreachAngle, template_version: text(item.template_key) as CommercialOutreachTemplateKey,
-      personalization_summary: "Owner-edited from a previously validated preview.", facts_used: parseFacts(item.facts_used), confidence: 1,
+      personalization_summary: "Owner message quality check.", facts_used: parseFacts(item.facts_used), confidence: editing ? 1 : Number(item.confidence),
     },
     businessName: text(business.business_name), city: nullableText(lead.city_snapshot || business.city), verifiedFacts,
     otherBusinessNames: (otherBusinesses ?? []).map((candidate) => text(row(candidate).business_name)).filter(Boolean),
   });
-  if (!result.ok) throw new CommercialOutreachError(`commercial_outreach_edit_rejected:${result.codes.join(",")}`, 400);
-  mutation.patch.contentHash = commercialOutreachContentHash(mutation.patch.subject ?? null, mutation.patch.body ?? "");
+  if (!result.ok) throw new CommercialOutreachError(`commercial_outreach_${editing ? "edit" : "approval"}_rejected:${result.codes.join(",")}`, 400);
+  if (editing) mutation.patch.contentHash = commercialOutreachContentHash(subject, body);
 }
 
 export async function mutateCommercialOutreachItem(itemId: string, mutation: CommercialOutreachMutation) {
   const actor = await requireCommercialCrmAccess();
   if (!/^[0-9a-f-]{36}$/i.test(itemId)) throw new CommercialOutreachError("commercial_outreach_item_not_found", 404);
-  if (mutation.action === "edit_message") await validateOwnerEdit(itemId, mutation);
+  if (mutation.action === "edit_message" || mutation.action === "approve_message") await validateOwnerMessage(itemId, mutation);
   const patch: Row = {};
   if (mutation.patch.channel) patch.channel = mutation.patch.channel;
   if (mutation.patch.angle) patch.angle = mutation.patch.angle;

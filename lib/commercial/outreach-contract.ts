@@ -19,7 +19,7 @@ export const COMMERCIAL_OUTREACH_STATES = [
 export const COMMERCIAL_OUTREACH_STATUS_TABS = ["ready", "approved", "failed", "cancelled", "all"] as const;
 export const COMMERCIAL_OUTREACH_SORTS = ["newest", "confidence"] as const;
 
-export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_prompt_v2_exact_target_salutation";
+export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_message_quality_v2";
 
 export type CommercialOutreachChannel = (typeof COMMERCIAL_OUTREACH_CHANNELS)[number];
 export type CommercialOutreachAngle = (typeof COMMERCIAL_OUTREACH_ANGLES)[number];

@@ -74,6 +74,16 @@ async function processItem(
     return "failed";
   }
 
+  // Claiming intentionally clears item.validation_codes. Read the last failure
+  // from the append-only audit so the bounded second attempt can correct it.
+  let previousValidationCodes: string[] = [];
+  if (number(item.generation_attempt_count) > 1) {
+    const { data: failures } = await supabase.from("commercial_outreach_events")
+      .select("metadata_safe").eq("item_id", text(item.id)).eq("event_type", "generation_failed")
+      .order("occurred_at", { ascending: false }).limit(1);
+    const codes = row(row(failures?.[0]).metadata_safe).validation_codes;
+    previousValidationCodes = Array.isArray(codes) ? codes.map(text).filter(Boolean).slice(0, 20) : [];
+  }
   const generated = await generate({
     channel: text(item.channel) as CommercialOutreachChannel,
     angle: text(item.angle) as CommercialOutreachAngle,
@@ -81,6 +91,7 @@ async function processItem(
     templateIntent: text(template.intent),
     businessName,
     verifiedFacts,
+    previousValidationCodes,
   });
   if (!generated.ok || !generated.message) {
     await completeFailure(supabase, item, workerId, [generated.errorCode], generated.model);
