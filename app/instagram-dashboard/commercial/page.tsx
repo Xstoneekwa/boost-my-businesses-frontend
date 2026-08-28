@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import AnalyticsKpiCard from "@/components/restaurant-analytics/AnalyticsKpiCard";
-import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
 import CommercialLeadReviewQueue from "./CommercialLeadReviewQueue";
+import CommercialReviewQuality from "./CommercialReviewQuality";
+import { getHumanReviewFeedback } from "@/lib/commercial/human-review-feedback-service";
+import type { HumanReviewFeedback } from "@/lib/commercial/human-review-feedback";
 import CommercialDiscoveryPanel from "./CommercialDiscoveryPanel";
 import CommercialOutreachQueue from "./CommercialOutreachQueue";
 import { CommercialCrmAccessError, requireCommercialCrmAccess } from "@/lib/commercial/crm-access";
 import { CommercialReadModelError, getCommercialDashboardReadModel } from "@/lib/commercial/dashboard-read-model";
 import { CommercialReviewError, getCommercialReviewQueueReadModel } from "@/lib/commercial/lead-review";
 import { parseCommercialDashboardFilters, type CommercialDashboardSearchParams } from "@/lib/commercial/dashboard-query";
-import type { CommercialBreakdownRow, CommercialDashboardReadModel, CommercialQueueLead } from "@/lib/commercial/dashboard-read-model-types";
+import type { CommercialDashboardReadModel } from "@/lib/commercial/dashboard-read-model-types";
 import { parseCommercialReviewReadFilters, type CommercialReviewReadModel } from "@/lib/commercial/lead-review-contract";
 import { getCommercialDiscoveryReadModel } from "@/lib/commercial/discovery-service";
 import type { CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
@@ -61,43 +62,12 @@ function queryHref(model: CommercialDashboardReadModel, overrides: Record<string
   return `/instagram-dashboard/commercial?${query.toString()}#leads`;
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="commercial-empty">{children}</div>;
-}
-
 function StatusBadge({ value }: { value: string | null }) {
   return <span className={`commercial-badge commercial-badge-${value ?? "empty"}`}>{label(value)}</span>;
 }
 
-function QueueCard({ title, eyebrow, rows, empty }: { title: string; eyebrow: string; rows: CommercialQueueLead[]; empty: string }) {
-  return (
-    <article className="commercial-queue-card">
-      <div className="commercial-queue-heading"><div><small>{eyebrow}</small><h3>{title}</h3></div><strong>{rows.length}</strong></div>
-      {rows.length === 0 ? <Empty>{empty}</Empty> : (
-        <div className="commercial-queue-list">
-          {rows.map((lead) => (
-            <Link href={`/instagram-dashboard/commercial/leads/${lead.id}`} key={lead.id}>
-              <span><strong>{lead.businessName}</strong><small>{[lead.city, lead.subsegment].filter(Boolean).join(" · ") || "No segment yet"}</small></span>
-              <span className="commercial-queue-meta"><StatusBadge value={lead.priority} /><b>{lead.score ?? "—"}</b></span>
-            </Link>
-          ))}
-        </div>
-      )}
-    </article>
-  );
-}
-
-function BreakdownTable({ title, rows }: { title: string; rows: CommercialBreakdownRow[] }) {
-  return (
-    <article className="commercial-breakdown">
-      <h3>{title}</h3>
-      {rows.length === 0 ? <Empty>No qualified cohort data for this dimension.</Empty> : (
-        <div className="commercial-table-scroll"><table><thead><tr><th>Value</th><th>Q</th><th>Contacted</th><th>Replies</th><th>SQL</th><th>Demos</th><th>Paid</th><th>Paid / 100 Q</th></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.qualified}</td><td>{row.contacted}</td><td>{row.replies}</td><td>{row.salesQualified}</td><td>{row.demos}</td><td>{row.paid}</td><td>{row.sampleSufficient ? row.paidPer100Qualified?.toFixed(1) : "Not enough data"}</td></tr>)}</tbody>
-        </table></div>
-      )}
-    </article>
-  );
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="commercial-empty">{children}</div>;
 }
 
 function DashboardFilters({ model }: { model: CommercialDashboardReadModel }) {
@@ -125,12 +95,7 @@ function DashboardFilters({ model }: { model: CommercialDashboardReadModel }) {
   );
 }
 
-function Dashboard({ model, reviewQueue, discovery, outreach }: { model: CommercialDashboardReadModel; reviewQueue: CommercialReviewReadModel; discovery: CommercialDiscoveryReadModel; outreach: CommercialOutreachReadModel }) {
-  const kpiCards = [
-    ["Discovered", model.kpis.discovered], ["Qualified", model.kpis.qualified], ["Approved", model.kpis.approved],
-    ["Contacted", model.kpis.contacted], ["Replies", model.kpis.replies], ["Hot Leads", model.kpis.hotLeads],
-    ["Demos", model.kpis.demos], ["Paid Customers", model.kpis.paid],
-  ] as const;
+function Dashboard({ model, reviewQueue, discovery, outreach, feedback }: { model: CommercialDashboardReadModel; reviewQueue: CommercialReviewReadModel; discovery: CommercialDiscoveryReadModel; outreach: CommercialOutreachReadModel; feedback: HumanReviewFeedback }) {
   return (
     <main className="commercial-page">
       <DashboardPageHeader eyebrow="Founder cockpit" title="Commercial" description="What needs you, what the machine is doing, and what is winning — from one owner-only CRM source of truth." badges={[`${model.filters.range === "all" ? "All time" : model.filters.range} cohort`, "Owner only"]} />
@@ -139,13 +104,16 @@ function Dashboard({ model, reviewQueue, discovery, outreach }: { model: Commerc
       <section className="commercial-section-title"><small>FIND THE RIGHT PROSPECTS</small><h2>Discovery machine</h2></section>
       <CommercialDiscoveryPanel initialModel={discovery} />
 
+      <CommercialReviewQuality model={feedback} />
       <section className="commercial-section-title"><small>WHAT NEEDS ME</small><h2>Liam queue</h2></section>
       <CommercialLeadReviewQueue
         initialModel={reviewQueue}
+        canary={feedback}
         cities={model.facets.cities}
         subsegments={model.facets.subsegments}
         returnPath={queryHref(model, {
           page: model.leads.page,
+          review_scope: reviewQueue.filters.scope,
           review_page: reviewQueue.filters.page,
           review_lead: reviewQueue.selectedLead?.id,
           review_priority: reviewQueue.filters.priority,
@@ -159,30 +127,6 @@ function Dashboard({ model, reviewQueue, discovery, outreach }: { model: Commerc
         }).replace("#leads", "#review-queue")}
       />
       <CommercialOutreachQueue initialModel={outreach} />
-      <section className="commercial-queues">
-        <QueueCard eyebrow="Respond" title="Hot Responses" rows={model.queues.hotResponses} empty="No sales-qualified response is waiting." />
-        <QueueCard eyebrow="Prepare" title="Upcoming Demos" rows={model.queues.upcomingDemos} empty="No demo is currently booked in the CRM." />
-        <QueueCard eyebrow="Follow up" title="Needs Sales Action" rows={model.queues.needsSalesAction} empty="No reliable action-due field exists yet; this queue stays empty rather than guessing." />
-      </section>
-
-      <section className="commercial-section-title"><small>WHAT THE MACHINE IS DOING</small><h2>Pipeline health</h2></section>
-      <section className="commercial-kpis">{kpiCards.map(([name, value]) => <AnalyticsKpiCard key={name} label={name} value={formatNumber(value)} detail={`${model.filters.range === "all" ? "All-time" : model.filters.range} lead-created cohort`} />)}</section>
-      <section className="commercial-two-col">
-        <AnalyticsSectionCard eyebrow="Primary business KPI" title="Paid customers / 100 qualified prospects" description={`Paid is sourced only from commercial_conversions. Minimum sample: ${model.metricContract.minimumQualifiedSample} qualified leads.`} tone="accent">
-          <div className="commercial-primary-metric">{model.kpis.paidPer100SampleSufficient ? <><strong>{model.kpis.paidPer100Qualified?.toFixed(1)}</strong><span>customers / 100 qualified leads</span></> : <><strong>—</strong><span>Not enough data</span></>}</div>
-        </AnalyticsSectionCard>
-        <AnalyticsSectionCard eyebrow="Funnel" title="Qualified to Paid" description="Current coherent lead state; Paid is conversion-linked.">
-          {model.funnel.length === 0 || model.kpis.qualified === 0 ? <Empty>No qualified leads in this cohort yet.</Empty> : <div className="commercial-funnel">{model.funnel.map((step, index) => <div key={step.key}><span>{index ? "↓" : ""}</span><strong>{step.label}</strong><b>{formatNumber(step.count)}</b><small>{index === 0 ? "Baseline" : `${step.fromPrevious?.toFixed(1) ?? "—"}% previous · ${step.fromQualified?.toFixed(1) ?? "—"}% qualified`}</small></div>)}</div>}
-        </AnalyticsSectionCard>
-      </section>
-
-      <section className="commercial-section-title"><small>WHAT IS WINNING</small><h2>Performance breakdown</h2></section>
-      <section className="commercial-breakdowns">
-        <BreakdownTable title="Channel" rows={model.breakdowns.channel} /><BreakdownTable title="Angle" rows={model.breakdowns.angle} />
-        <BreakdownTable title="City" rows={model.breakdowns.city} /><BreakdownTable title="Subsegment" rows={model.breakdowns.subsegment} />
-        <BreakdownTable title="Template" rows={model.breakdowns.template} />
-      </section>
-
       <section id="leads" className="commercial-section-title"><small>CRM</small><h2>Leads</h2><p>{formatNumber(model.leads.total)} results · page {model.leads.page}{model.leads.pageCount ? ` of ${model.leads.pageCount}` : ""}</p></section>
       <section className="commercial-leads-card">
         {model.leads.rows.length === 0 ? <Empty>No commercial leads match the current filters. Production remains unseeded by design.</Empty> : <div className="commercial-table-scroll"><table><thead><tr><th>Business</th><th>City</th><th>Subsegment</th><th>Score</th><th>Priority</th><th>Channel</th><th>Angle</th><th>Qualification</th><th>Outreach</th><th>Sales</th><th>Last Activity</th><th>Created</th></tr></thead><tbody>
@@ -217,20 +161,22 @@ export default async function CommercialDashboardPage({ searchParams }: { search
   let reviewQueue: CommercialReviewReadModel | null = null;
   let discovery: CommercialDiscoveryReadModel | null = null;
   let outreach: CommercialOutreachReadModel | null = null;
+  let feedback: HumanReviewFeedback | null = null;
   let loadFailed = false;
   try {
     await requireCommercialCrmAccess();
-    [model, reviewQueue, discovery, outreach] = await Promise.all([
+    [model, reviewQueue, discovery, outreach, feedback] = await Promise.all([
       getCommercialDashboardReadModel(filters),
       getCommercialReviewQueueReadModel(filters, reviewFilters),
       getCommercialDiscoveryReadModel(),
       getCommercialOutreachReadModel(outreachFilters),
+      getHumanReviewFeedback(),
     ]);
   } catch (error) {
     if (error instanceof CommercialCrmAccessError) notFound();
     if (error instanceof CommercialReadModelError || error instanceof CommercialReviewError || error instanceof CommercialOutreachError) loadFailed = true;
     else throw error;
   }
-  if (loadFailed || !model || !reviewQueue || !discovery || !outreach) return <main className="commercial-page"><DashboardPageHeader eyebrow="Founder cockpit" title="Commercial" description="The owner-only CRM read model could not be loaded." /><div className="commercial-empty" role="alert">Commercial data is temporarily unavailable. No outreach or CRM state was changed.</div><CommercialStyles /></main>;
-  return <Dashboard model={model} reviewQueue={reviewQueue} discovery={discovery} outreach={outreach} />;
+  if (loadFailed || !model || !reviewQueue || !discovery || !outreach || !feedback) return <main className="commercial-page"><DashboardPageHeader eyebrow="Founder cockpit" title="Commercial" description="The owner-only CRM read model could not be loaded." /><div className="commercial-empty" role="alert">Commercial data is temporarily unavailable. No outreach or CRM state was changed.</div><CommercialStyles /></main>;
+  return <Dashboard model={model} reviewQueue={reviewQueue} discovery={discovery} outreach={outreach} feedback={feedback} />;
 }

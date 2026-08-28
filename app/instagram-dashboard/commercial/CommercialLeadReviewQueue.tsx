@@ -16,6 +16,7 @@ import { commercialReviewLabel, commercialReviewPriorityLabel, nextCommercialRev
 import CommercialLeadDetail from "./CommercialLeadDetail";
 import CommercialLeadQueueList from "./CommercialLeadQueueList";
 import styles from "./CommercialLeadReviewWorkspace.module.css";
+import type { HumanReviewFeedback } from "@/lib/commercial/human-review-feedback";
 
 type MutationResponse =
   | { ok: true; data: CommercialReviewMutationResult }
@@ -26,11 +27,13 @@ export default function CommercialLeadReviewQueue({
   returnPath,
   cities,
   subsegments,
+  canary,
 }: {
   initialModel: CommercialReviewReadModel;
   returnPath: string;
   cities: string[];
   subsegments: string[];
+  canary: HumanReviewFeedback;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -41,6 +44,8 @@ export default function CommercialLeadReviewQueue({
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState(initialModel.filters.search ?? "");
+  const [reviewSessionActive, setReviewSessionActive] = useState(false);
+  const [reviewReadyId, setReviewReadyId] = useState<string | null>(null);
 
   useEffect(() => {
     setModel(initialModel);
@@ -67,9 +72,34 @@ export default function CommercialLeadReviewQueue({
 
   const selected = model.selectedLead;
   const selectedId = selected?.id ?? null;
+  const member = canary.members.find((m) => m.id === selectedId);
+  const memberId = member?.id;
+  const reviewReady = !member || (reviewSessionActive && reviewReadyId === selectedId);
+  useEffect(() => {
+    if (!reviewSessionActive || !memberId || memberId === reviewReadyId) return;
+    let cancelled = false;
+    fetch(`/api/instagram-dashboard/commercial/leads/${memberId}/review/start`, { method: "POST" })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error("start_failed");
+        if (!cancelled) setReviewReadyId(memberId);
+      }).catch(() => {
+        if (!cancelled) {
+          setReviewSessionActive(false);
+          setFeedback({ tone: "error", message: "Review could not start. Retry before making a decision; nothing was changed." });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [reviewSessionActive, memberId, reviewReadyId]);
+  useEffect(() => {
+    if (canary.approvedWithoutPreview <= canary.terminalFailures || pendingId) return;
+    const timer = window.setInterval(() => router.refresh(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [canary.approvedWithoutPreview, canary.terminalFailures, pendingId, router]);
   const selectedIndex = useMemo(() => model.items.findIndex((item) => item.id === selectedId), [model.items, selectedId]);
 
   function selectLead(id: string) {
+    if (pendingId || isNavigating) return;
     setMobileDetailOpen(true);
     if (id !== selectedId) navigate({ review_lead: id });
   }
@@ -93,7 +123,7 @@ export default function CommercialLeadReviewQueue({
   });
 
   async function mutate(lead: CommercialReviewLead, action: CommercialReviewAction, patch: CommercialReviewPatch) {
-    if (pendingId) return;
+    if (pendingId || !reviewReady || isNavigating) return false;
     setPendingId(lead.id);
     setFeedback(null);
     const nextId = model.items[selectedIndex + 1]?.id ?? model.items[selectedIndex - 1]?.id ?? null;
@@ -130,12 +160,14 @@ export default function CommercialLeadReviewQueue({
             p2: Math.max(0, current.metrics.p2 - (lead.priority === "high" ? 1 : 0)),
           },
         }));
-        setFeedback({ tone: "success", message: action === "approve" ? `${lead.businessName} approved and moved to Ready for Outreach. Nothing was sent.` : `${lead.businessName} rejected. The decision is terminal for this lead.` });
+        setFeedback({ tone: "success", message: action === "approve" ? `${lead.businessName} approved. Its dry-run preview is being generated automatically. Nothing was sent.` : `${lead.businessName} rejected. The decision is terminal for this lead.` });
         const previousPage = !nextId && model.pagination.page > 1 ? model.pagination.page - 1 : model.pagination.page;
         navigate({ review_lead: nextId, review_page: previousPage === 1 ? null : previousPage });
       }
+      return true;
     } catch (error) {
       setFeedback({ tone: "error", message: error instanceof Error ? error.message : "The review request failed closed." });
+      return false;
     } finally {
       setPendingId(null);
     }
@@ -143,7 +175,7 @@ export default function CommercialLeadReviewQueue({
 
   return <section id="review-queue" className={styles.workspace} aria-labelledby="review-workflow-title">
     <div className={styles.heading}>
-      <div className={styles.headingCopy}><small className={styles.eyebrow}>REVIEW</small><h2 id="review-workflow-title">Needs Approval</h2><p>Qualification workspace · P1/P2 first · one selected lead at a time · no outreach.</p></div>
+      <div className={styles.headingCopy}><small className={styles.eyebrow}>REVIEW</small><h2 id="review-workflow-title">Needs Approval</h2><p>{model.filters.scope === "canary" ? "Frozen 25-lead canary · ignores global cohort filters · queue filters still apply" : "All pending leads · P1/P2 first"} · no outreach.</p></div>
       <div className={styles.metrics} aria-label="Approval queue summary"><span><b>{model.pagination.total}</b>Total</span><span><b>{model.metrics.p1}</b>P1</span><span><b>{model.metrics.p2}</b>P2</span></div>
     </div>
 
@@ -151,6 +183,7 @@ export default function CommercialLeadReviewQueue({
     <span className={styles.screenReaderOnly} aria-live="polite">{isNavigating ? "Updating lead qualification workspace" : "Lead qualification workspace ready"}</span>
 
     <div className={styles.toolbar}>
+      <select aria-label="Review scope" value={model.filters.scope ?? "all"} onChange={(event) => navigate({ review_scope: event.target.value, review_page: null, review_lead: null })}><option value="canary">Canary · 15 P1 + 10 P2</option><option value="all">All pending leads</option></select>
       <label className={styles.searchField}><span aria-hidden="true">⌕</span><input aria-label="Search business or Instagram" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} maxLength={120} placeholder="Search business / Instagram…" /></label>
       <select aria-label="Priority filter" value={model.filters.priority ?? ""} onChange={(event) => navigate({ review_priority: event.target.value || null, review_page: null, review_lead: null })}><option value="">All priorities</option>{COMMERCIAL_REVIEW_PRIORITIES.map((value) => <option value={value} key={value}>{commercialReviewPriorityLabel(value)} · {commercialReviewLabel(value)}</option>)}</select>
       <select aria-label="City filter" value={model.filters.city ?? ""} onChange={(event) => navigate({ review_city: event.target.value || null, review_page: null, review_lead: null })}><option value="">All cities</option>{cities.map((value) => <option value={value} key={value}>{value}</option>)}</select>
@@ -165,7 +198,7 @@ export default function CommercialLeadReviewQueue({
       <div className={`${styles.queueSlot} ${mobileDetailOpen ? styles.queueHiddenMobile : ""}`}>
         <CommercialLeadQueueList items={model.items} selectedId={selectedId} total={model.pagination.total} page={model.pagination.page} pageCount={model.pagination.pageCount} navigating={isNavigating} onSelect={selectLead} onPage={(page) => navigate({ review_page: page === 1 ? null : page, review_lead: null })} />
       </div>
-      <CommercialLeadDetail key={`${selectedId ?? "empty"}:${selected?.version ?? 0}`} lead={selected} pending={pendingId === selectedId} returnPath={returnPath} mobileOpen={mobileDetailOpen} previousDisabled={selectedIndex <= 0} nextDisabled={selectedIndex < 0 || selectedIndex >= model.items.length - 1} onBack={() => setMobileDetailOpen(false)} onPrevious={() => moveSelection(-1)} onNext={() => moveSelection(1)} onMutate={mutate} />
+      <CommercialLeadDetail key={`${selectedId ?? "empty"}:${selected?.version ?? 0}`} lead={selected} pending={pendingId === selectedId || isNavigating} canaryMember={member} reviewReady={reviewReady} starting={reviewSessionActive && !reviewReady} onStartReview={() => setReviewSessionActive(true)} returnPath={returnPath} mobileOpen={mobileDetailOpen} previousDisabled={selectedIndex <= 0} nextDisabled={selectedIndex < 0 || selectedIndex >= model.items.length - 1} onBack={() => setMobileDetailOpen(false)} onPrevious={() => moveSelection(-1)} onNext={() => moveSelection(1)} onMutate={mutate} />
     </div>
 
     <div className={styles.readySummary} role="note"><div><small className={styles.eyebrow}>APPROVED · READ ONLY</small><h3>Ready for Outreach</h3><p>Approved leads move into the dry-run message workspace below. No send action exists here.</p></div><div><strong>{model.metrics.readyForOutreach}</strong><span>{model.metrics.readyForOutreach === 1 ? "lead ready" : "leads ready"}</span><a href="#outreach-workspace">Review previews ↓</a></div></div>

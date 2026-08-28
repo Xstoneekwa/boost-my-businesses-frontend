@@ -26,6 +26,7 @@ import {
   safeCommercialReviewUrl,
 } from "@/lib/commercial/lead-review-ui";
 import styles from "./CommercialLeadReviewWorkspace.module.css";
+import type { HumanReviewFeedback } from "@/lib/commercial/human-review-feedback";
 
 function ContextSection({ title, entries, empty }: { title: string; entries: Array<{ label: string; value: string }>; empty: string }) {
   return <section className={styles.contextSection}>
@@ -45,6 +46,10 @@ export default function CommercialLeadDetail({
   onPrevious,
   onNext,
   onMutate,
+  canaryMember,
+  reviewReady = true,
+  starting = false,
+  onStartReview,
 }: {
   lead: CommercialReviewLead | null;
   pending: boolean;
@@ -55,7 +60,11 @@ export default function CommercialLeadDetail({
   onBack: () => void;
   onPrevious: () => void;
   onNext: () => void;
-  onMutate: (lead: CommercialReviewLead, action: CommercialReviewAction, patch: CommercialReviewPatch) => Promise<void>;
+  onMutate: (lead: CommercialReviewLead, action: CommercialReviewAction, patch: CommercialReviewPatch) => Promise<boolean>;
+  canaryMember?: HumanReviewFeedback["members"][number];
+  reviewReady?: boolean;
+  starting?: boolean;
+  onStartReview?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -76,6 +85,14 @@ export default function CommercialLeadDetail({
   const website = safeCommercialReviewUrl(lead.website);
   const reviewPatch = { outreachChannel: channel, messageAngle: angle, priority, personalizationNote, audienceNote };
   const detailHref = `/instagram-dashboard/commercial/leads/${lead.id}?return_to=${encodeURIComponent(returnPath)}`;
+  function cancelEdit() {
+    setChannel((lead!.outreachChannel as CommercialReviewChannel) || "instagram");
+    setAngle((lead!.messageAngle as CommercialReviewAngle) || "A");
+    setPriority((lead!.priority as CommercialReviewPriority) || "normal");
+    setPersonalizationNote(commercialReviewNote(lead!.personalizationContext));
+    setAudienceNote(commercialReviewNote(lead!.audienceContext));
+    setEditing(false);
+  }
 
   return <article className={`${styles.detail} ${mobileOpen ? "" : styles.detailHiddenMobile}`} aria-label={`Review ${lead.businessName}`}>
     <header className={styles.detailHeader}>
@@ -92,6 +109,9 @@ export default function CommercialLeadDetail({
     </header>
 
     <div className={styles.detailBody}>
+      {canaryMember ? <section className={styles.recommendation} aria-label="Canary review tracking"><h4>Canary · original AI baseline</h4><p>{commercialReviewPriorityLabel(canaryMember.aiPriority)} · {commercialReviewScore(canaryMember.aiScore)}/10 · {commercialReviewLabel(canaryMember.aiChannel)} · Angle {canaryMember.aiAngle}</p>
+        {reviewReady ? <p role="status">Review in progress. Elapsed time includes breaks. The next lead starts automatically in this session.</p> : <><p>Start when ready to read the evidence. Merely opening this dashboard records no review.</p><button type="button" className={styles.primaryButton} disabled={starting || pending} onClick={onStartReview}>{starting ? "Starting…" : canaryMember.startedAt ? "Resume review" : "Start review"}</button></>}
+      </section> : null}
       <div className={styles.linkRow}>
         {lead.instagramHandle ? <a href={`https://www.instagram.com/${encodeURIComponent(lead.instagramHandle.replace(/^@/, ""))}`} target="_blank" rel="noreferrer">@{lead.instagramHandle.replace(/^@/, "")} ↗</a> : <span>Instagram not captured</span>}
         {website ? <a href={website} target="_blank" rel="noreferrer">Website ↗</a> : <span>Website not captured</span>}
@@ -120,21 +140,21 @@ export default function CommercialLeadDetail({
         </div>
         <label><span>Personalization note</span><textarea maxLength={1000} rows={3} value={personalizationNote} onChange={(event) => setPersonalizationNote(event.target.value)} disabled={pending} /></label>
         <label><span>Audience / competitor note</span><textarea maxLength={1000} rows={3} value={audienceNote} onChange={(event) => setAudienceNote(event.target.value)} disabled={pending} /></label>
-        <div className={styles.inlineActions}><button type="button" className={styles.primaryButton} onClick={async () => { await onMutate(lead, "update_context", reviewPatch); setEditing(false); }} disabled={pending}>{pending ? "Saving…" : "Save changes"}</button><button type="button" className={styles.quietButton} onClick={() => setEditing(false)} disabled={pending}>Cancel</button></div>
+        <div className={styles.inlineActions}><button type="button" className={styles.primaryButton} onClick={async () => { if (await onMutate(lead, "update_context", reviewPatch)) setEditing(false); }} disabled={pending || !reviewReady}>{pending ? "Saving…" : "Save changes"}</button><button type="button" className={styles.quietButton} onClick={cancelEdit} disabled={pending}>Cancel</button></div>
       </section> : null}
 
       {rejecting ? <section className={styles.rejectPanel} role="dialog" aria-modal="false" aria-labelledby="reject-lead-title">
         <h4 id="reject-lead-title">Why reject this lead?</h4>
-        <label><span>Existing reason</span><select value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value as CommercialRejectionReason | "")} disabled={pending}><option value="">No reason selected</option>{COMMERCIAL_REJECTION_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        {rejectionReason === "other" ? <label><span>Note</span><textarea maxLength={500} rows={2} value={rejectionNote} onChange={(event) => setRejectionNote(event.target.value)} disabled={pending} /></label> : null}
-        <div className={styles.inlineActions}><button type="button" className={styles.dangerButton} onClick={() => onMutate(lead, "reject", { rejectionReason: rejectionReason || undefined, rejectionNote: rejectionReason === "other" ? rejectionNote : undefined })} disabled={pending}>{pending ? "Rejecting…" : "Confirm reject & next"}</button><button type="button" className={styles.quietButton} onClick={() => setRejecting(false)} disabled={pending}>Cancel</button></div>
+        <label><span>Reason</span><select value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value as CommercialRejectionReason | "")} disabled={pending}><option value="">Select a reason</option>{COMMERCIAL_REJECTION_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label><span>Optional note</span><textarea maxLength={500} rows={2} value={rejectionNote} onChange={(event) => setRejectionNote(event.target.value)} disabled={pending} /></label>
+        <div className={styles.inlineActions}><button type="button" className={styles.dangerButton} onClick={() => onMutate(lead, "reject", { rejectionReason: rejectionReason || undefined, rejectionNote })} disabled={pending || !rejectionReason || !reviewReady}>{pending ? "Rejecting…" : "Confirm reject & next"}</button><button type="button" className={styles.quietButton} onClick={() => setRejecting(false)} disabled={pending}>Cancel</button></div>
       </section> : null}
     </div>
 
     <footer className={styles.decisionBar} aria-label="Lead decision controls">
-      <button type="button" className={styles.primaryButton} onClick={() => onMutate(lead, "approve", reviewPatch)} disabled={pending}>{pending ? "Saving…" : "Approve & next"}</button>
-      <button type="button" className={styles.dangerButton} onClick={() => { setRejecting(true); setEditing(false); }} disabled={pending}>Reject</button>
-      <button type="button" className={styles.secondaryButton} onClick={() => { setEditing(true); setRejecting(false); }} disabled={pending}>Edit</button>
+      <button type="button" className={styles.primaryButton} onClick={() => onMutate(lead, "approve", reviewPatch)} disabled={pending || !reviewReady || editing || rejecting}>{pending ? "Saving…" : "Approve & next"}</button>
+      <button type="button" className={styles.dangerButton} onClick={() => { cancelEdit(); setRejecting(true); }} disabled={pending || !reviewReady}>Reject</button>
+      <button type="button" className={styles.secondaryButton} onClick={() => { setEditing(true); setRejecting(false); }} disabled={pending || !reviewReady}>Edit</button>
       <span>No outreach is sent here.</span>
     </footer>
   </article>;

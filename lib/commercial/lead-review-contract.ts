@@ -75,6 +75,7 @@ export type CommercialReviewQueueItem = Omit<
 };
 
 export type CommercialReviewReadFilters = {
+  scope?: "canary" | "all";
   priority?: CommercialReviewPriority;
   city?: string;
   subsegment?: string;
@@ -119,6 +120,7 @@ export function parseCommercialReviewReadFilters(params: Record<string, ReviewQu
   const search = cleanQueryText(params.review_search);
 
   return {
+    scope: firstQueryValue(params.review_scope) === "all" ? "all" : "canary",
     priority: COMMERCIAL_REVIEW_PRIORITIES.includes(rawPriority as CommercialReviewPriority) ? rawPriority as CommercialReviewPriority : undefined,
     city: city || undefined,
     subsegment: subsegment || undefined,

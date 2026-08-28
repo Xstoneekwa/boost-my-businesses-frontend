@@ -130,9 +130,16 @@ export async function processCommercialOutreachBatch(dependencies: CommercialOut
   const items = Array.isArray(data) ? data.map(row) : [];
   let ready = 0; let failed = 0;
   for (const item of items) {
-    const outcome = await processItem(supabase, item, workerId, generate);
-    if (outcome === "ready") ready += 1;
-    else if (outcome === "failed") failed += 1;
+    try {
+      const outcome = await processItem(supabase, item, workerId, generate);
+      if (outcome === "ready") ready += 1;
+      else if (outcome === "failed") failed += 1;
+    } catch {
+      // Persist unexpected generation errors. A DB outage is recovered by the
+      // expiring claim lease; no item remains silently generating forever.
+      await completeFailure(supabase, item, workerId, ["generation_unexpected_failure"]);
+      failed += 1;
+    }
   }
   return { workerId, claimed: items.length, ready, failed, realEmailSend: false, realInstagramDmSend: false, phoneFarmDmExecution: false };
 }
