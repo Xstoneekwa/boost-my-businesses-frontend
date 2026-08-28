@@ -1,6 +1,6 @@
 import type { CommercialOutreachAngle, CommercialOutreachChannel, CommercialOutreachFact } from "./outreach-contract";
 
-export const OUTREACH_QUALITY_VERSION = "commercial_outreach_message_quality_v2";
+export const OUTREACH_QUALITY_VERSION = "commercial_outreach_message_quality_v3";
 export const AUDIENCE_CTA = "Would you like me to show you which Instagram audiences I'd target for your business?";
 
 function clean(value: string) {
@@ -11,7 +11,7 @@ export function hasUnresolvedOutreachPlaceholder(value: string) {
   const normalized = clean(value).replace(/&lt;|&#60;/gi, "<").replace(/&gt;|&#62;/gi, ">");
   // Bracketed substitutions have no valid use in this short plain-text copy.
   // Also reject unmatched braces/brackets rather than let malformed tokens leak.
-  return /[\[\]{}<>]|\b(?:TBD|TODO|TBC|FIXME|PLACEHOLDER|INSERT[_ -]+(?:NAME|TEXT|COMPANY)|YOUR[_ -]+(?:NAME|COMPANY|BUSINESS[_ -]+NAME)|FIRST[_ -]+NAME)\b|%[A-Z_]+%|\$\w+|\bX{3,}\b/i.test(normalized);
+  return /[\[\]{}<>]|\b(?:T[ _.-]?B[ _.-]?D|TO[ _.-]?DO|TBC|FIXME|PLACE[ _-]?HOLDER|INSERT[_ -]+(?:NAME|TEXT|COMPANY)|YOUR[_ -]+(?:NAME|COMPANY|BUSINESS[_ -]+NAME)|FIRST[_ -]+NAME)\b|%[A-Z_]+%|\$\w+|\bX{3,}\b/i.test(normalized);
 }
 
 export function commercialOutreachGreeting(input: { businessName: string; city?: string | null; verifiedFacts?: CommercialOutreachFact[] }) {
@@ -41,17 +41,43 @@ export function commercialOutreachGreeting(input: { businessName: string; city?:
 export function outreachCopyInstructions(channel: CommercialOutreachChannel, angle: CommercialOutreachAngle) {
   return [
     "Never emit unresolved placeholders, bracketed tokens, Your Name, TODO or TBD. Omit unavailable information instead.",
-    "Write the observation in everyday language. Never expose field labels or CRM taxonomy such as subsegment, qualification score or fact ledger. Do not praise expertise, vibrancy, engagement or performance without evidence; a plain verified location or service observation is enough.",
+    "Write the observation in everyday language. Never expose field labels or CRM taxonomy such as subsegment, qualification score or fact ledger. Do not praise expertise, vibrancy, engagement or performance without evidence. Preserve a specific verified service/bio/booking observation when available; city-only is a fallback for sparse facts.",
     "Core proposition: Your next customers are already on Instagram. BMB helps bring them to you.",
-    "Explain briefly that BMB identifies relevant Instagram audiences, including audiences of competitors or similar businesses, to help attract qualified potential customers. Describe a capability, not guaranteed outcomes or facts about a named competitor.",
+    "Required chain in order: verified observation → opportunity → concrete BMB mechanism → potential benefit → light CTA. Explain the mechanism in ONE connected statement, or two adjacent linked sentences: BMB identifies relevant Instagram audiences around competitors/similar businesses AND uses targeted interactions to bring those people to the prospect's Instagram profile, helping attract potential customers or support qualified growth. Do not omit targeted interactions or the profile destination. A list of keywords or merely finding audiences is insufficient. Describe a capability, not a guaranteed result.",
     angle === "A" ? "Angle A: growth, visibility alongside similar businesses/competitors, reaching relevant potential customers." : "Angle B: acquisition, finding potential customers in relevant Instagram audiences.",
     "Include BMB, Instagram, relevant audiences and potential customers/qualified growth explicitly. Do not offer content creation, generic engagement consultancy, automated replies or booking management.",
+    angle === "A"
+      ? "Mechanism example (adapt naturally): BMB identifies relevant Instagram audiences around similar businesses and uses targeted interactions to bring those people to your profile, helping grow your visibility among potential customers."
+      : "Mechanism example (adapt naturally): BMB identifies relevant Instagram audiences around similar businesses and uses targeted interactions to bring those people to your profile, helping you reach potential customers.",
     `End with exactly this light CTA: ${AUDIENCE_CTA}`,
     channel === "instagram"
       ? "Instagram DM: 45–85 words, maximum 650 characters. Greeting, one short verified observation, one concrete BMB opportunity, then CTA. No subject, sign-off, signature, P.S., demo request, Meta Ads claim or long presentation."
       : "Email: 85–140 words, maximum 1200 characters, with a specific subject and short paragraphs: verified observation, opportunity, BMB value, audience angle, CTA. Do not append a signature. Do not reuse the short DM body. The optional approved comparison is exactly 'up to 3–4× less than Meta Ads'; omit unless genuinely useful. No other numerical or performance claims.",
-    "No unsupported praise, market leadership, inferred owner/first name, named competitor, spend, revenue, customer counts, growth rates or claims about the prospect's performance. Omit missing facts.",
+    "Never say qualified leads eager to engage, ready to buy, guaranteed customers or guaranteed sales. Interest and purchase intent are unknown. Use potential customers or qualified growth. No unsupported praise, market leadership, inferred owner/first name, named competitor, spend, revenue, customer counts, growth rates or claims about the prospect's performance. No signature or sign-off: no canonical sender is configured. Omit missing facts.",
   ].join(" ");
+}
+
+// BMB_VALUE_PROPOSITION_PRESENT: ordered, connected clauses, not a keyword bag.
+// Deliberately bounded/deterministic; this is not a claim of full semantic proof.
+export function hasBmbValueProposition(body: string, angle: CommercialOutreachAngle) {
+  const statements = clean(body).match(/[^.!?]+[.!?]?/g) ?? [];
+  return statements.some((sentence, index) => {
+    const start = sentence.search(/\bBMB\s+(?:(?:helps?\s+(?:you\s+)?|can\s+))?(?:identif(?:y|ies)|finds?|targets?|locates?)\b/i);
+    if (start < 0 || /\?/.test(sentence)) return false;
+    const next = statements[index + 1] ?? "";
+    const linked = /^\s*(?:We\s|It\s|Through targeted interactions|Using targeted interactions)/i.test(next) && !/\?/.test(next) ? next : "";
+    const mechanism = (sentence.slice(start) + linked).trim();
+    if (mechanism.length > 500 || /\b(?:not|never|cannot|can't|don't|doesn't|won't|without|no)\b/i.test(mechanism)) return false;
+    const audience = /\b(?:relevant|targeted|qualified)\s+Instagram\s+audiences?\b|\b(?:relevant|targeted|qualified)\s+audiences?\s+(?:on|across)\s+Instagram\b/i.exec(mechanism);
+    if (!audience || !/\b(?:competitors?|similar businesses)\b/i.test(mechanism)) return false;
+    const afterAudience = mechanism.slice(audience.index + audience[0].length);
+    const interaction = /\b(?:(?:and\s+)?(?:uses?|makes?|through|using|with)\s+targeted interactions|interacts?\s+(?:with\s+(?:them|those people)\s+)?in a targeted way)\b/i.exec(afterAudience);
+    if (!interaction) return false;
+    const result = afterAudience.slice(interaction.index + interaction[0].length);
+    const profile = /\b(?:to\s+)?(?:help\s+)?(?:bring|attract|draw|direct|lead|guide)\b[^.!?]{0,85}\b(?:to|towards?)\s+your\s+(?:Instagram\s+)?profile\b/i.exec(result);
+    if (!profile || !/\b(?:potential customers|qualified growth)\b/i.test(result)) return false;
+    return angle === "B" || /\b(?:grow|growth|visibility)\b/i.test(mechanism);
+  });
 }
 
 export function inspectCommercialOutreachQuality(input: {
@@ -65,10 +91,7 @@ export function inspectCommercialOutreachQuality(input: {
   const hey = hi.replace(/^Hi /, "Hey ");
   const starts = (g: string) => body.startsWith(g) && (body.length === g.length || /\s/.test(body[g.length]));
   const naturalGreeting = starts(hi) || starts(hey);
-  const valuePropClear = /\bBMB\b/i.test(body) && /\bInstagram\b/i.test(body)
-    && /\b(?:relevant|qualified|targeted)\b/i.test(body) && /\baudiences?\b/i.test(body)
-    && /\b(?:customers?|prospects?|qualified growth)\b/i.test(body)
-    && /\b(?:identify|identifies|find|finds|reach|reaches|connect|connects|attract|attracts|bring|brings|target|targets|help|helps)\b/i.test(body);
+  const valuePropClear = hasBmbValueProposition(body, input.angle);
   const sentences = body.match(/[^.!?]+[.!?]?/g) ?? [];
   const ctaClear = sentences.some((s) => /\?\s*$/.test(s) && /\b(?:show|share|see)\b/i.test(s)
     && /\b(?:audiences?|accounts?)\b/i.test(s) && /\bInstagram\b/i.test(s)
@@ -79,9 +102,11 @@ export function inspectCommercialOutreachQuality(input: {
   if (!valuePropClear) codes.push("bmb_value_proposition_missing");
   if (!ctaClear) codes.push("concrete_audience_cta_missing");
   if (/\b(?:book|schedule)\b[^.!?]{0,35}\b(?:demo|call|meeting)\b/i.test(body)) codes.push("premature_demo_cta");
-  if (/\b(?:best|regards|cheers|sincerely)\s*,\s*$/i.test(body) || /\bP\.?S\.?\s*:/i.test(body)) codes.push("incomplete_or_email_style_signature");
+  if (/\b(?:best(?: regards)?|kind regards|regards|cheers|sincerely)\s*,/i.test(body) || /\bP\.?S\.?\s*:/i.test(body)) codes.push("incomplete_or_email_style_signature");
+  if (ctaClear && !/\?\s*$/.test(body)) codes.push("content_after_cta_or_signature");
   if (/\b(?:content creation|creat(?:e|ing) (?:engaging )?content|manual content|manage your bookings|automated replies)\b/i.test(body)) codes.push("offer_positioning_mismatch");
   if (/\b(?:guarantee(?:d)?|leading (?:salon|clinic|studio)|number one|market leader)\b|\b\d[\d,.]*\s*(?:new |more |extra )?(?:customers?|clients?|leads?|bookings?|sales)\b/i.test(body)) codes.push("unsupported_commercial_claim");
+  if (/\b(?:eager to engage|ready to buy|ready[- ]to[- ]buy|guaranteed? (?:customers|sales)|will (?:buy|book|purchase)|customers who (?:want|need) your services)\b/i.test(combined)) codes.push("assumed_purchase_intent");
   const comparison = "up to 3–4× less than Meta Ads";
   if (/Meta Ads|\d\s*[×x]|\d+\s*%/i.test(combined) && (input.channel === "instagram" || !combined.includes(comparison) || /\d\s*[×x]|\d+\s*%/i.test(combined.replace(comparison, "")))) codes.push("unapproved_performance_comparison");
   const wordCount = body.split(/\s+/).length;

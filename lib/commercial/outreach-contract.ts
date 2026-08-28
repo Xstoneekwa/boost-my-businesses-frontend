@@ -19,7 +19,18 @@ export const COMMERCIAL_OUTREACH_STATES = [
 export const COMMERCIAL_OUTREACH_STATUS_TABS = ["ready", "approved", "failed", "cancelled", "all"] as const;
 export const COMMERCIAL_OUTREACH_SORTS = ["newest", "confidence"] as const;
 
-export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_message_quality_v2";
+export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_message_quality_v3";
+
+// Routing families remain V1: the lead synchronizer relies on those stable keys.
+// Copy versions are append-only catalogue entries, never a routing change.
+export const COMMERCIAL_OUTREACH_COPY_KEYS = [
+  "IG_BEAUTY_ANGLE_A_V3", "IG_BEAUTY_ANGLE_B_V3",
+  "EMAIL_BEAUTY_ANGLE_A_V3", "EMAIL_BEAUTY_ANGLE_B_V3",
+] as const;
+export type CommercialOutreachCopyKey = (typeof COMMERCIAL_OUTREACH_COPY_KEYS)[number];
+export function commercialOutreachCopyTemplateKey(channel: CommercialOutreachChannel, angle: CommercialOutreachAngle): CommercialOutreachCopyKey {
+  return `${channel === "instagram" ? "IG" : "EMAIL"}_BEAUTY_ANGLE_${angle}_V3`;
+}
 
 export type CommercialOutreachChannel = (typeof COMMERCIAL_OUTREACH_CHANNELS)[number];
 export type CommercialOutreachAngle = (typeof COMMERCIAL_OUTREACH_ANGLES)[number];
@@ -39,7 +50,8 @@ export type CommercialOutreachGeneratedMessage = {
   body: string;
   channel: CommercialOutreachChannel;
   angle: CommercialOutreachAngle;
-  template_version: CommercialOutreachTemplateKey;
+  template_version: CommercialOutreachTemplateKey | CommercialOutreachCopyKey;
+  personalization_evidence?: { key: string; quote: string };
   personalization_summary: string;
   facts_used: Array<{ key: string; value: string }>;
   confidence: number;

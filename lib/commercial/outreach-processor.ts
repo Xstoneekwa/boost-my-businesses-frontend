@@ -2,7 +2,7 @@ import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { generateCommercialOutreachMessage } from "./outreach-ai";
-import { COMMERCIAL_OUTREACH_PROMPT_VERSION, type CommercialOutreachAngle, type CommercialOutreachChannel, type CommercialOutreachTemplateKey } from "./outreach-contract";
+import { COMMERCIAL_OUTREACH_PROMPT_VERSION, commercialOutreachCopyTemplateKey, type CommercialOutreachAngle, type CommercialOutreachChannel } from "./outreach-contract";
 import { buildCommercialOutreachFactLedger } from "./outreach-facts";
 import { commercialOutreachContentHash, validateCommercialOutreachMessage } from "./outreach-validation";
 
@@ -44,9 +44,15 @@ async function processItem(
   workerId: string,
   generate: typeof generateCommercialOutreachMessage,
 ) {
+  const copyKey = commercialOutreachCopyTemplateKey(text(item.channel) as CommercialOutreachChannel, text(item.angle) as CommercialOutreachAngle);
+  // Never label a new V3 generation with an old immutable copy version.
+  if (item.template_version !== copyKey) {
+    await completeFailure(supabase, item, workerId, ["copy_version_requires_regeneration"]);
+    return "failed";
+  }
   const [{ data: leadData, error: leadError }, { data: templateData, error: templateError }] = await Promise.all([
     supabase.from("commercial_leads").select("id,campaign_id,business_id,qualification_status,outreach_status,priority,city_snapshot,subsegment_snapshot,outreach_channel,message_angle").eq("id", text(item.lead_id)).single<Row>(),
-    supabase.from("commercial_outreach_templates").select("template_key,channel,angle,intent,active").eq("template_key", text(item.template_key)).single<Row>(),
+    supabase.from("commercial_outreach_templates").select("template_key,channel,angle,intent,active").eq("template_key", copyKey).single<Row>(),
   ]);
   if (leadError || templateError || !leadData || !templateData) {
     await completeFailure(supabase, item, workerId, ["generation_context_unavailable"]);
@@ -87,7 +93,7 @@ async function processItem(
   const generated = await generate({
     channel: text(item.channel) as CommercialOutreachChannel,
     angle: text(item.angle) as CommercialOutreachAngle,
-    templateKey: text(item.template_key) as CommercialOutreachTemplateKey,
+    templateKey: copyKey,
     templateIntent: text(template.intent),
     businessName,
     verifiedFacts,

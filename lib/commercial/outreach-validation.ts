@@ -82,6 +82,19 @@ export function validateCommercialOutreachMessage(input: {
     if (!verified.has(`${normalized(fact.key)}\u0000${normalized(fact.value)}`)) codes.add("unverified_fact_used");
   }
   if (!factsUsed.some((fact) => fact.key !== "business_name")) codes.add("verified_personalization_missing");
+  // Generated V3 copy carries literal evidence, not a model's self-rated truth
+  // boolean. The source quote must occur in both the ledger and the observation.
+  // Owner edits / historical messages retain their existing facts contract.
+  if (message.personalization_evidence) {
+    const { key, quote } = message.personalization_evidence;
+    const fact = input.verifiedFacts.find((candidate) => candidate.key === key);
+    const observation = body.split(/\bBMB\b/i)[0];
+    if (!fact || key === "business_name" || key === "instagram_handle" || key === "instagram_profile_name"
+      || quote.trim().length < 3 || !contains(fact.value, quote) || !contains(observation, quote)
+      || !factsUsed.some((used) => used.key === key && normalized(used.value) === normalized(fact.value))) codes.add("personalization_evidence_mismatch");
+    if (input.verifiedFacts.some((candidate) => candidate.key === "instagram_bio")
+      && (key !== "instagram_bio" || (input.city && normalized(quote) === normalized(input.city)))) codes.add("rich_personalization_missing");
+  }
   if (!Number.isFinite(message.confidence) || message.confidence < 0 || message.confidence > 1) codes.add("confidence_invalid");
 
   return { ok: codes.size === 0, codes: [...codes].sort() };
