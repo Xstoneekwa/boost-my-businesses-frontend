@@ -147,7 +147,7 @@ a { color: inherit; text-decoration: none; }
 .nav-cta-soft:hover { color: var(--accent); }
 
 /* ---------- HERO ---------- */
-.hero { background: var(--hero-bg); color: var(--hero-ink); padding: 78px 0 64px; position: relative; overflow: hidden; }
+.hero { background: var(--hero-bg); color: var(--hero-ink); padding: 58px 0 46px; position: relative; overflow: hidden; }
 .hero-inner { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
 .hero-inner.hero-solo { grid-template-columns: 1fr; max-width: none; text-align: center; }
 .hero-inner.hero-solo .hero-trustline { justify-content: center; }
@@ -179,6 +179,18 @@ body.dir-neon .rotator {
 .hero-micro span { display: inline-flex; align-items: center; gap: 7px; }
 .hero-micro .ck { color: var(--good); font-weight: 900; }
 
+/* First-purchase offer: presentation only; billing and checkout stay unchanged. */
+.launch-offer { text-align: center; }
+.hero-offer { margin: 18px auto 0; }
+.offer-title { display: block; color: var(--accent); font-family: var(--font-display); font-size: clamp(1.35rem, 3vw, 1.7rem); line-height: 1.2; }
+.launch-offer .offer-summary { margin-top: 9px; color: var(--ink); font-size: 1.05rem; font-weight: 700; line-height: 1.5; }
+.launch-offer .offer-detail { margin-top: 6px; color: var(--ink-dim); font-size: .9rem; line-height: 1.6; }
+.hero-offer .offer-summary { margin-top: 4px; }
+.hero-offer + .hero-cta { margin-top: 18px; }
+.hero .hero-micro { margin-top: 12px; }
+.pricing-offer { margin-top: 26px; padding: 22px 24px; border: 1px solid var(--accent-ring); border-radius: var(--radius-sm); background: var(--accent-tint); }
+#top, #pricing, #how { scroll-margin-top: 90px; }
+
 /* ---------- logo marquee ---------- */
 .marquee-wrap {
   padding: 34px 0; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2);
@@ -193,13 +205,34 @@ body.dir-neon .rotator {
   display: flex; gap: 60px; align-items: center; padding-right: 60px;
   animation: scroll-x 30s linear infinite;
 }
+.marquee-wrap #logoTrack { gap: 0; padding-right: 0; flex: none; }
+.logo-set { display: flex; align-items: center; gap: 60px; padding-right: 60px; flex: none; }
 .marquee .wm-logo {
-  height: 44px; width: auto; max-width: 132px; object-fit: contain; flex: none;
-  opacity: .46; filter: brightness(0) saturate(0); transition: opacity .2s;
+  display: flex; align-items: center; justify-content: center; width: 132px; height: 44px; flex: none;
+  /* Only surplus source-background padding is clipped; brand artwork stays visible. */
+  overflow: hidden; opacity: .58; transition: opacity .2s;
 }
-body.dir-neon .marquee .wm-logo { filter: brightness(0) saturate(0) invert(1); opacity: .58; }
+.wm-logo img { width: var(--logo-size, 132px); height: auto; max-width: none; object-fit: contain; flex: none; filter: var(--logo-filter, grayscale(1) contrast(2)) url(#logo-matte); }
+.wm-fitness24 { --logo-size: 44px; --logo-filter: grayscale(1) contrast(1.8); }
+.wm-kick { --logo-size: 44px; }
+.wm-miladys { --logo-size: 132px; }
+.wm-obscura { --logo-filter: grayscale(1) contrast(3) brightness(2) contrast(2); }
+.wm-obscura img { clip-path: inset(35% 0); }
+.wm-miladys img { clip-path: inset(30% 2%); }
+.wm-pizza-hut { --logo-size: 64px; --logo-filter: grayscale(1) invert(1) contrast(2); }
+.wm-planet-fitness { --logo-filter: grayscale(1) brightness(3) invert(1) contrast(2); }
+.wm-proud-mary { --logo-size: 132px; --logo-filter: grayscale(1) invert(1) brightness(3) contrast(1.5); }
+.wm-rcl-foods { --logo-size: 44px; --logo-filter: grayscale(1) invert(1) contrast(2); }
+.wm-shakers { --logo-size: 68px; --logo-filter: grayscale(1) invert(1) contrast(2); }
+.wm-smoking-kills { --logo-size: 44px; --logo-filter: grayscale(1) brightness(4) invert(1) contrast(2); }
+.wm-vapiano { --logo-filter: grayscale(1) contrast(3); }
 .marquee .wm-logo:hover { opacity: .85; }
 @keyframes scroll-x { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .marquee-wrap .marquee { overflow-x: auto; mask-image: none; -webkit-mask-image: none; }
+  .marquee-wrap #logoTrack { animation: none; }
+  .logo-set[aria-hidden="true"] { display: none; }
+}
 
 /* ---------- strip ---------- */
 .strip { background: var(--accent); color: #fff; overflow: hidden; padding: 14px 0; }
@@ -521,6 +554,11 @@ body.dir-neon .cta-final {
 }
 
 /* ---------- responsive ---------- */
+@media (max-width: 1400px) {
+  #top, #pricing, #how { scroll-margin-top: 160px; }
+  .nav-inner { height: auto; min-height: 72px; flex-wrap: wrap; justify-content: center; padding-top: 12px; padding-bottom: 12px; gap: 14px 26px; }
+  .nav-right { margin-left: 0; flex-wrap: wrap; justify-content: center; }
+}
 @media (max-width: 1000px) {
   .features { grid-template-columns: repeat(2, 1fr); }
   .inds { grid-template-columns: repeat(2, 1fr); }
@@ -536,7 +574,15 @@ body.dir-neon .cta-final {
 @media (max-width: 600px) {
   .wrap { padding: 0 18px; }
   .features, .inds, .pricing { grid-template-columns: 1fr; }
-  .hero { padding: 52px 0 44px; }
+  .hero { padding: 44px 0 32px; }
+  .hero .hero-cta .btn { padding: 16px 22px; }
+  .hero-cta .btn { max-width: 100%; white-space: normal; text-align: center; }
+  .hero-micro { justify-content: center; text-align: center; gap: 10px 18px; }
+  .hero-micro > span { max-width: 100%; }
+  .hero-micro > span > span:last-child { min-width: 0; }
+  .pricing-offer { padding: 20px 16px; }
+  .bill-toggle { display: inline-grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 100%; border-radius: 24px; }
+  .bill-toggle button { padding: 12px 16px; }
   .footer-top { flex-direction: column; }
   .cmp-head, .cmp-row { grid-template-columns: 1fr 80px 120px; }
   .cmp-lbl-good span:last-child { display: none; }
