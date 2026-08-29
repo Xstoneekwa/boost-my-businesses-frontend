@@ -729,10 +729,12 @@ export default function ClientAccountsSection({
           ? responseData.connect_operation_token.trim()
           : "";
         let connectProgress: ClientConnectProgressSnapshot | null = null;
-        try {
-          connectProgress = await syncConnectProgress(account.accountId, connectOperationToken || null);
-        } catch {
-          connectProgress = null;
+        if (connectOperationToken) {
+          try {
+            connectProgress = await syncConnectProgress(account.accountId, connectOperationToken);
+          } catch {
+            connectProgress = null;
+          }
         }
         const reconciledProgress = reconcileClientConnectProgressLineage({
           previous: null,
@@ -760,23 +762,16 @@ export default function ClientAccountsSection({
       });
       if (pending) nextAccount = { ...nextAccount, operationPending: true };
 
-      let connectProgress: ClientConnectProgressSnapshot | null = null;
-      try {
-        connectProgress = await syncConnectProgress(account.accountId, null);
-      } catch {
-        // Readiness remains usable when the live projection is temporarily unavailable.
-      }
-
       const terminal = mode === "check_readiness"
         ? true
-        : isTerminalProcessAccount(nextAccount, mode, lang, connectProgress);
+        : isTerminalProcessAccount(nextAccount, mode, lang, null);
       setProcessModal({
         mode,
         username: nextAccount.username,
         accountId: nextAccount.accountId,
         account: nextAccount,
         connectPhase: terminal ? "complete" : "polling",
-        connectProgress,
+        connectProgress: null,
         timedOut: false,
       });
     } catch {

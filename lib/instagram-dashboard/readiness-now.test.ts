@@ -11,7 +11,7 @@ const assignmentId = "assignment-1";
 function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
   return {
     ig_accounts: [{ id: accountId, username: "demo", status: "active", admin_lifecycle_status: "active" }],
-    account_credentials: [{ account_id: accountId, status: "active", reauth_required: false }],
+    account_credentials: [{ account_id: accountId, provider: "instagram", status: "active", credentials_version: 1, reauth_required: false }],
     client_instagram_accounts: [{ account_id: accountId, login_status: "unknown", provisioning_status: "not_started", onboarding_status: "pending" }],
     account_package_summary: [{ account_id: accountId, runtime_profiles: ["full_cycle"], package_caps: { follow_day: 20, follow_session: 20 }, entitlements: [] }],
     ig_account_settings: [{ account_id: accountId }],
@@ -196,9 +196,52 @@ test("readiness now returns needs_credentials when credentials are missing", asy
   assert.equal(supabase.rpcCalls.length, 0);
 });
 
+test("readiness now selects active V3 and ignores superseded credential history", async () => {
+  const supabase = makeSupabase(baseRows({
+    account_credentials: [
+      { account_id: accountId, provider: "instagram", status: "superseded", credentials_version: 1, reauth_required: false },
+      { account_id: accountId, provider: "instagram", status: "superseded", credentials_version: 2, reauth_required: false },
+      { account_id: accountId, provider: "instagram", status: "active", credentials_version: 3, reauth_required: true, reauth_reason: "awaiting_login_verification" },
+    ],
+  }));
+
+  const result = await runReadinessNow(supabase.client, {
+    accountId,
+    now: new Date("2026-06-09T08:01:00.000Z"),
+    dryRun: true,
+  });
+
+  assert.equal(result.readiness_status, "ready_to_connect");
+  assert.equal(result.client_status, "ready_to_connect");
+  assert.equal(result.reason, "credentials_saved_pending_verification");
+  assert.equal(result.preflight_request_created, false);
+});
+
+test("readiness now fails closed on duplicate active Instagram credentials", async () => {
+  const supabase = makeSupabase(baseRows({
+    account_credentials: [
+      { account_id: accountId, provider: "instagram", status: "active", credentials_version: 2, reauth_required: false },
+      { account_id: accountId, provider: "instagram", status: "active", credentials_version: 3, reauth_required: true },
+    ],
+  }));
+
+  const result = await runReadinessNow(supabase.client, {
+    accountId,
+    now: new Date("2026-06-09T08:01:00.000Z"),
+    dryRun: true,
+  });
+
+  assert.equal(result.readiness_status, "retry_later");
+  assert.equal(result.client_status, "try_again_later");
+  assert.equal(result.reason, "multiple_active_instagram_credentials");
+  assert.deepEqual(result.blockers, ["multiple_active_instagram_credentials"]);
+  assert.equal(result.preflight_request_created, false);
+  assert.equal(supabase.rpcCalls.length, 0);
+});
+
 test("readiness now dry-run returns ready_to_connect when active credentials await login verification", async () => {
   const supabase = makeSupabase(baseRows({
-    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
+    account_credentials: [{ account_id: accountId, provider: "instagram", status: "active", credentials_version: 1, reauth_required: true, reauth_reason: "awaiting_login_verification" }],
     account_assignments: [{
       ...baseRows().account_assignments[0],
       starts_at: "2026-06-09T07:00:00.000Z",
@@ -229,7 +272,7 @@ test("readiness now dry-run returns ready_to_connect when active credentials awa
 
 test("readiness now dry-run is not blocked by missing CT targets during login verification", async () => {
   const supabase = makeSupabase(baseRows({
-    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
+    account_credentials: [{ account_id: accountId, provider: "instagram", status: "active", credentials_version: 1, reauth_required: true, reauth_reason: "awaiting_login_verification" }],
     ig_targets: [],
     account_assignments: [{
       ...baseRows().account_assignments[0],
@@ -252,7 +295,7 @@ test("readiness now dry-run is not blocked by missing CT targets during login ve
 
 test("readiness now creates login preflight when credentials await verification and dry-run is false", async () => {
   const supabase = makeSupabase(baseRows({
-    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true, reauth_reason: "awaiting_login_verification" }],
+    account_credentials: [{ account_id: accountId, provider: "instagram", status: "active", credentials_version: 1, reauth_required: true, reauth_reason: "awaiting_login_verification" }],
   }));
 
   const result = await runReadinessNow(supabase.client, {

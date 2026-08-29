@@ -16,7 +16,7 @@ const appInstanceId = "clone-b-1";
 function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
   return {
     ig_accounts: [{ id: accountId, username: "demo", status: "active", admin_lifecycle_status: "active" }],
-    account_credentials: [{ account_id: accountId, status: "active", reauth_required: true }],
+    account_credentials: [{ account_id: accountId, provider: "instagram", status: "active", credentials_version: 1, reauth_required: true }],
     client_instagram_accounts: [{ account_id: accountId, login_status: "pending", provisioning_status: "login_pending", onboarding_status: "ready" }],
     account_package_summary: [{ account_id: accountId, runtime_profiles: ["full_cycle"], package_caps: { follow_day: 20, follow_session: 20 }, entitlements: [] }],
     ig_account_settings: [{ account_id: accountId }],

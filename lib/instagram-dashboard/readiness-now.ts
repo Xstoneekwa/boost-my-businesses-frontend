@@ -6,6 +6,7 @@ import {
   hasClientOnboardingTargetMinimum,
 } from "../instagram-client/client-account-onboarding-policy.ts";
 import { NEEDS_MORE_TARGET_ACCOUNTS_THRESHOLD } from "./needs-more-target-accounts.ts";
+import { loadCanonicalActiveInstagramCredential } from "./canonical-active-instagram-credential.ts";
 import type { createSupabaseClient } from "../supabase.ts";
 
 export type ReadinessNowMode = "readiness_only" | "connect_enqueue";
@@ -395,8 +396,8 @@ export async function runReadinessNow(
     });
   }
 
-  const [credential, clientStatus, packageSummary, settingsRow, filtersRow, dmSettingsRow, targetCounts, blockingDashboardActionCount] = await Promise.all([
-    selectOne(supabase, "account_credentials", input.accountId, "status,reauth_required"),
+  const [credentialSelection, clientStatus, packageSummary, settingsRow, filtersRow, dmSettingsRow, targetCounts, blockingDashboardActionCount] = await Promise.all([
+    loadCanonicalActiveInstagramCredential(supabase, input.accountId),
     selectOne(supabase, "client_instagram_accounts", input.accountId, "account_id,login_status,provisioning_status,onboarding_status"),
     selectOneOptional(supabase, "account_package_summary", input.accountId, "account_id,commercial_package_code,runtime_profiles,package_caps,entitlements"),
     selectOneOptional(supabase, "ig_account_settings", input.accountId, "account_id"),
@@ -405,6 +406,27 @@ export async function runReadinessNow(
     countAccountTargets(supabase, input.accountId),
     countBlockingDashboardActions(supabase, input.accountId),
   ]);
+  if (credentialSelection.status === "invariant_violation") {
+    return safeResult({
+      audience,
+      readiness_status: "retry_later",
+      client_status: "try_again_later",
+      assignment_status: "blocked",
+      phone_available: null,
+      app_instance_available: null,
+      preflight_request_created: false,
+      idempotent: false,
+      next_action: "review_account",
+      reason: credentialSelection.reason,
+      blockers: [credentialSelection.reason],
+      checks: {
+        account_exists: true,
+        credentials_active: false,
+        credentials_invariant_valid: false,
+      },
+    });
+  }
+  const credential = credentialSelection.credential;
   const targetsRequired = accountPackageRequiresTargets(packageSummary);
   const onboardingComplete = normalize(clientStatus?.onboarding_status) === "ready";
   const onboardingTargetGateApplies = targetsRequired && !onboardingComplete;
