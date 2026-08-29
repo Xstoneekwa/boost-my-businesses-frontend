@@ -41,6 +41,10 @@ export type ClientInstagramAccountView = {
   clientReadinessStatus?: string | null;
   activeConnectStatus?: string | null;
   operationPending?: boolean;
+  temporaryActionLimit?: {
+    detectedAt: string | null;
+    recommendedPauseUntil: string | null;
+  } | null;
 };
 
 type Props = {
@@ -826,15 +830,28 @@ export default function ClientAccountsSection({
                 operationPending: account.operationPending,
               }, lang);
               const lifecycle = projectCommercialLifecyclePresentation(account.accountStatus, lang);
+              const actionLimit = account.temporaryActionLimit;
+              const actionLimitLabel = actionLimit
+                ? labelFor(lang, "Pause de 48 h requise", "48h pause required")
+                : null;
+              const actionLimitDetail = actionLimit
+                ? labelFor(
+                    lang,
+                    `Instagram a temporairement limité certaines actions.${actionLimit.recommendedPauseUntil ? ` Pause recommandée jusqu’au ${new Date(actionLimit.recommendedPauseUntil).toLocaleString("fr-FR")}.` : ""}`,
+                    `Instagram temporarily limited some actions.${actionLimit.recommendedPauseUntil ? ` Recommended pause until ${new Date(actionLimit.recommendedPauseUntil).toLocaleString("en-GB")}.` : ""}`,
+                  )
+                : null;
               return (
                 <article className="cd-account-row" key={account.accountId}>
                   <div className="cd-account-main">
                     <strong>@{account.username}</strong>
                     <small>{account.packageLabel}</small>
-                    <span className={`cd-account-pill cd-account-pill-${lifecycle?.tone ?? ui.badgeTone}`}>
-                      {lifecycle?.label ?? ui.badgeLabel}
+                    <span className={`cd-account-pill cd-account-pill-${actionLimit ? "warning" : lifecycle?.tone ?? ui.badgeTone}`}>
+                      {actionLimitLabel ?? lifecycle?.label ?? ui.badgeLabel}
                     </span>
-                    {lifecycle ? (
+                    {actionLimit ? (
+                      <p className="cd-account-subtext">{actionLimitDetail}</p>
+                    ) : lifecycle ? (
                       <p className="cd-account-subtext">
                         {labelFor(lang, `Statut de connexion : ${ui.badgeLabel}`, `Connection status: ${ui.badgeLabel}`)}
                       </p>

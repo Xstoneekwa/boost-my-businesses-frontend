@@ -79,6 +79,10 @@ export type ClientAccountProjectionInput = {
   readinessStatus?: string;
   activeConnectStatus?: string | null;
   operationPending?: boolean;
+  temporaryActionLimit?: {
+    detectedAt: string | null;
+    recommendedPauseUntil: string | null;
+  } | null;
 };
 
 export function projectClientAccountRow(input: ClientAccountProjectionInput) {
@@ -105,5 +109,6 @@ export function projectClientAccountRow(input: ClientAccountProjectionInput) {
     ...(clientReadinessStatus ? { clientReadinessStatus } : {}),
     ...(activeConnectStatus ? { activeConnectStatus } : {}),
     ...(input.operationPending ? { operationPending: true } : {}),
+    ...(input.temporaryActionLimit ? { temporaryActionLimit: input.temporaryActionLimit } : {}),
   };
 }
