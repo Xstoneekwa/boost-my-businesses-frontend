@@ -628,6 +628,7 @@ export default function ClientDashboard({
   const [passwordNotifications, setPasswordNotifications] = useState(initialNotifications);
   const [passwordUpdateTarget, setPasswordUpdateTarget] = useState<ClientPasswordUpdateTarget | null>(null);
   const [passwordUpdateRevision, setPasswordUpdateRevision] = useState(0);
+  const [postPasswordRetryRequest, setPostPasswordRetryRequest] = useState<{ accountId: string; revision: number } | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   useEffect(() => {
@@ -1377,6 +1378,7 @@ export default function ClientDashboard({
               displayMode={connectionActionPanel.showAccountActions ? "accounts" : "add_only"}
               accountScopeId={connectionActionPanel.accountScopeId}
               passwordUpdateRevision={passwordUpdateRevision}
+              postPasswordRetryRequest={postPasswordRetryRequest}
               onPasswordUpdateRequested={setPasswordUpdateTarget}
             />
             {demoMode ? (
@@ -1827,6 +1829,15 @@ export default function ClientDashboard({
             ? "Mot de passe enregistré. Relancez la connexion Instagram quand vous êtes prêt."
             : "Password saved. Restart the Instagram connection when you are ready.");
           router.refresh();
+        }}
+        onRestart={(accountId) => {
+          setPasswordUpdateTarget(null);
+          if (agencyModeActive) setOverviewScope(accountId);
+          setActiveView("overview");
+          setPostPasswordRetryRequest((current) => ({
+            accountId,
+            revision: (current?.revision ?? 0) + 1,
+          }));
         }}
       />
 

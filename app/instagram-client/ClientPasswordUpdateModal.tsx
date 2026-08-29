@@ -15,6 +15,7 @@ type Props = {
   target: ClientPasswordUpdateTarget | null;
   onClose: () => void;
   onSuccess: (result: { accountId: string; actionId: string; credentialsVersion: number }) => void;
+  onRestart: (accountId: string) => void;
 };
 
 type SubmitState = "idle" | "submitting" | "error" | "success";
@@ -23,7 +24,7 @@ function labelFor(lang: "fr" | "en", fr: string, en: string) {
   return lang === "fr" ? fr : en;
 }
 
-export default function ClientPasswordUpdateModal({ open, lang, target, onClose, onSuccess }: Props) {
+export default function ClientPasswordUpdateModal({ open, lang, target, onClose, onSuccess, onRestart }: Props) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
@@ -187,7 +188,20 @@ export default function ClientPasswordUpdateModal({ open, lang, target, onClose,
               </button>
             </>
           ) : (
-            <button type="button" className="cd-btn cd-btn-primary" onClick={close}>{labelFor(lang, "Fermer", "Close")}</button>
+            <>
+              <button type="button" className="cd-btn cd-btn-soft" onClick={close}>{labelFor(lang, "Fermer", "Close")}</button>
+              <button
+                type="button"
+                className="cd-btn cd-btn-primary"
+                onClick={() => {
+                  const accountId = target.accountId;
+                  close();
+                  onRestart(accountId);
+                }}
+              >
+                {labelFor(lang, "Relancer la connexion Instagram", "Restart Instagram connection")}
+              </button>
+            </>
           )}
         </div>
       </section>

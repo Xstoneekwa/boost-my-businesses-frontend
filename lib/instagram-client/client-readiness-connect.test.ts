@@ -17,7 +17,7 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
   return {
     ig_accounts: [{ id: accountId, username: "demo", status: "active", admin_lifecycle_status: "active" }],
     account_credentials: [{ account_id: accountId, status: "active", reauth_required: true }],
-    client_instagram_accounts: [{ account_id: accountId, login_status: "unknown", provisioning_status: "not_started", onboarding_status: "pending" }],
+    client_instagram_accounts: [{ account_id: accountId, login_status: "pending", provisioning_status: "login_pending", onboarding_status: "ready" }],
     account_package_summary: [{ account_id: accountId, runtime_profiles: ["full_cycle"], package_caps: { follow_day: 20, follow_session: 20 }, entitlements: [] }],
     ig_account_settings: [{ account_id: accountId }],
     ig_account_filters: [{ account_id: accountId }],
@@ -82,6 +82,9 @@ function makeSupabase(rows = baseRows(), slotAvailable = false, rpcError: string
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
+        if (name === "account_package_runtime_contract_status") {
+          return Promise.resolve({ data: { ok: true, reason: "ready" }, error: null });
+        }
         if (name === "list_available_assignment_slots") {
           return Promise.resolve({
             data: {
@@ -130,6 +133,7 @@ test("passive readiness with valid A16-02-style assignment returns ready_to_conn
     dryRun: true,
     mode: "readiness_only",
     now: new Date("2026-06-22T03:00:00.000Z"),
+    resolveOrphanRecovery: async () => ({ state: "none", blockingClient: false, botappActionAvailable: false, detectedAt: null, hasActiveLoginProvisioning: false }),
   });
   assert.equal(result.client_status, "ready_to_connect");
   assert.equal(result.preflight_request_created, false);
@@ -145,6 +149,7 @@ test("passive readiness without assignment returns preparation_pending and no lo
     dryRun: true,
     mode: "readiness_only",
     now: new Date("2026-06-22T03:00:00.000Z"),
+    resolveOrphanRecovery: async () => ({ state: "none", blockingClient: false, botappActionAvailable: false, detectedAt: null, hasActiveLoginProvisioning: false }),
   });
   assert.equal(projectClientReadinessStatus(result), "preparation_pending");
   assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
@@ -160,6 +165,7 @@ test("passive readiness with offline phone returns device_temporarily_unavailabl
     dryRun: true,
     mode: "readiness_only",
     now: new Date("2026-06-22T03:00:00.000Z"),
+    resolveOrphanRecovery: async () => ({ state: "none", blockingClient: false, botappActionAvailable: false, detectedAt: null, hasActiveLoginProvisioning: false }),
   });
   assert.equal(projectClientReadinessStatus(result), "device_temporarily_unavailable");
   assert.equal(supabase.rpcCalls.some((call) => call.name === "create_account_run_request"), false);
@@ -173,12 +179,13 @@ test("connect enqueue uses attempt-scoped idempotency and creates a new request"
     assignmentId,
     deadlineAt: "2026-06-22T10:00:00.000Z",
   });
+  const createCall = supabase.rpcCalls.find((call) => call.name === "create_account_run_request");
   assert.equal(result.preflight_request_created, true);
   assert.equal(supabase.rpcCalls.filter((call) => call.name === "create_account_run_request").length, 1);
-  assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "login_provisioning");
-  assert.equal(supabase.rpcCalls[0]?.args.p_actor_type, "client");
-  assert.equal(supabase.rpcCalls[0]?.args.p_source_surface, "instagram_client_connect");
-  assert.match(String(supabase.rpcCalls[0]?.args.p_idempotency_key), /^login-preflight-now:assignment-1:/);
+  assert.equal(createCall?.args.p_requested_run_type, "login_provisioning");
+  assert.equal(createCall?.args.p_actor_type, "client");
+  assert.equal(createCall?.args.p_source_surface, "instagram_client_connect");
+  assert.match(String(createCall?.args.p_idempotency_key), /^login-preflight-now:assignment-1:/);
 });
 
 test("connect enqueue maps rpc invalid_actor_type to rejected enqueue", async () => {
@@ -225,6 +232,7 @@ test("passive readiness stays ready_to_connect without dm settings or targets", 
     dryRun: true,
     mode: "readiness_only",
     now: new Date("2026-06-22T03:00:00.000Z"),
+    resolveOrphanRecovery: async () => ({ state: "none", blockingClient: false, botappActionAvailable: false, detectedAt: null, hasActiveLoginProvisioning: false }),
   });
   assert.equal(result.client_status, "ready_to_connect");
   assert.equal(projectClientReadinessStatus(result), "ready_to_connect");

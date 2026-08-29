@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ClientAccountProcessModal from "./ClientAccountProcessModal";
 import ClientVerificationModal from "./ClientVerificationModal";
@@ -54,6 +54,7 @@ type Props = {
   displayMode?: "accounts" | "add_only";
   accountScopeId?: string | null;
   passwordUpdateRevision?: number;
+  postPasswordRetryRequest?: { accountId: string; revision: number } | null;
   onPasswordUpdateRequested?: (target: ClientPasswordUpdateTarget) => void;
 };
 
@@ -128,6 +129,7 @@ export default function ClientAccountsSection({
   displayMode = "accounts",
   accountScopeId = null,
   passwordUpdateRevision = 0,
+  postPasswordRetryRequest = null,
   onPasswordUpdateRequested,
 }: Props) {
   const router = useRouter();
@@ -147,6 +149,7 @@ export default function ClientAccountsSection({
   const pollTimerRef = useRef<number | null>(null);
   const connectHydratedRef = useRef(false);
   const connectSubmissionRef = useRef(false);
+  const postPasswordRetryHandledRef = useRef(0);
 
   useEffect(() => {
     setItems(accounts);
@@ -788,6 +791,20 @@ export default function ClientAccountsSection({
       setActionAccountId(null);
     }
   }
+
+  const runPostPasswordRetryReadiness = useEffectEvent((account: ClientInstagramAccountView) => {
+    void runConnectProcess(account, "check_readiness");
+  });
+
+  useEffect(() => {
+    if (!postPasswordRetryRequest) return;
+    if (postPasswordRetryHandledRef.current === postPasswordRetryRequest.revision) return;
+    if (actionBusy || processModal) return;
+    const account = items.find((row) => row.accountId === postPasswordRetryRequest.accountId);
+    if (!account) return;
+    postPasswordRetryHandledRef.current = postPasswordRetryRequest.revision;
+    runPostPasswordRetryReadiness(account);
+  }, [actionBusy, items, postPasswordRetryRequest, processModal]);
 
   function confirmVerifiedConnection() {
     const account = processModal?.account;

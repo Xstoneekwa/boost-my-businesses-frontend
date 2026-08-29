@@ -351,6 +351,7 @@ export async function runReadinessNow(
     now?: Date;
     dryRun?: boolean;
     mode?: ReadinessNowMode;
+    resolveOrphanRecovery?: typeof resolveOrphanLoginRecoveryProjection;
   },
 ): Promise<ReadinessNowResult> {
   const audience = input.audience ?? "admin";
@@ -689,7 +690,7 @@ export async function runReadinessNow(
   }
 
   if (passiveOnly) {
-    const orphanRecovery = await resolveOrphanLoginRecoveryProjection(input.accountId).catch(() => null);
+    const orphanRecovery = await (input.resolveOrphanRecovery ?? resolveOrphanLoginRecoveryProjection)(input.accountId).catch(() => null);
     if (audience === "client" && orphanRecovery?.blockingClient) {
       return safeResult({
         audience,
