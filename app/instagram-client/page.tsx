@@ -66,10 +66,11 @@ async function getClientDashboardNotifications(clientId: string): Promise<Client
   const [{ data: passwordActions }, { data: verificationActions }, { data: accounts }, { data: clientAccounts }] = await Promise.all([
     supabase
       .from("account_dashboard_actions")
-      .select("id,account_id,status,safe_client_message,action_deep_link,created_at")
+      .select("id,account_id,status,requires_client_action,safe_client_message,action_deep_link,created_at")
       .in("account_id", accountIds)
       .eq("action_type", "update_instagram_password")
       .eq("audience", "client")
+      .eq("requires_client_action", true)
       .in("status", ["pending", "acknowledged", "pending_verification"])
       .order("created_at", { ascending: false })
       .limit(20),

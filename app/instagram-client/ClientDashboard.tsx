@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientNotificationsPanel from "./ClientNotificationsPanel";
+import ClientPasswordUpdateModal, { type ClientPasswordUpdateTarget } from "./ClientPasswordUpdateModal";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import ClientAgencyModeBanner from "./ClientAgencyModeBanner";
 import ClientAgencyOverviewPanel from "./ClientAgencyOverviewPanel";
@@ -616,7 +617,14 @@ export default function ClientDashboard({
     unfollow_whitelist: "",
   });
   const [accountNotifications, setAccountNotifications] = useState(initialAccountNotifications);
+  const [passwordNotifications, setPasswordNotifications] = useState(initialNotifications);
+  const [passwordUpdateTarget, setPasswordUpdateTarget] = useState<ClientPasswordUpdateTarget | null>(null);
+  const [passwordUpdateRevision, setPasswordUpdateRevision] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    setPasswordNotifications(initialNotifications);
+  }, [initialNotifications]);
 
   const t = T[lang];
   const connectionActionPanel = resolveClientConnectionActionPanel({
@@ -1286,9 +1294,9 @@ export default function ClientDashboard({
           />
         ) : null}
 
-        {initialNotifications.length > 0 && (
+        {passwordNotifications.length > 0 && (
           <section className="cd-action-alerts" aria-label="Required account actions">
-            {initialNotifications.map((notification) => (
+            {passwordNotifications.map((notification) => (
               <article className="cd-action-alert" key={notification.id}>
                 <div className="cd-action-alert-ic">
                   <svg viewBox="0 0 24 24" width={16} height={16} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -1303,7 +1311,14 @@ export default function ClientDashboard({
                   <strong>{lang === "fr" ? "Mise à jour du mot de passe Instagram requise" : "Instagram password update required"}</strong>
                   <p>{notification.message}</p>
                 </div>
-                <button className="cd-btn cd-btn-primary" onClick={() => handleNotificationNavigate(notification.actionHref)}>
+                <button
+                  className="cd-btn cd-btn-primary"
+                  onClick={() => setPasswordUpdateTarget({
+                    accountId: notification.accountId,
+                    actionId: notification.id,
+                    username: notification.username,
+                  })}
+                >
                   {lang === "fr" ? "Mettre à jour" : "Update password"}
                 </button>
               </article>
@@ -1329,6 +1344,8 @@ export default function ClientDashboard({
               accounts={hasLinkedInstagramAccount ? connectionActionPanel.accounts : []}
               displayMode={connectionActionPanel.showAccountActions ? "accounts" : "add_only"}
               accountScopeId={connectionActionPanel.accountScopeId}
+              passwordUpdateRevision={passwordUpdateRevision}
+              onPasswordUpdateRequested={setPasswordUpdateTarget}
             />
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
@@ -1766,6 +1783,21 @@ export default function ClientDashboard({
         }}
       />
 
+      <ClientPasswordUpdateModal
+        open={Boolean(passwordUpdateTarget)}
+        lang={lang}
+        target={passwordUpdateTarget}
+        onClose={() => setPasswordUpdateTarget(null)}
+        onSuccess={({ actionId }) => {
+          setPasswordNotifications((current) => current.filter((notification) => notification.id !== actionId));
+          setPasswordUpdateRevision((current) => current + 1);
+          setAccountMessage(lang === "fr"
+            ? "Mot de passe enregistré. Relancez la connexion Instagram quand vous êtes prêt."
+            : "Password saved. Restart the Instagram connection when you are ready.");
+          router.refresh();
+        }}
+      />
+
       {connectProgress ? (
         <div className="cd-progress-overlay" role="presentation" onMouseDown={() => setConnectProgress(null)}>
           <section className="cd-progress-modal" role="dialog" aria-modal="true" aria-labelledby="cd-progress-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -2190,6 +2222,7 @@ const CSS = `
 .cd-connect-actions{display:flex;gap:10px;flex-wrap:wrap}
 .cd-verification-label{display:block;color:#94A3B8;font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .cd-verification-input{width:100%;border:1px solid var(--line);border-radius:12px;background:#0B1020;color:#E5E7EB;padding:12px 14px;font-size:1rem}
+.cd-password-update-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
 .cd-verification-hint{margin:0;color:#778299;font-size:.82rem;line-height:1.45}
 .cd-verification-error{margin:0;border:1px solid rgba(248,113,113,.35);border-radius:12px;background:rgba(127,29,29,.22);color:#FCA5A5;padding:10px 12px;font-size:.84rem;line-height:1.45}
 .cd-progress-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px;background:rgba(2,6,23,.74)}

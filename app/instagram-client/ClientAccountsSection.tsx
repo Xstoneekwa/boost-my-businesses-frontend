@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ClientAccountProcessModal from "./ClientAccountProcessModal";
 import ClientVerificationModal from "./ClientVerificationModal";
+import type { ClientPasswordUpdateTarget } from "./ClientPasswordUpdateModal";
 import ClientInstagramOnboardingWizard from "./ClientInstagramOnboardingWizard";
 import { resolveClientAccountConnectionUi } from "@/lib/instagram-client/client-account-connection-ui";
 import {
@@ -52,6 +53,8 @@ type Props = {
   accounts: ClientInstagramAccountView[];
   displayMode?: "accounts" | "add_only";
   accountScopeId?: string | null;
+  passwordUpdateRevision?: number;
+  onPasswordUpdateRequested?: (target: ClientPasswordUpdateTarget) => void;
 };
 
 type ActionKind = "readiness" | "connect" | "refresh" | "cancel" | null;
@@ -124,6 +127,8 @@ export default function ClientAccountsSection({
   accounts,
   displayMode = "accounts",
   accountScopeId = null,
+  passwordUpdateRevision = 0,
+  onPasswordUpdateRequested,
 }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
@@ -247,6 +252,11 @@ export default function ClientAccountsSection({
     router.refresh();
     return scopedAccounts;
   }, [accountScopeId, lang, router]);
+
+  useEffect(() => {
+    if (passwordUpdateRevision <= 0) return;
+    void refreshFromServer();
+  }, [passwordUpdateRevision, refreshFromServer]);
 
   async function confirmCancelRestart() {
     if (!cancelConfirmAccount) return;
@@ -979,8 +989,18 @@ export default function ClientAccountsSection({
         onClose={closeProcessModal}
         onOpenVerification={() => setVerificationDismissed(false)}
         onUpdatePassword={() => {
+          const actionId = processModal?.connectProgress?.action_required?.id ?? "";
+          const accountId = processModal?.accountId ?? "";
+          const username = processModal?.username ?? "";
           closeProcessModal();
-          router.push("/instagram-client?view=account");
+          if (actionId && accountId && onPasswordUpdateRequested) {
+            onPasswordUpdateRequested({ actionId, accountId, username });
+          } else {
+            pushMessage(
+              labelFor(lang, "Action de mot de passe indisponible. Actualisez puis réessayez.", "Password action unavailable. Refresh and try again."),
+              "error",
+            );
+          }
         }}
       />
 

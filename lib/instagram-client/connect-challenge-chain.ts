@@ -21,7 +21,11 @@ export function findActiveVerificationAction(actionRows: Record<string, unknown>
   return actionRows.find((row) => {
     const actionType = readString(row.action_type);
     const status = readString(row.status).toLowerCase();
-    return ACTION_REQUIRED_TYPES.has(actionType) && ACTIVE_ACTION_STATUSES.has(status);
+    const clientPasswordWritePending = actionType === "update_instagram_password"
+      && row.requires_client_action !== true;
+    return ACTION_REQUIRED_TYPES.has(actionType)
+      && ACTIVE_ACTION_STATUSES.has(status)
+      && !clientPasswordWritePending;
   }) ?? null;
 }
 
@@ -29,6 +33,7 @@ function isActiveVerificationActionRow(action: Record<string, unknown> | null | 
   if (!action) return false;
   const actionType = readString(action.action_type);
   const status = readString(action.status).toLowerCase();
+  if (actionType === "update_instagram_password" && action.requires_client_action !== true) return false;
   return ACTION_REQUIRED_TYPES.has(actionType) && ACTIVE_ACTION_STATUSES.has(status);
 }
 
