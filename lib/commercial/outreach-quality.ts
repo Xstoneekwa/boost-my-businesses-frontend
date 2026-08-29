@@ -57,27 +57,22 @@ export function outreachCopyInstructions(channel: CommercialOutreachChannel, ang
   ].join(" ");
 }
 
-// BMB_VALUE_PROPOSITION_PRESENT: ordered, connected clauses, not a keyword bag.
-// Deliberately bounded/deterministic; this is not a claim of full semantic proof.
+// BMB_VALUE_PROPOSITION_PRESENT: coherent substance across the whole message,
+// not an exact clause shape or a keyword bag. Deliberately deterministic.
 export function hasBmbValueProposition(body: string, angle: CommercialOutreachAngle) {
-  const statements = clean(body).match(/[^.!?]+[.!?]?/g) ?? [];
-  return statements.some((sentence, index) => {
-    const start = sentence.search(/\bBMB\s+(?:(?:helps?\s+(?:you\s+)?|can\s+))?(?:identif(?:y|ies)|finds?|targets?|locates?)\b/i);
-    if (start < 0 || /\?/.test(sentence)) return false;
-    const next = statements[index + 1] ?? "";
-    const linked = /^\s*(?:We\s|It\s|Through targeted interactions|Using targeted interactions)/i.test(next) && !/\?/.test(next) ? next : "";
-    const mechanism = (sentence.slice(start) + linked).trim();
-    if (mechanism.length > 500 || /\b(?:not|never|cannot|can't|don't|doesn't|won't|without|no)\b/i.test(mechanism)) return false;
-    const audience = /\b(?:relevant|targeted|qualified)\s+Instagram\s+audiences?\b|\b(?:relevant|targeted|qualified)\s+audiences?\s+(?:on|across)\s+Instagram\b/i.exec(mechanism);
-    if (!audience || !/\b(?:competitors?|similar businesses)\b/i.test(mechanism)) return false;
-    const afterAudience = mechanism.slice(audience.index + audience[0].length);
-    const interaction = /\b(?:(?:and\s+)?(?:uses?|makes?|through|using|with)\s+targeted interactions|interacts?\s+(?:with\s+(?:them|those people)\s+)?in a targeted way)\b/i.exec(afterAudience);
-    if (!interaction) return false;
-    const result = afterAudience.slice(interaction.index + interaction[0].length);
-    const profile = /\b(?:to\s+)?(?:help\s+)?(?:bring|attract|draw|direct|lead|guide)\b[^.!?]{0,85}\b(?:to|towards?)\s+your\s+(?:Instagram\s+)?profile\b/i.exec(result);
-    if (!profile || !/\b(?:potential customers|qualified growth)\b/i.test(result)) return false;
-    return angle === "B" || /\b(?:grow|growth|visibility)\b/i.test(mechanism);
-  });
+  const message = clean(body);
+  const bmb = message.search(/\bBMB\b/i);
+  if (bmb < 0) return false;
+  const proposition = message.slice(bmb, bmb + 650);
+  if (/\bBMB\b[^.!?]{0,80}\b(?:not|never|cannot|can't|doesn't|won't|without)\b/i.test(proposition)) return false;
+  const solutionActs = /\bBMB\b[^.!?]{0,180}\b(?:identif(?:y|ies)|finds?|targets?|locates?|reaches?|brings?|attracts?|connects?|drives?|taps? into|helps? (?:you )?(?:reach|bring|attract|connect|drive|tap into))\b/i.test(proposition);
+  const instagramAudience = /\bInstagram\b/i.test(message) && (/\b(?:relevant|targeted|qualified|engaged|right)\b[^.!?]{0,45}\b(?:audiences?|followers?|people)\b|\b(?:audiences?|followers?|people)\b[^.!?]{0,45}\b(?:relevant|targeted|qualified|engaged|right)\b/i.test(message));
+  const targetingContext = /\b(?:competitors?|similar businesses|targeted interactions?|people[^.!?]{0,35}(?:to|towards?) your (?:Instagram )?profile)\b/i.test(message);
+  const profileMovement = /\b(?:bring|drive|direct|guide|lead|attract|connect)\b[^.!?]{0,100}\b(?:people|them|audiences?|followers?)?[^.!?]{0,45}\b(?:to|towards?) your (?:Instagram )?profile\b/i.test(message)
+    || /\b(?:reach|target|tap into|connect with|attract)\b[^.!?]{0,100}\b(?:relevant|targeted|qualified|engaged|right)\b[^.!?]{0,45}\b(?:audiences?|followers?|people)\b/i.test(message);
+  const benefit = /\b(?:potential customers?|qualified growth|relevant followers?|engaged followers?|qualified audience growth|(?:stronger|grow(?:ing)? (?:your )?)visibility[^.!?]{0,35}(?:right|relevant|targeted) audience|grow(?:ing)? (?:your )?(?:relevant audience|qualified audience))\b/i.test(message);
+  return solutionActs && instagramAudience && targetingContext && profileMovement && benefit
+    && (angle === "B" || /\b(?:grow|growth|visibility)\b/i.test(message));
 }
 
 export function inspectCommercialOutreachQuality(input: {
@@ -105,7 +100,7 @@ export function inspectCommercialOutreachQuality(input: {
   if (/\b(?:best(?: regards)?|kind regards|regards|cheers|sincerely)\s*,/i.test(body) || /\bP\.?S\.?\s*:/i.test(body)) codes.push("incomplete_or_email_style_signature");
   if (ctaClear && !/\?\s*$/.test(body)) codes.push("content_after_cta_or_signature");
   if (/\b(?:content creation|creat(?:e|ing) (?:engaging )?content|manual content|manage your bookings|automated replies)\b/i.test(body)) codes.push("offer_positioning_mismatch");
-  if (/\b(?:guarantee(?:d)?|leading (?:salon|clinic|studio)|number one|market leader)\b|\b\d[\d,.]*\s*(?:new |more |extra )?(?:customers?|clients?|leads?|bookings?|sales)\b/i.test(body)) codes.push("unsupported_commercial_claim");
+  if (/\b(?:guarantee(?:d)?|leading (?:salon|clinic|studio)|number one|market leader)\b|\b\d[\d,.]*\s*(?:(?:new|more|extra|paying|qualified)\s+)?(?:customers?|clients?|leads?|bookings?|sales)\b/i.test(body)) codes.push("unsupported_commercial_claim");
   if (/\b(?:eager to engage|ready to buy|ready[- ]to[- ]buy|guaranteed? (?:customers|sales)|will (?:buy|book|purchase)|customers who (?:want|need) your services)\b/i.test(combined)) codes.push("assumed_purchase_intent");
   const comparison = "up to 3–4× less than Meta Ads";
   if (/Meta Ads|\d\s*[×x]|\d+\s*%/i.test(combined) && (input.channel === "instagram" || !combined.includes(comparison) || /\d\s*[×x]|\d+\s*%/i.test(combined.replace(comparison, "")))) codes.push("unapproved_performance_comparison");

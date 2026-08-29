@@ -5,10 +5,11 @@ import type {
   CommercialOutreachGeneratedMessage,
 } from "./outreach-contract";
 
-const internalPattern = /system prompt|developer message|internal instruction|debug output|json payload|\b(?:subsegment|qualification score|fact ledger)\b|```|"(?:channel|angle|facts_used|confidence)"\s*:/i;
-const unsupportedClaimPattern = /(?:your|you have|you've had|you are doing)\s+(?:revenue|ad spend|customer count|growth rate|\d+\s+customers)|you spend\s+[^.]*\s+on ads|your owner|your monthly sales|your conversion rate/i;
+const internalPattern = /system prompt|developer message|internal instruction|debug output|json payload|tool (?:call|output)|function (?:call|result)|assistant to=|\b(?:subsegment|qualification score|fact ledger)\b|```|"(?:channel|angle|facts_used|confidence)"\s*:/i;
+const unsupportedClaimPattern = /(?:your|you have|you've had|you are doing)\s+(?:revenue|ad spend|customer count|growth rate|\d+\s+customers)|you(?: currently)? spend\s+[^.]*\s+on (?:Meta )?Ads|your owner|your monthly sales|your conversion rate/i;
 const emailFormattingPattern = /^(?:subject|to|from):/im;
 const knownCities = ["Johannesburg", "Cape Town", "Pretoria", "Durban"];
+const foreignCountryPattern = /\b(?:United States|USA|United Kingdom|UK|Nigeria|Kenya|Australia|Canada|France|Germany)\b/i;
 
 function normalized(value: string) {
   return value.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-ZA");
@@ -16,6 +17,25 @@ function normalized(value: string) {
 function contains(haystack: string, needle: string) {
   return normalized(haystack).includes(normalized(needle));
 }
+
+const semanticStopWords = new Set(["a", "an", "and", "as", "at", "for", "in", "of", "on", "our", "service", "services", "the", "to", "we", "with", "your"]);
+function semanticTokens(value: string) {
+  return normalized(value).replace(/colour/g, "color").replace(/make[ -]?up/g, "makeup")
+    .replace(/[^\p{L}\p{N}]+/gu, " ").split(/\s+/).filter((token) => token.length > 2 && !semanticStopWords.has(token))
+    .map((token) => token.endsWith("ies") ? `${token.slice(0, -3)}y` : token.endsWith("s") && token.length > 4 ? token.slice(0, -1) : token);
+}
+function semanticallyContains(haystack: string, claim: string) {
+  const source = new Set(semanticTokens(haystack));
+  const wanted = [...new Set(semanticTokens(claim))];
+  return wanted.length >= 1 && wanted.filter((token) => source.has(token)).length / wanted.length >= 0.75;
+}
+
+const serviceFamilies = [
+  ["lash", /\b(?:lash(?:es)?|mega volume|russian volume)\b/i], ["brow", /\b(?:brows?|microblading)\b/i],
+  ["nail", /\b(?:nails?|manicure|pedicure)\b/i], ["injectable", /\b(?:botox|fillers?|injectables?)\b/i],
+  ["hair_extension", /\bhair extensions?\b/i], ["hair_color", /\bhair colou?r(?:ing)?\b/i],
+  ["precision_cut", /\bprecision cuts?\b/i], ["bridal", /\bbridal\b/i], ["makeup", /\bmake[ -]?up\b/i],
+] as const;
 
 function stringRecord(value: unknown): { key: string; value: string } | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -65,6 +85,7 @@ export function validateCommercialOutreachMessage(input: {
       codes.add("wrong_city_reference");
     }
   }
+  if (foreignCountryPattern.test(combined)) codes.add("wrong_country_reference");
 
   for (const otherName of input.otherBusinessNames ?? []) {
     if (otherName.length >= 5 && normalized(otherName) !== normalized(input.businessName) && contains(combined, otherName)) {
@@ -82,15 +103,18 @@ export function validateCommercialOutreachMessage(input: {
     if (!verified.has(`${normalized(fact.key)}\u0000${normalized(fact.value)}`)) codes.add("unverified_fact_used");
   }
   if (!factsUsed.some((fact) => fact.key !== "business_name")) codes.add("verified_personalization_missing");
-  // Generated V3 copy carries literal evidence, not a model's self-rated truth
-  // boolean. The source quote must occur in both the ledger and the observation.
+  const evidenceCorpus = input.verifiedFacts.map((fact) => fact.value).join(" ");
+  for (const [, pattern] of serviceFamilies) if (pattern.test(body) && !pattern.test(evidenceCorpus)) codes.add("unsupported_service_claim");
+  // Generated V3 copy carries evidence, not a model's self-rated truth boolean.
+  // A faithful normalized paraphrase must be supported by both the ledger and
+  // the pre-BMB observation; the complete facts_used entry remains exact.
   // Owner edits / historical messages retain their existing facts contract.
   if (message.personalization_evidence) {
     const { key, quote } = message.personalization_evidence;
     const fact = input.verifiedFacts.find((candidate) => candidate.key === key);
     const observation = body.split(/\bBMB\b/i)[0];
     if (!fact || key === "business_name" || key === "instagram_handle" || key === "instagram_profile_name"
-      || quote.trim().length < 3 || !contains(fact.value, quote) || !contains(observation, quote)
+      || quote.trim().length < 3 || !semanticallyContains(fact.value, quote) || !semanticallyContains(observation, quote)
       || !factsUsed.some((used) => used.key === key && normalized(used.value) === normalized(fact.value))) codes.add("personalization_evidence_mismatch");
     if (input.verifiedFacts.some((candidate) => candidate.key === "instagram_bio")
       && (key !== "instagram_bio" || (input.city && normalized(quote) === normalized(input.city)))) codes.add("rich_personalization_missing");
