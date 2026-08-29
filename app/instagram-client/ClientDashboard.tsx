@@ -72,7 +72,13 @@ type ClientProgressSnapshot = {
   run_id: string | null;
   status: "unknown" | "queued" | "claimed" | "running" | "action_required" | "connected" | "failed" | "stopped";
   reason: string | null;
-  action_required: null | { title: string; message: string; status: string };
+  action_required: null | {
+    id: string;
+    action_type: string;
+    title: string;
+    message: string;
+    status: string;
+  };
   steps: Array<{ id: string; label: string; subtitle: string; status: "pending" | "running" | "done" | "failed" | "action_required" | "skipped" }>;
   process_log: Array<{ id: string; timestamp: string; phase: string; message: string }>;
 };
@@ -99,6 +105,8 @@ function projectCanonicalConnectProgress(snapshot: ClientConnectProgressSnapshot
     reason: snapshot.message,
     action_required: snapshot.action_required
       ? {
+        id: snapshot.action_required.id,
+        action_type: snapshot.action_required.action_type,
         title: snapshot.action_required.title,
         message: snapshot.action_required.message,
         status: snapshot.action_required.status,
@@ -1034,6 +1042,30 @@ export default function ClientDashboard({
   const notificationBadge = notificationsFeatureAvailable && accountNotifications.activeCount > 0
     ? accountNotifications.activeCount
     : undefined;
+  const progressPasswordTarget = connectProgress
+    ? (() => {
+        const liveAction = connectProgress.snapshot?.action_required;
+        if (liveAction?.action_type === "update_instagram_password" && liveAction.id) {
+          return {
+            actionId: liveAction.id,
+            accountId: connectProgress.account.accountId,
+            username: connectProgress.account.username,
+            message: liveAction.message,
+          };
+        }
+        const notification = passwordNotifications.find(
+          (row) => row.accountId === connectProgress.account.accountId,
+        );
+        return notification
+          ? {
+              actionId: notification.id,
+              accountId: notification.accountId,
+              username: notification.username,
+              message: notification.message,
+            }
+          : null;
+      })()
+    : null;
   const overviewRecentFeed = hasOverviewInsights ? (accountInsights?.recentFeed ?? []) : [];
   const overviewStats = buildOverviewStats(accountInsights, lang);
   const followerChartUsername = agencyModeActive
@@ -1805,10 +1837,11 @@ export default function ClientDashboard({
               <div>
                 <span>@{connectProgress.account.username} · Instagram</span>
                 <h3 id="cd-progress-title">{t.account.connectTitle}</h3>
-                <p>{connectProgress.snapshot?.status === "action_required" ? t.account.connectActionRequired : t.account.connectBody}</p>
+                <p>{progressPasswordTarget?.message || (connectProgress.snapshot?.status === "action_required" ? t.account.connectActionRequired : t.account.connectBody)}</p>
               </div>
-              <em className={`status-${connectProgress.snapshot?.status || "running"}`}>
-                {connectProgress.snapshot?.status === "connected" ? (lang === "fr" ? "Connecté" : "Connected")
+              <em className={`status-${progressPasswordTarget ? "action_required" : connectProgress.snapshot?.status || "running"}`}>
+                {progressPasswordTarget ? (lang === "fr" ? "Mot de passe requis" : "Password required")
+                  : connectProgress.snapshot?.status === "connected" ? (lang === "fr" ? "Connecté" : "Connected")
                   : connectProgress.snapshot?.status === "action_required" ? (lang === "fr" ? "Action requise" : "Action required")
                     : connectProgress.snapshot?.status === "failed" ? (lang === "fr" ? "Échec" : "Failed")
                       : (lang === "fr" ? "En cours" : "In progress")}
@@ -1827,14 +1860,29 @@ export default function ClientDashboard({
                 </div>
               ))}
             </section>
-            {connectProgress.snapshot?.action_required ? (
-              <p className="cd-progress-action">{connectProgress.snapshot.action_required.message || t.account.connectActionRequired}</p>
+            {progressPasswordTarget || connectProgress.snapshot?.action_required ? (
+              <p className="cd-progress-action">{progressPasswordTarget?.message || connectProgress.snapshot?.action_required?.message || t.account.connectActionRequired}</p>
             ) : null}
             {connectProgress.snapshot?.status === "action_required" ? (
               <p className="cd-progress-action">{t.account.connectActionHelp}</p>
             ) : null}
             <div className="cd-connect-actions">
               <button className="cd-btn cd-btn-soft" onClick={() => setConnectProgress(null)}>{lang === "fr" ? "Fermer" : "Close"}</button>
+              {progressPasswordTarget ? (
+                <button
+                  className="cd-btn cd-btn-primary"
+                  onClick={() => {
+                    setConnectProgress(null);
+                    setPasswordUpdateTarget({
+                      actionId: progressPasswordTarget.actionId,
+                      accountId: progressPasswordTarget.accountId,
+                      username: progressPasswordTarget.username,
+                    });
+                  }}
+                >
+                  {lang === "fr" ? "Mettre à jour le mot de passe" : "Update password"}
+                </button>
+              ) : null}
               <button
                 className="cd-btn cd-btn-primary"
                 onClick={() => setConnectProgress((current) => current ? {
