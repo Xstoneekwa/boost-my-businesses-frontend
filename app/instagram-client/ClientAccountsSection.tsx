@@ -539,20 +539,24 @@ export default function ClientAccountsSection({
       if (processModal.mode === "connect") {
         retryOperationToken = await ensureClientConnectAttempt(accountId) || retryOperationToken;
       }
-      const connectProgress = processModal.mode === "connect"
-        ? await syncConnectProgress(accountId, retryOperationToken)
-        : processModal.connectProgress ?? null;
+      let connectProgress = processModal.connectProgress ?? null;
+      try {
+        connectProgress = await syncConnectProgress(
+          accountId,
+          processModal.mode === "connect" ? retryOperationToken : null,
+        );
+      } catch {
+        // Keep the last known projection when the live read path is unavailable.
+      }
       const account = await syncProcessAccount(accountId);
       if (account) {
         setProcessModal((current) => {
           if (!current) return current;
-          const reconciledProgress = current.mode === "connect"
-            ? reconcileClientConnectProgressLineage({
-                previous: current.connectProgress,
-                incoming: connectProgress,
-                operationToken: retryOperationToken,
-              })
-            : current.connectProgress;
+          const reconciledProgress = reconcileClientConnectProgressLineage({
+            previous: current.connectProgress,
+            incoming: connectProgress,
+            operationToken: current.mode === "connect" ? retryOperationToken : null,
+          });
           const terminal = isTerminalProcessAccount(
             account,
             current.mode,
@@ -753,15 +757,23 @@ export default function ClientAccountsSection({
       });
       if (pending) nextAccount = { ...nextAccount, operationPending: true };
 
+      let connectProgress: ClientConnectProgressSnapshot | null = null;
+      try {
+        connectProgress = await syncConnectProgress(account.accountId, null);
+      } catch {
+        // Readiness remains usable when the live projection is temporarily unavailable.
+      }
+
       const terminal = mode === "check_readiness"
         ? true
-        : isTerminalProcessAccount(nextAccount, mode, lang);
+        : isTerminalProcessAccount(nextAccount, mode, lang, connectProgress);
       setProcessModal({
         mode,
         username: nextAccount.username,
         accountId: nextAccount.accountId,
         account: nextAccount,
         connectPhase: terminal ? "complete" : "polling",
+        connectProgress,
         timedOut: false,
       });
     } catch {
@@ -976,7 +988,7 @@ export default function ClientAccountsSection({
         lang={lang}
         username={processModal?.username}
         projection={processProjection}
-        connectProgress={processModal?.mode === "connect" ? processModal.connectProgress ?? null : null}
+        connectProgress={processModal?.connectProgress ?? null}
         refreshing={processRefreshing}
         confirming={actionKind === "connect"}
         onRefresh={() => void handleProcessRefresh()}
