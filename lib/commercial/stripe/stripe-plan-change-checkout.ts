@@ -2,7 +2,7 @@ import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireStripeTestConfig, StripeFoundationError, assertStripeTestLivemode } from "./stripe-config.ts";
 import { getStripeClient } from "./stripe-client.ts";
-import { resolveServerStripePriceId } from "./stripe-price-resolver.ts";
+import { resolveCanonicalPackageStripePriceId } from "./stripe-component-price-resolver.ts";
 import { createStripeCheckoutAttempt } from "./stripe-checkout-attempts.ts";
 import { buildSafeStripeMetadata, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
 import { isPlanKey, type PlanKey } from "../catalog.ts";
@@ -113,11 +113,10 @@ export async function createStripePlanChangePaymentSession(
   }
   const { stripeSubscriptionId, stripeCustomerId } = subscriptionBinding;
 
-  const targetPriceId = await resolveServerStripePriceId(supabase, {
+  const targetPriceId = await resolveCanonicalPackageStripePriceId(supabase, {
     environment: "test",
     planKey: targetPlanKey as PlanKey,
     billingIntervalMonths,
-    outreachAddonKey: readString(quote.target_outreach_addon_key) || null,
   });
   if (!targetPriceId) {
     return {
@@ -125,6 +124,15 @@ export async function createStripePlanChangePaymentSession(
       status: 503,
       code: "stripe_price_mapping_missing",
       messageEn: "Stripe test price mapping is missing for the target plan.",
+    };
+  }
+  const quoteBoundTargetPriceId = readString((quote.metadata as Row | null)?.canonical_target_stripe_price_id);
+  if (quoteBoundTargetPriceId && quoteBoundTargetPriceId !== targetPriceId) {
+    return {
+      ok: false as const,
+      status: 409,
+      code: "stripe_price_mapping_changed",
+      messageEn: "Stripe test price mapping changed after this quote was created.",
     };
   }
 
@@ -302,19 +310,22 @@ export async function reconcileStripePlanChangeFromCanonicalSubscription(
 
   const { data: quote } = await supabase
     .from("commercial_plan_change_quotes")
-    .select("id,client_id,account_id,target_plan_key,billing_interval_months,target_outreach_addon_key,idempotency_key,status,amount_due_cents")
+    .select("id,client_id,account_id,target_plan_key,billing_interval_months,target_outreach_addon_key,idempotency_key,status,amount_due_cents,metadata")
     .eq("id", quoteId)
     .maybeSingle<Row>();
   if (!quote?.id) return { ok: false as const, code: "plan_change_quote_missing" as const };
 
   const targetPlanKey = readString(quote.target_plan_key);
   if (!isPlanKey(targetPlanKey)) return { ok: false as const, code: "invalid_plan" as const };
-  const expectedPriceId = await resolveServerStripePriceId(supabase, {
+  const expectedPriceId = await resolveCanonicalPackageStripePriceId(supabase, {
     environment: "test",
     planKey: targetPlanKey,
     billingIntervalMonths: Number(quote.billing_interval_months ?? 1) as 1 | 3 | 6 | 12,
-    outreachAddonKey: readString(quote.target_outreach_addon_key) || null,
   });
+  const quoteBoundTargetPriceId = readString((quote.metadata as Row | null)?.canonical_target_stripe_price_id);
+  if (quoteBoundTargetPriceId && quoteBoundTargetPriceId !== expectedPriceId) {
+    return { ok: false as const, code: "stripe_price_mapping_changed" as const };
+  }
   if (!expectedPriceId || expectedPriceId !== currentPriceId) {
     return { ok: true as const, action: "current_price_not_target" as const };
   }

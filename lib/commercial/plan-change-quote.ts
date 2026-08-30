@@ -5,6 +5,7 @@ import { buildPlanChangeProrationQuote } from "./plan-change-proration.ts";
 import { loadPlanChangeSourceForAccount, clientVisiblePlanLabel, type PlanChangeSource } from "./plan-change-source.ts";
 import { isPlanKey, type PlanKey } from "./catalog.ts";
 import { evaluatePlanChangeActivation, planChangeActivationClientMessages } from "./plan-change-activation-guard.ts";
+import { resolveCanonicalPackageStripePriceId } from "./stripe/stripe-component-price-resolver.ts";
 
 type Row = Record<string, unknown>;
 
@@ -243,6 +244,23 @@ export async function createPlanChangeQuote(
     existingCustomerCreditCents,
   });
 
+  const canonicalTargetStripePriceId = source.activationMode === "stripe_test"
+    ? await resolveCanonicalPackageStripePriceId(supabase, {
+      environment: "test",
+      planKey: input.targetPlanKey,
+      billingIntervalMonths: source.billingIntervalMonths,
+    })
+    : null;
+  if (source.activationMode === "stripe_test" && !canonicalTargetStripePriceId) {
+    return {
+      ok: false,
+      status: 503,
+      code: "stripe_price_mapping_missing",
+      messageFr: "Le tarif Stripe Test de cette formule est indisponible.",
+      messageEn: "The Stripe Test price mapping for this plan is unavailable.",
+    };
+  }
+
   const activationEval = evaluatePlanChangeActivation({
     amountDueCents: proration.amountDueCents,
     actorEmail: source.purchaserEmail,
@@ -288,6 +306,7 @@ export async function createPlanChangeQuote(
         checkout_context: "per_account_plan_change",
         change_scope: "per_account",
         account_id: accountId,
+        canonical_target_stripe_price_id: canonicalTargetStripePriceId,
       },
       pricing_snapshot: catalogQuote.pricingSnapshot,
     })
