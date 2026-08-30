@@ -31,6 +31,7 @@ import {
   validateSubscriptionCheckoutPayment,
 } from "./stripe-payment-confirmation.ts";
 import { executeCommercialCancelForDeletedSubscription } from "../account-lifecycle-service.ts";
+import { reconcileStripePlanChangeFromCanonicalSubscription } from "./stripe-plan-change-checkout.ts";
 
 type Row = Record<string, unknown>;
 
@@ -225,6 +226,7 @@ async function handleCheckoutSessionFulfillmentEvent(
       attempt: refreshed.attempt,
       session,
       stripe,
+      stripeEventId: event.id,
     }, env);
     if ("awaitingPayment" in result && result.awaitingPayment) {
       await markStripeCheckoutAttemptAwaitingPayment(supabase, refreshed.attempt.id, {
@@ -265,7 +267,11 @@ async function handleSubscriptionProjectionEvent(
   event: Stripe.Event,
   context: { eventRowId: string },
 ) {
-  const subscription = event.data.object as Stripe.Subscription;
+  const incomingSubscription = event.data.object as Stripe.Subscription;
+  assertStripeTestLivemode(incomingSubscription.livemode);
+  const subscription = event.type === "customer.subscription.deleted"
+    ? incomingSubscription
+    : await getStripeClient().subscriptions.retrieve(incomingSubscription.id);
   assertStripeTestLivemode(subscription.livemode);
   const customerId = readString(subscription.customer);
   const { data: profile } = await supabase
@@ -315,6 +321,19 @@ async function handleSubscriptionProjectionEvent(
     incomingSnapshot: buildStripeSubscriptionSnapshot(subscription),
     incomingIsTerminalEvent: event.type === "customer.subscription.deleted",
   });
+  if (event.type !== "customer.subscription.deleted") {
+    const planChange = await reconcileStripePlanChangeFromCanonicalSubscription(supabase, {
+      subscription,
+      stripeEventId: event.id,
+    });
+    if (!planChange.ok) {
+      throw new StripeFulfillmentError(
+        planChange.code,
+        "Stripe plan change reconciliation failed.",
+        true,
+      );
+    }
+  }
   if (event.type === "customer.subscription.deleted") {
     await executeCommercialCancelForDeletedSubscription({
       supabase,

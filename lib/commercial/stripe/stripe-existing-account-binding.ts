@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getEntitlementById, markEntitlementConsumed } from "../entitlements.ts";
 import type { PlanKey } from "../catalog.ts";
+import type { CommercialMigrationKind, CommercialTestMode } from "./commercial-test-mode.ts";
 
 type Row = Record<string, unknown>;
 
@@ -19,7 +20,14 @@ const INELIGIBLE_ACCOUNT_STATUSES = new Set([
 
 export async function assertExistingAccountStripeCheckoutTarget(
   supabase: SupabaseClient,
-  input: { clientId: string; accountId: string; planKey: PlanKey },
+  input: {
+    clientId: string;
+    accountId: string;
+    planKey: PlanKey;
+    commercialTestMode: CommercialTestMode;
+    commercialMigrationKind?: CommercialMigrationKind | null;
+    commercialMigrationAuthorizationId?: string | null;
+  },
 ) {
   const clientId = readString(input.clientId);
   const accountId = readString(input.accountId);
@@ -65,32 +73,114 @@ export async function assertExistingAccountStripeCheckoutTarget(
 
   const { data: entitlementRows, error: entitlementError } = await supabase
     .from("client_account_entitlements")
-    .select("id")
+    .select("id,status,plan_key,commercial_package_code,metadata")
     .eq("client_id", clientId)
     .eq("account_id", accountId)
     .eq("status", "entitlement_consumed")
-    .limit(1);
+    .limit(2);
   if (entitlementError) {
     return { ok: false as const, code: "target_entitlement_lookup_failed" as const };
   }
-  if (Array.isArray(entitlementRows) && entitlementRows.length > 0) {
+  const consumedEntitlements = Array.isArray(entitlementRows) ? entitlementRows as Row[] : [];
+  const migrationKind = input.commercialMigrationKind ?? null;
+  if (!migrationKind && consumedEntitlements.length > 0) {
     return { ok: false as const, code: "target_modern_entitlement_exists" as const };
+  }
+
+  let sourceEntitlementId: string | null = null;
+  let migrationAuthorizationId: string | null = null;
+  if (migrationKind === "simulated_to_stripe_test") {
+    if (input.commercialTestMode !== "stripe_test") {
+      return { ok: false as const, code: "migration_requires_stripe_test_mode" as const };
+    }
+    if (consumedEntitlements.length !== 1) {
+      return { ok: false as const, code: "migration_requires_one_simulated_entitlement" as const };
+    }
+    const source = consumedEntitlements[0];
+    const metadata = source.metadata && typeof source.metadata === "object"
+      ? source.metadata as Row
+      : {};
+    if (
+      readString(metadata.checkout_mode) !== "simulated"
+      || metadata.billing_excluded !== true
+    ) {
+      return { ok: false as const, code: "migration_source_not_simulated" as const };
+    }
+    if (
+      readString(source.plan_key).toLowerCase() !== input.planKey
+      || readString(source.commercial_package_code).toLowerCase() !== input.planKey
+    ) {
+      return { ok: false as const, code: "migration_source_package_mismatch" as const };
+    }
+    sourceEntitlementId = readString(source.id);
+    const authorizationId = readString(input.commercialMigrationAuthorizationId);
+    if (!authorizationId) {
+      return { ok: false as const, code: "commercial_migration_authorization_required" as const };
+    }
+
+    const { data: authorization, error: authorizationError } = await supabase
+      .from("commercial_stripe_migration_authorizations")
+      .select("id,client_id,account_id,source_entitlement_id,migration_kind,commercial_test_mode,status,expires_at")
+      .eq("id", authorizationId)
+      .eq("client_id", clientId)
+      .eq("account_id", accountId)
+      .eq("source_entitlement_id", sourceEntitlementId)
+      .maybeSingle<Row>();
+    if (authorizationError || !authorization?.id) {
+      return { ok: false as const, code: "commercial_migration_authorization_invalid" as const };
+    }
+    if (
+      readString(authorization.migration_kind) !== migrationKind
+      || readString(authorization.commercial_test_mode) !== "stripe_test"
+      || readString(authorization.status) !== "authorized"
+      || Date.parse(readString(authorization.expires_at)) <= Date.now()
+    ) {
+      return { ok: false as const, code: "commercial_migration_authorization_ineligible" as const };
+    }
+    migrationAuthorizationId = authorizationId;
+
+    const { data: migrations, error: migrationError } = await supabase
+      .from("commercial_stripe_entitlement_migrations")
+      .select("id,state")
+      .eq("source_entitlement_id", sourceEntitlementId)
+      .limit(1);
+    if (migrationError) {
+      return { ok: false as const, code: "commercial_migration_lookup_failed" as const };
+    }
+    if (Array.isArray(migrations) && migrations.length > 0) {
+      return { ok: false as const, code: "commercial_migration_already_exists" as const };
+    }
+  } else if (migrationKind) {
+    return { ok: false as const, code: "commercial_migration_kind_invalid" as const };
   }
 
   const { data: subscriptionRows, error: subscriptionError } = await supabase
     .from("commercial_stripe_subscriptions")
-    .select("id")
+    .select("id,status,stripe_subscription_id")
     .eq("client_id", clientId)
     .eq("account_id", accountId)
     .limit(1);
   if (subscriptionError) {
     return { ok: false as const, code: "target_subscription_lookup_failed" as const };
   }
-  if (Array.isArray(subscriptionRows) && subscriptionRows.length > 0) {
+  const activeSubscriptions = (subscriptionRows ?? []).filter((row) => ![
+    "canceled",
+    "cancelled",
+    "incomplete_expired",
+    "unpaid",
+  ].includes(readString((row as Row).status).toLowerCase()));
+  if (activeSubscriptions.length > 0) {
     return { ok: false as const, code: "target_modern_subscription_exists" as const };
   }
 
-  return { ok: true as const, clientId, accountId };
+  return {
+    ok: true as const,
+    clientId,
+    accountId,
+    sourceEntitlementId,
+    migrationAuthorizationId,
+    commercialMigrationKind: migrationKind,
+  };
 }
 
 export async function bindActivatedEntitlementToExistingAccount(
@@ -112,4 +202,48 @@ export async function bindActivatedEntitlementToExistingAccount(
     entitlementId: input.entitlementId,
     accountId: input.accountId,
   });
+}
+
+export async function reconcileSimulatedToStripeTestEntitlement(
+  supabase: SupabaseClient,
+  input: {
+    clientId: string;
+    accountId: string;
+    sourceEntitlementId: string;
+    replacementEntitlementId: string;
+    authorizationId: string;
+    stripeSubscriptionId: string;
+    stripeCustomerId: string;
+    stripePriceId: string;
+    stripeCheckoutSessionId: string;
+    stripeEventId: string;
+  },
+) {
+  const { data, error } = await supabase.rpc("reconcile_simulated_to_stripe_test_v1", {
+    p_client_id: input.clientId,
+    p_account_id: input.accountId,
+    p_source_entitlement_id: input.sourceEntitlementId,
+    p_replacement_entitlement_id: input.replacementEntitlementId,
+    p_authorization_id: input.authorizationId,
+    p_stripe_subscription_id: input.stripeSubscriptionId,
+    p_stripe_customer_id: input.stripeCustomerId,
+    p_stripe_price_id: input.stripePriceId,
+    p_stripe_checkout_session_id: input.stripeCheckoutSessionId,
+    p_stripe_event_id: input.stripeEventId,
+  });
+  if (error) {
+    return { ok: false as const, code: "simulated_to_stripe_reconciliation_failed" as const };
+  }
+  const payload = data && typeof data === "object" ? data as Row : {};
+  if (payload.ok !== true) {
+    return {
+      ok: false as const,
+      code: readString(payload.code, "simulated_to_stripe_reconciliation_rejected"),
+    };
+  }
+  return {
+    ok: true as const,
+    idempotentReplay: payload.idempotent_replay === true,
+    migrationId: readString(payload.migration_id) || null,
+  };
 }

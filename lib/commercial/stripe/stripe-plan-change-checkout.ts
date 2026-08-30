@@ -7,6 +7,8 @@ import { createStripeCheckoutAttempt } from "./stripe-checkout-attempts.ts";
 import { buildSafeStripeMetadata, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
 import { isPlanKey, type PlanKey } from "../catalog.ts";
 import { isStripeTestFoundationReady, getStripeTestReadiness } from "./stripe-readiness.ts";
+import { activatePlanChangeQuote } from "../plan-change-quote.ts";
+import { upsertStripeSubscriptionProjection } from "./stripe-subscription-projection.ts";
 
 type Row = Record<string, unknown>;
 
@@ -21,14 +23,20 @@ async function resolveClientStripeSubscription(
 ) {
   const { data: subscriptionRow } = await supabase
     .from("commercial_stripe_subscriptions")
-    .select("stripe_subscription_id")
+    .select("stripe_subscription_id,stripe_customer_id,account_id,client_account_entitlement_id,status,commercial_checkout_session_id,commercial_mode,pricing_mode,pricing_snapshot_fingerprint")
     .eq("client_id", input.clientId)
     .eq("client_account_entitlement_id", input.entitlementId)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle<Row>();
 
-  return readString(subscriptionRow?.stripe_subscription_id) || null;
+  const stripeSubscriptionId = readString(subscriptionRow?.stripe_subscription_id);
+  if (!stripeSubscriptionId) return null;
+  return {
+    stripeSubscriptionId,
+    stripeCustomerId: readString(subscriptionRow?.stripe_customer_id),
+    row: subscriptionRow as Row,
+  };
 }
 
 export async function createStripePlanChangePaymentSession(
@@ -67,9 +75,6 @@ export async function createStripePlanChangePaymentSession(
   }
 
   const amountDueCents = Number(quote.amount_due_cents ?? 0);
-  if (amountDueCents <= 0) {
-    return { ok: false as const, status: 400, code: "stripe_not_required", messageEn: "This plan change does not require Stripe payment." };
-  }
 
   if (readString(quote.status) !== "quote_pending") {
     return { ok: false as const, status: 409, code: "quote_not_pending", messageEn: "Quote is no longer pending." };
@@ -88,11 +93,11 @@ export async function createStripePlanChangePaymentSession(
     return { ok: false as const, status: 400, code: "entitlement_account_binding_required", messageEn: "Plan change must target one entitlement and account." };
   }
   const billingIntervalMonths = Number(quote.billing_interval_months ?? 1) as 1 | 3 | 6 | 12;
-  const stripeSubscriptionId = await resolveClientStripeSubscription(supabase, {
+  const subscriptionBinding = await resolveClientStripeSubscription(supabase, {
     clientId: input.clientId,
     entitlementId: sourceEntitlementId,
   });
-  if (!stripeSubscriptionId) {
+  if (!subscriptionBinding) {
     return {
       ok: false as const,
       status: 503,
@@ -100,6 +105,7 @@ export async function createStripePlanChangePaymentSession(
       messageEn: "Stripe subscription is required before plan change checkout.",
     };
   }
+  const { stripeSubscriptionId, stripeCustomerId } = subscriptionBinding;
 
   const targetPriceId = await resolveServerStripePriceId(supabase, {
     environment: "test",
@@ -128,9 +134,46 @@ export async function createStripePlanChangePaymentSession(
   rejectUnsafeStripeMetadataKeys(metadata);
 
   const stripe = getStripeClient(env);
+  await supabase
+    .from("commercial_stripe_subscriptions")
+    .update({
+      plan_change_quote_id: input.quoteId,
+      metadata_safe: {
+        plan_change_state: "stripe_mutation_pending",
+        target_stripe_price_id: targetPriceId,
+        source_entitlement_id: sourceEntitlementId,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("stripe_subscription_id", stripeSubscriptionId)
+    .eq("client_id", input.clientId)
+    .eq("account_id", accountId);
+
+  if (amountDueCents <= 0) {
+    const sync = await syncStripeSubscriptionPriceAfterPlanChangePayment(stripe, {
+      stripeSubscriptionId,
+      targetPriceId,
+      settlementMode: "stripe_credit_or_zero",
+      idempotencyKey: `${input.idempotencyKey}:subscription-price`,
+    });
+    if (!sync.ok) {
+      return { ok: false as const, status: 503, code: sync.code, messageEn: "Stripe subscription price update failed." };
+    }
+    return {
+      ok: true as const,
+      checkoutUrl: null,
+      internalAttemptId: null,
+      targetPriceId,
+      amountDueCents,
+      stripeMutationInitiated: true as const,
+      awaitingSubscriptionWebhook: true as const,
+      prorationBehavior: sync.prorationBehavior,
+    };
+  }
+
   const stripeSession = await stripe.checkout.sessions.create({
     mode: "payment",
-    customer_email: input.purchaserEmail,
+    ...(stripeCustomerId ? { customer: stripeCustomerId } : { customer_email: input.purchaserEmail }),
     client_reference_id: input.quoteId,
     line_items: [{
       quantity: 1,
@@ -157,6 +200,7 @@ export async function createStripePlanChangePaymentSession(
     flowType: "plan_change",
     stripeCheckoutSessionId: stripeSession.id,
     checkoutMode: "payment",
+    commercialTestMode: "stripe_test",
     purchaserEmail: input.purchaserEmail,
     clientId: input.clientId,
     stripeSubscriptionId,
@@ -186,6 +230,8 @@ export async function syncStripeSubscriptionPriceAfterPlanChangePayment(
     stripeSubscriptionId: string;
     targetPriceId: string;
     preservePeriodEndUnix?: number | null;
+    settlementMode?: "already_collected" | "stripe_credit_or_zero";
+    idempotencyKey?: string | null;
   },
 ) {
   const subscription = await stripe.subscriptions.retrieve(input.stripeSubscriptionId);
@@ -198,7 +244,7 @@ export async function syncStripeSubscriptionPriceAfterPlanChangePayment(
 
   const updateParams: Stripe.SubscriptionUpdateParams = {
     items: [{ id: itemId, price: input.targetPriceId }],
-    proration_behavior: "none",
+    proration_behavior: input.settlementMode === "stripe_credit_or_zero" ? "create_prorations" : "none",
     billing_cycle_anchor: "unchanged",
   };
 
@@ -206,6 +252,139 @@ export async function syncStripeSubscriptionPriceAfterPlanChangePayment(
     updateParams.cancel_at = undefined;
   }
 
-  await stripe.subscriptions.update(input.stripeSubscriptionId, updateParams);
-  return { ok: true as const };
+  const updated = await stripe.subscriptions.update(
+    input.stripeSubscriptionId,
+    updateParams,
+    input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
+  );
+  const appliedPriceId = updated.items.data[0]?.price?.id ?? null;
+  if (appliedPriceId !== input.targetPriceId) {
+    return { ok: false as const, code: "stripe_subscription_price_not_applied" as const };
+  }
+  return {
+    ok: true as const,
+    stripeSubscriptionId: updated.id,
+    stripeSubscriptionItemId: updated.items.data[0]?.id ?? itemId,
+    appliedPriceId,
+    prorationBehavior: updateParams.proration_behavior,
+  };
+}
+
+export async function reconcileStripePlanChangeFromCanonicalSubscription(
+  supabase: SupabaseClient,
+  input: {
+    subscription: Stripe.Subscription;
+    stripeEventId: string;
+  },
+) {
+  assertStripeTestLivemode(input.subscription.livemode);
+  if (input.subscription.pending_update) {
+    return { ok: true as const, action: "awaiting_pending_update" as const };
+  }
+  const currentPriceId = input.subscription.items.data[0]?.price?.id ?? null;
+  if (!currentPriceId) {
+    return { ok: false as const, code: "stripe_subscription_price_missing" as const };
+  }
+
+  const { data: projection } = await supabase
+    .from("commercial_stripe_subscriptions")
+    .select("client_id,account_id,client_account_entitlement_id,plan_change_quote_id,stripe_customer_id,commercial_checkout_session_id,commercial_mode,pricing_mode,pricing_snapshot_fingerprint")
+    .eq("stripe_subscription_id", input.subscription.id)
+    .maybeSingle<Row>();
+  const quoteId = readString(projection?.plan_change_quote_id);
+  if (!quoteId) return { ok: true as const, action: "no_plan_change" as const };
+
+  const { data: quote } = await supabase
+    .from("commercial_plan_change_quotes")
+    .select("id,client_id,account_id,target_plan_key,billing_interval_months,target_outreach_addon_key,idempotency_key,status,amount_due_cents")
+    .eq("id", quoteId)
+    .maybeSingle<Row>();
+  if (!quote?.id) return { ok: false as const, code: "plan_change_quote_missing" as const };
+
+  const targetPlanKey = readString(quote.target_plan_key);
+  if (!isPlanKey(targetPlanKey)) return { ok: false as const, code: "invalid_plan" as const };
+  const expectedPriceId = await resolveServerStripePriceId(supabase, {
+    environment: "test",
+    planKey: targetPlanKey,
+    billingIntervalMonths: Number(quote.billing_interval_months ?? 1) as 1 | 3 | 6 | 12,
+    outreachAddonKey: readString(quote.target_outreach_addon_key) || null,
+  });
+  if (!expectedPriceId || expectedPriceId !== currentPriceId) {
+    return { ok: true as const, action: "current_price_not_target" as const };
+  }
+
+  if (readString(quote.status) !== "activated") {
+    await supabase
+      .from("commercial_plan_change_quotes")
+      .update({
+        payment_status: "confirmed",
+        payment_provider: "stripe",
+        provider_transaction_id: input.subscription.id,
+        payment_confirmed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", quoteId);
+
+    const activation = await activatePlanChangeQuote(supabase, {
+      quoteId,
+      idempotencyKey: readString(quote.idempotency_key),
+      actorEmail: null,
+      simulatedActivation: false,
+    });
+    if (!activation.ok) {
+      return { ok: false as const, code: activation.code };
+    }
+  }
+
+  const clientId = readString(quote.client_id) || readString(projection?.client_id);
+  const accountId = readString(quote.account_id) || readString(projection?.account_id);
+  const { data: replacementRows } = await supabase
+    .from("client_account_entitlements")
+    .select("id")
+    .eq("client_id", clientId)
+    .eq("account_id", accountId)
+    .eq("status", "entitlement_consumed")
+    .eq("plan_key", targetPlanKey)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const replacementEntitlementId = readString(replacementRows?.[0]?.id);
+  if (!replacementEntitlementId) {
+    return { ok: false as const, code: "plan_change_replacement_entitlement_missing" as const };
+  }
+
+  await upsertStripeSubscriptionProjection(supabase, {
+    clientId,
+    stripeSubscriptionId: input.subscription.id,
+    stripeCustomerId: readString(input.subscription.customer) || readString(projection?.stripe_customer_id),
+    stripePriceId: currentPriceId,
+    clientAccountEntitlementId: replacementEntitlementId,
+    accountId,
+    commercialCheckoutSessionId: readString(projection?.commercial_checkout_session_id) || null,
+    commercialMode: readString(projection?.commercial_mode) || "full_cycle",
+    pricingMode: readString(projection?.pricing_mode) || "public_catalog",
+    pricingSnapshotFingerprint: readString(projection?.pricing_snapshot_fingerprint) || null,
+    status: input.subscription.status,
+    currentPeriodStart: input.subscription.current_period_start
+      ? new Date(input.subscription.current_period_start * 1000).toISOString()
+      : null,
+    currentPeriodEnd: input.subscription.current_period_end
+      ? new Date(input.subscription.current_period_end * 1000).toISOString()
+      : null,
+    cancelAtPeriodEnd: input.subscription.cancel_at_period_end,
+  });
+
+  await supabase
+    .from("commercial_stripe_subscriptions")
+    .update({
+      plan_change_quote_id: quoteId,
+      metadata_safe: {
+        plan_change_state: "webhook_reconciled",
+        stripe_event_id: input.stripeEventId,
+        canonical_stripe_price_id: currentPriceId,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("stripe_subscription_id", input.subscription.id);
+
+  return { ok: true as const, action: "activated_from_canonical_price" as const };
 }

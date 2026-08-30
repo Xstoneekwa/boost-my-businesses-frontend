@@ -54,6 +54,12 @@ export async function POST(request: Request) {
     return jsonOk({
       checkout_url: result.checkoutUrl,
       internal_attempt_id: result.internalAttemptId,
+      stripe_mutation_initiated: "stripeMutationInitiated" in result
+        ? result.stripeMutationInitiated
+        : false,
+      awaiting_subscription_webhook: "awaitingSubscriptionWebhook" in result
+        ? result.awaitingSubscriptionWebhook
+        : false,
     });
   } catch (error) {
     if (error instanceof StripeFoundationError) {

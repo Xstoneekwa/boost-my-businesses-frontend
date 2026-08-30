@@ -41,8 +41,16 @@ import {
 } from "./stripe-per-entitlement-billing.ts";
 import { upsertStripeBillingProfile } from "./stripe-subscription-projection.ts";
 import { assertExistingAccountStripeCheckoutTarget } from "./stripe-existing-account-binding.ts";
+import {
+  assertRealStripeTestMode,
+  isCommercialMigrationKind,
+  type CommercialMigrationKind,
+  type CommercialTestMode,
+} from "./commercial-test-mode.ts";
 
 export type CreateStripeSubscriptionCheckoutInput = {
+  commercialTestMode: CommercialTestMode;
+  realStripeTestE2E?: boolean;
   commercialMode?: string | null;
   planKey?: string | null;
   packageKey?: string | null;
@@ -56,6 +64,8 @@ export type CreateStripeSubscriptionCheckoutInput = {
   targetAccountId?: string | null;
   billingSource?: string | null;
   commercialMigrationReason?: string | null;
+  commercialMigrationKind?: CommercialMigrationKind | null;
+  commercialMigrationAuthorizationId?: string | null;
   password?: string | null;
   passwordConfirmation?: string | null;
   successUrl: string;
@@ -284,6 +294,13 @@ export async function createStripeSubscriptionCheckoutSession(
   input: CreateStripeSubscriptionCheckoutInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<CreateStripeSubscriptionCheckoutResult> {
+  const testMode = assertRealStripeTestMode({
+    commercialTestMode: input.commercialTestMode,
+    realStripeTestE2E: input.realStripeTestE2E,
+  });
+  if (!testMode.ok) {
+    return { ok: false, status: 400, code: testMode.code, messageEn: "Explicit Stripe Test mode is required." };
+  }
   try {
     requireStripeTestConfig(env);
   } catch (error) {
@@ -329,6 +346,15 @@ export async function createStripeSubscriptionCheckoutSession(
   const targetAccountId = readString(input.targetAccountId) || null;
   const billingSource = readString(input.billingSource) || null;
   const commercialMigrationReason = readString(input.commercialMigrationReason) || null;
+  const commercialMigrationKindInput = readString(input.commercialMigrationKind) || null;
+  const commercialMigrationKind = commercialMigrationKindInput && isCommercialMigrationKind(commercialMigrationKindInput)
+    ? commercialMigrationKindInput
+    : null;
+  if (commercialMigrationKindInput && !commercialMigrationKind) {
+    return { ok: false, status: 400, code: "commercial_migration_kind_invalid", messageEn: "Commercial migration kind is invalid." };
+  }
+  let sourceEntitlementId: string | null = null;
+  let commercialMigrationAuthorizationId: string | null = null;
   if (targetAccountId) {
     if (flowType !== "additional_account" || !input.clientId || !planKey) {
       return { ok: false, status: 400, code: "target_account_binding_invalid", messageEn: "Existing account checkout binding is invalid." };
@@ -337,10 +363,17 @@ export async function createStripeSubscriptionCheckoutSession(
       clientId: input.clientId,
       accountId: targetAccountId,
       planKey,
+      commercialTestMode: testMode.commercialTestMode,
+      commercialMigrationKind,
+      commercialMigrationAuthorizationId: input.commercialMigrationAuthorizationId,
     });
     if (!target.ok) {
       return { ok: false, status: 409, code: target.code, messageEn: "Existing account is not eligible for Stripe checkout binding." };
     }
+    sourceEntitlementId = target.sourceEntitlementId;
+    commercialMigrationAuthorizationId = target.migrationAuthorizationId;
+  } else if (commercialMigrationKind) {
+    return { ok: false, status: 400, code: "commercial_migration_target_required", messageEn: "Commercial migration requires an existing account target." };
   }
 
   if (flowType === "first_purchase") {
@@ -442,12 +475,17 @@ export async function createStripeSubscriptionCheckoutSession(
     pricingSnapshot: quote.pricingSnapshot as unknown as Record<string, unknown>,
     catalogSnapshot: quote.catalogSnapshot as unknown as Record<string, unknown>,
     totalPeriodCents: quote.totalPeriodCents,
+    commercialTestMode: testMode.commercialTestMode,
     metadataSafe: {
       prod_test_authorization_id: simulationAccess.prodTestAuthorizationId,
       checkout_access_source: simulationAccess.source,
       target_account_id: targetAccountId,
       billing_source: billingSource,
       commercial_migration_reason: commercialMigrationReason,
+      commercial_migration_kind: commercialMigrationKind,
+      commercial_migration_authorization_id: commercialMigrationAuthorizationId,
+      source_entitlement_id: sourceEntitlementId,
+      real_stripe_test_e2e: input.realStripeTestE2E === true,
     },
   });
   if (!pendingSession.ok) {
@@ -477,6 +515,10 @@ export async function createStripeSubscriptionCheckoutSession(
     target_account_id: targetAccountId,
     billing_source: billingSource,
     commercial_migration_reason: commercialMigrationReason,
+    commercial_migration_kind: commercialMigrationKind,
+    commercial_migration_authorization_id: commercialMigrationAuthorizationId,
+    source_entitlement_id: sourceEntitlementId,
+    commercial_test_mode: testMode.commercialTestMode,
   });
   rejectUnsafeStripeMetadataKeys(metadata);
 
@@ -540,6 +582,7 @@ export async function createStripeSubscriptionCheckoutSession(
     flowType,
     stripeCheckoutSessionId: stripeSession.id,
     checkoutMode: "subscription",
+    commercialTestMode: testMode.commercialTestMode,
     purchaserEmail: email,
     clientId,
     authUserId,
