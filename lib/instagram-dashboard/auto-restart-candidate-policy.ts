@@ -19,6 +19,7 @@ export type RestartNeedInput = {
   totalRemainingQuota: number;
   canonicalLiveUnfollowResumeAuthorized?: boolean;
   operatorStopContinuationAuthorized?: boolean;
+  freshBusinessBoundaryReplacementAuthorized?: boolean;
 };
 
 export type SafeRestartStrategyInput = {
@@ -131,6 +132,15 @@ export function resolveRestartNeed(input: RestartNeedInput) {
     return {
       needed: false,
       reason: "quota_exhausted",
+      historicalSafeBoundaryFallback: false,
+      canonicalLiveUnfollowOverride: false,
+    } as const;
+  }
+
+  if (input.freshBusinessBoundaryReplacementAuthorized === true) {
+    return {
+      needed: true,
+      reason: "stale_partial_resume_replaced_by_fresh_business_window",
       historicalSafeBoundaryFallback: false,
       canonicalLiveUnfollowOverride: false,
     } as const;

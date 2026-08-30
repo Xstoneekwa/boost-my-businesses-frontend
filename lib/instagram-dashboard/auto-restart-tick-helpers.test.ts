@@ -271,6 +271,11 @@ test("Loriele two-tick lineage rebuilds an exact request only after circuit and 
     sessionTerminationClass: "partial_resumable",
     unfollowPhaseStatus: "partial_resumable",
     lineageValid: identity.lineageValid,
+    resumeBoundary: {
+      compatible: true,
+      reason: "compatible" as const,
+      compatibilityKey: "account|date|assignment|start|end|session",
+    },
     autoRestartEnabled: true,
     unfollowEnabled: true,
     dailyQuotaRemaining: 79,

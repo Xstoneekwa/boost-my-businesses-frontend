@@ -29,6 +29,7 @@ import {
   pruneTerminalAccountSessionPhases,
   resolveBoundedSessionQuota,
   resolvePartialUnfollowLiveResume,
+  resolvePartialUnfollowResumeBoundary,
   resolvePersistedUnfollowPhaseStatus,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
@@ -198,6 +199,10 @@ export type AutoRestartCandidate = {
     cleanupCompleted: boolean | null;
     lockReleased: boolean | null;
     businessDaySast: string;
+    sourceAccountId?: string;
+    sourceAssignmentId?: string;
+    sourceScheduledWindowStart?: string;
+    sourceScheduledWindowEnd?: string;
     phasesToRun: { welcome: boolean; follow: boolean; unfollow: boolean } | null;
     quotaRemaining: Record<string, number>;
     unfollowCheckpoint?: Record<string, unknown> | null;
@@ -283,10 +288,6 @@ function readBoolean(value: unknown, fallback = false) {
     if (["false", "0", "no", "off", "disabled"].includes(normalized)) return false;
   }
   return fallback;
-}
-
-function todayStartIso() {
-  return businessDayWindow().startIso;
 }
 
 function mapByAccount(rows: SupabaseRecord[], key = "account_id") {
@@ -503,6 +504,10 @@ function reliabilityFromLatestRun(
       cleanupCompleted: null,
       lockReleased: null,
       businessDaySast: "",
+      sourceAccountId: "",
+      sourceAssignmentId: "",
+      sourceScheduledWindowStart: "",
+      sourceScheduledWindowEnd: "",
       phasesToRun: null,
       quotaRemaining: {},
       unfollowCheckpoint: null,
@@ -623,6 +628,10 @@ function reliabilityFromLatestRun(
     cleanupCompleted: typeof resumePlan?.cleanup_completed === "boolean" ? resumePlan.cleanup_completed : null,
     lockReleased: typeof resumePlan?.lock_released === "boolean" ? resumePlan.lock_released : null,
     businessDaySast: readString(resumePlan?.business_day_sast, ""),
+    sourceAccountId: readString(resumePlan?.account_id, ""),
+    sourceAssignmentId: readString(resumePlan?.assignment_id, ""),
+    sourceScheduledWindowStart: readString(resumePlan?.scheduled_window_start, ""),
+    sourceScheduledWindowEnd: readString(resumePlan?.scheduled_window_end, ""),
     phasesToRun: persistedPhases
       ? {
         welcome: readBoolean(persistedPhases.welcome, false),
@@ -870,6 +879,7 @@ function planCandidate({
   priorTargetId,
   rules,
   reliability,
+  currentBusinessDateSast,
   incidentBlockReason = null,
 }: {
   account: ManageAccount;
@@ -893,6 +903,7 @@ function planCandidate({
   priorTargetId: string | null;
   rules: AutoRestartRulePreview;
   reliability: AutoRestartCandidate["reliability"];
+  currentBusinessDateSast: string;
   incidentBlockReason?: string | null;
 }): AutoRestartCandidate {
   const packageDefaults = inferPackageDefaults(account);
@@ -955,6 +966,19 @@ function planCandidate({
     sessionTerminationClass: reliability.sessionTerminationClass,
     unfollowPhaseStatus: reliability.unfollowPhaseStatus,
     lineageValid: reliability.sourceLineageValid === true,
+    resumeBoundary: resolvePartialUnfollowResumeBoundary({
+      sourceAccountId: reliability.sourceAccountId,
+      currentAccountId: account.accountId,
+      sourceBusinessDateSast: reliability.businessDaySast,
+      currentBusinessDateSast,
+      sourceAssignmentId: reliability.sourceAssignmentId,
+      currentAssignmentId: readString(assignment?.id, ""),
+      sourceScheduledWindowStart: reliability.sourceScheduledWindowStart,
+      currentScheduledWindowStart: readString(assignment?.starts_at, ""),
+      sourceScheduledWindowEnd: reliability.sourceScheduledWindowEnd,
+      currentScheduledWindowEnd: readString(assignment?.ends_at, ""),
+      sourceBusinessSessionId: reliability.businessSessionId,
+    }),
     autoRestartEnabled: rules.resumeUnfollowIfQuotaRemaining,
     unfollowEnabled,
     dailyQuotaRemaining: unfollow.remaining,
@@ -1041,7 +1065,10 @@ function planCandidate({
     blockingReasons.push("assignment_or_device_pending");
   }
   const operatorStopContinuation = reliability.operatorStopContinuation === true;
+  const stalePartialResumeRejected = partialUnfollowLiveResume.discardPersistedPlan;
   const persistedPhasesForPlanning = operatorStopContinuation
+    ? null
+    : stalePartialResumeRejected
     ? null
     : partialUnfollowLiveResume.applies
     ? {
@@ -1051,6 +1078,8 @@ function planCandidate({
     }
     : reliability.phasesToRun;
   const persistedQuotaForPlanning = operatorStopContinuation
+    ? {}
+    : stalePartialResumeRejected
     ? {}
     : partialUnfollowLiveResume.applies
     ? {
@@ -1099,7 +1128,8 @@ function planCandidate({
   const accountSessionRemaining = plannedAccountSession.totalRemaining;
   // A canonical account-session resume plan is authoritative. It must never
   // silently switch to a fresh Outreach run because unrelated raw quota exists.
-  const outreachRemaining = reliability.phasesToRun || partialUnfollowLiveResume.applies
+  const outreachRemaining = (reliability.phasesToRun && !stalePartialResumeRejected)
+    || partialUnfollowLiveResume.applies
     ? operatorStopContinuation ? outreach.remaining : 0
     : outreach.remaining;
   const outreachPhaseCompletion = resolvePhaseCompletion({
@@ -1154,8 +1184,11 @@ function planCandidate({
     totalRemainingQuota,
     canonicalLiveUnfollowResumeAuthorized: partialUnfollowLiveResume.authorized,
     operatorStopContinuationAuthorized: operatorStopContinuation,
+    freshBusinessBoundaryReplacementAuthorized: stalePartialResumeRejected,
   });
-  const exactViewportResumeAvailable = !operatorStopContinuation && exactViewportResumeEvidence({
+  const exactViewportResumeAvailable = !operatorStopContinuation
+    && !stalePartialResumeRejected
+    && exactViewportResumeEvidence({
     safeCheckpointAvailable: reliability.safeCheckpointAvailable,
     targetRotationSafeAfterScrollFailure: reliability.targetRotationSafeAfterScrollFailure,
     scrollFailureSurfaceAmbiguous: reliability.scrollFailureSurfaceAmbiguous,
@@ -1169,7 +1202,7 @@ function planCandidate({
     eligibleTargets: eligibleFollowTargets,
     workerPlanExplicitlySafe: reliability.restartAllowed === true
       || restartNeed.canonicalLiveUnfollowOverride,
-    forceFreshBoundary: operatorStopContinuation,
+    forceFreshBoundary: operatorStopContinuation || stalePartialResumeRejected,
   });
   const enqueueAllowed = accountEligible
     && restartNeed.needed
@@ -1200,6 +1233,14 @@ function planCandidate({
   });
   const sourceBusinessSessionId = operatorStopContinuation
     ? `operator-stop:${reliability.lastRunId}`
+    : stalePartialResumeRejected
+    ? [
+      "scheduled",
+      account.accountId,
+      readString(assignment?.id, "missing-assignment"),
+      currentBusinessDateSast,
+      startsAt || "missing-window",
+    ].join(":")
     : reliability.businessSessionId || reliability.lastRunId;
 
   return {
@@ -1262,7 +1303,7 @@ function planCandidate({
     historicalSafeBoundaryFallback: restartNeed.historicalSafeBoundaryFallback,
     operatorStopContinuation,
     operatorStopReason: operatorStopContinuation ? reliability.operatorStopReason : null,
-    freshBoundaryOnly: operatorStopContinuation,
+    freshBoundaryOnly: operatorStopContinuation || stalePartialResumeRejected,
     enqueueAllowed,
     sourceRunId: reliability.lastRunId,
     sourceBusinessSessionId,
@@ -1328,7 +1369,8 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
     getRadarData(),
   ]);
   const accountIds = manageData.activeAccounts.map((account) => account.accountId).filter(Boolean);
-  const since = todayStartIso();
+  const currentBusinessDay = businessDayWindow();
+  const since = currentBusinessDay.startIso;
 
   const [
     autoRestartSettingsResult,
@@ -1665,6 +1707,7 @@ export async function getAutoRestartData(): Promise<AutoRestartOverview> {
           sourceRunRequestsByRun.get(latestRunId),
           Boolean(canonicalPlan),
         ),
+        currentBusinessDateSast: currentBusinessDay.businessDate,
         incidentBlockReason: firstAutomationBlockingIncident(
           incidentsByAccount.get(account.accountId) ?? [],
           incidentActions,

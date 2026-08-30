@@ -5,6 +5,7 @@ import {
   pruneTerminalAccountSessionPhases,
   resolveBoundedSessionQuota,
   resolvePartialUnfollowLiveResume,
+  resolvePartialUnfollowResumeBoundary,
   resolvePersistedUnfollowPhaseStatus,
   resolvePhaseCompletion,
   resolvePlannedAccountSession,
@@ -58,6 +59,19 @@ const partialUnfollow = (overrides: Partial<Parameters<typeof resolvePartialUnfo
     sessionTerminationClass: "partial_resumable",
     unfollowPhaseStatus: "partial_resumable",
     lineageValid: true,
+    resumeBoundary: resolvePartialUnfollowResumeBoundary({
+      sourceAccountId: "account-1",
+      currentAccountId: "account-1",
+      sourceBusinessDateSast: "2026-07-30",
+      currentBusinessDateSast: "2026-07-30",
+      sourceAssignmentId: "assignment-1",
+      currentAssignmentId: "assignment-1",
+      sourceScheduledWindowStart: "2026-07-30T16:00:00.000Z",
+      currentScheduledWindowStart: "2026-07-30T16:00:00.000Z",
+      sourceScheduledWindowEnd: "2026-07-30T22:00:00.000Z",
+      currentScheduledWindowEnd: "2026-07-30T22:00:00.000Z",
+      sourceBusinessSessionId: "business-session-1",
+    }),
     autoRestartEnabled: true,
     unfollowEnabled: true,
     dailyQuotaRemaining: 79,
@@ -76,6 +90,7 @@ test("Loriele partial remainder rebuilds an exact Unfollow-only quota from actio
   assert.deepEqual(continuation, {
     applies: true,
     authorized: true,
+    discardPersistedPlan: false,
     reason: "partial_resumable_live_unfollow_backlog",
     backlogTotal: 6,
     actionableNow: 3,
@@ -115,6 +130,7 @@ test("the phase circuit remains authoritative even when three candidates are act
   }), {
     applies: true,
     authorized: false,
+    discardPersistedPlan: false,
     reason: "unfollow_phase_circuit_open",
     backlogTotal: 6,
     actionableNow: 3,
@@ -191,6 +207,124 @@ test("a stale or superseded source lineage fails closed", () => {
   assert.equal(partialUnfollow({ lineageValid: false }).reason, "resume_source_run_superseded");
   assert.equal(partialUnfollow({ lineageValid: false }).authorized, false);
 });
+
+const compatibleBoundaryInput = {
+  sourceAccountId: "account-1",
+  currentAccountId: "account-1",
+  sourceBusinessDateSast: "2026-08-31",
+  currentBusinessDateSast: "2026-08-31",
+  sourceAssignmentId: "assignment-00-06",
+  currentAssignmentId: "assignment-00-06",
+  sourceScheduledWindowStart: "2026-08-30T22:00:00.000Z",
+  currentScheduledWindowStart: "2026-08-30T22:00:00.000Z",
+  sourceScheduledWindowEnd: "2026-08-31T04:00:00.000Z",
+  currentScheduledWindowEnd: "2026-08-31T04:00:00.000Z",
+  sourceBusinessSessionId: "business-session-1",
+} as const;
+
+test("same account, day, assignment, window, and business session preserves a genuine partial resume", () => {
+  assert.deepEqual(resolvePartialUnfollowResumeBoundary(compatibleBoundaryInput), {
+    compatible: true,
+    reason: "compatible",
+    compatibilityKey: [
+      "account-1",
+      "2026-08-31",
+      "assignment-00-06",
+      "2026-08-30T22:00:00.000Z",
+      "2026-08-31T04:00:00.000Z",
+      "business-session-1",
+    ].join("|"),
+  });
+});
+
+test("resume boundary fails closed for a different business day", () => {
+  const boundary = resolvePartialUnfollowResumeBoundary({
+    ...compatibleBoundaryInput,
+    sourceBusinessDateSast: "2026-08-26",
+  });
+  assert.equal(boundary.compatible, false);
+  assert.equal(boundary.reason, "resume_business_day_mismatch");
+});
+
+test("resume boundary rejects a different assignment, window, or account", () => {
+  assert.equal(resolvePartialUnfollowResumeBoundary({
+    ...compatibleBoundaryInput,
+    sourceAssignmentId: "assignment-old",
+  }).reason, "resume_assignment_mismatch");
+  assert.equal(resolvePartialUnfollowResumeBoundary({
+    ...compatibleBoundaryInput,
+    sourceScheduledWindowStart: "2026-08-30T16:00:00.000Z",
+  }).reason, "resume_window_mismatch");
+  assert.equal(resolvePartialUnfollowResumeBoundary({
+    ...compatibleBoundaryInput,
+    sourceAccountId: "other-account",
+  }).reason, "resume_account_mismatch");
+});
+
+test("legacy partial checkpoints missing temporal lineage fail closed", () => {
+  for (const missing of [
+    "sourceBusinessDateSast",
+    "sourceAssignmentId",
+    "sourceScheduledWindowStart",
+    "sourceScheduledWindowEnd",
+    "sourceBusinessSessionId",
+  ] as const) {
+    assert.equal(resolvePartialUnfollowResumeBoundary({
+      ...compatibleBoundaryInput,
+      [missing]: "",
+    }).reason, "resume_business_boundary_missing");
+  }
+});
+
+test("live Unfollow backlog cannot authorize a cross-day checkpoint or suppress fresh Follow", () => {
+  const stale = partialUnfollow({
+    actionableNow: 152,
+    technicalHoldTotal: 31,
+    dailyQuotaRemaining: 120,
+    sessionQuotaRemaining: 120,
+    resumeBoundary: resolvePartialUnfollowResumeBoundary({
+      ...compatibleBoundaryInput,
+      sourceBusinessDateSast: "2026-08-26",
+    }),
+  });
+  assert.equal(stale.applies, false);
+  assert.equal(stale.authorized, false);
+  assert.equal(stale.discardPersistedPlan, true);
+  assert.equal(stale.reason, "resume_business_day_mismatch");
+});
+
+for (const fixture of [
+  { account: "rex_gen_boost_ai", followRemaining: 50, followTargets: 15 },
+  { account: "bmybusinesses", followRemaining: 120, followTargets: 15 },
+]) {
+  test(`${fixture.account} cross-day field fixture rebuilds a fresh full-cycle plan`, () => {
+    const stale = partialUnfollow({
+      actionableNow: 120,
+      technicalHoldTotal: 0,
+      dailyQuotaRemaining: 120,
+      sessionQuotaRemaining: 120,
+      resumeBoundary: resolvePartialUnfollowResumeBoundary({
+        ...compatibleBoundaryInput,
+        sourceBusinessDateSast: "2026-08-26",
+      }),
+    });
+    assert.equal(stale.discardPersistedPlan, true);
+    assert.equal(fixture.followTargets, 15);
+    const fresh = resolvePlannedAccountSession({
+      persistedPhases: null,
+      persistedQuotaRemaining: {},
+      quotas: {
+        welcome: quota(0, false),
+        follow: quota(fixture.followRemaining),
+        unfollow: quota(120),
+      },
+      eligibleWorkRemaining: { unfollow: 120 },
+    });
+    assert.deepEqual(fresh.phases, { welcome: false, follow: true, unfollow: true });
+    assert.equal(fresh.remaining.follow, fixture.followRemaining);
+    assert.equal(fresh.remaining.unfollow, 120);
+  });
+}
 
 test("the global Unfollow Auto Restart switch remains authoritative", () => {
   const result = partialUnfollow({ autoRestartEnabled: false });

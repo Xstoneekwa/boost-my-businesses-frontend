@@ -32,6 +32,11 @@ export type PhaseCompletion = {
 export type PartialUnfollowLiveResumeReason =
   | "not_partial_unfollow_lineage"
   | "resume_source_run_superseded"
+  | "resume_business_boundary_missing"
+  | "resume_account_mismatch"
+  | "resume_business_day_mismatch"
+  | "resume_assignment_mismatch"
+  | "resume_window_mismatch"
   | "unfollow_auto_restart_disabled"
   | "unfollow_disabled"
   | "unfollow_quota_reached"
@@ -45,6 +50,7 @@ export type PartialUnfollowLiveResumeReason =
 export type PartialUnfollowLiveResume = {
   applies: boolean;
   authorized: boolean;
+  discardPersistedPlan: boolean;
   reason: PartialUnfollowLiveResumeReason;
   backlogTotal: number;
   actionableNow: number;
@@ -52,6 +58,18 @@ export type PartialUnfollowLiveResume = {
   terminalTotal: number;
   plannedQuota: number;
   nextEvaluationAt: string | null;
+};
+
+export type PartialUnfollowResumeBoundary = {
+  compatible: boolean;
+  reason:
+    | "compatible"
+    | "resume_business_boundary_missing"
+    | "resume_account_mismatch"
+    | "resume_business_day_mismatch"
+    | "resume_assignment_mismatch"
+    | "resume_window_mismatch";
+  compatibilityKey: string | null;
 };
 
 export type UnfollowTechnicalHoldRestartGate = {
@@ -71,6 +89,86 @@ function safeCount(value: number | null | undefined) {
 function validIso(value: string | null | undefined) {
   if (!value) return null;
   return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function exactIso(value: string | null | undefined) {
+  const valid = validIso(value);
+  return valid ? new Date(valid).toISOString() : "";
+}
+
+/**
+ * A partial Unfollow checkpoint is scoped to one immutable business execution
+ * boundary. Structural run lineage and a live backlog are not sufficient:
+ * every temporal/window identifier must be present and must still identify the
+ * current admission. Missing legacy metadata fails closed.
+ */
+export function resolvePartialUnfollowResumeBoundary(input: {
+  sourceAccountId?: string | null;
+  currentAccountId?: string | null;
+  sourceBusinessDateSast?: string | null;
+  currentBusinessDateSast?: string | null;
+  sourceAssignmentId?: string | null;
+  currentAssignmentId?: string | null;
+  sourceScheduledWindowStart?: string | null;
+  currentScheduledWindowStart?: string | null;
+  sourceScheduledWindowEnd?: string | null;
+  currentScheduledWindowEnd?: string | null;
+  sourceBusinessSessionId?: string | null;
+}): PartialUnfollowResumeBoundary {
+  const sourceAccountId = String(input.sourceAccountId || "").trim();
+  const currentAccountId = String(input.currentAccountId || "").trim();
+  const sourceBusinessDateSast = String(input.sourceBusinessDateSast || "").trim();
+  const currentBusinessDateSast = String(input.currentBusinessDateSast || "").trim();
+  const sourceAssignmentId = String(input.sourceAssignmentId || "").trim();
+  const currentAssignmentId = String(input.currentAssignmentId || "").trim();
+  const sourceScheduledWindowStart = exactIso(input.sourceScheduledWindowStart);
+  const currentScheduledWindowStart = exactIso(input.currentScheduledWindowStart);
+  const sourceScheduledWindowEnd = exactIso(input.sourceScheduledWindowEnd);
+  const currentScheduledWindowEnd = exactIso(input.currentScheduledWindowEnd);
+  const sourceBusinessSessionId = String(input.sourceBusinessSessionId || "").trim();
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (
+    !sourceAccountId
+    || !currentAccountId
+    || !datePattern.test(sourceBusinessDateSast)
+    || !datePattern.test(currentBusinessDateSast)
+    || !sourceAssignmentId
+    || !currentAssignmentId
+    || !sourceScheduledWindowStart
+    || !currentScheduledWindowStart
+    || !sourceScheduledWindowEnd
+    || !currentScheduledWindowEnd
+    || !sourceBusinessSessionId
+  ) {
+    return { compatible: false, reason: "resume_business_boundary_missing", compatibilityKey: null };
+  }
+  if (sourceAccountId !== currentAccountId) {
+    return { compatible: false, reason: "resume_account_mismatch", compatibilityKey: null };
+  }
+  if (sourceBusinessDateSast !== currentBusinessDateSast) {
+    return { compatible: false, reason: "resume_business_day_mismatch", compatibilityKey: null };
+  }
+  if (sourceAssignmentId !== currentAssignmentId) {
+    return { compatible: false, reason: "resume_assignment_mismatch", compatibilityKey: null };
+  }
+  if (
+    sourceScheduledWindowStart !== currentScheduledWindowStart
+    || sourceScheduledWindowEnd !== currentScheduledWindowEnd
+  ) {
+    return { compatible: false, reason: "resume_window_mismatch", compatibilityKey: null };
+  }
+  return {
+    compatible: true,
+    reason: "compatible",
+    compatibilityKey: [
+      currentAccountId,
+      currentBusinessDateSast,
+      currentAssignmentId,
+      currentScheduledWindowStart,
+      currentScheduledWindowEnd,
+      sourceBusinessSessionId,
+    ].join("|"),
+  };
 }
 
 export function resolvePersistedUnfollowPhaseStatus(input: {
@@ -113,6 +211,7 @@ export function resolvePartialUnfollowLiveResume(input: {
   sessionTerminationClass: string;
   unfollowPhaseStatus?: string | null;
   lineageValid: boolean;
+  resumeBoundary: PartialUnfollowResumeBoundary;
   autoRestartEnabled: boolean;
   unfollowEnabled: boolean;
   dailyQuotaRemaining: number;
@@ -138,15 +237,18 @@ export function resolvePartialUnfollowLiveResume(input: {
   const explicitUnfollowLineage = ["partial_resumable", "partial_safe_stopped"]
     .includes(phaseStatus);
   const failedMandatoryUnfollow = completedSession && phaseStatus === "failed";
-  const applies = (partial && explicitUnfollowLineage) || failedMandatoryUnfollow;
+  const lineageApplies = (partial && explicitUnfollowLineage) || failedMandatoryUnfollow;
   const result = (
     reason: PartialUnfollowLiveResumeReason,
     authorized = false,
     plannedQuota = 0,
     nextEvaluationAt: string | null = null,
+    applies = lineageApplies,
+    discardPersistedPlan = false,
   ): PartialUnfollowLiveResume => ({
     applies,
     authorized,
+    discardPersistedPlan,
     reason,
     backlogTotal,
     actionableNow,
@@ -156,8 +258,14 @@ export function resolvePartialUnfollowLiveResume(input: {
     nextEvaluationAt,
   });
 
-  if (!applies) return result("not_partial_unfollow_lineage");
+  if (!lineageApplies) return result("not_partial_unfollow_lineage");
   if (!input.lineageValid) return result("resume_source_run_superseded");
+  if (!input.resumeBoundary.compatible) {
+    const boundaryReason = input.resumeBoundary.reason === "compatible"
+      ? "resume_business_boundary_missing"
+      : input.resumeBoundary.reason;
+    return result(boundaryReason, false, 0, null, false, true);
+  }
   if (!input.autoRestartEnabled) return result("unfollow_auto_restart_disabled");
   if (!input.unfollowEnabled) return result("unfollow_disabled");
 

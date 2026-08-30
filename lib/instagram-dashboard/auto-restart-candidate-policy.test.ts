@@ -90,6 +90,42 @@ test("no partial run means no restart even when the account is otherwise eligibl
   }).needed, false);
 });
 
+test("a rejected stale partial is replaced by a fresh business-window admission", () => {
+  assert.deepEqual(resolveRestartNeed({
+    lastRunId: "old-partial-run",
+    sessionTerminationClass: "partial_resumable",
+    restartAllowed: false,
+    restartBlockReason: "restart_not_needed",
+    totalRemainingQuota: 170,
+    freshBusinessBoundaryReplacementAuthorized: true,
+  }), {
+    needed: true,
+    reason: "stale_partial_resume_replaced_by_fresh_business_window",
+    historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: false,
+  });
+});
+
+test("fresh-window replacement cannot reuse an old exact viewport checkpoint", () => {
+  const strategy = resolveSafeRestartStrategy({
+    restartNeeded: true,
+    followPhasePlanned: true,
+    followRemaining: 50,
+    exactViewportResumeAvailable: false,
+    priorTargetId: "old-target",
+    eligibleTargets: [
+      { id: "fresh-target", createdAt: "2026-08-31T00:00:00Z", lastUsedAt: null },
+    ],
+    workerPlanExplicitlySafe: false,
+    forceFreshBoundary: true,
+  });
+  assert.deepEqual(strategy, {
+    strategy: "next_target",
+    reason: "next_eligible_target_identified",
+    nextTargetId: "fresh-target",
+  });
+});
+
 test("the safe boundary target order mirrors the Worker unused-then-oldest contract", () => {
   assert.deepEqual(sortSafeBoundaryTargets([
     { id: "used-new", createdAt: "2026-07-03", lastUsedAt: "2026-07-24" },
