@@ -40,6 +40,7 @@ type PlanChangeQuote = {
   activationMessageFr?: string | null;
   activationMessageEn?: string | null;
   pricingSnapshot?: CommercialPricingSnapshot | null;
+  activationMode: "simulated_test" | "stripe_test";
 };
 
 type CurrentPlan = {
@@ -178,24 +179,49 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
     setError("");
     setSuccess("");
     try {
-      const response = await fetch("/api/commercial/checkout/plan-change/activate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          quote_id: quote.quoteId,
-          idempotency_key: quote.idempotencyKey,
-        }),
-      });
+      const stripeBacked = quote.activationMode === "stripe_test";
+      const response = await fetch(
+        stripeBacked
+          ? "/api/commercial/checkout/stripe/plan-change/create-session"
+          : "/api/commercial/checkout/plan-change/activate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            quote_id: quote.quoteId,
+            idempotency_key: quote.idempotencyKey,
+          }),
+        },
+      );
       const parsed = await parseCheckoutApiResponse<{
         message_fr?: string;
         message_en?: string;
         redirect_path?: string;
+        checkout_url?: string | null;
+        stripe_mutation_initiated?: boolean;
+        awaiting_subscription_webhook?: boolean;
       }>(response, {
         messageFr: "Impossible de confirmer le changement de formule.",
         messageEn: "Could not confirm the plan change.",
       });
       if (!parsed.ok) {
         throw new Error(lang === "fr" ? parsed.clientMessageFr : parsed.clientMessageEn);
+      }
+      if (stripeBacked) {
+        if (parsed.data?.checkout_url) {
+          window.location.assign(parsed.data.checkout_url);
+          return;
+        }
+        if (!parsed.data?.stripe_mutation_initiated) {
+          throw new Error(lang === "fr"
+            ? "Le changement Stripe n'a pas pu être lancé."
+            : "The Stripe plan change could not be started.");
+        }
+        setSuccess(lang === "fr"
+          ? "Changement Stripe lancé. La formule sera actualisée après confirmation Stripe."
+          : "Stripe plan change started. The plan will update after Stripe confirmation.");
+        router.push("/instagram-client");
+        return;
       }
       setSuccess(lang === "fr" ? parsed.data?.message_fr ?? "" : parsed.data?.message_en ?? "");
       router.push(parsed.data?.redirect_path || "/instagram-client");
@@ -213,9 +239,13 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
   return (
     <div className="commercial-checkout">
       <div className="commercial-checkout-banner">
-        {lang === "fr"
-          ? "Changement de formule par compte — simulation interne, aucun paiement réel prélevé."
-          : "Per-account plan change — internal simulation, no real payment collected."}
+        {quote?.activationMode === "simulated_test"
+          ? (lang === "fr"
+            ? "Changement de formule par compte — simulation interne, aucun paiement réel prélevé."
+            : "Per-account plan change — internal simulation, no real payment collected.")
+          : (lang === "fr"
+            ? "Changement de formule sécurisé par compte."
+            : "Secure per-account plan change.")}
       </div>
 
       <h1>{intention === "welcome_dm"
@@ -357,13 +387,18 @@ export default function PlanChangeCheckoutForm(props: { lang?: "fr" | "en" }) {
           || quoting
           || !quote
           || !selectedAccount?.eligible
-          || (Boolean(quote?.amountDueCents) && quote!.amountDueCents > 0 && !quote?.simulatedActivationAvailable)
+          || (quote.activationMode === "simulated_test"
+            && Boolean(quote.amountDueCents)
+            && quote.amountDueCents > 0
+            && !quote.simulatedActivationAvailable)
         }
         onClick={() => void onConfirm()}
       >
         {loading
           ? (lang === "fr" ? "Confirmation..." : "Confirming...")
-          : quote && quote.amountDueCents > 0
+          : quote?.activationMode === "stripe_test" && quote.amountDueCents > 0
+            ? (lang === "fr" ? "Continuer vers le paiement" : "Continue to payment")
+            : quote && quote.amountDueCents > 0
             ? (lang === "fr" ? "Simuler l'activation" : "Simulate activation")
             : (lang === "fr" ? "Confirmer le changement" : "Confirm plan change")}
       </button>

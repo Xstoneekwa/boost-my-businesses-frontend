@@ -37,6 +37,7 @@ export type PlanChangeQuoteView = {
   activationMessageFr: string | null;
   activationMessageEn: string | null;
   pricingSnapshot: CommercialPricingSnapshot | null;
+  activationMode: "simulated_test" | "stripe_test";
 };
 
 function readNumber(value: unknown, fallback = 0) {
@@ -374,6 +375,7 @@ function buildQuoteView(
     activationMessageFr: activationMessages?.messageFr ?? null,
     activationMessageEn: activationMessages?.messageEn ?? null,
     pricingSnapshot,
+    activationMode: source.activationMode,
   };
 }
 
@@ -415,6 +417,7 @@ function mapQuoteRow(
     pricingSnapshot: (row.pricing_snapshot && typeof row.pricing_snapshot === "object")
       ? row.pricing_snapshot as CommercialPricingSnapshot
       : null,
+    activationMode: source.activationMode,
   };
 }
 

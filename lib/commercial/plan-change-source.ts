@@ -30,6 +30,7 @@ export type PlanChangeSource = {
   billableAccountCount: number;
   outreachAddonKey: OutreachAddonKey | null;
   changeScope: "per_account";
+  activationMode: "simulated_test" | "stripe_test";
 };
 
 export type PlanChangeSourceErrorCode =
@@ -170,8 +171,32 @@ function isAccountCommercialEntitlement(row: Row) {
 function isCommercialCheckoutSession(row: Row) {
   const flowType = readString(row.flow_type);
   if (!["first_purchase", "additional_account", "plan_change"].includes(flowType)) return false;
-  if (readString(row.status) !== "checkout_activated_test") return false;
+  if (!["checkout_activated_test", "checkout_paid"].includes(readString(row.status))) return false;
   return true;
+}
+
+export function resolveAccountCommercialSessionMode(input: {
+  session: Row;
+  subscriptions: Row[];
+  clientId: string;
+  accountId: string;
+  entitlementId: string;
+}): "simulated_test" | "stripe_test" | null {
+  if (readString(input.session.status) === "checkout_activated_test") return "simulated_test";
+  if (readString(input.session.status) !== "checkout_paid") return null;
+
+  const sessionId = readString(input.session.id);
+  const matches = input.subscriptions.filter((row) => (
+    readString(row.client_id) === input.clientId
+    && readString(row.account_id) === input.accountId
+    && readString(row.client_account_entitlement_id) === input.entitlementId
+    && readString(row.commercial_checkout_session_id) === sessionId
+    && ["active", "trialing"].includes(readString(row.status).toLowerCase())
+    && row.livemode === false
+    && Boolean(readString(row.stripe_subscription_id))
+  ));
+
+  return matches.length === 1 ? "stripe_test" : null;
 }
 
 export async function loadPlanChangeSourceForAccount(
@@ -251,6 +276,39 @@ export async function loadPlanChangeSourceForAccount(
     return { ok: false, code: "source_not_found" };
   }
 
+  let stripeSubscriptions: Row[] = [];
+  if (readString(sessionRow.status) === "checkout_paid") {
+    const { data: subscriptionRows, error: subscriptionError } = await supabase
+      .from("commercial_stripe_subscriptions")
+      .select(`
+        client_id,
+        account_id,
+        client_account_entitlement_id,
+        commercial_checkout_session_id,
+        stripe_subscription_id,
+        status,
+        livemode
+      `)
+      .eq("client_id", input.clientId)
+      .eq("account_id", input.accountId)
+      .eq("client_account_entitlement_id", readString(entitlement.id))
+      .eq("commercial_checkout_session_id", readString(sessionRow.id))
+      .in("status", ["active", "trialing"])
+      .eq("livemode", false)
+      .limit(2);
+    if (subscriptionError) return { ok: false, code: "source_not_found" };
+    stripeSubscriptions = Array.isArray(subscriptionRows) ? subscriptionRows as Row[] : [];
+  }
+
+  const activationMode = resolveAccountCommercialSessionMode({
+    session: sessionRow,
+    subscriptions: stripeSubscriptions,
+    clientId: input.clientId,
+    accountId: input.accountId,
+    entitlementId: readString(entitlement.id),
+  });
+  if (!activationMode) return { ok: false, code: "source_not_found" };
+
   const planKeyRaw = readString(entitlement.plan_key || sessionRow.plan_key).toLowerCase();
   if (!isPlanKey(planKeyRaw)) return { ok: false, code: "source_ambiguous_pricing" };
 
@@ -314,6 +372,7 @@ export async function loadPlanChangeSourceForAccount(
       billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
       outreachAddonKey,
       changeScope: "per_account",
+      activationMode,
     },
   };
 }
@@ -439,6 +498,7 @@ export async function loadPlanChangeSource(
       sourceRevision,
       purchaserEmail: readString(sessionRow.purchaser_email),
       billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
+      activationMode: "simulated_test",
     },
   };
 }

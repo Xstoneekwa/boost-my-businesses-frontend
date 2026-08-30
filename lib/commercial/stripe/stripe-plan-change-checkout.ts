@@ -19,16 +19,21 @@ function readString(value: unknown, fallback = "") {
 
 async function resolveClientStripeSubscription(
   supabase: SupabaseClient,
-  input: { clientId: string; entitlementId: string },
+  input: { clientId: string; accountId: string; entitlementId: string },
 ) {
-  const { data: subscriptionRow } = await supabase
+  const { data: subscriptionRows, error } = await supabase
     .from("commercial_stripe_subscriptions")
-    .select("stripe_subscription_id,stripe_customer_id,account_id,client_account_entitlement_id,status,commercial_checkout_session_id,commercial_mode,pricing_mode,pricing_snapshot_fingerprint")
+    .select("stripe_subscription_id,stripe_customer_id,account_id,client_account_entitlement_id,status,livemode,commercial_checkout_session_id,commercial_mode,pricing_mode,pricing_snapshot_fingerprint")
     .eq("client_id", input.clientId)
+    .eq("account_id", input.accountId)
     .eq("client_account_entitlement_id", input.entitlementId)
+    .in("status", ["active", "trialing"])
+    .eq("livemode", false)
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<Row>();
+    .limit(2);
+
+  if (error || !Array.isArray(subscriptionRows) || subscriptionRows.length !== 1) return null;
+  const subscriptionRow = subscriptionRows[0] as Row;
 
   const stripeSubscriptionId = readString(subscriptionRow?.stripe_subscription_id);
   if (!stripeSubscriptionId) return null;
@@ -95,6 +100,7 @@ export async function createStripePlanChangePaymentSession(
   const billingIntervalMonths = Number(quote.billing_interval_months ?? 1) as 1 | 3 | 6 | 12;
   const subscriptionBinding = await resolveClientStripeSubscription(supabase, {
     clientId: input.clientId,
+    accountId,
     entitlementId: sourceEntitlementId,
   });
   if (!subscriptionBinding) {
