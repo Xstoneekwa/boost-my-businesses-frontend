@@ -48,6 +48,25 @@ function readString(value: unknown, fallback = "") {
   return fallback;
 }
 
+export function assertStripeSubscriptionBindingMetadata(input: {
+  livemode: boolean | null;
+  metadata: Stripe.Metadata;
+  expectedClientId: string;
+  expectedAccountId: string;
+}) {
+  if (
+    input.livemode !== false
+    || readString(input.metadata.client_id) !== input.expectedClientId
+    || readString(input.metadata.target_account_id) !== input.expectedAccountId
+  ) {
+    throw new StripeFulfillmentError(
+      "stripe_subscription_binding_metadata_mismatch",
+      "Stripe subscription binding metadata does not match the checkout target.",
+      false,
+    );
+  }
+}
+
 async function loadSubscriptionForSession(stripe: Stripe, session: Stripe.Checkout.Session) {
   const subscriptionRef = session.subscription;
   const subscriptionId = typeof subscriptionRef === "string"
@@ -111,6 +130,8 @@ export async function fulfillStripeCheckoutAttempt(
       attempt: input.attempt,
       session: input.session,
       subscriptionId: paymentValidation.subscriptionId,
+      subscriptionLivemode: subscription?.livemode ?? null,
+      subscriptionMetadata: subscription?.metadata ?? {},
       stripePriceId: subscription?.items.data[0]?.price?.id ?? null,
       customerId: readString(input.session.customer),
       paymentIntentId: readString(input.session.payment_intent),
@@ -151,6 +172,8 @@ async function fulfillSubscriptionAttempt(
     attempt: StripeCheckoutAttemptRow;
     session: Stripe.Checkout.Session;
     subscriptionId: string;
+    subscriptionLivemode: boolean | null;
+    subscriptionMetadata: Stripe.Metadata;
     stripePriceId: string | null;
     customerId: string;
     paymentIntentId: string;
@@ -201,6 +224,16 @@ async function fulfillSubscriptionAttempt(
     || readString((checkoutSession.metadata as Row | null)?.target_account_id)
     || null;
 
+  const expectedClientId = readString(checkoutSession.client_id) || readString(input.attempt.client_id);
+  if (targetAccountId) {
+    assertStripeSubscriptionBindingMetadata({
+      livemode: input.subscriptionLivemode,
+      metadata: input.subscriptionMetadata,
+      expectedClientId,
+      expectedAccountId: targetAccountId,
+    });
+  }
+
   const activation = await activateClientAccountEntitlementFromCheckout(supabase, {
     planKey: readString(checkoutSession.plan_key),
     billingIntervalMonths: Number(checkoutSession.billing_interval_months ?? 1),
@@ -243,6 +276,7 @@ async function fulfillSubscriptionAttempt(
         );
       }
       const replacement = await reconcileSimulatedToStripeTestEntitlement(supabase, {
+        checkoutAttemptId: input.attempt.id,
         clientId: activation.clientId,
         accountId: targetAccountId,
         sourceEntitlementId,
@@ -253,6 +287,13 @@ async function fulfillSubscriptionAttempt(
         stripePriceId: input.stripePriceId,
         stripeCheckoutSessionId: input.session.id,
         stripeEventId: input.stripeEventId,
+        stripeLivemode: input.subscriptionLivemode,
+        stripeMetadataClientId: readString(input.subscriptionMetadata.client_id),
+        stripeMetadataTargetAccountId: readString(input.subscriptionMetadata.target_account_id),
+        stripeMetadataSourceEntitlementId: readString(input.subscriptionMetadata.source_entitlement_id),
+        stripeMetadataMigrationKind: readString(input.subscriptionMetadata.commercial_migration_kind),
+        stripeMetadataCommercialTestMode: readString(input.subscriptionMetadata.commercial_test_mode),
+        stripeMetadataAuthorizationId: readString(input.subscriptionMetadata.commercial_migration_authorization_id),
       });
       if (!replacement.ok) {
         throw new StripeFulfillmentError(

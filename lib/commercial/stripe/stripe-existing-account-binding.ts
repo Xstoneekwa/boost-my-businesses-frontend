@@ -207,6 +207,7 @@ export async function bindActivatedEntitlementToExistingAccount(
 export async function reconcileSimulatedToStripeTestEntitlement(
   supabase: SupabaseClient,
   input: {
+    checkoutAttemptId: string;
     clientId: string;
     accountId: string;
     sourceEntitlementId: string;
@@ -217,9 +218,17 @@ export async function reconcileSimulatedToStripeTestEntitlement(
     stripePriceId: string;
     stripeCheckoutSessionId: string;
     stripeEventId: string;
+    stripeLivemode: boolean | null;
+    stripeMetadataClientId: string;
+    stripeMetadataTargetAccountId: string;
+    stripeMetadataSourceEntitlementId: string;
+    stripeMetadataMigrationKind: string;
+    stripeMetadataCommercialTestMode: string;
+    stripeMetadataAuthorizationId: string;
   },
 ) {
-  const { data, error } = await supabase.rpc("reconcile_simulated_to_stripe_test_v1", {
+  const { data, error } = await supabase.rpc("reconcile_simulated_to_stripe_test_v2", {
+    p_checkout_attempt_id: input.checkoutAttemptId,
     p_client_id: input.clientId,
     p_account_id: input.accountId,
     p_source_entitlement_id: input.sourceEntitlementId,
@@ -230,6 +239,13 @@ export async function reconcileSimulatedToStripeTestEntitlement(
     p_stripe_price_id: input.stripePriceId,
     p_stripe_checkout_session_id: input.stripeCheckoutSessionId,
     p_stripe_event_id: input.stripeEventId,
+    p_stripe_livemode: input.stripeLivemode,
+    p_stripe_metadata_client_id: input.stripeMetadataClientId,
+    p_stripe_metadata_target_account_id: input.stripeMetadataTargetAccountId,
+    p_stripe_metadata_source_entitlement_id: input.stripeMetadataSourceEntitlementId,
+    p_stripe_metadata_migration_kind: input.stripeMetadataMigrationKind,
+    p_stripe_metadata_commercial_test_mode: input.stripeMetadataCommercialTestMode,
+    p_stripe_metadata_authorization_id: input.stripeMetadataAuthorizationId,
   });
   if (error) {
     return { ok: false as const, code: "simulated_to_stripe_reconciliation_failed" as const };
