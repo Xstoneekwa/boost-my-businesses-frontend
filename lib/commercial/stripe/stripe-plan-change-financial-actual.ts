@@ -19,6 +19,16 @@ export type StripePlanChangeFinancialActual = {
   reconciledAt: string;
 };
 
+export function stripeCreditSnapshotMatchesQuote(
+  quotedCreditCents: number,
+  actual: StripePlanChangeFinancialActual | null,
+): boolean {
+  return Number.isInteger(quotedCreditCents)
+    && quotedCreditCents >= 0
+    && actual !== null
+    && actual.remainingCreditCents === quotedCreditCents;
+}
+
 const EVENT_CORRELATION_TOLERANCE_SECONDS = 5 * 60;
 
 function normalizeCurrency(value: string) {
@@ -79,9 +89,21 @@ function canonicalPendingLines(
   ));
 }
 
+function currentPendingLines(
+  lines: StripeProrationLine[],
+  input: { stripeSubscriptionId: string },
+) {
+  return lines.filter((line) => (
+    line.proration
+    && normalizeCurrency(line.currency) === "eur"
+    && line.subscriptionId === input.stripeSubscriptionId
+  ));
+}
+
 export function resolveStripePlanChangeFinancialActual(input: {
   stripeSubscriptionId: string;
   mutationUnix: number;
+  snapshotMode?: "mutation_actual" | "current_credit";
   pendingInvoiceItems?: StripeProrationLine[];
   finalizedInvoiceLines?: StripeProrationLine[];
   customerBalanceBeforeCents?: number | null;
@@ -89,7 +111,9 @@ export function resolveStripePlanChangeFinancialActual(input: {
   reconciledAt?: string;
 }): StripePlanChangeFinancialActual | null {
   const reconciledAt = input.reconciledAt ?? new Date().toISOString();
-  const pending = canonicalPendingLines(input.pendingInvoiceItems ?? [], input);
+  const pending = input.snapshotMode === "current_credit"
+    ? currentPendingLines(input.pendingInvoiceItems ?? [], input)
+    : canonicalPendingLines(input.pendingInvoiceItems ?? [], input);
   const pendingActual = summarizeSignedProration("pending_invoice_items", pending, reconciledAt);
   if (pendingActual) return pendingActual;
 
@@ -99,6 +123,18 @@ export function resolveStripePlanChangeFinancialActual(input: {
 
   const before = input.customerBalanceBeforeCents;
   const after = input.customerBalanceAfterCents;
+  if (input.snapshotMode === "current_credit" && Number.isFinite(after)) {
+    const signedBalance = Math.trunc(Number(after));
+    return {
+      source: "customer_balance",
+      currency: "EUR",
+      amountDueCents: Math.max(0, signedBalance),
+      remainingCreditCents: Math.max(0, -signedBalance),
+      signedProrationNetCents: signedBalance,
+      sourceObjectIds: [],
+      reconciledAt,
+    };
+  }
   if (Number.isFinite(before) && Number.isFinite(after)) {
     const signedDelta = Math.trunc(Number(after)) - Math.trunc(Number(before));
     if (signedDelta !== 0) {
@@ -151,6 +187,7 @@ export async function collectStripePlanChangeFinancialActual(
     stripeCustomerId: string;
     mutationUnix: number;
     customerBalanceBeforeCents?: number | null;
+    snapshotMode?: "mutation_actual" | "current_credit";
   },
 ) {
   const [pending, invoices, customer] = await Promise.all([
@@ -176,5 +213,6 @@ export async function collectStripePlanChangeFinancialActual(
     finalizedInvoiceLines,
     customerBalanceBeforeCents: input.customerBalanceBeforeCents,
     customerBalanceAfterCents,
+    snapshotMode: input.snapshotMode,
   });
 }

@@ -7,9 +7,11 @@ import { createStripeCheckoutAttempt } from "./stripe-checkout-attempts.ts";
 import { buildSafeStripeMetadata, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
 import { isPlanKey, type PlanKey } from "../catalog.ts";
 import { isStripeTestFoundationReady, getStripeTestReadiness } from "./stripe-readiness.ts";
-import { activatePlanChangeQuote } from "../plan-change-quote.ts";
 import { upsertStripeSubscriptionProjection } from "./stripe-subscription-projection.ts";
-import { collectStripePlanChangeFinancialActual } from "./stripe-plan-change-financial-actual.ts";
+import {
+  collectStripePlanChangeFinancialActual,
+  stripeCreditSnapshotMatchesQuote,
+} from "./stripe-plan-change-financial-actual.ts";
 
 type Row = Record<string, unknown>;
 
@@ -149,6 +151,45 @@ export async function createStripePlanChangePaymentSession(
   rejectUnsafeStripeMetadataKeys(metadata);
 
   const stripe = getStripeClient(env);
+  if (!stripeCustomerId) {
+    return {
+      ok: false as const,
+      status: 503,
+      code: "stripe_customer_missing",
+      messageEn: "Stripe customer binding is required before plan change confirmation.",
+    };
+  }
+  const currentCreditSnapshot = await collectStripePlanChangeFinancialActual(stripe, {
+    stripeSubscriptionId,
+    stripeCustomerId,
+    mutationUnix: Math.floor(Date.now() / 1000),
+    snapshotMode: "current_credit",
+  });
+  const quotedStripeCreditCents = Number(quote.existing_customer_credit_cents ?? 0);
+  if (
+    !currentCreditSnapshot
+    || !stripeCreditSnapshotMatchesQuote(quotedStripeCreditCents, currentCreditSnapshot)
+  ) {
+    await supabase
+      .from("commercial_plan_change_quotes")
+      .update({
+        status: "quote_stale",
+        metadata: {
+          ...((quote.metadata && typeof quote.metadata === "object") ? quote.metadata as Row : {}),
+          stripe_credit_validation: "changed_before_confirmation",
+          canonical_stripe_credit_cents: currentCreditSnapshot?.remainingCreditCents ?? null,
+          canonical_stripe_credit_source: currentCreditSnapshot?.source ?? null,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.quoteId);
+    return {
+      ok: false as const,
+      status: 409,
+      code: "stripe_credit_changed",
+      messageEn: "Stripe credit changed after this quote was created.",
+    };
+  }
   await supabase
     .from("commercial_stripe_subscriptions")
     .update({
@@ -157,6 +198,8 @@ export async function createStripePlanChangePaymentSession(
         plan_change_state: "stripe_mutation_pending",
         target_stripe_price_id: targetPriceId,
         source_entitlement_id: sourceEntitlementId,
+        canonical_stripe_credit_cents: currentCreditSnapshot.remainingCreditCents,
+        canonical_stripe_credit_source: currentCreditSnapshot.source,
       },
       updated_at: new Date().toISOString(),
     })
@@ -174,6 +217,9 @@ export async function createStripePlanChangePaymentSession(
           ...((quote.metadata && typeof quote.metadata === "object") ? quote.metadata as Row : {}),
           quote_is_estimate: true,
           stripe_customer_balance_before_cents: customerBalanceBeforeCents,
+          canonical_stripe_credit_cents: currentCreditSnapshot.remainingCreditCents,
+          canonical_stripe_credit_source: currentCreditSnapshot.source,
+          canonical_stripe_credit_object_ids: currentCreditSnapshot.sourceObjectIds,
         },
         updated_at: new Date().toISOString(),
       })
@@ -334,7 +380,7 @@ export async function reconcileStripePlanChangeFromCanonicalSubscription(
 
   const { data: quote } = await supabase
     .from("commercial_plan_change_quotes")
-    .select("id,client_id,account_id,target_plan_key,billing_interval_months,target_outreach_addon_key,idempotency_key,status,amount_due_cents,remaining_credit_cents,activated_checkout_session_id,metadata")
+    .select("id,client_id,account_id,target_plan_key,billing_interval_months,target_outreach_addon_key,idempotency_key,status,amount_due_cents,existing_customer_credit_cents,remaining_credit_cents,activated_checkout_session_id,metadata")
     .eq("id", quoteId)
     .maybeSingle<Row>();
   if (!quote?.id) return { ok: false as const, code: "plan_change_quote_missing" as const };
@@ -354,30 +400,72 @@ export async function reconcileStripePlanChangeFromCanonicalSubscription(
     return { ok: true as const, action: "current_price_not_target" as const };
   }
 
-  let activatedCheckoutSessionId = readString(quote.activated_checkout_session_id);
-  if (readString(quote.status) !== "quote_activated") {
-    await supabase
-      .from("commercial_plan_change_quotes")
-      .update({
-        payment_status: "confirmed",
-        payment_provider: "stripe",
-        provider_transaction_id: input.subscription.id,
-        payment_confirmed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", quoteId);
-
-    const activation = await activatePlanChangeQuote(supabase, {
-      quoteId,
-      idempotencyKey: readString(quote.idempotency_key),
-      actorEmail: null,
-      simulatedActivation: false,
-    });
-    if (!activation.ok) {
-      return { ok: false as const, code: activation.code };
-    }
-    activatedCheckoutSessionId = readString(activation.checkoutSessionId);
+  const stripeCustomerId = readString(input.subscription.customer) || readString(projection?.stripe_customer_id);
+  const mutationUnix = Number(input.stripeEventCreatedAt ?? 0);
+  if (!stripeCustomerId || !Number.isFinite(mutationUnix) || mutationUnix <= 0) {
+    return { ok: false as const, code: "stripe_financial_correlation_missing" as const };
   }
+  const quoteMetadata = quote.metadata && typeof quote.metadata === "object" ? quote.metadata as Row : {};
+  const baselineValue = Number(quoteMetadata.stripe_customer_balance_before_cents);
+  const actual = await collectStripePlanChangeFinancialActual(input.stripe ?? getStripeClient(), {
+    stripeSubscriptionId: input.subscription.id,
+    stripeCustomerId,
+    mutationUnix,
+    customerBalanceBeforeCents: Number.isFinite(baselineValue) ? baselineValue : null,
+  });
+  if (!actual) {
+    return { ok: false as const, code: "stripe_financial_actual_unavailable" as const };
+  }
+  const actualPlanPeriodTotalCents = Number(input.subscription.items.data[0]?.price?.unit_amount ?? 0);
+  const actualPeriodStartAt = input.subscription.current_period_start
+    ? new Date(input.subscription.current_period_start * 1000).toISOString()
+    : "";
+  const actualPeriodEndAt = input.subscription.current_period_end
+    ? new Date(input.subscription.current_period_end * 1000).toISOString()
+    : "";
+  if (
+    !Number.isInteger(actualPlanPeriodTotalCents)
+    || actualPlanPeriodTotalCents <= 0
+    || !actualPeriodStartAt
+    || !actualPeriodEndAt
+    || Date.parse(actualPeriodEndAt) <= Date.parse(actualPeriodStartAt)
+  ) {
+    return { ok: false as const, code: "stripe_period_projection_invalid" as const };
+  }
+
+  const { data: activationResult, error: activationError } = await supabase.rpc(
+    "activate_stripe_commercial_plan_change_per_account_v1",
+    {
+      p_quote_id: quoteId,
+      p_idempotency_key: readString(quote.idempotency_key),
+      p_stripe_event_id: input.stripeEventId,
+      p_stripe_subscription_id: input.subscription.id,
+      p_current_stripe_price_id: currentPriceId,
+      p_quoted_stripe_credit_cents: Number(quote.existing_customer_credit_cents ?? 0),
+      p_actual_source: actual.source,
+      p_actual_amount_due_cents: actual.amountDueCents,
+      p_actual_remaining_credit_cents: actual.remainingCreditCents,
+      p_actual_proration_net_cents: actual.signedProrationNetCents,
+      p_actual_plan_period_total_cents: actualPlanPeriodTotalCents,
+      p_actual_period_start_at: actualPeriodStartAt,
+      p_actual_period_end_at: actualPeriodEndAt,
+      p_source_object_ids: actual.sourceObjectIds,
+      p_reconciled_at: actual.reconciledAt,
+    },
+  );
+  const activationPayload = activationResult && typeof activationResult === "object"
+    ? activationResult as Row
+    : {};
+  if (activationError || activationPayload.ok !== true) {
+    return {
+      ok: false as const,
+      code: readString(activationPayload.code, "stripe_plan_change_activation_failed"),
+    };
+  }
+  const activatedCheckoutSessionId = readString(
+    activationPayload.checkout_session_id,
+    readString(quote.activated_checkout_session_id),
+  );
 
   const clientId = readString(quote.client_id) || readString(projection?.client_id);
   const accountId = readString(quote.account_id) || readString(projection?.account_id);
@@ -430,60 +518,6 @@ export async function reconcileStripePlanChangeFromCanonicalSubscription(
       updated_at: new Date().toISOString(),
     })
     .eq("stripe_subscription_id", input.subscription.id);
-
-  const stripeCustomerId = readString(input.subscription.customer) || readString(projection?.stripe_customer_id);
-  const mutationUnix = Number(input.stripeEventCreatedAt ?? 0);
-  if (!stripeCustomerId || !Number.isFinite(mutationUnix) || mutationUnix <= 0) {
-    return { ok: false as const, code: "stripe_financial_correlation_missing" as const };
-  }
-  const quoteMetadata = quote.metadata && typeof quote.metadata === "object" ? quote.metadata as Row : {};
-  const baselineValue = Number(quoteMetadata.stripe_customer_balance_before_cents);
-  const actual = await collectStripePlanChangeFinancialActual(input.stripe ?? getStripeClient(), {
-    stripeSubscriptionId: input.subscription.id,
-    stripeCustomerId,
-    mutationUnix,
-    customerBalanceBeforeCents: Number.isFinite(baselineValue) ? baselineValue : null,
-  });
-  if (!actual) {
-    return { ok: false as const, code: "stripe_financial_actual_unavailable" as const };
-  }
-  const actualPlanPeriodTotalCents = Number(input.subscription.items.data[0]?.price?.unit_amount ?? 0);
-  const actualPeriodStartAt = input.subscription.current_period_start
-    ? new Date(input.subscription.current_period_start * 1000).toISOString()
-    : "";
-  const actualPeriodEndAt = input.subscription.current_period_end
-    ? new Date(input.subscription.current_period_end * 1000).toISOString()
-    : "";
-  if (
-    !Number.isInteger(actualPlanPeriodTotalCents)
-    || actualPlanPeriodTotalCents <= 0
-    || !actualPeriodStartAt
-    || !actualPeriodEndAt
-    || Date.parse(actualPeriodEndAt) <= Date.parse(actualPeriodStartAt)
-  ) {
-    return { ok: false as const, code: "stripe_period_projection_invalid" as const };
-  }
-
-  const { data: financialResult, error: financialError } = await supabase.rpc(
-    "reconcile_plan_change_stripe_financial_actual_v1",
-    {
-      p_quote_id: quoteId,
-      p_stripe_subscription_id: input.subscription.id,
-      p_actual_source: actual.source,
-      p_actual_amount_due_cents: actual.amountDueCents,
-      p_actual_remaining_credit_cents: actual.remainingCreditCents,
-      p_actual_proration_net_cents: actual.signedProrationNetCents,
-      p_actual_plan_period_total_cents: actualPlanPeriodTotalCents,
-      p_actual_period_start_at: actualPeriodStartAt,
-      p_actual_period_end_at: actualPeriodEndAt,
-      p_source_object_ids: actual.sourceObjectIds,
-      p_reconciled_at: actual.reconciledAt,
-    },
-  );
-  const financialPayload = financialResult && typeof financialResult === "object" ? financialResult as Row : {};
-  if (financialError || financialPayload.ok !== true) {
-    return { ok: false as const, code: readString(financialPayload.code, "stripe_financial_projection_failed") };
-  }
 
   return {
     ok: true as const,
