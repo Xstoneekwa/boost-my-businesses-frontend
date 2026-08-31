@@ -203,12 +203,14 @@ export async function createPlanChangeQuote(
     };
   }
 
-  const existingCustomerCreditCents = await readAccountScopedCreditBalanceCents(
-    supabase,
-    input.clientId,
-    accountId,
-    source.currency,
-  );
+  const existingCustomerCreditCents = source.activationMode === "stripe_test"
+    ? source.stripeActualCreditCents
+    : await readAccountScopedCreditBalanceCents(
+      supabase,
+      input.clientId,
+      accountId,
+      source.currency,
+    );
   if (existingCustomerCreditCents == null) {
     return {
       ok: false,

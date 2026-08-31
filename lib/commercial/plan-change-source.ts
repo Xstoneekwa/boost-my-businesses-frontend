@@ -31,6 +31,7 @@ export type PlanChangeSource = {
   outreachAddonKey: OutreachAddonKey | null;
   changeScope: "per_account";
   activationMode: "simulated_test" | "stripe_test";
+  stripeActualCreditCents: number;
 };
 
 export type PlanChangeSourceErrorCode =
@@ -286,6 +287,8 @@ export async function loadPlanChangeSourceForAccount(
         client_account_entitlement_id,
         commercial_checkout_session_id,
         stripe_subscription_id,
+        current_period_start,
+        current_period_end,
         status,
         livemode
       `)
@@ -327,13 +330,16 @@ export async function loadPlanChangeSourceForAccount(
     ? entitlement.metadata as Row
     : null;
 
-  const periodStartAt = readString(entitlement.consumed_at)
+  const canonicalStripeSubscription = activationMode === "stripe_test" ? stripeSubscriptions[0] : null;
+  const periodStartAt = readString(canonicalStripeSubscription?.current_period_start)
+    || readString(entitlement.consumed_at)
     || readString(sessionRow.activated_at)
     || readString(sessionRow.created_at)
     || readString(entitlement.created_at);
   if (!periodStartAt) return { ok: false, code: "source_period_invalid" };
 
-  const periodEndAt = readMetadataString(entitlementMetadata, "period_end_at")
+  const periodEndAt = readString(canonicalStripeSubscription?.current_period_end)
+    || readMetadataString(entitlementMetadata, "period_end_at")
     || readMetadataString(sessionMetadata, "period_end_at")
     || resolvePeriodEndAt(periodStartAt, billingIntervalMonths);
   if (!periodEndAt) return { ok: false, code: "source_period_invalid" };
@@ -373,6 +379,14 @@ export async function loadPlanChangeSourceForAccount(
       outreachAddonKey,
       changeScope: "per_account",
       activationMode,
+      // Stripe-backed plan changes persist their post-mutation actual separately
+      // from the immutable pre-confirmation quote. A first Stripe subscription has
+      // no prior plan-change credit, therefore the canonical starting value is 0.
+      stripeActualCreditCents: Math.max(0, readNumber(
+        entitlementMetadata?.actual_stripe_remaining_credit_cents
+          ?? sessionMetadata?.actual_stripe_remaining_credit_cents,
+        0,
+      )),
     },
   };
 }
@@ -499,6 +513,7 @@ export async function loadPlanChangeSource(
       purchaserEmail: readString(sessionRow.purchaser_email),
       billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
       activationMode: "simulated_test",
+      stripeActualCreditCents: 0,
     },
   };
 }

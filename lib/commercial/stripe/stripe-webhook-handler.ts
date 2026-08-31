@@ -325,6 +325,8 @@ async function handleSubscriptionProjectionEvent(
     const planChange = await reconcileStripePlanChangeFromCanonicalSubscription(supabase, {
       subscription,
       stripeEventId: event.id,
+      stripeEventCreatedAt: event.created,
+      stripe: getStripeClient(),
     });
     if (!planChange.ok) {
       throw new StripeFulfillmentError(
