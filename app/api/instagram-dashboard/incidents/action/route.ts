@@ -1,6 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { loadIncidentDetail } from "@/lib/instagram-dashboard/incident-detail";
-import { dispatchIncidentLifecycleNotifications } from "@/lib/instagram-dashboard/incident-lifecycle-notifications";
 import { isIncidentOnlyActionRateLimit } from "@/lib/instagram-dashboard/action-rate-limit-policy";
 import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString, requireRelayOrAdmin } from "../../_utils";
 import { verifyCompassRelayKey } from "../../compass/relay-auth";
@@ -105,37 +104,10 @@ export async function POST(request: Request) {
     if (error) return mapRpcError(error.message, error.code);
 
     const transition = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
-    const notificationIds = Array.isArray(transition.notification_ids)
-      ? transition.notification_ids.map((value) => String(value)).filter((value) => UUID.test(value))
-      : [];
     let deliveries: Array<Record<string, unknown>> = [];
     const idempotent = transition.idempotent === true;
-    if (!idempotent && notificationIds.length && (action === "resolve" || action === "retry_notification")) {
-      const detailBeforeDelivery = await loadIncidentDetail(incidentId);
-      if (detailBeforeDelivery) {
-        const incident = detailBeforeDelivery.incident;
-        try {
-          deliveries = await dispatchIncidentLifecycleNotifications({
-            incidentId,
-            notificationIds,
-            facts: {
-              id: incident.id,
-              accountUsername: incident.accountUsername,
-              incidentType: incident.incidentType,
-              reason: incident.reason,
-              resolutionReason: incident.resolutionReason,
-              resolvedAt: incident.resolvedAt,
-              resolvedBy: incident.resolvedBy,
-            },
-          });
-        } catch {
-          deliveries = notificationIds.map((id) => ({
-            id,
-            status: "failed",
-            error: "delivery_dispatch_failed_after_database_commit",
-          }));
-        }
-      }
+    if (!idempotent && (action === "resolve" || action === "retry_notification")) {
+      deliveries = [{ status: "queued", router: "notification_router_v2" }];
     }
 
     const detail = await loadIncidentDetail(incidentId);

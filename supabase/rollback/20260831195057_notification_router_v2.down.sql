@@ -1,0 +1,26 @@
+drop trigger if exists notification_business_events_materialize_v2 on public.notification_business_events;
+drop trigger if exists notification_business_events_immutable_v2 on public.notification_business_events;
+drop trigger if exists notification_router_auto_login_success_v2 on public.client_instagram_accounts;
+drop trigger if exists notification_router_auto_login_failure_v2 on public.account_incidents;
+drop trigger if exists notification_router_general_incident_v2 on public.account_incidents;
+drop trigger if exists notification_router_new_client_v2 on public.commercial_stripe_checkout_attempts;
+drop trigger if exists notification_router_plan_change_v2 on public.commercial_stripe_subscriptions;
+drop function if exists public.notification_router_auto_login_success_v2();
+drop function if exists public.notification_router_auto_login_failure_v2();
+drop function if exists public.notification_router_general_incident_v2();
+drop function if exists public.notification_router_new_client_v2();
+drop function if exists public.notification_router_plan_change_v2();
+drop function if exists public.complete_notification_delivery_attempt_v2(uuid,text,timestamptz,boolean,integer,text);
+drop function if exists public.skip_notification_delivery_v2(uuid,text,text);
+drop function if exists public.rotate_notification_incident_ciphertexts_v2(jsonb);
+drop function if exists public.claim_notification_deliveries_v2(text,integer);
+drop function if exists public.emit_notification_business_event_v2(text,text,text,text,uuid,uuid,uuid,jsonb,jsonb,timestamptz);
+drop function if exists public.notification_router_materialize_deliveries_v2();
+drop function if exists public.notification_business_events_immutable_v2();
+drop table if exists public.notification_delivery_attempts;
+drop table if exists public.notification_deliveries;
+drop table if exists public.notification_business_events;
+drop table if exists public.notification_destination_settings;
+
+commit;
+begin;

@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/commercial-outreach",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/notification-router",
+      "schedule": "* * * * *"
     }
   ]
 }

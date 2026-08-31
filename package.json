@@ -13,7 +13,9 @@
     "test:target-availability-engine": "node --test --experimental-strip-types lib/target-availability/identity-engine.test.ts lib/target-availability/assessment-engine.test.ts lib/target-availability/current-projection.test.ts lib/target-availability/replay-harness.test.ts && node --test lib/target-availability/engine-architecture.test.mjs lib/target-availability/dormancy-contract.test.mjs",
     "replay:target-availability": "node --experimental-strip-types lib/target-availability/replay-cli.ts",
     "test:ct-v2-1": "node --test --experimental-strip-types lib/target-lifecycle/*.test.ts lib/target-availability/*.test.ts lib/ct-premium/replacement-shadow.test.ts",
-    "test:ct-architecture": "node --test lib/target-lifecycle/architecture-boundary.test.mjs"
+    "test:ct-architecture": "node --test lib/target-lifecycle/architecture-boundary.test.mjs",
+    "test:notification-router-v2": "tsx --test lib/notification-router-v2/*.test.ts && node --test lib/notification-router-v2/*.test.mjs",
+    "migrate:notification-router-v2:incident-settings": "tsx scripts/migrate-incident-notification-settings-v2.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",
@@ -36,6 +38,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }
