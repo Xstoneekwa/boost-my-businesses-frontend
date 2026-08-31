@@ -38,6 +38,8 @@ export type ClientPlanResolutionSource =
   | "client_subscription"
   | "pending";
 
+export const CLIENT_COMMERCIAL_TIME_ZONE = "Africa/Johannesburg";
+
 const RUNTIME_PACKAGE_CODES = new Set([
   "full_cycle",
   "outreach_only",
@@ -148,14 +150,32 @@ export function addCalendarMonthsUtc(iso: string, months: number) {
 export function resolveSubscriptionPeriodEnd(input: {
   periodStartAt: string | null;
   billingIntervalMonths: number | null;
+  canonicalStripePeriodEndAt?: string | null;
+  canonicalEntitlementPeriodEndAt?: string | null;
   explicitPeriodEndAt?: string | null;
 }) {
-  if (input.explicitPeriodEndAt) {
-    const explicit = new Date(input.explicitPeriodEndAt);
+  for (const authoritativePeriodEnd of [
+    input.canonicalStripePeriodEndAt,
+    input.canonicalEntitlementPeriodEndAt,
+    input.explicitPeriodEndAt,
+  ]) {
+    if (!authoritativePeriodEnd) continue;
+    const explicit = new Date(authoritativePeriodEnd);
     if (!Number.isNaN(explicit.getTime())) return explicit.toISOString();
   }
   if (!input.periodStartAt || !input.billingIntervalMonths) return null;
   return addCalendarMonthsUtc(input.periodStartAt, input.billingIntervalMonths);
+}
+
+export function formatClientCommercialDate(value: string, lang: "fr" | "en") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(lang === "fr" ? "fr-FR" : "en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: CLIENT_COMMERCIAL_TIME_ZONE,
+  }).format(date);
 }
 
 export function formatClientMonthlyPrice(planKey: string | null, monthlyPriceCents: number | null, lang: "fr" | "en") {

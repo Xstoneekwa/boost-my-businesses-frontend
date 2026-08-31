@@ -2,7 +2,7 @@ import type { ClientAccountInsights } from "./load-account-insights";
 import type { AccountCommercialSubscriptionDisplay } from "./load-account-commercial-subscription";
 import type { ClientWorkspaceView } from "./workspace-data";
 import { COMMERCIAL_PLANS, type PlanKey } from "../commercial/catalog.ts";
-import { isKnownCommercialPlanKey } from "./client-subscription-projection";
+import { formatClientCommercialDate, isKnownCommercialPlanKey } from "./client-subscription-projection.ts";
 
 export type OverviewStatCard = {
   lbl: string;
@@ -47,13 +47,7 @@ function formatCount(value: number, lang: "fr" | "en") {
 }
 
 function formatBillingDate(value: string, lang: "fr" | "en") {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return formatClientCommercialDate(value, lang);
 }
 
 function formatSignedCount(value: number, lang: "fr" | "en") {

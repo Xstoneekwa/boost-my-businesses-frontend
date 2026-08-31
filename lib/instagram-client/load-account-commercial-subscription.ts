@@ -118,13 +118,21 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
     ? entitlement.metadata as SupabaseRecord
     : null;
 
+  const commercialPeriodEndAt = entitlement ? resolveSubscriptionPeriodEnd({
+    periodStartAt: readString(entitlement.consumed_at) || readString(entitlement.created_at) || readString(subscriptionRow?.starts_at) || null,
+    billingIntervalMonths: Number(entitlement.billing_interval_months) || null,
+    canonicalStripePeriodEndAt: readMetadataString(entitlementMetadata, "actual_stripe_period_end_at") || null,
+    canonicalEntitlementPeriodEndAt: readMetadataString(entitlementMetadata, "period_end_at") || null,
+    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at") || null,
+  }) : null;
+
   const commercial = entitlement ? {
     planKey: readString(entitlement.plan_key).toLowerCase() || null,
     commercialPackageCode: readString(entitlement.commercial_package_code).toLowerCase() || null,
     checkoutSessionPlanKey: null,
     billingIntervalMonths: Number(entitlement.billing_interval_months) || null,
     periodStartAt: readString(entitlement.consumed_at) || readString(entitlement.created_at) || readString(subscriptionRow?.starts_at) || null,
-    periodEndAt: readMetadataString(entitlementMetadata, "period_end_at") || null,
+    periodEndAt: commercialPeriodEndAt,
     growthEstimateLabel: readMetadataString(entitlementMetadata, "growth_estimate_label") || null,
     monthlyPriceCents: Number(entitlement.pack_monthly_discounted_cents) || null,
   } : null;
@@ -166,10 +174,10 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
 
   const supportLabel = readMetadataString(entitlementMetadata, "support_label") || pendingLabel(input.lang);
 
-  const periodEndAt = resolveSubscriptionPeriodEnd({
-    periodStartAt: commercial?.periodStartAt ?? (readString(subscriptionRow?.starts_at) || null),
-    billingIntervalMonths: commercial?.billingIntervalMonths ?? null,
-    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at"),
+  const periodEndAt = commercial?.periodEndAt ?? resolveSubscriptionPeriodEnd({
+    periodStartAt: readString(subscriptionRow?.starts_at) || null,
+    billingIntervalMonths: null,
+    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at") || null,
   });
 
   const billingDateIso = projection.billingDisplayMode === "next_billing"
