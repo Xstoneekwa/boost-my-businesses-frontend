@@ -34,6 +34,7 @@ import {
   operationalBlockerFromDashboardAction,
   type OperationalBlocker,
 } from "@/lib/instagram-dashboard/operational-blocker";
+import { isCurrentBlockingDashboardAction } from "@/lib/instagram-dashboard/dashboard-action-blockers";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -833,6 +834,11 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       (dashboardActionsResult.data ?? []) as SupabaseRecord[],
       (incidentsResult.data ?? []) as SupabaseRecord[],
     );
+    const activeIncidentIds = new Set(
+      ((incidentsResult.data ?? []) as SupabaseRecord[])
+        .map((row) => readString(row, ["id"], ""))
+        .filter(Boolean),
+    );
 
     const actionCountsByAccount = new Map<string, {
       total: number;
@@ -853,7 +859,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       const actionType = readString(row, ["action_type"], "").toLowerCase();
       const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
       const isReplacementInProgress = isStaleSessionReplacementAction(row, actionType);
-      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction && !isReplacementInProgress) {
+      if (isCurrentBlockingDashboardAction(row, { activeIncidentIds }) && !isCredentialVerificationAction && !isReplacementInProgress) {
         current.blocking += 1;
         current.firstBlockingAction ||= actionType || "blocking_dashboard_action";
         current.operationalBlocker ||= operationalBlockerFromDashboardAction(row);

@@ -98,6 +98,25 @@ test("unknown plan and zero-quota enabled phase fail closed", () => {
   assert.equal(validateCanonicalResumePlan(metadata.resume_plan), "phase_plan_quota_invalid");
 });
 
+test("post-follow recovery is executable only as the first confirmed phase", () => {
+  const metadata = buildAutoRestartResumePlanMetadata(candidate);
+  const recoveryPlan = {
+    ...metadata.resume_plan,
+    phase_order: ["post_follow_recovery", "welcome", "follow", "unfollow"],
+    safe_next_step: "post_follow_recovery",
+    phases_to_run: {
+      ...metadata.resume_plan.phases_to_run,
+      post_follow_recovery: true,
+      follow: true,
+    },
+  };
+  assert.equal(validateCanonicalResumePlan(recoveryPlan), null);
+  assert.equal(
+    validateCanonicalResumePlan({ ...recoveryPlan, safe_next_step: "follow" }),
+    "post_follow_recovery_contract_invalid",
+  );
+});
+
 test("no executable phase is rejected before authorization consumption", () => {
   const metadata = buildAutoRestartResumePlanMetadata({
     ...candidate,

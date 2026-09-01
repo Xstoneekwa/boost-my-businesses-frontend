@@ -513,7 +513,7 @@ async function consumeAuthorizationAndCreateRequest(
     metadata: Record<string, unknown>;
   },
 ) {
-  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v3", {
+  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v4", {
     p_authorization_id: input.authorizationId,
     p_worker_id: input.workerId,
     p_device_id: input.deviceId,
@@ -1604,7 +1604,7 @@ async function processHumanConfirmedResumes(
           resume_reason: "resolved_incident_human_authorized",
           resume_strategy: candidate.safeRestartStrategy,
           source_incident_id: incidentId,
-          source_request_id: input.requestId,
+          source_request_id: readString(storedPlan.run_request_id),
           authorization_id: authorizationId,
           retry_generation: readNumber(authorization.retry_generation, 0),
           last_checkpoint: {
@@ -1622,6 +1622,34 @@ async function processHumanConfirmedResumes(
           },
         });
         const storedPlanPayload = readRecord(storedPlan.plan);
+        const storedPhases = readRecord(storedPlanPayload?.phases_to_run);
+        const storedQuota = readRecord(storedPlanPayload?.quota_remaining);
+        if (storedPhases?.post_follow_recovery === true) {
+          const storedFollowRemaining = readNumber(storedQuota?.follow, -1);
+          const candidateFollowRemaining = readNumber(
+            resumeMetadata.resume_plan.quota_remaining.follow,
+            -1,
+          );
+          if (
+            storedPhases.follow !== false
+            || readString(storedPlanPayload?.safe_next_step) !== "post_follow_recovery"
+            || storedPlanPayload?.new_follow_blocked_until_recovery !== true
+            || storedFollowRemaining <= 0
+            || candidateFollowRemaining !== storedFollowRemaining
+          ) {
+            await blockResume("post_follow_recovery_reconciliation_required");
+            continue;
+          }
+          Object.assign(resumeMetadata.resume_plan, {
+            phase_order: ["post_follow_recovery", "welcome", "follow", "unfollow"],
+            safe_next_step: "post_follow_recovery",
+            phases_to_run: {
+              ...resumeMetadata.resume_plan.phases_to_run,
+              post_follow_recovery: true,
+              follow: true,
+            },
+          });
+        }
         const storedUnfollowCheckpoint = readRecord(storedPlanPayload?.unfollow_checkpoint)
           ?? readRecord(readRecord(storedPlanPayload?.unfollow_outcome)?.checkpoint)
           ?? null;

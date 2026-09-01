@@ -23,7 +23,7 @@ test("authorization consumption and request creation use one atomic RPC", () => 
   const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
   assert.match(humanSection, /consumeAuthorizationAndCreateRequest\(supabase/);
   assert.doesNotMatch(humanSection, /claimAuthorizationAtomically/);
-  assert.match(tickSource, /consume_resume_authorization_and_create_request_v3/);
+  assert.match(tickSource, /consume_resume_authorization_and_create_request_v4/);
 });
 
 test("resume request creation stays on the canonical CP0 path", () => {
@@ -144,6 +144,19 @@ test("human Unfollow resume transports the exact persisted Daily Plan checkpoint
     humanSection.indexOf("resumeMetadata.resume_plan.unfollow_checkpoint = storedUnfollowCheckpoint")
       < humanSection.indexOf("consumeAuthorizationAndCreateRequest(supabase"),
     "the exact checkpoint must be attached before atomic request creation",
+  );
+});
+
+test("persisted post-follow recovery is ordered before remaining Follow quota", () => {
+  const humanSection = tickSource.slice(tickSource.indexOf("async function processHumanConfirmedResumes"));
+  assert.match(humanSection, /storedPhases\?\.post_follow_recovery === true/);
+  assert.match(humanSection, /post_follow_recovery_reconciliation_required/);
+  assert.match(humanSection, /"post_follow_recovery", "welcome", "follow", "unfollow"/);
+  assert.match(humanSection, /safe_next_step: "post_follow_recovery"/);
+  assert.match(humanSection, /post_follow_recovery: true/);
+  assert.ok(
+    humanSection.indexOf('safe_next_step: "post_follow_recovery"')
+      < humanSection.indexOf("consumeAuthorizationAndCreateRequest(supabase"),
   );
 });
 

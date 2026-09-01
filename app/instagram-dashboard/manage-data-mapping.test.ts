@@ -89,7 +89,7 @@ test("Admin Manage renders separate Active, Archives, and Trash buckets", () => 
 
 test("Manage does not treat credential verification actions as social blocking", () => {
   assert.match(manageSource, /isCredentialVerificationAction/);
-  assert.match(manageSource, /blocking_campaign"\], false\) && !isCredentialVerificationAction/);
+  assert.match(manageSource, /isCurrentBlockingDashboardAction\(row, \{ activeIncidentIds \}\) && !isCredentialVerificationAction/);
   assert.match(manageSource, /blockingCampaign: Boolean\(operationalBlocker\)/);
   assert.match(manageSource, /hasFreshActionCounts \? actionCounts\.blocking > 0 : account\.blockingCampaign/);
 });

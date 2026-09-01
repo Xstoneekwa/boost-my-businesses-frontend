@@ -67,11 +67,13 @@ test("multiple accounts are loaded through one set-based RPC without N+1", async
       calls.push({ name, args });
       return {
         data: [
-          restrictionRow,
+          { ...restrictionRow, source_type: "incident", source_id: restrictionRow.incident_id },
           {
             ...restrictionRow,
             account_id: secondAccount,
             incident_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            source_type: "incident",
+            source_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             incident_type: "account_login_required",
             reason_code: "account_login_required",
           },
@@ -88,10 +90,30 @@ test("multiple accounts are loaded through one set-based RPC without N+1", async
   ]);
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.name, "canonical_active_blocking_incidents_v1");
+  assert.equal(calls[0]?.name, "canonical_active_operational_blockers_v1");
   assert.deepEqual(calls[0]?.args.p_account_ids, [restrictionRow.account_id, secondAccount]);
   assert.equal(blockers.size, 2);
   assert.equal(blockers.get(secondAccount)?.category, "login");
+});
+
+test("the canonical batch loader projects a standalone dashboard action", async () => {
+  const blockers = await loadCanonicalOperationalBlockers({
+    async rpc() {
+      return {
+        data: [{
+          account_id: restrictionRow.account_id,
+          source_type: "dashboard_action",
+          source_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          action_type: "review_login_challenge",
+          reason_code: "review_login_challenge",
+          severity: "warning",
+        }],
+        error: null,
+      };
+    },
+  }, [restrictionRow.account_id]);
+  assert.equal(blockers.get(restrictionRow.account_id)?.sourceType, "dashboard_action");
+  assert.equal(blockers.get(restrictionRow.account_id)?.reasonCode, "review_login_challenge");
 });
 
 test("empty account batch performs no RPC", async () => {

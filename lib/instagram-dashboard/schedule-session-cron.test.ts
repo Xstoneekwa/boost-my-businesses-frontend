@@ -135,7 +135,7 @@ function makeSupabase(overrides: {
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
-        if (name === "canonical_active_blocking_incidents_v1") {
+        if (name === "canonical_active_operational_blockers_v1") {
           return Promise.resolve({ data: overrides.operationalBlockers ?? [], error: null });
         }
         if (overrides.rpcError) {
@@ -157,7 +157,7 @@ function makeSupabase(overrides: {
 }
 
 function nonProjectionRpcCalls(calls: Array<{ name: string; args: Record<string, unknown> }>) {
-  return calls.filter((call) => call.name !== "canonical_active_blocking_incidents_v1");
+  return calls.filter((call) => call.name !== "canonical_active_operational_blockers_v1");
 }
 
 test("assignmentWindowActive matches inclusive start and exclusive end", () => {
@@ -243,7 +243,8 @@ test("active canonical blocker skips pre-enqueue with one batch read and no requ
   const supabase = makeSupabase({
     operationalBlockers: [{
       account_id: "account-1",
-      incident_id: "incident-1",
+      source_type: "incident",
+      source_id: "incident-1",
       incident_type: "instagram_account_restriction",
       reason_code: "instagram_action_rate_limit",
       severity: "error",
@@ -267,7 +268,7 @@ test("active canonical blocker skips pre-enqueue with one batch read and no requ
   assert.equal(run.result.summary.queued_count, 0);
   assert.equal(eligibilityCalls, 0);
   assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
-  const projectionCalls = supabase.rpcCalls.filter((call) => call.name === "canonical_active_blocking_incidents_v1");
+  const projectionCalls = supabase.rpcCalls.filter((call) => call.name === "canonical_active_operational_blockers_v1");
   assert.equal(projectionCalls.length, 1);
   assert.deepEqual(projectionCalls[0]?.args.p_account_ids, ["account-1"]);
 });

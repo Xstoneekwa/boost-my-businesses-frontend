@@ -138,7 +138,7 @@ export async function loadCanonicalOperationalBlockers(
 ): Promise<Map<string, OperationalBlocker>> {
   const uniqueAccountIds = [...new Set(accountIds.map((value) => value.trim()).filter(Boolean))];
   if (!uniqueAccountIds.length) return new Map();
-  const result = await supabase.rpc("canonical_active_blocking_incidents_v1", {
+  const result = await supabase.rpc("canonical_active_operational_blockers_v1", {
     p_account_ids: uniqueAccountIds,
   }) as { data?: unknown; error?: { message?: string } | null };
   if (result.error) throw new Error(result.error.message || "canonical_operational_blockers_unavailable");
@@ -146,7 +146,17 @@ export async function loadCanonicalOperationalBlockers(
   const blockers = new Map<string, OperationalBlocker>();
   for (const row of rows) {
     const accountId = text(row.account_id);
-    const blocker = operationalBlockerFromCanonicalIncident(row);
+    const sourceType = text(row.source_type).toLowerCase();
+    const blocker = sourceType === "dashboard_action"
+      ? operationalBlockerFromDashboardAction({
+          id: row.source_id,
+          action_type: row.action_type,
+          blocking_campaign: true,
+        })
+      : operationalBlockerFromCanonicalIncident({
+          ...row,
+          incident_id: row.incident_id ?? row.source_id,
+        });
     if (accountId && blocker) blockers.set(accountId, blocker);
   }
   return blockers;
