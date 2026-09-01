@@ -16,6 +16,10 @@ import {
   WELCOME_TEMPLATE_MISSING_REASON,
 } from "./schedule-session-configuration-incidents.ts";
 import { resolveCanonicalBusinessActionDeadline } from "./business-session-deadline.ts";
+import {
+  loadCanonicalOperationalBlockers,
+  type OperationalBlocker,
+} from "./operational-blocker.ts";
 
 const ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const PHYSICAL_PHONE_DEVICE_KIND = "physical_phone";
@@ -102,6 +106,7 @@ export type ScheduleSessionCronSummary = {
   skipped_emulator_device_count: number;
   skipped_stale_device_count: number;
   skipped_eligibility_count: number;
+  skipped_operational_blocker_count: number;
   skipped_missing_assignment_target_count: number;
   skipped_botapp_runtime_unavailable_count: number;
   skipped_scheduler_disabled_count: number;
@@ -192,6 +197,7 @@ function emptySummary(): ScheduleSessionCronSummary {
     skipped_emulator_device_count: 0,
     skipped_stale_device_count: 0,
     skipped_eligibility_count: 0,
+    skipped_operational_blocker_count: 0,
     skipped_missing_assignment_target_count: 0,
     skipped_botapp_runtime_unavailable_count: 0,
     skipped_scheduler_disabled_count: 0,
@@ -554,6 +560,11 @@ const defaultRuntimeHealthLoader: ScheduleSessionRuntimeHealthLoader = async (su
   return { schedulerConnected: health.schedulerConnected, status: health.status };
 };
 
+export type ScheduleSessionOperationalBlockerLoader = (
+  supabase: SupabaseLike,
+  accountIds: string[],
+) => Promise<Map<string, OperationalBlocker>>;
+
 export async function runScheduleSessionCron(
   supabase: SupabaseLike,
   options: {
@@ -564,6 +575,7 @@ export async function runScheduleSessionCron(
     syncConfigurationIncidents?: boolean;
     loadRuntimeHealth?: ScheduleSessionRuntimeHealthLoader;
     loadSchedulerAuthorization?: ScheduleSessionSchedulerAuthorizationLoader;
+    loadOperationalBlockers?: ScheduleSessionOperationalBlockerLoader;
   } = {},
 ): Promise<{ status: 200 | 401 | 403 | 503; result: ScheduleSessionCronResult }> {
   const env = readScheduleSessionCronEnv(options.env);
@@ -602,6 +614,7 @@ export async function runScheduleSessionCron(
   const evaluateEligibility = options.evaluateEligibility ?? defaultEligibilityEvaluator;
   const syncConfigurationIncidents = options.syncConfigurationIncidents ?? options.evaluateEligibility == null;
   const loadRuntimeHealth = options.loadRuntimeHealth ?? defaultRuntimeHealthLoader;
+  const loadOperationalBlockers = options.loadOperationalBlockers ?? loadCanonicalOperationalBlockers;
   const assignments = await listActiveWindowAssignments(supabase, now, env.limit);
   summary.scanned_assignments_count = assignments.length;
   if (!assignments.length) {
@@ -637,9 +650,10 @@ export async function runScheduleSessionCron(
     ...assignments.map((row) => readString(row.account_id)).filter(Boolean),
     ...peerAssignments.map((row) => readString(row.account_id)).filter(Boolean),
   ])];
-  const [activeRequests, activeRuns] = await Promise.all([
+  const [activeRequests, activeRuns, operationalBlockers] = await Promise.all([
     listActiveRequests(supabase, accountIds),
     listActiveRuns(supabase, accountIds),
+    loadOperationalBlockers(supabase, accountIds),
   ]);
   const activeRequestAccounts = new Set(activeRequests.map((row) => readString(row.account_id)).filter(Boolean));
   const activeRunAccounts = new Set(activeRuns.map((row) => readString(row.account_id)).filter(Boolean));
@@ -698,6 +712,22 @@ export async function runScheduleSessionCron(
       .filter(Boolean);
     if (busyPeerAccounts.some((peerAccountId) => activeRequestAccounts.has(peerAccountId) || activeRunAccounts.has(peerAccountId))) {
       summary.skipped_phone_busy_count += 1;
+      continue;
+    }
+
+    const operationalBlocker = operationalBlockers.get(accountId);
+    if (operationalBlocker) {
+      summary.skipped_eligibility_count += 1;
+      summary.skipped_operational_blocker_count += 1;
+      evaluatedAccounts.push({
+        account_id: accountId,
+        assignment_id: assignmentId,
+        eligible: false,
+        queued: false,
+        stage: "runtime",
+        stable_reason: "active_blocking_incident",
+        evaluated_at: now.toISOString(),
+      });
       continue;
     }
 

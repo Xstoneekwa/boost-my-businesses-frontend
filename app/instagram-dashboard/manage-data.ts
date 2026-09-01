@@ -28,6 +28,12 @@ import {
   projectCurrentPasswordUpdateActions,
   type PasswordUpdateOperationalState,
 } from "@/lib/instagram-dashboard/password-update-operational-state";
+import {
+  chooseOperationalBlocker,
+  loadCanonicalOperationalBlockers,
+  operationalBlockerFromDashboardAction,
+  type OperationalBlocker,
+} from "@/lib/instagram-dashboard/operational-blocker";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -83,6 +89,7 @@ export type ManageAccount = {
   pendingActionsCount: number;
   blockingCampaign: boolean;
   primaryBlockReason?: string | null;
+  operationalBlocker?: OperationalBlocker | null;
   primaryOperationalState?: "PASSWORD_UPDATE_REQUIRED" | null;
   passwordUpdateAction?: PasswordUpdateOperationalState | null;
   latestIncidentSeverity: string;
@@ -111,6 +118,7 @@ export type ManageAccount = {
   readiness?: string;
   eligibility?: string;
   eligibilityReason?: string;
+  schedulerEligible?: boolean;
   profileImageUrl?: string | null;
   profileImageSource?: string | null;
   instagramVerificationStatus?: string | null;
@@ -789,7 +797,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
 
   try {
     const supabase = createSupabaseClient();
-    const [dashboardActionsResult, incidentsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount] = await Promise.all([
+    const [dashboardActionsResult, incidentsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount, incidentBlockersByAccount] = await Promise.all([
       supabase
         .from("account_dashboard_actions")
         .select("id,incident_id,account_id,action_type,status,blocking_campaign,requires_client_action,created_at,updated_at,metadata,metadata_safe")
@@ -813,6 +821,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         .in("account_id", accountIds)
         .limit(5000),
       loadTargetEligibilityCountsByAccount(supabase, accountIds),
+      loadCanonicalOperationalBlockers(supabase, accountIds),
     ]);
 
     const errors = [...overview.errors];
@@ -825,11 +834,21 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       (incidentsResult.data ?? []) as SupabaseRecord[],
     );
 
-    const actionCountsByAccount = new Map<string, { total: number; blocking: number; firstBlockingAction: string | null }>();
+    const actionCountsByAccount = new Map<string, {
+      total: number;
+      blocking: number;
+      firstBlockingAction: string | null;
+      operationalBlocker: OperationalBlocker | null;
+    }>();
     for (const row of ((dashboardActionsResult.data ?? []) as SupabaseRecord[])) {
       const accountId = readString(row, ["account_id"], "");
       if (!accountId) continue;
-      const current = actionCountsByAccount.get(accountId) ?? { total: 0, blocking: 0, firstBlockingAction: null };
+      const current = actionCountsByAccount.get(accountId) ?? {
+        total: 0,
+        blocking: 0,
+        firstBlockingAction: null,
+        operationalBlocker: null,
+      };
       current.total += 1;
       const actionType = readString(row, ["action_type"], "").toLowerCase();
       const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
@@ -837,6 +856,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
       if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction && !isReplacementInProgress) {
         current.blocking += 1;
         current.firstBlockingAction ||= actionType || "blocking_dashboard_action";
+        current.operationalBlocker ||= operationalBlockerFromDashboardAction(row);
       }
       actionCountsByAccount.set(accountId, current);
     }
@@ -861,6 +881,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         total: account.pendingActionsCount,
         blocking: account.blockingCampaign ? 1 : 0,
         firstBlockingAction: account.primaryBlockReason ?? null,
+        operationalBlocker: account.operationalBlocker ?? null,
       };
       const hasFreshActionCounts = actionCountsByAccount.has(account.accountId);
       const readinessProjection = buildAdminReadinessProjection({
@@ -903,15 +924,26 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         });
       const canonicalReady = readinessProjection.overall_readiness_status === "ready";
       const passwordUpdateAction = currentPasswordActions.get(account.accountId) ?? null;
+      const operationalBlocker = chooseOperationalBlocker(
+        incidentBlockersByAccount.get(account.accountId) ?? null,
+        actionCounts.operationalBlocker,
+      );
+      const schedulerEligible = canonicalReady && !operationalBlocker;
       return {
         ...account,
-        blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
-        primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
+        blockingCampaign: Boolean(operationalBlocker)
+          || (hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign),
+        primaryBlockReason: operationalBlocker?.reasonCode
+          ?? actionCounts.firstBlockingAction
+          ?? account.primaryBlockReason
+          ?? null,
+        operationalBlocker,
         primaryOperationalState: passwordUpdateAction ? "PASSWORD_UPDATE_REQUIRED" : null,
         passwordUpdateAction,
         readiness: readinessProjection.overall_readiness_status,
-        eligibility: canonicalReady ? "can_start" : "blocked_now",
-        eligibilityReason: readinessProjection.overall_readiness_reason,
+        eligibility: schedulerEligible ? "can_start" : "blocked_now",
+        eligibilityReason: operationalBlocker?.reasonCode ?? readinessProjection.overall_readiness_reason,
+        schedulerEligible,
         readinessProjection,
       };
     };
