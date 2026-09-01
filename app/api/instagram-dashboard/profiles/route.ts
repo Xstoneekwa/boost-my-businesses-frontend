@@ -336,7 +336,7 @@ function safeSettingsSummary(
   };
 }
 
-async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGeneratedAt: string) {
+export async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGeneratedAt: string) {
   const ids = accounts.map(accountId).filter(Boolean);
   if (!ids.length) return accounts;
   try {
@@ -467,7 +467,7 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
   }
 }
 
-async function requireRelayOrAdmin(request: Request) {
+export async function requireProfilesReadAccess(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
   if (!relayAuth.ok) {
@@ -479,7 +479,7 @@ async function requireRelayOrAdmin(request: Request) {
 export async function GET(request: Request) {
   try {
     const projectionGeneratedAt = new Date().toISOString();
-    const unauthorizedResponse = await requireRelayOrAdmin(request);
+    const unauthorizedResponse = await requireProfilesReadAccess(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const manage = await getManageData({ requireCanonicalComplete: true });

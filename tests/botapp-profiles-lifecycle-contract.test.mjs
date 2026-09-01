@@ -21,14 +21,14 @@ test("legacy Profiles keeps the all-account lifecycle ledger", () => {
 
 test("manage activeAccounts and live selection share the operational lifecycle contract", () => {
   assert.match(manageSource, /classifyOperationalProfileLifecycle\(account\)/);
-  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.activeAccounts\)/);
+  assert.match(liveSource, /selectCanonicalVisibleProfiles\(manage\.activeAccounts\)/);
 });
 
 test("live endpoint selects the canonical activeAccounts projection", () => {
-  assert.match(liveSource, /unwrapJsonOkData\(await legacyResponse\.json\(\)\)/);
-  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.activeAccounts\)/);
-  assert.doesNotMatch(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.profiles\)/);
-  assert.match(liveSource, /profiles_live_all_accounts_visible_v2/);
+  assert.match(liveSource, /getManageData\(\{ requireCanonicalComplete: true \}\)/);
+  assert.match(liveSource, /selectCanonicalVisibleProfiles\(manage\.activeAccounts\)/);
+  assert.doesNotMatch(liveSource, /getLegacyProfiles|legacyPayload/);
+  assert.match(liveSource, /profiles_live_shared_core_v3/);
 });
 
 test("ten allAccounts with two terminal rows return exactly eight visible profiles", () => {

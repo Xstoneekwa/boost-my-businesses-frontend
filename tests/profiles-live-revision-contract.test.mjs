@@ -17,12 +17,14 @@ const canonicalProfilesRoute = readFileSync(
 
 test("live endpoint is dynamic, private no-store, and selects canonical revision", () => {
   assert.match(route, /dynamic\s*=\s*"force-dynamic"/);
-  assert.match(route, /Cache-Control", "private, no-store"/);
-  assert.match(route, /GET as getLegacyProfiles/);
-  assert.match(route, /legacyPayload\.activeAccounts/);
+  assert.match(route, /"Cache-Control": "private, no-store"/);
+  assert.match(route, /getManageData\(\{ requireCanonicalComplete: true \}\)/);
+  assert.match(route, /selectCanonicalVisibleProfiles\(manage\.activeAccounts\)/);
+  assert.match(route, /enrichAccountsWithRuntime/);
+  assert.doesNotMatch(route, /GET as getLegacyProfiles|legacyPayload/);
   assert.match(canonicalProfilesRoute, /total_story,live_counter_revision,created_at/);
   assert.match(canonicalProfilesRoute, /projection_revision:\s*projectionGeneratedAt/);
-  assert.match(route, /projection_revision:\s*legacyPayload\.projection_revision/);
+  assert.match(route, /projection_revision:\s*generatedAt/);
   assert.doesNotMatch(route, /generated_at:\s*new Date\(\)\.toISOString\(\)/);
 });
 
