@@ -51,7 +51,7 @@ export function renderBusinessMessage(event: Pick<NotificationBusinessEventInput
       return lines("⚠️ Nouveaux comptes cibles Premium nécessaires", [["Client", p.clientUsername], ["Comptes disponibles", p.availableTargets], ["Action", "Ajouter de nouveaux comptes cibles avant le prochain remplacement."]], event.environment);
     case "incident.opened":
     case "incident.resolved":
-      return lines(event.eventType.endsWith("resolved") ? "✅ Incident résolu" : "⚠️ Incident à traiter", [["Compte", p.username], ["Situation", p.summary], p.action ? ["Action", p.action] : null, ["Statut", event.eventType.endsWith("resolved") ? "Résolu" : "Action requise"]], event.environment);
+      return lines(event.eventType.endsWith("resolved") ? "✅ Incident résolu" : "⚠️ Incident à traiter", [["Compte", p.username], ["Situation", p.summary], p.resolutionNote ? ["Note de résolution", p.resolutionNote] : null, p.resolutionReason ? ["Motif", p.resolutionReason] : null, p.action ? ["Action", p.action] : null, ["Statut", event.eventType.endsWith("resolved") ? "Résolu" : "Action requise"], p.dashboardUrl ? ["Open Incidents/Actions", p.dashboardUrl] : null], event.environment);
     default:
       return lines("⚠️ Notification opérationnelle", [["Compte", p.username], ["Situation", p.summary], p.action ? ["Action", p.action] : null], event.environment);
   }

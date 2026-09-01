@@ -34,3 +34,22 @@ test("success is emitted only by explicit terminal event types", () => {
   assert.match(renderBusinessMessage({ category: "new_client", environment: "live", eventType: "new_client.activated", businessPayload: { username: "@x", plan: "Pro", duration: "3 mois" } }), /Compte activé et prêt/);
   assert.match(renderBusinessMessage({ category: "auto_login", environment: "live", eventType: "auto_login.connected", businessPayload: { username: "@x", plan: "Pro" } }), /Connecté et prêt/);
 });
+
+test("incident resolution carries the safe note and exact Admin deep-link to both providers", () => {
+  const message = renderBusinessMessage({
+    category: "incident",
+    environment: "live",
+    eventType: "incident.resolved",
+    businessPayload: {
+      username: "@example",
+      summary: "La situation signalée a été traitée.",
+      resolutionNote: "Verified by Liam",
+      resolutionReason: "verified_and_resolved",
+      dashboardUrl: "https://www.boostmybusinesses.com/instagram-dashboard/incidents?incident_id=509ca00b-dc07-43ab-82af-ae0bf7010d45",
+    },
+  });
+  assert.match(message, /Note de résolution : Verified by Liam/);
+  assert.match(message, /Open Incidents\/Actions : https:\/\/www\.boostmybusinesses\.com\/instagram-dashboard\/incidents\?incident_id=509ca00b-dc07-43ab-82af-ae0bf7010d45/);
+  assert.equal(providerPayload("slack", message).text, message);
+  assert.equal(providerPayload("discord", message).content, message);
+});

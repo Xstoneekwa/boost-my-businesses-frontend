@@ -103,6 +103,7 @@ function timeline(actions: ReturnType<typeof actionRow>[], reviewEvents: ReturnT
       id: `review:${row.id}`,
       actionType: row.eventType,
       message: row.resolutionReason ?? (row.note ? "Operator note recorded" : `Incident ${row.newStatus ?? row.eventType}`),
+      resolutionNote: row.note,
       actorType: row.actorType,
       actorId: row.actorId,
       createdAt: row.createdAt,
