@@ -14,6 +14,10 @@
       if (el.dataset.fr === undefined) el.dataset.fr = el.innerHTML;
       el.innerHTML = lang === "en" ? el.dataset.en : el.dataset.fr;
     });
+    document.querySelectorAll("[data-aria-en]").forEach(function (el) {
+      if (el.dataset.ariaFr === undefined) el.dataset.ariaFr = el.getAttribute("aria-label") || "";
+      el.setAttribute("aria-label", lang === "en" ? el.dataset.ariaEn : el.dataset.ariaFr);
+    });
     document.querySelectorAll("#lang button").forEach(function (b) {
       b.classList.toggle("on", b.dataset.lang === lang);
     });
@@ -170,12 +174,21 @@
   var videoPh = document.getElementById("videoPh");
   var videoPlay = document.getElementById("videoPlay");
   if (demoVideo && videoPlay) {
+    if ("IntersectionObserver" in window) {
+      var videoPreloadObserver = new IntersectionObserver(function (entries) {
+        if (!entries[0].isIntersecting) return;
+        demoVideo.preload = "auto";
+        demoVideo.load();
+        videoPreloadObserver.disconnect();
+      }, { rootMargin: "80px 0px" });
+      videoPreloadObserver.observe(demoVideo);
+    }
     videoPlay.addEventListener("click", function () {
+      demoVideo.setAttribute("controls", "");
       demoVideo.play().then(function () {
         if (videoPh) videoPh.style.display = "none";
-        demoVideo.setAttribute("controls", "");
       }).catch(function () {
-        // No video file yet — keep placeholder visible
+        demoVideo.removeAttribute("controls");
       });
     });
   }

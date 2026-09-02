@@ -283,11 +283,11 @@ section { position: relative; }
   background: linear-gradient(135deg, var(--surface-2), var(--surface-3));
   box-shadow: var(--card-shadow);
 }
-.demo-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+.demo-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
 .video-ph {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 22px;
-  background-image: repeating-linear-gradient(135deg, var(--accent-soft) 0 14px, transparent 14px 30px);
+  background: linear-gradient(180deg, rgba(14,15,20,0.08), rgba(14,15,20,0.30));
 }
 .video-play {
   width: 84px; height: 84px; border-radius: 50%; border: none; cursor: pointer;
@@ -298,7 +298,6 @@ section { position: relative; }
 }
 .video-play:hover { transform: scale(1.06); box-shadow: 0 24px 56px -12px var(--accent-ring), 0 0 0 14px rgba(255,255,255,0.08); }
 .video-play svg { transform: translateX(2px); }
-.video-ph-cap { font-family: "Courier New", monospace; font-size: .92rem; color: var(--ink-mute); letter-spacing: .01em; text-align: center; padding: 0 20px; }
 
 /* ---------- how it works ---------- */
 .how-grid { display: flex; flex-direction: column; gap: 28px; }
