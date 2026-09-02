@@ -286,6 +286,10 @@ export function scheduleSessionRetryIdempotencyKey(baseKey: string, ordinal: num
   return `${baseKey}:retry:v1:${Math.max(1, Math.trunc(ordinal))}`;
 }
 
+export function scheduleSessionRetryIdempotencyKeyV2(baseKey: string, ordinal: number) {
+  return `${baseKey}:retry:v2:${Math.max(1, Math.trunc(ordinal))}`;
+}
+
 type UpdateCapableBuilder = QueryBuilder & {
   update: (values: Record<string, unknown>) => QueryBuilder;
 };
@@ -500,7 +504,11 @@ async function queueScheduledSession(
     : {};
   const status = readString(request.status).toLowerCase();
   const errorCode = readString(request.error_code).toLowerCase();
-  if (status !== "blocked" || !RETRYABLE_PRE_RUN_BLOCK_REASONS.has(errorCode)) {
+  const retryablePreRunBlock = status === "blocked" && RETRYABLE_PRE_RUN_BLOCK_REASONS.has(errorCode);
+  const operatorCanceled = status === "canceled"
+    && Boolean(readString(request.cancel_requested_at))
+    && Boolean(readString(request.run_id));
+  if (!retryablePreRunBlock && !operatorCanceled) {
     return {
       created: status === "queued",
       reason: status === "queued" ? "scheduled_request_created" : "scheduled_retry_not_needed",
@@ -510,7 +518,7 @@ async function queueScheduledSession(
     };
   }
 
-  const retryResult = await supabase.rpc("create_schedule_session_pre_run_retry_v1", {
+  const retryResult = await supabase.rpc("create_schedule_session_retry_v2", {
     p_account_id: input.accountId,
     p_assignment_id: input.assignmentId,
     p_window_starts_at: input.startsAt,
@@ -529,8 +537,8 @@ async function queueScheduledSession(
     created: retry.created === true,
     reason: readString(retry.reason, "scheduled_retry_not_needed"),
     request: retry,
-    idempotencyKey: readString(retry.idempotency_key, scheduleSessionRetryIdempotencyKey(baseIdempotencyKey, 1)),
-    retryablePreRunBlock: true,
+    idempotencyKey: readString(retry.idempotency_key, scheduleSessionRetryIdempotencyKeyV2(baseIdempotencyKey, 1)),
+    retryablePreRunBlock,
   };
 }
 

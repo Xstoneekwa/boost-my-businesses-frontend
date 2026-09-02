@@ -93,8 +93,8 @@ test("RPCs are hardened to service role and audit events remain private", () => 
 
 test("scheduler only delegates a repaired terminal pre-run block to the atomic retry RPC", () => {
   assert.match(scheduler, /RETRYABLE_PRE_RUN_BLOCK_REASONS/);
-  assert.match(scheduler, /status !== "blocked"/);
-  assert.match(scheduler, /create_schedule_session_pre_run_retry_v1/);
+  assert.match(scheduler, /status === "blocked" && RETRYABLE_PRE_RUN_BLOCK_REASONS\.has\(errorCode\)/);
+  assert.match(scheduler, /create_schedule_session_retry_v2/);
   assert.match(scheduler, /SCHEDULE_PRE_RUN_RETRY_LIMIT = 1/);
   assert.match(scheduler, /scheduled_retry_created_count/);
 });

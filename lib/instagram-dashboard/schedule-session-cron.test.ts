@@ -8,6 +8,7 @@ import {
   runScheduleSessionCron,
   scheduleSessionIdempotencyKey,
   scheduleSessionRetryIdempotencyKey,
+  scheduleSessionRetryIdempotencyKeyV2,
   SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT,
 } from "./schedule-session-cron.ts";
 
@@ -144,7 +145,7 @@ function makeSupabase(overrides: {
         if (name === "create_account_run_request" && overrides.baseRequest) {
           return Promise.resolve({ data: overrides.baseRequest, error: null });
         }
-        if (name === "create_schedule_session_pre_run_retry_v1") {
+        if (name === "create_schedule_session_retry_v2") {
           return Promise.resolve({
             data: overrides.retryDecision ?? { created: false, reason: "scheduled_retry_not_needed" },
             error: null,
@@ -204,6 +205,7 @@ test("scheduleSessionRetryIdempotencyKey is stable and versioned", () => {
   const base = scheduleSessionIdempotencyKey("assignment-1", windowStart);
   assert.equal(scheduleSessionRetryIdempotencyKey(base, 1), `${base}:retry:v1:1`);
   assert.equal(SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT, 1);
+  assert.equal(scheduleSessionRetryIdempotencyKeyV2(base, 1), `${base}:retry:v2:1`);
 });
 
 test("auth rejects missing and invalid tokens", async () => {
@@ -275,7 +277,7 @@ test("active canonical blocker skips pre-enqueue with one batch read and no requ
 
 test("blocked pre-run package contract creates exactly one bounded retry request", async () => {
   const baseKey = scheduleSessionIdempotencyKey("assignment-1", windowStart);
-  const retryKey = scheduleSessionRetryIdempotencyKey(baseKey, 1);
+  const retryKey = scheduleSessionRetryIdempotencyKeyV2(baseKey, 1);
   const supabase = makeSupabase({
     baseRequest: {
       id: "blocked-request-1",
@@ -308,7 +310,7 @@ test("blocked pre-run package contract creates exactly one bounded retry request
   assert.equal(run.result.summary.scheduled_retry_created_count, 1);
   assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), [
     "create_account_run_request",
-    "create_schedule_session_pre_run_retry_v1",
+    "create_schedule_session_retry_v2",
   ]);
   const retryArgs = nonProjectionRpcCalls(supabase.rpcCalls)[1]?.args;
   assert.equal(retryArgs?.p_base_idempotency_key, baseKey);
@@ -337,6 +339,63 @@ test("runtime_contract_not_ready is the only other retryable pre-run contract re
   assert.equal(run.result.summary.retryable_pre_run_block_count, 1);
   assert.equal(run.result.summary.queued_count, 0);
   assert.equal(run.result.summary.scheduled_retry_not_needed_count, 1);
+});
+
+test("operator-canceled base is reconsidered only by the next natural tick", async () => {
+  const baseKey = scheduleSessionIdempotencyKey("assignment-1", windowStart);
+  const retryKey = scheduleSessionRetryIdempotencyKeyV2(baseKey, 1);
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "canceled-request-1",
+      status: "canceled",
+      cancel_requested_at: "2026-07-02T06:05:00.000Z",
+      run_id: "canceled-run-1",
+      idempotency_key: baseKey,
+    },
+    retryDecision: {
+      created: true,
+      reason: "scheduled_retry_created",
+      request_id: "natural-retry-request-1",
+      idempotency_key: retryKey,
+      retry_of_request_id: "canceled-request-1",
+      retry_reason: "operator_canceled",
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+  assert.equal(run.result.summary.queued_count, 1);
+  assert.equal(run.result.summary.retryable_pre_run_block_count, 0);
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), [
+    "create_account_run_request",
+    "create_schedule_session_retry_v2",
+  ]);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls)[1]?.args.p_base_idempotency_key, baseKey);
+});
+
+test("canceled base without exact run lineage is not retried", async () => {
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "canceled-request-without-run",
+      status: "canceled",
+      cancel_requested_at: "2026-07-02T06:05:00.000Z",
+      run_id: null,
+      idempotency_key: scheduleSessionIdempotencyKey("assignment-1", windowStart),
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), ["create_account_run_request"]);
 });
 
 for (const eligibilityReason of [
