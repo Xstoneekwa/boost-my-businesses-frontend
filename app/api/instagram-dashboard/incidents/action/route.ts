@@ -112,7 +112,7 @@ export async function POST(request: Request) {
 
     const detail = await loadIncidentDetail(incidentId);
     return jsonOk({
-      contractVersion: "incident_human_review_action_v2",
+      contractVersion: "incident_human_review_action_v3",
       action,
       eventId: transition.event_id ?? null,
       incidentId,
@@ -133,6 +133,12 @@ export async function POST(request: Request) {
         && Date.parse(detailBeforeAction.incident.metadataSafe.recommended_pause_until) > Date.now()
           ? "recommended_48h_pause_not_elapsed"
           : null,
+      equivalent_incidents_resolved: transition.equivalent_incidents_resolved ?? 0,
+      remaining_operator_review_blockers: transition.remaining_operator_review_blockers ?? null,
+      runtime_reactivated: transition.runtime_reactivated === true,
+      runtime_status: transition.runtime_status ?? null,
+      runtime_restore_blocked_reason: transition.runtime_restore_blocked_reason ?? null,
+      manual_stop_persistent_block: false,
       deliveries,
       detail,
     });

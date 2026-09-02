@@ -30,11 +30,11 @@ test("terminal or exhausted live Unfollow backlog is not-needed, not a blocked i
 
 test("a live Unfollow advisory cannot mask an earlier account safety block", () => {
   assert.deepEqual(resolveAccountRestartEligibility([
-    "manual_stop_requested",
+    "active_run_request_exists",
     "unfollow_phase_circuit_open",
   ]), {
     eligible: false,
-    reason: "manual_stop_requested",
+    reason: "active_run_request_exists",
   });
 });
 
@@ -54,7 +54,6 @@ test("only current real blockers exclude an otherwise normal account", () => {
   for (const reason of [
     "current_window_closed",
     "blocking_incident_active",
-    "manual_stop_requested",
     "manual_only",
     "no_quota_remaining",
     "active_run_exists",
