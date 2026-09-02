@@ -99,7 +99,7 @@ test("unconfirmed rename leaves CT unchanged", () => {
   assert.equal(hygiene.shouldReevaluateNeedsMoreTargets, false);
 });
 
-test("explicit not_found archives with stable reason", () => {
+test("first not_found records reversible evidence without archiving", () => {
   const decision = evaluateTargetQuality({
     verification_status: "not_found",
     normalized_username: "missing_user",
@@ -112,6 +112,28 @@ test("explicit not_found archives with stable reason", () => {
     jobDecision,
     decision,
     now,
+  });
+
+  assert.equal(hygiene.hygieneAction, "record_not_found_evidence");
+  assert.equal(hygiene.shouldApplyTargetPatch, false);
+  assert.equal(hygiene.auditReason, "account_not_found_pending_confirmation");
+  assert.equal(hygiene.shouldReevaluateNeedsMoreTargets, false);
+});
+
+test("independently confirmed not_found archives with stable reason", () => {
+  const decision = evaluateTargetQuality({
+    verification_status: "not_found",
+    normalized_username: "missing_user",
+    canonical_username: "missing_user",
+    provider_checked_at: now.toISOString(),
+  });
+  const jobDecision = terminalJob(decision);
+  const hygiene = resolveTargetVerificationHygiene({
+    existingTarget: { ...existingEligible, normalized_username: "missing_user" },
+    jobDecision,
+    decision,
+    now,
+    canonicalUnavailableConfirmed: true,
   });
 
   assert.equal(hygiene.hygieneAction, "archive_not_found");

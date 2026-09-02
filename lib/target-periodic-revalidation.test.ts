@@ -259,6 +259,17 @@ test("archive clears periodic schedule and restore reinscribes staggered due dat
   assert.equal(archivePatch.periodic_revalidation_next_due_at, null);
 });
 
+test("first not_found schedules a bounded confirmation without archiving", () => {
+  const now = new Date("2026-06-17T12:00:00.000Z");
+  const patch = buildPeriodicSchedulePatchAfterTerminal(now, "record_not_found_evidence");
+  assert.equal(
+    Date.parse(patch.periodic_revalidation_next_due_at as string) - now.getTime(),
+    30 * 60 * 1000,
+  );
+  assert.equal(patch.periodic_revalidation_last_terminal_at, now.toISOString());
+  assert.equal(patch.periodic_revalidation_window_key, null);
+});
+
 test("provider retry does not advance periodic schedule", () => {
   assert.equal(shouldAdvancePeriodicSchedule({
     batchId: "periodic_weekly:123",

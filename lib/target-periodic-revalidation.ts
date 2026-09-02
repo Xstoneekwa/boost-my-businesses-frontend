@@ -1,4 +1,5 @@
 export const PERIODIC_REVALIDATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+export const PERIODIC_NOT_FOUND_RECHECK_MS = 30 * 60 * 1000;
 export const PERIODIC_REVALIDATION_BATCH_PREFIX = "periodic_weekly";
 export const PERIODIC_REVALIDATION_TRIGGER_SOURCE = "periodic_weekly";
 
@@ -96,11 +97,21 @@ export function buildPeriodicSchedulePatchAfterTerminal(
   terminalAtUtc: Date,
   hygieneAction:
     | "none"
+    | "record_not_found_evidence"
     | "rename_confirmed"
     | "archive_not_found"
     | "archive_verified"
     | "apply_quality_decision",
 ) {
+  if (hygieneAction === "record_not_found_evidence") {
+    return {
+      periodic_revalidation_last_terminal_at: terminalAtUtc.toISOString(),
+      periodic_revalidation_next_due_at: new Date(
+        terminalAtUtc.getTime() + PERIODIC_NOT_FOUND_RECHECK_MS,
+      ).toISOString(),
+      periodic_revalidation_window_key: null,
+    };
+  }
   if (hygieneAction === "rename_confirmed") {
     return { periodic_revalidation_window_key: null };
   }
@@ -122,6 +133,7 @@ export function shouldAdvancePeriodicSchedule(input: {
   jobStatus: string;
   hygieneAction:
     | "none"
+    | "record_not_found_evidence"
     | "rename_confirmed"
     | "archive_not_found"
     | "archive_verified"

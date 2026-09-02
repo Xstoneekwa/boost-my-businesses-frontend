@@ -27,6 +27,7 @@ export type TargetVerificationHygieneResult = {
   auditReason: string;
   hygieneAction:
     | "none"
+    | "record_not_found_evidence"
     | "rename_confirmed"
     | "archive_not_found"
     | "archive_verified"
@@ -188,6 +189,7 @@ export function resolveTargetVerificationHygiene(input: {
   decision: TargetQualityDecision;
   now: Date;
   activeUsernames?: string[];
+  canonicalUnavailableConfirmed?: boolean;
 }): TargetVerificationHygieneResult {
   const nowIso = input.now.toISOString();
   const activeUsernames = input.activeUsernames ?? [];
@@ -230,6 +232,13 @@ export function resolveTargetVerificationHygiene(input: {
   }
 
   if (input.decision.quality_status === "rejected_not_found") {
+    if (input.canonicalUnavailableConfirmed !== true) {
+      return {
+        ...none,
+        auditReason: "account_not_found_pending_confirmation",
+        hygieneAction: "record_not_found_evidence",
+      };
+    }
     return {
       shouldApplyTargetPatch: true,
       targetPatch: buildArchivePatch(

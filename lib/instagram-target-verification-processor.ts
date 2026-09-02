@@ -220,6 +220,29 @@ async function loadActiveTargetUsernames(
     .filter(Boolean);
 }
 
+async function hasCanonicalUnavailableConfirmation(
+  supabase: TargetVerificationSupabaseClient,
+  job: ClaimedJob,
+  now: Date,
+) {
+  const { data, error } = await supabase
+    .from("ct_target_availability_current")
+    .select("account_id,target_id,availability_status,confidence,identity_status,confirmed_at,valid_until")
+    .eq("target_id", job.target_id)
+    .eq("account_id", job.account_id)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  const row = data as SupabaseRecord;
+  const validUntilMs = Date.parse(readString(row.valid_until, ""));
+  return readString(row.availability_status, "") === "unavailable_confirmed"
+    && readString(row.confidence, "") === "high"
+    && readString(row.confirmed_at, "") !== ""
+    && Number.isFinite(validUntilMs)
+    && validUntilMs >= now.getTime()
+    && !["identity_conflict", "identity_ambiguous"].includes(readString(row.identity_status, ""));
+}
+
 async function isTargetStillVerifiable(
   supabase: TargetVerificationSupabaseClient,
   job: ClaimedJob,
@@ -406,6 +429,9 @@ export async function processTargetVerificationBatch(
       const activeUsernames = existingTarget
         ? await loadActiveTargetUsernames(supabase, job.account_id, job.target_id)
         : [];
+      const canonicalUnavailableConfirmed = existingTarget && decision.quality_status === "rejected_not_found"
+        ? await hasCanonicalUnavailableConfirmation(supabase, job, currentNow)
+        : false;
       const hygiene = existingTarget
         ? resolveTargetVerificationHygiene({
           existingTarget,
@@ -413,6 +439,7 @@ export async function processTargetVerificationBatch(
           decision,
           now: currentNow,
           activeUsernames,
+          canonicalUnavailableConfirmed,
         })
         : {
           shouldApplyTargetPatch: true,
