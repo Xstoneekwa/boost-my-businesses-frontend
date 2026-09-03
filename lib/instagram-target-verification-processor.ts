@@ -11,7 +11,7 @@ import {
 import { reevaluateNeedsMoreTargetAccountsAfterTargetMutation } from "./instagram-dashboard/needs-more-target-accounts.ts";
 import {
   buildPeriodicSchedulePatchAfterTerminal,
-  isPeriodicRevalidationBatchId,
+  isPeriodicRevalidationJob,
   shouldAdvancePeriodicSchedule,
 } from "./target-periodic-revalidation.ts";
 import {
@@ -50,6 +50,7 @@ export type TargetVerificationProcessorOptions = {
   maxDurationMs?: number | string;
   now?: () => Date;
   verifyUsername?: (username: string) => Promise<TargetVerificationDecision>;
+  mode?: "business_requalification" | "evidence_only";
 };
 
 type ClaimedJob = {
@@ -57,6 +58,7 @@ type ClaimedJob = {
   target_id: string;
   account_id: string;
   batch_id: string | null;
+  metadata_safe: Record<string, unknown> | null;
   normalized_username: string;
   attempt_count: number;
   max_attempts: number;
@@ -144,6 +146,9 @@ function safeJob(row: SupabaseRecord): ClaimedJob | null {
     target_id: targetId,
     account_id: accountId,
     batch_id: readString(row.batch_id, "") || null,
+    metadata_safe: row.metadata_safe && typeof row.metadata_safe === "object"
+      ? row.metadata_safe as Record<string, unknown>
+      : null,
     normalized_username: normalizedUsername,
     attempt_count: Math.max(1, readInteger(row.attempt_count, 1)),
     max_attempts: Math.max(1, readInteger(row.max_attempts, 3)),
@@ -185,7 +190,7 @@ async function loadTargetForHygiene(
 ) {
   const { data, error } = await supabase
     .from("ig_targets")
-    .select("id,account_id,normalized_username,target_username,canonical_username,input_username,status,quality_status,verification_status,metadata_safe,archived_at,deleted_at")
+    .select("id,account_id,normalized_username,target_username,canonical_username,input_username,status,quality_status,verification_status,metadata_safe,archived_at,deleted_at,updated_at,provider_checked_at,followers_count")
     .eq("id", job.target_id)
     .eq("account_id", job.account_id)
     .maybeSingle();
@@ -331,7 +336,7 @@ async function previewClaimableJobs(
 ) {
   const { data, error } = await supabase
     .from("ct_target_verification_jobs")
-    .select("id, target_id, account_id, batch_id, normalized_username, attempt_count, max_attempts")
+    .select("id, target_id, account_id, batch_id, normalized_username, attempt_count, max_attempts, metadata_safe")
     .in("status", ["pending", "retry_scheduled"])
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${now.toISOString()}`)
     .order("next_attempt_at", { ascending: true, nullsFirst: true })
@@ -356,6 +361,59 @@ async function claimJobs(
   return ((data ?? []) as SupabaseRecord[]).map(safeJob).filter((job): job is ClaimedJob => Boolean(job));
 }
 
+async function claimEvidenceJobs(
+  supabase: TargetVerificationSupabaseClient,
+  limit: number,
+  workerId: string,
+) {
+  const { data, error } = await supabase.rpc("claim_ct_target_evidence_revalidation_jobs_v1", {
+    p_batch_limit: limit,
+    p_worker_id: workerId,
+  });
+
+  if (error) throw new Error(error.message || "target_evidence_revalidation_claim_failed");
+  return ((data ?? []) as SupabaseRecord[]).map(safeJob).filter((job): job is ClaimedJob => Boolean(job));
+}
+
+function normalizedEvidenceUsername(value: unknown) {
+  return readString(value, "").trim().toLowerCase();
+}
+
+async function persistEvidenceOnlyResult(
+  supabase: TargetVerificationSupabaseClient,
+  job: ClaimedJob,
+  decision: TargetVerificationDecision,
+) {
+  const canonicalUsername = normalizedEvidenceUsername(decision.canonical_username);
+  const expectedUsername = normalizedEvidenceUsername(job.normalized_username);
+  const checkedAt = readString(decision.provider_checked_at, "");
+  const followersCount = decision.followers_count;
+  const foundEvidence = decision.verification_status === "found"
+    && canonicalUsername === expectedUsername
+    && Number.isInteger(followersCount)
+    && Number(followersCount) >= 0
+    && Number.isFinite(Date.parse(checkedAt));
+
+  const outcome = foundEvidence
+    ? "found"
+    : decision.verification_status === "not_found"
+      ? "not_found"
+      : canonicalUsername && canonicalUsername !== expectedUsername
+        ? "identity_mismatch"
+        : "no_fresh_evidence";
+
+  const { data, error } = await supabase.rpc("persist_ct_target_evidence_refresh_v1", {
+    p_target_id: job.target_id,
+    p_account_id: job.account_id,
+    p_expected_normalized_username: expectedUsername,
+    p_outcome: outcome,
+    p_provider_checked_at: foundEvidence ? checkedAt : null,
+    p_followers_count: foundEvidence ? followersCount : null,
+  });
+  if (error) throw new Error(error.message || "target_evidence_refresh_persist_failed");
+  return readString(data, "");
+}
+
 export async function processTargetVerificationBatch(
   supabase: TargetVerificationSupabaseClient,
   options: TargetVerificationProcessorOptions = {},
@@ -367,12 +425,15 @@ export async function processTargetVerificationBatch(
   const workerId = safeTargetVerificationWorkerId(options.workerId);
   const maxDurationMs = boundedTargetVerificationMaxDurationMs(options.maxDurationMs);
   const verifyUsername = options.verifyUsername ?? verifySingleTargetUsername;
+  const mode = options.mode ?? "business_requalification";
   const summary = emptyTargetVerificationBatchSummary();
   let stoppedEarlyReason: string | null = null;
 
   const jobs = dryRun
     ? await previewClaimableJobs(supabase, limit, now())
-    : await claimJobs(supabase, limit, workerId);
+    : mode === "evidence_only"
+      ? await claimEvidenceJobs(supabase, limit, workerId)
+      : await claimJobs(supabase, limit, workerId);
   summary.claimed_count = jobs.length;
 
   if (dryRun) {
@@ -425,6 +486,51 @@ export async function processTargetVerificationBatch(
         now: currentNow,
       });
       const nowIso = currentNow.toISOString();
+
+      if (mode === "evidence_only") {
+        if (!isPeriodicRevalidationJob(job)) {
+          await markJobSkipped(supabase, job, nowIso);
+          summary.skipped_count += 1;
+          continue;
+        }
+
+        let evidenceResult = "retry_deferred";
+        if (jobDecision.jobStatus !== "retry_scheduled") {
+          evidenceResult = await persistEvidenceOnlyResult(supabase, job, decision);
+        }
+
+        const identityMismatch = evidenceResult === "identity_mismatch";
+        const { error: jobError } = await supabase
+          .from("ct_target_verification_jobs")
+          .update({
+            status: identityMismatch ? "failed" : jobDecision.jobStatus,
+            next_attempt_at: jobDecision.nextAttemptAt,
+            locked_at: null,
+            locked_by: null,
+            last_error_code: identityMismatch ? "identity_mismatch" : jobDecision.lastErrorCode,
+            last_error_message: identityMismatch ? "Canonical username did not match the claimed target." : jobDecision.lastErrorMessage,
+            provider_status: decision.verification_status,
+            updated_at: nowIso,
+          })
+          .eq("id", job.id);
+        if (jobError) throw new Error(jobError.message || "job_update_failed");
+
+        if (decision.verification_status === "rate_limited") summary.rate_limited_count += 1;
+        if (["provider_error", "unavailable"].includes(decision.verification_status)) summary.provider_error_count += 1;
+        if (jobDecision.jobStatus === "retry_scheduled") summary.retry_scheduled_count += 1;
+        else if (evidenceResult === "updated" || evidenceResult === "already_fresher") summary.succeeded_count += 1;
+        else summary.skipped_count += 1;
+
+        if (decision.verification_status === "rate_limited") {
+          stoppedEarlyReason = "rate_limited";
+          const remaining = jobs.slice(index + 1);
+          await requeueUnprocessedJobs(supabase, remaining, currentNow, "batch_stopped_after_rate_limit", "rate_limited");
+          summary.retry_scheduled_count += remaining.length;
+          break;
+        }
+        continue;
+      }
+
       const existingTarget = await loadTargetForHygiene(supabase, job);
       const activeUsernames = existingTarget
         ? await loadActiveTargetUsernames(supabase, job.account_id, job.target_id)
@@ -451,11 +557,12 @@ export async function processTargetVerificationBatch(
 
       const periodicPatch = shouldAdvancePeriodicSchedule({
         batchId: job.batch_id,
+        metadataSafe: job.metadata_safe,
         jobStatus: jobDecision.jobStatus,
         hygieneAction: hygiene.hygieneAction,
       })
         ? buildPeriodicSchedulePatchAfterTerminal(currentNow, hygiene.hygieneAction)
-        : isPeriodicRevalidationBatchId(job.batch_id) && jobDecision.jobStatus !== "retry_scheduled" && hygiene.hygieneAction === "none"
+        : isPeriodicRevalidationJob(job) && jobDecision.jobStatus !== "retry_scheduled" && hygiene.hygieneAction === "none"
           ? { periodic_revalidation_window_key: null }
           : {};
 

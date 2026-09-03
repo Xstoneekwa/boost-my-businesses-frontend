@@ -327,13 +327,6 @@ function createSchedulerMock(input: {
       return { data: this.filterRows(), error: null };
     }
 
-    async upsert(values: Record<string, unknown>, _options?: { onConflict?: string; ignoreDuplicates?: boolean }) {
-      const row = values as Record<string, unknown>;
-      const existing = jobs.find((job) => job.target_id === row.target_id);
-      if (!existing) jobs.push(row);
-      return { error: null };
-    }
-
     async insert() {
       return { error: null };
     }
@@ -368,6 +361,42 @@ function createSchedulerMock(input: {
   const api = {
     targets,
     jobs,
+    async rpc(name: string, args: Record<string, unknown>) {
+      if (name === "terminalize_invalid_ct_target_evidence_jobs_v1") {
+        return { data: 0, error: null };
+      }
+      assert.equal(name, "enqueue_ct_target_evidence_revalidation_job_v1");
+      const target = targets.find((row) => row.id === args.p_target_id && row.account_id === args.p_account_id);
+      if (!target || target.normalized_username !== args.p_normalized_username) {
+        return { data: "target_not_eligible", error: null };
+      }
+      if (target.periodic_revalidation_window_key) {
+        return { data: "window_already_claimed", error: null };
+      }
+      const existing = jobs.find((job) => job.target_id === args.p_target_id);
+      if (existing && ["pending", "processing", "retry_scheduled"].includes(String(existing.status))) {
+        return { data: "active_job_exists", error: null };
+      }
+      const payload = {
+        target_id: args.p_target_id,
+        account_id: args.p_account_id,
+        batch_id: null,
+        normalized_username: args.p_normalized_username,
+        status: "pending",
+        attempt_count: 0,
+        max_attempts: 3,
+        provider_status: "pending",
+        metadata_safe: {
+          trigger_source: "periodic_weekly",
+          periodic_window_key: args.p_window_key,
+          mode: "evidence_only",
+        },
+      };
+      if (existing) Object.assign(existing, payload);
+      else jobs.push(payload);
+      target.periodic_revalidation_window_key = args.p_window_key;
+      return { data: "enqueued", error: null };
+    },
     from(table: string) {
       return new MockQuery(table);
     },

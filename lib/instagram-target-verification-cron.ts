@@ -64,6 +64,7 @@ export type TargetVerificationCronOptions = {
     supabase: TargetVerificationSupabaseClient,
     options: { env?: NodeJS.ProcessEnv; dryRun?: boolean; enqueueLimit?: number },
   ) => Promise<PeriodicRevalidationSchedulerSummary>;
+  processorMode?: "business_requalification" | "evidence_only";
 };
 
 export type TargetVerificationCronRun =
@@ -101,6 +102,24 @@ export function readTargetVerificationCronEnv(
     lockTtlSeconds: readEnvInteger(env.CT_TARGET_VERIFICATION_CRON_LOCK_TTL_SECONDS, 120, 30, 600),
     configuredToken,
     workerId: safeTargetVerificationWorkerId(env.CT_TARGET_VERIFICATION_CRON_WORKER_ID || DEFAULT_WORKER_ID),
+  };
+}
+
+export function buildTargetEvidenceRevalidationEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    CT_TARGET_VERIFICATION_CRON_TOKEN: env.CRON_SECRET,
+    CT_TARGET_VERIFICATION_CRON_ENABLED: env.CT_TARGET_EVIDENCE_REVALIDATION_ENABLED ?? "false",
+    CT_TARGET_VERIFICATION_CRON_DRY_RUN: env.CT_TARGET_EVIDENCE_REVALIDATION_DRY_RUN ?? "true",
+    CT_TARGET_VERIFICATION_CRON_LIMIT: env.CT_TARGET_EVIDENCE_REVALIDATION_LIMIT ?? "5",
+    CT_TARGET_VERIFICATION_CRON_MAX_DURATION_MS: env.CT_TARGET_EVIDENCE_REVALIDATION_MAX_DURATION_MS ?? "10000",
+    CT_TARGET_VERIFICATION_CRON_LOCK_TTL_SECONDS: env.CT_TARGET_EVIDENCE_REVALIDATION_LOCK_TTL_SECONDS ?? "120",
+    CT_TARGET_VERIFICATION_CRON_WORKER_ID: "ct_evidence_revalidation_cron",
+    CT_TARGET_PERIODIC_REVALIDATION_ENABLED: env.CT_TARGET_EVIDENCE_REVALIDATION_ENABLED ?? "false",
+    CT_TARGET_PERIODIC_REVALIDATION_DRY_RUN: env.CT_TARGET_EVIDENCE_REVALIDATION_DRY_RUN ?? "true",
+    CT_TARGET_PERIODIC_REVALIDATION_ENQUEUE_LIMIT: env.CT_TARGET_EVIDENCE_REVALIDATION_ENQUEUE_LIMIT ?? "25",
   };
 }
 
@@ -284,6 +303,7 @@ export async function runTargetVerificationCron(
       dryRun: cronEnv.dryRun,
       workerId: cronEnv.workerId,
       maxDurationMs: cronEnv.maxDurationMs,
+      mode: options.processorMode,
     });
 
     if (batchResult.summary.claimed_count === 0) {

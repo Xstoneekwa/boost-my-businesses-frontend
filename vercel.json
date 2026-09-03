@@ -29,6 +29,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/target-evidence-revalidation",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/commercial-discovery",
       "schedule": "* * * * *"
     },
