@@ -122,6 +122,7 @@ function MarketingNav({ lang, page }: { lang: Lang; page: "home" | "automation" 
         <Brand />
         <nav className={styles.navLinks} aria-label="Main navigation">
           <Link href="/instagram-growth">{t.product}</Link>
+          <Link href="/instagram-growth-south-africa">South Africa</Link>
           <Link href="/ai-automation">{t.automation}</Link>
           <a href={page === "home" ? "#results" : "#systems"}>{page === "home" ? homeCopy[lang].nav.proof : automationCopy[lang].nav.services}</a>
           <a href={page === "home" ? "#plans" : "#method"}>{page === "home" ? homeCopy[lang].nav.plans : automationCopy[lang].nav.process}</a>
@@ -189,8 +190,10 @@ function SiteFooter({ lang }: { lang: Lang }) {
     <footer className={styles.footer}>
       <div className={styles.footerTop}>
         <div><Brand /><p>{fr ? "Instagram Growth comme produit principal. L’automatisation IA quand votre business est prêt à aller plus loin." : "Instagram Growth as the flagship. AI automation when your business is ready to go further."}</p></div>
-        <div><strong>{fr ? "Produits" : "Products"}</strong><Link href="/instagram-growth">Instagram Growth</Link><Link href="/ai-automation">AI Automation</Link><Link href="/instagram-login">Dashboard</Link></div>
-        <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link><a href={CALENDLY_URL} target="_blank" rel="noopener noreferrer">{fr ? "Réserver un appel" : "Book a call"}</a></div>
+        <div><strong>Instagram Growth</strong><Link href="/instagram-growth">{fr ? "Vue d’ensemble" : "Overview"}</Link><Link href="/instagram-growth-south-africa">South Africa</Link><Link href="/instagram-growth/real-estate">{fr ? "Immobilier" : "Real Estate"}</Link><Link href="/instagram-growth/beauty-aesthetics">{fr ? "Beauté & esthétique" : "Beauty & Aesthetics"}</Link><Link href="/instagram-growth/restaurants">Restaurants</Link><Link href="/instagram-growth/fitness">Fitness</Link></div>
+        <div><strong>{fr ? "Automatisation IA" : "AI Automation"}</strong><Link href="/ai-automation">AI Automation</Link></div>
+        <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/">{fr ? "Accueil" : "Home"}</Link><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link></div>
+        <div><strong>{fr ? "Compte" : "Account"}</strong><Link href="/instagram-login">Dashboard</Link></div>
         <div><strong>{fr ? "Légal" : "Legal"}</strong><Link href="/privacy-policy">{fr ? "Confidentialité" : "Privacy"}</Link><Link href="/terms-and-conditions">{fr ? "Conditions" : "Terms"}</Link><Link href="/refund-policy">{fr ? "Remboursement" : "Refunds"}</Link></div>
       </div>
       <div className={styles.footerBottom}><span>© 2026 Boost My Businesses Ltd.</span><span>London · United Kingdom</span></div>

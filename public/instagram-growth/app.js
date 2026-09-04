@@ -214,6 +214,20 @@
   }, { threshold: 0.12 });
   document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
 
+  /* ---------- Connected product journey ---------- */
+  var journey = document.querySelector("[data-product-journey]");
+  if (journey) {
+    var journeyIo = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("is-active");
+          journeyIo.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.28 });
+    journeyIo.observe(journey);
+  }
+
   /* ---------- Init ---------- */
   var saved = "fr";
   try { saved = localStorage.getItem(STORE_LANG) || "fr"; } catch (e) {}

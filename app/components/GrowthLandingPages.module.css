@@ -119,7 +119,7 @@
 .finalCta { width: min(1110px,calc(100% - 48px)); margin: 30px auto 100px; padding: 74px 44px; text-align: center; border: 1px solid rgba(244,173,51,.25); border-radius: 32px; background: radial-gradient(circle at 50% -20%,rgba(244,173,51,.17),transparent 52%),#101117; }
 .finalCta h2 { max-width: 850px; margin-left: auto; margin-right: auto; }
 .finalCta > div { display: flex; justify-content: center; gap: 12px; margin-top: 30px; }
-.footer { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 60px; padding: 60px max(24px,calc((100vw - 1160px)/2)) 50px; border-top: 1px solid var(--line); background: #07080d; }
+.footer { display: grid; grid-template-columns: minmax(260px,1.8fr) repeat(5,minmax(120px,1fr)); gap: 34px; padding: 60px max(24px,calc((100vw - 1320px)/2)) 50px; border-top: 1px solid var(--line); background: #07080d; }
 .footer > div { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .footer p { max-width: 420px; color: #77747b; font-size: .78rem; line-height: 1.7; }
 .footer strong { margin-bottom: 7px; color: #d9d4cb; font-size: .7rem; letter-spacing: .11em; text-transform: uppercase; }

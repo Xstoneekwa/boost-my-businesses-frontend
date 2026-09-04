@@ -168,7 +168,7 @@
 .finalCta h2 { max-width: 850px; margin-left: auto; margin-right: auto; }
 .finalCta .actions { justify-content: center; }
 .footer { border-top: 1px solid var(--line); padding: 64px max(24px, calc((100vw - 1180px) / 2)) 24px; background: #07080d; }
-.footerTop { display: grid; grid-template-columns: 2fr repeat(3, 1fr); gap: 48px; }
+.footerTop { display: grid; grid-template-columns: minmax(260px,1.6fr) repeat(5,minmax(120px,1fr)); gap: 30px; }
 .footerTop > div { display: flex; flex-direction: column; align-items: flex-start; gap: 11px; }
 .footerTop p { max-width: 380px; color: #77747b; line-height: 1.7; font-size: .78rem; }
 .footerTop > div > strong { color: #d9d4cb; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 8px; }
@@ -238,7 +238,7 @@
   .planGrid article.planFeatured { transform: none; }
   .beyond, .fitSection, .flagship { grid-template-columns: 1fr; gap: 44px; padding: 38px; }
   .footerTop { grid-template-columns: 1.4fr 1fr 1fr; }
-  .footerTop > div:last-child { grid-column: 2; }
+  .footerTop > div:last-child { grid-column: auto; }
   .orchestrationMap { grid-template-columns: 1fr; }
   .orchestrationMap > strong { width: 130px; margin: 10px auto; }
   .orchestrationMap > strong::before, .orchestrationMap > strong::after { display: none; }

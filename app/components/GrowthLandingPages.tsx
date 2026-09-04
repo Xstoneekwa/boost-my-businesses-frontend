@@ -11,6 +11,7 @@ import {
   ManagedInfrastructureVisual,
   type IndustryVisual,
 } from "./GrowthAnimatedVisuals";
+import { ContextualValueVisual, SequentialProcessVisual } from "./GrowthContextualVisuals";
 import styles from "./GrowthLandingPages.module.css";
 
 type Lang = "fr" | "en";
@@ -265,6 +266,7 @@ function Header({ lang, setLang }: { lang: Lang; setLang: (lang: Lang) => void }
         <Brand />
         <nav aria-label={fr ? "Navigation principale" : "Main navigation"}>
           <Link href="/instagram-growth">Instagram Growth</Link>
+          <Link href="/instagram-growth-south-africa">South Africa</Link>
           <a href="#how">{fr ? "Méthode" : "How it works"}</a>
           <a href="#audiences">{fr ? "Audiences" : "Audiences"}</a>
         </nav>
@@ -286,8 +288,11 @@ function Footer({ lang }: { lang: Lang }) {
   return (
     <footer className={styles.footer}>
       <div><Brand /><p>{fr ? "Croissance Instagram ciblée, opérée depuis de vrais téléphones et gérée par notre équipe." : "Targeted Instagram growth, operated from real phones and managed by our team."}</p></div>
-      <div><strong>{fr ? "Explorer" : "Explore"}</strong><Link href="/instagram-growth-south-africa">South Africa</Link>{(Object.keys(verticals) as VerticalKey[]).map((key) => <Link key={key} href={`/instagram-growth/${key}`}>{pick(verticals[key].label, lang)}</Link>)}</div>
-      <div><strong>{fr ? "Actions" : "Actions"}</strong><Link href={PRICING_URL}>{fr ? "Offres" : "Plans"}</Link><a href={CALENDLY_URL} target="_blank" rel="noopener noreferrer">{fr ? "Réserver un appel" : "Book a call"}</a><Link href="/instagram-growth">Instagram Growth</Link></div>
+      <div><strong>Instagram Growth</strong><Link href="/instagram-growth">{fr ? "Vue d’ensemble" : "Overview"}</Link><Link href="/instagram-growth-south-africa">South Africa</Link>{(Object.keys(verticals) as VerticalKey[]).map((key) => <Link key={key} href={`/instagram-growth/${key}`}>{pick(verticals[key].label, lang)}</Link>)}</div>
+      <div><strong>{fr ? "Automatisation IA" : "AI Automation"}</strong><Link href="/ai-automation">AI Automation</Link></div>
+      <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/">{fr ? "Accueil" : "Home"}</Link><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link></div>
+      <div><strong>{fr ? "Compte" : "Account"}</strong><Link href="/instagram-login">Dashboard</Link><Link href={PRICING_URL}>{fr ? "Offres" : "Plans"}</Link></div>
+      <div><strong>{fr ? "Légal" : "Legal"}</strong><Link href="/privacy-policy">{fr ? "Confidentialité" : "Privacy"}</Link><Link href="/terms-and-conditions">{fr ? "Conditions" : "Terms"}</Link><Link href="/refund-policy">{fr ? "Remboursement" : "Refunds"}</Link></div>
     </footer>
   );
 }
@@ -445,7 +450,12 @@ export function VerticalGrowthPage({ vertical }: { vertical: VerticalKey }) {
 
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.sectionHead}><Eyebrow>{fr ? "L’ENJEU" : "THE OPPORTUNITY"}</Eyebrow><h2>{pick(t.challenge, lang)}</h2><p>{pick(t.challengeLead, lang)}</p></div>
-        <ResultCards items={t.outcomes} lang={lang} />
+        <ContextualValueVisual
+          industry={vertical}
+          lang={lang}
+          sources={t.sources.map((source) => pick(source, lang))}
+          outcomes={t.outcomes.map((outcome) => pick(outcome, lang))}
+        />
       </section>
 
       <section className={styles.section} id="audiences">
@@ -488,6 +498,15 @@ const saCities = [
   { city: "Winelands & tourism", places: "Stellenbosch · Franschhoek · Garden Route · safari corridors", text: "Food, wine, hospitality and travel audiences can combine South African and international discovery sources." },
 ];
 
+const saSources: Copy[] = [
+  { fr: "Marques sud-africaines", en: "South African brands" },
+  { fr: "Créateurs locaux pertinents", en: "Relevant local creators" },
+  { fr: "Pages de ville et de quartier", en: "City and neighbourhood pages" },
+  { fr: "Médias et lieux locaux", en: "Local media and venues" },
+  { fr: "Entreprises complémentaires", en: "Complementary businesses" },
+  { fr: "Événements et communautés", en: "Events and communities" },
+];
+
 export function SouthAfricaGrowthPage() {
   const [lang, setLang] = useLanguage();
   const fr = lang === "fr";
@@ -514,38 +533,30 @@ export function SouthAfricaGrowthPage() {
 
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.sectionHead}><Eyebrow>{fr ? "AU-DELÀ DU NOMBRE" : "BEYOND THE NUMBER"}</Eyebrow><h2>{fr ? "Une audience locale pertinente vaut plus qu’un simple compteur d’abonnés." : "A relevant local audience matters more than a follower count."}</h2><p>{fr ? "La croissance utile rapproche votre marque des personnes qui partagent déjà votre marché, votre ville, vos intérêts et vos communautés." : "Useful growth brings your brand closer to people who already share your market, city, interests and communities."}</p></div>
-        <ResultCards product lang={lang} items={[
-          { fr: "Plus de découverte auprès d’audiences cohérentes", en: "More discovery among aligned audiences" },
-          { fr: "Une base plus solide pour votre contenu et vos offres", en: "A stronger audience layer for content and offers" },
-          { fr: "Une campagne gérée, affinée au fil des signaux", en: "A managed campaign refined as signals emerge" },
-        ]} />
+        <ContextualValueVisual
+          product
+          industry="south-africa"
+          lang={lang}
+          sources={saSources.map((source) => pick(source, lang))}
+          outcomes={[
+            fr ? "Plus de découverte auprès d’audiences cohérentes" : "More discovery among aligned audiences",
+            fr ? "Une base plus solide pour votre contenu et vos offres" : "A stronger audience layer for content and offers",
+            fr ? "Une campagne gérée, affinée au fil des signaux" : "A managed campaign refined as signals emerge",
+          ]}
+        />
       </section>
 
       <section className={styles.section} id="how">
         <div className={styles.sectionHead}><Eyebrow>{fr ? "COMMENT ÇA FONCTIONNE" : "HOW TARGETING WORKS"}</Eyebrow><h2>{fr ? "Votre marché devient une carte de sources d’audience crédibles." : "Your market becomes a map of credible audience sources."}</h2><p>{fr ? "Nous combinons niche, localisation, concurrents, communautés et signaux d’intérêt pour construire un ciblage concret, puis nous l’optimisons." : "We combine niche, location, competitors, communities and interest signals into a concrete targeting plan, then optimize it."}</p></div>
-        <div className={styles.cardGrid}><article><h3>{fr ? "Cartographier" : "Map"}</h3><p>{fr ? "Comprendre l’offre, la zone, l’audience et les concurrents pertinents." : "Understand the offer, service area, audience and relevant competitors."}</p></article><article><h3>{fr ? "Sélectionner" : "Select"}</h3><p>{fr ? "Choisir des sources dont l’audience présente une vraie cohérence." : "Choose sources whose audiences show genuine relevance."}</p></article><article><h3>{fr ? "Optimiser" : "Optimize"}</h3><p>{fr ? "Affiner la campagne selon la qualité des signaux observés." : "Refine the campaign based on the quality of observed signals."}</p></article></div>
+        <SequentialProcessVisual lang={lang} />
       </section>
 
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.splitHead}><div><Eyebrow>{fr ? "SOURCES LOCALES" : "LOCAL AUDIENCE SOURCES"}</Eyebrow><h2>{fr ? "La pertinence géographique vient des écosystèmes ciblés." : "Geographic relevance comes from the ecosystems you target."}</h2></div><p>{fr ? "Instagram ne fournit pas de filtre postal exact. Nous construisons donc la pertinence locale à partir de comptes, lieux et signaux sélectionnés pour votre marché." : "Instagram does not provide an exact postcode filter. We build local relevance from accounts, places and signals selected for your market."}</p></div>
-        <AudienceTargetingVisual lang={lang} sources={[
-          { fr: "Marques sud-africaines", en: "South African brands" },
-          { fr: "Créateurs locaux pertinents", en: "Relevant local creators" },
-          { fr: "Pages de ville et de quartier", en: "City and neighbourhood pages" },
-          { fr: "Médias et lieux locaux", en: "Local media and venues" },
-          { fr: "Entreprises complémentaires", en: "Complementary businesses" },
-          { fr: "Événements et communautés", en: "Events and communities" },
-        ]} />
+        <AudienceTargetingVisual lang={lang} sources={saSources} />
       </section>
 
-      <AnimatedVisualSystem lang={lang} industry="south-africa" sources={[
-        { fr: "Marques sud-africaines", en: "South African brands" },
-        { fr: "Créateurs locaux pertinents", en: "Relevant local creators" },
-        { fr: "Pages de ville et de quartier", en: "City and neighbourhood pages" },
-        { fr: "Médias et lieux locaux", en: "Local media and venues" },
-        { fr: "Entreprises complémentaires", en: "Complementary businesses" },
-        { fr: "Événements et communautés", en: "Events and communities" },
-      ]} />
+      <AnimatedVisualSystem lang={lang} industry="south-africa" sources={saSources} />
 
       <section className={`${styles.section} ${styles.strategyBand}`} id="audiences">
         <div className={styles.sectionHead}><Eyebrow>SOUTH AFRICA TARGETING</Eyebrow><h2>{fr ? "Quatre marchés majeurs. Des écosystèmes locaux différents." : "Four major markets. Different local ecosystems."}</h2><p>{fr ? "Ces zones illustrent comment une campagne peut être structurée autour de lieux et communautés ; elles ne constituent pas une promesse de précision non supportée." : "These areas illustrate how a campaign can be structured around places and communities; they are not a claim of unsupported geographic precision."}</p></div>
