@@ -23,6 +23,7 @@
     });
     resetRotator();
     updateBilling();
+    syncPublicCheckoutHrefs();
     try { localStorage.setItem(STORE_LANG, lang); } catch (e) {}
   }
   var langEl = document.getElementById("lang");
@@ -62,6 +63,7 @@
     y: { fr: "facturé sur 12 mois", en: "billed for 12 months" }
   };
   var DISCOUNT = { m: 0, q: 0.10, h: 0.20, y: 0.25 };
+  var PERIOD_MONTHS = { m: 1, q: 3, h: 6, y: 12 };
   var PUBLIC_CHECKOUT_HREFS = {
     growth: "/instagram-growth/checkout?plan=growth&months=1",
     pro: "/instagram-growth/checkout?plan=pro&months=1",
@@ -75,10 +77,10 @@
       var offer = el.getAttribute("data-checkout-offer");
       var href = PUBLIC_CHECKOUT_HREFS[offer];
       if (!href) return;
-      if (currentLang === "en") {
-        href += (href.indexOf("?") >= 0 ? "&" : "?") + "lang=en";
-      }
-      el.setAttribute("href", href);
+      var url = new URL(href, window.location.origin);
+      url.searchParams.set("months", String(PERIOD_MONTHS[currentPeriod]));
+      url.searchParams.set("lang", currentLang);
+      el.setAttribute("href", url.pathname + url.search);
     });
   }
   function updateBilling() {
@@ -97,6 +99,7 @@
     currentPeriod = b.dataset.period;
     billToggle.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
     updateBilling();
+    syncPublicCheckoutHrefs();
   });
 
   /* ---------- Results chart ---------- */
@@ -214,6 +217,5 @@
   /* ---------- Init ---------- */
   var saved = "fr";
   try { saved = localStorage.getItem(STORE_LANG) || "fr"; } catch (e) {}
-  syncPublicCheckoutHrefs();
   applyLang(saved);
 })();
