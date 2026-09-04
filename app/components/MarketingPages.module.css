@@ -62,7 +62,7 @@
 .hero { position: relative; padding: 104px 24px 92px; }
 .heroAura { position: absolute; width: 560px; height: 560px; right: -100px; top: -160px; border-radius: 50%; background: radial-gradient(circle, rgba(225, 48, 108, .16), rgba(131, 58, 180, .08) 42%, transparent 70%); filter: blur(12px); pointer-events: none; }
 .heroGrid { position: relative; width: min(1180px, 100%); margin: auto; display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(420px, .96fr); align-items: center; gap: 80px; }
-.heroCopy h1 { max-width: 700px; font-size: clamp(3.25rem, 6.2vw, 6.4rem); line-height: .93; letter-spacing: -.065em; margin: 22px 0 28px; }
+.heroCopy h1 { max-width: 700px; font-size: clamp(3rem, 5.25vw, 5.55rem); line-height: .96; letter-spacing: -.06em; margin: 22px 0 28px; }
 .heroCopy h1 span { display: block; background: linear-gradient(90deg, #ffcf58 0%, #ed7b58 46%, #df4c92 72%, #a26cf3 100%); color: transparent; background-clip: text; -webkit-background-clip: text; }
 .heroCopy > p { max-width: 690px; color: #b8b3ac; font-size: 1.08rem; line-height: 1.75; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--gold); font-size: .71rem; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
@@ -111,6 +111,22 @@
 .proof article span { display: block; margin-top: 4px; color: #74727a; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
 
 .section { width: min(1180px, calc(100% - 48px)); margin: auto; padding: 110px 0; }
+.homeSectionMuted, .homeSectionDeep {
+  width: 100%;
+  max-width: none;
+  padding: 110px max(24px, calc((100vw - 1180px) / 2));
+  border-bottom: 1px solid var(--line);
+}
+.homeSectionMuted {
+  background:
+    radial-gradient(720px 360px at 82% 18%, rgba(143, 93, 247, .055), transparent 72%),
+    linear-gradient(180deg, #0e1019, #0b0d15);
+}
+.homeSectionDeep {
+  background:
+    radial-gradient(760px 380px at 18% 12%, rgba(244, 173, 51, .05), transparent 72%),
+    linear-gradient(180deg, #080910, #0a0b12);
+}
 .sectionHead { max-width: 780px; margin-bottom: 48px; }
 .sectionHead h2, .beyond h2, .orchestration h2, .fitSection h2, .flagship h2, .finalCta h2 { margin: 18px 0 16px; font-size: clamp(2.2rem, 4.4vw, 4.6rem); line-height: 1.02; letter-spacing: -.055em; }
 .sectionHead p, .beyond p, .flagship p { max-width: 700px; color: var(--muted); line-height: 1.75; }
@@ -163,7 +179,7 @@
 .automationPage { background: radial-gradient(850px 600px at 80% 4%, rgba(134, 72, 171, .14), transparent 70%), radial-gradient(800px 500px at 8% 26%, rgba(244, 173, 51, .06), transparent 70%), var(--bg); }
 .automationHero { min-height: 710px; display: grid; place-items: center; text-align: center; }
 .automationHeroInner { position: relative; z-index: 2; width: min(940px, 100%); margin: auto; }
-.automationHeroInner h1 { margin: 26px auto; max-width: 920px; font-size: clamp(3.2rem, 7vw, 7rem); line-height: .91; letter-spacing: -.07em; }
+.automationHeroInner h1 { margin: 26px auto; max-width: 920px; font-size: clamp(3rem, 5.8vw, 5.8rem); line-height: .95; letter-spacing: -.06em; }
 .automationHeroInner > p { max-width: 720px; margin: auto; color: var(--muted); line-height: 1.75; }
 .automationHeroInner .actions { justify-content: center; }
 .secondaryBadge { display: table; margin: 0 auto 24px; padding: 8px 12px; border: 1px solid rgba(219, 75, 139, .25); border-radius: 999px; background: rgba(219, 75, 139, .07); color: #ec87b3; font-size: .66rem; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; }
@@ -235,7 +251,7 @@
   .language button { padding: 5px 7px; }
   .navCta { max-width: 132px; text-align: center; line-height: 1.2; }
   .hero { padding: 62px 16px 56px; }
-  .heroCopy h1 { font-size: clamp(2.65rem, 13.2vw, 4rem); }
+  .heroCopy h1 { font-size: clamp(2.4rem, 11.6vw, 3.35rem); line-height: .98; }
   .heroCopy > p { font-size: .93rem; }
   .actions { flex-direction: column; align-items: stretch; }
   .primaryButton, .secondaryButton { width: 100%; }
@@ -247,6 +263,7 @@
   .proof article { border-right: 0; border-bottom: 1px solid var(--line); }
   .proof article:last-child { border-bottom: 0; }
   .section { width: calc(100% - 32px); padding: 78px 0; }
+  .homeSectionMuted, .homeSectionDeep { width: 100%; padding: 78px 16px; }
   .sectionHead { margin-bottom: 34px; }
   .sectionHead h2, .beyond h2, .orchestration h2, .fitSection h2, .flagship h2, .finalCta h2 { font-size: 2.3rem; }
   .whyCard, .quoteGrid article { padding: 23px; }
@@ -264,7 +281,7 @@
   .footerTop > div:last-child { grid-column: auto; }
   .footerBottom { flex-direction: column; }
   .automationHero { min-height: 670px; }
-  .automationHeroInner h1 { font-size: clamp(2.75rem, 13vw, 4rem); }
+  .automationHeroInner h1 { font-size: clamp(2.5rem, 11.5vw, 3.4rem); line-height: .98; }
   .systemGrid { grid-template-columns: 1fr; }
   .systemGrid article, .systemGrid article:last-child { grid-column: span 1; }
   .orchestration { padding: 78px 16px; }

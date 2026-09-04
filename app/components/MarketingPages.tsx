@@ -10,6 +10,7 @@ type Lang = "fr" | "en";
 const LANGUAGE_KEY = "boost_ai_landing_lang_v1";
 const LANGUAGE_EVENT = "bmb-language-change";
 const CALENDLY_URL = "https://calendly.com/boostmybusinesses/discovertheassistant";
+const HOME_URL = "https://www.boostmybusinesses.com";
 
 const profiles = [
   { name: "Maison Sevel", handle: "@maison.sevel", start: 12680, gain: 840, city: "Genève" },
@@ -95,7 +96,7 @@ function useLanguage() {
 
 function Brand() {
   return (
-    <Link className={styles.brand} href="/" aria-label="Boost My Businesses">
+    <Link className={styles.brand} href={HOME_URL} aria-label="Boost My Businesses">
       <Image src="/instagram-growth/assets/icon-square-256.png" alt="" width={38} height={38} aria-hidden="true" />
       <span>Boost<span>My</span>Businesses</span>
     </Link>
@@ -222,7 +223,7 @@ export function HomeMarketingPage() {
         <div>{t.proof.metrics.map((metric) => <article key={metric.l}><strong>{metric.n}</strong><span>{metric.l}</span></article>)}</div>
       </section>
 
-      <section className={styles.section}>
+      <section className={`${styles.section} ${styles.homeSectionMuted}`}>
         <div className={styles.sectionHead}><Eyebrow>{t.why.eyebrow}</Eyebrow><h2>{t.why.title}</h2><p>{t.why.lead}</p></div>
         <div className={styles.whyGrid}>{t.why.cards.map((card) => <article key={card.n} className={styles.whyCard}><span>{card.n}</span><h3>{card.t}</h3><p>{card.d}</p></article>)}</div>
       </section>
@@ -232,7 +233,7 @@ export function HomeMarketingPage() {
         <div className={styles.useGrid}>{t.uses.cards.map((card, index) => <article key={card.t}><span>0{index + 1}</span><h3>{card.t}</h3><p>{card.d}</p></article>)}</div>
       </section>
 
-      <section className={styles.section} id="plans">
+      <section className={`${styles.section} ${styles.homeSectionDeep}`} id="plans">
         <div className={styles.sectionHead}><Eyebrow>{t.plans.eyebrow}</Eyebrow><h2>{t.plans.title}</h2><p>{t.plans.lead}</p></div>
         <div className={styles.planGrid}>{t.plans.cards.map((card, index) => <article key={card.t} className={index === 1 ? styles.planFeatured : ""}><span className={styles.planIndex}>0{index + 1}</span><h3>{card.t}</h3><strong>{card.tag}</strong><p>{card.d}</p></article>)}</div>
         <div className={styles.centerAction}><Link className={styles.primaryButton} href="/instagram-growth#pricing">{t.plans.cta}<Arrow /></Link></div>
@@ -243,7 +244,7 @@ export function HomeMarketingPage() {
         <div className={styles.beyondList}>{t.beyond.items.map((item, index) => <div key={item}><span>0{index + 1}</span><strong>{item}</strong><i>↗</i></div>)}</div>
       </section>
 
-      <section className={styles.section}>
+      <section className={`${styles.section} ${styles.homeSectionMuted}`}>
         <div className={styles.sectionHead}><Eyebrow>{t.stories.eyebrow}</Eyebrow><h2>{t.stories.title}</h2></div>
         <div className={styles.quoteGrid}>{t.stories.quotes.map((quote) => <article key={quote.n}><div className={styles.stars}>★★★★★</div><blockquote>“{quote.q}”</blockquote><div className={styles.person}><Image src={quote.img} alt="" width={48} height={48} /><span><strong>{quote.n}</strong><small>{quote.s}</small></span></div></article>)}</div>
       </section>
