@@ -282,21 +282,21 @@ section { position: relative; }
 .feature-visual-card::before {
   content: ""; position: absolute; z-index: 1; inset: 0; pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(6,7,11,.02) 18%, rgba(6,7,11,.38) 53%, rgba(6,7,11,.97) 100%),
-    linear-gradient(90deg, rgba(8,9,14,.86) 0%, rgba(8,9,14,.18) 58%, transparent 100%);
+    linear-gradient(180deg, rgba(6,7,11,.01) 18%, rgba(6,7,11,.08) 53%, rgba(6,7,11,.42) 100%),
+    linear-gradient(90deg, rgba(8,9,14,.22) 0%, rgba(8,9,14,.04) 58%, transparent 100%);
 }
 .feature-visual-card::after {
   content: ""; position: absolute; z-index: 1; inset: 0; pointer-events: none;
-  border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255,255,255,.025), inset 0 -80px 100px rgba(0,0,0,.22);
+  border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255,255,255,.025), inset 0 -80px 100px rgba(0,0,0,.08);
 }
 .feature-visual {
   position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  filter: saturate(.92) contrast(1.04); transform: scale(1.002); transition: transform .75s cubic-bezier(.2,.7,.2,1), filter .5s ease;
+  filter: brightness(1.16) saturate(1.04) contrast(1.02); transform: scale(1.002); transition: transform .75s cubic-bezier(.2,.7,.2,1), filter .5s ease;
 }
-.feature-visual-card:hover .feature-visual { transform: scale(1.035); filter: saturate(1) contrast(1.06); }
+.feature-visual-card:hover .feature-visual { transform: scale(1.035); filter: brightness(1.2) saturate(1.08) contrast(1.03); }
 .feature-copy {
   position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; padding: 128px 30px 28px;
-  background: linear-gradient(180deg, transparent, rgba(7,8,12,.72) 42%, rgba(7,8,12,.94));
+  background: linear-gradient(180deg, transparent, rgba(7,8,12,.38) 42%, rgba(7,8,12,.82));
 }
 .feature-copy .fic {
   width: 48px; height: 48px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,.14);
