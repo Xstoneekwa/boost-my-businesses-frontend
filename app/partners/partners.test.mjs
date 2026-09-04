@@ -21,9 +21,10 @@ test("shared marketing language keeps Instagram key and legacy fallback", () => 
   assert.match(lang, /setItem\("bmb_lang", next\)/);
   assert.match(lang, /boost_ai_landing_lang_v1/);
 });
-test("both required marketing entry points expose partners", () => {
-  for (const file of ["../components/MarketingPages.tsx", "../../public/instagram-growth/index.html"]) {
-    assert.match(readFileSync(new URL(file, import.meta.url), "utf8"), /href="\/partners"/);
+test("all shared marketing entry points expose partners in navigation and footer", () => {
+  for (const file of ["../components/MarketingPages.tsx", "../components/GrowthLandingPages.tsx", "../../public/instagram-growth/index.html"]) {
+    const content = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.ok((content.match(/href="\/partners"/g) || []).length >= 2, file);
   }
 });
 test("commercial scope is explicit in both languages", () => {

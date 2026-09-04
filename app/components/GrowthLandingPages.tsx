@@ -271,6 +271,7 @@ function Header({ lang, setLang }: { lang: Lang; setLang: (lang: Lang) => void }
           <a href="#audiences">{fr ? "Audiences" : "Audiences"}</a>
         </nav>
         <div className={styles.headerActions}>
+          <Link className={styles.partnerLink} href="/partners">{fr ? "Partenaires" : "Partners"}</Link>
           <div className={styles.language} aria-label="Language">
             {(["fr", "en"] as const).map((option) => (
               <button key={option} type="button" aria-pressed={lang === option} className={lang === option ? styles.activeLanguage : ""} onClick={() => setLang(option)}>{option.toUpperCase()}</button>
@@ -290,7 +291,7 @@ function Footer({ lang }: { lang: Lang }) {
       <div><Brand /><p>{fr ? "Croissance Instagram ciblée, opérée depuis de vrais téléphones et gérée par notre équipe." : "Targeted Instagram growth, operated from real phones and managed by our team."}</p></div>
       <div><strong>Instagram Growth</strong><Link href="/instagram-growth">{fr ? "Vue d’ensemble" : "Overview"}</Link><Link href="/instagram-growth-south-africa">South Africa</Link>{(Object.keys(verticals) as VerticalKey[]).map((key) => <Link key={key} href={`/instagram-growth/${key}`}>{pick(verticals[key].label, lang)}</Link>)}</div>
       <div><strong>{fr ? "Automatisation IA" : "AI Automation"}</strong><Link href="/ai-automation">AI Automation</Link></div>
-      <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/">{fr ? "Accueil" : "Home"}</Link><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link></div>
+      <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/">{fr ? "Accueil" : "Home"}</Link><Link href="/partners">{fr ? "Partenaires" : "Partners"}</Link><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link></div>
       <div><strong>{fr ? "Compte" : "Account"}</strong><Link href="/instagram-login">Dashboard</Link><Link href={PRICING_URL}>{fr ? "Offres" : "Plans"}</Link></div>
       <div><strong>{fr ? "Légal" : "Legal"}</strong><Link href="/privacy-policy">{fr ? "Confidentialité" : "Privacy"}</Link><Link href="/terms-and-conditions">{fr ? "Conditions" : "Terms"}</Link><Link href="/refund-policy">{fr ? "Remboursement" : "Refunds"}</Link></div>
     </footer>

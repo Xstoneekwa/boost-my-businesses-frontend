@@ -101,6 +101,7 @@ function MarketingNav({ lang, page }: { lang: Lang; page: "home" | "automation" 
           <a href={page === "home" ? "#plans" : "#method"}>{page === "home" ? homeCopy[lang].nav.plans : automationCopy[lang].nav.process}</a>
         </nav>
         <div className={styles.navActions}>
+          <Link className={styles.partnerLink} href="/partners">{lang === "fr" ? "Partenaires" : "Partners"}</Link>
           <LanguageSwitch lang={current} setLang={setLang} />
           <a className={styles.navCall} href={CALENDLY_URL} target="_blank" rel="noopener noreferrer">{t.call}</a>
           <Link className={styles.navCta} href={page === "home" ? "/instagram-growth" : "/contact"}>{t.start}</Link>

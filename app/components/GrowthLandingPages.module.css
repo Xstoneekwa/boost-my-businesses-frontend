@@ -26,7 +26,11 @@
 .brand > span > span { color: var(--gold); }
 .header nav { display: flex; align-items: center; gap: 28px; margin-left: auto; }
 .header nav a { color: #aaa7a3; font-size: .8rem; font-weight: 700; }
-.headerActions { display: flex; align-items: center; gap: 12px; }
+.headerActions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.partnerLink { padding: 10px 13px; border: 1px solid #f4ad3355; border-radius: 12px; color: #f7cb7d !important; font-size: .76rem; font-weight: 700; white-space: nowrap; }
+.partnerLink:hover { background: #f4ad3314; }
+@media (min-width: 901px) and (max-width: 1200px) { .headerInner { flex-wrap: wrap; padding: 16px 0; gap: 18px; } .header nav { order: 3; width: 100%; justify-content: center; } .headerActions { margin-left: auto; } }
+@media (max-width: 600px) { .headerActions .partnerLink { font-size: .67rem; padding: 10px; } }
 .language { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.035); }
 .language button { border: 0; padding: 6px 9px; border-radius: 999px; color: #85838a; background: transparent; cursor: pointer; font-size: .68rem; font-weight: 800; }
 .language button.activeLanguage { color: #0b0b0d; background: linear-gradient(135deg,#f1d39a,#8d79c8); }
