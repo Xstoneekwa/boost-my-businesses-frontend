@@ -11,7 +11,7 @@ type Copy = { fr: string; en: string };
 const HOME_URL = "https://www.boostmybusinesses.com";
 const PRICING_URL = "/instagram-growth#pricing";
 const CALENDLY_URL = "https://calendly.com/boostmybusinesses/discovertheassistant";
-const LANGUAGE_KEY = "boost_ai_landing_lang_v1";
+const LANGUAGE_KEY = "bmb_lang";
 const LANGUAGE_EVENT = "bmb-language-change";
 
 type VerticalKey = "real-estate" | "beauty-aesthetics" | "restaurants" | "fitness";
@@ -30,6 +30,25 @@ type VerticalConfig = {
   strategyCards: { title: Copy; text: Copy }[];
   saExample: Copy;
   faq: { q: Copy; a: Copy }[];
+};
+
+const verticalImages: Record<VerticalKey, { src: string; alt: Copy }> = {
+  "real-estate": {
+    src: "/instagram-growth/verticals/real-estate.png",
+    alt: { en: "Contemporary property and city skyline at dusk", fr: "Bien contemporain et skyline urbaine au crépuscule" },
+  },
+  "beauty-aesthetics": {
+    src: "/instagram-growth/verticals/beauty-aesthetics.png",
+    alt: { en: "Premium skincare studio prepared for a treatment", fr: "Studio skincare premium préparé pour un soin" },
+  },
+  restaurants: {
+    src: "/instagram-growth/verticals/restaurants.png",
+    alt: { en: "Restaurant dining room during evening service", fr: "Salle de restaurant pendant le service du soir" },
+  },
+  fitness: {
+    src: "/instagram-growth/verticals/fitness.png",
+    alt: { en: "Community training session in a boutique fitness studio", fr: "Séance collective dans un studio fitness premium" },
+  },
 };
 
 const verticals: Record<VerticalKey, VerticalConfig> = {
@@ -269,7 +288,92 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className={styles.eyebrow}>{children}</span>;
 }
 
-function PricingBridge({ lang }: { lang: Lang }) {
+const sharedFaq: { q: Copy; a: Copy }[] = [
+  {
+    q: { en: "How do you build a locally relevant audience?", fr: "Comment construisez-vous une audience localement pertinente ?" },
+    a: { en: "We select relevant accounts, creators, communities, brands and local pages as audience sources. Instagram does not provide an exact postcode filter, so we never promise that 100% of followers will come from one city.", fr: "Nous sélectionnons des comptes, créateurs, communautés, marques et pages locales comme sources d’audience. Instagram ne fournit pas de filtre postal exact : nous ne promettons donc jamais que 100 % des abonnés viendront d’une seule ville." },
+  },
+  {
+    q: { en: "Do you use bots or buy followers?", fr: "Utilisez-vous des bots ou achetez-vous des abonnés ?" },
+    a: { en: "No. We do not purchase followers or inject fake accounts. Managed activity is operated from real phones to help relevant real people discover your profile naturally.", fr: "Non. Nous n’achetons pas d’abonnés et n’injectons pas de faux comptes. L’activité gérée est opérée depuis de vrais téléphones pour aider de vraies personnes pertinentes à découvrir naturellement votre profil." },
+  },
+  {
+    q: { en: "What does fully managed mean?", fr: "Que signifie service entièrement géré ?" },
+    a: { en: "Our team sets up, supervises and refines the campaign and its audience sources. You keep control of your brand and content while BMB manages the growth operation.", fr: "Notre équipe configure, supervise et affine la campagne ainsi que ses sources d’audience. Vous gardez le contrôle de votre marque et de vos contenus pendant que BMB gère l’opération de croissance." },
+  },
+  {
+    q: { en: "Will Growth publish content or send cold prospecting DMs?", fr: "Growth publie-t-il du contenu ou envoie-t-il des DMs de prospection à froid ?" },
+    a: { en: "No. The base Growth service does not publish on your behalf and does not include cold prospecting DMs. Prospecting messages are a separate Outreach service; Welcome DM is available only on eligible plans.", fr: "Non. Le service Growth de base ne publie pas à votre place et n’inclut pas de DMs de prospection à froid. Les messages de prospection relèvent du service Outreach séparé ; le Welcome DM est disponible uniquement sur les offres éligibles." },
+  },
+];
+
+export function FaqAccordion({ items, lang }: { items: { q: Copy; a: Copy }[]; lang: Lang }) {
+  return (
+    <div className={styles.faqList}>
+      {items.map((item, index) => (
+        <details key={item.q.en} className={styles.faqItem} open={index === 0}>
+          <summary><span>{pick(item.q, lang)}</span><i aria-hidden="true">+</i></summary>
+          <div><p>{pick(item.a, lang)}</p></div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+export function HeroMedia({ src, alt, lang, steps }: { src: string; alt: Copy; lang: Lang; steps: Copy[] }) {
+  return (
+    <div className={styles.heroVisual}>
+      <Image src={src} alt={pick(alt, lang)} fill priority sizes="(max-width: 900px) 100vw, 46vw" />
+      <div className={styles.heroVisualShade} />
+      <div className={styles.journeyOverlay}>
+        <span>{lang === "fr" ? "PARCOURS GÉRÉ" : "MANAGED JOURNEY"}</span>
+        <div>{steps.map((step, index) => <strong key={step.en}><i>{String(index + 1).padStart(2, "0")}</i>{pick(step, lang)}</strong>)}</div>
+      </div>
+    </div>
+  );
+}
+
+export function ResultCards({ items, lang, product = false }: { items: Copy[]; lang: Lang; product?: boolean }) {
+  return (
+    <div className={styles.outcomeGrid}>
+      {items.map((item, index) => (
+        <article key={item.en}>
+          <span>{String(index + 1).padStart(2, "0")}</span>
+          <p>{pick(item, lang)}</p>
+          <small>{lang === "fr" ? `Objectif ${product ? "produit" : "de campagne"} — résultat non garanti` : `${product ? "Product" : "Campaign"} objective — result not guaranteed`}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function AudienceTargetingVisual({ sources, lang }: { sources: Copy[]; lang: Lang }) {
+  return (
+    <div className={styles.sourceGrid}>
+      {sources.map((source, index) => <div key={source.en}><span>{String(index + 1).padStart(2, "0")}</span>{pick(source, lang)}</div>)}
+    </div>
+  );
+}
+
+function IndustryMediaSection({ industries, lang }: { industries: { key: VerticalKey; text: Copy }[]; lang: Lang }) {
+  return (
+    <div className={styles.industryGrid}>
+      {industries.map((industry) => {
+        const visual = verticalImages[industry.key];
+        return (
+          <Link key={industry.key} href={`/instagram-growth/${industry.key}`}>
+            <Image src={visual.src} alt="" fill sizes="(max-width: 600px) 100vw, (max-width: 900px) 50vw, 25vw" aria-hidden="true" />
+            <span className={styles.mediaShade} />
+            <span className={styles.industryArrow}>↗</span>
+            <div><h3>{pick(verticals[industry.key].label, lang)}</h3><p>{pick(industry.text, lang)}</p></div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export function PricingBridge({ lang }: { lang: Lang }) {
   const fr = lang === "fr";
   return (
     <section className={styles.pricingBridge}>
@@ -306,21 +410,18 @@ export function VerticalGrowthPage({ vertical }: { vertical: VerticalKey }) {
             <p>{pick(t.lead, lang)}</p>
             <div className={styles.actions}><a className={styles.primaryButton} href={PRICING_URL}>{fr ? "Voir les offres" : "Explore plans"}<span aria-hidden="true">↗</span></a><a className={styles.secondaryButton} href={CALENDLY_URL} target="_blank" rel="noopener noreferrer">{fr ? "Réserver un appel" : "Book a call"}</a></div>
           </div>
-          <div className={styles.heroPanel}>
-            <span>{fr ? "PARCOURS D’ACQUISITION" : "ACQUISITION JOURNEY"}</span>
-            {t.funnel.map((step, index) => <div key={step.en}><i>0{index + 1}</i><strong>{pick(step, lang)}</strong></div>)}
-          </div>
+          <HeroMedia src={verticalImages[vertical].src} alt={verticalImages[vertical].alt} lang={lang} steps={t.funnel} />
         </div>
       </section>
 
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.sectionHead}><Eyebrow>{fr ? "L’ENJEU" : "THE OPPORTUNITY"}</Eyebrow><h2>{pick(t.challenge, lang)}</h2><p>{pick(t.challengeLead, lang)}</p></div>
-        <div className={styles.outcomeGrid}>{t.outcomes.map((item, index) => <article key={item.en}><span>0{index + 1}</span><p>{pick(item, lang)}</p></article>)}</div>
+        <ResultCards items={t.outcomes} lang={lang} />
       </section>
 
       <section className={styles.section} id="audiences">
         <div className={styles.splitHead}><div><Eyebrow>{fr ? "SOURCES D’AUDIENCE" : "AUDIENCE SOURCES"}</Eyebrow><h2>{fr ? "Des signaux pertinents, pas une audience générique." : "Relevant signals, not a generic audience."}</h2></div><p>{fr ? "Chaque source est évaluée selon votre niche, votre localisation et la cohérence de son audience." : "Each source is assessed against your niche, location and the relevance of its audience."}</p></div>
-        <div className={styles.sourceGrid}>{t.sources.map((source, index) => <div key={source.en}><span>{String(index + 1).padStart(2, "0")}</span>{pick(source, lang)}</div>)}</div>
+        <AudienceTargetingVisual sources={t.sources} lang={lang} />
       </section>
 
       <section className={`${styles.section} ${styles.strategyBand}`} id="how">
@@ -339,7 +440,7 @@ export function VerticalGrowthPage({ vertical }: { vertical: VerticalKey }) {
 
       <section className={styles.section}>
         <div className={styles.sectionHead}><Eyebrow>FAQ</Eyebrow><h2>{fr ? `Questions sur Instagram Growth pour ${pick(t.label, lang).toLowerCase()}` : `Instagram growth for ${pick(t.label, lang).toLowerCase()}: questions`}</h2></div>
-        <div className={styles.faqGrid}>{t.faq.map((item) => <article key={item.q.en}><h3>{pick(item.q, lang)}</h3><p>{pick(item.a, lang)}</p></article>)}</div>
+        <FaqAccordion items={[...t.faq, ...sharedFaq]} lang={lang} />
       </section>
 
       <FinalCta lang={lang} title={fr ? "Développez une audience qui correspond à votre activité." : "Grow an audience that fits your business."} />
@@ -372,13 +473,21 @@ export function SouthAfricaGrowthPage() {
         <div className={styles.heroGlow} />
         <div className={styles.heroInner}>
           <div><Eyebrow>SOUTH AFRICA · INSTAGRAM GROWTH</Eyebrow><h1>{fr ? "La croissance Instagram pour les entreprises sud-africaines" : "Instagram growth for South African businesses"}</h1><p>{fr ? "Une croissance réelle, ciblée et géographiquement pertinente, propulsée par l’IA et opérée depuis de vrais téléphones — tout en restant entièrement gérée par notre équipe." : "Real, targeted, geo-relevant Instagram growth powered by AI and real phones — fully managed by our team."}</p><div className={styles.actions}><a className={styles.primaryButton} href={PRICING_URL}>{fr ? "Explorer les offres" : "Explore plans"}<span aria-hidden="true">↗</span></a><a className={styles.secondaryButton} href={CALENDLY_URL} target="_blank" rel="noopener noreferrer">{fr ? "Réserver un appel" : "Book a call"}</a></div></div>
-          <div className={`${styles.heroPanel} ${styles.mapPanel}`}><span>{fr ? "PERTINENCE LOCALE" : "LOCAL RELEVANCE"}</span><strong>South Africa</strong><p>Johannesburg · Cape Town · Durban · Pretoria</p><small>{fr ? "Des exemples de sources locales, pas une promesse de ciblage au mètre près." : "Examples of local source markets, not a promise of pinpoint targeting."}</small></div>
+          <div className={`${styles.heroVisual} ${styles.saVisual}`}>
+            <Image src="/instagram-growth/verticals/south-africa.png" alt={fr ? "Environnement urbain et entrepreneurial sud-africain" : "South African urban business environment"} fill priority sizes="(max-width: 900px) 100vw, 46vw" />
+            <div className={styles.heroVisualShade} />
+            <div className={styles.mapOverlay}><span>{fr ? "PERTINENCE LOCALE" : "LOCAL RELEVANCE"}</span><strong>South Africa</strong><p>Johannesburg · Cape Town · Durban · Pretoria</p><small>{fr ? "Des marchés sources, jamais une promesse de précision au code postal." : "Source markets, never a promise of postcode precision."}</small></div>
+          </div>
         </div>
       </section>
 
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.sectionHead}><Eyebrow>{fr ? "AU-DELÀ DU NOMBRE" : "BEYOND THE NUMBER"}</Eyebrow><h2>{fr ? "Une audience locale pertinente vaut plus qu’un simple compteur d’abonnés." : "A relevant local audience matters more than a follower count."}</h2><p>{fr ? "La croissance utile rapproche votre marque des personnes qui partagent déjà votre marché, votre ville, vos intérêts et vos communautés." : "Useful growth brings your brand closer to people who already share your market, city, interests and communities."}</p></div>
-        <div className={styles.outcomeGrid}><article><span>01</span><p>{fr ? "Plus de découverte auprès d’audiences cohérentes" : "More discovery among aligned audiences"}</p></article><article><span>02</span><p>{fr ? "Une base plus solide pour votre contenu et vos offres" : "A stronger audience layer for content and offers"}</p></article><article><span>03</span><p>{fr ? "Une campagne gérée, affinée au fil des signaux" : "A managed campaign refined as signals emerge"}</p></article></div>
+        <ResultCards product lang={lang} items={[
+          { fr: "Plus de découverte auprès d’audiences cohérentes", en: "More discovery among aligned audiences" },
+          { fr: "Une base plus solide pour votre contenu et vos offres", en: "A stronger audience layer for content and offers" },
+          { fr: "Une campagne gérée, affinée au fil des signaux", en: "A managed campaign refined as signals emerge" },
+        ]} />
       </section>
 
       <section className={styles.section} id="how">
@@ -388,9 +497,14 @@ export function SouthAfricaGrowthPage() {
 
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.splitHead}><div><Eyebrow>{fr ? "SOURCES LOCALES" : "LOCAL AUDIENCE SOURCES"}</Eyebrow><h2>{fr ? "La pertinence géographique vient des écosystèmes ciblés." : "Geographic relevance comes from the ecosystems you target."}</h2></div><p>{fr ? "Instagram ne fournit pas de filtre postal exact. Nous construisons donc la pertinence locale à partir de comptes, lieux et signaux sélectionnés pour votre marché." : "Instagram does not provide an exact postcode filter. We build local relevance from accounts, places and signals selected for your market."}</p></div>
-        <div className={styles.sourceGrid}>
-          {(fr ? ["Marques sud-africaines", "Créateurs locaux pertinents", "Pages de ville et de quartier", "Médias et lieux locaux", "Entreprises complémentaires", "Événements et communautés"] : ["South African brands", "Relevant local creators", "City and neighbourhood pages", "Local media and venues", "Complementary businesses", "Events and communities"]).map((source, index) => <div key={source}><span>{String(index + 1).padStart(2, "0")}</span>{source}</div>)}
-        </div>
+        <AudienceTargetingVisual lang={lang} sources={[
+          { fr: "Marques sud-africaines", en: "South African brands" },
+          { fr: "Créateurs locaux pertinents", en: "Relevant local creators" },
+          { fr: "Pages de ville et de quartier", en: "City and neighbourhood pages" },
+          { fr: "Médias et lieux locaux", en: "Local media and venues" },
+          { fr: "Entreprises complémentaires", en: "Complementary businesses" },
+          { fr: "Événements et communautés", en: "Events and communities" },
+        ]} />
       </section>
 
       <section className={`${styles.section} ${styles.strategyBand}`} id="audiences">
@@ -400,7 +514,7 @@ export function SouthAfricaGrowthPage() {
 
       <section className={styles.section}>
         <div className={styles.splitHead}><div><Eyebrow>{fr ? "SECTEURS" : "INDUSTRIES"}</Eyebrow><h2>{fr ? "Des stratégies adaptées aux parcours d’achat réels." : "Strategies shaped around real customer journeys."}</h2></div><p>{fr ? "Explorez une landing dédiée à chaque verticale, avec sources, funnel et exemples distincts." : "Explore a dedicated landing for each vertical, with distinct sources, funnel and examples."}</p></div>
-        <div className={styles.industryGrid}>{industries.map((industry) => <Link key={industry.key} href={`/instagram-growth/${industry.key}`}><span>↗</span><h3>{pick(verticals[industry.key].label, lang)}</h3><p>{pick(industry.text, lang)}</p></Link>)}</div>
+        <IndustryMediaSection industries={industries} lang={lang} />
       </section>
 
       <section className={styles.infrastructure}>
@@ -414,7 +528,11 @@ export function SouthAfricaGrowthPage() {
 
       <section className={styles.section}>
         <div className={styles.sectionHead}><Eyebrow>SOUTH AFRICA FAQ</Eyebrow><h2>{fr ? "Questions fréquentes" : "Questions from South African businesses"}</h2></div>
-        <div className={styles.faqGrid}><article><h3>{fr ? "Les offres sont-elles en rand ?" : "Are plans billed in rand?"}</h3><p>{fr ? "Non. Les offres restent facturées en EUR et votre banque gère automatiquement la conversion." : "No. Plans remain billed in EUR and your bank handles currency conversion automatically."}</p></article><article><h3>{fr ? "Pouvez-vous cibler ma ville ?" : "Can you target my city?"}</h3><p>{fr ? "Nous construisons des sources géographiquement pertinentes autour de votre marché. Nous ne promettons pas une précision que le produit ne peut pas prouver." : "We build geographically relevant sources around your market. We do not promise precision the product cannot substantiate."}</p></article><article><h3>{fr ? "Utilisez-vous de vrais téléphones ?" : "Do you use real phones?"}</h3><p>{fr ? "Oui. L’activité est opérée depuis notre infrastructure de téléphones réels et gérée par notre équipe." : "Yes. Activity runs from our real-phone infrastructure and is managed by our team."}</p></article><article><h3>{fr ? "Est-ce réservé à l’Afrique du Sud ?" : "Is BMB only for South Africa?"}</h3><p>{fr ? "Non. Boost My Businesses reste international ; cette page est une porte d’entrée locale." : "No. Boost My Businesses remains international; this page is a local acquisition entry point."}</p></article></div>
+        <FaqAccordion lang={lang} items={[
+          { q: { fr: "Les offres sont-elles en rand ?", en: "Are plans billed in rand?" }, a: { fr: "Non. Les offres restent facturées en EUR et votre banque gère automatiquement la conversion.", en: "No. Plans remain billed in EUR and your bank handles currency conversion automatically." } },
+          { q: { fr: "Est-ce réservé à l’Afrique du Sud ?", en: "Is BMB only for South Africa?" }, a: { fr: "Non. Boost My Businesses reste international ; cette page est une porte d’entrée locale.", en: "No. Boost My Businesses remains international; this page is a local acquisition entry point." } },
+          ...sharedFaq,
+        ]} />
       </section>
 
       <FinalCta lang={lang} title={fr ? "Faites grandir votre audience en Afrique du Sud avec une campagne réellement gérée." : "Grow your South African audience with a campaign that is genuinely managed."} />
