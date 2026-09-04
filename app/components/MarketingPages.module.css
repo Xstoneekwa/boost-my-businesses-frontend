@@ -320,13 +320,14 @@
   opacity: 0;
   filter: blur(7px);
   transform: translateY(34px) scale(.975);
-  transition: opacity .72s ease, transform .84s cubic-bezier(.2, .72, .2, 1), filter .72s ease, border-color .5s ease, box-shadow .8s ease;
+  transition: opacity .62s ease, transform .76s cubic-bezier(.2, .72, .2, 1), filter .62s ease, border-color .5s ease, box-shadow .8s ease;
+  will-change: opacity, transform, filter;
 }
-.planGrid[data-motion="ready"][data-visible="true"] article { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
-.planGrid[data-motion="ready"][data-visible="true"] article:nth-child(1) { transition-delay: .06s; }
-.planGrid[data-motion="ready"][data-visible="true"] article:nth-child(2) { transition-delay: .22s; }
-.planGrid[data-motion="ready"][data-visible="true"] article:nth-child(3) { transition-delay: .38s; }
-.planGrid[data-motion="ready"][data-visible="true"] article.planFeatured { transform: translateY(-10px) scale(1); box-shadow: 0 30px 82px rgba(235, 143, 20, .16); }
+.planGrid[data-motion="ready"][data-reveal-step="1"] article:nth-child(1),
+.planGrid[data-motion="ready"][data-reveal-step="2"] article:nth-child(-n + 2),
+.planGrid[data-motion="ready"][data-reveal-step="3"] article { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
+.planGrid[data-motion="ready"][data-reveal-step="2"] article.planFeatured,
+.planGrid[data-motion="ready"][data-reveal-step="3"] article.planFeatured { transform: translateY(-10px) scale(1); box-shadow: 0 30px 82px rgba(235, 143, 20, .16); }
 .planGrid h3 { font-size: 1.55rem; margin-top: 50px; }
 .planGrid article > strong { display: block; min-height: 52px; color: #e9e3d7; line-height: 1.5; }
 .centerAction { display: flex; justify-content: center; margin-top: 40px; }
@@ -417,7 +418,8 @@
   .previewShell { width: min(540px, 100%); margin: auto; }
   .planGrid, .quoteGrid { grid-template-columns: 1fr; }
   .planGrid article.planFeatured { transform: none; }
-  .planGrid[data-motion="ready"][data-visible="true"] article.planFeatured { transform: translateY(0) scale(1); }
+  .planGrid[data-motion="ready"][data-reveal-step="2"] article.planFeatured,
+  .planGrid[data-motion="ready"][data-reveal-step="3"] article.planFeatured { transform: translateY(0) scale(1); }
   .acquisitionFlow span, .adaptiveFlow span { padding: 9px 8px; font-size: .61rem; }
   .integratedVisual { height: 760px; }
   .integratedIntro { top: 32px; left: 28px; width: calc(100% - 56px); }
@@ -558,8 +560,8 @@
   .primaryButton, .secondaryButton { transition: none; }
   .acquisitionVisual::after, .acquisitionSweep, .acquisitionFlow span::before { animation: none; }
   .planGrid[data-motion="ready"] article,
-  .planGrid[data-motion="ready"][data-visible="true"] article,
-  .planGrid[data-motion="ready"][data-visible="true"] article.planFeatured {
+  .planGrid[data-motion="ready"][data-reveal-step] article,
+  .planGrid[data-motion="ready"][data-reveal-step] article.planFeatured {
     opacity: 1;
     filter: none;
     transform: none;

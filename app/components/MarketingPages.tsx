@@ -209,24 +209,39 @@ function SequencedPlanGrid({ cards }: { cards: Array<{ t: string; tag: string; d
     if (!grid) return;
 
     grid.dataset.motion = "ready";
+    grid.dataset.revealStep = "0";
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduceMotion || !("IntersectionObserver" in window)) {
+      grid.dataset.revealStep = "3";
       grid.dataset.visible = "true";
       return;
     }
 
+    const revealTimers: number[] = [];
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting) return;
-        grid.dataset.visible = "true";
         observer.disconnect();
+        grid.dataset.revealStep = "1";
+        revealTimers.push(
+          window.setTimeout(() => { grid.dataset.revealStep = "2"; }, 320),
+          window.setTimeout(() => {
+            grid.dataset.revealStep = "3";
+            grid.dataset.visible = "true";
+          }, 640),
+        );
       },
       { threshold: 0.2, rootMargin: "0px 0px -8%" },
     );
-    const frame = window.requestAnimationFrame(() => observer.observe(grid));
+    let observeFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      observeFrame = window.requestAnimationFrame(() => observer.observe(grid));
+    });
 
     return () => {
       window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(observeFrame);
+      revealTimers.forEach((timer) => window.clearTimeout(timer));
       observer.disconnect();
     };
   }, []);
@@ -234,7 +249,7 @@ function SequencedPlanGrid({ cards }: { cards: Array<{ t: string; tag: string; d
   return (
     <div ref={gridRef} className={styles.planGrid} data-testid="sequenced-plan-grid">
       {cards.map((card, index) => (
-        <article key={card.t} className={index === 1 ? styles.planFeatured : ""}>
+        <article key={card.t} className={index === 1 ? styles.planFeatured : ""} data-reveal-order={index + 1}>
           <span className={styles.planIndex}>0{index + 1}</span>
           <h3>{card.t}</h3>
           <strong>{card.tag}</strong>
