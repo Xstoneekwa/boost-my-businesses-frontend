@@ -7,6 +7,33 @@ import {
 import { targetDecisionFromLookup } from "../lib/instagram-targets.ts";
 
 const fixedNow = new Date("2026-05-30T02:00:00.000Z");
+const tenantId = "11111111-1111-4111-8111-111111111111";
+
+function successfulAvailabilityResult(patch = {}) {
+  return {
+    active: true,
+    autoKilled: false,
+    scopeMode: "all_active_accounts",
+    attempted: 1,
+    accepted: 1,
+    processed: 1,
+    rejected: 0,
+    deduplicated: 0,
+    capHits: 0,
+    errors: 0,
+    retries: 0,
+    crossTenant: 0,
+    outOfOrder: 0,
+    identityTransitions: 1,
+    assessments: 1,
+    currentUpdates: 1,
+    latencyP50Ms: 1,
+    latencyP95Ms: 1,
+    latencyMaxMs: 1,
+    reasons: [],
+    ...patch,
+  };
+}
 
 const baseLookup = {
   ok: true,
@@ -109,6 +136,8 @@ class FakeQuery {
     if (this.table === "ig_targets") return this.db.targets;
     if (this.table === "ct_target_verification_jobs") return this.db.jobs;
     if (this.table === "ct_target_availability_current") return this.db.availabilityCurrent;
+    if (this.table === "ct_target_identity_current") return this.db.identityCurrent;
+    if (this.table === "client_instagram_accounts") return this.db.clientAccounts;
     return [];
   }
 
@@ -131,6 +160,15 @@ class FakeSupabase {
     this.jobs = jobs;
     this.targets = targets;
     this.availabilityCurrent = [];
+    this.identityCurrent = [];
+    this.clientAccounts = [{
+      client_id: tenantId,
+      account_id: "account-1",
+      active: true,
+      onboarding_status: "ready",
+      provisioning_status: "ready",
+      login_status: "connected",
+    }];
     this.audit = [];
   }
 
@@ -430,16 +468,29 @@ test("evidence-only mode refreshes follower evidence without business mutations"
     quality_status: db.targets[0].quality_status,
     archived_at: db.targets[0].archived_at,
   };
+  const projected = [];
 
   const result = await processTargetVerificationBatch(db, {
     mode: "evidence_only",
     now: () => fixedNow,
     verifyUsername: async () => decisionFromLookup({ followers_count: 1200 }),
+    processAvailabilityBatch: async (_supabase, observations, context) => {
+      projected.push({ observations, context });
+      return successfulAvailabilityResult();
+    },
   });
 
   assert.equal(result.summary.succeeded_count, 1);
   assert.equal(db.targets[0].followers_count, 1200);
   assert.equal(db.targets[0].provider_checked_at, fixedNow.toISOString());
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0].observations[0].tenant_id, tenantId);
+  assert.equal(projected[0].observations[0].account_id, "account-1");
+  assert.equal(projected[0].observations[0].target_id, "target-evidence");
+  assert.equal(projected[0].observations[0].lookup_result, "found");
+  assert.equal(projected[0].observations[0].profile_found, true);
+  assert.equal(projected[0].observations[0].observed_at, fixedNow.toISOString());
+  assert.equal(projected[0].context.workerId, "dashboard_verify_batch");
   assert.deepEqual({
     status: db.targets[0].status,
     quality_status: db.targets[0].quality_status,
@@ -473,6 +524,7 @@ test("old valid legacy pending job is adopted and processed evidence-only", asyn
     mode: "evidence_only",
     now: () => fixedNow,
     verifyUsername: async () => decisionFromLookup({ followers_count: 1300 }),
+    processAvailabilityBatch: async () => successfulAvailabilityResult(),
   });
   assert.equal(result.summary.succeeded_count, 1);
   assert.equal(db.jobs[0].metadata_safe.mode, "evidence_only");
@@ -554,10 +606,92 @@ test("evidence-only stale provider response cannot overwrite newer evidence", as
     mode: "evidence_only",
     now: () => fixedNow,
     verifyUsername: async () => decisionFromLookup({ followers_count: 100 }),
+    processAvailabilityBatch: async () => {
+      assert.fail("stale evidence must not enter the Availability pipeline");
+    },
   });
   assert.equal(result.summary.succeeded_count, 1);
   assert.equal(db.targets[0].provider_checked_at, newer);
   assert.equal(db.targets[0].followers_count, 1500);
+});
+
+test("duplicate current evidence uses one deterministic Availability idempotency key", async () => {
+  const jobs = [
+    pendingJob("duplicate-a", "target_user", {
+      target_id: "target-shared",
+      batch_id: null,
+      metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+    }),
+    pendingJob("duplicate-b", "target_user", {
+      target_id: "target-shared",
+      batch_id: null,
+      metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+    }),
+  ];
+  const db = fakePeriodicDb(jobs);
+  const keys = [];
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    limit: 2,
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+    processAvailabilityBatch: async (_supabase, observations) => {
+      keys.push(observations[0].idempotency_key);
+      return successfulAvailabilityResult(keys.length === 2 ? { deduplicated: 1 } : {});
+    },
+  });
+  assert.equal(result.summary.succeeded_count, 2);
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("ambiguous tenant binding fails closed before Availability projection", async () => {
+  const job = pendingJob("ambiguous-tenant", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  db.clientAccounts.push({ ...db.clientAccounts[0], client_id: "22222222-2222-4222-8222-222222222222" });
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+    processAvailabilityBatch: async () => {
+      assert.fail("ambiguous tenant binding must not enter the Availability pipeline");
+    },
+  });
+  assert.equal(result.summary.succeeded_count, 0);
+  assert.equal(result.summary.retry_scheduled_count, 1);
+  assert.equal(db.jobs[0].status, "retry_scheduled");
+  assert.equal(db.jobs[0].last_error_code, "processor_error");
+  assert.equal(db.availabilityCurrent.length, 0);
+});
+
+test("existing identity conflict fails closed before Availability projection", async () => {
+  const job = pendingJob("identity-conflict", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  db.identityCurrent.push({
+    tenant_id: tenantId,
+    account_id: job.account_id,
+    target_id: job.target_id,
+    current_username: "target_user",
+    domain_identity_status: "identity_conflict",
+  });
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+    processAvailabilityBatch: async () => {
+      assert.fail("identity conflict must not enter the Availability pipeline");
+    },
+  });
+  assert.equal(result.summary.retry_scheduled_count, 1);
+  assert.equal(db.jobs[0].status, "retry_scheduled");
+  assert.equal(db.jobs[0].last_error_code, "processor_error");
+  assert.equal(db.availabilityCurrent.length, 0);
 });
 
 test("evidence-only rate limit preserves target and requeues without fake freshness", async () => {

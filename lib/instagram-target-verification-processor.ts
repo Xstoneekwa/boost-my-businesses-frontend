@@ -18,6 +18,7 @@ import {
   resolveTargetVerificationHygiene,
   type TargetHygieneExistingRow,
 } from "./target-verification-hygiene.ts";
+import { processTargetAvailabilityBatch } from "./target-availability/runtime-pipeline.ts";
 
 export type SupabaseRecord = Record<string, unknown>;
 
@@ -51,6 +52,7 @@ export type TargetVerificationProcessorOptions = {
   now?: () => Date;
   verifyUsername?: (username: string) => Promise<TargetVerificationDecision>;
   mode?: "business_requalification" | "evidence_only";
+  processAvailabilityBatch?: typeof processTargetAvailabilityBatch;
 };
 
 type ClaimedJob = {
@@ -379,6 +381,130 @@ function normalizedEvidenceUsername(value: unknown) {
   return readString(value, "").trim().toLowerCase();
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function loadExactEvidenceTenant(
+  supabase: TargetVerificationSupabaseClient,
+  accountId: string,
+) {
+  const { data, error } = await supabase
+    .from("client_instagram_accounts")
+    .select("client_id,account_id,active,onboarding_status,provisioning_status,login_status")
+    .eq("account_id", accountId)
+    .eq("active", true)
+    .limit(2);
+  if (error) throw new Error(error.message || "target_evidence_tenant_binding_read_failed");
+  const readyLinks = (data ?? []).filter((row) => (
+    UUID_RE.test(readString(row.client_id, ""))
+    && readString(row.account_id, "") === accountId
+    && row.active === true
+    && readString(row.onboarding_status, "") === "ready"
+    && readString(row.provisioning_status, "") === "ready"
+    && readString(row.login_status, "") === "connected"
+  ));
+  if (readyLinks.length !== 1) throw new Error("target_evidence_tenant_binding_not_unique");
+  return readString(readyLinks[0].client_id, "").toLowerCase();
+}
+
+async function evidenceRefreshStillCurrent(
+  supabase: TargetVerificationSupabaseClient,
+  job: ClaimedJob,
+  expectedUsername: string,
+  checkedAt: string,
+) {
+  const { data, error } = await supabase
+    .from("ig_targets")
+    .select("id,account_id,normalized_username,provider_checked_at,archived_at,deleted_at")
+    .eq("id", job.target_id)
+    .eq("account_id", job.account_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message || "target_evidence_current_read_failed");
+  if (!data || data.archived_at || data.deleted_at) return false;
+  return normalizedEvidenceUsername(data.normalized_username) === expectedUsername
+    && Number.isFinite(Date.parse(readString(data.provider_checked_at, "")))
+    && Date.parse(readString(data.provider_checked_at, "")) === Date.parse(checkedAt);
+}
+
+async function assertEvidenceIdentityIsUnambiguous(
+  supabase: TargetVerificationSupabaseClient,
+  tenantId: string,
+  job: ClaimedJob,
+  expectedUsername: string,
+) {
+  const { data, error } = await supabase
+    .from("ct_target_identity_current")
+    .select("tenant_id,account_id,target_id,current_username,domain_identity_status")
+    .eq("tenant_id", tenantId)
+    .eq("account_id", job.account_id)
+    .eq("target_id", job.target_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message || "target_evidence_identity_read_failed");
+  if (!data) return;
+  const identityStatus = readString(data.domain_identity_status, "");
+  const currentUsername = normalizedEvidenceUsername(data.current_username);
+  if (["identity_conflict", "identity_ambiguous"].includes(identityStatus)
+    || (currentUsername && currentUsername !== expectedUsername)) {
+    throw new Error("target_evidence_identity_not_unambiguous");
+  }
+}
+
+async function bridgeFoundEvidenceToAvailability(
+  supabase: TargetVerificationSupabaseClient,
+  job: ClaimedJob,
+  decision: TargetVerificationDecision,
+  workerId: string,
+  queueDepth: number,
+  availabilityProcessor: typeof processTargetAvailabilityBatch,
+) {
+  const expectedUsername = normalizedEvidenceUsername(job.normalized_username);
+  const canonicalUsername = normalizedEvidenceUsername(decision.canonical_username);
+  const checkedAt = readString(decision.provider_checked_at, "");
+  if (!await evidenceRefreshStillCurrent(supabase, job, expectedUsername, checkedAt)) return "stale" as const;
+  const tenantId = await loadExactEvidenceTenant(supabase, job.account_id);
+  await assertEvidenceIdentityIsUnambiguous(supabase, tenantId, job, expectedUsername);
+  const idempotencyKey = `target-evidence-provider:${job.target_id}:${checkedAt}`;
+  const result = await availabilityProcessor(
+    supabase as Parameters<typeof processTargetAvailabilityBatch>[0],
+    [{
+      tenant_id: tenantId,
+      account_id: job.account_id,
+      target_id: job.target_id,
+      observed_at: checkedAt,
+      source: "provider",
+      source_run_id: null,
+      source_worker: "backend-target-evidence-revalidation",
+      worker_version: "target-evidence-revalidation-v1",
+      searched_username: expectedUsername,
+      observed_username: canonicalUsername,
+      observed_stable_platform_user_id: null,
+      lookup_result: "found",
+      profile_found: true,
+      verified_badge: decision.is_verified,
+      followers_surface: "unknown",
+      ui_evidence_quality: "medium",
+      network_state: "healthy",
+      session_state: "unknown",
+      reason_codes: ["provider_target_found", "stable_id_missing"],
+      idempotency_key: idempotencyKey,
+      evidence_safe: {
+        provider_found: true,
+        followers_count_present: Number.isInteger(decision.followers_count),
+      },
+    }],
+    {
+      workerId,
+      workerRelease: "target-evidence-revalidation-v1",
+      batchKey: idempotencyKey,
+      queueDepth,
+    },
+  );
+  if (!result.active || result.errors > 0 || result.rejected > 0 || result.capHits > 0
+    || result.crossTenant > 0 || result.outOfOrder > 0 || result.processed < 1) {
+    throw new Error(`target_evidence_availability_projection_failed:${result.reasons[0] || "unknown"}`);
+  }
+  return result.deduplicated > 0 ? "deduplicated" as const : "projected" as const;
+}
+
 async function persistEvidenceOnlyResult(
   supabase: TargetVerificationSupabaseClient,
   job: ClaimedJob,
@@ -411,7 +537,10 @@ async function persistEvidenceOnlyResult(
     p_followers_count: foundEvidence ? followersCount : null,
   });
   if (error) throw new Error(error.message || "target_evidence_refresh_persist_failed");
-  return readString(data, "");
+  return {
+    outcome: readString(data, ""),
+    foundEvidence,
+  };
 }
 
 export async function processTargetVerificationBatch(
@@ -425,6 +554,7 @@ export async function processTargetVerificationBatch(
   const workerId = safeTargetVerificationWorkerId(options.workerId);
   const maxDurationMs = boundedTargetVerificationMaxDurationMs(options.maxDurationMs);
   const verifyUsername = options.verifyUsername ?? verifySingleTargetUsername;
+  const availabilityProcessor = options.processAvailabilityBatch ?? processTargetAvailabilityBatch;
   const mode = options.mode ?? "business_requalification";
   const summary = emptyTargetVerificationBatchSummary();
   let stoppedEarlyReason: string | null = null;
@@ -496,7 +626,18 @@ export async function processTargetVerificationBatch(
 
         let evidenceResult = "retry_deferred";
         if (jobDecision.jobStatus !== "retry_scheduled") {
-          evidenceResult = await persistEvidenceOnlyResult(supabase, job, decision);
+          const persisted = await persistEvidenceOnlyResult(supabase, job, decision);
+          evidenceResult = persisted.outcome;
+          if (persisted.foundEvidence && ["updated", "already_fresher"].includes(evidenceResult)) {
+            await bridgeFoundEvidenceToAvailability(
+              supabase,
+              job,
+              decision,
+              workerId,
+              jobs.length - index - 1,
+              availabilityProcessor,
+            );
+          }
         }
 
         const identityMismatch = evidenceResult === "identity_mismatch";
