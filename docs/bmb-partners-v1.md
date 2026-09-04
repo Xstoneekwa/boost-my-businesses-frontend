@@ -28,6 +28,8 @@ NO_FIGMA_ASSET_REUSE=YES
 
 Hero copy, agency/operations annotations and photographic scene form one composition. The responsibilities section overlays the two poles within a shared scene. The multi-account scene is explicitly illustrative, not a fabricated live dashboard. Mobile uses a dedicated portrait composition to preserve both agency and phones. Text remains HTML for accessibility and translation.
 
+Owner lighting follow-up: reduced dark scene overlays; image presentation brightness 1.18 for hero and 1.35 for responsibilities; localized text backing retains readability without dimming the entire photograph. Desktop and mobile rechecked.
+
 KEEP_AS_PRINCIPLE: clear hierarchy, contextual annotations, realistic demonstration and reassurance close to conversion.
 BMB_ADAPTATION: agency relationship layer connected to managed real-phone operation; BMB charcoal and amber palette.
 DO_NOT_COPY: all Propulse assets, wording, numbers, distinctive layouts and branding.
@@ -44,7 +46,7 @@ React review: no API calls, lightweight language subscription with cleanup, nati
 - 5 Partners source contract tests: PASS.
 - 24 existing commercial pricing snapshot tests: PASS.
 - Local full Next production build: PASS (including Next TypeScript phase).
-- Standalone repository typecheck has diagnostics in existing tests; comparison with baseline is recorded in the final delivery report. No diagnostic in modified files.
+- Standalone repository typecheck has diagnostics in existing tests; its 346-line output is byte-for-byte identical to the baseline output. No diagnostic in modified files.
 - Local browser: FR desktop/mobile390, EN desktop/mobile390, persisted FR reload, FAQ opens, canonical Calendly destination, pricing anchor, homepage/AI Automation/South Africa smoke: PASS.
 - Production remains unchanged. Preview checks and exact candidate/deployment identifiers will be recorded in the delivery report.
 
