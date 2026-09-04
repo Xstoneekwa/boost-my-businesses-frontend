@@ -3,6 +3,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useSyncExternalStore } from "react";
+import {
+  AnimatedComparisonChart,
+  AnimatedGrowthTimeline,
+  AudienceFlowVisual,
+  IndustryJourneyVisual,
+  ManagedInfrastructureVisual,
+  type IndustryVisual,
+} from "./GrowthAnimatedVisuals";
 import styles from "./GrowthLandingPages.module.css";
 
 type Lang = "fr" | "en";
@@ -355,6 +363,27 @@ export function AudienceTargetingVisual({ sources, lang }: { sources: Copy[]; la
   );
 }
 
+function AnimatedVisualSystem({ lang, sources, industry }: { lang: Lang; sources: Copy[]; industry: IndustryVisual }) {
+  const fr = lang === "fr";
+  return (
+    <section className={`${styles.section} ${styles.visualSystem}`} id="visual-system">
+      <div className={styles.sectionHead}>
+        <Eyebrow>{fr ? "EXPLICATION VISUELLE" : "VISUAL EXPLANATION"}</Eyebrow>
+        <h2>{fr ? "Voyez comment le ciblage devient une progression gérée." : "See how targeting becomes managed momentum."}</h2>
+        <p>{fr ? "Ces visualisations expliquent le fonctionnement du système. Elles illustrent une méthode, sans inventer de résultat client ni garantir une performance." : "These visuals explain how the system works. They illustrate a method without inventing client results or guaranteeing performance."}</p>
+      </div>
+      <div className={styles.visualPair}>
+        <AnimatedComparisonChart lang={lang} />
+        <AnimatedGrowthTimeline lang={lang} />
+      </div>
+      <div className={styles.visualPair}>
+        <AudienceFlowVisual lang={lang} sources={sources.map((source) => pick(source, lang))} />
+        <IndustryJourneyVisual lang={lang} industry={industry} />
+      </div>
+    </section>
+  );
+}
+
 function IndustryMediaSection({ industries, lang }: { industries: { key: VerticalKey; text: Copy }[]; lang: Lang }) {
   return (
     <div className={styles.industryGrid}>
@@ -424,14 +453,16 @@ export function VerticalGrowthPage({ vertical }: { vertical: VerticalKey }) {
         <AudienceTargetingVisual sources={t.sources} lang={lang} />
       </section>
 
+      <AnimatedVisualSystem lang={lang} sources={t.sources} industry={vertical} />
+
       <section className={`${styles.section} ${styles.strategyBand}`} id="how">
         <div className={styles.sectionHead}><Eyebrow>{fr ? "STRATÉGIE GÉRÉE" : "MANAGED STRATEGY"}</Eyebrow><h2>{pick(t.strategyTitle, lang)}</h2><p>{pick(t.strategyLead, lang)}</p></div>
         <div className={styles.cardGrid}>{t.strategyCards.map((card) => <article key={card.title.en}><h3>{pick(card.title, lang)}</h3><p>{pick(card.text, lang)}</p></article>)}</div>
       </section>
 
-      <section className={styles.infrastructure}>
-        <div><Eyebrow>{fr ? "INFRASTRUCTURE RÉELLE" : "REAL INFRASTRUCTURE"}</Eyebrow><h2>{fr ? "De vrais téléphones. Une activité naturelle. Une équipe aux commandes." : "Real phones. Natural activity. A team in control."}</h2></div>
-        <div className={styles.infrastructureList}><span>{fr ? "Rythmes progressifs adaptés au compte" : "Progressive pacing adapted to the account"}</span><span>{fr ? "Campagnes supervisées et optimisées" : "Campaigns supervised and optimized"}</span><span>{fr ? "Ciblage fondé sur des sources concrètes" : "Targeting built from concrete sources"}</span></div>
+      <section className={`${styles.infrastructure} ${styles.infrastructureEnhanced}`}>
+        <div className={styles.infrastructureCopy}><div><Eyebrow>{fr ? "INFRASTRUCTURE RÉELLE" : "REAL INFRASTRUCTURE"}</Eyebrow><h2>{fr ? "De vrais téléphones. Une activité naturelle. Une équipe aux commandes." : "Real phones. Natural activity. A team in control."}</h2></div><div className={styles.infrastructureList}><span>{fr ? "Rythmes progressifs adaptés au compte" : "Progressive pacing adapted to the account"}</span><span>{fr ? "Campagnes supervisées et optimisées" : "Campaigns supervised and optimized"}</span><span>{fr ? "Ciblage fondé sur des sources concrètes" : "Targeting built from concrete sources"}</span></div></div>
+        <ManagedInfrastructureVisual lang={lang} />
       </section>
 
       <section className={styles.example}><span>{fr ? "EXEMPLE DE CIBLAGE — PAS UN RÉSULTAT CLIENT" : "TARGETING EXAMPLE — NOT A CLIENT RESULT"}</span><p>{pick(t.saExample, lang)}</p><Link href="/instagram-growth-south-africa">{fr ? "Explorer la landing South Africa" : "Explore the South Africa landing"} →</Link></section>
@@ -507,6 +538,15 @@ export function SouthAfricaGrowthPage() {
         ]} />
       </section>
 
+      <AnimatedVisualSystem lang={lang} industry="south-africa" sources={[
+        { fr: "Marques sud-africaines", en: "South African brands" },
+        { fr: "Créateurs locaux pertinents", en: "Relevant local creators" },
+        { fr: "Pages de ville et de quartier", en: "City and neighbourhood pages" },
+        { fr: "Médias et lieux locaux", en: "Local media and venues" },
+        { fr: "Entreprises complémentaires", en: "Complementary businesses" },
+        { fr: "Événements et communautés", en: "Events and communities" },
+      ]} />
+
       <section className={`${styles.section} ${styles.strategyBand}`} id="audiences">
         <div className={styles.sectionHead}><Eyebrow>SOUTH AFRICA TARGETING</Eyebrow><h2>{fr ? "Quatre marchés majeurs. Des écosystèmes locaux différents." : "Four major markets. Different local ecosystems."}</h2><p>{fr ? "Ces zones illustrent comment une campagne peut être structurée autour de lieux et communautés ; elles ne constituent pas une promesse de précision non supportée." : "These areas illustrate how a campaign can be structured around places and communities; they are not a claim of unsupported geographic precision."}</p></div>
         <div className={styles.cityGrid}>{saCities.map((city) => <article key={city.city}><span>{city.city}</span><h3>{city.places}</h3><p>{city.text}</p></article>)}</div>
@@ -517,9 +557,9 @@ export function SouthAfricaGrowthPage() {
         <IndustryMediaSection industries={industries} lang={lang} />
       </section>
 
-      <section className={styles.infrastructure}>
-        <div><Eyebrow>{fr ? "INFRASTRUCTURE GÉRÉE" : "MANAGED INFRASTRUCTURE"}</Eyebrow><h2>{fr ? "Une technologie internationale, opérée dans des conditions réelles." : "International technology, operated in real-world conditions."}</h2></div>
-        <div className={styles.infrastructureList}><span>{fr ? "Agents IA opérant depuis de vrais téléphones" : "AI agents operating from real phones"}</span><span>{fr ? "Rythme naturel et limites adaptées" : "Natural pacing and adapted limits"}</span><span>{fr ? "Supervision et optimisation par notre équipe" : "Supervision and optimization by our team"}</span></div>
+      <section className={`${styles.infrastructure} ${styles.infrastructureEnhanced}`}>
+        <div className={styles.infrastructureCopy}><div><Eyebrow>{fr ? "INFRASTRUCTURE GÉRÉE" : "MANAGED INFRASTRUCTURE"}</Eyebrow><h2>{fr ? "Une technologie internationale, opérée dans des conditions réelles." : "International technology, operated in real-world conditions."}</h2></div><div className={styles.infrastructureList}><span>{fr ? "Agents IA opérant depuis de vrais téléphones" : "AI agents operating from real phones"}</span><span>{fr ? "Rythme naturel et limites adaptées" : "Natural pacing and adapted limits"}</span><span>{fr ? "Supervision et optimisation par notre équipe" : "Supervision and optimization by our team"}</span></div></div>
+        <ManagedInfrastructureVisual lang={lang} />
       </section>
 
       <section className={styles.proofBand}><Eyebrow>{fr ? "CE QUE LE PRODUIT EST CONÇU POUR FAIRE" : "WHAT THE PRODUCT IS BUILT TO DO"}</Eyebrow><div><strong>200–800</strong><span>{fr ? "abonnés ciblés / mois selon l’offre produit générale" : "targeted followers / month across the general product range"}</span></div><p>{fr ? "Cette fourchette est une indication produit générale déjà publiée, pas un résultat client sud-africain ni une garantie." : "This is an existing general product range, not a South African client result or a guarantee."}</p></section>

@@ -86,6 +86,8 @@
 .sourceGrid div:nth-child(3n) { border-right: 0; }
 .sourceGrid div:nth-last-child(-n+3) { border-bottom: 0; }
 .sourceGrid span { color: #7b5ca7; font-size: .65rem; }
+.visualSystem { padding-top: 34px; }
+.visualPair { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-top: 16px; }
 .cardGrid h3 { margin: 32px 0 12px; font-size: 1.25rem; }
 .cardGrid p { color: #99959a; font-size: .84rem; line-height: 1.7; }
 
@@ -94,6 +96,10 @@
 .infrastructureList { display: grid; gap: 10px; }
 .infrastructureList span { padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; color: #c5c0b9; background: rgba(255,255,255,.02); font-size: .78rem; }
 .infrastructureList span::before { content: "✓"; margin-right: 10px; color: #36d399; }
+.infrastructureEnhanced { width: min(1160px,calc(100% - 48px)); grid-template-columns: minmax(260px,.68fr) minmax(0,1.32fr); gap: 38px; padding: 38px; }
+.infrastructureCopy { display: grid; align-content: center; gap: 30px; }
+.infrastructureEnhanced .infrastructureList { gap: 8px; }
+.infrastructureEnhanced .infrastructureList span { padding: 12px 13px; }
 .example { width: min(920px,calc(100% - 48px)); margin: 90px auto; padding: 34px; border-left: 3px solid var(--pink); border-radius: 4px 20px 20px 4px; background: rgba(235,75,133,.055); }
 .example > span { color: #ec83ae; font-size: .65rem; font-weight: 900; letter-spacing: .13em; }
 .example p { margin: 16px 0; color: #dcd7d0; line-height: 1.75; }
@@ -151,7 +157,7 @@
   .heroInner { grid-template-columns: 1fr; gap: 48px; }
   .heroPanel, .heroVisual { max-width: 680px; width: 100%; }
   .industryGrid { grid-template-columns: 1fr 1fr; }
-  .infrastructure { grid-template-columns: 1fr; gap: 35px; }
+  .infrastructure, .infrastructureEnhanced { grid-template-columns: 1fr; gap: 35px; }
   .footer { grid-template-columns: 1.5fr 1fr 1fr; }
 }
 
@@ -173,7 +179,7 @@
   .section { width: calc(100% - 32px); padding: 76px 0; }
   .lightBand, .strategyBand { width: 100%; padding: 76px 16px; }
   .sectionHead h2, .splitHead h2, .infrastructure h2, .pricingBridge h2, .finalCta h2 { font-size: 2.25rem; }
-  .outcomeGrid, .cardGrid, .cityGrid, .industryGrid { grid-template-columns: 1fr; }
+  .outcomeGrid, .cardGrid, .cityGrid, .industryGrid, .visualPair { grid-template-columns: 1fr; }
   .splitHead { grid-template-columns: 1fr; gap: 10px; }
   .sourceGrid { grid-template-columns: 1fr; }
   .sourceGrid div { min-height: 105px; border-right: 0; border-bottom: 1px solid var(--line) !important; }
