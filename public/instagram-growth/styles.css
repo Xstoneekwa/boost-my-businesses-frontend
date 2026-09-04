@@ -437,6 +437,7 @@ body.dir-neon .cmp-yes.cmp-text { color: #fbbf24; }
 .plan .price { font-family: var(--font-display); font-weight: 800; font-size: 2.3rem; margin: 14px 0 2px; }
 .plan .price small { font-size: .92rem; font-weight: 600; color: var(--ink-mute); }
 .plan .price-note { font-size: .8rem; color: var(--ink-mute); min-height: 18px; }
+.plan .plan-positioning { color: var(--good); font-size: .84rem; font-weight: 700; line-height: 1.4; margin-top: 10px; min-height: 2.8em; }
 .plan ul { list-style: none; margin: 20px 0 24px; display: flex; flex-direction: column; gap: 11px; }
 .plan li { display: flex; gap: 9px; align-items: flex-start; font-size: .92rem; color: var(--ink-dim); line-height: 1.38; }
 .plan li .ck { color: var(--accent); font-weight: 900; flex: none; }
