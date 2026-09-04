@@ -2,13 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useMarketingLanguage as useLanguage } from "./useMarketingLanguage";
 import styles from "./MarketingPages.module.css";
 
 type Lang = "fr" | "en";
 
-const LANGUAGE_KEY = "boost_ai_landing_lang_v1";
-const LANGUAGE_EVENT = "bmb-language-change";
 const CALENDLY_URL = "https://calendly.com/boostmybusinesses/discovertheassistant";
 const HOME_URL = "https://www.boostmybusinesses.com";
 
@@ -67,32 +66,6 @@ const automationCopy = {
     final: { eyebrow: "LET’S TALK ABOUT YOUR WORKFLOW", title: "Show us what slows your team down. We’ll show you what can be automated.", primary: "Book a call", secondary: "Contact us" },
   },
 };
-
-function subscribeLanguage(callback: () => void) {
-  window.addEventListener("storage", callback);
-  window.addEventListener(LANGUAGE_EVENT, callback);
-  return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener(LANGUAGE_EVENT, callback);
-  };
-}
-
-function getLanguageSnapshot(): Lang {
-  const saved = window.localStorage.getItem(LANGUAGE_KEY);
-  return saved === "fr" ? "fr" : "en";
-}
-
-function useLanguage() {
-  const lang = useSyncExternalStore(subscribeLanguage, getLanguageSnapshot, () => "en" as Lang);
-  const setLang = (next: Lang) => {
-    window.localStorage.setItem(LANGUAGE_KEY, next);
-    window.dispatchEvent(new Event(LANGUAGE_EVENT));
-  };
-  useEffect(() => {
-    document.documentElement.lang = lang;
-  }, [lang]);
-  return [lang, setLang] as const;
-}
 
 function Brand() {
   return (
@@ -192,7 +165,7 @@ function SiteFooter({ lang }: { lang: Lang }) {
         <div><Brand /><p>{fr ? "Instagram Growth comme produit principal. L’automatisation IA quand votre business est prêt à aller plus loin." : "Instagram Growth as the flagship. AI automation when your business is ready to go further."}</p></div>
         <div><strong>Instagram Growth</strong><Link href="/instagram-growth">{fr ? "Vue d’ensemble" : "Overview"}</Link><Link href="/instagram-growth-south-africa">South Africa</Link><Link href="/instagram-growth/real-estate">{fr ? "Immobilier" : "Real Estate"}</Link><Link href="/instagram-growth/beauty-aesthetics">{fr ? "Beauté & esthétique" : "Beauty & Aesthetics"}</Link><Link href="/instagram-growth/restaurants">Restaurants</Link><Link href="/instagram-growth/fitness">Fitness</Link></div>
         <div><strong>{fr ? "Automatisation IA" : "AI Automation"}</strong><Link href="/ai-automation">AI Automation</Link></div>
-        <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/">{fr ? "Accueil" : "Home"}</Link><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link></div>
+        <div><strong>{fr ? "Société" : "Company"}</strong><Link href="/">{fr ? "Accueil" : "Home"}</Link><Link href="/partners">{fr ? "Partenaires" : "Partners"}</Link><Link href="/about">{fr ? "À propos" : "About"}</Link><Link href="/contact">Contact</Link></div>
         <div><strong>{fr ? "Compte" : "Account"}</strong><Link href="/instagram-login">Dashboard</Link></div>
         <div><strong>{fr ? "Légal" : "Legal"}</strong><Link href="/privacy-policy">{fr ? "Confidentialité" : "Privacy"}</Link><Link href="/terms-and-conditions">{fr ? "Conditions" : "Terms"}</Link><Link href="/refund-policy">{fr ? "Remboursement" : "Refunds"}</Link></div>
       </div>
