@@ -62,18 +62,13 @@ export function ContextualValueVisual({
   lang,
   sources,
   outcomes,
-  product = false,
 }: {
   industry: ContextualIndustry;
   lang: VisualLang;
   sources: string[];
   outcomes: string[];
-  product?: boolean;
 }) {
   const copy = visualConfig[industry];
-  const disclaimer = lang === "fr"
-    ? `Objectifs ${product ? "produit" : "de campagne"} — aucun résultat ni niveau de précision garanti.`
-    : `${product ? "Product" : "Campaign"} objectives — no result or precision level is guaranteed.`;
 
   return (
     <article className={`${styles.valueVisual} ${styles[`theme_${industry}`]}`}>
@@ -100,7 +95,6 @@ export function ContextualValueVisual({
       <div className={styles.outcomeRail}>
         {outcomes.map((outcome, index) => <div key={outcome}><span>{String(index + 1).padStart(2, "0")}</span><strong>{outcome}</strong></div>)}
       </div>
-      <p className={styles.disclaimer}>{disclaimer}</p>
     </article>
   );
 }
@@ -135,7 +129,6 @@ export function SequentialProcessVisual({ lang }: { lang: VisualLang }) {
         ))}
       </div>
       <div className={styles.refinedState}><i aria-hidden="true">✓</i><div><small>{lang === "fr" ? "ÉTAT CONCEPTUEL" : "CONCEPTUAL STATE"}</small><strong>{lang === "fr" ? "Campagne affinée" : "Campaign refined"}</strong></div></div>
-      <p>{lang === "fr" ? "La pertinence vient des sources et signaux sélectionnés — pas d’une promesse de précision au code postal." : "Relevance comes from selected sources and signals — not a promise of postcode-level precision."}</p>
     </article>
   );
 }

@@ -526,7 +526,7 @@ export function SouthAfricaGrowthPage() {
           <div className={`${styles.heroVisual} ${styles.saVisual}`}>
             <Image src="/instagram-growth/verticals/south-africa.png" alt={fr ? "Environnement urbain et entrepreneurial sud-africain" : "South African urban business environment"} fill priority sizes="(max-width: 900px) 100vw, 46vw" />
             <div className={styles.heroVisualShade} />
-            <div className={styles.mapOverlay}><span>{fr ? "PERTINENCE LOCALE" : "LOCAL RELEVANCE"}</span><strong>South Africa</strong><p>Johannesburg · Cape Town · Durban · Pretoria</p><small>{fr ? "Des marchés sources, jamais une promesse de précision au code postal." : "Source markets, never a promise of postcode precision."}</small></div>
+            <div className={styles.mapOverlay}><span>{fr ? "PERTINENCE LOCALE" : "LOCAL RELEVANCE"}</span><strong>South Africa</strong><p>Johannesburg · Cape Town · Durban · Pretoria</p></div>
           </div>
         </div>
       </section>
@@ -534,7 +534,6 @@ export function SouthAfricaGrowthPage() {
       <section className={`${styles.section} ${styles.lightBand}`}>
         <div className={styles.sectionHead}><Eyebrow>{fr ? "AU-DELÀ DU NOMBRE" : "BEYOND THE NUMBER"}</Eyebrow><h2>{fr ? "Une audience locale pertinente vaut plus qu’un simple compteur d’abonnés." : "A relevant local audience matters more than a follower count."}</h2><p>{fr ? "La croissance utile rapproche votre marque des personnes qui partagent déjà votre marché, votre ville, vos intérêts et vos communautés." : "Useful growth brings your brand closer to people who already share your market, city, interests and communities."}</p></div>
         <ContextualValueVisual
-          product
           industry="south-africa"
           lang={lang}
           sources={saSources.map((source) => pick(source, lang))}

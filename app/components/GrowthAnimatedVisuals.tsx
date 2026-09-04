@@ -9,7 +9,7 @@ export type IndustryVisual = "real-estate" | "beauty-aesthetics" | "restaurants"
 type VisualShellProps = {
   eyebrow: string;
   title: string;
-  note: string;
+  note?: string;
   children: React.ReactNode;
   className?: string;
 };
@@ -19,7 +19,7 @@ function VisualShell({ eyebrow, title, note, children, className = "" }: VisualS
     <article className={`${styles.visual} ${styles.visible} ${className}`}>
       <header><span>{eyebrow}</span><h3>{title}</h3></header>
       <div className={styles.stage}>{children}</div>
-      <p className={styles.note}>{note}</p>
+      {note ? <p className={styles.note}>{note}</p> : null}
     </article>
   );
 }
@@ -30,7 +30,6 @@ export function AnimatedComparisonChart({ lang }: { lang: VisualLang }) {
     <VisualShell
       eyebrow={fr ? "AVEC / SANS BMB" : "WITH / WITHOUT BMB"}
       title={fr ? "D’une activité diffuse à une progression pilotée" : "From scattered activity to managed momentum"}
-      note={fr ? "Trajectoire illustrative — pas une prévision ni une garantie de résultat." : "Illustrative trajectory — not a forecast or performance guarantee."}
     >
       <Image className={styles.growthImage} src="/instagram-growth/animated/growth-momentum-v1.png" alt="" fill sizes="(max-width: 650px) 100vw, 50vw" aria-hidden="true" />
       <div className={styles.growthShade} aria-hidden="true" />
@@ -59,7 +58,6 @@ export function AnimatedGrowthTimeline({ lang }: { lang: VisualLang }) {
     <VisualShell
       eyebrow={fr ? "PROGRESSION SUR 3 MOIS" : "3-MONTH PROGRESSION"}
       title={fr ? "Une boucle qui apprend et s’affine" : "A loop designed to learn and refine"}
-      note={fr ? "Exemple de progression opérationnelle — l’issue dépend du compte, du contenu et du marché." : "Example operational progression — outcomes depend on the account, content and market."}
     >
       <Image className={`${styles.growthImage} ${styles.timelineImage}`} src="/instagram-growth/animated/growth-momentum-v1.png" alt="" fill sizes="(max-width: 650px) 100vw, 50vw" aria-hidden="true" />
       <div className={styles.growthShade} aria-hidden="true" />
@@ -79,7 +77,6 @@ export function AudienceFlowVisual({ lang, sources }: { lang: VisualLang; source
     <VisualShell
       eyebrow={fr ? "CARTE D’AUDIENCE" : "AUDIENCE MAP"}
       title={fr ? "Des sources crédibles convergent vers une audience pertinente" : "Credible sources converge into a relevant audience"}
-      note={fr ? "Explication visuelle du ciblage — pas une promesse de localisation exacte." : "Visual explanation of targeting — not a promise of exact location precision."}
       className={styles.flowVisual}
     >
       <div className={styles.flowMap}>
@@ -130,7 +127,6 @@ export function IndustryJourneyVisual({ lang, industry }: { lang: VisualLang; in
     <VisualShell
       eyebrow={fr ? "PARCOURS SECTORIEL" : "INDUSTRY JOURNEY"}
       title={fr ? "Du bon signal à une intention plus pertinente" : "From the right signal to more relevant intent"}
-      note={fr ? "Schéma explicatif — ce parcours soutient la découverte, sans garantir une conversion." : "Visual explanation — this journey supports discovery without guaranteeing a conversion."}
       className={styles.journeyVisual}
     >
       <div className={styles.journeyMap}>
