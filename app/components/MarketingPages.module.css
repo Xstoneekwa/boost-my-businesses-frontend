@@ -320,7 +320,7 @@
   opacity: 0;
   filter: blur(7px);
   transform: translateY(34px) scale(.975);
-  transition: opacity .62s ease, transform .76s cubic-bezier(.2, .72, .2, 1), filter .62s ease, border-color .5s ease, box-shadow .8s ease;
+  transition: opacity .72s ease, transform .86s cubic-bezier(.2, .72, .2, 1), filter .72s ease, border-color .5s ease, box-shadow .8s ease;
   will-change: opacity, transform, filter;
 }
 .planGrid[data-motion="ready"][data-reveal-step="1"] article:nth-child(1),

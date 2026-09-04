@@ -210,6 +210,7 @@ function SequencedPlanGrid({ cards }: { cards: Array<{ t: string; tag: string; d
 
     grid.dataset.motion = "ready";
     grid.dataset.revealStep = "0";
+    grid.dataset.revealCycle = "0";
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduceMotion || !("IntersectionObserver" in window)) {
       grid.dataset.revealStep = "3";
@@ -218,20 +219,42 @@ function SequencedPlanGrid({ cards }: { cards: Array<{ t: string; tag: string; d
     }
 
     const revealTimers: number[] = [];
+    let isInsideViewport = false;
+    let revealCycle = 0;
+
+    const clearRevealTimers = () => {
+      revealTimers.splice(0).forEach((timer) => window.clearTimeout(timer));
+    };
+
+    const startReveal = () => {
+      if (isInsideViewport) return;
+      isInsideViewport = true;
+      revealCycle += 1;
+      grid.dataset.revealCycle = String(revealCycle);
+      grid.dataset.revealStep = "1";
+      revealTimers.push(
+        window.setTimeout(() => { grid.dataset.revealStep = "2"; }, 520),
+        window.setTimeout(() => {
+          grid.dataset.revealStep = "3";
+          grid.dataset.visible = "true";
+        }, 1040),
+      );
+    };
+
+    const resetReveal = () => {
+      if (!isInsideViewport) return;
+      isInsideViewport = false;
+      clearRevealTimers();
+      grid.dataset.revealStep = "0";
+      delete grid.dataset.visible;
+    };
+
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (!entry.isIntersecting) return;
-        observer.disconnect();
-        grid.dataset.revealStep = "1";
-        revealTimers.push(
-          window.setTimeout(() => { grid.dataset.revealStep = "2"; }, 320),
-          window.setTimeout(() => {
-            grid.dataset.revealStep = "3";
-            grid.dataset.visible = "true";
-          }, 640),
-        );
+        if (entry.isIntersecting) startReveal();
+        else resetReveal();
       },
-      { threshold: 0.2, rootMargin: "0px 0px -8%" },
+      { threshold: 0, rootMargin: "0px 0px -6%" },
     );
     let observeFrame = 0;
     const frame = window.requestAnimationFrame(() => {
@@ -241,7 +264,7 @@ function SequencedPlanGrid({ cards }: { cards: Array<{ t: string; tag: string; d
     return () => {
       window.cancelAnimationFrame(frame);
       window.cancelAnimationFrame(observeFrame);
-      revealTimers.forEach((timer) => window.clearTimeout(timer));
+      clearRevealTimers();
       observer.disconnect();
     };
   }, []);
