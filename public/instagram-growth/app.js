@@ -212,20 +212,46 @@
       if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
     });
   }, { threshold: 0.12 });
-  document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  document.querySelectorAll(".reveal").forEach(function (el) {
+    if (!el.matches("[data-product-journey] .stp")) io.observe(el);
+  });
 
   /* ---------- Connected product journey ---------- */
   var journey = document.querySelector("[data-product-journey]");
   if (journey) {
+    var journeyCards = journey.querySelectorAll(".stp");
+    var journeyTimers = [];
+    var journeyInside = false;
+    var journeyReduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    function resetJourney() {
+      journeyTimers.forEach(clearTimeout);
+      journeyTimers = [];
+      journeyInside = false;
+      journey.classList.remove("is-active");
+      journeyCards.forEach(function (card) { card.classList.remove("in"); });
+    }
+    function showJourney() {
+      if (journeyInside) return;
+      journeyInside = true;
+      journey.dataset.revealCycle = String(Number(journey.dataset.revealCycle || 0) + 1);
+      journey.classList.add("is-active");
+      journeyCards.forEach(function (card, index) {
+        if (journeyReduced.matches || index === 0) card.classList.add("in");
+        else journeyTimers.push(setTimeout(function () { card.classList.add("in"); }, index * 520));
+      });
+    }
     var journeyIo = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("is-active");
-          journeyIo.unobserve(entry.target);
-        }
+        if (entry.isIntersecting || journeyReduced.matches) showJourney();
+        else resetJourney();
       });
-    }, { threshold: 0.28 });
+    }, { threshold: 0, rootMargin: "0px 0px -6%" });
     journeyIo.observe(journey);
+    journeyReduced.addEventListener("change", function () {
+      resetJourney();
+      if (journeyReduced.matches) showJourney();
+      else { journeyIo.unobserve(journey); journeyIo.observe(journey); }
+    });
   }
 
   /* ---------- Init ---------- */
