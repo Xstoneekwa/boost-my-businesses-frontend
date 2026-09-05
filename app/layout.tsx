@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { GoogleTagManagerHead, GoogleTagManagerNoScript } from "./components/GoogleTagManager";
+import ConsentBanner from "./components/ConsentBanner";
 
 export const metadata: Metadata = {
   title: "Boost My Businesses",
@@ -14,6 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <head>
+        <GoogleTagManagerHead />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -22,7 +25,9 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <GoogleTagManagerNoScript />
         {children}
+        <ConsentBanner />
       </body>
     </html>
   );

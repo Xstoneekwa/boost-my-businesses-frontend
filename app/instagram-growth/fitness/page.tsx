@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
+import { marketingMetadata } from "@/lib/marketing/seo";
+import MarketingStructuredData from "@/app/components/MarketingStructuredData";
 import { VerticalGrowthPage } from "../../components/GrowthLandingPages";
 
-export const metadata: Metadata = {
-  title: "Instagram Growth for Fitness Brands | Boost My Businesses",
-  description: "Managed Instagram growth for gyms, trainers, run clubs, coaches and fitness communities.",
-};
+export const metadata = marketingMetadata("/instagram-growth/fitness");
 
 export default function FitnessInstagramGrowthPage() {
-  return <VerticalGrowthPage vertical="fitness" />;
+  return <><MarketingStructuredData path="/instagram-growth/fitness" /><VerticalGrowthPage vertical="fitness" /></>;
 }

@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
+import { marketingMetadata } from "@/lib/marketing/seo";
+import MarketingStructuredData from "@/app/components/MarketingStructuredData";
 import { InstagramGrowthFrame } from "./InstagramGrowthFrame";
 
-export const metadata: Metadata = {
-  title: "Instagram Growth – Boost My Businesses",
-  description: "Croissance Instagram automatisée par IA. Abonnés réels, géolocalisés, sans engagement.",
-};
+export const metadata = marketingMetadata("/instagram-growth");
 
 export default function InstagramGrowthPage() {
-  return <InstagramGrowthFrame />;
+  return <><MarketingStructuredData path="/instagram-growth" /><InstagramGrowthFrame /></>;
 }

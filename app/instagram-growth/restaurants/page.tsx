@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
+import { marketingMetadata } from "@/lib/marketing/seo";
+import MarketingStructuredData from "@/app/components/MarketingStructuredData";
 import { VerticalGrowthPage } from "../../components/GrowthLandingPages";
 
-export const metadata: Metadata = {
-  title: "Instagram Growth for Restaurants | Boost My Businesses",
-  description: "Managed Instagram audience growth for restaurants, hospitality venues and local food brands.",
-};
+export const metadata = marketingMetadata("/instagram-growth/restaurants");
 
 export default function RestaurantsInstagramGrowthPage() {
-  return <VerticalGrowthPage vertical="restaurants" />;
+  return <><MarketingStructuredData path="/instagram-growth/restaurants" /><VerticalGrowthPage vertical="restaurants" /></>;
 }

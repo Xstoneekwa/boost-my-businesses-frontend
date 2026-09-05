@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
+import { marketingMetadata } from "@/lib/marketing/seo";
+import MarketingStructuredData from "@/app/components/MarketingStructuredData";
 import { VerticalGrowthPage } from "../../components/GrowthLandingPages";
 
-export const metadata: Metadata = {
-  title: "Instagram Growth for Beauty & Aesthetics | Boost My Businesses",
-  description: "Managed Instagram growth for salons, skincare, aesthetics, bridal and wellness businesses seeking relevant local audiences.",
-};
+export const metadata = marketingMetadata("/instagram-growth/beauty-aesthetics");
 
 export default function BeautyAestheticsInstagramGrowthPage() {
-  return <VerticalGrowthPage vertical="beauty-aesthetics" />;
+  return <><MarketingStructuredData path="/instagram-growth/beauty-aesthetics" /><VerticalGrowthPage vertical="beauty-aesthetics" /></>;
 }

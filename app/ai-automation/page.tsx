@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
+import { marketingMetadata } from "@/lib/marketing/seo";
+import MarketingStructuredData from "@/app/components/MarketingStructuredData";
 import { AiAutomationMarketingPage } from "../components/MarketingPages";
 
-export const metadata: Metadata = {
-  title: "AI Automation for Real Business Workflows | Boost My Businesses",
-  description: "Explore AI call assistants, WhatsApp lead automation, support automation, UGC production and custom business workflows.",
-};
+export const metadata = marketingMetadata("/ai-automation");
 
 export default function AiAutomationPage() {
-  return <AiAutomationMarketingPage />;
+  return <><MarketingStructuredData path="/ai-automation" /><AiAutomationMarketingPage /></>;
 }

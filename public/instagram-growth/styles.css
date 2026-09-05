@@ -576,7 +576,7 @@ body.dir-neon .oo-price { color: #fbbf24; }
 .footer { background: var(--surface-2); border-top: 1px solid var(--line); padding: 56px 0 40px; }
 .footer-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 28px; }
 .footer .brand { font-size: 1.05rem; margin-bottom: 12px; }
-.footer .fcol h4 { font-family: var(--font-display); font-size: .82rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-mute); margin-bottom: 14px; }
+.footer .fcol .footer-group-title { font-family: var(--font-display); font-weight: 700; font-size: .82rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-mute); margin-bottom: 14px; }
 .footer .fcol a { display: block; color: var(--ink-dim); font-size: .95rem; font-weight: 600; margin-bottom: 9px; }
 .footer .fcol a:hover { color: var(--accent); }
 .footer .ftabout { max-width: 280px; color: var(--ink-dim); font-size: .95rem; line-height: 1.5; }

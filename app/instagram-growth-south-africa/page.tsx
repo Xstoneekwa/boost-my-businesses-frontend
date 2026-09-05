@@ -1,11 +1,9 @@
-import type { Metadata } from "next";
+import { marketingMetadata } from "@/lib/marketing/seo";
+import MarketingStructuredData from "@/app/components/MarketingStructuredData";
 import { SouthAfricaGrowthPage } from "../components/GrowthLandingPages";
 
-export const metadata: Metadata = {
-  title: "Instagram Growth for South African Businesses | Boost My Businesses",
-  description: "Managed, AI-powered Instagram growth for South African businesses using relevant audience sources and real-phone infrastructure.",
-};
+export const metadata = marketingMetadata("/instagram-growth-south-africa");
 
 export default function InstagramGrowthSouthAfricaPage() {
-  return <SouthAfricaGrowthPage />;
+  return <><MarketingStructuredData path="/instagram-growth-south-africa" /><SouthAfricaGrowthPage /></>;
 }
