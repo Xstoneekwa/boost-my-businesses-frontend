@@ -104,7 +104,10 @@ export function parseCommercialDiscoveryTrigger(value: unknown): CommercialDisco
   if (countryCode !== "ZA" && countryCode !== "FR") throw new Error("commercial_discovery_country_invalid");
   const city = typeof row.city === "string" ? row.city.trim() : "";
   if (!city || (countryCode === "ZA" && !isOneOf(city, COMMERCIAL_DISCOVERY_CITIES))) throw new Error("commercial_discovery_city_invalid");
-  if (row.subsegment !== undefined && row.subsegment !== "" && !(city === "France" && row.subsegment === null) && !isOneOf(row.subsegment, COMMERCIAL_DISCOVERY_SUBSEGMENTS)) {
+  // The France UI disables subsegment selection, so FormData serializes it as
+  // null for every owner-supplied city. Treat that as the explicit absence of
+  // a subsegment for France while preserving the stricter ZA contract.
+  if (row.subsegment !== undefined && row.subsegment !== "" && !(countryCode === "FR" && row.subsegment === null) && !isOneOf(row.subsegment, COMMERCIAL_DISCOVERY_SUBSEGMENTS)) {
     throw new Error("commercial_discovery_subsegment_invalid");
   }
   const maxProspects = Number(row.maxProspects);
