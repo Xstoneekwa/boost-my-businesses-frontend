@@ -24,7 +24,7 @@ function queriesForTerm(term: string, city: CommercialDiscoveryCity, countryCode
   const country = countryCode === "FR" ? "France" : "South Africa";
   return [
     `site:instagram.com/ "${term}" "${city}" ${country}`,
-    `site:instagram.com/ "${term}" "${city}" booking`,
+    `site:instagram.com/ "${term}" "${city}" ${country} booking`,
   ];
 }
 
