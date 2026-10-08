@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { COMMERCIAL_MARKETS } from "./market-config.ts";
-import { parseCommercialDiscoveryTrigger } from "./discovery-contract.ts";
+import { COMMERCIAL_FRANCE_CANARY_VOLUMES, parseCommercialDiscoveryTrigger } from "./discovery-contract.ts";
 import { buildCommercialDiscoveryQueries } from "./discovery-query-portfolio.ts";
 import { resolveCommercialLocation, deterministicCommercialPrecheck, enrichCommercialWebsite } from "./discovery-reliability.ts";
 
@@ -20,11 +21,24 @@ test("France configuration is national, French and Europe/Paris; SA unchanged", 
 
 test("France canary accepts owner-supplied cities without a city-specific engine branch", () => {
   for (const city of ["Paris", "Marseille", "Lyon", "Lille"]) {
-    const parsed = parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects: 30, idempotencyKey: "commercial-france-canary-v1" });
-    assert.equal(parsed.countryCode, "FR");
-    assert.equal(parsed.city, city);
-    assert.ok(buildCommercialDiscoveryQueries(city, "Hair Salon", "FR").every((query) => query.includes(`"${city}"`) && query.includes("France")));
+    for (const maxProspects of [10, 30, 50]) {
+      const parsed = parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects, idempotencyKey: `commercial-france-${city.toLowerCase()}-v1` });
+      assert.equal(parsed.countryCode, "FR");
+      assert.equal(parsed.city, city);
+      assert.equal(parsed.maxProspects, maxProspects);
+      assert.ok(buildCommercialDiscoveryQueries(city, "Hair Salon", "FR").every((query) => query.includes(`"${city}"`) && query.includes("France")));
+    }
+    assert.throws(() => parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects: 9, idempotencyKey: `commercial-france-${city.toLowerCase()}-v1` }));
+    assert.throws(() => parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects: 51, idempotencyKey: `commercial-france-${city.toLowerCase()}-v1` }));
   }
+});
+
+test("France discovery UI exposes only backend-compatible volumes", () => {
+  assert.deepEqual([...COMMERCIAL_FRANCE_CANARY_VOLUMES], [10, 30, 50]);
+  const source = readFileSync(new URL("../../app/instagram-dashboard/commercial/CommercialDiscoveryPanel.tsx", import.meta.url), "utf8");
+  assert.match(source, /name=\"maxProspects\"/);
+  assert.match(source, /COMMERCIAL_FRANCE_CANARY_VOLUMES/);
+  assert.doesNotMatch(source, /type=\"hidden\" name=\"maxProspects\"/);
 });
 
 test("language, French names and French domains never prove France location", () => {
