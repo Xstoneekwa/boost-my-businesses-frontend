@@ -1,4 +1,5 @@
-import type { CommercialDiscoveryCity, CommercialDiscoverySubsegment } from "./discovery-contract";
+import type { CommercialDiscoveryCity, CommercialDiscoveryCountry, CommercialDiscoverySubsegment } from "./discovery-contract";
+import { FRANCE_BEAUTY_QUERY_TERMS } from "./market-config.ts";
 
 const SUBSEGMENT_SEARCH_TERMS: Record<CommercialDiscoverySubsegment, readonly string[]> = {
   "Aesthetic Clinic": ["aesthetic clinic", "aesthetics clinic", "aesthetic centre"],
@@ -19,15 +20,17 @@ const BROAD_SEARCH_TERMS = [
   "aesthetic clinic", "skin clinic", "med spa", "beauty salon", "hair salon", "nail lash brow studio",
 ] as const;
 
-function queriesForTerm(term: string, city: CommercialDiscoveryCity) {
+function queriesForTerm(term: string, city: CommercialDiscoveryCity, countryCode: CommercialDiscoveryCountry = city === "France" ? "FR" : "ZA") {
+  const country = countryCode === "FR" ? "France" : "South Africa";
   return [
-    `site:instagram.com/ "${term}" "${city}" South Africa`,
+    `site:instagram.com/ "${term}" "${city}" ${country}`,
     `site:instagram.com/ "${term}" "${city}" booking`,
   ];
 }
 
-export function buildCommercialDiscoveryQueries(city: CommercialDiscoveryCity, subsegment?: CommercialDiscoverySubsegment) {
+export function buildCommercialDiscoveryQueries(city: CommercialDiscoveryCity, subsegment?: CommercialDiscoverySubsegment, countryCode: CommercialDiscoveryCountry = city === "France" ? "FR" : "ZA") {
+  if (city === "France") return FRANCE_BEAUTY_QUERY_TERMS.map((term) => `site:instagram.com/ "${term}" "France" ("rendez-vous" OR "réservation" OR "prestations")`);
   const terms = subsegment ? SUBSEGMENT_SEARCH_TERMS[subsegment] : BROAD_SEARCH_TERMS;
   const limit = subsegment ? 8 : 10;
-  return [...new Set(terms.flatMap((term) => queriesForTerm(term, city)))].slice(0, limit);
+  return [...new Set(terms.flatMap((term) => queriesForTerm(term, city, countryCode)))].slice(0, limit);
 }

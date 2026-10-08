@@ -17,13 +17,11 @@ import {
 } from "@/lib/instagram-target-lifecycle";
 import {
   buildRestorePeriodicSchedulePatch,
-  clearPeriodicSchedulePatch,
 } from "@/lib/target-periodic-revalidation";
 import {
   classifyBulkTargetLines,
   isValidTargetUsername,
   normalizeTargetUsername,
-  pendingTargetVerificationDecision,
   summarizeBulkTargetLines,
   verifySingleTargetUsername,
   type BulkTargetSummary,
@@ -43,6 +41,7 @@ import {
   TARGET_AUTO_ARCHIVE_READD_BLOCKED_AUDIT_REASON,
 } from "@/lib/instagram-dashboard/target-auto-archive-low-fbr-policy";
 import { reevaluateNeedsMoreTargetAccountsAfterTargetMutation } from "@/lib/instagram-dashboard/needs-more-target-accounts";
+import { archiveTransitionRequest } from "@/lib/instagram-dashboard/archive-transition-contract";
 
 export type { TargetSafeRow };
 
@@ -51,6 +50,8 @@ type SupabaseRecord = Record<string, unknown>;
 export type TargetsServiceContext = {
   actorType: TargetActorType;
   sourceSurface: "admin_dashboard" | "client_dashboard" | "client_dashboard_ai";
+  actorId?: string | null;
+  tenantId?: string | null;
 };
 
 export type TargetsServiceResult<T> =
@@ -428,7 +429,16 @@ export async function listAccountTargets(accountId: string): Promise<TargetsServ
     .eq("account_id", accountId)
     .order("created_at", { ascending: false });
 
-  if (error) return { ok: false, error: error.message, status: 500 };
+  if (error) {
+    const status = error.code === "23505" || error.code === "23514"
+      ? 409
+      : error.code === "42501"
+        ? 403
+        : error.code === "22023"
+          ? 400
+          : 500;
+    return { ok: false, error: error.message, status };
+  }
   return { ok: true, data: ((data ?? []) as SupabaseRecord[]).map(safeTargetRow) };
 }
 
@@ -684,54 +694,45 @@ export async function archiveAccountTargets(
   accountId: string,
   ids: string[],
   ctx: TargetsServiceContext,
+  archiveIntentId: string,
 ): Promise<TargetsServiceResult<{ archived: number }>> {
   if (ids.length === 0) return { ok: false, error: "Missing ids.", status: 400 };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(archiveIntentId)) {
+    return { ok: false, error: "Missing or invalid archive_intent_id.", status: 400 };
+  }
 
   const supabase = createSupabaseClient();
-  const { data: owned, error: selError } = await supabase
-    .from("ig_targets")
-    .select("id, status")
+  const { data: tenantRows, error: tenantError } = await supabase
+    .from("client_instagram_accounts")
+    .select("client_id,account_id,active")
     .eq("account_id", accountId)
-    .in("id", ids);
-
-  if (selError) return { ok: false, error: selError.message, status: 500 };
-
-  const ownedIds = new Set((owned ?? []).map((r: SupabaseRecord) => readString(r.id, "")));
-  for (const id of ids) {
-    if (!ownedIds.has(id)) {
-      return { ok: false, error: "One or more targets do not belong to this account.", status: 400 };
-    }
+    .eq("active", true)
+    .limit(2);
+  if (tenantError) return { ok: false, error: tenantError.message, status: 500 };
+  const tenants = (tenantRows ?? []) as SupabaseRecord[];
+  const tenantId = ctx.tenantId ?? (tenants.length === 1 ? readString(tenants[0].client_id, "") : "");
+  if (!tenantId || !tenants.some((row) => readString(row.client_id, "") === tenantId)) {
+    return { ok: false, error: "Account tenant binding is not unique.", status: 409 };
   }
 
   const archiveReason = ctx.sourceSurface === "client_dashboard" ? "client_dashboard_archive" : "dashboard_archive";
-  const now = new Date().toISOString();
-  const { data: archivedRows, error } = await supabase
-    .from("ig_targets")
-    .update({
-      status: "archived",
-      archived_at: now,
-      archive_reason: archiveReason,
-      ...clearPeriodicSchedulePatch(),
-      updated_at: now,
-    })
-    .eq("account_id", accountId)
-    .in("id", ids)
-    .select("id, status");
-
+  const normalizedIds = [...new Set(ids)].sort();
+  const { data, error } = await supabase.rpc("archive_targets_transition_batch_v1", {
+    p_request: archiveTransitionRequest({
+      tenantId,
+      accountId,
+      archiveIntentId,
+      targetIds: normalizedIds,
+      reason: archiveReason,
+      source: ctx.sourceSurface === "client_dashboard" ? "client_dashboard" : "admin_dashboard",
+      actorType: ctx.actorType,
+      actorId: ctx.actorId,
+    }),
+  });
   if (error) return { ok: false, error: error.message, status: 500 };
-  await Promise.all(((archivedRows ?? []) as SupabaseRecord[]).map((row) => tryRecordTargetAudit(supabase, {
-    accountId,
-    operation: "target_archive",
-    result: "archived",
-    reason: archiveReason,
-    actorType: ctx.actorType,
-    sourceSurface: ctx.sourceSurface,
-    targetId: readString(row.id, ""),
-    previousStatus: readString(((owned ?? []) as SupabaseRecord[]).find((candidate) => readString(candidate.id, "") === readString(row.id, ""))?.status, "unknown"),
-    nextStatus: "archived",
-  })));
   await reevaluateNeedsMoreTargetAccountsAfterTargetMutation(accountId, "target_archive");
-  return { ok: true, data: { archived: ids.length } };
+  const receipt = data && typeof data === "object" && !Array.isArray(data) ? data as SupabaseRecord : {};
+  return { ok: true, data: { archived: readNumber(receipt.archived, normalizedIds.length) } };
 }
 
 export async function restoreAccountTarget(

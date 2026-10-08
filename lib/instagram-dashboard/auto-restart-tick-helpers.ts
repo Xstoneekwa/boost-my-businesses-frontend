@@ -5,6 +5,14 @@ export const AUTO_RESTART_TICK_SOURCE = "auto_restart_tick";
 export { SCHEDULER_DISABLED_REASON } from "./scheduler-authorization.ts";
 export const UNEXPECTED_TICK_FAILURE_REASON = "unexpected_tick_error";
 const TICK_FAILURE_REASON_MAX_LENGTH = 160;
+const SAFE_SEMANTIC_REASON_CODES = new Set([
+  "resume_plan_lineage_mismatch",
+  "resume_plan_lineage_incomplete",
+  "canonical_resume_lineage_missing",
+  "canonical_resume_lineage_mismatch",
+  "legacy_resume_lineage_unprovable",
+  "restriction_preflight_not_authorized",
+]);
 
 /**
  * Produces a stable, redacted failure reason for a failed tick lock.
@@ -20,9 +28,16 @@ export function sanitizeTickFailureReason(error: unknown): string {
   const normalized = raw.replace(/\s+/g, " ").trim();
   if (!normalized) return UNEXPECTED_TICK_FAILURE_REASON;
   const redacted = normalized
+    .replace(/\b(?:[a-z][a-z0-9]*_)*(?:token|secret|password|credential|authorization|session)(?:_[a-z0-9]+)*\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]")
+    .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b(?:account_token|access_token|refresh_token|worker_secret|session_secret)_[a-z0-9+/_=-]+/gi, "[redacted]")
     .replace(/\b(key|token|secret|password|authorization|bearer)\b\s*[:=]\s*\S+/gi, "$1=[redacted]")
     .replace(/\bhttps?:\/\/\S+/gi, "[redacted-url]")
-    .replace(/\b[A-Za-z0-9+/_-]{24,}\b/g, "[redacted]");
+    .replace(/\b[A-Za-z0-9+/_-]{24,}\b/g, (value) => (
+      SAFE_SEMANTIC_REASON_CODES.has(value)
+        ? value
+        : "[redacted]"
+    ));
   const truncated = redacted.length > TICK_FAILURE_REASON_MAX_LENGTH
     ? `${redacted.slice(0, TICK_FAILURE_REASON_MAX_LENGTH)}…`
     : redacted;
@@ -74,6 +89,7 @@ type ResumeCandidate = {
   [key: string]: unknown;
   restartNeeded?: boolean;
   historicalSafeBoundaryFallback?: boolean;
+  restrictionPreflightContinuation?: boolean;
   operatorStopContinuation?: boolean;
   operatorStopReason?: string | null;
   freshBoundaryOnly?: boolean;
@@ -102,7 +118,8 @@ type ResumeCandidate = {
     lastRunStatus?: string;
     sourceLabel?: string;
     unfollowPhaseStatus?: string;
-    operatorStopContinuation?: boolean;
+    restrictionPreflightContinuation?: boolean;
+  operatorStopContinuation?: boolean;
     operatorStopReason?: string;
   };
   blockReason: string;
@@ -243,6 +260,15 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
       return { ok: false as const, reason: "operator_stop_continuation_invalid" };
     }
   }
+  // Set only by the canonical persisted preflight evidence projection.
+  const preflightContinuation = candidate.restrictionPreflightContinuation === true;
+  if (preflightContinuation && (
+    candidate.restartNeedReason !== "restriction_preflight_completed_live_business_plan"
+    || candidate.sourceLineageValid !== true || !candidate.sourceRequestId
+    || !Number.isSafeInteger(candidate.canonicalAttemptId) || Number(candidate.canonicalAttemptId) < 1
+    || candidate.freshBoundaryOnly !== true || candidate.exactViewportResumeAvailable === true
+    || candidate.safeRestartStrategy === "exact_checkpoint_resume" || candidate.restartNeeded !== true
+  )) return { ok: false as const, reason: "restriction_preflight_continuation_invalid" };
   const canonicalLiveUnfollowOverride = candidate.canonicalLiveUnfollowResumeAuthorized === true;
   if (canonicalLiveUnfollowOverride) {
     const phases = candidate.plannedPhasesToRun;
@@ -295,6 +321,7 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
     && !safeBoundaryFallback
     && !canonicalLiveUnfollowOverride
     && !operatorStopContinuation
+    && !preflightContinuation
   ) {
     return { ok: false as const, reason: reliability.restartBlockReason || "restart_not_allowed" };
   }
@@ -320,6 +347,7 @@ function evaluateResumePlanRuntimeSupport(candidate: ResumeCandidate): ResumeRun
       return { ok: false as const, reason: "resume_plan_invalid" };
     }
   }
+  if (preflightContinuation) return canonicalResumeQuotaRuntimeSupported(candidate);
   const sessionClass = reliability.sessionTerminationClass.toLowerCase();
   // A canonical BotApp stop is proven by its exact request/run lineage,
   // stopped/canceled terminal status, operator reason and fresh-boundary-only

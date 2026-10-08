@@ -5,6 +5,7 @@ import { buildPlanChangeProrationQuote } from "./plan-change-proration.ts";
 import { loadPlanChangeSourceForAccount, clientVisiblePlanLabel, type PlanChangeSource } from "./plan-change-source.ts";
 import { isPlanKey, type PlanKey } from "./catalog.ts";
 import { evaluatePlanChangeActivation, planChangeActivationClientMessages } from "./plan-change-activation-guard.ts";
+import { resolveCanonicalPackageStripePriceId } from "./stripe/stripe-component-price-resolver.ts";
 
 type Row = Record<string, unknown>;
 
@@ -37,6 +38,7 @@ export type PlanChangeQuoteView = {
   activationMessageFr: string | null;
   activationMessageEn: string | null;
   pricingSnapshot: CommercialPricingSnapshot | null;
+  activationMode: "simulated_test" | "stripe_test";
 };
 
 function readNumber(value: unknown, fallback = 0) {
@@ -201,12 +203,14 @@ export async function createPlanChangeQuote(
     };
   }
 
-  const existingCustomerCreditCents = await readAccountScopedCreditBalanceCents(
-    supabase,
-    input.clientId,
-    accountId,
-    source.currency,
-  );
+  const existingCustomerCreditCents = source.activationMode === "stripe_test"
+    ? source.stripeActualCreditCents
+    : await readAccountScopedCreditBalanceCents(
+      supabase,
+      input.clientId,
+      accountId,
+      source.currency,
+    );
   if (existingCustomerCreditCents == null) {
     return {
       ok: false,
@@ -241,6 +245,23 @@ export async function createPlanChangeQuote(
     periodEndAt: source.periodEndAt,
     existingCustomerCreditCents,
   });
+
+  const canonicalTargetStripePriceId = source.activationMode === "stripe_test"
+    ? await resolveCanonicalPackageStripePriceId(supabase, {
+      environment: "test",
+      planKey: input.targetPlanKey,
+      billingIntervalMonths: source.billingIntervalMonths,
+    })
+    : null;
+  if (source.activationMode === "stripe_test" && !canonicalTargetStripePriceId) {
+    return {
+      ok: false,
+      status: 503,
+      code: "stripe_price_mapping_missing",
+      messageFr: "Le tarif Stripe Test de cette formule est indisponible.",
+      messageEn: "The Stripe Test price mapping for this plan is unavailable.",
+    };
+  }
 
   const activationEval = evaluatePlanChangeActivation({
     amountDueCents: proration.amountDueCents,
@@ -287,6 +308,7 @@ export async function createPlanChangeQuote(
         checkout_context: "per_account_plan_change",
         change_scope: "per_account",
         account_id: accountId,
+        canonical_target_stripe_price_id: canonicalTargetStripePriceId,
       },
       pricing_snapshot: catalogQuote.pricingSnapshot,
     })
@@ -374,6 +396,7 @@ function buildQuoteView(
     activationMessageFr: activationMessages?.messageFr ?? null,
     activationMessageEn: activationMessages?.messageEn ?? null,
     pricingSnapshot,
+    activationMode: source.activationMode,
   };
 }
 
@@ -415,6 +438,7 @@ function mapQuoteRow(
     pricingSnapshot: (row.pricing_snapshot && typeof row.pricing_snapshot === "object")
       ? row.pricing_snapshot as CommercialPricingSnapshot
       : null,
+    activationMode: source.activationMode,
   };
 }
 

@@ -1,5 +1,7 @@
+import { traceStep } from "./profiles-live-causal-context.ts";
 import { createSupabaseClient } from "../supabase.ts";
 import { ACTIVE_RUN_REQUEST_STATUSES } from "./run-request-statuses.ts";
+import { constrainProfilesLiveQuery } from "./profiles-live-resilience.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -54,53 +56,59 @@ function eventToState(actionType: string): OrphanRecoveryState {
   return EVENT_TO_STATE[readString(actionType, "").toLowerCase()] ?? "none";
 }
 
-async function loadRecentRecoveryEvents(accountId: string) {
+type OrphanTraceOptions = { accountIndex?: number; onSelect?: () => void };
+
+async function loadRecentRecoveryEvents(accountId: string, trace: OrphanTraceOptions = {}) {
   const supabase = createSupabaseClient();
-  const { data, error } = await supabase
+  trace.onSelect?.();
+  const { data, error } = await traceStep("orphan.events.select", () => constrainProfilesLiveQuery(supabase
     .from("ig_action_logs")
     .select("action_type,status,message,payload,created_at")
     .eq("account_id", accountId)
     .in("action_type", [...ORPHAN_RECOVERY_EVENT_TYPES])
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(20)), { account_index: trace.accountIndex ?? null });
   if (error) throw new Error("Could not load orphan recovery events.");
   return (data ?? []) as SupabaseRecord[];
 }
 
-async function loadRecentOrphanBlockedRequest(accountId: string) {
+async function loadRecentOrphanBlockedRequest(accountId: string, trace: OrphanTraceOptions = {}) {
   const supabase = createSupabaseClient();
-  const { data, error } = await supabase
+  trace.onSelect?.();
+  const { data, error } = await traceStep("orphan.blocked_request.select", () => constrainProfilesLiveQuery(supabase
     .from("account_run_requests")
-    .select("id,status,error_code,finished_at,created_at")
+    .select("id,status,error_code,completed_at,created_at")
     .eq("account_id", accountId)
     .eq("requested_run_type", "login_provisioning")
     .eq("status", "blocked")
     .eq("error_code", "orphan_challenge_provenance_weak")
-    .order("finished_at", { ascending: false })
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
     .limit(1)
-    .maybeSingle();
+    .maybeSingle()), { account_index: trace.accountIndex ?? null });
   if (error) throw new Error("Could not load orphan blocked request.");
   return data as SupabaseRecord | null;
 }
 
-export async function hasActiveLoginProvisioningRequest(accountId: string) {
+export async function hasActiveLoginProvisioningRequest(accountId: string, trace: OrphanTraceOptions = {}) {
   const supabase = createSupabaseClient();
-  const { data, error } = await supabase
+  trace.onSelect?.();
+  const { data, error } = await traceStep("orphan.active_request.select", () => constrainProfilesLiveQuery(supabase
     .from("account_run_requests")
     .select("id,status,requested_run_type")
     .eq("account_id", accountId)
     .in("status", [...ACTIVE_RUN_REQUEST_STATUSES])
     .in("requested_run_type", ["login_provisioning", "login_email_code_resume"])
-    .limit(1);
+    .limit(1)), { account_index: trace.accountIndex ?? null });
   if (error) throw new Error("Could not verify active login provisioning.");
   return Boolean((data ?? []).length);
 }
 
-export async function resolveOrphanLoginRecoveryProjection(accountId: string): Promise<OrphanLoginRecoveryProjection> {
+export async function resolveOrphanLoginRecoveryProjection(accountId: string, trace: OrphanTraceOptions = {}): Promise<OrphanLoginRecoveryProjection> {
   const [events, blockedRequest, hasActiveLoginProvisioning] = await Promise.all([
-    loadRecentRecoveryEvents(accountId),
-    loadRecentOrphanBlockedRequest(accountId),
-    hasActiveLoginProvisioningRequest(accountId),
+    loadRecentRecoveryEvents(accountId, trace),
+    loadRecentOrphanBlockedRequest(accountId, trace),
+    hasActiveLoginProvisioningRequest(accountId, trace),
   ]);
 
   const latestEvent = events[0];
@@ -109,7 +117,7 @@ export async function resolveOrphanLoginRecoveryProjection(accountId: string): P
 
   if (state === "none" && blockedRequest) {
     state = "orphan_challenge_detected";
-    detectedAt = readString(blockedRequest.finished_at, "") || readString(blockedRequest.created_at, "") || null;
+    detectedAt = readString(blockedRequest.completed_at, "") || readString(blockedRequest.created_at, "") || null;
   }
 
   const blockingClient = CLIENT_BLOCKING_STATES.has(state);

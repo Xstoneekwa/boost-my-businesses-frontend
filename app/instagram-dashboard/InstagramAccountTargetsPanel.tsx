@@ -18,6 +18,7 @@ import {
   type TargetSafeRow,
   type TargetsOverview,
 } from "./targets-data";
+import { clearWebArchiveIntent, prepareWebArchiveIntent } from "@/lib/instagram-dashboard/web-archive-intent";
 
 type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -425,6 +426,7 @@ export default function InstagramAccountTargetsPanel({
 
   async function deleteIds(ids: string[]) {
     if (ids.length === 0) return;
+    const archiveIntent = prepareWebArchiveIntent(window.localStorage, "admin", accountId, ids);
     setSaving(true);
     setError("");
     setSuccess("");
@@ -433,10 +435,11 @@ export default function InstagramAccountTargetsPanel({
         await fetch("/api/instagram-dashboard/targets", {
           method: "DELETE",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ account_id: accountId, ids }),
+          body: JSON.stringify({ account_id: accountId, ids, archive_intent_id: archiveIntent.archiveIntentId }),
         }),
         "Could not delete targets.",
       );
+      clearWebArchiveIntent(window.localStorage, archiveIntent);
       setSelected(new Set());
       setSuccess(ids.length === 1 ? "Target archived." : `${ids.length} targets archived.`);
       await loadTargets();

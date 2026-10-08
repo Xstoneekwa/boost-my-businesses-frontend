@@ -30,6 +30,8 @@ export type PlanChangeSource = {
   billableAccountCount: number;
   outreachAddonKey: OutreachAddonKey | null;
   changeScope: "per_account";
+  activationMode: "simulated_test" | "stripe_test";
+  stripeActualCreditCents: number;
 };
 
 export type PlanChangeSourceErrorCode =
@@ -170,8 +172,32 @@ function isAccountCommercialEntitlement(row: Row) {
 function isCommercialCheckoutSession(row: Row) {
   const flowType = readString(row.flow_type);
   if (!["first_purchase", "additional_account", "plan_change"].includes(flowType)) return false;
-  if (readString(row.status) !== "checkout_activated_test") return false;
+  if (!["checkout_activated_test", "checkout_paid"].includes(readString(row.status))) return false;
   return true;
+}
+
+export function resolveAccountCommercialSessionMode(input: {
+  session: Row;
+  subscriptions: Row[];
+  clientId: string;
+  accountId: string;
+  entitlementId: string;
+}): "simulated_test" | "stripe_test" | null {
+  if (readString(input.session.status) === "checkout_activated_test") return "simulated_test";
+  if (readString(input.session.status) !== "checkout_paid") return null;
+
+  const sessionId = readString(input.session.id);
+  const matches = input.subscriptions.filter((row) => (
+    readString(row.client_id) === input.clientId
+    && readString(row.account_id) === input.accountId
+    && readString(row.client_account_entitlement_id) === input.entitlementId
+    && readString(row.commercial_checkout_session_id) === sessionId
+    && ["active", "trialing"].includes(readString(row.status).toLowerCase())
+    && row.livemode === false
+    && Boolean(readString(row.stripe_subscription_id))
+  ));
+
+  return matches.length === 1 ? "stripe_test" : null;
 }
 
 export async function loadPlanChangeSourceForAccount(
@@ -251,6 +277,41 @@ export async function loadPlanChangeSourceForAccount(
     return { ok: false, code: "source_not_found" };
   }
 
+  let stripeSubscriptions: Row[] = [];
+  if (readString(sessionRow.status) === "checkout_paid") {
+    const { data: subscriptionRows, error: subscriptionError } = await supabase
+      .from("commercial_stripe_subscriptions")
+      .select(`
+        client_id,
+        account_id,
+        client_account_entitlement_id,
+        commercial_checkout_session_id,
+        stripe_subscription_id,
+        current_period_start,
+        current_period_end,
+        status,
+        livemode
+      `)
+      .eq("client_id", input.clientId)
+      .eq("account_id", input.accountId)
+      .eq("client_account_entitlement_id", readString(entitlement.id))
+      .eq("commercial_checkout_session_id", readString(sessionRow.id))
+      .in("status", ["active", "trialing"])
+      .eq("livemode", false)
+      .limit(2);
+    if (subscriptionError) return { ok: false, code: "source_not_found" };
+    stripeSubscriptions = Array.isArray(subscriptionRows) ? subscriptionRows as Row[] : [];
+  }
+
+  const activationMode = resolveAccountCommercialSessionMode({
+    session: sessionRow,
+    subscriptions: stripeSubscriptions,
+    clientId: input.clientId,
+    accountId: input.accountId,
+    entitlementId: readString(entitlement.id),
+  });
+  if (!activationMode) return { ok: false, code: "source_not_found" };
+
   const planKeyRaw = readString(entitlement.plan_key || sessionRow.plan_key).toLowerCase();
   if (!isPlanKey(planKeyRaw)) return { ok: false, code: "source_ambiguous_pricing" };
 
@@ -269,13 +330,16 @@ export async function loadPlanChangeSourceForAccount(
     ? entitlement.metadata as Row
     : null;
 
-  const periodStartAt = readString(entitlement.consumed_at)
+  const canonicalStripeSubscription = activationMode === "stripe_test" ? stripeSubscriptions[0] : null;
+  const periodStartAt = readString(canonicalStripeSubscription?.current_period_start)
+    || readString(entitlement.consumed_at)
     || readString(sessionRow.activated_at)
     || readString(sessionRow.created_at)
     || readString(entitlement.created_at);
   if (!periodStartAt) return { ok: false, code: "source_period_invalid" };
 
-  const periodEndAt = readMetadataString(entitlementMetadata, "period_end_at")
+  const periodEndAt = readString(canonicalStripeSubscription?.current_period_end)
+    || readMetadataString(entitlementMetadata, "period_end_at")
     || readMetadataString(sessionMetadata, "period_end_at")
     || resolvePeriodEndAt(periodStartAt, billingIntervalMonths);
   if (!periodEndAt) return { ok: false, code: "source_period_invalid" };
@@ -314,6 +378,15 @@ export async function loadPlanChangeSourceForAccount(
       billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
       outreachAddonKey,
       changeScope: "per_account",
+      activationMode,
+      // Stripe-backed plan changes persist their post-mutation actual separately
+      // from the immutable pre-confirmation quote. A first Stripe subscription has
+      // no prior plan-change credit, therefore the canonical starting value is 0.
+      stripeActualCreditCents: Math.max(0, readNumber(
+        entitlementMetadata?.actual_stripe_remaining_credit_cents
+          ?? sessionMetadata?.actual_stripe_remaining_credit_cents,
+        0,
+      )),
     },
   };
 }
@@ -439,6 +512,8 @@ export async function loadPlanChangeSource(
       sourceRevision,
       purchaserEmail: readString(sessionRow.purchaser_email),
       billableAccountCount: Math.max(1, readNumber(sessionRow.billable_account_count, 1)),
+      activationMode: "simulated_test",
+      stripeActualCreditCents: 0,
     },
   };
 }

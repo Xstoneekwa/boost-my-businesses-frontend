@@ -42,6 +42,7 @@ export type ClientConnectProgressSnapshot = {
 };
 
 const EMAIL_CODE_ACTION = "enter_email_verification_code";
+export const PASSWORD_UPDATE_ACTION = "update_instagram_password";
 const VERIFICATION_ACTION_TYPES = new Set([
   EMAIL_CODE_ACTION,
   "complete_two_factor",
@@ -130,6 +131,20 @@ function mapVerificationState(action: ProgressInput["actionRequired"]) {
   return { required: true, code_submitted: false, challenge_status: actionStatus || "pending" };
 }
 
+export function isPasswordUpdateAction(action: ProgressInput["actionRequired"]) {
+  return readString(action?.action_type).toLowerCase() === PASSWORD_UPDATE_ACTION;
+}
+
+export function canSubmitVerificationCode(action: ClientConnectProgressAction | null | undefined) {
+  return action?.can_submit_code === true;
+}
+
+function isActiveAction(action: ProgressInput["actionRequired"]) {
+  if (!action) return false;
+  const status = readString(action.status).toLowerCase();
+  return ACTIVE_ACTION_STATUSES.has(status) || status === "pending_verification";
+}
+
 export function mapProgressToClientConnectStatus(input: ProgressInput): ClientConnectStatus {
   const overall = readString(input.overallStatus).toLowerCase();
   const requestStatus = readString(input.requestStatus).toLowerCase();
@@ -141,8 +156,11 @@ export function mapProgressToClientConnectStatus(input: ProgressInput): ClientCo
     loginStatus: input.loginStatus,
     provisioningStatus: input.provisioningStatus,
   });
+  const passwordUpdateRequired = isPasswordUpdateAction(input.actionRequired)
+    && isActiveAction(input.actionRequired);
 
   if (loginStatus === "connected" || overall === "connected") return "connected";
+  if (passwordUpdateRequired) return "wrong_password";
   if (accountVerificationPending || verification.required) {
     const resumeState = resolveVerificationResumeState(input);
     if (resumeState.resumeActive) return "verification_resume_active";
@@ -222,22 +240,40 @@ export function projectClientConnectProgress(input: ProgressInput): ClientConnec
     && acceptsVerificationCode
     && (SUBMITTABLE_ACTION_STATUSES.has(actionStatus) || actionStatus === "pending_verification");
 
-  const actionRequired = input.actionRequired && (verification.required || accountVerificationPending) ? {
+  const passwordUpdateRequired = isPasswordUpdateAction(input.actionRequired)
+    && isActiveAction(input.actionRequired);
+  const actionRequired = input.actionRequired && (verification.required || accountVerificationPending || passwordUpdateRequired) ? {
     id: readString(input.actionRequired.id),
     action_type: readString(input.actionRequired.action_type),
     status: actionStatus,
-    title: readString(input.actionRequired.title, lang === "fr" ? "Vérification requise" : "Verification required"),
+    title: readString(
+      input.actionRequired.title,
+      passwordUpdateRequired
+        ? lang === "fr" ? "Mot de passe Instagram à mettre à jour" : "Instagram password update required"
+        : lang === "fr" ? "Vérification requise" : "Verification required",
+    ),
     message: readString(
       input.actionRequired.message,
-      lang === "fr"
-        ? "Instagram demande une vérification avant de terminer la connexion de votre compte."
-        : "Instagram requires verification before your account connection can finish.",
+      passwordUpdateRequired
+        ? lang === "fr"
+          ? "Instagram a refusé les identifiants de ce compte. Mettez à jour le mot de passe pour reprendre la connexion en toute sécurité."
+          : "Instagram rejected this account's credentials. Update the password to resume the connection securely."
+        : lang === "fr"
+          ? "Instagram demande une vérification avant de terminer la connexion de votre compte."
+          : "Instagram requires verification before your account connection can finish.",
     ),
     resume_status: resumeStatus,
     can_submit_code: canSubmitCode,
   } : null;
 
-  const message = connectStatus === "verification_required"
+  const message = connectStatus === "wrong_password"
+    ? readString(
+      input.actionRequired?.message,
+      lang === "fr"
+        ? "Instagram a refusé les identifiants de ce compte. Mettez à jour le mot de passe pour reprendre la connexion en toute sécurité."
+        : "Instagram rejected this account's credentials. Update the password to resume the connection securely.",
+    )
+    : connectStatus === "verification_required"
     ? (lang === "fr"
       ? "Instagram demande une vérification avant de terminer la connexion de votre compte."
       : "Instagram requires verification before your account connection can finish.")

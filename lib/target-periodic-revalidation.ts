@@ -1,4 +1,5 @@
 export const PERIODIC_REVALIDATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+export const PERIODIC_NOT_FOUND_RECHECK_MS = 30 * 60 * 1000;
 export const PERIODIC_REVALIDATION_BATCH_PREFIX = "periodic_weekly";
 export const PERIODIC_REVALIDATION_TRIGGER_SOURCE = "periodic_weekly";
 
@@ -21,6 +22,7 @@ export type PeriodicVerificationJobRow = {
   target_id?: string | null;
   status?: string | null;
   batch_id?: string | null;
+  metadata_safe?: Record<string, unknown> | null;
 };
 
 function readString(value: unknown, fallback = "") {
@@ -31,6 +33,15 @@ function readString(value: unknown, fallback = "") {
 
 export function isPeriodicRevalidationBatchId(batchId: string | null | undefined) {
   return readString(batchId, "").startsWith(`${PERIODIC_REVALIDATION_BATCH_PREFIX}:`);
+}
+
+export function isPeriodicRevalidationJob(input: {
+  batch_id?: string | null;
+  metadata_safe?: Record<string, unknown> | null;
+}) {
+  return input.metadata_safe?.mode === "evidence_only"
+    || input.metadata_safe?.trigger_source === PERIODIC_REVALIDATION_TRIGGER_SOURCE
+    || isPeriodicRevalidationBatchId(input.batch_id);
 }
 
 export function computePeriodicStaggerOffsetMs(targetId: string) {
@@ -96,11 +107,21 @@ export function buildPeriodicSchedulePatchAfterTerminal(
   terminalAtUtc: Date,
   hygieneAction:
     | "none"
+    | "record_not_found_evidence"
     | "rename_confirmed"
     | "archive_not_found"
     | "archive_verified"
     | "apply_quality_decision",
 ) {
+  if (hygieneAction === "record_not_found_evidence") {
+    return {
+      periodic_revalidation_last_terminal_at: terminalAtUtc.toISOString(),
+      periodic_revalidation_next_due_at: new Date(
+        terminalAtUtc.getTime() + PERIODIC_NOT_FOUND_RECHECK_MS,
+      ).toISOString(),
+      periodic_revalidation_window_key: null,
+    };
+  }
   if (hygieneAction === "rename_confirmed") {
     return { periodic_revalidation_window_key: null };
   }
@@ -119,15 +140,20 @@ export function buildPeriodicSchedulePatchAfterTerminal(
 
 export function shouldAdvancePeriodicSchedule(input: {
   batchId: string | null | undefined;
+  metadataSafe?: Record<string, unknown> | null;
   jobStatus: string;
   hygieneAction:
     | "none"
+    | "record_not_found_evidence"
     | "rename_confirmed"
     | "archive_not_found"
     | "archive_verified"
     | "apply_quality_decision";
 }) {
-  if (!isPeriodicRevalidationBatchId(input.batchId)) return false;
+  if (!isPeriodicRevalidationJob({
+    batch_id: input.batchId,
+    metadata_safe: input.metadataSafe,
+  })) return false;
   if (input.jobStatus === "retry_scheduled") return false;
   return input.hygieneAction !== "none";
 }
@@ -182,7 +208,9 @@ export function buildPeriodicVerificationJobPayload(input: {
   return {
     target_id: input.targetId,
     account_id: input.accountId,
-    batch_id: buildPeriodicBatchId(input.windowKey),
+    // Production stores batch_id as uuid. Periodic lineage is safe metadata,
+    // not a synthetic value in the UUID batch slot.
+    batch_id: null,
     normalized_username: input.normalizedUsername,
     status: "pending",
     attempt_count: 0,
@@ -212,6 +240,7 @@ export function emptyPeriodicRevalidationSchedulerSummary() {
     skipped_window_claim_count: 0,
     deferred_not_due_count: 0,
     provider_deferred_count: 0,
+    invalid_terminalized_count: 0,
     errors_count: 0,
   };
 }

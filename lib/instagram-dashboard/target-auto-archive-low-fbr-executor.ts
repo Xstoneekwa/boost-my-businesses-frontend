@@ -10,6 +10,10 @@ import {
   type AutoArchiveCandidateEvaluation,
 } from "./target-auto-archive-low-fbr-policy";
 import { reevaluateNeedsMoreTargetAccountsAfterTargetMutation } from "./needs-more-target-accounts.ts";
+import {
+  archiveTransitionRequest,
+  deterministicArchiveIntentId,
+} from "./archive-transition-contract.ts";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -173,23 +177,38 @@ export async function runTargetAutoArchiveLowFbrPolicyBatch(input: {
       continue;
     }
 
-    const now = new Date().toISOString();
-    const { error: updateError } = await supabase
-      .from("ig_targets")
-      .update({
-        status: "archived",
-        archived_at: now,
-        auto_archived_at: now,
-        archive_reason: TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON,
-        readd_blocked_until: null,
-        readd_blocked_permanently: true,
-        readd_block_reason: TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON,
-        readd_blocked_at: now,
-        updated_at: now,
-      })
-      .eq("id", targetId)
+    const { data: links, error: linkError } = await supabase
+      .from("client_instagram_accounts")
+      .select("client_id")
       .eq("account_id", accountId)
-      .neq("status", "archived");
+      .eq("active", true)
+      .limit(2);
+    const tenantIds = [...new Set((links ?? []).map((link) => readString(link.client_id, "")).filter(Boolean))];
+    if (linkError || tenantIds.length !== 1) {
+      result.errors += 1;
+      continue;
+    }
+
+    const archiveIntentId = deterministicArchiveIntentId([
+      "target_auto_archive_low_fbr_v1",
+      tenantIds[0],
+      accountId,
+      targetId,
+      String(evaluation.followsSent),
+      String(evaluation.followbackRatio),
+    ]);
+    const { error: updateError } = await supabase.rpc("archive_targets_transition_batch_v1", {
+      p_request: archiveTransitionRequest({
+        tenantId: tenantIds[0],
+        accountId,
+        archiveIntentId,
+        targetIds: [targetId],
+        reason: TARGET_AUTO_ARCHIVE_LOW_FBR_ARCHIVE_REASON,
+        source: "low_fbr",
+        actorType: "system",
+        evidenceReference: `low_fbr:${evaluation.followsSent}:${evaluation.followbackRatio}`,
+      }),
+    });
 
     if (updateError) {
       result.errors += 1;

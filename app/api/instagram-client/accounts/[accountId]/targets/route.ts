@@ -34,7 +34,7 @@ async function authorizeAccountRoute(accountId: string) {
   if (!ownership.ok) {
     return { error: NextResponse.json({ ok: false, error: ownership.error }, { status: ownership.status }) };
   }
-  return { accountId: normalizedAccountId };
+  return { accountId: normalizedAccountId, actorId: session.userId, tenantId: session.clientId };
 }
 
 export async function GET(
@@ -97,7 +97,7 @@ export async function POST(
   }, { status: result.status ?? 201 });
 }
 
-type DeleteBody = { ids?: string[] };
+type DeleteBody = { ids?: string[]; archive_intent_id?: string };
 
 export async function DELETE(
   request: Request,
@@ -120,7 +120,11 @@ export async function DELETE(
     ? body.ids.map((id) => readString(id, "").trim()).filter(Boolean)
     : [];
 
-  const result = await archiveAccountTargets(auth.accountId, ids, clientTargetsContext);
+  const result = await archiveAccountTargets(auth.accountId, ids, {
+    ...clientTargetsContext,
+    actorId: auth.actorId,
+    tenantId: auth.tenantId,
+  }, readString(body?.archive_intent_id, "").trim());
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
   return NextResponse.json({ ok: true, data: result.data });
 }

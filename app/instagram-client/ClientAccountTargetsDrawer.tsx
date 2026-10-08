@@ -30,6 +30,7 @@ import {
   isClientAiTargetingEnabled,
 } from "@/lib/instagram-client/ai-targeting-gate";
 import TargetAvatar from "./TargetAvatar";
+import { clearWebArchiveIntent, prepareWebArchiveIntent } from "@/lib/instagram-dashboard/web-archive-intent";
 
 type Lang = "fr" | "en";
 
@@ -355,6 +356,13 @@ export default function ClientAccountTargetsDrawer({
   async function archiveSelected() {
     const ids = Object.entries(selected).filter(([, on]) => on).map(([id]) => id);
     if (ids.length === 0) return;
+    const confirmed = window.confirm(
+      lang === "fr"
+        ? `${ids.length} cible(s) seront archivées. Confirmer ?`
+        : `${ids.length} target(s) will be archived. Confirm?`,
+    );
+    if (!confirmed) return;
+    const archiveIntent = prepareWebArchiveIntent(window.localStorage, "client", accountId, ids);
     setSaving(true);
     setError("");
     setSuccess("");
@@ -363,10 +371,11 @@ export default function ClientAccountTargetsDrawer({
         await fetch(`/api/instagram-client/accounts/${encodeURIComponent(accountId)}/targets`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ ids }),
+          body: JSON.stringify({ ids, archive_intent_id: archiveIntent.archiveIntentId }),
         }),
         lang === "fr" ? "Archivage impossible." : "Could not archive.",
       );
+      clearWebArchiveIntent(window.localStorage, archiveIntent);
       setSelected({});
       setSuccess(lang === "fr" ? (ids.length === 1 ? "Cible archivée." : `${ids.length} cibles archivées.`) : (ids.length === 1 ? "Target archived." : `${ids.length} targets archived.`));
       await loadTargets();

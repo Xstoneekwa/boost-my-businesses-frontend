@@ -2,6 +2,7 @@ import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireCommercialCrmAccess } from "./crm-access";
+import { FRANCE_CANARY_IDEMPOTENCY_KEY } from "./market-config";
 import type { CommercialDiscoveryReadModel, CommercialDiscoveryRun, CommercialDiscoveryTrigger } from "./discovery-contract";
 
 type Row = Record<string, unknown>;
@@ -19,7 +20,16 @@ function runFromRow(value: unknown): CommercialDiscoveryRun {
 export async function createCommercialDiscoveryRun(trigger: CommercialDiscoveryTrigger) {
   const context = await requireCommercialCrmAccess();
   const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.rpc("create_commercial_discovery_run_v2", { p_actor_user_id: context.userId, p_city: trigger.city, p_subsegment: trigger.subsegment ?? null, p_max_prospects: trigger.maxProspects, p_idempotency_key: trigger.idempotencyKey, p_force_rescore: trigger.forceRescore });
+  const { data, error } = trigger.countryCode === "FR"
+    ? await supabase.rpc("create_commercial_france_canary_run_v1", {
+      p_actor_user_id: context.userId,
+      p_city: trigger.city,
+      p_subsegment: trigger.subsegment ?? null,
+      p_max_prospects: trigger.maxProspects,
+      p_idempotency_key: trigger.city === "France" ? FRANCE_CANARY_IDEMPOTENCY_KEY : trigger.idempotencyKey,
+      p_geography_safe: { country_code: "FR", city: trigger.city, subsegment: trigger.subsegment ?? null },
+    })
+    : await supabase.rpc("create_commercial_discovery_run_v2", { p_actor_user_id: context.userId, p_city: trigger.city, p_subsegment: trigger.subsegment ?? null, p_max_prospects: trigger.maxProspects, p_idempotency_key: trigger.idempotencyKey, p_force_rescore: trigger.forceRescore });
   if (error) throw new Error("commercial_discovery_create_failed");
   return row(data);
 }

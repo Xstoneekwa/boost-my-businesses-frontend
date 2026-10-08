@@ -35,9 +35,37 @@ export function projectSocialProfileFollowerDelta3d(input: {
   rows: SocialProfileSnapshotRow[];
   now: string | Date;
 }) {
-  const rows = reliableRows(input.rows);
-  const current = rows.at(-1) ?? null;
   const nowMs = input.now instanceof Date ? input.now.getTime() : timestamp(input.now);
+  // A projection belongs to one account. Never form a cross-account baseline.
+  const accountIds = new Set(input.rows.map(row => row.account_id));
+  const rows = accountIds.size === 1 && [...accountIds][0]
+    ? reliableRows(input.rows).filter(row => timestamp(row.observed_at) <= nowMs && Boolean(row.source_provider?.trim()))
+    : [];
+  const toleranceMs = FOLLOWER_DELTA_BASELINE_TOLERANCE_HOURS * 3600_000;
+  let current = rows.at(-1) ?? null;
+  let baseline: SocialProfileSnapshotRow | null = null;
+  // Walk newest observations first. An incomplete observation cannot erase
+  // the latest complete business delta. Binary search keeps this O(n log n).
+  for (let index = rows.length - 1; index >= 1; index--) {
+    const target = timestamp(rows[index].observed_at) - FOLLOWER_DELTA_WINDOW_HOURS * 3600_000;
+    let lo = 0;
+    let hi = index;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (timestamp(rows[mid].observed_at) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    const candidate = [lo - 1, lo]
+      .filter(position => position >= 0 && position < index)
+      .map(position => ({ row: rows[position], distance: Math.abs(timestamp(rows[position].observed_at) - target) }))
+      .filter(point => point.distance <= toleranceMs)
+      .sort((a, b) => a.distance - b.distance || timestamp(b.row.observed_at) - timestamp(a.row.observed_at))[0];
+    if (candidate) {
+      current = rows[index];
+      baseline = candidate.row;
+      break;
+    }
+  }
   if (!current) {
     return {
       value: null,
@@ -60,14 +88,6 @@ export function projectSocialProfileFollowerDelta3d(input: {
   const currentMs = timestamp(current.observed_at);
   const ageSeconds = Math.max(0, Math.round((nowMs - currentMs) / 1000));
   const freshness = freshnessStatus(ageSeconds);
-  const targetMs = currentMs - FOLLOWER_DELTA_WINDOW_HOURS * 3600_000;
-  const toleranceMs = FOLLOWER_DELTA_BASELINE_TOLERANCE_HOURS * 3600_000;
-  const baseline = rows
-    .filter((row) => row !== current)
-    .map((row) => ({ row, distance: Math.abs(timestamp(row.observed_at) - targetMs) }))
-    .filter(({ distance }) => distance <= toleranceMs)
-    .sort((left, right) => left.distance - right.distance
-      || timestamp(right.row.observed_at) - timestamp(left.row.observed_at))[0]?.row ?? null;
   const currentValue = Number(current.followers_count);
   const currentFollowings = Number.isSafeInteger(current.following_count)
     ? Number(current.following_count)

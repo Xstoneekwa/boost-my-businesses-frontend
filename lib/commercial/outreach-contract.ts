@@ -19,7 +19,27 @@ export const COMMERCIAL_OUTREACH_STATES = [
 export const COMMERCIAL_OUTREACH_STATUS_TABS = ["ready", "approved", "failed", "cancelled", "all"] as const;
 export const COMMERCIAL_OUTREACH_SORTS = ["newest", "confidence"] as const;
 
-export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_prompt_v2_exact_target_salutation";
+export const COMMERCIAL_OUTREACH_PROMPT_VERSION = "commercial_outreach_message_quality_v3";
+
+// Routing families remain V1: the lead synchronizer relies on those stable keys.
+// Copy versions are append-only catalogue entries, never a routing change.
+export const COMMERCIAL_OUTREACH_COPY_KEYS = [
+  "IG_BEAUTY_ANGLE_A_V3", "IG_BEAUTY_ANGLE_B_V3",
+  "EMAIL_BEAUTY_ANGLE_A_V3", "EMAIL_BEAUTY_ANGLE_B_V3",
+] as const;
+export type CommercialOutreachCopyKey = (typeof COMMERCIAL_OUTREACH_COPY_KEYS)[number];
+export const COMMERCIAL_DIRECT_BOOKING_PROMPT_VERSION = "commercial_direct_calendly_v1";
+export type CommercialDirectBookingCopyKey = `${"IG" | "EMAIL"}_BEAUTY_ANGLE_${"A" | "B"}_V4` | `${"IG" | "EMAIL"}_BEAUTY_ANGLE_${"A" | "B"}_${"EN" | "FR"}_V5`;
+export const COMMERCIAL_CERTIFIED_COPY_PROMPT_VERSION = "commercial_direct_calendly_en_fr_v1";
+export function commercialCertifiedCopyKey(channel: CommercialOutreachChannel, angle: CommercialOutreachAngle, language: "en" | "fr") : CommercialDirectBookingCopyKey {
+  return `${channel === "instagram" ? "IG" : "EMAIL"}_BEAUTY_ANGLE_${angle}_${language === "fr" ? "FR" : "EN"}_V5`;
+}
+export function commercialDirectBookingCopyKey(channel: CommercialOutreachChannel, angle: CommercialOutreachAngle): CommercialDirectBookingCopyKey {
+  return `${channel === "instagram" ? "IG" : "EMAIL"}_BEAUTY_ANGLE_${angle}_V4`;
+}
+export function commercialOutreachCopyTemplateKey(channel: CommercialOutreachChannel, angle: CommercialOutreachAngle): CommercialOutreachCopyKey {
+  return `${channel === "instagram" ? "IG" : "EMAIL"}_BEAUTY_ANGLE_${angle}_V3`;
+}
 
 export type CommercialOutreachChannel = (typeof COMMERCIAL_OUTREACH_CHANNELS)[number];
 export type CommercialOutreachAngle = (typeof COMMERCIAL_OUTREACH_ANGLES)[number];
@@ -39,13 +59,19 @@ export type CommercialOutreachGeneratedMessage = {
   body: string;
   channel: CommercialOutreachChannel;
   angle: CommercialOutreachAngle;
-  template_version: CommercialOutreachTemplateKey;
+  template_version: CommercialOutreachTemplateKey | CommercialOutreachCopyKey | CommercialDirectBookingCopyKey;
+  personalization_evidence?: { key: string; quote: string };
   personalization_summary: string;
   facts_used: Array<{ key: string; value: string }>;
   confidence: number;
 };
 
 export type CommercialOutreachItem = {
+  supersededBy?: string | null;
+  language?: "en" | "fr";
+  historical?: boolean;
+  liveSendEligible?: false;
+  previousVersion?: { id: string; subject: string | null; body: string | null; templateVersion: string; approvedAt: string | null } | null;
   id: string;
   leadId: string;
   campaignId: string;
@@ -111,6 +137,7 @@ export type CommercialOutreachQueueItem = {
 };
 
 export type CommercialOutreachReadFilters = {
+  country?: "ZA" | "FR";
   status: CommercialOutreachStatusTab;
   channel?: CommercialOutreachChannel;
   angle?: CommercialOutreachAngle;
@@ -159,6 +186,7 @@ function firstQueryValue(value: OutreachQueryValue) {
 
 export function parseCommercialOutreachReadFilters(params: Record<string, OutreachQueryValue>): CommercialOutreachReadFilters {
   const rawStatus = firstQueryValue(params.outreach_tab);
+  const country = firstQueryValue(params.country);
   const rawChannel = firstQueryValue(params.outreach_channel);
   const rawAngle = firstQueryValue(params.outreach_angle);
   const rawTemplate = firstQueryValue(params.outreach_template);
@@ -167,6 +195,7 @@ export function parseCommercialOutreachReadFilters(params: Record<string, Outrea
   const rawItem = firstQueryValue(params.outreach_item);
   const rawSearch = firstQueryValue(params.outreach_search).normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 120);
   return {
+    country: country === "ZA" || country === "FR" ? country : undefined,
     status: COMMERCIAL_OUTREACH_STATUS_TABS.includes(rawStatus as CommercialOutreachStatusTab) ? rawStatus as CommercialOutreachStatusTab : "ready",
     channel: COMMERCIAL_OUTREACH_CHANNELS.includes(rawChannel as CommercialOutreachChannel) ? rawChannel as CommercialOutreachChannel : undefined,
     angle: COMMERCIAL_OUTREACH_ANGLES.includes(rawAngle as CommercialOutreachAngle) ? rawAngle as CommercialOutreachAngle : undefined,

@@ -13,6 +13,7 @@ import {
   jsonOk,
   readJsonBody,
   readString,
+  resolveInstagramDashboardActor,
   requireInstagramAdmin,
 } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
@@ -97,24 +98,29 @@ type DeleteBody = {
   account_id?: string;
   ids?: string[];
   actor_type?: TargetActorType;
+  archive_intent_id?: string;
 };
 
 export async function DELETE(request: Request) {
   try {
-    const unauthorized = await requireRelayOrAdmin(request);
-    if (unauthorized) return unauthorized;
+    const auth = await resolveInstagramDashboardActor(request, "Target archive");
+    if (!auth.ok) return auth.response;
 
     const body = await readJsonBody<DeleteBody>(request);
     if (!body) return jsonError("Invalid JSON body.", 400);
 
     const accountId = readString(body.account_id, "").trim();
     if (!accountId) return jsonError("Missing account_id.", 400);
-    const actorType: TargetActorType = body.actor_type === "client" ? "client" : "admin";
+    const actorType: TargetActorType = "admin";
     const ids = Array.isArray(body.ids)
       ? body.ids.map((id) => readString(id, "").trim()).filter(Boolean)
       : [];
 
-    const result = await archiveAccountTargets(accountId, ids, serviceContext(actorType));
+    const archiveIntentId = readString(body.archive_intent_id, "").trim();
+    const result = await archiveAccountTargets(accountId, ids, {
+      ...serviceContext(actorType),
+      actorId: auth.actor.actorId,
+    }, archiveIntentId);
     if (!result.ok) return jsonError(result.error, result.status);
     return jsonOk(result.data);
   } catch (error) {

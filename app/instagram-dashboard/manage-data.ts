@@ -1,3 +1,5 @@
+import { causalFetch } from "@/lib/instagram-dashboard/profiles-live-causal-context";
+import { traceStep, traceMetric, traceFallback } from "@/lib/instagram-dashboard/profiles-live-causal-context";
 import { createSupabaseClient } from "@/lib/supabase";
 import {
   buildAdminReadinessProjection,
@@ -24,6 +26,18 @@ import {
   type CanonicalClientAccountVisibilitySeed,
   type CanonicalIgAccountVisibilitySeed,
 } from "@/lib/instagram-dashboard/canonical-client-account-visibility";
+import {
+  projectCurrentPasswordUpdateActions,
+  type PasswordUpdateOperationalState,
+} from "@/lib/instagram-dashboard/password-update-operational-state";
+import {
+  chooseOperationalBlocker,
+  loadCanonicalOperationalBlockers,
+  operationalBlockerFromDashboardAction,
+  type OperationalBlocker,
+} from "@/lib/instagram-dashboard/operational-blocker";
+import { isCurrentBlockingDashboardAction } from "@/lib/instagram-dashboard/dashboard-action-blockers";
+import { constrainProfilesLiveQuery } from "@/lib/instagram-dashboard/profiles-live-resilience";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -79,6 +93,9 @@ export type ManageAccount = {
   pendingActionsCount: number;
   blockingCampaign: boolean;
   primaryBlockReason?: string | null;
+  operationalBlocker?: OperationalBlocker | null;
+  primaryOperationalState?: "PASSWORD_UPDATE_REQUIRED" | null;
+  passwordUpdateAction?: PasswordUpdateOperationalState | null;
   latestIncidentSeverity: string;
   lastSafeUpdate: string | null;
   phoneName: string;
@@ -105,6 +122,7 @@ export type ManageAccount = {
   readiness?: string;
   eligibility?: string;
   eligibilityReason?: string;
+  schedulerEligible?: boolean;
   profileImageUrl?: string | null;
   profileImageSource?: string | null;
   instagramVerificationStatus?: string | null;
@@ -476,17 +494,19 @@ function sourceStatusWithBackend(backendApi: ManageSourceStatus, overview: Manag
   };
 }
 
-async function enrichWithPublicProfileMetadata(overview: ManageOverview): Promise<ManageOverview> {
+async function enrichWithPublicProfileMetadata(overview: ManageOverview, previous?: Promise<ManageOverview>): Promise<ManageOverview> {
   const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
-  if (!accountIds.length) return overview;
+  if (!accountIds.length) return previous ?? overview;
 
   try {
     const supabase = createSupabaseClient();
-    const { data, error } = await supabase
+    const { data, error } = await constrainProfilesLiveQuery(supabase
       .from("ig_accounts")
       .select("id,username,username_verification_status,username_verification_reason,avatar_url")
-      .in("id", accountIds);
+      .in("id", accountIds));
 
+    // Reads overlap; projection still consumes every preceding canonical stage.
+    overview = previous ? await previous : overview;
     if (error || !Array.isArray(data)) {
       return { ...overview, errors: ["Public profile metadata unavailable.", ...overview.errors] };
     }
@@ -507,6 +527,7 @@ async function enrichWithPublicProfileMetadata(overview: ManageOverview): Promis
     };
     return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
   } catch {
+    overview = previous ? await previous : overview;
     return { ...overview, errors: ["Public profile metadata unavailable.", ...overview.errors] };
   }
 }
@@ -517,10 +538,10 @@ async function enrichWithIgAccountLifecycle(overview: ManageOverview): Promise<M
 
   try {
     const supabase = createSupabaseClient();
-    const { data, error } = await supabase
+    const { data, error } = await constrainProfilesLiveQuery(supabase
       .from("ig_accounts")
       .select("id,status,admin_lifecycle_status,archived_at,trashed_at,scheduled_trash_at,scheduled_delete_at,restored_at")
-      .in("id", accountIds);
+      .in("id", accountIds));
     if (error) {
       return { ...overview, errors: ["Instagram account lifecycle projection unavailable.", ...overview.errors] };
     }
@@ -559,34 +580,34 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
   try {
     const supabase = createSupabaseClient();
     const [credentialsResult, assignmentsResult, clientAccountsResult, settingsResult, appInstancesByAccountResult] = await Promise.all([
-      supabase
+      constrainProfilesLiveQuery(supabase
         .from("account_credentials")
         .select("account_id,status,reauth_required,secret_ref,created_at,metadata_safe")
         .in("account_id", accountIds)
         .order("created_at", { ascending: false })
-        .limit(5000),
-      supabase
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
         .from("account_assignments")
         .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,released_at,schedule_mode,slot_kind")
         .in("account_id", accountIds)
         .in("status", ["pending", "reserved", "active"])
         .order("starts_at", { ascending: false })
-        .limit(5000),
-      supabase
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
         .from("client_instagram_accounts")
         .select("account_id,login_status,provisioning_status,onboarding_status,login_identity_proof_status,login_identity_expected_username,login_identity_detected_username,login_identity_profile_opened,login_identity_username_match,login_identity_verified_at,login_identity_source_run_id,login_identity_failure_reason,login_identity_proof_version,login_state_source_at,login_state_version,login_state_invalidation_reason")
         .in("account_id", accountIds)
-        .limit(5000),
-      supabase
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
         .from("ig_account_settings")
         .select("account_id,email")
         .in("account_id", accountIds)
-        .limit(5000),
-      supabase
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
         .from("phone_app_instances")
         .select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id")
         .in("current_account_id", accountIds)
-        .limit(5000),
+        .limit(5000)),
     ]);
 
     if (credentialsResult.error || assignmentsResult.error || clientAccountsResult.error || settingsResult.error || appInstancesByAccountResult.error) {
@@ -637,10 +658,10 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
     ].filter(Boolean))];
     const [devicesResult, appInstancesResult] = await Promise.all([
       deviceIds.length
-        ? supabase.from("phone_devices").select("id,name,device_name,status,timezone").in("id", deviceIds)
+        ? constrainProfilesLiveQuery(supabase.from("phone_devices").select("id,name,device_name,status,timezone").in("id", deviceIds))
         : Promise.resolve({ data: [], error: null }),
       appInstanceIds.length
-        ? supabase.from("phone_app_instances").select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id").in("id", appInstanceIds)
+        ? constrainProfilesLiveQuery(supabase.from("phone_app_instances").select("id,device_id,visible_label,instance_index,package_name,status,is_launchable,usable_for_auto_login,current_account_id").in("id", appInstanceIds))
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -777,49 +798,79 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
   }
 }
 
-async function enrichWithReadinessProjection(overview: ManageOverview): Promise<ManageOverview> {
+async function enrichWithReadinessProjection(overview: ManageOverview, previous?: Promise<ManageOverview>): Promise<ManageOverview> {
   const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
-  if (!accountIds.length) return overview;
+  if (!accountIds.length) return previous ?? overview;
 
   try {
     const supabase = createSupabaseClient();
-    const [dashboardActionsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount] = await Promise.all([
-      supabase
+    const [dashboardActionsResult, incidentsResult, dmSettingsResult, unfollowSettingsResult, targetCountsByAccount, incidentBlockersByAccount] = await Promise.all([
+      constrainProfilesLiveQuery(supabase
         .from("account_dashboard_actions")
-        .select("account_id,action_type,status,blocking_campaign")
+        .select("id,incident_id,account_id,action_type,status,blocking_campaign,requires_client_action,created_at,updated_at,metadata,metadata_safe")
         .in("account_id", accountIds)
         .in("status", ["pending", "acknowledged", "pending_verification"])
-        .limit(5000),
-      supabase
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
+        .from("account_incidents")
+        .select("id,account_id,status,run_id,reason,failure_reason,created_at,updated_at,metadata")
+        .in("account_id", accountIds)
+        .in("status", ["open", "acknowledged", "investigating"])
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
         .from("ig_account_dm_settings")
         .select("account_id,welcome_enabled,outreach_enabled")
         .in("account_id", accountIds)
-        .limit(5000),
-      supabase
+        .limit(5000)),
+      constrainProfilesLiveQuery(supabase
         .from("ig_account_unfollow_settings")
         .select("account_id,unfollow_enabled,unfollow_mode")
         .in("account_id", accountIds)
-        .limit(5000),
+        .limit(5000)),
       loadTargetEligibilityCountsByAccount(supabase, accountIds),
+      loadCanonicalOperationalBlockers(supabase, accountIds),
     ]);
 
+    // Reads overlap; projection still consumes every preceding canonical stage.
+    overview = previous ? await previous : overview;
     const errors = [...overview.errors];
-    if (dashboardActionsResult.error || dmSettingsResult.error || unfollowSettingsResult.error) {
+    if (dashboardActionsResult.error || incidentsResult.error || dmSettingsResult.error || unfollowSettingsResult.error) {
       errors.unshift("Readiness projection partially unavailable.");
     }
 
-    const actionCountsByAccount = new Map<string, { total: number; blocking: number; firstBlockingAction: string | null }>();
+    const currentPasswordActions = projectCurrentPasswordUpdateActions(
+      (dashboardActionsResult.data ?? []) as SupabaseRecord[],
+      (incidentsResult.data ?? []) as SupabaseRecord[],
+    );
+    const activeIncidentIds = new Set(
+      ((incidentsResult.data ?? []) as SupabaseRecord[])
+        .map((row) => readString(row, ["id"], ""))
+        .filter(Boolean),
+    );
+
+    const actionCountsByAccount = new Map<string, {
+      total: number;
+      blocking: number;
+      firstBlockingAction: string | null;
+      operationalBlocker: OperationalBlocker | null;
+    }>();
     for (const row of ((dashboardActionsResult.data ?? []) as SupabaseRecord[])) {
       const accountId = readString(row, ["account_id"], "");
       if (!accountId) continue;
-      const current = actionCountsByAccount.get(accountId) ?? { total: 0, blocking: 0, firstBlockingAction: null };
+      const current = actionCountsByAccount.get(accountId) ?? {
+        total: 0,
+        blocking: 0,
+        firstBlockingAction: null,
+        operationalBlocker: null,
+      };
       current.total += 1;
       const actionType = readString(row, ["action_type"], "").toLowerCase();
       const isCredentialVerificationAction = actionType === "submit_instagram_credentials" || actionType === "review_credentials";
       const isReplacementInProgress = isStaleSessionReplacementAction(row, actionType);
-      if (readBoolean(row, ["blocking_campaign"], false) && !isCredentialVerificationAction && !isReplacementInProgress) {
+      if (isCurrentBlockingDashboardAction(row, { activeIncidentIds }) && !isCredentialVerificationAction && !isReplacementInProgress) {
         current.blocking += 1;
         current.firstBlockingAction ||= actionType || "blocking_dashboard_action";
+        current.operationalBlocker ||= operationalBlockerFromDashboardAction(row);
       }
       actionCountsByAccount.set(accountId, current);
     }
@@ -844,6 +895,7 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
         total: account.pendingActionsCount,
         blocking: account.blockingCampaign ? 1 : 0,
         firstBlockingAction: account.primaryBlockReason ?? null,
+        operationalBlocker: account.operationalBlocker ?? null,
       };
       const hasFreshActionCounts = actionCountsByAccount.has(account.accountId);
       const readinessProjection = buildAdminReadinessProjection({
@@ -885,19 +937,34 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
           blockingActionsCount: actionCounts.blocking,
         });
       const canonicalReady = readinessProjection.overall_readiness_status === "ready";
+      const passwordUpdateAction = currentPasswordActions.get(account.accountId) ?? null;
+      const operationalBlocker = chooseOperationalBlocker(
+        incidentBlockersByAccount.get(account.accountId) ?? null,
+        actionCounts.operationalBlocker,
+      );
+      const schedulerEligible = canonicalReady && !operationalBlocker;
       return {
         ...account,
-        blockingCampaign: hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign,
-        primaryBlockReason: actionCounts.firstBlockingAction ?? account.primaryBlockReason ?? null,
+        blockingCampaign: Boolean(operationalBlocker)
+          || (hasFreshActionCounts ? actionCounts.blocking > 0 : account.blockingCampaign),
+        primaryBlockReason: operationalBlocker?.reasonCode
+          ?? actionCounts.firstBlockingAction
+          ?? account.primaryBlockReason
+          ?? null,
+        operationalBlocker,
+        primaryOperationalState: passwordUpdateAction ? "PASSWORD_UPDATE_REQUIRED" : null,
+        passwordUpdateAction,
         readiness: readinessProjection.overall_readiness_status,
-        eligibility: canonicalReady ? "can_start" : "blocked_now",
-        eligibilityReason: readinessProjection.overall_readiness_reason,
+        eligibility: schedulerEligible ? "can_start" : "blocked_now",
+        eligibilityReason: operationalBlocker?.reasonCode ?? readinessProjection.overall_readiness_reason,
+        schedulerEligible,
         readinessProjection,
       };
     };
 
     return overviewWithAccounts({ ...overview, errors }, overview.allAccounts.map(enrich), errors);
   } catch {
+    overview = previous ? await previous : overview;
     return {
       ...overview,
       errors: ["Readiness projection unavailable.", ...overview.errors],
@@ -905,12 +972,14 @@ async function enrichWithReadinessProjection(overview: ManageOverview): Promise<
   }
 }
 
-async function enrichWithCommercialPackageSummaries(overview: ManageOverview): Promise<ManageOverview> {
+async function enrichWithCommercialPackageSummaries(overview: ManageOverview, previous?: Promise<ManageOverview>): Promise<ManageOverview> {
   const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
-  if (!accountIds.length) return overview;
+  if (!accountIds.length) return previous ?? overview;
 
   try {
     const summaryByAccount = await getAccountPackageSummaries(accountIds);
+    // Reads overlap; projection still consumes every preceding canonical stage.
+    overview = previous ? await previous : overview;
     const enrich = (account: ManageAccount): ManageAccount => {
       const summary = summaryByAccount.get(account.accountId);
       if (!summary) {
@@ -934,6 +1003,7 @@ async function enrichWithCommercialPackageSummaries(overview: ManageOverview): P
 
     return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
   } catch {
+    overview = previous ? await previous : overview;
     return {
       ...overview,
       errors: ["Commercial package summary unavailable.", ...overview.errors],
@@ -1234,21 +1304,24 @@ export async function getManageDataFromLegacyTables(): Promise<ManageOverview> {
   return assembleOverview(mappedAccounts, errors, legacySourceStatus(mappedAccounts));
 }
 
-export async function getManageDataFromAdminDashboardApi(): Promise<ManageOverview> {
+export async function getManageDataFromAdminDashboardApi(options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<ManageOverview> {
   const config = adminDashboardConfig();
   if (!config) {
     throw new ManageApiError("Backend API not configured");
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), adminDashboardTimeoutMs);
+  const abortFromCaller = () => controller.abort();
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeout = setTimeout(() => controller.abort(), Math.min(adminDashboardTimeoutMs, options.timeoutMs ?? adminDashboardTimeoutMs));
 
   try {
     const pageSize = 200;
     const maxPages = 25;
     const items: SupabaseRecord[] = [];
     for (let page = 0; page < maxPages; page += 1) {
-      const response = await fetch(config.url, {
+      const response = await causalFetch(config.url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${config.token}`,
@@ -1289,13 +1362,15 @@ export async function getManageDataFromAdminDashboardApi(): Promise<ManageOvervi
     throw new ManageApiError("Backend API request failed");
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
-async function reconcileWithCanonicalActiveClientAccounts(
-  overview: ManageOverview,
-  requireCanonicalComplete: boolean,
-): Promise<ManageOverview> {
+type CanonicalVisibilityRead =
+  | { ok: true; clientRows: SupabaseRecord[]; igRows: SupabaseRecord[] }
+  | { ok: false };
+
+async function readCanonicalClientAccountVisibility(): Promise<CanonicalVisibilityRead> {
   try {
     const supabase = createSupabaseClient();
     const pageSize = 500;
@@ -1304,13 +1379,13 @@ async function reconcileWithCanonicalActiveClientAccounts(
 
     for (let page = 0; page < maxPages; page += 1) {
       const start = page * pageSize;
-      const result = await supabase
+      const result = await constrainProfilesLiveQuery(supabase
         .from("client_instagram_accounts")
         .select("account_id,client_id,label,active,onboarding_rollback_at,login_status,provisioning_status,onboarding_status,created_at")
         .eq("active", true)
         .is("onboarding_rollback_at", null)
         .order("created_at", { ascending: false })
-        .range(start, start + pageSize - 1);
+        .range(start, start + pageSize - 1));
       if (result.error) throw result.error;
       const pageRows = (result.data ?? []) as SupabaseRecord[];
       clientRows.push(...pageRows);
@@ -1321,13 +1396,30 @@ async function reconcileWithCanonicalActiveClientAccounts(
     const accountIds = [...new Set(clientRows.map((row) => readString(row, ["account_id"], "")).filter(Boolean))];
     const igRows: SupabaseRecord[] = [];
     for (let start = 0; start < accountIds.length; start += 200) {
-      const result = await supabase
+      const result = await constrainProfilesLiveQuery(supabase
         .from("ig_accounts")
         .select("id,username,display_name,status,admin_lifecycle_status,device_name,created_at")
-        .in("id", accountIds.slice(start, start + 200));
+        .in("id", accountIds.slice(start, start + 200)));
       if (result.error) throw result.error;
       igRows.push(...((result.data ?? []) as SupabaseRecord[]));
     }
+
+    return { ok: true, clientRows, igRows };
+  } catch {
+    // Settle immediately so an API failure cannot leave a rejected read promise.
+    return { ok: false };
+  }
+}
+
+async function reconcileWithCanonicalActiveClientAccounts(
+  overview: ManageOverview,
+  requireCanonicalComplete: boolean,
+  preparedRead?: Promise<CanonicalVisibilityRead>,
+): Promise<ManageOverview> {
+  try {
+    const rows = await (preparedRead ?? readCanonicalClientAccountVisibility());
+    if (!rows.ok) throw new Error("Canonical visibility read failed");
+    const { clientRows, igRows } = rows;
 
     const clientAccounts: CanonicalClientAccountVisibilitySeed[] = clientRows.map((row) => ({
       accountId: readString(row, ["account_id"], ""),
@@ -1374,16 +1466,33 @@ async function enrichWithOrphanRecovery(overview: ManageOverview): Promise<Manag
   const accountIds = overview.allAccounts.map((account) => account.accountId).filter(Boolean);
   if (!accountIds.length) return overview;
 
+  const orphanStartedAt = performance.now();
+  const accountDurations: number[] = [];
+  let selectCount = 0;
+  traceMetric("orphan_account_count", accountIds.length);
   const projections = await Promise.all(
-    accountIds.map(async (accountId) => {
+    accountIds.map(async (accountId, accountIndex) => {
+      const accountStartedAt = performance.now();
       try {
-        const projection = await resolveOrphanLoginRecoveryProjection(accountId);
+        const projection = await traceStep("orphan.account", () => resolveOrphanLoginRecoveryProjection(accountId, {
+          accountIndex,
+          onSelect: () => { selectCount += 1; },
+        }), { account_index: accountIndex });
         return [accountId, projection] as const;
       } catch {
+        traceFallback("orphan_projection_unavailable");
         return [accountId, null] as const;
+      } finally {
+        accountDurations.push(performance.now() - accountStartedAt);
       }
     }),
   );
+  const sortedDurations = [...accountDurations].sort((a, b) => a - b);
+  traceMetric("orphan_select_count", selectCount);
+  traceMetric("orphan_account_p50_ms", sortedDurations[Math.max(0, Math.ceil(sortedDurations.length * 0.5) - 1)] ?? 0);
+  traceMetric("orphan_account_max_ms", sortedDurations.at(-1) ?? 0);
+  traceMetric("orphan_account_sum_ms", accountDurations.reduce((sum, value) => sum + value, 0));
+  traceMetric("orphan_total_ms", performance.now() - orphanStartedAt);
   const byId = new Map(projections);
   const enrich = (account: ManageAccount): ManageAccount => {
     const projection = byId.get(account.accountId);
@@ -1397,9 +1506,22 @@ async function enrichWithOrphanRecovery(overview: ManageOverview): Promise<Manag
   return overviewWithAccounts(overview, overview.allAccounts.map(enrich));
 }
 
+async function enrichSharedCoreWithTrace(overview: ManageOverview) {
+  traceMetric("shared_account_count", overview.allAccounts.length);
+  const lifecycle = await traceStep("shared.lifecycle", () => enrichWithIgAccountLifecycle(overview));
+  // Lifecycle alone can remove accounts. The remaining stages preserve IDs;
+  // fetch on that exact scope, then apply their projections in historical order.
+  const assignment = traceStep("shared.assignment_credentials", () => enrichWithAssignmentAndCredentialStatus(lifecycle));
+  const metadata = traceStep("shared.public_metadata", () => enrichWithPublicProfileMetadata(lifecycle, assignment));
+  const packages = traceStep("shared.commercial_packages", () => enrichWithCommercialPackageSummaries(lifecycle, metadata));
+  return traceStep("shared.readiness", () => enrichWithReadinessProjection(lifecycle, packages));
+}
+
 export async function getManageData(options: {
   includeOrphanRecovery?: boolean;
   requireCanonicalComplete?: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 } = {}) {
   const includeOrphanRecovery = options.includeOrphanRecovery !== false;
   let overview: ManageOverview;
@@ -1409,12 +1531,14 @@ export async function getManageData(options: {
     }
     const fallback = await getManageDataFromLegacyTables();
     overview = sourceStatusWithBackend(backendApiNotConfiguredStatus, fallback);
-    const enriched = await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
-    return includeOrphanRecovery ? await enrichWithOrphanRecovery(enriched) : enriched;
+    const enriched = await enrichSharedCoreWithTrace(overview);
+    return includeOrphanRecovery ? await traceStep("shared.orphan_recovery", () => enrichWithOrphanRecovery(enriched)) : enriched;
   }
 
+  // These reads have no dependency on manage_overview. Only their merge does.
+  const canonicalRead = traceStep("shared.canonical_reconciliation", () => readCanonicalClientAccountVisibility());
   try {
-    overview = await getManageDataFromAdminDashboardApi();
+    overview = await traceStep("shared.manage_overview", () => getManageDataFromAdminDashboardApi({ timeoutMs: options.timeoutMs, signal: options.signal }));
   } catch {
     if (options.requireCanonicalComplete) throw new ManageApiError("Canonical manage_overview account scan failed");
     const fallback = await getManageDataFromLegacyTables();
@@ -1423,7 +1547,7 @@ export async function getManageData(options: {
       errors: ["Backend API unavailable; using legacy fallback.", ...fallback.errors],
     });
   }
-  overview = await reconcileWithCanonicalActiveClientAccounts(overview, options.requireCanonicalComplete === true);
-  const enriched = await enrichWithReadinessProjection(await enrichWithCommercialPackageSummaries(await enrichWithPublicProfileMetadata(await enrichWithAssignmentAndCredentialStatus(await enrichWithIgAccountLifecycle(overview)))));
-  return includeOrphanRecovery ? await enrichWithOrphanRecovery(enriched) : enriched;
+  overview = await reconcileWithCanonicalActiveClientAccounts(overview, options.requireCanonicalComplete === true, canonicalRead);
+  const enriched = await enrichSharedCoreWithTrace(overview);
+  return includeOrphanRecovery ? await traceStep("shared.orphan_recovery", () => enrichWithOrphanRecovery(enriched)) : enriched;
 }

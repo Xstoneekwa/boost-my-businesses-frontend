@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import ClientNotificationsPanel from "./ClientNotificationsPanel";
+import ClientPasswordUpdateModal, { type ClientPasswordUpdateTarget } from "./ClientPasswordUpdateModal";
 import ClientAccountsSection, { type ClientInstagramAccountView } from "./ClientAccountsSection";
 import ClientAgencyModeBanner from "./ClientAgencyModeBanner";
 import ClientAgencyOverviewPanel from "./ClientAgencyOverviewPanel";
@@ -71,7 +72,13 @@ type ClientProgressSnapshot = {
   run_id: string | null;
   status: "unknown" | "queued" | "claimed" | "running" | "action_required" | "connected" | "failed" | "stopped";
   reason: string | null;
-  action_required: null | { title: string; message: string; status: string };
+  action_required: null | {
+    id: string;
+    action_type: string;
+    title: string;
+    message: string;
+    status: string;
+  };
   steps: Array<{ id: string; label: string; subtitle: string; status: "pending" | "running" | "done" | "failed" | "action_required" | "skipped" }>;
   process_log: Array<{ id: string; timestamp: string; phase: string; message: string }>;
 };
@@ -98,6 +105,8 @@ function projectCanonicalConnectProgress(snapshot: ClientConnectProgressSnapshot
     reason: snapshot.message,
     action_required: snapshot.action_required
       ? {
+        id: snapshot.action_required.id,
+        action_type: snapshot.action_required.action_type,
         title: snapshot.action_required.title,
         message: snapshot.action_required.message,
         status: snapshot.action_required.status,
@@ -616,7 +625,15 @@ export default function ClientDashboard({
     unfollow_whitelist: "",
   });
   const [accountNotifications, setAccountNotifications] = useState(initialAccountNotifications);
+  const [passwordNotifications, setPasswordNotifications] = useState(initialNotifications);
+  const [passwordUpdateTarget, setPasswordUpdateTarget] = useState<ClientPasswordUpdateTarget | null>(null);
+  const [passwordUpdateRevision, setPasswordUpdateRevision] = useState(0);
+  const [postPasswordRetryRequest, setPostPasswordRetryRequest] = useState<{ accountId: string; revision: number } | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    setPasswordNotifications(initialNotifications);
+  }, [initialNotifications]);
 
   const t = T[lang];
   const connectionActionPanel = resolveClientConnectionActionPanel({
@@ -1026,6 +1043,30 @@ export default function ClientDashboard({
   const notificationBadge = notificationsFeatureAvailable && accountNotifications.activeCount > 0
     ? accountNotifications.activeCount
     : undefined;
+  const progressPasswordTarget = connectProgress
+    ? (() => {
+        const liveAction = connectProgress.snapshot?.action_required;
+        if (liveAction?.action_type === "update_instagram_password" && liveAction.id) {
+          return {
+            actionId: liveAction.id,
+            accountId: connectProgress.account.accountId,
+            username: connectProgress.account.username,
+            message: liveAction.message,
+          };
+        }
+        const notification = passwordNotifications.find(
+          (row) => row.accountId === connectProgress.account.accountId,
+        );
+        return notification
+          ? {
+              actionId: notification.id,
+              accountId: notification.accountId,
+              username: notification.username,
+              message: notification.message,
+            }
+          : null;
+      })()
+    : null;
   const overviewRecentFeed = hasOverviewInsights ? (accountInsights?.recentFeed ?? []) : [];
   const overviewStats = buildOverviewStats(accountInsights, lang);
   const followerChartUsername = agencyModeActive
@@ -1286,9 +1327,9 @@ export default function ClientDashboard({
           />
         ) : null}
 
-        {initialNotifications.length > 0 && (
+        {passwordNotifications.length > 0 && (
           <section className="cd-action-alerts" aria-label="Required account actions">
-            {initialNotifications.map((notification) => (
+            {passwordNotifications.map((notification) => (
               <article className="cd-action-alert" key={notification.id}>
                 <div className="cd-action-alert-ic">
                   <svg viewBox="0 0 24 24" width={16} height={16} stroke="currentColor" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -1303,7 +1344,14 @@ export default function ClientDashboard({
                   <strong>{lang === "fr" ? "Mise à jour du mot de passe Instagram requise" : "Instagram password update required"}</strong>
                   <p>{notification.message}</p>
                 </div>
-                <button className="cd-btn cd-btn-primary" onClick={() => handleNotificationNavigate(notification.actionHref)}>
+                <button
+                  className="cd-btn cd-btn-primary"
+                  onClick={() => setPasswordUpdateTarget({
+                    accountId: notification.accountId,
+                    actionId: notification.id,
+                    username: notification.username,
+                  })}
+                >
                   {lang === "fr" ? "Mettre à jour" : "Update password"}
                 </button>
               </article>
@@ -1329,6 +1377,9 @@ export default function ClientDashboard({
               accounts={hasLinkedInstagramAccount ? connectionActionPanel.accounts : []}
               displayMode={connectionActionPanel.showAccountActions ? "accounts" : "add_only"}
               accountScopeId={connectionActionPanel.accountScopeId}
+              passwordUpdateRevision={passwordUpdateRevision}
+              postPasswordRetryRequest={postPasswordRetryRequest}
+              onPasswordUpdateRequested={setPasswordUpdateTarget}
             />
             {demoMode ? (
               <p className="cd-preview-banner" role="note">{t.preview}</p>
@@ -1766,6 +1817,30 @@ export default function ClientDashboard({
         }}
       />
 
+      <ClientPasswordUpdateModal
+        open={Boolean(passwordUpdateTarget)}
+        lang={lang}
+        target={passwordUpdateTarget}
+        onClose={() => setPasswordUpdateTarget(null)}
+        onSuccess={({ actionId }) => {
+          setPasswordNotifications((current) => current.filter((notification) => notification.id !== actionId));
+          setPasswordUpdateRevision((current) => current + 1);
+          setAccountMessage(lang === "fr"
+            ? "Mot de passe enregistré. Relancez la connexion Instagram quand vous êtes prêt."
+            : "Password saved. Restart the Instagram connection when you are ready.");
+          router.refresh();
+        }}
+        onRestart={(accountId) => {
+          setPasswordUpdateTarget(null);
+          if (agencyModeActive) setOverviewScope(accountId);
+          setActiveView("overview");
+          setPostPasswordRetryRequest((current) => ({
+            accountId,
+            revision: (current?.revision ?? 0) + 1,
+          }));
+        }}
+      />
+
       {connectProgress ? (
         <div className="cd-progress-overlay" role="presentation" onMouseDown={() => setConnectProgress(null)}>
           <section className="cd-progress-modal" role="dialog" aria-modal="true" aria-labelledby="cd-progress-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -1773,10 +1848,11 @@ export default function ClientDashboard({
               <div>
                 <span>@{connectProgress.account.username} · Instagram</span>
                 <h3 id="cd-progress-title">{t.account.connectTitle}</h3>
-                <p>{connectProgress.snapshot?.status === "action_required" ? t.account.connectActionRequired : t.account.connectBody}</p>
+                <p>{progressPasswordTarget?.message || (connectProgress.snapshot?.status === "action_required" ? t.account.connectActionRequired : t.account.connectBody)}</p>
               </div>
-              <em className={`status-${connectProgress.snapshot?.status || "running"}`}>
-                {connectProgress.snapshot?.status === "connected" ? (lang === "fr" ? "Connecté" : "Connected")
+              <em className={`status-${progressPasswordTarget ? "action_required" : connectProgress.snapshot?.status || "running"}`}>
+                {progressPasswordTarget ? (lang === "fr" ? "Mot de passe requis" : "Password required")
+                  : connectProgress.snapshot?.status === "connected" ? (lang === "fr" ? "Connecté" : "Connected")
                   : connectProgress.snapshot?.status === "action_required" ? (lang === "fr" ? "Action requise" : "Action required")
                     : connectProgress.snapshot?.status === "failed" ? (lang === "fr" ? "Échec" : "Failed")
                       : (lang === "fr" ? "En cours" : "In progress")}
@@ -1795,14 +1871,29 @@ export default function ClientDashboard({
                 </div>
               ))}
             </section>
-            {connectProgress.snapshot?.action_required ? (
-              <p className="cd-progress-action">{connectProgress.snapshot.action_required.message || t.account.connectActionRequired}</p>
+            {progressPasswordTarget || connectProgress.snapshot?.action_required ? (
+              <p className="cd-progress-action">{progressPasswordTarget?.message || connectProgress.snapshot?.action_required?.message || t.account.connectActionRequired}</p>
             ) : null}
             {connectProgress.snapshot?.status === "action_required" ? (
               <p className="cd-progress-action">{t.account.connectActionHelp}</p>
             ) : null}
             <div className="cd-connect-actions">
               <button className="cd-btn cd-btn-soft" onClick={() => setConnectProgress(null)}>{lang === "fr" ? "Fermer" : "Close"}</button>
+              {progressPasswordTarget ? (
+                <button
+                  className="cd-btn cd-btn-primary"
+                  onClick={() => {
+                    setConnectProgress(null);
+                    setPasswordUpdateTarget({
+                      actionId: progressPasswordTarget.actionId,
+                      accountId: progressPasswordTarget.accountId,
+                      username: progressPasswordTarget.username,
+                    });
+                  }}
+                >
+                  {lang === "fr" ? "Mettre à jour le mot de passe" : "Update password"}
+                </button>
+              ) : null}
               <button
                 className="cd-btn cd-btn-primary"
                 onClick={() => setConnectProgress((current) => current ? {
@@ -2190,6 +2281,7 @@ const CSS = `
 .cd-connect-actions{display:flex;gap:10px;flex-wrap:wrap}
 .cd-verification-label{display:block;color:#94A3B8;font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .cd-verification-input{width:100%;border:1px solid var(--line);border-radius:12px;background:#0B1020;color:#E5E7EB;padding:12px 14px;font-size:1rem}
+.cd-password-update-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
 .cd-verification-hint{margin:0;color:#778299;font-size:.82rem;line-height:1.45}
 .cd-verification-error{margin:0;border:1px solid rgba(248,113,113,.35);border-radius:12px;background:rgba(127,29,29,.22);color:#FCA5A5;padding:10px 12px;font-size:.84rem;line-height:1.45}
 .cd-progress-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px;background:rgba(2,6,23,.74)}

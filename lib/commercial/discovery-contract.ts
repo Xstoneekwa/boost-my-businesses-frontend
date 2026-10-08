@@ -6,12 +6,17 @@ export const COMMERCIAL_DISCOVERY_SUBSEGMENTS = [
 ] as const;
 
 export const COMMERCIAL_DISCOVERY_MAX_PROSPECTS = 30;
+export const COMMERCIAL_FRANCE_CANARY_MAX_PROSPECTS = 50;
 export const COMMERCIAL_DISCOVERY_CANARY_MAX = 3;
 export const COMMERCIAL_SCORING_MODEL_VERSION = "BMB_SCORING_MODEL_V2";
 export const COMMERCIAL_AI_PROMPT_VERSION = "BMB_COMMERCIAL_AI_V2";
 export const COMMERCIAL_AI_FORMAT_NAME = "bmb_commercial_analysis_v1";
 
-export type CommercialDiscoveryCity = (typeof COMMERCIAL_DISCOVERY_CITIES)[number];
+// France is a nationwide run scope, never the detected business city.
+// City is data supplied by the run. The ZA UI keeps its historical allow-list,
+// while France can accept any owner-approved city without a code change.
+export type CommercialDiscoveryCity = string;
+export type CommercialDiscoveryCountry = "ZA" | "FR";
 export type CommercialDiscoverySubsegment = (typeof COMMERCIAL_DISCOVERY_SUBSEGMENTS)[number];
 export type CommercialScoreDimension =
   | "instagramImportance" | "contentQuality" | "activity" | "commercialStrength"
@@ -49,6 +54,7 @@ export type CommercialAiAnalysis = {
 };
 
 export type CommercialDiscoveryTrigger = {
+  countryCode?: CommercialDiscoveryCountry;
   city: CommercialDiscoveryCity;
   subsegment?: CommercialDiscoverySubsegment;
   maxProspects: number;
@@ -93,16 +99,25 @@ function isOneOf<T extends readonly string[]>(value: unknown, allowed: T): value
 
 export function parseCommercialDiscoveryTrigger(value: unknown): CommercialDiscoveryTrigger {
   const row = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  if (!isOneOf(row.city, COMMERCIAL_DISCOVERY_CITIES)) throw new Error("commercial_discovery_city_invalid");
-  if (row.subsegment !== undefined && row.subsegment !== "" && !isOneOf(row.subsegment, COMMERCIAL_DISCOVERY_SUBSEGMENTS)) {
+  const countryCode = row.countryCode === undefined ? (row.city === "France" ? "FR" : "ZA") : row.countryCode;
+  if (countryCode !== "ZA" && countryCode !== "FR") throw new Error("commercial_discovery_country_invalid");
+  const city = typeof row.city === "string" ? row.city.trim() : "";
+  if (!city || (countryCode === "ZA" && !isOneOf(city, COMMERCIAL_DISCOVERY_CITIES))) throw new Error("commercial_discovery_city_invalid");
+  if (row.subsegment !== undefined && row.subsegment !== "" && !(city === "France" && row.subsegment === null) && !isOneOf(row.subsegment, COMMERCIAL_DISCOVERY_SUBSEGMENTS)) {
     throw new Error("commercial_discovery_subsegment_invalid");
   }
   const maxProspects = Number(row.maxProspects);
-  if (!Number.isInteger(maxProspects) || maxProspects < 1 || maxProspects > COMMERCIAL_DISCOVERY_MAX_PROSPECTS) {
+  const maxAllowed = countryCode === "FR" ? COMMERCIAL_FRANCE_CANARY_MAX_PROSPECTS : COMMERCIAL_DISCOVERY_MAX_PROSPECTS;
+  // The initial France canary is three independent, idempotent city runs
+  // (10 candidates each). Historical `city=France` runs retain their
+  // original 30-candidate contract for backward compatibility.
+  const minAllowed = countryCode === "FR" ? (city === "France" ? 30 : 10) : 1;
+  if (!Number.isInteger(maxProspects) || maxProspects < minAllowed || maxProspects > maxAllowed) {
     throw new Error("commercial_discovery_max_invalid");
   }
   const idempotencyKey = typeof row.idempotencyKey === "string" ? row.idempotencyKey.trim() : "";
   if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("commercial_discovery_idempotency_invalid");
   if (row.forceRescore !== undefined && typeof row.forceRescore !== "boolean") throw new Error("commercial_discovery_force_rescore_invalid");
-  return { city: row.city, ...(row.subsegment ? { subsegment: row.subsegment as CommercialDiscoverySubsegment } : {}), maxProspects, idempotencyKey, forceRescore: row.forceRescore === true };
+  if (countryCode === "FR" && city === "France" && (maxProspects !== 30 || row.forceRescore === true || row.subsegment)) throw new Error("commercial_france_canary_scope_invalid");
+  return { countryCode, city, ...(row.subsegment ? { subsegment: row.subsegment as CommercialDiscoverySubsegment } : {}), maxProspects, idempotencyKey, forceRescore: row.forceRescore === true };
 }

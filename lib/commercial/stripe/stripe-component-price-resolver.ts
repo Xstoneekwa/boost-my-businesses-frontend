@@ -1,10 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BillingIntervalMonths, OutreachAddonKey, PlanKey } from "../catalog.ts";
 import type { StripeCatalogEnvironment } from "./stripe-catalog.ts";
+import { isValidStripePriceId } from "./stripe-catalog.ts";
 import type {
   ProductKey,
   StripeBillingComponent,
   StripeComponentKind,
+} from "./stripe-per-entitlement-billing.ts";
+import {
+  productKeyForPackage,
+  publicCatalogAmountCents,
 } from "./stripe-per-entitlement-billing.ts";
 
 type Row = Record<string, unknown>;
@@ -81,6 +86,46 @@ export async function resolveStripeComponentPriceId(
 ) {
   const row = await loadStripeComponentPriceCatalogRow(supabase, input);
   return row?.active ? row.stripe_price_id : null;
+}
+
+/**
+ * Canonical public-catalog package resolver shared by quote, confirmation,
+ * Stripe mutation and webhook reconciliation. The component identity includes
+ * the catalog-derived amount, so stale or cross-package mappings fail closed.
+ */
+export async function resolveCanonicalPackageStripePriceCatalogRow(
+  supabase: SupabaseClient,
+  input: {
+    environment: StripeCatalogEnvironment;
+    planKey: PlanKey;
+    billingIntervalMonths: BillingIntervalMonths;
+  },
+) {
+  const component: StripeBillingComponent = {
+    componentKind: "package",
+    productKey: productKeyForPackage(input.planKey),
+    packageKey: input.planKey,
+    outreachKey: null,
+    billingIntervalMonths: input.billingIntervalMonths,
+    amountCents: publicCatalogAmountCents("package", input.planKey, input.billingIntervalMonths),
+    currency: "eur",
+  };
+  return loadStripeComponentPriceCatalogRow(supabase, {
+    environment: input.environment,
+    component,
+  });
+}
+
+export async function resolveCanonicalPackageStripePriceId(
+  supabase: SupabaseClient,
+  input: {
+    environment: StripeCatalogEnvironment;
+    planKey: PlanKey;
+    billingIntervalMonths: BillingIntervalMonths;
+  },
+) {
+  const row = await resolveCanonicalPackageStripePriceCatalogRow(supabase, input);
+  return row?.active && isValidStripePriceId(row.stripe_price_id) ? row.stripe_price_id : null;
 }
 
 export async function resolveStripeProductIdForComponent(

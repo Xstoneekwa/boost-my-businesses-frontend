@@ -398,12 +398,23 @@ export function validateCanonicalResumePlan(plan: Record<string, unknown>): stri
     return null;
   }
   if (plan.package_contract_ready !== true) return "phase_plan_package_unknown";
-  if (!Array.isArray(plan.phase_order) || plan.phase_order.join(",") !== "welcome,follow,unfollow") {
+  const order = Array.isArray(plan.phase_order) ? plan.phase_order.join(",") : "";
+  const recoveryFirst = order === "post_follow_recovery,welcome,follow,unfollow";
+  if (order !== "welcome,follow,unfollow" && !recoveryFirst) {
     return "phase_plan_order_invalid";
   }
   const phases = plan.phases_to_run as Record<string, unknown> | undefined;
   const quota = plan.quota_remaining as Record<string, unknown> | undefined;
   if (!phases || !quota) return "phase_plan_unknown";
+  if (recoveryFirst) {
+    if (
+      phases.post_follow_recovery !== true
+      || plan.safe_next_step !== "post_follow_recovery"
+      || phases.follow !== true
+    ) return "post_follow_recovery_contract_invalid";
+  } else if (phases.post_follow_recovery === true) {
+    return "post_follow_recovery_contract_invalid";
+  }
   const enabled = ["welcome", "follow", "unfollow"].filter((phase) => phases[phase] === true);
   if (!enabled.length) return "resume_phase_plan_not_actionable";
   for (const phase of enabled) {

@@ -1,14 +1,18 @@
 import { createHash } from "node:crypto";
 import type { CommercialDiscoveryCity } from "./discovery-contract.ts";
+import { resolveFranceLocation, franceNonLocalServiceReason } from "./france-location.ts";
+export { resolveFranceLocation } from "./france-location.ts";
 
 type EvidenceSource = "provider" | "instagram" | "website" | "booking" | "structured_metadata";
 
 export type LocationResolution = {
-  country: "ZA" | null;
-  city: CommercialDiscoveryCity | null;
+  country: "ZA" | "FR" | null;
+  city: string | null;
+  postalCode?: string | null;
+  region?: string | null;
   confidence: "HIGH" | "MEDIUM" | "LOW";
   confidenceScore: number;
-  evidence: Array<{ source: EvidenceSource; value: string; city: CommercialDiscoveryCity }>;
+  evidence: Array<{ source: EvidenceSource; value: string; city: string; evidence_source?: EvidenceSource; raw_evidence?: string; normalized_city?: string; normalized_country?: "FR"; postal_code?: string | null; region?: string | null; confidence?: "HIGH" | "MEDIUM" | "LOW" }>;
 };
 
 export type CommercialPrecheckResult = {
@@ -40,7 +44,7 @@ const audienceVerticalPatterns: Array<[Exclude<AudienceVertical, "beauty_general
   ["nails_lashes_brows", /\b(nail|lash|brow|makeup|pmu|manicure|pedicure)\b/i],
 ];
 const closedPattern = /\b(permanently closed|business closed|no longer trading|ceased trading)\b/i;
-const cityPatterns: Record<CommercialDiscoveryCity, RegExp> = {
+const cityPatterns: Record<string, RegExp> = {
   Johannesburg: /\b(johannesburg|joburg|jozi|sandton|rosebank|midrand|randburg|fourways|soweto|centurion|gauteng)\b/i,
   "Cape Town": /\b(cape town|capetown|cpt|stellenbosch|somerset west|claremont|constantia|sea point|western cape)\b/i,
 };
@@ -60,10 +64,12 @@ function audienceVerticalLabel(vertical: AudienceVertical) {
   return vertical === "hair" ? "hair" : "Beauty/Aesthetics";
 }
 
+
 export function resolveCommercialLocation(input: {
   requestedCity: CommercialDiscoveryCity;
   signals: Partial<Record<EvidenceSource, unknown[]>>;
 }): LocationResolution {
+  if (input.requestedCity === "France") return resolveFranceLocation(input.signals);
   const evidence: LocationResolution["evidence"] = [];
   for (const [source, values] of Object.entries(input.signals) as Array<[EvidenceSource, unknown[] | undefined]>) {
     for (const raw of values ?? []) {
@@ -89,6 +95,7 @@ export function deterministicCommercialPrecheck(input: {
   snippet?: unknown;
   profileName?: unknown;
   biography?: unknown;
+  websiteDescription?: unknown;
   category?: unknown;
   recentCaptions?: unknown[];
   isPrivate?: boolean | null;
@@ -98,13 +105,20 @@ export function deterministicCommercialPrecheck(input: {
   const fields = [input.title, input.snippet, input.profileName, input.biography, input.category, ...(input.recentCaptions ?? [])].map((value) => clean(value)).filter(Boolean);
   const combined = fields.join(" ");
   const identityCombined = [input.title, input.profileName, input.category].map((value) => clean(value)).filter(Boolean).join(" ");
+  const franceExclusion = input.requestedCity === "France" ? franceNonLocalServiceReason(identityCombined, clean(input.biography), clean(input.websiteDescription)) : null;
+  if (franceExclusion) return { decision: "PRECHECK_REJECT", reason: franceExclusion, evidence: fields.slice(0, 4) };
+  const beauty = input.requestedCity === "France" ? /(?:esth[ée]ti|beaut[ée]|coiff|ongl|cils|sourcils|maquill|[ée]pilation|soins de la peau|dermato|salon|skin|spa|lash|brow|nail|makeup|hair)/i : beautyPattern;
   if (input.profileFound === false) return { decision: "PRECHECK_REJECT", reason: "instagram_profile_not_found", evidence: [] };
   if (input.isPrivate === true) return { decision: "PRECHECK_REJECT", reason: "instagram_private", evidence: [] };
   if (closedPattern.test(combined)) return { decision: "PRECHECK_REJECT", reason: "business_closed", evidence: fields.filter((value) => closedPattern.test(value)).slice(0, 3) };
-  if (disallowedAudiencePattern.test(identityCombined) || (disallowedAudiencePattern.test(combined) && !beautyPattern.test(combined))) {
+  if (disallowedAudiencePattern.test(identityCombined) || (disallowedAudiencePattern.test(combined) && !beauty.test(combined))) {
     return { decision: "PRECHECK_REJECT", reason: "clearly_unrelated_business", evidence: fields.filter((value) => disallowedAudiencePattern.test(value)).slice(0, 3) };
   }
-  if (!beautyPattern.test(combined)) return { decision: "PRECHECK_AMBIGUOUS", reason: "beauty_vertical_unproven", evidence: fields.slice(0, 3) };
+  if (!beauty.test(combined)) return { decision: "PRECHECK_AMBIGUOUS", reason: "beauty_vertical_unproven", evidence: fields.slice(0, 3) };
+  if (input.requestedCity === "France") {
+    if (input.location.country !== "FR" || !input.location.city || input.location.confidence === "LOW") return { decision: "PRECHECK_AMBIGUOUS", reason: "location_requires_enrichment", evidence: [] };
+    return { decision: "PRECHECK_PASS", reason: "plausible_local_beauty_business", evidence: input.location.evidence.map((e) => `${e.source}:${e.value}`).slice(0, 5) };
+  }
   const wrongCityEvidence = input.location.evidence.filter((item) => item.city !== input.requestedCity);
   if (input.location.confidence === "LOW" && wrongCityEvidence.length) {
     return { decision: "PRECHECK_REJECT", reason: "outside_strict_market", evidence: wrongCityEvidence.map((item) => item.value).slice(0, 3) };
@@ -167,7 +181,7 @@ function decodeHtml(value: string) {
   return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-function extractPage(html: string, pageUrl: string) {
+function extractPage(html: string, pageUrl: string, market: "ZA" | "FR" = "ZA") {
   const links: Array<{ url: string; title: string }> = [];
   for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     const url = normalizedUrl(decodeHtml(match[1]), pageUrl);
@@ -175,8 +189,19 @@ function extractPage(html: string, pageUrl: string) {
   }
   const plain = decodeHtml(html.replace(/<script\b(?![^>]*application\/ld\+json)[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
   const email = plain.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)?.[0]?.toLowerCase() ?? null;
-  const phone = plain.match(/(?:\+27|0)[1-8][\d\s().-]{7,14}\d/)?.[0]?.replace(/\s+/g, " ").trim() ?? null;
-  const address = plain.match(/.{0,80}\b(?:Johannesburg|Joburg|Sandton|Rosebank|Midrand|Cape Town|Stellenbosch|Western Cape)\b.{0,120}/i)?.[0]?.trim() ?? null;
+  const phone = plain.match(market === "FR" ? /(?:\+33\s?\(?0?\)?|0)[1-9](?:[\s.-]?\d{2}){4}/ : /(?:\+27|0)[1-8][\d\s().-]{7,14}\d/)?.[0]?.replace(/\s+/g, " ").trim() ?? null;
+  let address = plain.match(market === "FR" ? /.{0,50}\b\d{5}\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’ -]{1,70}(?:France|\+33).{0,30}/u : /.{0,80}\b(?:Johannesburg|Joburg|Sandton|Rosebank|Midrand|Cape Town|Stellenbosch|Western Cape)\b.{0,120}/i)?.[0]?.trim() ?? null;
+  if (market === "FR") {
+    const visit = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      const record = value as Record<string, unknown>;
+      const country = typeof record.addressCountry === "object" && record.addressCountry ? (record.addressCountry as Record<string, unknown>).name : record.addressCountry;
+      if (/^(FR|France)$/i.test(String(country)) && typeof record.addressLocality === "string") address = `${clean(record.streetAddress)} ${clean(record.postalCode)} ${clean(record.addressLocality)}, France`.trim();
+      Object.values(record).forEach(visit);
+    };
+    for (const match of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { visit(JSON.parse(match[1])); } catch { /* malformed structured evidence is ignored */ } }
+  }
   const description = html.match(/<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? null;
   const booking = extractBookingEvidence(links, [plain]);
   return { links, email, phone, address, description: description ? decodeHtml(description).slice(0, 500) : null, ...booking };
@@ -204,7 +229,7 @@ async function fetchWithRedirectLimit(url: string, fetchImpl: typeof fetch, time
   return null;
 }
 
-export async function enrichCommercialWebsite(input: { websiteUrl: string | null; fetchImpl?: typeof fetch; maxPages?: number; timeoutMs?: number; maxBytes?: number }) {
+export async function enrichCommercialWebsite(input: { websiteUrl: string | null; market?: "ZA" | "FR"; fetchImpl?: typeof fetch; maxPages?: number; timeoutMs?: number; maxBytes?: number }) {
   const start = input.websiteUrl ? normalizedUrl(input.websiteUrl) : null;
   if (!start) return { websiteUrl: null, pagesFetched: 0, email: null, phone: null, address: null, description: null, bookingUrl: null, bookingProvider: null, bookingEvidence: null, evidence: [] as string[] };
   const fetchImpl = input.fetchImpl ?? fetch; const maxPages = Math.min(Math.max(input.maxPages ?? 3, 1), 3); const timeoutMs = Math.min(Math.max(input.timeoutMs ?? 5_000, 500), 8_000); const maxBytes = Math.min(Math.max(input.maxBytes ?? 512_000, 16_000), 512_000);
@@ -213,7 +238,7 @@ export async function enrichCommercialWebsite(input: { websiteUrl: string | null
     const url = queue.shift()!; if (visited.has(url)) continue; visited.add(url);
     try {
       const result = await fetchWithRedirectLimit(url, fetchImpl, timeoutMs, maxBytes); if (!result) continue;
-      const page = extractPage(result.html, result.url); pages.push(page); evidence.push(result.url);
+      const page = extractPage(result.html, result.url, input.market); pages.push(page); evidence.push(result.url);
       for (const link of page.links) if (new URL(link.url).hostname === new URL(start).hostname && /contact|book|appointment|about/i.test(`${link.title} ${link.url}`) && !visited.has(link.url)) queue.push(link.url);
     } catch { /* Bounded website enrichment is best-effort; Instagram evidence remains usable. */ }
   }
@@ -223,13 +248,13 @@ export async function enrichCommercialWebsite(input: { websiteUrl: string | null
     bookingEvidence: first("evidence") as string | null, evidence };
 }
 
-export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, "audience_relevance_score">>, requestedCity: CommercialDiscoveryCity, targetContext: unknown = "") {
+export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, "audience_relevance_score">>, requestedCity: string, targetContext: unknown = "") {
   const targetVertical = audienceVertical(targetContext);
   return input.flatMap((candidate) => {
     const combined = `${candidate.name} ${candidate.instagram_handle} ${candidate.category} ${candidate.reason} ${candidate.source_query}`;
     const normalizedHandle = clean(candidate.instagram_handle, 200).toLowerCase().replace(/^@/, "");
     if (disallowedAudienceHandlePattern.test(normalizedHandle) || disallowedAudiencePattern.test(combined) || !beautyPattern.test(combined)) return [];
-    const sameCity = cityPatterns[requestedCity].test(candidate.location ?? "");
+    const sameCity = cityPatterns[requestedCity]?.test(candidate.location ?? "") ?? (clean(candidate.location).toLowerCase() === clean(requestedCity).toLowerCase());
     if (!sameCity) return [];
     const candidateVertical = audienceVertical(`${candidate.name} ${candidate.category} ${candidate.source_query}`);
     const exactVertical = targetVertical === candidateVertical;

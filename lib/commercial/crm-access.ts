@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getInstagramUserContext } from "@/lib/restaurant-analytics/session";
+import { getInstagramUserContextReadOnly } from "@/lib/restaurant-analytics/session";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { UserContext } from "@/lib/userContext";
 import {
@@ -36,7 +36,9 @@ export async function resolveCommercialCrmAccess(): Promise<CommercialCrmAccessR
   let context: UserContext | null;
 
   try {
-    context = await getInstagramUserContext();
+    // This permission check is also used by Server Components. Session cookie
+    // persistence belongs to the auth route, never to an authorization read.
+    context = await getInstagramUserContextReadOnly();
   } catch {
     return {
       allowed: false,

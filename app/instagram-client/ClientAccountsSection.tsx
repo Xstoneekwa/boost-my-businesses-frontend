@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ClientAccountProcessModal from "./ClientAccountProcessModal";
 import ClientVerificationModal from "./ClientVerificationModal";
+import type { ClientPasswordUpdateTarget } from "./ClientPasswordUpdateModal";
 import ClientInstagramOnboardingWizard from "./ClientInstagramOnboardingWizard";
 import { resolveClientAccountConnectionUi } from "@/lib/instagram-client/client-account-connection-ui";
-import type { ClientConnectProgressSnapshot } from "@/lib/instagram-client/connect-progress-projection";
+import {
+  canSubmitVerificationCode,
+  type ClientConnectProgressSnapshot,
+} from "@/lib/instagram-client/connect-progress-projection";
 import { operationPendingFromConnectResult, operationPendingFromReadinessResult } from "@/lib/instagram-client/client-account-state";
 import {
   clientSafeProcessErrorMessage,
@@ -38,6 +42,10 @@ export type ClientInstagramAccountView = {
   clientReadinessStatus?: string | null;
   activeConnectStatus?: string | null;
   operationPending?: boolean;
+  temporaryActionLimit?: {
+    detectedAt: string | null;
+    recommendedPauseUntil: string | null;
+  } | null;
 };
 
 type Props = {
@@ -45,6 +53,9 @@ type Props = {
   accounts: ClientInstagramAccountView[];
   displayMode?: "accounts" | "add_only";
   accountScopeId?: string | null;
+  passwordUpdateRevision?: number;
+  postPasswordRetryRequest?: { accountId: string; revision: number } | null;
+  onPasswordUpdateRequested?: (target: ClientPasswordUpdateTarget) => void;
 };
 
 type ActionKind = "readiness" | "connect" | "refresh" | "cancel" | null;
@@ -75,6 +86,14 @@ function labelFor(lang: "fr" | "en", fr: string, en: string) {
 
 function isTerminalConnectProgress(snapshot: ClientConnectProgressSnapshot | null | undefined) {
   return isExplicitTerminalClientConnectProgress(snapshot);
+}
+
+function shouldOpenVerificationModal(snapshot: ClientConnectProgressSnapshot | null | undefined) {
+  if (!snapshot?.action_required) return false;
+  if (canSubmitVerificationCode(snapshot.action_required)) return true;
+  return snapshot.connect_status === "verification_code_accepted"
+    || snapshot.connect_status === "verification_resume_active"
+    || snapshot.connect_status === "verification_code_submitted";
 }
 
 function isTerminalProcessAccount(
@@ -109,6 +128,9 @@ export default function ClientAccountsSection({
   accounts,
   displayMode = "accounts",
   accountScopeId = null,
+  passwordUpdateRevision = 0,
+  postPasswordRetryRequest = null,
+  onPasswordUpdateRequested,
 }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(accounts);
@@ -127,6 +149,7 @@ export default function ClientAccountsSection({
   const pollTimerRef = useRef<number | null>(null);
   const connectHydratedRef = useRef(false);
   const connectSubmissionRef = useRef(false);
+  const postPasswordRetryHandledRef = useRef(0);
 
   useEffect(() => {
     setItems(accounts);
@@ -233,6 +256,11 @@ export default function ClientAccountsSection({
     return scopedAccounts;
   }, [accountScopeId, lang, router]);
 
+  useEffect(() => {
+    if (passwordUpdateRevision <= 0) return;
+    void refreshFromServer();
+  }, [passwordUpdateRevision, refreshFromServer]);
+
   async function confirmCancelRestart() {
     if (!cancelConfirmAccount) return;
     setActionKind("cancel");
@@ -329,7 +357,6 @@ export default function ClientAccountsSection({
 
   const resumeActiveConnect = useCallback(async (
     account: ClientInstagramAccountView,
-    openVerification = false,
     connectOperationToken?: string | null,
   ) => {
     const progress = await syncConnectProgress(account.accountId, connectOperationToken);
@@ -381,7 +408,7 @@ export default function ClientAccountsSection({
       connectOperationToken: connectOperationToken ?? null,
       timedOut: false,
     });
-    if (openVerification || reconciledProgress?.connect_status === "verification_required") {
+    if (shouldOpenVerificationModal(reconciledProgress)) {
       setVerificationDismissed(false);
     }
     return reconciledProgress;
@@ -396,7 +423,7 @@ export default function ClientAccountsSection({
     connectHydratedRef.current = true;
     let cancelled = false;
 
-    void resumeActiveConnect(candidate, true).catch(() => {
+    void resumeActiveConnect(candidate).catch(() => {
       if (!cancelled) connectHydratedRef.current = false;
     });
 
@@ -412,12 +439,7 @@ export default function ClientAccountsSection({
 
   const verificationModalOpen = Boolean(
     processModal?.mode === "connect"
-    && (
-      processModal.connectProgress?.connect_status === "verification_required"
-      || processModal.connectProgress?.connect_status === "verification_code_accepted"
-      || processModal.connectProgress?.connect_status === "verification_resume_active"
-    )
-    && processModal.connectProgress.action_required
+    && shouldOpenVerificationModal(processModal.connectProgress)
     && !verificationDismissed,
   );
 
@@ -464,7 +486,7 @@ export default function ClientAccountsSection({
             connectPhase: isTerminalConnectProgress(reconciledProgress) ? "complete" : "polling",
             addPhase: current.addPhase === "refreshing" ? "complete" : current.addPhase,
           };
-          if (mode === "connect" && reconciledProgress?.connect_status === "verification_required") {
+          if (mode === "connect" && shouldOpenVerificationModal(reconciledProgress)) {
             setVerificationDismissed(false);
           }
           if (mode === "connect" && reconciledProgress) {
@@ -520,20 +542,24 @@ export default function ClientAccountsSection({
       if (processModal.mode === "connect") {
         retryOperationToken = await ensureClientConnectAttempt(accountId) || retryOperationToken;
       }
-      const connectProgress = processModal.mode === "connect"
-        ? await syncConnectProgress(accountId, retryOperationToken)
-        : processModal.connectProgress ?? null;
+      let connectProgress = processModal.connectProgress ?? null;
+      try {
+        connectProgress = await syncConnectProgress(
+          accountId,
+          processModal.mode === "connect" ? retryOperationToken : null,
+        );
+      } catch {
+        // Keep the last known projection when the live read path is unavailable.
+      }
       const account = await syncProcessAccount(accountId);
       if (account) {
         setProcessModal((current) => {
           if (!current) return current;
-          const reconciledProgress = current.mode === "connect"
-            ? reconcileClientConnectProgressLineage({
-                previous: current.connectProgress,
-                incoming: connectProgress,
-                operationToken: retryOperationToken,
-              })
-            : current.connectProgress;
+          const reconciledProgress = reconcileClientConnectProgressLineage({
+            previous: current.connectProgress,
+            incoming: connectProgress,
+            operationToken: current.mode === "connect" ? retryOperationToken : null,
+          });
           const terminal = isTerminalProcessAccount(
             account,
             current.mode,
@@ -541,7 +567,7 @@ export default function ClientAccountsSection({
             reconciledProgress,
             retryOperationToken,
           );
-          if (reconciledProgress?.connect_status === "verification_required") {
+          if (shouldOpenVerificationModal(reconciledProgress)) {
             setVerificationDismissed(false);
           }
           return {
@@ -564,7 +590,7 @@ export default function ClientAccountsSection({
 
   function closeProcessModal() {
     stopProcessPolling();
-    if (processModal?.connectProgress?.connect_status === "verification_required") {
+    if (shouldOpenVerificationModal(processModal?.connectProgress)) {
       setVerificationDismissed(true);
     } else {
       setVerificationDismissed(false);
@@ -578,7 +604,7 @@ export default function ClientAccountsSection({
     setActionAccountId(account.accountId);
     try {
       const connectOperationToken = await ensureClientConnectAttempt(account.accountId);
-      await resumeActiveConnect(account, true, connectOperationToken);
+      await resumeActiveConnect(account, connectOperationToken);
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : labelFor(lang, "Impossible de rouvrir la vérification.", "Could not reopen verification."), "error");
     } finally {
@@ -703,10 +729,12 @@ export default function ClientAccountsSection({
           ? responseData.connect_operation_token.trim()
           : "";
         let connectProgress: ClientConnectProgressSnapshot | null = null;
-        try {
-          connectProgress = await syncConnectProgress(account.accountId, connectOperationToken || null);
-        } catch {
-          connectProgress = null;
+        if (connectOperationToken) {
+          try {
+            connectProgress = await syncConnectProgress(account.accountId, connectOperationToken);
+          } catch {
+            connectProgress = null;
+          }
         }
         const reconciledProgress = reconcileClientConnectProgressLineage({
           previous: null,
@@ -736,13 +764,14 @@ export default function ClientAccountsSection({
 
       const terminal = mode === "check_readiness"
         ? true
-        : isTerminalProcessAccount(nextAccount, mode, lang);
+        : isTerminalProcessAccount(nextAccount, mode, lang, null);
       setProcessModal({
         mode,
         username: nextAccount.username,
         accountId: nextAccount.accountId,
         account: nextAccount,
         connectPhase: terminal ? "complete" : "polling",
+        connectProgress: null,
         timedOut: false,
       });
     } catch {
@@ -757,6 +786,20 @@ export default function ClientAccountsSection({
       setActionAccountId(null);
     }
   }
+
+  const runPostPasswordRetryReadiness = useEffectEvent((account: ClientInstagramAccountView) => {
+    void runConnectProcess(account, "check_readiness");
+  });
+
+  useEffect(() => {
+    if (!postPasswordRetryRequest) return;
+    if (postPasswordRetryHandledRef.current === postPasswordRetryRequest.revision) return;
+    if (actionBusy || processModal) return;
+    const account = items.find((row) => row.accountId === postPasswordRetryRequest.accountId);
+    if (!account) return;
+    postPasswordRetryHandledRef.current = postPasswordRetryRequest.revision;
+    runPostPasswordRetryReadiness(account);
+  }, [actionBusy, items, postPasswordRetryRequest, processModal]);
 
   function confirmVerifiedConnection() {
     const account = processModal?.account;
@@ -821,15 +864,28 @@ export default function ClientAccountsSection({
                 operationPending: account.operationPending,
               }, lang);
               const lifecycle = projectCommercialLifecyclePresentation(account.accountStatus, lang);
+              const actionLimit = account.temporaryActionLimit;
+              const actionLimitLabel = actionLimit
+                ? labelFor(lang, "Pause de 48 h requise", "48h pause required")
+                : null;
+              const actionLimitDetail = actionLimit
+                ? labelFor(
+                    lang,
+                    `Instagram a temporairement limité certaines actions.${actionLimit.recommendedPauseUntil ? ` Pause recommandée jusqu’au ${new Date(actionLimit.recommendedPauseUntil).toLocaleString("fr-FR")}.` : ""}`,
+                    `Instagram temporarily limited some actions.${actionLimit.recommendedPauseUntil ? ` Recommended pause until ${new Date(actionLimit.recommendedPauseUntil).toLocaleString("en-GB")}.` : ""}`,
+                  )
+                : null;
               return (
                 <article className="cd-account-row" key={account.accountId}>
                   <div className="cd-account-main">
                     <strong>@{account.username}</strong>
                     <small>{account.packageLabel}</small>
-                    <span className={`cd-account-pill cd-account-pill-${lifecycle?.tone ?? ui.badgeTone}`}>
-                      {lifecycle?.label ?? ui.badgeLabel}
+                    <span className={`cd-account-pill cd-account-pill-${actionLimit ? "warning" : lifecycle?.tone ?? ui.badgeTone}`}>
+                      {actionLimitLabel ?? lifecycle?.label ?? ui.badgeLabel}
                     </span>
-                    {lifecycle ? (
+                    {actionLimit ? (
+                      <p className="cd-account-subtext">{actionLimitDetail}</p>
+                    ) : lifecycle ? (
                       <p className="cd-account-subtext">
                         {labelFor(lang, `Statut de connexion : ${ui.badgeLabel}`, `Connection status: ${ui.badgeLabel}`)}
                       </p>
@@ -944,7 +1000,7 @@ export default function ClientAccountsSection({
         lang={lang}
         username={processModal?.username}
         projection={processProjection}
-        connectProgress={processModal?.mode === "connect" ? processModal.connectProgress ?? null : null}
+        connectProgress={processModal?.connectProgress ?? null}
         refreshing={processRefreshing}
         confirming={actionKind === "connect"}
         onRefresh={() => void handleProcessRefresh()}
@@ -956,6 +1012,20 @@ export default function ClientAccountsSection({
         }
         onClose={closeProcessModal}
         onOpenVerification={() => setVerificationDismissed(false)}
+        onUpdatePassword={() => {
+          const actionId = processModal?.connectProgress?.action_required?.id ?? "";
+          const accountId = processModal?.accountId ?? "";
+          const username = processModal?.username ?? "";
+          closeProcessModal();
+          if (actionId && accountId && onPasswordUpdateRequested) {
+            onPasswordUpdateRequested({ actionId, accountId, username });
+          } else {
+            pushMessage(
+              labelFor(lang, "Action de mot de passe indisponible. Actualisez puis réessayez.", "Password action unavailable. Refresh and try again."),
+              "error",
+            );
+          }
+        }}
       />
 
       <ClientVerificationModal

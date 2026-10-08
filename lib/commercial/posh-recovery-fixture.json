@@ -1,0 +1,104 @@
+{
+  "rawOutput": "{\"subject\":null,\"opening_observation\":\"You specialise in nail artistry.\",\"business_opportunity\":\"There’s an opportunity to reach potential customers on Instagram.\",\"bmb_mechanism\":\"Boost My Businesses identifies relevant Instagram audiences around similar businesses or competitors and uses targeted interactions to bring those people to your profile.\",\"business_benefit\":\"This can enhance your visibility and promote qualified growth.\",\"evidence_ids_used\":[\"evidence_v51:nail_artistry:476c0ada36ef\"],\"confidence\":0.9}",
+  "sourceReference": "resp_06412c40d1ecea41016ab6d987b90c87d2a8b77b799d7e03d6",
+  "model": "gpt-4o-mini-2024-07-18",
+  "context": {
+    "item": {
+      "id": "1d09593a-8349-4c80-bcc5-740ef88ef71a",
+      "version": 5,
+      "state": "generation_failed",
+      "channel": "instagram",
+      "angle": "B",
+      "language": "en",
+      "template_version": "IG_BEAUTY_ANGLE_B_EN_V5",
+      "approved_at": null,
+      "approved_by": null
+    },
+    "lead": {
+      "city_snapshot": "Cape Town",
+      "subsegment_snapshot": "Nail Studio",
+      "outreach_channel": "instagram",
+      "message_angle": "B"
+    },
+    "business": {
+      "city": "Cape Town",
+      "website": null,
+      "subsegment": "Nail Studio",
+      "booking_url": null,
+      "country_code": "ZA",
+      "business_name": "POSH",
+      "booking_provider": null,
+      "instagram_handle": "poshcapetown",
+      "enrichment_snapshot_safe": {
+        "booking": {
+          "evidence": null,
+          "bookingUrl": null,
+          "bookingProvider": null
+        },
+        "website": {
+          "email": null,
+          "phone": null,
+          "address": null,
+          "evidence": [],
+          "bookingUrl": null,
+          "websiteUrl": null,
+          "description": null,
+          "pagesFetched": 0,
+          "bookingEvidence": null,
+          "bookingProvider": null
+        },
+        "location": {
+          "city": "Cape Town",
+          "country": "ZA",
+          "evidence": [
+            {
+              "city": "Cape Town",
+              "value": "POSH Nail Salon | Sea Point, Cape Town Where luxury meets artistry. #nailtechnician #nailtechscapetown #hiring #poshcapetown ...",
+              "source": "provider"
+            },
+            {
+              "city": "Cape Town",
+              "value": "Elevating nail artistry with a touch of sophistication. —— 📍POSH Sea Point - Mayphil Court, Regent Road 📍POSH Durbanville - 32 Oxford Street",
+              "source": "instagram"
+            }
+          ],
+          "confidence": "HIGH",
+          "confidenceScore": 0.94
+        },
+        "instagram": {
+          "ok": true,
+          "reason": "found",
+          "status": "found",
+          "metadata": {
+            "biography": "Elevating nail artistry with a touch of sophistication. \n—— \n📍POSH Sea Point - Mayphil Court, Regent Road\n📍POSH Durbanville - 32 Oxford Street",
+            "cache_hit": false,
+            "latency_ms": 2063,
+            "profile_name": "POSH",
+            "rate_limited": false,
+            "throttle_hit": false,
+            "provider_mode": "searchapi",
+            "provider_engine": "instagram_profile",
+            "provider_status": "found"
+          },
+          "bio_links": [],
+          "checked_at": "2026-08-15T02:41:37.290Z",
+          "is_private": null,
+          "is_business": null,
+          "is_verified": null,
+          "posts_count": 311,
+          "external_url": null,
+          "avatar_hd_url": null,
+          "input_username": "poshcapetown",
+          "followers_count": 5266,
+          "following_count": 73,
+          "instagram_user_id": null,
+          "official_category": null,
+          "canonical_username": "poshcapetown",
+          "external_profile_id": null,
+          "provider_profile_id": null
+        }
+      }
+    },
+    "context_fingerprint": "fixture"
+  }
+}

@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "@/lib/supabase";
+import { constrainProfilesLiveQuery, profilesLiveResilienceActive } from "@/lib/instagram-dashboard/profiles-live-resilience";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -97,13 +98,16 @@ function runtimeProfilesFromRows(rows: SupabaseRecord[]) {
 
 async function readAccountPackageSummary(accountIds: string[]) {
   if (!accountIds.length) return new Map<string, AccountPackageSummary>();
-  const { data, error } = await createSupabaseClient()
+  const { data, error } = await constrainProfilesLiveQuery(createSupabaseClient()
     .from("account_package_summary")
     .select("account_id,commercial_package_code,commercial_package_label,commercial_addons,outreach_variant,outreach_job_source,entitlements,runtime_profiles")
     .in("account_id", accountIds)
-    .limit(1000);
+    .limit(1000));
 
-  if (error || !Array.isArray(data)) return new Map<string, AccountPackageSummary>();
+  if (error || !Array.isArray(data)) {
+    if (profilesLiveResilienceActive()) throw error ?? new Error("Invalid package summary payload");
+    return new Map<string, AccountPackageSummary>();
+  }
   return new Map(
     (data as SupabaseRecord[])
       .map((row) => {
@@ -116,14 +120,17 @@ async function readAccountPackageSummary(accountIds: string[]) {
 
 async function readRuntimeProfiles(accountIds: string[]) {
   if (!accountIds.length) return new Map<string, Set<string>>();
-  const { data, error } = await createSupabaseClient()
+  const { data, error } = await constrainProfilesLiveQuery(createSupabaseClient()
     .from("client_subscription_accounts")
     .select("account_id,client_subscriptions(subscription_type,status)")
     .in("account_id", accountIds)
     .eq("status", "active")
-    .limit(1000);
+    .limit(1000));
 
-  if (error || !Array.isArray(data)) return new Map<string, Set<string>>();
+  if (error || !Array.isArray(data)) {
+    if (profilesLiveResilienceActive()) throw error ?? new Error("Invalid runtime profiles payload");
+    return new Map<string, Set<string>>();
+  }
   return runtimeProfilesFromRows(data as SupabaseRecord[]);
 }
 

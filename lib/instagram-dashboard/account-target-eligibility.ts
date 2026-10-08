@@ -1,5 +1,6 @@
 import { readString } from "../instagram-client/guards.ts";
 import type { createSupabaseClient } from "../supabase.ts";
+import { constrainProfilesLiveQuery, profilesLiveResilienceActive } from "./profiles-live-resilience.ts";
 
 type TargetEligibilitySupabase = ReturnType<typeof createSupabaseClient>;
 
@@ -86,14 +87,18 @@ export async function loadTargetEligibilityCountsForAccount(
   };
   if (!accountId.trim()) return empty;
   try {
-    const result = await supabase
+    const result = await constrainProfilesLiveQuery(supabase
       .from("ig_targets")
       .select(ACCOUNT_TARGET_ELIGIBILITY_SELECT)
       .eq("account_id", accountId)
-      .limit(500);
-    if (result.error) return empty;
+      .limit(500));
+    if (result.error) {
+      if (profilesLiveResilienceActive()) throw result.error;
+      return empty;
+    }
     return summarizeTargetEligibilityRows(result.data ?? []);
-  } catch {
+  } catch (error) {
+    if (profilesLiveResilienceActive()) throw error;
     return empty;
   }
 }
@@ -107,13 +112,16 @@ export async function loadTargetEligibilityCountsByAccount(
   if (uniqueIds.length === 0) return out;
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await constrainProfilesLiveQuery(supabase
       .from("ig_targets")
       .select(`account_id,${ACCOUNT_TARGET_ELIGIBILITY_SELECT}`)
       .in("account_id", uniqueIds)
-      .limit(5000);
+      .limit(5000));
 
-    if (error) return out;
+    if (error) {
+      if (profilesLiveResilienceActive()) throw error;
+      return out;
+    }
     const grouped = new Map<string, TargetEligibilityRow[]>();
     for (const row of data ?? []) {
       const accountId = readString(row.account_id, "");
@@ -123,7 +131,8 @@ export async function loadTargetEligibilityCountsByAccount(
     for (const accountId of uniqueIds) {
       out.set(accountId, summarizeTargetEligibilityRows(grouped.get(accountId) ?? []));
     }
-  } catch {
+  } catch (error) {
+    if (profilesLiveResilienceActive()) throw error;
     // Caller falls back to per-account zeros.
   }
   return out;

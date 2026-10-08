@@ -2,7 +2,8 @@ import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
-import { analyzeCommercialProspectWithRetry } from "./discovery-ai";
+import { analyzeCommercialProspect, analyzeCommercialProspectWithRetry } from "./discovery-ai";
+import { FR_PROFILE_FIRST_KEY, type PersistPage } from "./france-profile-first";
 import { COMMERCIAL_AI_PROMPT_VERSION, COMMERCIAL_SCORING_MODEL_VERSION, type CommercialDiscoveryCity, type CommercialDiscoverySubsegment } from "./discovery-contract";
 import { discoverCommercialCandidates, type CommercialDiscoveryCandidate } from "./discovery-provider";
 import {
@@ -38,11 +39,27 @@ function text(value: unknown) { return typeof value === "string" ? value : ""; }
 function nullableText(value: unknown) { const valueText = text(value).trim(); return valueText || null; }
 function num(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function array(value: unknown) { return Array.isArray(value) ? value : []; }
-function sleep(milliseconds: number) { return new Promise<void>((resolve) => setTimeout(resolve, milliseconds)); }
 function safeDatabaseError(error: unknown, attempts: number) {
   const value = row(error); const code = text(value.code).slice(0, 64);
   const category = /^23/.test(code) ? "constraint_violation" : /^08/.test(code) ? "connection_error" : /^PGRST/i.test(code) ? "postgrest_error" : "database_error";
   return { provider: "supabase", code: code || "unknown", category, attempts };
+}
+async function loadFranceControl(supabase: SupabaseAdmin, runId: string) {
+  const result = await supabase.from("commercial_france_run_controls").select("run_id,state").eq("run_id", runId).maybeSingle();
+  if (result.error) throw new Error("france_control_read_failed");
+  return result.data ? row(result.data) : null;
+}
+async function reserveFranceCall(supabase: SupabaseAdmin, runId: string, provider: "searchapi" | "sirene" | "openai", kind: "discovery" | "resolver" | "site_page" | "profile" | "sirene" | "scoring", key: string) {
+  const result = await supabase.rpc("reserve_commercial_france_provider_call_v1", { p_run_id: runId, p_provider: provider, p_call_kind: kind, p_call_key: key });
+  if (result.error) throw new Error("france_provider_reservation_failed");
+  const value = row(result.data);
+  if (value.reserved !== true) throw new Error(`france_provider_${text(value.reason) || "budget_blocked"}`);
+  return text(value.call_id) || null;
+}
+async function finishFranceCall(supabase: SupabaseAdmin, callId: string | null, status: "succeeded" | "failed" | "skipped", durationMs: number, resultCount = 0, errorCode?: string) {
+  if (!callId) return;
+  const result = await supabase.rpc("finish_commercial_france_provider_call_v1", { p_call_id: callId, p_status: status, p_duration_ms: Math.max(0, durationMs), p_result_count: Math.max(0, resultCount), p_error_code: errorCode ?? null });
+  if (result.error) throw new Error("france_provider_ledger_write_failed");
 }
 class CommercialDiscoveryItemUpdateError extends Error {
   constructor(readonly safeDetail: Row) { super("commercial_discovery_item_update_failed"); }
@@ -60,7 +77,26 @@ function candidateFromItem(item: Row): CommercialDiscoveryCandidate {
 }
 
 async function discoverAndPersistRun(supabase: SupabaseAdmin, run: Row, discover: typeof discoverCommercialCandidates) {
-  const discovery = await discover({ city: text(run.city) as CommercialDiscoveryCity, subsegment: nullableText(run.subsegment) as CommercialDiscoverySubsegment | undefined, maxCandidates: num(run.max_prospects) });
+  const experiment = text(run.idempotency_key) === FR_PROFILE_FIRST_KEY;
+  const persist: PersistPage = async (record, phase) => {
+    const value = { run_id: text(run.id), query_id: record.query_id, page: record.page, payload: record };
+    const result = phase === "start" || phase === "skip"
+      ? await supabase.from("commercial_france_serp_pages_v2").insert(value)
+      : await supabase.from("commercial_france_serp_pages_v2").update({ payload: record }).eq("run_id", value.run_id).eq("query_id", value.query_id).eq("page", value.page).select("query_id").single();
+    if (result.error) throw new Error("fr_capture_audit_failure");
+  };
+  const franceControl = text(run.country_code) === "FR" ? await loadFranceControl(supabase, text(run.id)) : null;
+  const providerStarted = Date.now();
+  const discoveryCallId = franceControl ? await reserveFranceCall(supabase, text(run.id), "searchapi", "discovery", `run:${text(run.id)}:discovery`) : null;
+  let discovery;
+  try {
+    discovery = await discover({ city: text(run.city) as CommercialDiscoveryCity, countryCode: text(run.country_code) === "FR" ? "FR" : "ZA", subsegment: nullableText(run.subsegment) as CommercialDiscoverySubsegment | undefined, maxCandidates: num(run.max_prospects),
+      ...(experiment ? { experiment: { runId: text(run.id), persist } } : {}) });
+    await finishFranceCall(supabase, discoveryCallId, "succeeded", Date.now() - providerStarted, discovery.candidates.length);
+  } catch (error) {
+    await finishFranceCall(supabase, discoveryCallId, "failed", Date.now() - providerStarted, 0, error instanceof Error ? error.message : "discovery_failed");
+    throw error;
+  }
   const records = discovery.candidates.map((candidate, index) => ({
     run_id: text(run.id), provider: candidate.provider, provider_external_id: candidate.providerExternalId,
     source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
@@ -68,7 +104,8 @@ async function discoverAndPersistRun(supabase: SupabaseAdmin, run: Row, discover
     selected_for_processing: index < num(run.max_prospects), candidate_rank: index + 1,
     idempotency_key: `${text(run.id)}:${candidate.providerExternalId}`,
     source_snapshot_safe: { instagram_handle: candidate.instagramHandle, profile_url: candidate.profileUrl, title: candidate.title, snippet: candidate.snippet,
-      source_query: candidate.sourceQuery, position: candidate.position, extraction_mode: candidate.extractionMode },
+      source_query: candidate.sourceQuery, position: candidate.position, extraction_mode: candidate.extractionMode,
+      ...(experiment ? { experiment: FR_PROFILE_FIRST_KEY, attribution: candidate.experimentAttribution } : {}) },
   }));
   if (records.length) {
     const { error } = await supabase.from("commercial_discovery_items").upsert(records, { onConflict: "run_id,idempotency_key", ignoreDuplicates: true });
@@ -95,7 +132,7 @@ async function recordPrecheckDecision(supabase: SupabaseAdmin, item: Row, decisi
     reason_code: decision.reason, metadata_safe: { decision: decision.decision, location_confidence: location.confidence } });
 }
 
-async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string, targetContext: string) {
+async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string, targetContext: string, detectedCity: string = city) {
   const { data } = await supabase.from("commercial_discovery_items").select("provider_external_id,source_url,source_query,source_snapshot_safe")
     .eq("run_id", text(item.run_id)).eq("selected_for_processing", true).eq("status", "completed")
     .eq("precheck_decision", "PRECHECK_PASS").not("lead_id", "is", null).limit(90);
@@ -110,14 +147,29 @@ async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city:
       source: "searchapi_google_serp", source_query: sourceQuery, confidence: location.confidence.toLowerCase() as "high" | "medium" | "low" };
     return [suggestion];
   });
-  return filterCommercialAudiences(candidates, city, targetContext);
+  return filterCommercialAudiences(candidates, detectedCity, targetContext);
 }
 
 async function processCommercialItem(supabase: SupabaseAdmin, item: Row, dependencies: ProcessorDependencies) {
   const started = Date.now(); const candidate = candidateFromItem(item); const city = text(item.city) as CommercialDiscoveryCity;
+  const market = text(item.country_code) === "FR" || !["Johannesburg", "Cape Town"].includes(city) ? "FR" as const : "ZA" as const;
   const lookupProfile = dependencies.lookupProfile ?? lookupInstagramPublicProfile; const analyze = dependencies.analyze ?? analyzeCommercialProspectWithRetry; const enrichWebsite = dependencies.enrichWebsite ?? enrichCommercialWebsite;
   try {
-    const profile = await lookupProfile(candidate.instagramHandle);
+    const franceControl = market === "FR" ? await loadFranceControl(supabase, text(item.run_id)) : null;
+    if (franceControl && !["armed", "running"].includes(text(franceControl.state))) {
+      await supabase.from("commercial_discovery_items").update({ status: "pending", locked_at: null, locked_by: null, next_attempt_at: null }).eq("id", text(item.id));
+      return;
+    }
+    const profileStarted = Date.now();
+    const profileCallId = franceControl ? await reserveFranceCall(supabase, text(item.run_id), "searchapi", "profile", `item:${text(item.id)}:profile`) : null;
+    let profile;
+    try {
+      profile = await lookupProfile(candidate.instagramHandle);
+      await finishFranceCall(supabase, profileCallId, "succeeded", Date.now() - profileStarted, profile.ok && profile.status === "found" ? 1 : 0);
+    } catch (error) {
+      await finishFranceCall(supabase, profileCallId, "failed", Date.now() - profileStarted, 0, error instanceof Error ? error.message : "profile_failed");
+      throw error;
+    }
     if (!profile.ok || profile.status !== "found") {
       const code = `profile_${profile.status}`; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
       if (profile.status === "not_found") {
@@ -143,12 +195,22 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const bioLinks = profile.bio_links?.map((link) => ({ url: link.url, title: link.title })) ?? [];
     const observedUrls = extractObservedUrls([...profileTexts, ...bioLinks.map((link) => link.url)]);
     const observedWebsite = profile.external_url ?? bioLinks.map((link) => link.url).find((url) => url && !/instagram\.com/i.test(url)) ?? observedUrls[0] ?? null;
-    const website = await enrichWebsite({ websiteUrl: observedWebsite });
+    const siteStarted = Date.now();
+    const siteCallId = franceControl ? await reserveFranceCall(supabase, text(item.run_id), "searchapi", "site_page", `item:${text(item.id)}:site`) : null;
+    let website;
+    try {
+      website = await enrichWebsite({ websiteUrl: observedWebsite, ...(market === "FR" ? { market } : {}) });
+      await finishFranceCall(supabase, siteCallId, "succeeded", Date.now() - siteStarted, num(website.pagesFetched));
+    } catch (error) {
+      await finishFranceCall(supabase, siteCallId, "failed", Date.now() - siteStarted, 0, error instanceof Error ? error.message : "site_failed");
+      throw error;
+    }
     const directBooking = extractBookingEvidence(bioLinks, profileTexts);
     const booking = directBooking.bookingUrl ? directBooking : { bookingUrl: website.bookingUrl, bookingProvider: website.bookingProvider, evidence: website.bookingEvidence };
     const businessWebsite = website.websiteUrl && !isSharedCommercialPlatformUrl(website.websiteUrl) ? website.websiteUrl : null;
     location = resolveCommercialLocation({ requestedCity: city, signals: { provider: providerTexts, instagram: profileTexts, website: [website.address, website.description], booking: [booking.evidence], structured_metadata: [website.address] } });
     precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
+      ...(market === "FR" ? { websiteDescription: website.description } : {}),
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
     if (precheck.decision !== "PRECHECK_PASS") {
       const terminal = { ...precheck, decision: "PRECHECK_REJECT" as const, reason: precheck.reason === "location_requires_enrichment" ? "location_unresolved_after_enrichment" : precheck.reason };
@@ -168,7 +230,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         lead_id: nullableText(dbPreflight.lead_id), completed_at: new Date().toISOString(), duration_ms: Date.now() - started }); return;
     }
 
-    const compactEvidence = { businessName, requestedCity: city, requestedSubsegment: nullableText(item.subsegment), instagram: { username: profile.canonical_username,
+    const detectedCity = market === "FR" ? location.city! : city;
+    const compactEvidence = { businessName, requestedCity: detectedCity, requestedSubsegment: nullableText(item.subsegment), instagram: { username: profile.canonical_username,
       followers: profile.followers_count, posts: profile.posts_count, category: profile.official_category, biography: profile.metadata.biography,
       recentCaptions: recentCaptions.slice(0, 4) }, website: { url: businessWebsite, description: website.description, bookingProvider: booking.bookingProvider },
       deterministic: { location, precheck, publicProfile: profile.is_private === false } };
@@ -180,7 +243,23 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         .eq("enrichment_snapshot_hash", enrichmentHash).eq("scoring_model_version", COMMERCIAL_SCORING_MODEL_VERSION).eq("prompt_version", COMMERCIAL_AI_PROMPT_VERSION).maybeSingle();
       cached = data ? row(data) : null;
     }
-    const ai = cached ? { ok: true as const, analysis: row(cached.analysis_snapshot_safe) as never, model: text(cached.ai_model), attempts: 0, usage: undefined } : await analyze({ evidence: compactEvidence, city, requestedSubsegment: nullableText(item.subsegment) ?? undefined });
+    const experiment = text(row(item.source_snapshot_safe).experiment) === FR_PROFILE_FIRST_KEY;
+    if (experiment && !cached) {
+      const { data: reserved, error } = await supabase.rpc("reserve_commercial_france_score_v2", { p_item_id: text(item.id) });
+      if (error || reserved !== true) throw new Error("fr_scoring_budget_or_replay_blocked");
+    }
+    const request = { evidence: compactEvidence, city: detectedCity, ...(market === "FR" ? { market } : {}), requestedSubsegment: nullableText(item.subsegment) ?? undefined };
+    const scoringStarted = Date.now();
+    const scoringCallId = franceControl && !cached ? await reserveFranceCall(supabase, text(item.run_id), "openai", "scoring", `item:${text(item.id)}:scoring`) : null;
+    let ai;
+    try {
+      ai = cached ? { ok: true as const, analysis: row(cached.analysis_snapshot_safe) as never, model: text(cached.ai_model), attempts: 0, usage: undefined }
+        : experiment ? { ...await analyzeCommercialProspect(request), attempts: 1 } : await analyze(request);
+      await finishFranceCall(supabase, scoringCallId, "succeeded", Date.now() - scoringStarted, ai.ok && ai.analysis ? 1 : 0);
+    } catch (error) {
+      await finishFranceCall(supabase, scoringCallId, "failed", Date.now() - scoringStarted, 0, error instanceof Error ? error.message : "scoring_failed");
+      throw error;
+    }
     if (!ai.ok || !ai.analysis) {
       await updateItem(supabase, text(item.id), { status: "failed", stage: "FAILED", error_code: "AI_ANALYSIS_FAILED", error_detail_safe: { provider_code: ai.errorCode, attempts: ai.attempts },
         completed_at: new Date().toISOString(), duration_ms: Date.now() - started }); return;
@@ -194,12 +273,12 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       return;
     }
     const audienceTargetContext = [businessName, profile.official_category, candidate.title].filter(Boolean).join(" ");
-    const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext);
+    const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext, detectedCity);
     const payload = { provider: candidate.provider, provider_external_id: candidate.providerExternalId, source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
       source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
       analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage }, score_breakdown_safe: score.breakdown,
       personalization_context_safe: { observed_evidence: ai.analysis.evidence, reasoning: ai.analysis.reasoning }, audience_context_safe: { source: "deterministically_filtered_discovery_peers", suggestions: audiences },
-      business_name: businessName, country_code: "ZA", city, vertical: "Beauty/Aesthetics", subsegment: ai.analysis.subsegment, instagram_handle: profile.canonical_username,
+      business_name: businessName, country_code: market, city: detectedCity, vertical: "Beauty/Aesthetics", subsegment: ai.analysis.subsegment, instagram_handle: profile.canonical_username,
       website: businessWebsite, email: website.email, phone: website.phone, address_safe: website.address, business_description: website.description ?? ai.analysis.reasoning,
       booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, business_status: ai.analysis.signals.appearsClosed ? "closed" : "unknown",
       qualification_status: score.qualificationStatus, item_status: score.itemStatus, lead_score: score.score, score_percent: score.scorePercent, priority: score.crmPriority,
@@ -227,7 +306,7 @@ export async function processCommercialDiscoveryBatch(dependencies: ProcessorDep
   for (const claimed of claimedRuns) {
     try { await discoverAndPersistRun(supabase, claimed, discover); }
     catch {
-      const exhausted = num(claimed.discovery_attempt_count) >= num(claimed.discovery_max_attempts);
+      const exhausted = text(claimed.idempotency_key) === FR_PROFILE_FIRST_KEY || num(claimed.discovery_attempt_count) >= num(claimed.discovery_max_attempts);
       await supabase.from("commercial_discovery_runs").update({ discovery_status: exhausted ? "failed" : "pending", status: exhausted ? "failed" : "running",
         worker_locked_at: null, worker_locked_by: null, error_summary_safe: { discovery_provider_failure: 1 } }).eq("id", text(claimed.id));
     }
@@ -240,7 +319,11 @@ export async function processCommercialDiscoveryBatch(dependencies: ProcessorDep
   const items = array(itemClaims).map(row).filter((item) => !terminalItemStatuses.has(text(item.status)));
   await mapWithBoundedConcurrency(items, concurrency, (item) => processCommercialItem(supabase, item, dependencies));
   const touchedRuns = [...new Set([...claimedRuns.map((run) => text(run.id)), ...items.map((item) => text(item.run_id))].filter(Boolean))];
-  for (const runId of touchedRuns) await supabase.rpc("refresh_commercial_discovery_run_v2", { p_run_id: runId });
+  for (const runId of touchedRuns) {
+    await supabase.rpc("refresh_commercial_discovery_run_v2", { p_run_id: runId });
+    const franceControl = await loadFranceControl(supabase, runId);
+    if (franceControl) await supabase.rpc("evaluate_commercial_france_run_gate_v1", { p_run_id: runId });
+  }
   return { workerId, discoveredRuns: claimedRuns.length, claimedItems: items.length, concurrency, batchLimit };
 }
 

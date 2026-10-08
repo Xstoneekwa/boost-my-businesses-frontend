@@ -23,6 +23,15 @@ function positiveAttempt(value: unknown) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function nonNegativeInteger(value: unknown) {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value)
+      : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -40,8 +49,12 @@ export function resolveCanonicalAttemptIdentity(input: {
     id?: unknown;
     account_id?: unknown;
     run_id?: unknown;
+    root_business_session_id?: unknown;
+    execution_attempt_no?: unknown;
+    retry_index?: unknown;
     metadata_safe?: unknown;
   } | null;
+  legacyBusinessSessionId?: unknown;
   runProjectionAttemptId?: unknown;
 }) {
   const sourceRunId = clean(input.sourceRunId);
@@ -51,11 +64,40 @@ export function resolveCanonicalAttemptIdentity(input: {
   const requestRunId = clean(input.sourceRequest?.run_id);
   const metadata = record(input.sourceRequest?.metadata_safe);
   const resumePlan = record(metadata?.resume_plan);
-  const requestAttemptId = positiveAttempt(
+  const legacyAttemptId = positiveAttempt(
     metadata?.attempt_id
       ?? metadata?.current_attempt_id
       ?? resumePlan?.attempt_id
       ?? resumePlan?.current_attempt_id,
+  );
+  const legacyRetryIndex = nonNegativeInteger(
+    metadata?.retry_index ?? resumePlan?.retry_index,
+  );
+  const legacyBusinessSessionId = clean(
+    metadata?.root_business_session_id
+      ?? metadata?.business_session_id
+      ?? resumePlan?.root_business_session_id
+      ?? resumePlan?.business_session_id
+      ?? input.legacyBusinessSessionId,
+  );
+  const canonicalBusinessSessionId = clean(input.sourceRequest?.root_business_session_id);
+  const canonicalAttemptId = positiveAttempt(input.sourceRequest?.execution_attempt_no);
+  const canonicalRetryIndex = nonNegativeInteger(input.sourceRequest?.retry_index);
+  const canonicalTuplePresent = (
+    input.sourceRequest?.root_business_session_id !== null
+    && input.sourceRequest?.root_business_session_id !== undefined
+  ) || (
+    input.sourceRequest?.execution_attempt_no !== null
+    && input.sourceRequest?.execution_attempt_no !== undefined
+  ) || (
+    input.sourceRequest?.retry_index !== null
+    && input.sourceRequest?.retry_index !== undefined
+  );
+  const canonicalTupleValid = Boolean(
+    canonicalBusinessSessionId
+    && canonicalAttemptId !== null
+    && canonicalRetryIndex !== null
+    && canonicalAttemptId === canonicalRetryIndex + 1
   );
   const runProjectionAttemptId = positiveAttempt(input.runProjectionAttemptId);
   const retryContractPresent = Boolean(resumePlan)
@@ -63,35 +105,74 @@ export function resolveCanonicalAttemptIdentity(input: {
     || metadata?.retry_index !== undefined
     || metadata?.previous_run_id !== undefined
     || metadata?.prior_run_id !== undefined;
-  const attemptContractMissing = retryContractPresent && requestAttemptId === null;
-  const resolvedAttemptId = requestAttemptId ?? runProjectionAttemptId;
-  const lineageValid = Boolean(
+  const attemptContractMissing = retryContractPresent && legacyAttemptId === null;
+  const resolvedLegacyAttemptId = legacyAttemptId ?? runProjectionAttemptId;
+  const resolvedLegacyRetryIndex = legacyRetryIndex
+    ?? (resolvedLegacyAttemptId === null ? null : resolvedLegacyAttemptId - 1);
+  const legacyTupleValid = Boolean(
+    legacyBusinessSessionId
+    && resolvedLegacyAttemptId !== null
+    && resolvedLegacyRetryIndex !== null
+    && resolvedLegacyAttemptId === resolvedLegacyRetryIndex + 1
+    && !attemptContractMissing
+  );
+  const canonicalLegacyMismatch = canonicalTupleValid && Boolean(
+    legacyBusinessSessionId && legacyBusinessSessionId !== canonicalBusinessSessionId
+    || legacyAttemptId !== null && legacyAttemptId !== canonicalAttemptId
+    || legacyRetryIndex !== null && legacyRetryIndex !== canonicalRetryIndex
+  );
+  const requestBindingValid = Boolean(
     sourceRunId
     && requestId
     && requestRunId === sourceRunId
     && (!sourceAccountId || requestAccountId === sourceAccountId)
-    && !attemptContractMissing
-    && resolvedAttemptId !== null
   );
-  const canonicalAttemptId = lineageValid
-    ? resolvedAttemptId
+  const lineageValid = requestBindingValid && (
+    canonicalTuplePresent
+      ? canonicalTupleValid && !canonicalLegacyMismatch
+      : legacyTupleValid
+  );
+  const resolvedBusinessSessionId = lineageValid
+    ? canonicalTuplePresent ? canonicalBusinessSessionId : legacyBusinessSessionId
+    : null;
+  const resolvedAttemptId = lineageValid
+    ? canonicalTuplePresent ? canonicalAttemptId : resolvedLegacyAttemptId
+    : null;
+  const resolvedRetryIndex = lineageValid
+    ? canonicalTuplePresent ? canonicalRetryIndex : resolvedLegacyRetryIndex
     : null;
   return {
     sourceRequestId: requestId || null,
-    canonicalAttemptId,
-    requestAttemptId,
+    canonicalBusinessSessionId: resolvedBusinessSessionId,
+    canonicalAttemptId: resolvedAttemptId,
+    canonicalRetryIndex: resolvedRetryIndex,
+    requestAttemptId: legacyAttemptId,
     runProjectionAttemptId,
-    attemptSource: requestAttemptId !== null
-      ? "account_run_requests.metadata_safe.attempt_id"
+    attemptSource: canonicalTuplePresent && canonicalTupleValid
+      ? "account_run_requests.execution_attempt_no"
+      : legacyAttemptId !== null
+      ? "account_run_requests.metadata_safe.attempt_id_legacy"
       : attemptContractMissing
         ? "account_run_requests.retry_attempt_missing_fail_closed"
       : runProjectionAttemptId !== null
-        ? "ig_runs.performance_summary.attempt_id_fallback"
+        ? "ig_runs.performance_summary.attempt_id_legacy_fallback"
         : "missing",
-    divergence: requestAttemptId !== null
+    divergence: legacyAttemptId !== null
       && runProjectionAttemptId !== null
-      && requestAttemptId !== runProjectionAttemptId,
+      && legacyAttemptId !== runProjectionAttemptId,
     attemptContractMissing,
+    canonicalTuplePresent,
+    canonicalLegacyMismatch,
+    lineageMode: lineageValid
+      ? canonicalTuplePresent ? "canonical_db_columns" : "compatible_legacy_fallback"
+      : "fail_closed",
+    lineageReason: lineageValid
+      ? ""
+      : canonicalTuplePresent
+        ? "canonical_resume_lineage_mismatch"
+        : !legacyBusinessSessionId && resolvedLegacyAttemptId === null
+          ? "canonical_resume_lineage_missing"
+          : "legacy_resume_lineage_unprovable",
     lineageValid,
   } as const;
 }

@@ -82,11 +82,22 @@ test("tick failure reason is stable and redacted", () => {
   assert.equal(sanitizeTickFailureReason(undefined), UNEXPECTED_TICK_FAILURE_REASON);
   assert.equal(sanitizeTickFailureReason(new Error("db timeout")), "db timeout");
 
+  const fakeSecret = ["sk", "_live", "_1234567890abcdef"].join("");
+  const fakeJwt = ["ey", "JhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"].join("");
   const withSecret = sanitizeTickFailureReason(
-    new Error("request failed key=sk_live_1234567890abcdef token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload at https://internal.example.com/tick?token=abc"),
+    new Error(`request failed key=${fakeSecret} token: ${fakeJwt}.payload at https://internal.example.com/tick?token=abc`),
   );
   assert.doesNotMatch(withSecret, /sk_live|eyJhbGci|internal\.example\.com/);
   assert.match(withSecret, /\[redacted/);
+
+  assert.equal(
+    sanitizeTickFailureReason(new Error("resume_plan_lineage_mismatch")),
+    "resume_plan_lineage_mismatch",
+  );
+  assert.equal(
+    sanitizeTickFailureReason(new Error(["sk", "_live", "_1234567890abcdefghijklmnop"].join(""))),
+    "[redacted]",
+  );
 
   const longMessage = sanitizeTickFailureReason(new Error("x y ".repeat(400)));
   assert.ok(longMessage.length <= 161, "reason must be truncated to a stable bound");

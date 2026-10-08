@@ -3,6 +3,7 @@ type DashboardActionRow = Record<string, unknown>;
 export type DashboardActionBlockerOptions = {
   now?: Date;
   latestSuccessfulSessionAt?: string | null;
+  activeIncidentIds?: ReadonlySet<string>;
 };
 
 const terminalActionStatuses = new Set([
@@ -69,5 +70,7 @@ export function isCurrentBlockingDashboardAction(row: DashboardActionRow, option
   if (row.blocking_campaign !== true) return false;
   if (isTerminalDashboardAction(row)) return false;
   if (isStaleHistoricalSchedulerBlocker(row, options)) return false;
+  const incidentId = readString(row, "incident_id");
+  if (incidentId && options.activeIncidentIds && !options.activeIncidentIds.has(incidentId)) return false;
   return true;
 }
