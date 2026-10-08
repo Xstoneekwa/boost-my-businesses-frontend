@@ -21,6 +21,11 @@ test("France configuration is national, French and Europe/Paris; SA unchanged", 
 
 test("France canary accepts owner-supplied cities without a city-specific engine branch", () => {
   for (const city of ["Paris", "Marseille", "Lyon", "Lille"]) {
+    const noSubsegment = parseCommercialDiscoveryTrigger({ countryCode: "FR", city, subsegment: null, maxProspects: 10, idempotencyKey: `commercial-france-${city.toLowerCase()}-null-v1` });
+    assert.equal(noSubsegment.countryCode, "FR");
+    assert.equal(noSubsegment.city, city);
+    assert.equal(noSubsegment.subsegment, undefined);
+    assert.equal(noSubsegment.maxProspects, 10);
     for (const maxProspects of [10, 30, 50]) {
       const parsed = parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects, idempotencyKey: `commercial-france-${city.toLowerCase()}-v1` });
       assert.equal(parsed.countryCode, "FR");
@@ -31,6 +36,7 @@ test("France canary accepts owner-supplied cities without a city-specific engine
     assert.throws(() => parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects: 9, idempotencyKey: `commercial-france-${city.toLowerCase()}-v1` }));
     assert.throws(() => parseCommercialDiscoveryTrigger({ countryCode: "FR", city, maxProspects: 51, idempotencyKey: `commercial-france-${city.toLowerCase()}-v1` }));
   }
+  assert.throws(() => parseCommercialDiscoveryTrigger({ countryCode: "FR", city: "Paris", subsegment: "Not a segment", maxProspects: 10, idempotencyKey: "commercial-france-invalid-subsegment-v1" }));
 });
 
 test("France discovery UI exposes only backend-compatible volumes", () => {
