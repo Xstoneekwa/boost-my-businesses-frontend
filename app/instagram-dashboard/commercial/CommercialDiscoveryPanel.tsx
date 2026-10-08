@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { COMMERCIAL_DISCOVERY_CITIES, COMMERCIAL_DISCOVERY_SUBSEGMENTS, type CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
+import { COMMERCIAL_DISCOVERY_CITIES, COMMERCIAL_DISCOVERY_SUBSEGMENTS, COMMERCIAL_FRANCE_CANARY_VOLUMES, type CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
 
 export default function CommercialDiscoveryPanel({ initialModel }: { initialModel: CommercialDiscoveryReadModel }) {
   const router = useRouter(); const [model, setModel] = useState(initialModel); const [error, setError] = useState<string | null>(null); const [pending, startTransition] = useTransition();
@@ -34,10 +34,10 @@ export default function CommercialDiscoveryPanel({ initialModel }: { initialMode
     });
   }
   return <section className="commercial-discovery-panel">
-    <div className="commercial-discovery-copy"><small>OWNER-TRIGGERED DISCOVERY</small><h3>Beauty & Aesthetics · {market === "FR" ? "France" : "South Africa"}</h3><p>{market === "FR" ? "France entière · Europe/Paris · un seul canary de 30 maximum. Ville détectée sur preuves. Arrêt pour revue Liam, aucun envoi." : "Durable discovery runs in bounded batches and survives reloads. Follow the certified 3 → 10 → 30 gate. It stops at Needs Approval; no message is sent."}</p></div>
+    <div className="commercial-discovery-copy"><small>OWNER-TRIGGERED DISCOVERY</small><h3>Beauty & Aesthetics · {market === "FR" ? "France" : "South Africa"}</h3><p>{market === "FR" ? "France entière · Europe/Paris · ville libre validée par le propriétaire. Volumes bornés par le contrat France (10 · 30 · 50). Arrêt pour revue Liam, aucun envoi." : "Durable discovery runs in bounded batches and survives reloads. Follow the certified 3 → 10 → 30 gate. It stops at Needs Approval; no message is sent."}</p></div>
     <form action={submit}>
       <label><span>Discovery market</span><select value={market} onChange={(event) => setMarket(event.target.value)}><option value="ZA">South Africa</option><option value="FR">France</option></select></label>
-      {market === "FR" ? <><label><span>France canary city</span><input name="city" defaultValue="Paris" placeholder="Any owner-approved city" /></label><input type="hidden" name="maxProspects" value="30" /></> : <label><span>City</span><select name="city" defaultValue="Johannesburg">{COMMERCIAL_DISCOVERY_CITIES.map((city) => <option key={city}>{city}</option>)}</select></label>}
+      {market === "FR" ? <><label><span>France canary city</span><input name="city" defaultValue="Paris" placeholder="Any owner-approved city" /></label><label><span>France volume</span><select name="maxProspects" defaultValue="10">{COMMERCIAL_FRANCE_CANARY_VOLUMES.map((volume) => <option key={volume} value={volume}>{volume} candidats</option>)}</select></label></> : <label><span>City</span><select name="city" defaultValue="Johannesburg">{COMMERCIAL_DISCOVERY_CITIES.map((city) => <option key={city}>{city}</option>)}</select></label>}
       <label><span>Subsegment</span><select name="subsegment" key={market} disabled={market === "FR"} defaultValue=""><option value="">All approved subsegments</option>{COMMERCIAL_DISCOVERY_SUBSEGMENTS.map((segment) => <option key={segment}>{segment}</option>)}</select></label>
       {market !== "FR" && <label><span>Scale gate</span><select name="maxProspects" defaultValue="3"><option value="3">Canary · 3</option><option value="10">Intermediate · 10</option><option value="30">Controlled · 30</option></select></label>}
       <button disabled={pending || active} type="submit">{active ? "Discovery running…" : pending ? "Starting…" : "Run Discovery"}</button>
