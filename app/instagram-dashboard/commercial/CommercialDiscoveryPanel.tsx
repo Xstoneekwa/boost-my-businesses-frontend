@@ -8,9 +8,16 @@ export default function CommercialDiscoveryPanel({ initialModel }: { initialMode
   const router = useRouter(); const [model, setModel] = useState(initialModel); const [error, setError] = useState<string | null>(null); const [pending, startTransition] = useTransition();
   const [market, setMarket] = useState("ZA");
   const active = model.latest.some((run) => run.status === "queued" || run.status === "running");
+  async function readApiPayload(response: Response) {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      throw new Error(`Discovery API returned a non-JSON response (HTTP ${response.status}, ${contentType || "unknown content type"}).`);
+    }
+    return response.json() as Promise<{ data?: CommercialDiscoveryReadModel; error?: string }>;
+  }
   async function refresh() {
     const response = await fetch("/api/instagram-dashboard/commercial/discovery/runs", { cache: "no-store" });
-    const payload = await response.json(); if (response.ok && payload.data) setModel(payload.data);
+    const payload = await readApiPayload(response); if (response.ok && payload.data) setModel(payload.data);
     return response.ok;
   }
   useEffect(() => {
@@ -21,9 +28,13 @@ export default function CommercialDiscoveryPanel({ initialModel }: { initialMode
 
   function submit(formData: FormData) {
     setError(null); startTransition(async () => {
-      const response = await fetch("/api/instagram-dashboard/commercial/discovery/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countryCode: market, city: formData.get("city"), subsegment: formData.get("subsegment"), maxProspects: Number(formData.get("maxProspects")), forceRescore: false, idempotencyKey: `commercial-discovery:${crypto.randomUUID()}` }) });
-      const payload = await response.json(); if (!response.ok) { setError(payload.error || "Discovery could not start."); return; }
-      await refresh(); router.refresh();
+      try {
+        const response = await fetch("/api/instagram-dashboard/commercial/discovery/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countryCode: market, city: formData.get("city"), subsegment: formData.get("subsegment"), maxProspects: Number(formData.get("maxProspects")), forceRescore: false, idempotencyKey: `commercial-discovery:${crypto.randomUUID()}` }) });
+        const payload = await readApiPayload(response); if (!response.ok) { setError(payload.error || "Discovery could not start."); return; }
+        await refresh(); router.refresh();
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Discovery could not start.");
+      }
     });
   }
   function cancel(runId: string) {
