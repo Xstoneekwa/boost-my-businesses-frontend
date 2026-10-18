@@ -69,8 +69,14 @@ async function finishFranceCall(supabase: SupabaseAdmin, callId: string | null, 
 }
 async function finalizeFranceControl(supabase: SupabaseAdmin, runId: string) {
   const control = await loadFranceControl(supabase, runId);
-  // No France row means ZA. Never reopen an existing HOLD/STOP/cancellation.
-  if (!control || !["armed", "running"].includes(text(control.state))) return;
+  // No France row means ZA. HOLD/cancellation stay untouched. A touched STOP
+  // may need to finish cancelling unstarted items after an in-flight batch.
+  if (!control || !["armed", "running", "stopped"].includes(text(control.state))) return;
+  if (text(control.state) === "stopped") {
+    const gate = await supabase.rpc("evaluate_commercial_france_run_gate_v1", { p_run_id: runId });
+    if (gate.error) throw new Error("france_finalizer_gate_failed");
+    return;
+  }
   const runResult = await supabase.from("commercial_discovery_runs").select("status").eq("id", runId).single();
   if (runResult.error) throw new Error("france_finalizer_run_read_failed");
   const status = text(row(runResult.data).status);
@@ -355,6 +361,14 @@ export async function processCommercialDiscoveryBatch(dependencies: ProcessorDep
   await mapWithBoundedConcurrency(items, concurrency, (item) => processCommercialItem(supabase, item, dependencies));
   const touchedRuns = [...new Set([...claimedRuns.map((run) => text(run.id)), ...items.map((item) => text(item.run_id))].filter(Boolean))];
   for (const runId of touchedRuns) {
+    // A previously stopped in-flight batch must settle cancellation BEFORE
+    // refresh can mistake cancelled/preserved items for successful completion.
+    const control = await loadFranceControl(supabase, runId);
+    if (text(control?.state) === "stopped") {
+      await finalizeFranceControl(supabase, runId);
+      await supabase.rpc("refresh_commercial_discovery_run_v2", { p_run_id: runId });
+      continue;
+    }
     await supabase.rpc("refresh_commercial_discovery_run_v2", { p_run_id: runId });
     await finalizeFranceControl(supabase, runId);
   }
