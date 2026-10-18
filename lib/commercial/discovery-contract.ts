@@ -1,3 +1,5 @@
+import { FRANCE_CANARY_IDEMPOTENCY_KEY } from "./market-config.ts";
+
 export const COMMERCIAL_DISCOVERY_CITIES = ["Johannesburg", "Cape Town"] as const;
 export const COMMERCIAL_DISCOVERY_SUBSEGMENTS = [
   "Aesthetic Clinic", "Skin Clinic", "Med Spa", "Beauty Salon", "Hair Salon",
@@ -8,6 +10,8 @@ export const COMMERCIAL_DISCOVERY_SUBSEGMENTS = [
 export const COMMERCIAL_DISCOVERY_MAX_PROSPECTS = 30;
 export const COMMERCIAL_FRANCE_CANARY_MAX_PROSPECTS = 50;
 export const COMMERCIAL_FRANCE_CANARY_VOLUMES = [10, 30, 50] as const;
+// Same namespace and bounds as commercial_france_run_key_v2_check / the RPC.
+export const COMMERCIAL_FRANCE_RUN_KEY_PATTERN = /^commercial-france-[a-z0-9][a-z0-9-]{1,180}-v[0-9]+$/;
 export const COMMERCIAL_DISCOVERY_CANARY_MAX = 3;
 export const COMMERCIAL_SCORING_MODEL_VERSION = "BMB_SCORING_MODEL_V2";
 export const COMMERCIAL_AI_PROMPT_VERSION = "BMB_COMMERCIAL_AI_V2";
@@ -121,7 +125,25 @@ export function parseCommercialDiscoveryTrigger(value: unknown): CommercialDisco
   }
   const idempotencyKey = typeof row.idempotencyKey === "string" ? row.idempotencyKey.trim() : "";
   if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("commercial_discovery_idempotency_invalid");
+  if (countryCode === "FR" && city !== "France" && !COMMERCIAL_FRANCE_RUN_KEY_PATTERN.test(idempotencyKey)) {
+    throw new Error("commercial_france_idempotency_key_invalid");
+  }
   if (row.forceRescore !== undefined && typeof row.forceRescore !== "boolean") throw new Error("commercial_discovery_force_rescore_invalid");
   if (countryCode === "FR" && city === "France" && (maxProspects !== 30 || row.forceRescore === true || row.subsegment)) throw new Error("commercial_france_canary_scope_invalid");
   return { countryCode, city, ...(row.subsegment ? { subsegment: row.subsegment as CommercialDiscoverySubsegment } : {}), maxProspects, idempotencyKey, forceRescore: row.forceRescore === true };
+}
+/** Stable canary identity: retrying the same France scope must replay its run. */
+export async function buildCommercialFranceDiscoveryIdempotencyKey(input: {
+  city: string;
+  maxProspects: number;
+  subsegment?: CommercialDiscoverySubsegment | null;
+}): Promise<string> {
+  const trigger = parseCommercialDiscoveryTrigger({ ...input, countryCode: "FR", idempotencyKey: "commercial-france-builder-v2" });
+  // Preserve the historical nationwide run's existing server-side key.
+  if (trigger.city === "France") return FRANCE_CANARY_IDEMPOTENCY_KEY;
+  const scope = JSON.stringify([trigger.city, trigger.maxProspects, trigger.subsegment ?? null]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(scope));
+  const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const citySlug = trigger.city.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "city";
+  return `commercial-france-${citySlug}-${trigger.maxProspects}-${fingerprint}-v2`;
 }

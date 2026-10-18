@@ -2,11 +2,23 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { COMMERCIAL_DISCOVERY_CITIES, COMMERCIAL_DISCOVERY_SUBSEGMENTS, COMMERCIAL_FRANCE_CANARY_VOLUMES, type CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
+import { buildCommercialFranceDiscoveryIdempotencyKey, COMMERCIAL_DISCOVERY_CITIES, COMMERCIAL_DISCOVERY_SUBSEGMENTS, COMMERCIAL_FRANCE_CANARY_VOLUMES, type CommercialDiscoveryReadModel } from "@/lib/commercial/discovery-contract";
 
 export default function CommercialDiscoveryPanel({ initialModel }: { initialModel: CommercialDiscoveryReadModel }) {
   const router = useRouter(); const [model, setModel] = useState(initialModel); const [error, setError] = useState<string | null>(null); const [pending, startTransition] = useTransition();
   const [market, setMarket] = useState("ZA");
+  const [franceCity, setFranceCity] = useState("Paris");
+  const [franceVolume, setFranceVolume] = useState(10);
+  const [franceKeyState, setFranceKeyState] = useState<{ city: string; volume: number; key: string } | null>(null);
+  const franceKey = franceKeyState?.city === franceCity && franceKeyState.volume === franceVolume ? franceKeyState.key : "";
+  useEffect(() => {
+    if (market !== "FR" || !franceCity.trim()) return;
+    let cancelled = false;
+    buildCommercialFranceDiscoveryIdempotencyKey({ city: franceCity, maxProspects: franceVolume, subsegment: null })
+      .then((key) => { if (!cancelled) setFranceKeyState({ city: franceCity, volume: franceVolume, key }); })
+      .catch(() => { if (!cancelled) setError("France run key could not be prepared. Check the France run parameters."); });
+    return () => { cancelled = true; };
+  }, [market, franceCity, franceVolume]);
   const active = model.latest.some((run) => run.status === "queued" || run.status === "running");
   async function readApiPayload(response: Response) {
     const contentType = response.headers.get("content-type") || "";
@@ -29,7 +41,9 @@ export default function CommercialDiscoveryPanel({ initialModel }: { initialMode
   function submit(formData: FormData) {
     setError(null); startTransition(async () => {
       try {
-        const response = await fetch("/api/instagram-dashboard/commercial/discovery/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countryCode: market, city: formData.get("city"), subsegment: formData.get("subsegment"), maxProspects: Number(formData.get("maxProspects")), forceRescore: false, idempotencyKey: `commercial-discovery:${crypto.randomUUID()}` }) });
+        const idempotencyKey = market === "FR" ? String(formData.get("idempotencyKey") || "") : `commercial-discovery:${crypto.randomUUID()}`;
+        if (market === "FR" && !idempotencyKey) throw new Error("France run key is not ready.");
+        const response = await fetch("/api/instagram-dashboard/commercial/discovery/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countryCode: market, city: formData.get("city"), subsegment: formData.get("subsegment"), maxProspects: Number(formData.get("maxProspects")), forceRescore: false, idempotencyKey }) });
         const payload = await readApiPayload(response); if (!response.ok) { setError(payload.error || "Discovery could not start."); return; }
         await refresh(); router.refresh();
       } catch (error) {
@@ -48,10 +62,10 @@ export default function CommercialDiscoveryPanel({ initialModel }: { initialMode
     <div className="commercial-discovery-copy"><small>OWNER-TRIGGERED DISCOVERY</small><h3>Beauty & Aesthetics · {market === "FR" ? "France" : "South Africa"}</h3><p>{market === "FR" ? "France entière · Europe/Paris · ville libre validée par le propriétaire. Volumes bornés par le contrat France (10 · 30 · 50). Arrêt pour revue Liam, aucun envoi." : "Durable discovery runs in bounded batches and survives reloads. Follow the certified 3 → 10 → 30 gate. It stops at Needs Approval; no message is sent."}</p></div>
     <form action={submit}>
       <label><span>Discovery market</span><select value={market} onChange={(event) => setMarket(event.target.value)}><option value="ZA">South Africa</option><option value="FR">France</option></select></label>
-      {market === "FR" ? <><label><span>France canary city</span><input name="city" defaultValue="Paris" placeholder="Any owner-approved city" /></label><label><span>France volume</span><select name="maxProspects" defaultValue="10">{COMMERCIAL_FRANCE_CANARY_VOLUMES.map((volume) => <option key={volume} value={volume}>{volume} candidats</option>)}</select></label></> : <label><span>City</span><select name="city" defaultValue="Johannesburg">{COMMERCIAL_DISCOVERY_CITIES.map((city) => <option key={city}>{city}</option>)}</select></label>}
+      {market === "FR" ? <><input type="hidden" name="idempotencyKey" value={franceKey} readOnly /><label><span>France canary city</span><input name="city" value={franceCity} onChange={(event) => setFranceCity(event.target.value)} placeholder="Any owner-approved city" /></label><label><span>France volume</span><select name="maxProspects" value={franceVolume} onChange={(event) => setFranceVolume(Number(event.target.value))}>{COMMERCIAL_FRANCE_CANARY_VOLUMES.map((volume) => <option key={volume} value={volume}>{volume} candidats</option>)}</select></label></> : <label><span>City</span><select name="city" defaultValue="Johannesburg">{COMMERCIAL_DISCOVERY_CITIES.map((city) => <option key={city}>{city}</option>)}</select></label>}
       <label><span>Subsegment</span><select name="subsegment" key={market} disabled={market === "FR"} defaultValue=""><option value="">All approved subsegments</option>{COMMERCIAL_DISCOVERY_SUBSEGMENTS.map((segment) => <option key={segment}>{segment}</option>)}</select></label>
       {market !== "FR" && <label><span>Scale gate</span><select name="maxProspects" defaultValue="3"><option value="3">Canary · 3</option><option value="10">Intermediate · 10</option><option value="30">Controlled · 30</option></select></label>}
-      <button disabled={pending || active} type="submit">{active ? "Discovery running…" : pending ? "Starting…" : "Run Discovery"}</button>
+      <button disabled={pending || active || (market === "FR" && !franceKey)} type="submit">{active ? "Discovery running…" : pending ? "Starting…" : "Run Discovery"}</button>
     </form>
     {error ? <p className="commercial-discovery-error" role="alert">{error}</p> : null}
     <div className="commercial-discovery-summary"><span><b>{model.summary.discovered}</b> discovered</span><span><b>{model.summary.enriched}</b> enriched</span><span><b>{model.summary.scored}</b> scored</span><span><b>{model.summary.p1}</b> P1</span><span><b>{model.summary.p2}</b> P2</span></div>
