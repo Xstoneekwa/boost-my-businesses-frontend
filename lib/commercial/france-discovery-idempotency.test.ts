@@ -70,6 +70,7 @@ test("builder and parser use exactly the existing DB namespace without changing 
 test("form prepares the same key it submits and retains the Content-Type guard", () => {
   assert.match(panel, /buildCommercialFranceDiscoveryIdempotencyKey\(\{ city: franceCity, maxProspects: franceVolume, subsegment: null \}\)/);
   assert.match(panel, /type="hidden" name="idempotencyKey" value=\{franceKey\}/);
+  assert.match(panel, /<output aria-label="France run reference"[^>]*>\{franceKey \|\|/);
   assert.match(panel, /market === "FR" && !franceKey/);
   assert.match(panel, /forceRescore: false, idempotencyKey \}/);
   assert.match(panel, /contentType\.toLowerCase\(\)\.includes\("application\/json"\)/);
