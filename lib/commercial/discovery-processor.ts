@@ -49,10 +49,16 @@ async function loadFranceControl(supabase: SupabaseAdmin, runId: string) {
   if (result.error) throw new Error("france_control_read_failed");
   return result.data ? row(result.data) : null;
 }
+class CommercialFranceProfileBudgetExhaustedError extends Error {
+  constructor(readonly used: number, readonly limit: number) { super("france_profile_budget_exhausted"); }
+}
 async function reserveFranceCall(supabase: SupabaseAdmin, runId: string, provider: "searchapi" | "sirene" | "openai", kind: "discovery" | "resolver" | "site_page" | "profile" | "sirene" | "scoring", key: string) {
   const result = await supabase.rpc("reserve_commercial_france_provider_call_v1", { p_run_id: runId, p_provider: provider, p_call_kind: kind, p_call_key: key });
   if (result.error) throw new Error("france_provider_reservation_failed");
   const value = row(result.data);
+  if (value.reserved !== true && kind === "profile" && value.reason === "budget_exceeded") {
+    throw new CommercialFranceProfileBudgetExhaustedError(num(value.used), num(value.limit));
+  }
   if (value.reserved !== true) throw new Error(`france_provider_${text(value.reason) || "budget_blocked"}`);
   return text(value.call_id) || null;
 }
@@ -60,6 +66,26 @@ async function finishFranceCall(supabase: SupabaseAdmin, callId: string | null, 
   if (!callId) return;
   const result = await supabase.rpc("finish_commercial_france_provider_call_v1", { p_call_id: callId, p_status: status, p_duration_ms: Math.max(0, durationMs), p_result_count: Math.max(0, resultCount), p_error_code: errorCode ?? null });
   if (result.error) throw new Error("france_provider_ledger_write_failed");
+}
+async function finalizeFranceControl(supabase: SupabaseAdmin, runId: string) {
+  const control = await loadFranceControl(supabase, runId);
+  // No France row means ZA. Never reopen an existing HOLD/STOP/cancellation.
+  if (!control || !["armed", "running"].includes(text(control.state))) return;
+  const runResult = await supabase.from("commercial_discovery_runs").select("status").eq("id", runId).single();
+  if (runResult.error) throw new Error("france_finalizer_run_read_failed");
+  const status = text(row(runResult.data).status);
+  if (!["failed", "cancelled"].includes(status)) {
+    const gate = await supabase.rpc("evaluate_commercial_france_run_gate_v1", { p_run_id: runId });
+    if (gate.error) throw new Error("france_finalizer_gate_failed");
+  }
+  const state = ["completed", "completed_with_errors", "partial"].includes(status) ? "completed"
+    : status === "failed" ? "stopped" : status === "cancelled" ? "cancelled" : null;
+  if (!state) return;
+  // The conditional update preserves any HOLD/STOP established by the gate
+  // (or a concurrent worker) before this terminal synchronization.
+  const result = await supabase.from("commercial_france_run_controls").update({ state })
+    .eq("run_id", runId).in("state", ["armed", "running"]);
+  if (result.error) throw new Error("france_finalizer_control_write_failed");
 }
 class CommercialDiscoveryItemUpdateError extends Error {
   constructor(readonly safeDetail: Row) { super("commercial_discovery_item_update_failed"); }
@@ -289,6 +315,15 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     if (ingestError) throw new Error("ingest_failed");
     void ingested;
   } catch (error) {
+    if (error instanceof CommercialFranceProfileBudgetExhaustedError) {
+      const held = await supabase.from("commercial_france_run_controls").update({ state: "hold", stop_code: "profile_budget_exhausted", stop_reason: "public_profiles_budget_exhausted" })
+        .eq("run_id", text(item.run_id)).in("state", ["armed", "running"]);
+      if (held.error) throw new Error("france_profile_budget_hold_failed");
+      await updateItem(supabase, text(item.id), { status: "cancelled", stage: "REJECTED", error_code: "skipped_by_budget",
+        error_detail_safe: { reason: "budget_exhausted", budget: "public_profiles", used: error.used, limit: error.limit },
+        next_attempt_at: null, locked_at: null, locked_by: null, completed_at: new Date().toISOString(), duration_ms: Date.now() - started });
+      return;
+    }
     const code = error instanceof Error ? error.message : "processor_error"; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
     await updateItem(supabase, text(item.id), { status: canRetry ? "retry_scheduled" : "failed", stage: "FAILED", error_code: code,
       error_detail_safe: error instanceof CommercialDiscoveryItemUpdateError ? error.safeDetail : {},
@@ -321,13 +356,15 @@ export async function processCommercialDiscoveryBatch(dependencies: ProcessorDep
   const touchedRuns = [...new Set([...claimedRuns.map((run) => text(run.id)), ...items.map((item) => text(item.run_id))].filter(Boolean))];
   for (const runId of touchedRuns) {
     await supabase.rpc("refresh_commercial_discovery_run_v2", { p_run_id: runId });
-    const franceControl = await loadFranceControl(supabase, runId);
-    if (franceControl) await supabase.rpc("evaluate_commercial_france_run_gate_v1", { p_run_id: runId });
+    await finalizeFranceControl(supabase, runId);
   }
   return { workerId, discoveredRuns: claimedRuns.length, claimedItems: items.length, concurrency, batchLimit };
 }
 
 export async function cancelCommercialDiscoveryRun(runId: string, actorUserId: string) {
-  const { data, error } = await createSupabaseAdminClient().rpc("cancel_commercial_discovery_run_v2", { p_run_id: runId, p_actor_user_id: actorUserId });
-  if (error) throw new Error("commercial_discovery_cancel_failed"); return row(data);
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.rpc("cancel_commercial_discovery_run_v2", { p_run_id: runId, p_actor_user_id: actorUserId });
+  if (error) throw new Error("commercial_discovery_cancel_failed");
+  if (text(row(data).status) === "cancelled") await finalizeFranceControl(supabase, runId);
+  return row(data);
 }

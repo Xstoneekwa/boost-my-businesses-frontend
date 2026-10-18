@@ -28,6 +28,9 @@ export async function createCommercialDiscoveryRun(trigger: CommercialDiscoveryT
       p_max_prospects: trigger.maxProspects,
       p_idempotency_key: trigger.city === "France" ? FRANCE_CANARY_IDEMPOTENCY_KEY : trigger.idempotencyKey,
       p_geography_safe: { country_code: "FR", city: trigger.city, subsegment: trigger.subsegment ?? null },
+      // One bounded profile reservation per candidate; existing controls are
+      // preserved by the RPC's idempotent ON CONFLICT DO NOTHING contract.
+      p_budget_limits_safe: { public_profiles: trigger.maxProspects },
     })
     : await supabase.rpc("create_commercial_discovery_run_v2", { p_actor_user_id: context.userId, p_city: trigger.city, p_subsegment: trigger.subsegment ?? null, p_max_prospects: trigger.maxProspects, p_idempotency_key: trigger.idempotencyKey, p_force_rescore: trigger.forceRescore });
   if (error) throw new Error("commercial_discovery_create_failed");
