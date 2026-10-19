@@ -3,19 +3,8 @@ import {
   INSTAGRAM_AUTH_ACCESS_COOKIE,
   INSTAGRAM_AUTH_REFRESH_COOKIE,
 } from "@/lib/userContext";
-
-/** Keep Instagram admin cookies aligned with Supabase refresh token lifetime (7 days). */
-export const INSTAGRAM_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
-
-export function getInstagramAuthCookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: INSTAGRAM_AUTH_COOKIE_MAX_AGE_SECONDS,
-  };
-}
+import { getInstagramAuthCookieOptions } from "@/lib/instagram-auth/session-policy";
+export { getInstagramAuthCookieOptions, INSTAGRAM_AUTH_COOKIE_MAX_AGE_SECONDS } from "@/lib/instagram-auth/session-policy";
 
 export async function readInstagramAuthCookies(): Promise<{
   accessToken: string;

@@ -3,8 +3,7 @@
 import type { CSSProperties, FormEvent } from "react";
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { createInstagramSignInClient } from "@/lib/supabase/browser";
 import { instagramPostLoginPath } from "@/lib/instagram-auth/post-login-path";
 import type { UserRole } from "@/lib/userContext";
 
@@ -57,7 +56,6 @@ function FieldLabel({ children, fontMono }: { children: React.ReactNode; fontMon
 }
 
 export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }: Props) {
-  const router = useRouter();
   const [email, setEmail]         = useState("");
   const [password, setPassword]   = useState("");
   const [error, setError]         = useState("");
@@ -75,7 +73,7 @@ export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }
     setSubmitting(true);
 
     try {
-      const supabase = createSupabaseBrowserClient();
+      const supabase = createInstagramSignInClient();
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -111,8 +109,8 @@ export default function InstagramLoginClient({ fontDisplay, fontBody, fontMono }
         return;
       }
 
-      router.refresh();
-      router.push(dashboardPath);
+      // Start a fresh document only after the server has persisted HttpOnly cookies.
+      window.location.assign(dashboardPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connexion échouée. Réessayez.");
       setSubmitting(false);

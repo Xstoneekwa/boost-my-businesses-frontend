@@ -1,5 +1,8 @@
 import { Archivo, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import InstagramLoginClient from "./InstagramLoginClient";
+import { redirect } from "next/navigation";
+import { getInstagramUserContextReadOnly } from "@/lib/restaurant-analytics/session";
+import { instagramPostLoginPath } from "@/lib/instagram-auth/post-login-path";
 
 const archivo = Archivo({
   subsets: ["latin"],
@@ -16,7 +19,9 @@ const jetbrains = JetBrains_Mono({
   weight: ["400", "500", "600", "700"],
 });
 
-export default function InstagramLoginPage() {
+export default async function InstagramLoginPage() {
+  const context = await getInstagramUserContextReadOnly();
+  if (context) redirect(instagramPostLoginPath(context.role));
   return (
     <InstagramLoginClient
       fontDisplay={archivo.style.fontFamily}

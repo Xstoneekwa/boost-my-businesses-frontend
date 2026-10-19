@@ -6,6 +6,13 @@ export type RefreshedInstagramAuthSession = {
   userId: string;
 };
 
+/** Temporary Auth outages must fail closed without erasing a usable refresh cookie. */
+export function throwIfInstagramAuthUnavailable(error: { status?: number } | null | undefined): void {
+  if (error && (!error.status || error.status === 429 || error.status >= 500)) {
+    throw new Error("Instagram authentication is temporarily unavailable.");
+  }
+}
+
 export async function refreshInstagramAuthSession(
   refreshToken: string,
 ): Promise<RefreshedInstagramAuthSession | null> {
@@ -18,6 +25,7 @@ export async function refreshInstagramAuthSession(
   const { data, error } = await supabase.auth.refreshSession({
     refresh_token: normalizedRefresh,
   });
+  throwIfInstagramAuthUnavailable(error);
 
   const session = data.session;
   const user = data.user;

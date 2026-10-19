@@ -10,7 +10,7 @@ import {
   readInstagramAuthCookies,
   writeInstagramAuthCookies,
 } from "@/lib/instagram-auth/cookies";
-import { refreshInstagramAuthSession } from "@/lib/instagram-auth/refresh-session";
+import { refreshInstagramAuthSession, throwIfInstagramAuthUnavailable } from "@/lib/instagram-auth/refresh-session";
 
 type TenantUserRecord = {
   user_id?: unknown;
@@ -57,6 +57,7 @@ async function resolveAuthUserId(accessToken: string): Promise<string | null> {
 
   const supabase = createSupabaseAdminClient();
   const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+  throwIfInstagramAuthUnavailable(userError);
   if (userError || !userData.user?.id) {
     return null;
   }
@@ -71,8 +72,9 @@ export type ResolveInstagramUserContextOptions = {
 
 /**
  * Resolve Instagram dashboard user context from httpOnly cookies.
- * When the access JWT is expired but the refresh token is valid, refreshes in memory.
- * Cookie writes/clears happen only when `allowCookieMutation` is true (route handlers).
+ * Read-only renders never consume a refresh token they cannot persist. The scoped
+ * Proxy refreshes and forwards cookies before rendering. Route handlers may also
+ * refresh, provided they persist the new pair in the same response.
  */
 export async function resolveInstagramUserContextFromCookies(
   options: ResolveInstagramUserContextOptions = {},
@@ -86,7 +88,7 @@ export async function resolveInstagramUserContextFromCookies(
 
   let userId = await resolveAuthUserId(accessToken);
 
-  if (!userId && refreshToken) {
+  if (!userId && refreshToken && allowCookieMutation) {
     const refreshed = await refreshInstagramAuthSession(refreshToken);
     if (!refreshed) {
       if (allowCookieMutation) {

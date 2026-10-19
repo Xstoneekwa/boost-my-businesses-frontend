@@ -110,19 +110,26 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const context = await refreshInstagramUserContextFromCookies();
+  try {
+    const context = await refreshInstagramUserContextFromCookies();
 
-  if (!context) {
+    if (!context) {
+      return NextResponse.json(
+        { error: "Instagram session expired or invalid." },
+        { status: 401, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     return NextResponse.json(
-      { error: "Instagram session expired or invalid." },
-      { status: 401, headers: { "Cache-Control": "no-store" } },
+      { user: context },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "Instagram authentication is temporarily unavailable." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
     );
   }
-
-  return NextResponse.json(
-    { user: context },
-    { status: 200, headers: { "Cache-Control": "no-store" } },
-  );
 }
 
 export async function DELETE() {
