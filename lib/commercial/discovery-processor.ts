@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
 import { analyzeCommercialProspect, analyzeCommercialProspectWithRetry } from "./discovery-ai";
 import { FR_PROFILE_FIRST_KEY, type PersistPage } from "./france-profile-first";
-import { COMMERCIAL_AI_PROMPT_VERSION, COMMERCIAL_SCORING_MODEL_VERSION, type CommercialDiscoveryCity, type CommercialDiscoverySubsegment } from "./discovery-contract";
+import { COMMERCIAL_AI_PROMPT_VERSION, COMMERCIAL_SCORING_MODEL_VERSION, type CommercialDiscoveryCity, type CommercialDiscoveryCountry, type CommercialDiscoverySubsegment } from "./discovery-contract";
 import { discoverCommercialCandidates, type CommercialDiscoveryCandidate } from "./discovery-provider";
 import {
   commercialSnapshotHash,
@@ -164,7 +164,7 @@ async function recordPrecheckDecision(supabase: SupabaseAdmin, item: Row, decisi
     reason_code: decision.reason, metadata_safe: { decision: decision.decision, location_confidence: location.confidence } });
 }
 
-async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string, targetContext: string, detectedCity: string = city) {
+async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city: CommercialDiscoveryCity, ownHandle: string, targetContext: string, detectedCity: string = city, countryCode?: CommercialDiscoveryCountry) {
   const { data } = await supabase.from("commercial_discovery_items").select("provider_external_id,source_url,source_query,source_snapshot_safe")
     .eq("run_id", text(item.run_id)).eq("selected_for_processing", true).eq("status", "completed")
     .eq("precheck_decision", "PRECHECK_PASS").not("lead_id", "is", null).limit(90);
@@ -172,7 +172,7 @@ async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city:
     const peer = row(raw); const source = row(peer.source_snapshot_safe); const handle = text(source.instagram_handle) || text(peer.provider_external_id);
     if (!handle || handle === ownHandle) return [];
     const title = text(source.title) || handle; const snippet = text(source.snippet); const sourceQuery = text(source.source_query) || text(peer.source_query);
-    const location = resolveCommercialLocation({ requestedCity: city, signals: { provider: [title, snippet] } });
+    const location = resolveCommercialLocation({ requestedCity: city, countryCode, signals: { provider: [title, snippet] } });
     const category = snippet || title;
     const suggestion: Omit<AudienceSuggestion, "audience_relevance_score"> = { name: title.slice(0, 160), instagram_handle: handle, category: category.slice(0, 160),
       location: location.city, reason: `Beauty/Aesthetics profile found by source query: ${sourceQuery}`.slice(0, 320), profile_url: `https://www.instagram.com/${handle}/`,
@@ -184,9 +184,14 @@ async function loadAudienceSuggestions(supabase: SupabaseAdmin, item: Row, city:
 
 async function processCommercialItem(supabase: SupabaseAdmin, item: Row, dependencies: ProcessorDependencies) {
   const started = Date.now(); const candidate = candidateFromItem(item); const city = text(item.city) as CommercialDiscoveryCity;
-  const market = text(item.country_code) === "FR" || !["Johannesburg", "Cape Town"].includes(city) ? "FR" as const : "ZA" as const;
   const lookupProfile = dependencies.lookupProfile ?? lookupInstagramPublicProfile; const analyze = dependencies.analyze ?? analyzeCommercialProspectWithRetry; const enrichWebsite = dependencies.enrichWebsite ?? enrichCommercialWebsite;
   try {
+    // Item claims do not include country_code; use the persisted run context,
+    // never a city-name heuristic, for every geography/precheck branch.
+    const runContext = await supabase.from("commercial_discovery_runs").select("country_code").eq("id", text(item.run_id)).single();
+    if (runContext.error) throw new Error("commercial_discovery_country_read_failed");
+    const market = text(row(runContext.data).country_code);
+    if (market !== "FR" && market !== "ZA") throw new Error("commercial_discovery_country_invalid");
     const franceControl = market === "FR" ? await loadFranceControl(supabase, text(item.run_id)) : null;
     if (franceControl && !["armed", "running"].includes(text(franceControl.state))) {
       await supabase.from("commercial_discovery_items").update({ status: "pending", locked_at: null, locked_by: null, next_attempt_at: null }).eq("id", text(item.id));
@@ -205,8 +210,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     if (!profile.ok || profile.status !== "found") {
       const code = `profile_${profile.status}`; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
       if (profile.status === "not_found") {
-        const location = resolveCommercialLocation({ requestedCity: city, signals: { provider: [candidate.title, candidate.snippet] } });
-        const precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileFound: false, location });
+        const location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: [candidate.title, candidate.snippet] } });
+        const precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet, profileFound: false, location });
         await recordPrecheckDecision(supabase, item, precheck, location, { duration_ms: Date.now() - started });
         return;
       }
@@ -218,8 +223,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const recentCaptions = profile.recent_post_captions ?? [];
     const profileTexts = [profile.metadata.profile_name, profile.metadata.biography, profile.official_category, ...recentCaptions];
     const providerTexts = [candidate.title, candidate.snippet];
-    let location = resolveCommercialLocation({ requestedCity: city, signals: { provider: providerTexts, instagram: profileTexts } });
-    let precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
+    let location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: providerTexts, instagram: profileTexts } });
+    let precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
     if (precheck.decision === "PRECHECK_REJECT") { await recordPrecheckDecision(supabase, item, precheck, location, { duration_ms: Date.now() - started }); return; }
     if (precheck.decision === "PRECHECK_AMBIGUOUS") await recordPrecheckDecision(supabase, item, precheck, location);
@@ -240,8 +245,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const directBooking = extractBookingEvidence(bioLinks, profileTexts);
     const booking = directBooking.bookingUrl ? directBooking : { bookingUrl: website.bookingUrl, bookingProvider: website.bookingProvider, evidence: website.bookingEvidence };
     const businessWebsite = website.websiteUrl && !isSharedCommercialPlatformUrl(website.websiteUrl) ? website.websiteUrl : null;
-    location = resolveCommercialLocation({ requestedCity: city, signals: { provider: providerTexts, instagram: profileTexts, website: [website.address, website.description], booking: [booking.evidence], structured_metadata: [website.address] } });
-    precheck = deterministicCommercialPrecheck({ requestedCity: city, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
+    location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: providerTexts, instagram: profileTexts, website: [website.address, website.description], booking: [booking.evidence], structured_metadata: [website.address] } });
+    precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
       ...(market === "FR" ? { websiteDescription: website.description } : {}),
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
     if (precheck.decision !== "PRECHECK_PASS") {
@@ -280,7 +285,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       const { data: reserved, error } = await supabase.rpc("reserve_commercial_france_score_v2", { p_item_id: text(item.id) });
       if (error || reserved !== true) throw new Error("fr_scoring_budget_or_replay_blocked");
     }
-    const request = { evidence: compactEvidence, city: detectedCity, ...(market === "FR" ? { market } : {}), requestedSubsegment: nullableText(item.subsegment) ?? undefined };
+    const request = { evidence: compactEvidence, city: detectedCity, ...(market === "FR" ? { market: "FR" as const } : {}), requestedSubsegment: nullableText(item.subsegment) ?? undefined };
     const scoringStarted = Date.now();
     const scoringCallId = franceControl && !cached ? await reserveFranceCall(supabase, text(item.run_id), "openai", "scoring", `item:${text(item.id)}:scoring`) : null;
     let ai;
@@ -305,7 +310,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       return;
     }
     const audienceTargetContext = [businessName, profile.official_category, candidate.title].filter(Boolean).join(" ");
-    const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext, detectedCity);
+    const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext, detectedCity, market);
     const payload = { provider: candidate.provider, provider_external_id: candidate.providerExternalId, source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
       source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
       analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage }, score_breakdown_safe: score.breakdown,

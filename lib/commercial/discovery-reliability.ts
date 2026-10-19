@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CommercialDiscoveryCity } from "./discovery-contract.ts";
+import type { CommercialDiscoveryCity, CommercialDiscoveryCountry } from "./discovery-contract.ts";
 import { resolveFranceLocation, franceNonLocalServiceReason } from "./france-location.ts";
 export { resolveFranceLocation } from "./france-location.ts";
 
@@ -67,9 +67,11 @@ function audienceVerticalLabel(vertical: AudienceVertical) {
 
 export function resolveCommercialLocation(input: {
   requestedCity: CommercialDiscoveryCity;
+  countryCode?: CommercialDiscoveryCountry;
   signals: Partial<Record<EvidenceSource, unknown[]>>;
 }): LocationResolution {
-  if (input.requestedCity === "France") return resolveFranceLocation(input.signals);
+  // Preserve legacy nationwide callers, but an explicit run country wins.
+  if (input.countryCode === "FR" || (input.countryCode === undefined && input.requestedCity === "France")) return resolveFranceLocation(input.signals);
   const evidence: LocationResolution["evidence"] = [];
   for (const [source, values] of Object.entries(input.signals) as Array<[EvidenceSource, unknown[] | undefined]>) {
     for (const raw of values ?? []) {
@@ -91,6 +93,7 @@ export function resolveCommercialLocation(input: {
 
 export function deterministicCommercialPrecheck(input: {
   requestedCity: CommercialDiscoveryCity;
+  countryCode?: CommercialDiscoveryCountry;
   title?: unknown;
   snippet?: unknown;
   profileName?: unknown;
@@ -102,12 +105,13 @@ export function deterministicCommercialPrecheck(input: {
   profileFound?: boolean;
   location: LocationResolution;
 }): CommercialPrecheckResult {
+  const france = input.countryCode === "FR" || (input.countryCode === undefined && input.requestedCity === "France");
   const fields = [input.title, input.snippet, input.profileName, input.biography, input.category, ...(input.recentCaptions ?? [])].map((value) => clean(value)).filter(Boolean);
   const combined = fields.join(" ");
   const identityCombined = [input.title, input.profileName, input.category].map((value) => clean(value)).filter(Boolean).join(" ");
-  const franceExclusion = input.requestedCity === "France" ? franceNonLocalServiceReason(identityCombined, clean(input.biography), clean(input.websiteDescription)) : null;
+  const franceExclusion = france ? franceNonLocalServiceReason(identityCombined, clean(input.biography), clean(input.websiteDescription)) : null;
   if (franceExclusion) return { decision: "PRECHECK_REJECT", reason: franceExclusion, evidence: fields.slice(0, 4) };
-  const beauty = input.requestedCity === "France" ? /(?:esth[ée]ti|beaut[ée]|coiff|ongl|cils|sourcils|maquill|[ée]pilation|soins de la peau|dermato|salon|skin|spa|lash|brow|nail|makeup|hair)/i : beautyPattern;
+  const beauty = france ? /(?:esth[ée]ti|beaut[ée]|coiff|ongl|cils|sourcils|maquill|[ée]pilation|soins de la peau|dermato|salon|skin|spa|lash|brow|nail|makeup|hair)/i : beautyPattern;
   if (input.profileFound === false) return { decision: "PRECHECK_REJECT", reason: "instagram_profile_not_found", evidence: [] };
   if (input.isPrivate === true) return { decision: "PRECHECK_REJECT", reason: "instagram_private", evidence: [] };
   if (closedPattern.test(combined)) return { decision: "PRECHECK_REJECT", reason: "business_closed", evidence: fields.filter((value) => closedPattern.test(value)).slice(0, 3) };
@@ -115,8 +119,11 @@ export function deterministicCommercialPrecheck(input: {
     return { decision: "PRECHECK_REJECT", reason: "clearly_unrelated_business", evidence: fields.filter((value) => disallowedAudiencePattern.test(value)).slice(0, 3) };
   }
   if (!beauty.test(combined)) return { decision: "PRECHECK_AMBIGUOUS", reason: "beauty_vertical_unproven", evidence: fields.slice(0, 3) };
-  if (input.requestedCity === "France") {
+  if (france) {
     if (input.location.country !== "FR" || !input.location.city || input.location.confidence === "LOW") return { decision: "PRECHECK_AMBIGUOUS", reason: "location_requires_enrichment", evidence: [] };
+    if (input.requestedCity !== "France" && clean(input.location.city).toLocaleLowerCase("fr") !== clean(input.requestedCity).toLocaleLowerCase("fr")) {
+      return { decision: "PRECHECK_REJECT", reason: "outside_strict_market", evidence: input.location.evidence.map((e) => e.value).slice(0, 3) };
+    }
     return { decision: "PRECHECK_PASS", reason: "plausible_local_beauty_business", evidence: input.location.evidence.map((e) => `${e.source}:${e.value}`).slice(0, 5) };
   }
   const wrongCityEvidence = input.location.evidence.filter((item) => item.city !== input.requestedCity);
