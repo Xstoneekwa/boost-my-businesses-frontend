@@ -238,6 +238,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const profileTexts = [profile.metadata.profile_name, profile.metadata.biography, profile.official_category, ...recentCaptions];
     const providerTexts = [candidate.title, candidate.snippet];
     let location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: providerTexts, instagram: profileTexts } });
+    // Preserve the actual IG provenance before adding candidate-site observations.
+    const observedProfileCities = [...new Set(location.evidence.filter(e => e.source === "instagram").map(e => e.city))];
     let precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
     if (precheck.decision === "PRECHECK_REJECT") { await recordPrecheckDecision(supabase, item, precheck, location, { duration_ms: Date.now() - started }); return; }
@@ -273,7 +275,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       profileFirst = resolveProfileFirstIdentity({ anchors,
         context: { country: "FR", requestedCity: city, profileUrl: candidate.profileUrl, candidateWebsiteUrls: [observedWebsite, website.websiteUrl, ...(website.evidence ?? [])].filter((url): url is string => Boolean(url)) },
         sites: website.identityPages ?? [],
-        profile: { url: candidate.profileUrl, alias: nullableText(profile.metadata.profile_name) ?? undefined, city: location.confidence !== "LOW" ? location.city ?? undefined : undefined,
+        profile: { url: candidate.profileUrl, alias: nullableText(profile.metadata.profile_name) ?? undefined, city: observedProfileCities.length === 1 ? observedProfileCities[0] : undefined,
           website: profile.external_url ?? undefined, observed_at: profile.checked_at },
         hits: [{ url: candidate.profileUrl, title: candidate.title ?? "", snippet: candidate.snippet ?? "" }], observedAt: profile.checked_at });
       // UNKNOWN is never promoted because enrichment found a plausible URL.
@@ -281,7 +283,10 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       if (!profileFirst.scoringAllowed || profile.is_private !== false) {
         const contradiction = profileFirst.admission.outcome === "REJECT" || profileFirst.identity?.match.reason === "IDENTITY_CONTRADICTION";
         const identityLow = profileFirst.identity?.match.confidence === "LOW";
-        const reason = profileFirst.admission.outcome === "ADMITTED" ? profileFirst.scoringAllowed ? "enrichment_not_verified_public_profile" : profileFirst.identity!.match.reason : profileFirst.admission.reason;
+        const reason = profileFirst.admission.outcome === "ADMITTED"
+          ? profileFirst.scoringAllowed ? "enrichment_not_verified_public_profile"
+            : profileFirst.identity!.match.confidence === "HIGH" ? "candidate_handle_mismatch" : profileFirst.identity!.match.reason
+          : profileFirst.admission.reason;
         // Reuse the existing terminal review-hold status. The explicit HOLD
         // outcome is evidence metadata, not a new DB state or identity LOW.
         await recordPrecheckDecision(supabase, item, precheck, location, {

@@ -74,11 +74,11 @@ export function resolveProfileFirstIdentity(input: { anchors: EstablishmentAncho
   const unique = [...new Map(admitted.map(a => [`${a.candidate.provider}:${a.candidate.externalId || a.provenance.reference}`, a])).values()];
   const firstHold = admissions.find(a => a.outcome === "HOLD");
   const admission = admissions.find(a => a.outcome === "REJECT") ?? (unique.length === 1 ? unique[0] : hold(unique.length ? "ambiguous_independent_establishments" : firstHold?.detail ?? "no_independent_structured_establishment"));
-  if (admission.outcome !== "ADMITTED") return { contract: PROFILE_FIRST_ANCHOR_CONTRACT, admission, identity: null, scoringAllowed: false };
+  if (admission.outcome !== "ADMITTED") return { contract: PROFILE_FIRST_ANCHOR_CONTRACT, admission, identity: null, candidateIdentityConfidence: null, scoringAllowed: false };
   const identity: BusinessResolution = evaluateBusinessResolution(admission.candidate, input.hits ?? [], input.sites, [input.profile], input.observedAt);
   // V2 may find another legitimate account. It must never certify THIS candidate by accident.
   const sameHandle = identity.match.matchedHandle === rootInstagramHandle(input.context.profileUrl);
-  return { contract: PROFILE_FIRST_ANCHOR_CONTRACT, admission, identity, scoringAllowed: identity.match.confidence === "HIGH" && sameHandle };
+  return { contract: PROFILE_FIRST_ANCHOR_CONTRACT, admission, identity, candidateIdentityConfidence: sameHandle ? identity.match.confidence : null, scoringAllowed: identity.match.confidence === "HIGH" && sameHandle };
 }
 
 /** Adapter for pre-existing structured business records, not for raw profile/SERP data.

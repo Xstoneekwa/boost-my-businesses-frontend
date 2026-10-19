@@ -70,7 +70,7 @@ test("ambiguous establishments hold; explicit profile contradiction reuses V2 re
   assert.equal(r.identity?.match.reason, "IDENTITY_CONTRADICTION"); assert.equal(r.scoringAllowed, false);
 });
 test("another IG account on a certified site cannot certify the candidate", () => {
-  const r = resolve([anchor], [{ ...site, links: ["https://instagram.com/another/"] }]); assert.equal(r.scoringAllowed, false);
+  const r = resolve([anchor], [{ ...site, links: ["https://instagram.com/another/"] }]); assert.equal(r.scoringAllowed, false); assert.equal(r.candidateIdentityConfidence, null);
 });
 for (const [url, type] of [["https://iarabeauty.com/pro/fixture", "THIRD_PARTY_BOOKING"], ["https://planity.com/fixture", "THIRD_PARTY_BOOKING"], ["https://wa.me/fixture", "CONTACT_PLATFORM"], ["https://api.whatsapp.com/", "CONTACT_PLATFORM"], ["https://t.me/fixture", "CONTACT_PLATFORM"], ["https://telegram.org/", "CONTACT_PLATFORM"]]) {
   test(`third party ${new URL(url).hostname} never official`, () => {
