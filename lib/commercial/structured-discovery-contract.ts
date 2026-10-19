@@ -5,7 +5,14 @@ export type StructuredCandidate = {
   address: string; postalCode: string; city: string; department: string;
   activity: { code: string; nomenclature: string; label: string };
   eligibility: { prospectingEligible: boolean; reason: string; checkedAt: string; policyVersion: string; establishmentDiffusion: string; legalUnitDiffusion: string };
-  source: { license: string; attribution: string; observedAt: string; url: string };
+  source: { license: string; attribution: string; observedAt: string; url: string; lineage?: {
+    delivery_source: "DINUM"; canonical_identity_provider: "sirene"; siret: string; siren: string;
+    fieldPaths: Record<string, string>; providerUpdatedAt: string | null;
+    legalUnitUpdatedAt: string | null; observedAt: string;
+    rawAdminCity: string; normalizedMatchCity: string; commune: string; territorialRule: string;
+    establishmentState: string; legalUnitState: string; activitySource: string;
+    activityCompatibilityRule: string;
+  } };
   officialWebsite?: string;
   authorizedSocialLink?: string;
   business_aliases?: BusinessAlias[];
