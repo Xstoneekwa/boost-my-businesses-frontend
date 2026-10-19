@@ -48,7 +48,11 @@ export function admitProfileFirstAnchor(anchor: EstablishmentAnchor | null, cont
     || !c.source?.url || !c.source.observedAt || !c.businessName?.trim() || !c.city?.trim()) return hold("incomplete_provenance_or_establishment");
   // This checks original lineage as well as the stored reference, including redirects.
   // A renamed provider or copied site address must not turn self-evidence independent.
-  const candidateDomains = context.candidateWebsiteUrls.map(value => domain(value.replace(/^http:/, "https:"))).filter((v): v is string => Boolean(v));
+  const candidateDomains = context.candidateWebsiteUrls.flatMap(value => {
+    // Even an unusable hint (credentials/non-HTTPS) must not hide the same
+    // website from the circular-proof check. This never authorizes fetching it.
+    try { return [new URL(value).hostname.toLowerCase().replace(/^www\./, "")]; } catch { return []; }
+  });
   const sources = [c.source.url, p.reference, ...p.derivedFrom];
   if (sources.some(value => {
     const d = domain(value);

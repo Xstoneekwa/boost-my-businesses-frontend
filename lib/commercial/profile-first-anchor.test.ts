@@ -54,6 +54,10 @@ test("circular proof remains blocked when copied behind a different provider/ref
   const a = copy(); a.provenance.derivedFrom.push("https://salon.example/contact");
   assert.equal(admitProfileFirstAnchor(a, context).outcome, "HOLD");
 });
+test("unusable candidate URL cannot conceal its host from the circular-proof check", () => {
+  const a = copy(); a.candidate.source.url = a.provenance.reference = "https://salon.example/contact"; a.provenance.derivedFrom = [a.provenance.reference];
+  assert.equal(admitProfileFirstAnchor(a, { ...context, candidateWebsiteUrls: ["https://fixture:fixture@salon.example/"] }).outcome, "HOLD");
+});
 for (const field of ["provider", "reference", "observedAt"] as const) test(`missing provenance ${field} holds`, () => {
   const a = copy(); a.provenance[field] = ""; assert.equal(admitProfileFirstAnchor(a, context).outcome, "HOLD");
 });
