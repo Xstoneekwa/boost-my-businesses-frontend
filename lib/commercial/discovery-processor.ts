@@ -292,20 +292,26 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     try {
       ai = cached ? { ok: true as const, analysis: row(cached.analysis_snapshot_safe) as never, model: text(cached.ai_model), attempts: 0, usage: undefined }
         : experiment ? { ...await analyzeCommercialProspect(request), attempts: 1 } : await analyze(request);
-      await finishFranceCall(supabase, scoringCallId, "succeeded", Date.now() - scoringStarted, ai.ok && ai.analysis ? 1 : 0);
-    } catch (error) {
-      await finishFranceCall(supabase, scoringCallId, "failed", Date.now() - scoringStarted, 0, error instanceof Error ? error.message : "scoring_failed");
-      throw error;
+    } catch {
+      await finishFranceCall(supabase, scoringCallId, "failed", Date.now() - scoringStarted, 0, "provider_unavailable");
+      throw new Error("scoring_failed");
     }
+    // A resolved promise/HTTP 200 does not imply a valid scoring result.
+    // Finish once, after checking ai.ok, using the existing ledger outcomes.
+    const aiSucceeded = ai.ok && Boolean(ai.analysis);
+    await finishFranceCall(supabase, scoringCallId, aiSucceeded ? "succeeded" : "failed", Date.now() - scoringStarted,
+      aiSucceeded ? 1 : 0, aiSucceeded ? undefined : ai.errorCode ?? "schema_invalid");
+    const providerDiagnostic = "providerDiagnostic" in ai ? ai.providerDiagnostic : undefined;
+    const providerAttemptsSafe = "providerAttemptsSafe" in ai ? ai.providerAttemptsSafe : providerDiagnostic ? [providerDiagnostic] : [];
     if (!ai.ok || !ai.analysis) {
-      await updateItem(supabase, text(item.id), { status: "failed", stage: "FAILED", error_code: "AI_ANALYSIS_FAILED", error_detail_safe: { provider_code: ai.errorCode, attempts: ai.attempts },
+      await updateItem(supabase, text(item.id), { status: "failed", stage: "FAILED", error_code: "AI_ANALYSIS_FAILED", error_detail_safe: { provider_code: ai.errorCode, attempts: ai.attempts, provider_diagnostic: providerDiagnostic, provider_attempts_safe: providerAttemptsSafe },
         completed_at: new Date().toISOString(), duration_ms: Date.now() - started }); return;
     }
     const score = scoreCommercialProspect({ analysis: ai.analysis, isPrivate: profile.is_private, profileFound: true,
       businessStatus: ai.analysis.signals.appearsClosed ? "closed" : "unknown", deterministicLocationConfidence: location.confidence });
     if (score.itemStatus === "hard_rejected") {
       await updateItem(supabase, text(item.id), { status: "rejected", stage: "REJECTED", duplicate_reason: score.hardGateCodes.join(",") || "ai_hard_reject",
-        analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage },
+        analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage, provider_diagnostic: providerDiagnostic, provider_attempts_safe: providerAttemptsSafe },
         completed_at: new Date().toISOString(), duration_ms: Date.now() - started });
       return;
     }
@@ -313,7 +319,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext, detectedCity, market);
     const payload = { provider: candidate.provider, provider_external_id: candidate.providerExternalId, source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
       source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
-      analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage }, score_breakdown_safe: score.breakdown,
+      analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage, provider_diagnostic: providerDiagnostic, provider_attempts_safe: providerAttemptsSafe }, score_breakdown_safe: score.breakdown,
       personalization_context_safe: { observed_evidence: ai.analysis.evidence, reasoning: ai.analysis.reasoning }, audience_context_safe: { source: "deterministically_filtered_discovery_peers", suggestions: audiences },
       business_name: businessName, country_code: market, city: detectedCity, vertical: "Beauty/Aesthetics", subsegment: ai.analysis.subsegment, instagram_handle: profile.canonical_username,
       website: businessWebsite, email: website.email, phone: website.phone, address_safe: website.address, business_description: website.description ?? ai.analysis.reasoning,
