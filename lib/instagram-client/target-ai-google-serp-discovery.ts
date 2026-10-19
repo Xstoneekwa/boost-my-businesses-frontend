@@ -100,6 +100,7 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
   earlyStopCandidateCount?: number;
   maxQueriesToExecute?: number;
   thirdPageMinCandidates?: number;
+  candidateFilter?: (candidate: SerpProfileCandidate) => boolean;
 }): Promise<TargetAiGoogleSerpDiscoveryResult> {
   const apiKey = readDiscoveryApiKey();
   const endpoint = readDiscoveryEndpoint();
@@ -208,7 +209,10 @@ export async function runTargetAiGoogleSerpDiscovery(input: {
       for (const [reason, count] of Object.entries(extractionStats.rejections_by_reason)) {
         rejectionsByReason[reason] = (rejectionsByReason[reason] || 0) + count;
       }
-      collected.push(...extractSerpProfilesFromOrganicResults({ rows: organicResults, sourceQuery: query }));
+      const extracted = extractSerpProfilesFromOrganicResults({ rows: organicResults, sourceQuery: query });
+      // Optional caller-owned triage happens before the candidate cap/early
+      // stop. Callers without a filter (including ZA) retain their exact path.
+      collected.push(...(input.candidateFilter ? extracted.filter(input.candidateFilter) : extracted));
     }
 
     if (collected.length >= earlyStopCandidateCount) {

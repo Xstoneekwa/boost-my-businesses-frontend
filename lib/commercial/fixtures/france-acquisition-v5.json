@@ -1,0 +1,138 @@
+{
+  "sourceRun": "f29101f0-ef52-4ff3-813c-be4f0731c699",
+  "sourceScope": "Persisted V5 evidence, no new provider. Only SERP fields enter prefilter.",
+  "candidates": [
+    {
+      "username": "mhaesthetic.clinic",
+      "profileUrl": "https://www.instagram.com/mhaesthetic.clinic/",
+      "title": "MÉDECINE ESTHÉTIQUE PARIS (@mhaesthetic.clinic)",
+      "snippet": "MH AESTHETIC CLINIC | MÉDECINE ESTHÉTIQUE PARIS. 1,261 followers. 243 following. Beauty, cosmetic & personal care. MH AESTHETIC CLINIC",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France",
+      "position": 2,
+      "category": "A",
+      "auditReason": "Potential Paris beauty service; profile name and caption corroborate Paris, identity not certified",
+      "expectedKeep": true
+    },
+    {
+      "username": "paris.aesthetic.surgery",
+      "profileUrl": "https://www.instagram.com/paris.aesthetic.surgery/",
+      "title": "Centre de medecine esthétique (@paris.aesthetic.surgery)",
+      "snippet": "paris.aesthetic.surgery's profile picture. paris.aesthetic.surgery. Centre de medecine esthétique. 2,818 followers. 11 following. Soin & Médecine Esthétique ...",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 6,
+      "category": "B",
+      "auditReason": "Beauty SERP evidence retained; profile unavailable and establishment/location unverified",
+      "expectedKeep": true
+    },
+    {
+      "username": "flaviobolsonaro",
+      "profileUrl": "https://www.instagram.com/flaviobolsonaro/",
+      "title": "Flávio Bolsonaro (@flaviobolsonaro)",
+      "snippet": "Flávio Bolsonaro Senador | Advogado | Cristão Vamos resgatar o nosso Brasil Candidato à Presidência da República @fernanda.bolsonaro",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 9,
+      "category": "D",
+      "auditReason": "Senador/Advogado/presidential campaign already visible in snippet",
+      "expectedKeep": false
+    },
+    {
+      "username": "previewma",
+      "profileUrl": "https://www.instagram.com/previewma/",
+      "title": "Школа моделей и актерского мастерства ПреВью ...",
+      "snippet": "Основатель @helen.poleshchuk. Набор от 5 до 55 лет. Дефиле, фотопозирование, актерское мастерство, здоровая осанка и др.",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 10,
+      "category": "C",
+      "auditReason": "Model and acting school already visible in title/snippet",
+      "expectedKeep": false
+    },
+    {
+      "username": "guerrilla_works",
+      "profileUrl": "https://www.instagram.com/guerrilla_works/",
+      "title": "今村怜央(LEO IMAMURA)(ALI) (@guerrilla_works)",
+      "snippet": "45K followers · 3K+ following · 685 posts · @guerrilla_works: “MUSIC & PARADISE -Tokyo-”",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 11,
+      "category": "D",
+      "auditReason": "Music/Tokyo already visible in snippet",
+      "expectedKeep": false
+    },
+    {
+      "username": "ree_letrica",
+      "profileUrl": "https://www.instagram.com/ree_letrica/",
+      "title": "RE elétrica (@ree_letrica)",
+      "snippet": "329 followers · 402 following · 25 posts · @ree_letrica: “instalação elétrica em geral”",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 12,
+      "category": "C",
+      "auditReason": "Electrical installation already visible in title/snippet",
+      "expectedKeep": false
+    },
+    {
+      "username": "kccisnews",
+      "profileUrl": "https://www.instagram.com/kccisnews/",
+      "title": "KCCIS NEWS (@kccisnews)",
+      "snippet": "Reporting stories that matter to you. A student-led initiative in KCCIS to inform and share. Help us improve by giving us feedback!",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 13,
+      "category": "D",
+      "auditReason": "Student-led news already visible in snippet",
+      "expectedKeep": false
+    },
+    {
+      "username": "policy",
+      "profileUrl": "https://www.instagram.com/policy/",
+      "title": "Privacy Policy - How Meta collects and uses user data",
+      "snippet": "This helps you use Meta Products in the way that's right for you. In the Privacy Policy, we explain how we collect, use, share, retain and transfer information.",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 14,
+      "category": "E",
+      "auditReason": "Privacy Policy title and reserved /policy/ URL already available",
+      "expectedKeep": false
+    },
+    {
+      "username": "edencrochets",
+      "profileUrl": "https://www.instagram.com/edencrochets/",
+      "title": "Eden Crochets 🤍✨ (@edencrochets)",
+      "snippet": "Welcome to my cosy corner Whimsy amigurumi patterns I also like to read @edensbookcase Etsy, Contact me ⬇️. Follow. Message ...",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 15,
+      "category": "C",
+      "auditReason": "Crochet/amigurumi products already visible",
+      "expectedKeep": false
+    },
+    {
+      "username": "hamptontechsolutions",
+      "profileUrl": "https://www.instagram.com/hamptontechsolutions/",
+      "title": "HamptonTech Solutions (@hamptontechsolutions)",
+      "snippet": "HamptonTech's focus is on delivering the best quality and service to individuals as well as businesses.",
+      "sourceQuery": "site:instagram.com/ \"aesthetic clinic\" \"Paris\" France booking",
+      "position": 16,
+      "category": "C",
+      "auditReason": "Tech Solutions title with generic service text; later website confirms IT outside France",
+      "expectedKeep": false
+    }
+  ],
+  "localProof": {
+    "username": "mhaesthetic.clinic",
+    "signals": {
+      "provider": [
+        "MÉDECINE ESTHÉTIQUE PARIS (@mhaesthetic.clinic)",
+        "MH AESTHETIC CLINIC | MÉDECINE ESTHÉTIQUE PARIS. 1,261 followers. 243 following. Beauty, cosmetic & personal care. MH AESTHETIC CLINIC"
+      ],
+      "instagram": [
+        "MH AESTHETIC CLINIC | MÉDECINE ESTHÉTIQUE PARIS",
+        "𝐌𝐇 𝐀𝐄𝐒𝐓𝐇𝐄𝐓𝐈𝐂 𝐂𝐋𝐈𝐍𝐈𝐂\n𝑊ℎ𝑒𝑟𝑒 𝑠𝑐𝑖𝑒𝑛𝑐𝑒 𝑚𝑒𝑒𝑡𝑠 𝑒𝑙𝑒𝑔𝑎𝑛𝑐𝑒．\n◉ Advanced Skin & Laser Expert\n◉ Medical Aesthetics Consultant\n📍 Par",
+        "HYDRAFACIAL × SKIN BOOSTER L’excellence du soin, la qualité de la peau. Une peau lumineuse, un teint plus frais, un grain de peau visiblement affiné. L’association d’un soin Hydrafacial et d’un skin booster permet de combiner nettoyage en profondeur, élimination des impuretés et ",
+        "DÉTATOUER, PUIS RECONSTRUIRE. Le détatouage laser permet d’éliminer progressivement une ancienne dermopigmentation et notamment certains pigments résiduels orangés. Au fil des séances, le poil peut également être temporairement fragilisé : c’est pourquoi ma prise en charge ne s’a",
+        "Une séance bien préparée, c’est déjà optimiser ses résultats. 5 essentiels avant votre épilation laser pour allier efficacité, sécurité & précision. MH AESTHETIC — Paris 16e Sur rendez-vous [phone omitted]",
+        "L’épilation laser, pensée comme un véritable protocole sur mesure. Chez MH AESTHETIC, nous avons choisi une technologie de référence : le Candela GentleMax Pro Plus, associant Alexandrite & Nd:YAG pour s’adapter aux différents phototypes. ✦ Diagnostic personnalisé ✦ Protocole ada",
+        "La précision est une forme d’excellence. Parce qu’en esthétique, chaque détail compte. Une technologie performante ne suffit pas : l’analyse, la maîtrise du geste et la personnalisation du protocole font toute la différence. Chez MH AESTHETIC, chaque prise en charge est pensée su"
+      ],
+      "website": [
+        "Business Account"
+      ]
+    },
+    "contactEvidence": "Appointments CTA and WhatsApp link observed; direct DM/incoming enquiry not observed; timestamped activity unavailable."
+  }
+}

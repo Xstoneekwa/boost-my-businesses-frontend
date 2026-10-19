@@ -3,6 +3,7 @@ import type { CommercialDiscoveryCity, CommercialDiscoveryCountry, CommercialDis
 import { buildCommercialDiscoveryQueries } from "./discovery-query-portfolio";
 import { franceDiagnosticFetcher, type FranceQueryDiagnostic } from "./france-query-diagnostics";
 import { runFranceProfileFirst, type PersistPage } from "./france-profile-first";
+import { assessFranceSerpCandidate } from "./france-acquisition";
 
 export { buildCommercialDiscoveryQueries } from "./discovery-query-portfolio";
 
@@ -39,13 +40,21 @@ export async function discoverCommercialCandidates(input: { city: CommercialDisc
   const queries = buildCommercialDiscoveryQueries(input.city, input.subsegment, countryCode);
   const queryDiagnostics: FranceQueryDiagnostic[] = [];
   const isFrance = countryCode === "FR";
+  const prefilter = { version: "FR_SERP_TRIAGE_V1", evaluated: 0, kept: 0, rejected: 0, reasons: {} as Record<string, number> };
+  const candidateFilter = isFrance ? (candidate: Parameters<typeof assessFranceSerpCandidate>[0]) => {
+    const decision = assessFranceSerpCandidate(candidate);
+    prefilter.evaluated += 1;
+    prefilter[decision.keep ? "kept" : "rejected"] += 1;
+    prefilter.reasons[decision.reason] = (prefilter.reasons[decision.reason] ?? 0) + 1;
+    return decision.keep;
+  } : undefined;
   const fetcher = isFrance ? franceDiagnosticFetcher(input.fetcher ?? fetch, queryDiagnostics) : input.fetcher;
-  const result = await runTargetAiGoogleSerpDiscovery({ queries, maxCandidates: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 4, 12), 90), earlyStopCandidateCount: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 3, 10), 70), pagesPerQuery: 2, maxQueriesToExecute: queries.length, maxDurationMs: 110_000, fetcher });
+  const result = await runTargetAiGoogleSerpDiscovery({ queries, maxCandidates: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 4, 12), 90), earlyStopCandidateCount: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 3, 10), 70), pagesPerQuery: 2, maxQueriesToExecute: queries.length, maxDurationMs: 110_000, fetcher, ...(candidateFilter ? { candidateFilter } : {}) });
   return {
     queries,
     candidates: (isFrance ? result.candidates.slice(0, input.maxCandidates) : result.candidates).map((candidate) => ({ provider: "searchapi", providerExternalId: candidate.username.toLowerCase(), instagramHandle: candidate.username.toLowerCase(), profileUrl: candidate.profileUrl,
       title: candidate.title, snippet: candidate.snippet, sourceQuery: candidate.sourceQuery, position: candidate.position, extractionMode: candidate.extractionMode ?? "strict" })),
-    diagnostic: { ...(isFrance ? { queryDiagnostics } : {}), queriesExecuted: result.queriesExecuted, queriesSucceeded: result.queriesSucceeded, queriesFailed: result.queriesFailed, pagesFetched: result.pagesFetched,
+    diagnostic: { ...(isFrance ? { queryDiagnostics, acquisitionPrefilter: prefilter } : {}), queriesExecuted: result.queriesExecuted, queriesSucceeded: result.queriesSucceeded, queriesFailed: result.queriesFailed, pagesFetched: result.pagesFetched,
       organicResultsScanned: result.organicResultsScanned, extractedCandidatesCount: result.extractedCandidatesCount, rejectedNonProfileCount: result.rejectedNonProfileCount, stoppedReason: result.stoppedReason },
   };
 }

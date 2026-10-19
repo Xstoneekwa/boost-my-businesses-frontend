@@ -71,7 +71,7 @@ export function resolveCommercialLocation(input: {
   signals: Partial<Record<EvidenceSource, unknown[]>>;
 }): LocationResolution {
   // Preserve legacy nationwide callers, but an explicit run country wins.
-  if (input.countryCode === "FR" || (input.countryCode === undefined && input.requestedCity === "France")) return resolveFranceLocation(input.signals);
+  if (input.countryCode === "FR" || (input.countryCode === undefined && input.requestedCity === "France")) return resolveFranceLocation(input.signals, { countryCode: input.countryCode, requestedCity: input.requestedCity });
   const evidence: LocationResolution["evidence"] = [];
   for (const [source, values] of Object.entries(input.signals) as Array<[EvidenceSource, unknown[] | undefined]>) {
     for (const raw of values ?? []) {
