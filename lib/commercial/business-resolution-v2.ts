@@ -2,7 +2,7 @@ import type { BusinessAlias, StructuredCandidate } from "./structured-discovery-
 import { normalizeIdentityText as norm, rootInstagramHandle, type InstagramMatch, type SearchHit, type SiteEvidence } from "./structured-instagram-resolver";
 
 export type MatchEvidence = { type: string; source: string; reference: string; strength: "STRONG" | "SECONDARY" | "NEGATIVE"; observed_at: string };
-export type WebsiteClassification = "OFFICIAL_SITE" | "SHARED_PLATFORM" | "DIRECTORY" | "SOCIAL_NETWORK" | "UNKNOWN";
+export type WebsiteClassification = "OFFICIAL_SITE" | "SHARED_PLATFORM" | "THIRD_PARTY_BOOKING" | "CONTACT_PLATFORM" | "DIRECTORY" | "SOCIAL_NETWORK" | "UNKNOWN";
 export type WebsiteResolution = { url: string; classification: WebsiteClassification; confidence: "HIGH" | "MEDIUM" | "LOW"; signals: MatchEvidence[]; source: string };
 export type PublicProfileEvidence = { url:string; alias?:string; city?:string; address?:string; postalCode?:string; phone?:string; website?:string; services?:string; bookingIdentityVerified?:boolean; sharedBrand?:boolean; observed_at:string };
 export type BusinessResolution = { match: InstagramMatch; aliases: BusinessAlias[]; evidence: MatchEvidence[]; websites: WebsiteResolution[]; profileScope: "DEDICATED_ESTABLISHMENT_PROFILE" | "SHARED_BRAND_PROFILE" | "AMBIGUOUS_PROFILE"; observed_at:string };
@@ -21,6 +21,8 @@ export function classifyWebsiteUrl(value:string): WebsiteClassification {
   try {
     const url=new URL(value), h=url.hostname.toLowerCase();
     if(url.protocol!=="https:"||url.username||url.password) return "UNKNOWN";
+    if(/(^|\.)(wa\.me|whatsapp\.com|telegram\.org|telegram\.me|t\.me)$/.test(h))return "CONTACT_PLATFORM";
+    if(/(^|\.)(iarabeauty\.com|iara\.beauty)$/.test(h))return "THIRD_PARTY_BOOKING";
     if(/(^|\.)(planity|treatwell|fresha|booksy|linktr|linktree|calendly|resalib)\./.test(h))return "SHARED_PLATFORM";
     if(/(^|\.)(instagram|facebook|tiktok|linkedin|youtube|pinterest|threads|twitter|x)\./.test(h))return "SOCIAL_NETWORK";
     if(/(^|\.)(infobel|unboncoiffeur|alentoor|pagesjaunes|yelp|societe|pappers|verif|annuaire-entreprises|utagawavtt|mapquest|tripadvisor|google|mappy|118000|hoodspot|cylex|horaires)\./.test(h)||/annuaire|directory|business-index/.test(h))return "DIRECTORY";

@@ -70,6 +70,6 @@ test("all worker geography branches receive canonical country, including missing
   assert.match(processor, /select\("country_code"\)\.eq\("id", text\(item.run_id\)\)/);
   assert.doesNotMatch(processor, /!\["Johannesburg", "Cape Town"\]\.includes\(city\)/);
   const calls = processor.match(/(?:resolveCommercialLocation|deterministicCommercialPrecheck)\(\{[^\n]+/g) ?? [];
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 9); // Includes the independent-anchor location/precheck pair.
   assert.ok(calls.every((call) => /countryCode(?:: market)?[,}]/.test(call)));
 });

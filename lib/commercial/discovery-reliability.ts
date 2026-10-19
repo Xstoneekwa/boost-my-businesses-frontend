@@ -156,6 +156,19 @@ export function extractObservedUrls(values: unknown[]) {
   return [...urls].slice(0, 20);
 }
 
+/** France-only opt-in. An observed caption domain is a hint, never first-party proof. */
+export function extractFranceCaptionDomainHints(captions: unknown[]) {
+  const hints = new Map<string, { type: "CANDIDATE_DOMAIN_HINT"; url: string; source: "instagram_caption"; captionIndex: number }>();
+  captions.slice(0, 20).forEach((raw, captionIndex) => {
+    const value = clean(raw, 5000);
+    for (const match of value.matchAll(/(?<![\w@/#:.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:fr|com|net|org|eu|beauty|paris|clinic)(?![\w.-])/gi)) {
+      const url = normalizedUrl(`https://${match[0].toLowerCase()}`);
+      if (url && !hints.has(url)) hints.set(url, { type: "CANDIDATE_DOMAIN_HINT", url, source: "instagram_caption", captionIndex });
+    }
+  });
+  return [...hints.values()].slice(0, 20);
+}
+
 function bookingProvider(url: string) {
   const host = new URL(url).hostname.replace(/^www\./, "");
   if (/fresha\./i.test(host)) return "fresha";
@@ -211,7 +224,8 @@ function extractPage(html: string, pageUrl: string, market: "ZA" | "FR" = "ZA") 
   }
   const description = html.match(/<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? null;
   const booking = extractBookingEvidence(links, [plain]);
-  return { links, email, phone, address, description: description ? decodeHtml(description).slice(0, 500) : null, ...booking };
+  return { links, email, phone, address, description: description ? decodeHtml(description).slice(0, 500) : null, ...booking,
+    ...(market === "FR" ? { identityPage: { url: pageUrl, text: plain.slice(0, 12_000), links: links.map(link => link.url).filter(url => /^https:\/\/(?:www\.)?(?:instagram|facebook|tiktok|linkedin|youtube|pinterest|threads|twitter|x)\./i.test(url)).slice(0, 32) } } : {}) };
 }
 
 async function fetchWithRedirectLimit(url: string, fetchImpl: typeof fetch, timeoutMs: number, maxBytes: number) {
@@ -238,7 +252,8 @@ async function fetchWithRedirectLimit(url: string, fetchImpl: typeof fetch, time
 
 export async function enrichCommercialWebsite(input: { websiteUrl: string | null; market?: "ZA" | "FR"; fetchImpl?: typeof fetch; maxPages?: number; timeoutMs?: number; maxBytes?: number }) {
   const start = input.websiteUrl ? normalizedUrl(input.websiteUrl) : null;
-  if (!start) return { websiteUrl: null, pagesFetched: 0, email: null, phone: null, address: null, description: null, bookingUrl: null, bookingProvider: null, bookingEvidence: null, evidence: [] as string[] };
+  if (!start) return { websiteUrl: null, pagesFetched: 0, email: null, phone: null, address: null, description: null, bookingUrl: null, bookingProvider: null, bookingEvidence: null, evidence: [] as string[],
+    ...(input.market === "FR" ? { identityPages: [], socialLinks: [] } : {}) };
   const fetchImpl = input.fetchImpl ?? fetch; const maxPages = Math.min(Math.max(input.maxPages ?? 3, 1), 3); const timeoutMs = Math.min(Math.max(input.timeoutMs ?? 5_000, 500), 8_000); const maxBytes = Math.min(Math.max(input.maxBytes ?? 512_000, 16_000), 512_000);
   const queue = [start]; const visited = new Set<string>(); const pages: ReturnType<typeof extractPage>[] = []; const evidence: string[] = [];
   while (queue.length && visited.size < maxPages) {
@@ -252,7 +267,11 @@ export async function enrichCommercialWebsite(input: { websiteUrl: string | null
   const first = <K extends keyof ReturnType<typeof extractPage>>(key: K) => pages.map((page) => page[key]).find(Boolean) ?? null;
   return { websiteUrl: start, pagesFetched: pages.length, email: first("email") as string | null, phone: first("phone") as string | null, address: first("address") as string | null,
     description: first("description") as string | null, bookingUrl: first("bookingUrl") as string | null, bookingProvider: first("bookingProvider") as string | null,
-    bookingEvidence: first("evidence") as string | null, evidence };
+    bookingEvidence: first("evidence") as string | null, evidence,
+    ...(input.market === "FR" ? {
+      identityPages: pages.flatMap(page => page.identityPage ? [page.identityPage] : []),
+      socialLinks: pages.flatMap(page => page.identityPage?.links.map(url => ({ type: "CANDIDATE_SOCIAL_LINK" as const, url, sourcePage: page.identityPage!.url })) ?? []),
+    } : {}) };
 }
 
 export function filterCommercialAudiences(input: Array<Omit<AudienceSuggestion, "audience_relevance_score">>, requestedCity: string, targetContext: unknown = "") {

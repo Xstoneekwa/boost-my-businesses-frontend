@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
 import { analyzeCommercialProspect, analyzeCommercialProspectWithRetry } from "./discovery-ai";
 import { FR_PROFILE_FIRST_KEY, type PersistPage } from "./france-profile-first";
+import { anchorsFromStructuredBusinesses, classifyProfileFirstWebsiteUrl, resolveProfileFirstIdentity, type EstablishmentAnchor } from "./profile-first-anchor";
 import { COMMERCIAL_AI_PROMPT_VERSION, COMMERCIAL_SCORING_MODEL_VERSION, type CommercialDiscoveryCity, type CommercialDiscoveryCountry, type CommercialDiscoverySubsegment } from "./discovery-contract";
 import { discoverCommercialCandidates, type CommercialDiscoveryCandidate } from "./discovery-provider";
 import {
@@ -12,6 +13,7 @@ import {
   enrichCommercialWebsite,
   extractBookingEvidence,
   extractObservedUrls,
+  extractFranceCaptionDomainHints,
   filterCommercialAudiences,
   isSharedCommercialPlatformUrl,
   resolveCommercialLocation,
@@ -28,6 +30,7 @@ type ProcessorDependencies = {
   lookupProfile?: typeof lookupInstagramPublicProfile;
   analyze?: typeof analyzeCommercialProspectWithRetry;
   enrichWebsite?: typeof enrichCommercialWebsite;
+  loadAnchors?: (input: { city: string; businessName: string; instagramHandle: string }) => Promise<EstablishmentAnchor[]>;
   now?: () => Date;
 };
 
@@ -48,6 +51,17 @@ async function loadFranceControl(supabase: SupabaseAdmin, runId: string) {
   const result = await supabase.from("commercial_france_run_controls").select("run_id,state").eq("run_id", runId).maybeSingle();
   if (result.error) throw new Error("france_control_read_failed");
   return result.data ? row(result.data) : null;
+}
+/** Existing, normalized structured records only. No provider, lookup or anchor
+ * inferred from the profile/website. Bounded ambiguity fails closed. */
+async function loadExistingFranceAnchors(supabase: SupabaseAdmin, input: { city: string; businessName: string; instagramHandle: string }) {
+  let query = supabase.from("commercial_businesses").select("identity_mode,country_code,instagram_handle_normalized,metadata_safe")
+    .eq("identity_mode", "structured").eq("country_code", "FR");
+  if (input.city !== "France") query = query.eq("city", input.city);
+  const result = await query.limit(51);
+  if (result.error) throw new Error("profile_first_anchor_read_failed");
+  const records = (result.data ?? []).map(row);
+  return records.length > 50 ? [] : anchorsFromStructuredBusinesses(records, input);
 }
 class CommercialFranceProfileBudgetExhaustedError extends Error {
   constructor(readonly used: number, readonly limit: number) { super("france_profile_budget_exhausted"); }
@@ -231,7 +245,8 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
 
     const bioLinks = profile.bio_links?.map((link) => ({ url: link.url, title: link.title })) ?? [];
     const observedUrls = extractObservedUrls([...profileTexts, ...bioLinks.map((link) => link.url)]);
-    const observedWebsite = profile.external_url ?? bioLinks.map((link) => link.url).find((url) => url && !/instagram\.com/i.test(url)) ?? observedUrls[0] ?? null;
+    const domainHints = market === "FR" ? extractFranceCaptionDomainHints(recentCaptions) : [];
+    const observedWebsite = profile.external_url ?? bioLinks.map((link) => link.url).find((url) => url && !/instagram\.com/i.test(url)) ?? observedUrls[0] ?? domainHints[0]?.url ?? null;
     const siteStarted = Date.now();
     const siteCallId = franceControl ? await reserveFranceCall(supabase, text(item.run_id), "searchapi", "site_page", `item:${text(item.id)}:site`) : null;
     let website;
@@ -244,20 +259,61 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     }
     const directBooking = extractBookingEvidence(bioLinks, profileTexts);
     const booking = directBooking.bookingUrl ? directBooking : { bookingUrl: website.bookingUrl, bookingProvider: website.bookingProvider, evidence: website.bookingEvidence };
-    const businessWebsite = website.websiteUrl && !isSharedCommercialPlatformUrl(website.websiteUrl) ? website.websiteUrl : null;
+    const websiteClassification = market === "FR" && website.websiteUrl ? classifyProfileFirstWebsiteUrl(website.websiteUrl) : null;
+    let businessWebsite = website.websiteUrl && !isSharedCommercialPlatformUrl(website.websiteUrl) ? website.websiteUrl : null;
     location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: providerTexts, instagram: profileTexts, website: [website.address, website.description], booking: [booking.evidence], structured_metadata: [website.address] } });
     precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet, profileName: profile.metadata.profile_name,
       ...(market === "FR" ? { websiteDescription: website.description } : {}),
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
+    const businessName = text(profile.metadata.profile_name).trim() || candidate.title?.replace(/\s*[|(@-].*$/u, "").trim() || candidate.instagramHandle;
+    let profileFirst: ReturnType<typeof resolveProfileFirstIdentity> | undefined;
+    if (market === "FR" && precheck.decision !== "PRECHECK_REJECT") {
+      const input = { city, businessName, instagramHandle: profile.canonical_username ?? candidate.instagramHandle };
+      const anchors = await (dependencies.loadAnchors ? dependencies.loadAnchors(input) : loadExistingFranceAnchors(supabase, input));
+      profileFirst = resolveProfileFirstIdentity({ anchors,
+        context: { country: "FR", requestedCity: city, profileUrl: candidate.profileUrl, candidateWebsiteUrls: [observedWebsite, website.websiteUrl, ...(website.evidence ?? [])].filter((url): url is string => Boolean(url)) },
+        sites: website.identityPages ?? [],
+        profile: { url: candidate.profileUrl, alias: nullableText(profile.metadata.profile_name) ?? undefined, city: location.confidence !== "LOW" ? location.city ?? undefined : undefined,
+          website: profile.external_url ?? undefined, observed_at: profile.checked_at },
+        hits: [{ url: candidate.profileUrl, title: candidate.title ?? "", snippet: candidate.snippet ?? "" }], observedAt: profile.checked_at });
+      // UNKNOWN is never promoted because enrichment found a plausible URL.
+      businessWebsite = profileFirst.identity?.websites.find(site => site.classification === "OFFICIAL_SITE")?.url ?? null;
+      if (!profileFirst.scoringAllowed || profile.is_private !== false) {
+        const contradiction = profileFirst.admission.outcome === "REJECT" || profileFirst.identity?.match.reason === "IDENTITY_CONTRADICTION";
+        const identityLow = profileFirst.identity?.match.confidence === "LOW";
+        const reason = profileFirst.admission.outcome === "ADMITTED" ? profileFirst.scoringAllowed ? "enrichment_not_verified_public_profile" : profileFirst.identity!.match.reason : profileFirst.admission.reason;
+        // Reuse the existing terminal review-hold status. The explicit HOLD
+        // outcome is evidence metadata, not a new DB state or identity LOW.
+        await recordPrecheckDecision(supabase, item, precheck, location, {
+          status: contradiction || identityLow ? "rejected" : "possible_duplicate", stage: "ENRICHED", error_code: reason,
+          website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider, booking_evidence: booking.evidence,
+          enrichment_snapshot_safe: { instagram: profile, website, websiteClassification, domainHints, profile_first: profileFirst },
+          next_attempt_at: null, completed_at: new Date().toISOString(), duration_ms: Date.now() - started,
+        });
+        return;
+      }
+      // Independent establishment geography can now inform LOCATION, separately
+      // from the canonical V2 identity result. Candidate-site data is not an anchor.
+      if (profileFirst.admission.outcome === "ADMITTED") {
+        const anchor = profileFirst.admission.candidate;
+        location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: providerTexts, instagram: profileTexts,
+          structured_metadata: [`${anchor.address} ${anchor.postalCode} ${anchor.city}, France`] } });
+        precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet,
+          profileName: profile.metadata.profile_name, websiteDescription: website.description, biography: profile.metadata.biography,
+          category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
+      }
+    } else if (market === "FR") {
+      // Third-party URLs and unknown domains remain observations even on a fit reject.
+      businessWebsite = null;
+    }
     if (precheck.decision !== "PRECHECK_PASS") {
       const terminal = { ...precheck, decision: "PRECHECK_REJECT" as const, reason: precheck.reason === "location_requires_enrichment" ? "location_unresolved_after_enrichment" : precheck.reason };
       await recordPrecheckDecision(supabase, item, terminal, location, { website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider,
-        booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website }, duration_ms: Date.now() - started }); return;
+        booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(market === "FR" ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, duration_ms: Date.now() - started }); return;
     }
     await recordPrecheckDecision(supabase, item, precheck, location, { stage: "ENRICHED", website_url: businessWebsite, booking_url: booking.bookingUrl,
-      booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website }, enriched_at: new Date().toISOString() });
+      booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, enriched_at: new Date().toISOString() });
 
-    const businessName = text(profile.metadata.profile_name).trim() || candidate.title?.replace(/\s*[|(@-].*$/u, "").trim() || candidate.instagramHandle;
     const { data: preflightData, error: preflightError } = await supabase.rpc("preflight_commercial_discovery_candidate_v1", { p_run_id: text(item.run_id), p_provider: candidate.provider,
       p_external_id: candidate.providerExternalId, p_instagram_handle: profile.canonical_username, p_website: businessWebsite, p_business_name: businessName });
     if (preflightError) throw new Error("preflight_failed");
@@ -271,7 +327,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const compactEvidence = { businessName, requestedCity: detectedCity, requestedSubsegment: nullableText(item.subsegment), instagram: { username: profile.canonical_username,
       followers: profile.followers_count, posts: profile.posts_count, category: profile.official_category, biography: profile.metadata.biography,
       recentCaptions: recentCaptions.slice(0, 4) }, website: { url: businessWebsite, description: website.description, bookingProvider: booking.bookingProvider },
-      deterministic: { location, precheck, publicProfile: profile.is_private === false } };
+      deterministic: { location, precheck, publicProfile: profile.is_private === false, ...(profileFirst ? { profile_first: profileFirst } : {}) } };
     const enrichmentHash = commercialSnapshotHash(compactEvidence);
     const knownBusinessId = nullableText(dbPreflight.business_id);
     let cached: Row | null = null;
@@ -318,7 +374,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const audienceTargetContext = [businessName, profile.official_category, candidate.title].filter(Boolean).join(" ");
     const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext, detectedCity, market);
     const payload = { provider: candidate.provider, provider_external_id: candidate.providerExternalId, source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
-      source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
+      source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
       analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage, provider_diagnostic: providerDiagnostic, provider_attempts_safe: providerAttemptsSafe }, score_breakdown_safe: score.breakdown,
       personalization_context_safe: { observed_evidence: ai.analysis.evidence, reasoning: ai.analysis.reasoning }, audience_context_safe: { source: "deterministically_filtered_discovery_peers", suggestions: audiences },
       business_name: businessName, country_code: market, city: detectedCity, vertical: "Beauty/Aesthetics", subsegment: ai.analysis.subsegment, instagram_handle: profile.canonical_username,
