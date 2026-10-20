@@ -12,6 +12,14 @@ export type StructuredCandidate = {
     rawAdminCity: string; normalizedMatchCity: string; commune: string; territorialRule: string;
     establishmentState: string; legalUnitState: string; activitySource: string;
     activityCompatibilityRule: string;
+    legalIdentityBridge?: {
+      contract: string; profileUrl: string; profileSourceReference: string; profileLinkField: string;
+      profileLinkedWebsite: string; profileLinkObservedAt: string;
+      siteLegalPage: string; siteObservedAt: string; siteSiren: string; siteLegalName: string;
+      siteAddress: string; sitePostalCode: string; siteCity: string;
+      nameOrigin: "DINUM" | "FIRST_PARTY_LEGAL_PAGE";
+      sirenExact: true; addressCanonicalExact: true; postcodeExact: true; uniqueEstablishment: true;
+    };
   } };
   officialWebsite?: string;
   authorizedSocialLink?: string;

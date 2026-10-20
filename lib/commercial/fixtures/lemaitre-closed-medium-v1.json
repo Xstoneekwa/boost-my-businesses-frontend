@@ -1,0 +1,122 @@
+{
+  "contract": "LEMAITRE_CLOSED_MEDIUM_REGRESSION_V1",
+  "closed": true,
+  "newInvestigationAllowed": false,
+  "provenance": {
+    "kind": "MINIMIZED_REPLAY_OF_ACCEPTED_FACTS_NOT_RAW_PROVIDER_RESPONSE",
+    "ownerDecision": "VALID_MEDIUM_NO_STRONG_CROSS_PROOF",
+    "sourceRunId": "370ae664-d893-494e-8658-f23422750483",
+    "freshProfileObservedAt": "2026-10-20T13:19:52.438Z",
+    "siteObservation": "2026-10-20 bounded refresh, two HTTP200 pages, no exact/other Instagram profile URL",
+    "noNewProviderRequired": true
+  },
+  "expected": {
+    "businessFit": "PASS",
+    "anchor": "ADMITTED",
+    "location": "HIGH",
+    "identity": "MEDIUM",
+    "strongCrossProof": false,
+    "outreach": "HUMAN_REVIEW_REQUIRED"
+  },
+  "anchor": {
+    "candidate": {
+      "provider": "sirene",
+      "externalId": "10409892600017",
+      "country": "FR",
+      "businessName": "Le Maître Barbier",
+      "city": "Paris",
+      "postalCode": "75018",
+      "address": "5 RUE DU RUISSEAU 75018 PARIS",
+      "department": "75",
+      "activity": {
+        "code": "96.02A",
+        "label": "Beauty & Aesthetics",
+        "nomenclature": "NAFRev2"
+      },
+      "eligibility": {
+        "prospectingEligible": true,
+        "reason": "PREVIOUSLY_CERTIFIED_ESTABLISHMENT",
+        "checkedAt": "2026-10-19",
+        "policyVersion": "EXISTING_AUTHORIZED_POLICY",
+        "establishmentDiffusion": "O",
+        "legalUnitDiffusion": "O"
+      },
+      "business_aliases": [
+        {
+          "value": "Le Maître Barbier",
+          "alias_type": "legal_name",
+          "provider": "first_party_site",
+          "evidence": "https://lemaitrebarbierparis.fr/mentions-legales",
+          "observed_at": "2026-10-19"
+        },
+        {
+          "value": "Le Maître barbier paris",
+          "alias_type": "establishment_name",
+          "provider": "first_party_site",
+          "evidence": "https://lemaitrebarbierparis.fr/",
+          "observed_at": "2026-10-20T13:19:52.438Z"
+        }
+      ],
+      "source": {
+        "url": "https://annuaire-entreprises.data.gouv.fr/etablissement/10409892600017",
+        "license": "Licence Ouverte 2.0 — existing certified establishment facts",
+        "attribution": "Previously certified INSEE/Sirene-origin establishment via DINUM; legal name remains first-party",
+        "observedAt": "2026-10-19"
+      }
+    },
+    "provenance": {
+      "kind": "STRUCTURED_ESTABLISHMENT",
+      "provider": "sirene",
+      "reference": "https://annuaire-entreprises.data.gouv.fr/etablissement/10409892600017",
+      "observedAt": "2026-10-19",
+      "derivedFrom": [
+        "https://recherche-entreprises.api.gouv.fr/search"
+      ]
+    },
+    "legalId": {
+      "type": "SIRET",
+      "value": "10409892600017",
+      "exact": true
+    }
+  },
+  "context": {
+    "country": "FR",
+    "requestedCity": "Paris",
+    "profileUrl": "https://www.instagram.com/lemaitrebarbierparis/",
+    "candidateWebsiteUrls": [
+      "http://lemaitrebarbierparis.fr/",
+      "https://lemaitrebarbierparis.fr/"
+    ]
+  },
+  "profile": {
+    "url": "https://www.instagram.com/lemaitrebarbierparis/",
+    "alias": "Le Maître barbier paris",
+    "website": "http://lemaitrebarbierparis.fr/",
+    "observed_at": "2026-10-20T13:19:52.438Z"
+  },
+  "sites": [
+    {
+      "url": "https://lemaitrebarbierparis.fr/",
+      "text": "Le Maître barbier paris 5 RUE DU RUISSEAU 75018 PARIS",
+      "links": []
+    },
+    {
+      "url": "https://lemaitrebarbierparis.fr/mentions-legales",
+      "text": "Le Maître Barbier 5 RUE DU RUISSEAU 75018 PARIS",
+      "links": []
+    }
+  ],
+  "siteTextQualification": "Only whitelisted references actually matched during captured-page V2 replay, not raw HTML or newly observed copy",
+  "previous": {
+    "matchedHandle": "lemaitrebarbierparis",
+    "matchedProfileUrl": "https://www.instagram.com/lemaitrebarbierparis/",
+    "confidence": "MEDIUM",
+    "reason": "prior_certified_medium_hint_only",
+    "signals": [],
+    "sources": [
+      "owner:CROSS_PROOF_REFRESH_CANARY_LEMAITRE_CLOSED"
+    ],
+    "establishmentSpecific": false,
+    "resolverVersion": "COMMERCIAL_INSTAGRAM_RESOLVER_V2"
+  }
+}

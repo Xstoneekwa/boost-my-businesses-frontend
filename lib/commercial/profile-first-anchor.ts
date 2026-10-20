@@ -46,6 +46,8 @@ export function admitProfileFirstAnchor(anchor: EstablishmentAnchor | null, cont
   if (!c || !p || p.kind !== "STRUCTURED_ESTABLISHMENT" || !p.provider?.trim() || p.provider !== c.provider || !p.reference?.trim()
     || !p.observedAt || !Number.isFinite(Date.parse(p.observedAt)) || !Array.isArray(p.derivedFrom) || !p.derivedFrom.length
     || !c.source?.url || !c.source.observedAt || !c.businessName?.trim() || !c.city?.trim()) return hold("incomplete_provenance_or_establishment");
+  const bridge = c.source.lineage?.legalIdentityBridge;
+  if (bridge && (!rootInstagramHandle(bridge.profileUrl) || rootInstagramHandle(bridge.profileUrl) !== rootInstagramHandle(context.profileUrl))) return hold("legal_bridge_bound_to_another_instagram_profile");
   // This checks original lineage as well as the stored reference, including redirects.
   // A renamed provider or copied site address must not turn self-evidence independent.
   const candidateDomains = context.candidateWebsiteUrls.flatMap(value => {

@@ -1,0 +1,106 @@
+{
+  "contract": "FRANCE_IDENTITY_AND_FUTURE_OUTREACH_POLICY_V1",
+  "scope": "Owner-approved future policy and regression fixture only. Does not enable a live admission path, send, provider or canary.",
+  "vertical": "Beauty & Aesthetics",
+  "canonicalSubsegments": [
+    "Aesthetic Clinic",
+    "Skin Clinic",
+    "Med Spa",
+    "Beauty Salon",
+    "Hair Salon",
+    "Hair Stylist",
+    "Nail Studio",
+    "Lash Studio",
+    "Brow Studio",
+    "Laser Clinic",
+    "Makeup Artist",
+    "Wellness Studio"
+  ],
+  "dimensions": [
+    "BUSINESS_FIT",
+    "LOCATION",
+    "IDENTITY",
+    "DM_SUITABILITY"
+  ],
+  "identity": {
+    "HIGH": {
+      "meaning": "Strong establishment ↔ exact Instagram identity under existing V2 rules",
+      "futurePipelineAdmission": "CONDITIONAL_ON_DM_SUITABILITY_AND_EXISTING_GATES",
+      "automaticDmEligibility": false
+    },
+    "MEDIUM": {
+      "meaning": "Business/location credible but strong account cross-proof missing",
+      "futurePipelineAdmission": "HUMAN_REVIEW_REQUIRED",
+      "automaticDmEligibility": false,
+      "isLow": false
+    },
+    "HOLD": {
+      "meaning": "Anchor/identity insufficient or ambiguous; identity may be NOT_REACHED",
+      "futurePipelineAdmission": "NOT_OUTREACH_ELIGIBLE",
+      "automaticDmEligibility": false,
+      "isLow": false
+    }
+  },
+  "liveSendAuthorized": false,
+  "autoApprovalAuthorized": false,
+  "dmRules": {
+    "inviteSentDistinct": true,
+    "inviteSentIsActiveConversation": false,
+    "followupBeforeAcceptance": false,
+    "firstDm": "SHORT_NATURAL_PERSONALIZED",
+    "unnecessaryLink": false,
+    "conversationalAiTrigger": "ACTUAL_INBOUND_REPLY_ONLY",
+    "funnel": [
+      "invite_sent",
+      "accepted",
+      "seen_optional",
+      "replied",
+      "qualified",
+      "booking/conversion"
+    ]
+  },
+  "closedCases": {
+    "lemaitrebarbierparis": {
+      "identity": "MEDIUM",
+      "disposition": "VALID_MEDIUM_NO_STRONG_CROSS_PROOF",
+      "dedicatedInvestigationAllowed": false,
+      "reopenOnly": "NEW_STRONG_EVIDENCE_NATURALLY_OBSERVED_IN_A_FUTURE_AUTHORIZED_RUN"
+    }
+  },
+  "nextCanary": {
+    "executed": false,
+    "ownerAuthorizationRequired": true,
+    "acquisitionPortfolio": [
+      "Aesthetic Clinic",
+      "Skin Clinic",
+      "Med Spa",
+      "Beauty Salon",
+      "Hair Salon",
+      "Hair Stylist",
+      "Nail Studio",
+      "Lash Studio",
+      "Brow Studio",
+      "Laser Clinic",
+      "Makeup Artist",
+      "Wellness Studio"
+    ],
+    "noBarberOrLashOnlyRestriction": true
+  },
+  "dinum": {
+    "activation": "EXPLICIT_BOUNDED_AUTHORIZATION_ONLY",
+    "noAutomaticDiscoveryCronOrWorkerActivation": true,
+    "legacyMicroCanaryLimitsPreserved": true,
+    "existingActivityCompatibilityIsPartialNotVerticalDefinition": true,
+    "noImplicitExpansionOfFourProfileLegacyAuthorization": true
+  },
+  "dataMinimization": {
+    "allowedPurposes": [
+      "FIND_TARGET_BUSINESS_INSTAGRAM",
+      "CONFIRM_ESTABLISHMENT_LOCATION",
+      "CERTIFY_ESTABLISHMENT_INSTAGRAM_LINK",
+      "ASSESS_DM_SUITABILITY"
+    ],
+    "rawProviderPayloadPersistence": false,
+    "directorFinanceAdministrativeHistoryReviews": false
+  }
+}
