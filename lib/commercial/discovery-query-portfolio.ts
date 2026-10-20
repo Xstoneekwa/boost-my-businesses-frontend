@@ -1,4 +1,4 @@
-import type { CommercialDiscoveryCity, CommercialDiscoveryCountry, CommercialDiscoverySubsegment } from "./discovery-contract";
+import { COMMERCIAL_DISCOVERY_SUBSEGMENTS, type CommercialDiscoveryCity, type CommercialDiscoveryCountry, type CommercialDiscoverySubsegment } from "./discovery-contract.ts";
 import { FRANCE_BEAUTY_QUERY_TERMS } from "./market-config.ts";
 
 const SUBSEGMENT_SEARCH_TERMS: Record<CommercialDiscoverySubsegment, readonly string[]> = {
@@ -34,16 +34,15 @@ const FRANCE_SUBSEGMENT_TERMS: Record<CommercialDiscoverySubsegment, readonly st
   "Makeup Artist": ["maquilleuse", "maquillage professionnel", "makeup artist"],
   "Wellness Studio": ["spa", "massage", "centre bien-être"],
 };
-const FRANCE_BROAD_TERMS = ["institut de beauté", "médecine esthétique", "salon de coiffure", "barbier", "onglerie", "extensions de cils", "sourcils", "spa", "maquilleuse", "épilation laser"];
-function franceCityQueries(city: string, subsegment?: CommercialDiscoverySubsegment) {
+function franceCityQueries(city: string, subsegment?: CommercialDiscoverySubsegment | null) {
   const locality = city.replace(/["\\\r\n]/g, " ").trim();
   const profileScope = '-inurl:/p/ -inurl:/reel/ -inurl:/explore/ -inurl:/policy/ -inurl:/privacy/';
   const base = (term: string) => `site:instagram.com/ "${term}" "${locality}" France ${profileScope}`;
-  // Diversify the broad first wave instead of filling its cap from the first
-  // English clinic/booking pair. Counts and all provider bounds are unchanged.
+  // One explicit local-language family per canonical niche, in canonical order.
+  // Reuse the targeted mapping; no second broad niche list may drift from it.
   return subsegment
     ? FRANCE_SUBSEGMENT_TERMS[subsegment].flatMap(term => [base(term), `${base(term)} ("rendez-vous" OR "réservation" OR "prestations")`]).slice(0, 8)
-    : FRANCE_BROAD_TERMS.map(base);
+    : COMMERCIAL_DISCOVERY_SUBSEGMENTS.map(segment => base(FRANCE_SUBSEGMENT_TERMS[segment][0]));
 }
 
 function queriesForTerm(term: string, city: CommercialDiscoveryCity, countryCode: CommercialDiscoveryCountry = city === "France" ? "FR" : "ZA") {
@@ -54,7 +53,7 @@ function queriesForTerm(term: string, city: CommercialDiscoveryCity, countryCode
   ];
 }
 
-export function buildCommercialDiscoveryQueries(city: CommercialDiscoveryCity, subsegment?: CommercialDiscoverySubsegment, countryCode: CommercialDiscoveryCountry = city === "France" ? "FR" : "ZA") {
+export function buildCommercialDiscoveryQueries(city: CommercialDiscoveryCity, subsegment?: CommercialDiscoverySubsegment | null, countryCode: CommercialDiscoveryCountry = city === "France" ? "FR" : "ZA") {
   if (city === "France") return FRANCE_BEAUTY_QUERY_TERMS.map((term) => `site:instagram.com/ "${term}" "France" ("rendez-vous" OR "réservation" OR "prestations")`);
   if (countryCode === "FR") return franceCityQueries(city, subsegment);
   const terms = subsegment ? SUBSEGMENT_SEARCH_TERMS[subsegment] : BROAD_SEARCH_TERMS;

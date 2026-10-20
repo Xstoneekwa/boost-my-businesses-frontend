@@ -26,7 +26,7 @@ export type CommercialDiscoveryProviderResult = {
   diagnostic: Record<string, unknown>;
 };
 
-export async function discoverCommercialCandidates(input: { city: CommercialDiscoveryCity; countryCode?: CommercialDiscoveryCountry; subsegment?: CommercialDiscoverySubsegment; maxCandidates: number; fetcher?: typeof fetch; experiment?: { runId: string; persist: PersistPage } }): Promise<CommercialDiscoveryProviderResult> {
+export async function discoverCommercialCandidates(input: { city: CommercialDiscoveryCity; countryCode?: CommercialDiscoveryCountry; subsegment?: CommercialDiscoverySubsegment | null; maxCandidates: number; fetcher?: typeof fetch; experiment?: { runId: string; persist: PersistPage } }): Promise<CommercialDiscoveryProviderResult> {
   const countryCode = input.countryCode ?? (input.city === "France" ? "FR" : "ZA");
   if (input.city === "France" && countryCode === "FR" && input.experiment) {
     const result = await runFranceProfileFirst({ runId: input.experiment.runId, persist: input.experiment.persist, fetcher: input.fetcher,
@@ -40,6 +40,8 @@ export async function discoverCommercialCandidates(input: { city: CommercialDisc
   const queries = buildCommercialDiscoveryQueries(input.city, input.subsegment, countryCode);
   const queryDiagnostics: FranceQueryDiagnostic[] = [];
   const isFrance = countryCode === "FR";
+  // City broad canary only: leave targeted, ZA and historical national flows alone.
+  const franceBroadCity = isFrance && input.city !== "France" && !input.subsegment;
   const prefilter = { version: "FR_SERP_TRIAGE_V1", evaluated: 0, kept: 0, rejected: 0, reasons: {} as Record<string, number> };
   const candidateFilter = isFrance ? (candidate: Parameters<typeof assessFranceSerpCandidate>[0]) => {
     const decision = assessFranceSerpCandidate(candidate);
@@ -49,7 +51,7 @@ export async function discoverCommercialCandidates(input: { city: CommercialDisc
     return decision.keep;
   } : undefined;
   const fetcher = isFrance ? franceDiagnosticFetcher(input.fetcher ?? fetch, queryDiagnostics) : input.fetcher;
-  const result = await runTargetAiGoogleSerpDiscovery({ queries, maxCandidates: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 4, 12), 90), earlyStopCandidateCount: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 3, 10), 70), pagesPerQuery: 2, maxQueriesToExecute: queries.length, maxDurationMs: 110_000, fetcher, ...(candidateFilter ? { candidateFilter } : {}) });
+  const result = await runTargetAiGoogleSerpDiscovery({ queries, maxCandidates: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 4, 12), 90), earlyStopCandidateCount: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 3, 10), 70), pagesPerQuery: franceBroadCity ? 1 : 2, maxQueriesToExecute: queries.length, maxDurationMs: 110_000, fetcher, ...(candidateFilter ? { candidateFilter } : {}) });
   return {
     queries,
     candidates: (isFrance ? result.candidates.slice(0, input.maxCandidates) : result.candidates).map((candidate) => ({ provider: "searchapi", providerExternalId: candidate.username.toLowerCase(), instagramHandle: candidate.username.toLowerCase(), profileUrl: candidate.profileUrl,

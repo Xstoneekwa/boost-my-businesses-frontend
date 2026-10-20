@@ -32,13 +32,15 @@ test("technical and spoofed URLs never become France business profiles", () => {
 });
 for (const city of ["Paris", "Marseille", "Lyon", "Annecy", "Saint-Rémy-de-Provence"]) test(`French portfolio is diverse and bounded in ${city}`, () => {
   const queries = buildCommercialDiscoveryQueries(city, undefined, "FR");
-  assert.equal(queries.length, 10); assert.equal(new Set(queries).size, 10);
+  assert.equal(queries.length, COMMERCIAL_DISCOVERY_SUBSEGMENTS.length); assert.equal(new Set(queries).size, COMMERCIAL_DISCOVERY_SUBSEGMENTS.length);
   assert.ok(queries.every(q => q.includes(`"${city}"`) && q.includes("France") && q.includes("-inurl:/policy/")));
-  assert.ok(queries.some(q => q.includes("coiffure"))); assert.ok(queries.some(q => q.includes("onglerie"))); assert.ok(queries.some(q => q.includes("barbier")));
+  assert.ok(queries.some(q => q.includes("coiffure"))); assert.ok(queries.some(q => q.includes("onglerie")));
+  assert.ok(queries.some(q => q.includes('"soins de la peau"'))); assert.ok(queries.some(q => q.includes('"coiffeur"')));
   assert.ok(queries.every(q => !q.includes(" booking")));
   for (const subsegment of COMMERCIAL_DISCOVERY_SUBSEGMENTS) {
     const targeted = buildCommercialDiscoveryQueries(city, subsegment, "FR");
     assert.equal(targeted.length, 6); assert.ok(targeted.every(q => q.includes(`"${city}"`) && q.includes("France")));
+    assert.ok(targeted.some(q => queries.includes(q)), `broad must explicitly cover ${subsegment}`);
   }
 });
 test("V5 local first-party proof reaches precheck only, never fabricated identity HIGH", () => {
