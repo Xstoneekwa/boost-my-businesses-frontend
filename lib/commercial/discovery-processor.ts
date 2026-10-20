@@ -4,7 +4,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
 import { analyzeCommercialProspect, analyzeCommercialProspectWithRetry } from "./discovery-ai";
 import { FR_PROFILE_FIRST_KEY, type PersistPage } from "./france-profile-first";
-import { anchorsFromStructuredBusinesses, classifyProfileFirstWebsiteUrl, resolveProfileFirstIdentity, type EstablishmentAnchor } from "./profile-first-anchor";
+import { admitProfileFirstAnchor, anchorsFromStructuredBusinesses, classifyProfileFirstWebsiteUrl, resolveProfileFirstIdentity, type EstablishmentAnchor } from "./profile-first-anchor";
+import { resolveFranceDinumAnchor, type DinumRuntimeEvidence } from "./france-dinum-runtime";
 import { COMMERCIAL_AI_PROMPT_VERSION, COMMERCIAL_SCORING_MODEL_VERSION, type CommercialDiscoveryCity, type CommercialDiscoveryCountry, type CommercialDiscoverySubsegment } from "./discovery-contract";
 import { discoverCommercialCandidates, type CommercialDiscoveryCandidate } from "./discovery-provider";
 import {
@@ -31,6 +32,7 @@ type ProcessorDependencies = {
   analyze?: typeof analyzeCommercialProspectWithRetry;
   enrichWebsite?: typeof enrichCommercialWebsite;
   loadAnchors?: (input: { city: string; businessName: string; instagramHandle: string }) => Promise<EstablishmentAnchor[]>;
+  dinumFetch?: typeof fetch;
   now?: () => Date;
 };
 
@@ -269,15 +271,28 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       biography: profile.metadata.biography, category: profile.official_category, recentCaptions, isPrivate: profile.is_private, profileFound: true, location });
     const businessName = text(profile.metadata.profile_name).trim() || candidate.title?.replace(/\s*[|(@-].*$/u, "").trim() || candidate.instagramHandle;
     let profileFirst: ReturnType<typeof resolveProfileFirstIdentity> | undefined;
+    let dinumAnchor: DinumRuntimeEvidence | undefined;
     if (market === "FR" && precheck.decision !== "PRECHECK_REJECT") {
       const input = { city, businessName, instagramHandle: profile.canonical_username ?? candidate.instagramHandle };
       const anchors = await (dependencies.loadAnchors ? dependencies.loadAnchors(input) : loadExistingFranceAnchors(supabase, input));
-      profileFirst = resolveProfileFirstIdentity({ anchors,
+      const identityInput: Parameters<typeof resolveProfileFirstIdentity>[0] = { anchors,
         context: { country: "FR", requestedCity: city, profileUrl: candidate.profileUrl, candidateWebsiteUrls: [observedWebsite, website.websiteUrl, ...(website.evidence ?? [])].filter((url): url is string => Boolean(url)) },
         sites: website.identityPages ?? [],
         profile: { url: candidate.profileUrl, alias: nullableText(profile.metadata.profile_name) ?? undefined, city: observedProfileCities.length === 1 ? observedProfileCities[0] : undefined,
           website: profile.external_url ?? undefined, observed_at: profile.checked_at },
-        hits: [{ url: candidate.profileUrl, title: candidate.title ?? "", snippet: candidate.snippet ?? "" }], observedAt: profile.checked_at });
+        hits: [{ url: candidate.profileUrl, title: candidate.title ?? "", snippet: candidate.snippet ?? "" }], observedAt: profile.checked_at };
+      profileFirst = resolveProfileFirstIdentity(identityInput);
+      if (profileFirst.admission.outcome === "HOLD" && !anchors.some(anchor => admitProfileFirstAnchor(anchor, identityInput.context).outcome === "ADMITTED")) {
+        const refreshed = await resolveFranceDinumAnchor(supabase, {
+          runId: text(item.run_id), itemId: text(item.id), country: market, city,
+          instagramHandle: input.instagramHandle, profileUrl: candidate.profileUrl,
+          observedName: text(profile.metadata.profile_name), publicProfile: profile.is_private === false,
+          precheckDecision: precheck.decision, precheckReason: precheck.reason,
+          plausibleFranceLocation: location.country === "FR" && location.evidence.length > 0, anchorAdmitted: false,
+        }, dependencies.dinumFetch);
+        dinumAnchor = refreshed.evidence;
+        if (refreshed.anchor) profileFirst = resolveProfileFirstIdentity({ ...identityInput, anchors: [refreshed.anchor] });
+      }
       // UNKNOWN is never promoted because enrichment found a plausible URL.
       businessWebsite = profileFirst.identity?.websites.find(site => site.classification === "OFFICIAL_SITE")?.url ?? null;
       if (!profileFirst.scoringAllowed || profile.is_private !== false) {
@@ -286,13 +301,13 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         const reason = profileFirst.admission.outcome === "ADMITTED"
           ? profileFirst.scoringAllowed ? "enrichment_not_verified_public_profile"
             : profileFirst.identity!.match.confidence === "HIGH" ? "candidate_handle_mismatch" : profileFirst.identity!.match.reason
-          : profileFirst.admission.reason;
+          : dinumAnchor?.reason ?? profileFirst.admission.reason;
         // Reuse the existing terminal review-hold status. The explicit HOLD
         // outcome is evidence metadata, not a new DB state or identity LOW.
         await recordPrecheckDecision(supabase, item, precheck, location, {
           status: contradiction || identityLow ? "rejected" : "possible_duplicate", stage: "ENRICHED", error_code: reason,
           website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider, booking_evidence: booking.evidence,
-          enrichment_snapshot_safe: { instagram: profile, website, websiteClassification, domainHints, profile_first: profileFirst },
+          enrichment_snapshot_safe: { instagram: profile, website, websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) },
           next_attempt_at: null, completed_at: new Date().toISOString(), duration_ms: Date.now() - started,
         });
         return;
@@ -314,10 +329,10 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     if (precheck.decision !== "PRECHECK_PASS") {
       const terminal = { ...precheck, decision: "PRECHECK_REJECT" as const, reason: precheck.reason === "location_requires_enrichment" ? "location_unresolved_after_enrichment" : precheck.reason };
       await recordPrecheckDecision(supabase, item, terminal, location, { website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider,
-        booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(market === "FR" ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, duration_ms: Date.now() - started }); return;
+        booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(market === "FR" ? { websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) } : {}) }, duration_ms: Date.now() - started }); return;
     }
     await recordPrecheckDecision(supabase, item, precheck, location, { stage: "ENRICHED", website_url: businessWebsite, booking_url: booking.bookingUrl,
-      booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, enriched_at: new Date().toISOString() });
+      booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) } : {}) }, enriched_at: new Date().toISOString() });
 
     const { data: preflightData, error: preflightError } = await supabase.rpc("preflight_commercial_discovery_candidate_v1", { p_run_id: text(item.run_id), p_provider: candidate.provider,
       p_external_id: candidate.providerExternalId, p_instagram_handle: profile.canonical_username, p_website: businessWebsite, p_business_name: businessName });

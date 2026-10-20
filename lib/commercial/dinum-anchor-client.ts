@@ -17,6 +17,15 @@ export type DinumInstagramAnchorInput = {
   observedDepartment?: { value: string; sourceReference: string; fieldPath: string };
 };
 export type DinumReservation = { key: string; handle: string; kind: "initial" | "verification"; query: string; reservedAt: string };
+/** Explicit worker authorization, separate from the closed four-profile micro-canary. */
+export type DinumRuntimeScope = { runId: string; candidates: Array<{ sourceItemId: string; instagramHandle: string }> };
+const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+function runtimeAllows(scope: DinumRuntimeScope, input: DinumInstagramAnchorInput) {
+  return uuid(scope.runId) && scope.candidates.length > 0 && scope.candidates.length <= 2
+    && scope.candidates.every(c => uuid(c.sourceItemId))
+    && new Set(scope.candidates.map(c => c.sourceItemId)).size === scope.candidates.length
+    && scope.candidates.some(c => c.sourceItemId === input.sourceItemId && c.instagramHandle === input.instagramHandle);
+}
 export type DinumSchemaGate = { status: "PASS" | "FAIL"; mismatches: string[]; checkedEstablishments: number };
 export type DinumCallResult = {
   reservation: DinumReservation; httpStatus: number | null; contentType: string | null; durationMs: number;
@@ -41,8 +50,8 @@ export function existingDinumActivityCompatibility(code: string, observedAt: str
     ? { code, nomenclature: "NAFRev2", compatible: true, ruleReference: policy.version } : undefined;
 }
 
-export function buildDinumAnchorQuery(input: DinumInstagramAnchorInput, verification?: { siret: string; necessity: string }) {
-  if (!DINUM_CANARY_HANDLES.includes(input.instagramHandle as never) || rootInstagramHandle(input.profileUrl) !== input.instagramHandle
+export function buildDinumAnchorQuery(input: DinumInstagramAnchorInput, verification?: { siret: string; necessity: string }, runtime?: DinumRuntimeScope) {
+  if (!(runtime ? runtimeAllows(runtime, input) : DINUM_CANARY_HANDLES.includes(input.instagramHandle as never)) || rootInstagramHandle(input.profileUrl) !== input.instagramHandle
     || !/^[0-9a-f-]{36}$/i.test(input.sourceItemId) || !input.nameHint.sourceReference || !input.nameHint.fieldPath
     || !input.nameHint.value.trim() || input.nameHint.value.length > 160 || /[\r\n\u0000]/.test(input.nameHint.value)
     || !input.targetCity.trim() || input.targetCity.length > 120 || /[\r\n\u0000]/.test(input.targetCity)) throw new Error("dinum_instagram_first_context_required");
@@ -123,8 +132,8 @@ function minimizedPayload(payload: unknown) {
   return { payload: { ...pick(root, ["page", "per_page", "total_results", "total_pages"]), results }, observations };
 }
 
-/** Explicit bounded canary entry point only; not called by cron, UI, a France worker,
- * or Sirene discovery. Ledger must be durably bound to this authorization across restarts.
+/** The legacy micro-canary stays closed by default. The worker supplies an explicit
+ * two-candidate scope AND the shared SQL reservation ledger; never autonomous discovery.
  */
 export class DinumAnchorClient {
   private stopped = false;
@@ -132,18 +141,19 @@ export class DinumAnchorClient {
   private calls: DinumReservation[];
   private lastCallStarted = 0;
   private observedSirets = new Map<string, Set<string>>();
-  constructor(private ledger: DinumCallLedger, private fetcher: typeof fetch = fetch, priorCalls: DinumReservation[] = []) {
+  constructor(private ledger: DinumCallLedger, private fetcher: typeof fetch = fetch, priorCalls: DinumReservation[] = [], private runtime?: DinumRuntimeScope) {
     this.calls = [...priorCalls];
     if (priorCalls.length > DINUM_ANCHOR_LIMITS.calls || priorCalls.some(c => !DINUM_CANARY_HANDLES.includes(c.handle as never))) throw new Error("dinum_prior_ledger_invalid");
   }
   async search(input: DinumInstagramAnchorInput, verification?: { siret: string; necessity: string }): Promise<DinumCallResult> {
     if (this.stopped || this.busy) throw new Error("dinum_gate_stopped_or_busy");
-    const url = buildDinumAnchorQuery(input, verification), kind = verification ? "verification" : "initial";
+    const url = buildDinumAnchorQuery(input, verification, this.runtime), kind = verification ? "verification" : "initial";
     const previous = this.calls.filter(c => c.handle === input.instagramHandle);
-    if (this.calls.length >= DINUM_ANCHOR_LIMITS.calls || previous.length >= DINUM_ANCHOR_LIMITS.perProfile || previous.some(c => c.kind === kind)) throw new Error("dinum_budget_or_replay_blocked");
+    if (this.calls.length >= (this.runtime ? 2 : DINUM_ANCHOR_LIMITS.calls) || previous.length >= DINUM_ANCHOR_LIMITS.perProfile || previous.some(c => c.kind === kind)) throw new Error("dinum_budget_or_replay_blocked");
     if (verification && (!previous.some(c => c.kind === "initial") || !this.observedSirets.get(input.instagramHandle)?.has(verification.siret))) throw new Error("dinum_verification_not_observed");
     const at = new Date().toISOString();
-    const reservation: DinumReservation = { key: `${DINUM_ANCHOR_CANARY}:${input.instagramHandle}:${kind}`, handle: input.instagramHandle, kind, query: url.toString(), reservedAt: at };
+    const key = this.runtime ? `run:${this.runtime.runId}:item:${input.sourceItemId}:dinum:${kind}` : `${DINUM_ANCHOR_CANARY}:${input.instagramHandle}:${kind}`;
+    const reservation: DinumReservation = { key, handle: input.instagramHandle, kind, query: url.toString(), reservedAt: at };
     this.busy = true;
     try { if (!await this.ledger.reserve(reservation)) throw new Error("dinum_durable_reservation_denied"); }
     catch (e) { this.busy = false; this.stopped = true; throw e; }
