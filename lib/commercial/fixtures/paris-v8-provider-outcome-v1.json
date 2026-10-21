@@ -1,0 +1,24 @@
+{
+  "source_run_id": "096d6c12-6312-48f3-8763-8f3582acf5bc",
+  "historical_run_mutated": false,
+  "actual_facts": {
+    "handles": ["miza_paris", "lesecretclinique"],
+    "item_attempts": 2,
+    "profile_reservations_per_item": 1,
+    "first_ledger_status": "succeeded",
+    "first_result_count": 0,
+    "first_provider_outcome": "NOT_RECORDED",
+    "terminal_error": "france_provider_idempotent_replay",
+    "serp_attempts": 12,
+    "serp_http_2xx": 11,
+    "serp_usable": 8,
+    "serp_provider_error_payload": 3,
+    "serp_timeouts": 1
+  },
+  "synthetic_future_failure": {
+    "label": "SYNTHETIC_TEST_ONLY_NOT_THE_HISTORICAL_V8_ERROR",
+    "status": 200,
+    "code": "fixture_provider_failure",
+    "type": "fixture_error"
+  }
+}

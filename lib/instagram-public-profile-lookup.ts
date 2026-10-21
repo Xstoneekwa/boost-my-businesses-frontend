@@ -38,6 +38,8 @@ export type InstagramPublicProfileLookupOptions = {
   now?: () => Date;
   timeoutMs?: number;
   disableCache?: boolean;
+  /** France accounting opt-in; default/ZA normalization is unchanged. */
+  strictProviderOutcome?: boolean;
   minIntervalMs?: number;
   maxPerMinute?: number;
 };
@@ -127,16 +129,16 @@ function withLookupMetadata(
   };
 }
 
-function searchApiCacheKey(inputUsername: string) {
-  return `searchapi:${inputUsername}`;
+function searchApiCacheKey(inputUsername: string, strict = false) {
+  return strict ? `searchapi:strict-outcome:${inputUsername}` : `searchapi:${inputUsername}`;
 }
 
 function readSearchApiCache(inputUsername: string, options: InstagramPublicProfileLookupOptions) {
   if (options.disableCache) return null;
-  const cached = searchApiCache.get(searchApiCacheKey(inputUsername));
+  const cached = searchApiCache.get(searchApiCacheKey(inputUsername, options.strictProviderOutcome));
   const nowMs = safeNowMs(options);
   if (!cached || cached.expiresAtMs <= nowMs) {
-    if (cached) searchApiCache.delete(searchApiCacheKey(inputUsername));
+    if (cached) searchApiCache.delete(searchApiCacheKey(inputUsername, options.strictProviderOutcome));
     return null;
   }
   return withLookupMetadata(cached.result, {
@@ -150,7 +152,7 @@ function writeSearchApiCache(inputUsername: string, lookup: InstagramPublicProfi
   if (options.disableCache) return;
   const ttlSeconds = searchApiCacheTtlSeconds(lookup.status);
   if (ttlSeconds <= 0) return;
-  searchApiCache.set(searchApiCacheKey(inputUsername), {
+  searchApiCache.set(searchApiCacheKey(inputUsername, options.strictProviderOutcome), {
     result: lookup,
     expiresAtMs: safeNowMs(options) + ttlSeconds * 1000,
   });
@@ -668,6 +670,9 @@ async function searchApiLookup(inputUsername: string, options: InstagramPublicPr
       const payload = await response.json();
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         return finalize(result(inputUsername, "provider_error", options, { reason: "provider_invalid_response" }));
+      }
+      if (options.strictProviderOutcome && (payload.error || payload.errors)) {
+        return finalize(result(inputUsername, "provider_error", options, { reason: "provider_error_payload" }));
       }
       return finalize(fromSearchApiPayload(inputUsername, payload as Record<string, unknown>, options));
     } catch (error) {

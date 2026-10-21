@@ -1,7 +1,7 @@
 import { runTargetAiGoogleSerpDiscovery } from "@/lib/instagram-client/target-ai-google-serp-discovery";
 import type { CommercialDiscoveryCity, CommercialDiscoveryCountry, CommercialDiscoverySubsegment } from "./discovery-contract";
 import { buildCommercialDiscoveryQueries } from "./discovery-query-portfolio";
-import { franceDiagnosticFetcher, type FranceQueryDiagnostic } from "./france-query-diagnostics";
+import { franceDiagnosticFetcher, franceSemanticSerpCounters, type FranceQueryDiagnostic } from "./france-query-diagnostics";
 import { runFranceProfileFirst, type PersistPage } from "./france-profile-first";
 import { assessFranceSerpCandidate } from "./france-acquisition";
 
@@ -52,11 +52,14 @@ export async function discoverCommercialCandidates(input: { city: CommercialDisc
   } : undefined;
   const fetcher = isFrance ? franceDiagnosticFetcher(input.fetcher ?? fetch, queryDiagnostics) : input.fetcher;
   const result = await runTargetAiGoogleSerpDiscovery({ queries, maxCandidates: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 4, 12), 90), earlyStopCandidateCount: isFrance ? input.maxCandidates : Math.min(Math.max(input.maxCandidates * 3, 10), 70), pagesPerQuery: franceBroadCity ? 1 : 2, maxQueriesToExecute: queries.length, maxDurationMs: 110_000, fetcher, ...(candidateFilter ? { candidateFilter } : {}) });
+  const semantic = isFrance ? franceSemanticSerpCounters(queryDiagnostics) : null;
   return {
     queries,
     candidates: (isFrance ? result.candidates.slice(0, input.maxCandidates) : result.candidates).map((candidate) => ({ provider: "searchapi", providerExternalId: candidate.username.toLowerCase(), instagramHandle: candidate.username.toLowerCase(), profileUrl: candidate.profileUrl,
       title: candidate.title, snippet: candidate.snippet, sourceQuery: candidate.sourceQuery, position: candidate.position, extractionMode: candidate.extractionMode ?? "strict" })),
-    diagnostic: { ...(isFrance ? { queryDiagnostics, acquisitionPrefilter: prefilter } : {}), queriesExecuted: result.queriesExecuted, queriesSucceeded: result.queriesSucceeded, queriesFailed: result.queriesFailed, pagesFetched: result.pagesFetched,
+    diagnostic: { ...(isFrance ? { queryDiagnostics, acquisitionPrefilter: prefilter, providerOutcomeCounters: semantic } : {}),
+      queriesExecuted: result.queriesExecuted, queriesSucceeded: semantic?.serp_ok ?? result.queriesSucceeded,
+      queriesFailed: semantic ? semantic.provider_errors + semantic.timeout : result.queriesFailed, pagesFetched: result.pagesFetched,
       organicResultsScanned: result.organicResultsScanned, extractedCandidatesCount: result.extractedCandidatesCount, rejectedNonProfileCount: result.rejectedNonProfileCount, stoppedReason: result.stoppedReason },
   };
 }

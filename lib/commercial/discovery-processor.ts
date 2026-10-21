@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { lookupInstagramPublicProfile } from "@/lib/instagram-public-profile-lookup";
 import { analyzeCommercialProspect, analyzeCommercialProspectWithRetry } from "./discovery-ai";
 import { FR_PROFILE_FIRST_KEY, type PersistPage } from "./france-profile-first";
+import { FranceProviderOperationError, franceProviderDiagnostic, lookupFranceProfile, runFranceItemOperation } from "./france-provider-outcome";
 import { admitProfileFirstAnchor, anchorsFromStructuredBusinesses, classifyProfileFirstWebsiteUrl, resolveProfileFirstIdentity, type EstablishmentAnchor } from "./profile-first-anchor";
 import { resolveFranceDinumAnchor, type DinumRuntimeEvidence } from "./france-dinum-runtime";
 import { COMMERCIAL_AI_PROMPT_VERSION, COMMERCIAL_SCORING_MODEL_VERSION, type CommercialDiscoveryCity, type CommercialDiscoveryCountry, type CommercialDiscoverySubsegment } from "./discovery-contract";
@@ -140,7 +141,9 @@ async function discoverAndPersistRun(supabase: SupabaseAdmin, run: Row, discover
   try {
     discovery = await discover({ city: text(run.city) as CommercialDiscoveryCity, countryCode: text(run.country_code) === "FR" ? "FR" : "ZA", subsegment: nullableText(run.subsegment) as CommercialDiscoverySubsegment | undefined, maxCandidates: num(run.max_prospects),
       ...(experiment ? { experiment: { runId: text(run.id), persist } } : {}) });
-    await finishFranceCall(supabase, discoveryCallId, "succeeded", Date.now() - providerStarted, discovery.candidates.length);
+    const usable = !franceControl || discovery.candidates.length > 0;
+    await finishFranceCall(supabase, discoveryCallId, usable ? "succeeded" : "failed", Date.now() - providerStarted,
+      discovery.candidates.length, usable ? undefined : "discovery_no_usable_results");
   } catch (error) {
     await finishFranceCall(supabase, discoveryCallId, "failed", Date.now() - providerStarted, 0, error instanceof Error ? error.message : "discovery_failed");
     throw error;
@@ -213,18 +216,18 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
       await supabase.from("commercial_discovery_items").update({ status: "pending", locked_at: null, locked_by: null, next_attempt_at: null }).eq("id", text(item.id));
       return;
     }
-    const profileStarted = Date.now();
-    const profileCallId = franceControl ? await reserveFranceCall(supabase, text(item.run_id), "searchapi", "profile", `item:${text(item.id)}:profile`) : null;
     let profile;
-    try {
+    let profileOutcome;
+    if (franceControl) {
+      profileOutcome = await lookupFranceProfile(supabase, item, candidate.instagramHandle, lookupProfile);
+      if (!profileOutcome.value) throw new FranceProviderOperationError(profileOutcome.error_code ?? "profile_provider_error", { provider_diagnostic: profileOutcome.diagnostic });
+      profile = profileOutcome.value;
+    } else {
       profile = await lookupProfile(candidate.instagramHandle);
-      await finishFranceCall(supabase, profileCallId, "succeeded", Date.now() - profileStarted, profile.ok && profile.status === "found" ? 1 : 0);
-    } catch (error) {
-      await finishFranceCall(supabase, profileCallId, "failed", Date.now() - profileStarted, 0, error instanceof Error ? error.message : "profile_failed");
-      throw error;
     }
     if (!profile.ok || profile.status !== "found") {
-      const code = `profile_${profile.status}`; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
+      const code = profileOutcome?.error_code ?? `profile_${profile.status}`;
+      const canRetry = !franceControl && transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
       if (profile.status === "not_found") {
         const location = resolveCommercialLocation({ requestedCity: city, countryCode: market, signals: { provider: [candidate.title, candidate.snippet] } });
         const precheck = deterministicCommercialPrecheck({ requestedCity: city, countryCode: market, title: candidate.title, snippet: candidate.snippet, profileFound: false, location });
@@ -232,6 +235,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         return;
       }
       await updateItem(supabase, text(item.id), { status: canRetry ? "retry_scheduled" : "failed", stage: "FAILED", error_code: code,
+        ...(profileOutcome ? { error_detail_safe: { provider_diagnostic: profileOutcome.diagnostic, original_outcome: profileOutcome.error_code } } : {}),
         next_attempt_at: canRetry ? nextCommercialAttemptAt((dependencies.now ?? (() => new Date()))(), num(item.attempt_count)) : null,
         completed_at: canRetry ? null : new Date().toISOString(), duration_ms: Date.now() - started });
       return;
@@ -251,15 +255,22 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const observedUrls = extractObservedUrls([...profileTexts, ...bioLinks.map((link) => link.url)]);
     const domainHints = market === "FR" ? extractFranceCaptionDomainHints(recentCaptions) : [];
     const observedWebsite = profile.external_url ?? bioLinks.map((link) => link.url).find((url) => url && !/instagram\.com/i.test(url)) ?? observedUrls[0] ?? domainHints[0]?.url ?? null;
-    const siteStarted = Date.now();
-    const siteCallId = franceControl ? await reserveFranceCall(supabase, text(item.run_id), "searchapi", "site_page", `item:${text(item.id)}:site`) : null;
     let website;
-    try {
-      website = await enrichWebsite({ websiteUrl: observedWebsite, ...(market === "FR" ? { market } : {}) });
-      await finishFranceCall(supabase, siteCallId, "succeeded", Date.now() - siteStarted, num(website.pagesFetched));
-    } catch (error) {
-      await finishFranceCall(supabase, siteCallId, "failed", Date.now() - siteStarted, 0, error instanceof Error ? error.message : "site_failed");
-      throw error;
+    if (franceControl) {
+      const outcome = await runFranceItemOperation(supabase, item, "site_page", async () => {
+        const diagnostic = franceProviderDiagnostic();
+        try {
+          const value = await enrichWebsite({ websiteUrl: observedWebsite, market: "FR" });
+          return { ledger_status: "succeeded" as const, result_count: num(value.pagesFetched), error_code: null, diagnostic, value };
+        } catch (error) {
+          diagnostic.timeout = error instanceof Error && (["AbortError", "TimeoutError"].includes(error.name) || error.message === "website_timeout");
+          return { ledger_status: "failed" as const, result_count: 0, error_code: diagnostic.timeout ? "website_timeout" : "site_failed", diagnostic, value: null };
+        }
+      });
+      if (!outcome.value) throw new FranceProviderOperationError(outcome.error_code ?? "site_failed", { provider_diagnostic: outcome.diagnostic });
+      website = outcome.value;
+    } else {
+      website = await enrichWebsite({ websiteUrl: observedWebsite });
     }
     const directBooking = extractBookingEvidence(bioLinks, profileTexts);
     const booking = directBooking.bookingUrl ? directBooking : { bookingUrl: website.bookingUrl, bookingProvider: website.bookingProvider, evidence: website.bookingEvidence };
@@ -307,7 +318,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         await recordPrecheckDecision(supabase, item, precheck, location, {
           status: contradiction || identityLow ? "rejected" : "possible_duplicate", stage: "ENRICHED", error_code: reason,
           website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider, booking_evidence: booking.evidence,
-          enrichment_snapshot_safe: { instagram: profile, website, websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) },
+          enrichment_snapshot_safe: { ...row(item.enrichment_snapshot_safe), instagram: profile, website, websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) },
           next_attempt_at: null, completed_at: new Date().toISOString(), duration_ms: Date.now() - started,
         });
         return;
@@ -329,10 +340,10 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     if (precheck.decision !== "PRECHECK_PASS") {
       const terminal = { ...precheck, decision: "PRECHECK_REJECT" as const, reason: precheck.reason === "location_requires_enrichment" ? "location_unresolved_after_enrichment" : precheck.reason };
       await recordPrecheckDecision(supabase, item, terminal, location, { website_url: businessWebsite, booking_url: booking.bookingUrl, booking_provider: booking.bookingProvider,
-        booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(market === "FR" ? { websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) } : {}) }, duration_ms: Date.now() - started }); return;
+        booking_evidence: booking.evidence, enrichment_snapshot_safe: { ...row(item.enrichment_snapshot_safe), instagram: profile, website, ...(market === "FR" ? { websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) } : {}) }, duration_ms: Date.now() - started }); return;
     }
     await recordPrecheckDecision(supabase, item, precheck, location, { stage: "ENRICHED", website_url: businessWebsite, booking_url: booking.bookingUrl,
-      booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { instagram: profile, website, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) } : {}) }, enriched_at: new Date().toISOString() });
+      booking_provider: booking.bookingProvider, booking_evidence: booking.evidence, enrichment_snapshot_safe: { ...row(item.enrichment_snapshot_safe), instagram: profile, website, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst, ...(dinumAnchor ? { dinum_anchor: dinumAnchor } : {}) } : {}) }, enriched_at: new Date().toISOString() });
 
     const { data: preflightData, error: preflightError } = await supabase.rpc("preflight_commercial_discovery_candidate_v1", { p_run_id: text(item.run_id), p_provider: candidate.provider,
       p_external_id: candidate.providerExternalId, p_instagram_handle: profile.canonical_username, p_website: businessWebsite, p_business_name: businessName });
@@ -394,7 +405,7 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     const audienceTargetContext = [businessName, profile.official_category, candidate.title].filter(Boolean).join(" ");
     const audiences = await loadAudienceSuggestions(supabase, item, city, profile.canonical_username ?? candidate.instagramHandle, audienceTargetContext, detectedCity, market);
     const payload = { provider: candidate.provider, provider_external_id: candidate.providerExternalId, source_url: candidate.profileUrl, source_query: candidate.sourceQuery,
-      source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { instagram: profile, website, location, booking, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
+      source_snapshot_safe: row(item.source_snapshot_safe), enrichment_snapshot_safe: { ...row(item.enrichment_snapshot_safe), instagram: profile, website, location, booking, ...(profileFirst ? { websiteClassification, domainHints, profile_first: profileFirst } : {}) }, enrichment_provenance_safe: { instagram_checked_at: profile.checked_at, website_pages: website.evidence },
       analysis_snapshot_safe: { ...ai.analysis, model: ai.model, prompt_version: COMMERCIAL_AI_PROMPT_VERSION, attempts: ai.attempts, usage: ai.usage, provider_diagnostic: providerDiagnostic, provider_attempts_safe: providerAttemptsSafe }, score_breakdown_safe: score.breakdown,
       personalization_context_safe: { observed_evidence: ai.analysis.evidence, reasoning: ai.analysis.reasoning }, audience_context_safe: { source: "deterministically_filtered_discovery_peers", suggestions: audiences },
       business_name: businessName, country_code: market, city: detectedCity, vertical: "Beauty/Aesthetics", subsegment: ai.analysis.subsegment, instagram_handle: profile.canonical_username,
@@ -408,6 +419,9 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
     if (ingestError) throw new Error("ingest_failed");
     void ingested;
   } catch (error) {
+    if (error instanceof FranceProviderOperationError && error.safeDetail.reason === "budget_exceeded" && error.safeDetail.kind === "profile") {
+      error = new CommercialFranceProfileBudgetExhaustedError(num(error.safeDetail.used), num(error.safeDetail.limit));
+    }
     if (error instanceof CommercialFranceProfileBudgetExhaustedError) {
       const held = await supabase.from("commercial_france_run_controls").update({ state: "hold", stop_code: "profile_budget_exhausted", stop_reason: "public_profiles_budget_exhausted" })
         .eq("run_id", text(item.run_id)).in("state", ["armed", "running"]);
@@ -417,9 +431,10 @@ async function processCommercialItem(supabase: SupabaseAdmin, item: Row, depende
         next_attempt_at: null, locked_at: null, locked_by: null, completed_at: new Date().toISOString(), duration_ms: Date.now() - started });
       return;
     }
-    const code = error instanceof Error ? error.message : "processor_error"; const canRetry = transientItemErrors.has(code) && num(item.attempt_count) < num(item.max_attempts);
+    const code = error instanceof Error ? error.message : "processor_error";
+    const canRetry = (error instanceof FranceProviderOperationError ? error.pending : transientItemErrors.has(code)) && num(item.attempt_count) < num(item.max_attempts);
     await updateItem(supabase, text(item.id), { status: canRetry ? "retry_scheduled" : "failed", stage: "FAILED", error_code: code,
-      error_detail_safe: error instanceof CommercialDiscoveryItemUpdateError ? error.safeDetail : {},
+      error_detail_safe: error instanceof CommercialDiscoveryItemUpdateError || error instanceof FranceProviderOperationError ? error.safeDetail : {},
       next_attempt_at: canRetry ? nextCommercialAttemptAt((dependencies.now ?? (() => new Date()))(), num(item.attempt_count)) : null,
       completed_at: canRetry ? null : new Date().toISOString(), duration_ms: Date.now() - started });
   }
