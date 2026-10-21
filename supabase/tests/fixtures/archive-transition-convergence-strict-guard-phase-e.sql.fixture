@@ -1,0 +1,8 @@
+-- FUTURE PHASE E QUALIFICATION FIXTURE ONLY.
+-- This file is deliberately outside supabase/migrations and must never be replayed by release migration tooling.
+drop trigger if exists ig_targets_archive_transition_guard_v1 on public.ig_targets;
+create trigger ig_targets_archive_transition_guard_v1
+before update of status on public.ig_targets
+for each row
+when (old.status is distinct from new.status)
+execute function archive_internal.reject_direct_archive_v1();

@@ -7,23 +7,26 @@ const fullProfilesSource = readFileSync(new URL("../route.ts", import.meta.url),
 
 test("live route exists and reuses the production Profiles projection", () => {
   assert.match(routeSource, /export async function GET\(request: Request\)/);
-  assert.match(routeSource, /GET as getLegacyProfiles/);
-  assert.match(routeSource, /legacyPayload\.activeAccounts/);
-  assert.doesNotMatch(routeSource, /legacyPayload\.profiles\b/);
-  assert.match(routeSource, /profiles_live_all_accounts_visible_v2/);
-  assert.match(routeSource, /Cache-Control", "private, no-store"/);
+  assert.match(routeSource, /getManageData\(\{ requireCanonicalComplete: true \}\)/);
+  assert.match(routeSource, /selectCanonicalVisibleProfiles\(manage\.activeAccounts\)/);
+  assert.doesNotMatch(routeSource, /selectCanonicalVisibleProfiles\(manage\.allAccounts\)/);
+  assert.doesNotMatch(routeSource, /GET as getLegacyProfiles|legacyPayload/);
+  assert.match(routeSource, /source: "profiles_live_shared_core_v3"/);
+  assert.match(routeSource, /"Cache-Control": "private, no-store"/);
 });
 
-test("live route reads canonical identity without importing newer lineage modules", () => {
-  assert.match(routeSource, /\.from\("client_instagram_accounts"\)/);
-  assert.match(routeSource, /login_identity_proof_status/);
-  assert.match(routeSource, /login_state_invalidation_reason/);
-  assert.doesNotMatch(routeSource, /dashboard-action-blockers|canonical_persisted_actions_sast_v1|profiles-live-projection/);
+test("live route reuses canonical identity from the shared core without a second lineage query", () => {
+  assert.match(routeSource, /loginIdentityProofStatus: profile\.loginIdentityProofStatus \?\? null/);
+  assert.match(routeSource, /loginStateInvalidationReason: profile\.loginStateInvalidationReason \?\? null/);
+  assert.match(routeSource, /identityProjectionSource: "shared_profile_core"/);
+  assert.doesNotMatch(routeSource, /\.from\("client_instagram_accounts"\)|dashboard-action-blockers|canonical_persisted_actions_sast_v1/);
 });
 
 test("missing identity stays unavailable and never becomes fake login required", () => {
-  assert.match(routeSource, /identitySource = "unavailable"/);
-  assert.match(routeSource, /loginIdentityProofStatus: identity \? identity\.login_identity_proof_status \?\? null : null/);
+  assert.match(routeSource, /loginIdentityProofStatus: profile\.loginIdentityProofStatus \?\? null/);
+  assert.match(routeSource, /loginIdentityProfileOpened: profile\.loginIdentityProfileOpened \?\? null/);
+  assert.match(routeSource, /loginIdentityUsernameMatch: profile\.loginIdentityUsernameMatch \?\? null/);
+  assert.match(routeSource, /loginIdentityVerifiedAt: profile\.loginIdentityVerifiedAt \?\? null/);
   assert.doesNotMatch(routeSource, /login_required|connected:\s*false/);
 });
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildTargetEvidenceRevalidationEnv,
   evaluateTargetVerificationCronAuth,
   evaluateTargetVerificationCronHttpMethod,
   extractTargetVerificationCronToken,
@@ -77,6 +78,15 @@ test("readTargetVerificationCronEnv clamps limit to 10", () => {
     CT_TARGET_VERIFICATION_CRON_LIMIT: "99",
   });
   assert.equal(env.limit, 10);
+});
+
+test("evidence cron environment is independently disabled and dry-run by default", () => {
+  const env = buildTargetEvidenceRevalidationEnv({ CRON_SECRET: "shared-secret" });
+  assert.equal(env.CT_TARGET_VERIFICATION_CRON_TOKEN, "shared-secret");
+  assert.equal(env.CT_TARGET_VERIFICATION_CRON_ENABLED, "false");
+  assert.equal(env.CT_TARGET_VERIFICATION_CRON_DRY_RUN, "true");
+  assert.equal(env.CT_TARGET_PERIODIC_REVALIDATION_ENABLED, "false");
+  assert.equal(env.CT_TARGET_VERIFICATION_CRON_WORKER_ID, "ct_evidence_revalidation_cron");
 });
 
 test("extractTargetVerificationCronToken reads bearer and custom header", () => {
@@ -188,6 +198,20 @@ test("runTargetVerificationCron calls processor with dry_run when enabled", asyn
   assert.equal(capturedOptions?.limit, 5);
 });
 
+test("runTargetVerificationCron passes the evidence-only boundary explicitly", async () => {
+  let capturedOptions = null;
+  await runTargetVerificationCron(makeSupabase(true), {
+    env: baseEnv,
+    callerToken: "cron-secret-token",
+    processorMode: "evidence_only",
+    processBatch: async (_supabase, options) => {
+      capturedOptions = options;
+      return { ...emptyBatchResult, summary: { ...emptyBatchResult.summary, claimed_count: 1 } };
+    },
+  });
+  assert.equal(capturedOptions?.mode, "evidence_only");
+});
+
 test("runTargetVerificationCron returns no_jobs when the processor claims nothing", async () => {
   const run = await runTargetVerificationCron(makeSupabase(true), {
     env: {
@@ -227,6 +251,7 @@ test("runTargetVerificationCron exposes periodic revalidation summary from enque
       skipped_window_claim_count: 0,
       deferred_not_due_count: 4,
       provider_deferred_count: 0,
+      invalid_terminalized_count: 0,
       errors_count: 0,
     }),
   });

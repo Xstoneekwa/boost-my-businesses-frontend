@@ -1,0 +1,11 @@
+{
+  "account_id": "synthetic-account-review",
+  "username_safe": "synthetic-user",
+  "action_type": "FOLLOW",
+  "occurred_at": "2026-09-07T12:00:00Z",
+  "actions_before_problem": 30,
+  "instagram_message_reason": "Synthetic action restriction",
+  "instagram_version": null,
+  "device_context_safe": null,
+  "region_proxy_context": null
+}

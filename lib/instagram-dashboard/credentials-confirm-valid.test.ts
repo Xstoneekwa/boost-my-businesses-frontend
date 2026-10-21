@@ -10,6 +10,10 @@ const accountId = "account-1";
 
 function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
   return {
+    account_package_summary: [{ account_id: accountId, runtime_profiles: ["full_cycle"], package_caps: { follow_day: 20, follow_session: 20 }, entitlements: [] }],
+    ig_account_settings: [{ account_id: accountId }],
+    ig_account_filters: [{ account_id: accountId }],
+    ig_account_dm_settings: [{ account_id: accountId }],
     ig_accounts: [{ id: accountId, username: "demo", status: "active", admin_lifecycle_status: "active" }],
     account_credentials: [{
       account_id: accountId,
@@ -29,7 +33,7 @@ function baseRows(overrides: Partial<Record<string, Row[]>> = {}) {
       ends_at: "2026-06-09T08:20:00.000Z",
       status: "active",
     }],
-    phone_devices: [{ id: "device-secret-1", status: "online" }],
+    phone_devices: [{ id: "device-secret-1", status: "online", device_kind: "physical_phone" }],
     phone_app_instances: [{ id: "app-secret-1", device_id: "device-secret-1", status: "available", usable_for_auto_login: true, is_launchable: true }],
     account_run_requests: [],
     ig_runs: [],
@@ -96,6 +100,7 @@ function makeSupabase(rows = baseRows()) {
         return makeQuery(rows as Record<string, Row[]>, table);
       },
       rpc(name: string, args: Record<string, unknown>) {
+        if (name === "account_package_runtime_contract_status") return Promise.resolve({ data: { ok: true, reason: "ready" }, error: null });
         rpcCalls.push({ name, args });
         return Promise.resolve({ data: { id: "request-safe-1", status: "queued" }, error: null });
       },
@@ -157,17 +162,28 @@ test("confirm valid refuses cancelled archived or trashed accounts", async () =>
   }
 });
 
-test("after confirm valid readiness now advances past credentials reauth", async () => {
+test("confirm valid clears credential verification, not Instagram identity; passive readiness never enqueues", async () => {
   const supabase = makeSupabase();
 
-  const before = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
-  assert.equal(before.reason, "credentials_reauth_required");
+  const before = await runReadinessNow(supabase.client, { accountId, mode: "readiness_only", now: new Date("2026-06-09T08:01:00.000Z") });
+  assert.equal(before.reason, "credentials_saved_pending_verification");
+  assert.equal(before.readiness_status, "ready_to_connect");
+  assert.equal(before.preflight_request_created, false);
+  assert.equal(supabase.rpcCalls.length, 0);
 
   await confirmValidCredentials(supabase.client, { accountId });
-  const after = await runReadinessNow(supabase.client, { accountId, now: new Date("2026-06-09T08:01:00.000Z") });
+  const passive = await runReadinessNow(supabase.client, { accountId, mode: "readiness_only", now: new Date("2026-06-09T08:01:00.000Z") });
+  assert.equal(passive.reason, "readiness_passive_ready_to_connect");
+  assert.equal(passive.readiness_status, "ready_to_connect");
+  assert.equal(passive.preflight_request_created, false);
+  assert.equal(supabase.rows.client_instagram_accounts[0].login_status, "unknown");
+  assert.equal(supabase.rpcCalls.length, 0);
+  // Explicit connect is a separate authorization, exercised only on this mock.
+  const after = await runReadinessNow(supabase.client, { accountId, mode: "connect_enqueue", now: new Date("2026-06-09T08:01:00.000Z") });
 
   assert.notEqual(after.reason, "credentials_reauth_required");
   assert.equal(after.readiness_status, "checking_connection");
+  assert.equal(after.reason, "login_preflight_now_queued");
   assert.equal(after.preflight_request_created, true);
   assert.equal(supabase.rpcCalls.length, 1);
   assert.equal(supabase.rpcCalls[0].name, "create_account_run_request");

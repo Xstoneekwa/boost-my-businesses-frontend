@@ -8,6 +8,7 @@ import {
   runScheduleSessionCron,
   scheduleSessionIdempotencyKey,
   scheduleSessionRetryIdempotencyKey,
+  scheduleSessionRetryIdempotencyKeyV2,
   SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT,
 } from "./schedule-session-cron.ts";
 
@@ -62,6 +63,7 @@ function makeSupabase(overrides: {
   rpcError?: { message: string };
   baseRequest?: Record<string, unknown>;
   retryDecision?: Record<string, unknown>;
+  operationalBlockers?: Array<Record<string, unknown>>;
 } = {}) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const assignmentUpdates: Array<Record<string, unknown>> = [];
@@ -134,13 +136,16 @@ function makeSupabase(overrides: {
       },
       rpc(name: string, args: Record<string, unknown>) {
         rpcCalls.push({ name, args });
+        if (name === "canonical_active_operational_blockers_v1") {
+          return Promise.resolve({ data: overrides.operationalBlockers ?? [], error: null });
+        }
         if (overrides.rpcError) {
           return Promise.resolve({ data: null, error: overrides.rpcError });
         }
         if (name === "create_account_run_request" && overrides.baseRequest) {
           return Promise.resolve({ data: overrides.baseRequest, error: null });
         }
-        if (name === "create_schedule_session_pre_run_retry_v1") {
+        if (name === "create_schedule_session_retry_v2") {
           return Promise.resolve({
             data: overrides.retryDecision ?? { created: false, reason: "scheduled_retry_not_needed" },
             error: null,
@@ -150,6 +155,10 @@ function makeSupabase(overrides: {
       },
     },
   };
+}
+
+function nonProjectionRpcCalls(calls: Array<{ name: string; args: Record<string, unknown> }>) {
+  return calls.filter((call) => call.name !== "canonical_active_operational_blockers_v1");
 }
 
 test("assignmentWindowActive matches inclusive start and exclusive end", () => {
@@ -196,6 +205,7 @@ test("scheduleSessionRetryIdempotencyKey is stable and versioned", () => {
   const base = scheduleSessionIdempotencyKey("assignment-1", windowStart);
   assert.equal(scheduleSessionRetryIdempotencyKey(base, 1), `${base}:retry:v1:1`);
   assert.equal(SCHEDULE_SESSION_PRE_RUN_RETRY_LIMIT, 1);
+  assert.equal(scheduleSessionRetryIdempotencyKeyV2(base, 1), `${base}:retry:v2:1`);
 });
 
 test("auth rejects missing and invalid tokens", async () => {
@@ -223,15 +233,51 @@ test("account in active window queues one scheduled run", async () => {
   assert.equal(run.result.scheduler_enabled, true);
   assert.equal(run.result.summary.eligible_count, 1);
   assert.equal(run.result.summary.queued_count, 1);
-  assert.equal(supabase.rpcCalls.length, 1);
-  assert.equal(supabase.rpcCalls[0]?.name, "create_account_run_request");
-  assert.equal(supabase.rpcCalls[0]?.args.p_requested_run_type, "account_session");
-  assert.equal((supabase.rpcCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
+  const mutationCalls = nonProjectionRpcCalls(supabase.rpcCalls);
+  assert.equal(mutationCalls.length, 1);
+  assert.equal(mutationCalls[0]?.name, "create_account_run_request");
+  assert.equal(mutationCalls[0]?.args.p_requested_run_type, "account_session");
+  assert.equal((mutationCalls[0]?.args.p_metadata_safe as Record<string, unknown>)?.trigger, "scheduler");
+});
+
+test("active canonical blocker skips pre-enqueue with one batch read and no request", async () => {
+  let eligibilityCalls = 0;
+  const supabase = makeSupabase({
+    operationalBlockers: [{
+      account_id: "account-1",
+      source_type: "incident",
+      source_id: "incident-1",
+      incident_type: "instagram_account_restriction",
+      reason_code: "instagram_action_rate_limit",
+      severity: "error",
+      requires_manual_resolution: true,
+      not_before: "2026-07-02T06:00:00.000Z",
+    }],
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => {
+      eligibilityCalls += 1;
+      return { ok: true };
+    },
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+
+  assert.equal(run.status, 200);
+  assert.equal(run.result.summary.skipped_operational_blocker_count, 1);
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.equal(eligibilityCalls, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
+  const projectionCalls = supabase.rpcCalls.filter((call) => call.name === "canonical_active_operational_blockers_v1");
+  assert.equal(projectionCalls.length, 1);
+  assert.deepEqual(projectionCalls[0]?.args.p_account_ids, ["account-1"]);
 });
 
 test("blocked pre-run package contract creates exactly one bounded retry request", async () => {
   const baseKey = scheduleSessionIdempotencyKey("assignment-1", windowStart);
-  const retryKey = scheduleSessionRetryIdempotencyKey(baseKey, 1);
+  const retryKey = scheduleSessionRetryIdempotencyKeyV2(baseKey, 1);
   const supabase = makeSupabase({
     baseRequest: {
       id: "blocked-request-1",
@@ -262,11 +308,11 @@ test("blocked pre-run package contract creates exactly one bounded retry request
   assert.equal(run.result.summary.queued_count, 1);
   assert.equal(run.result.summary.retryable_pre_run_block_count, 1);
   assert.equal(run.result.summary.scheduled_retry_created_count, 1);
-  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), [
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), [
     "create_account_run_request",
-    "create_schedule_session_pre_run_retry_v1",
+    "create_schedule_session_retry_v2",
   ]);
-  const retryArgs = supabase.rpcCalls[1]?.args;
+  const retryArgs = nonProjectionRpcCalls(supabase.rpcCalls)[1]?.args;
   assert.equal(retryArgs?.p_base_idempotency_key, baseKey);
   assert.equal(retryArgs?.p_retry_limit, 1);
   assert.equal(retryArgs?.p_assignment_id, "assignment-1");
@@ -295,6 +341,63 @@ test("runtime_contract_not_ready is the only other retryable pre-run contract re
   assert.equal(run.result.summary.scheduled_retry_not_needed_count, 1);
 });
 
+test("operator-canceled base is reconsidered only by the next natural tick", async () => {
+  const baseKey = scheduleSessionIdempotencyKey("assignment-1", windowStart);
+  const retryKey = scheduleSessionRetryIdempotencyKeyV2(baseKey, 1);
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "canceled-request-1",
+      status: "canceled",
+      cancel_requested_at: "2026-07-02T06:05:00.000Z",
+      run_id: "canceled-run-1",
+      idempotency_key: baseKey,
+    },
+    retryDecision: {
+      created: true,
+      reason: "scheduled_retry_created",
+      request_id: "natural-retry-request-1",
+      idempotency_key: retryKey,
+      retry_of_request_id: "canceled-request-1",
+      retry_reason: "operator_canceled",
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+  assert.equal(run.result.summary.queued_count, 1);
+  assert.equal(run.result.summary.retryable_pre_run_block_count, 0);
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), [
+    "create_account_run_request",
+    "create_schedule_session_retry_v2",
+  ]);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls)[1]?.args.p_base_idempotency_key, baseKey);
+});
+
+test("canceled base without exact run lineage is not retried", async () => {
+  const supabase = makeSupabase({
+    baseRequest: {
+      id: "canceled-request-without-run",
+      status: "canceled",
+      cancel_requested_at: "2026-07-02T06:05:00.000Z",
+      run_id: null,
+      idempotency_key: scheduleSessionIdempotencyKey("assignment-1", windowStart),
+    },
+  });
+  const run = await runScheduleSessionCron(supabase.client as never, {
+    env: { ...baseEnv, INSTAGRAM_SCHEDULE_SESSION_CRON_DRY_RUN: "false" },
+    callerToken: "cron-token",
+    now: inWindowNow,
+    evaluateEligibility: async () => ({ ok: true }),
+    loadRuntimeHealth: activeRuntimeHealth,
+  });
+  assert.equal(run.result.summary.queued_count, 0);
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), ["create_account_run_request"]);
+});
+
 for (const eligibilityReason of [
   "follow_day_quota_exhausted",
   "unfollow_day_quota_exhausted",
@@ -320,7 +423,7 @@ for (const eligibilityReason of [
     });
     assert.equal(run.result.summary.skipped_eligibility_count, 1);
     assert.equal(run.result.summary.queued_count, 0);
-    assert.equal(supabase.rpcCalls.length, 0);
+    assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
   });
 }
 
@@ -342,7 +445,7 @@ test("unrelated terminal errors never enter the scheduled retry RPC", async () =
   });
   assert.equal(run.result.summary.queued_count, 0);
   assert.equal(run.result.summary.scheduled_retry_not_needed_count, 1);
-  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), ["create_account_run_request"]);
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), ["create_account_run_request"]);
 });
 
 for (const reason of ["scheduled_retry_window_closed", "scheduled_retry_limit_reached", "scheduled_retry_not_needed"] as const) {
@@ -382,7 +485,7 @@ test("technical disable is reported as technical_disabled without any read", asy
   assert.equal(run.result.state, "technical_disabled");
   assert.equal(run.result.reason, "technical_disabled");
   assert.equal(run.result.summary.queued_count, 0);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("scheduler toggle OFF yields scheduler_disabled and zero automatic request", async () => {
@@ -401,7 +504,7 @@ test("scheduler toggle OFF yields scheduler_disabled and zero automatic request"
   assert.equal(run.result.scheduler_enabled, false);
   assert.equal(run.result.skipped, true);
   assert.equal(run.result.summary.queued_count, 0);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("dry run state stays observable and never enqueues even with scheduler ON", async () => {
@@ -419,7 +522,7 @@ test("dry run state stays observable and never enqueues even with scheduler ON",
   assert.equal(run.result.dry_run, true);
   assert.equal(run.result.summary.eligible_count, 1);
   assert.equal(run.result.summary.queued_count, 0);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("atomic RPC scheduler_disabled rejection is counted, not fatal", async () => {
@@ -455,7 +558,7 @@ test("scheduler settings read failure fails closed (no automatic request)", asyn
 
   assert.equal(run.status, 200);
   assert.equal(run.result.state, "scheduler_disabled");
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("CP2: expired scheduled window rolls forward to today's derived occurrence, without any run", async () => {
@@ -489,7 +592,7 @@ test("CP2: expired scheduled window rolls forward to today's derived occurrence,
   assert.equal(recurrence.previous_ends_at, "2026-07-03T10:00:00.000Z");
   assert.equal(recurrence.local_slot, "06:00-12:00");
   // …but it NEVER creates a run: zero RPC, zero enqueue.
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
   assert.equal(run.result.summary.queued_count, 0);
 });
 
@@ -576,7 +679,7 @@ test("CP2: manual_only assignments are never materialized (hard exclusion)", asy
   assert.equal(run.result.summary.rolled_forward_count, 0);
   assert.equal(run.result.summary.roll_forward_failed_count, 0);
   assert.equal(supabase.assignmentUpdates.length, 0);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("account outside active window produces zero runs", async () => {
@@ -592,7 +695,7 @@ test("account outside active window produces zero runs", async () => {
   if (run.status !== 200) return;
   assert.equal(run.result.reason, "no_active_windows");
   assert.equal(run.result.summary.queued_count, 0);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("two ticks in same window do not double enqueue", async () => {
@@ -710,7 +813,7 @@ test("BotApp runtime unavailable blocks enqueue despite active window", async ()
   assert.equal(run.result.reason, "botapp_runtime_unavailable");
   assert.equal(run.result.summary.queued_count, 0);
   assert.equal(run.result.summary.skipped_botapp_runtime_unavailable_count, 1);
-  assert.equal(supabase.rpcCalls.length, 0);
+  assert.equal(nonProjectionRpcCalls(supabase.rpcCalls).length, 0);
 });
 
 test("login required blocks scheduled launch", async () => {
@@ -742,7 +845,7 @@ test("welcome_template_missing persists one account rejection and upserts the ca
   assert.equal(run.result.summary.queued_count, 0);
   assert.equal(run.result.evaluated_accounts?.[0]?.stage, "configuration");
   assert.equal(run.result.evaluated_accounts?.[0]?.stable_reason, "welcome_template_missing");
-  assert.deepEqual(supabase.rpcCalls.map((call) => call.name), [
+  assert.deepEqual(nonProjectionRpcCalls(supabase.rpcCalls).map((call) => call.name), [
     "upsert_account_incident",
     "upsert_account_dashboard_action",
   ]);

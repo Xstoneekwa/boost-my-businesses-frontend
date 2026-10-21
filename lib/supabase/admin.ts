@@ -1,3 +1,4 @@
+import { causalFetch } from "../instagram-dashboard/profiles-live-causal-context";
 import { createClient } from "@supabase/supabase-js";
 
 export function createSupabaseAdminClient() {
@@ -17,6 +18,7 @@ export function createSupabaseAdminClient() {
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
+    global: { fetch: causalFetch },
     auth: {
       persistSession: false,
       autoRefreshToken: false,

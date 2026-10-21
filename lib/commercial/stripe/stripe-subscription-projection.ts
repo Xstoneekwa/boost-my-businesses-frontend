@@ -39,6 +39,12 @@ export function mergeStripeSubscriptionProjectionInput(
   existing: Row | null | undefined,
   incoming: StripeSubscriptionProjectionInput,
 ) {
+  const existingAccountId = readNullableString(existing?.account_id);
+  const incomingAccountId = readNullableString(incoming.accountId);
+  if (existingAccountId && incomingAccountId && existingAccountId !== incomingAccountId) {
+    throw new Error("stripe_subscription_cross_account_conflict");
+  }
+
   const existingStatus = readString(existing?.status);
   const appliedStatus = shouldApplySubscriptionStatus(existingStatus, incoming.status, {
     incomingIsTerminalEvent: incoming.incomingIsTerminalEvent,
@@ -55,7 +61,7 @@ export function mergeStripeSubscriptionProjectionInput(
     stripe_price_id: incoming.stripePriceId ?? readNullableString(existing?.stripe_price_id),
     client_account_entitlement_id: readNullableString(incoming.clientAccountEntitlementId)
       ?? readNullableString(existing?.client_account_entitlement_id),
-    account_id: readNullableString(incoming.accountId) ?? readNullableString(existing?.account_id),
+    account_id: incomingAccountId ?? existingAccountId,
     commercial_checkout_session_id: readNullableString(incoming.commercialCheckoutSessionId)
       ?? readNullableString(existing?.commercial_checkout_session_id),
     commercial_mode: readNullableString(incoming.commercialMode) ?? readNullableString(existing?.commercial_mode),

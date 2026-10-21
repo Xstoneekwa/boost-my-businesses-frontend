@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { activateClientAccountEntitlementFromCheckout } from "../activate-client-account-entitlement-from-checkout.ts";
 import { loadCheckoutPendingSignupCredential, clearCheckoutPendingSignupCredentialIdempotent } from "../checkout-pending-signup-credential.ts";
-import { activatePlanChangeQuote } from "../plan-change-quote.ts";
 import {
   type StripeCheckoutAttemptRow,
   canResumeStripeAttemptFulfillment,
@@ -26,7 +25,10 @@ import { assertStripeTestLivemode } from "./stripe-config.ts";
 import { reconcilePaidStripeSubscriptionProjection } from "./stripe-subscription-webhook-reconciliation.ts";
 import { STRIPE_ATTEMPT_STATUS, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
 import { isValidStripePriceId } from "./stripe-catalog.ts";
-import { bindActivatedEntitlementToExistingAccount } from "./stripe-existing-account-binding.ts";
+import {
+  bindActivatedEntitlementToExistingAccount,
+  reconcileSimulatedToStripeTestEntitlement,
+} from "./stripe-existing-account-binding.ts";
 
 type Row = Record<string, unknown>;
 
@@ -44,6 +46,25 @@ export class StripeFulfillmentError extends Error {
 function readString(value: unknown, fallback = "") {
   if (typeof value === "string") return value.trim() || fallback;
   return fallback;
+}
+
+export function assertStripeSubscriptionBindingMetadata(input: {
+  livemode: boolean | null;
+  metadata: Stripe.Metadata;
+  expectedClientId: string;
+  expectedAccountId: string;
+}) {
+  if (
+    input.livemode !== false
+    || readString(input.metadata.client_id) !== input.expectedClientId
+    || readString(input.metadata.target_account_id) !== input.expectedAccountId
+  ) {
+    throw new StripeFulfillmentError(
+      "stripe_subscription_binding_metadata_mismatch",
+      "Stripe subscription binding metadata does not match the checkout target.",
+      false,
+    );
+  }
 }
 
 async function loadSubscriptionForSession(stripe: Stripe, session: Stripe.Checkout.Session) {
@@ -78,6 +99,7 @@ export async function fulfillStripeCheckoutAttempt(
     attempt: StripeCheckoutAttemptRow;
     session: Stripe.Checkout.Session;
     stripe?: Stripe;
+    stripeEventId?: string | null;
   },
   env: NodeJS.ProcessEnv = process.env,
 ) {
@@ -108,8 +130,12 @@ export async function fulfillStripeCheckoutAttempt(
       attempt: input.attempt,
       session: input.session,
       subscriptionId: paymentValidation.subscriptionId,
+      subscriptionLivemode: subscription?.livemode ?? null,
+      subscriptionMetadata: subscription?.metadata ?? {},
+      stripePriceId: subscription?.items.data[0]?.price?.id ?? null,
       customerId: readString(input.session.customer),
       paymentIntentId: readString(input.session.payment_intent),
+      stripeEventId: readString(input.stripeEventId) || `manual_reconciliation:${input.session.id}`,
     }, env);
   }
 
@@ -146,8 +172,12 @@ async function fulfillSubscriptionAttempt(
     attempt: StripeCheckoutAttemptRow;
     session: Stripe.Checkout.Session;
     subscriptionId: string;
+    subscriptionLivemode: boolean | null;
+    subscriptionMetadata: Stripe.Metadata;
+    stripePriceId: string | null;
     customerId: string;
     paymentIntentId: string;
+    stripeEventId: string;
   },
   env: NodeJS.ProcessEnv = process.env,
 ) {
@@ -194,6 +224,16 @@ async function fulfillSubscriptionAttempt(
     || readString((checkoutSession.metadata as Row | null)?.target_account_id)
     || null;
 
+  const expectedClientId = readString(checkoutSession.client_id) || readString(input.attempt.client_id);
+  if (targetAccountId) {
+    assertStripeSubscriptionBindingMetadata({
+      livemode: input.subscriptionLivemode,
+      metadata: input.subscriptionMetadata,
+      expectedClientId,
+      expectedAccountId: targetAccountId,
+    });
+  }
+
   const activation = await activateClientAccountEntitlementFromCheckout(supabase, {
     planKey: readString(checkoutSession.plan_key),
     billingIntervalMonths: Number(checkoutSession.billing_interval_months ?? 1),
@@ -221,11 +261,54 @@ async function fulfillSubscriptionAttempt(
   }
 
   if (targetAccountId) {
-    await bindActivatedEntitlementToExistingAccount(supabase, {
-      entitlementId: activation.entitlementId,
-      accountId: targetAccountId,
-      clientId: activation.clientId,
-    });
+    const migrationKind = readString(input.attempt.metadata_safe.commercial_migration_kind)
+      || readString((checkoutSession.metadata as Row | null)?.commercial_migration_kind);
+    if (migrationKind === "simulated_to_stripe_test") {
+      const sourceEntitlementId = readString(input.attempt.metadata_safe.source_entitlement_id)
+        || readString((checkoutSession.metadata as Row | null)?.source_entitlement_id);
+      const authorizationId = readString(input.attempt.metadata_safe.commercial_migration_authorization_id)
+        || readString((checkoutSession.metadata as Row | null)?.commercial_migration_authorization_id);
+      if (!sourceEntitlementId || !authorizationId || !input.customerId || !input.stripePriceId) {
+        throw new StripeFulfillmentError(
+          "simulated_to_stripe_lineage_incomplete",
+          "Simulated to Stripe migration lineage is incomplete.",
+          false,
+        );
+      }
+      const replacement = await reconcileSimulatedToStripeTestEntitlement(supabase, {
+        checkoutAttemptId: input.attempt.id,
+        clientId: activation.clientId,
+        accountId: targetAccountId,
+        sourceEntitlementId,
+        replacementEntitlementId: activation.entitlementId,
+        authorizationId,
+        stripeSubscriptionId: input.subscriptionId,
+        stripeCustomerId: input.customerId,
+        stripePriceId: input.stripePriceId,
+        stripeCheckoutSessionId: input.session.id,
+        stripeEventId: input.stripeEventId,
+        stripeLivemode: input.subscriptionLivemode,
+        stripeMetadataClientId: readString(input.subscriptionMetadata.client_id),
+        stripeMetadataTargetAccountId: readString(input.subscriptionMetadata.target_account_id),
+        stripeMetadataSourceEntitlementId: readString(input.subscriptionMetadata.source_entitlement_id),
+        stripeMetadataMigrationKind: readString(input.subscriptionMetadata.commercial_migration_kind),
+        stripeMetadataCommercialTestMode: readString(input.subscriptionMetadata.commercial_test_mode),
+        stripeMetadataAuthorizationId: readString(input.subscriptionMetadata.commercial_migration_authorization_id),
+      });
+      if (!replacement.ok) {
+        throw new StripeFulfillmentError(
+          replacement.code,
+          "Simulated to Stripe entitlement reconciliation failed.",
+          true,
+        );
+      }
+    } else {
+      await bindActivatedEntitlementToExistingAccount(supabase, {
+        entitlementId: activation.entitlementId,
+        accountId: targetAccountId,
+        clientId: activation.clientId,
+      });
+    }
     await updateStripeCheckoutAttemptStatus(supabase, input.attempt.id, {
       status: STRIPE_ATTEMPT_STATUS.FULFILLMENT_PROCESSING,
       clientAccountEntitlementId: activation.entitlementId,
@@ -247,7 +330,7 @@ async function fulfillSubscriptionAttempt(
       clientId: activation.clientId,
       stripeSubscriptionId: input.subscriptionId,
       stripeCustomerId: input.customerId,
-      stripePriceId: null,
+      stripePriceId: input.stripePriceId,
       clientAccountEntitlementId: activation.entitlementId,
       accountId: targetAccountId,
       commercialCheckoutSessionId: readString(checkoutSession.id),
@@ -307,6 +390,8 @@ async function fulfillPlanChangeAttempt(
   const sync = await syncStripeSubscriptionPriceAfterPlanChangePayment(input.stripe, {
     stripeSubscriptionId,
     targetPriceId,
+    settlementMode: "already_collected",
+    idempotencyKey: `${input.attempt.idempotency_key}:subscription-price`,
   });
   if (!sync.ok) {
     throw new StripeFulfillmentError("stripe_subscription_sync_failed", "Stripe subscription sync failed.", true);
@@ -314,7 +399,7 @@ async function fulfillPlanChangeAttempt(
 
   const { data: quoteRow } = await supabase
     .from("commercial_plan_change_quotes")
-    .select("idempotency_key,status,payment_status")
+    .select("id,idempotency_key,status,payment_status")
     .eq("id", quoteId)
     .maybeSingle<Row>();
 
@@ -335,20 +420,18 @@ async function fulfillPlanChangeAttempt(
       .eq("id", quoteId);
   }
 
-  const activation = await activatePlanChangeQuote(supabase, {
-    quoteId,
-    idempotencyKey: readString(quoteRow.idempotency_key) || input.attempt.idempotency_key,
-    actorEmail: input.attempt.purchaser_email,
-    simulatedActivation: false,
-  });
-
-  if (!activation.ok) {
-    throw new StripeFulfillmentError(
-      readString(activation.code, "plan_change_activation_failed"),
-      readString(activation.messageEn, "Plan change activation failed."),
-      true,
-    );
-  }
+  await supabase
+    .from("commercial_stripe_subscriptions")
+    .update({
+      plan_change_quote_id: quoteId,
+      stripe_price_id: sync.appliedPriceId,
+      metadata_safe: {
+        plan_change_state: "stripe_price_applied_awaiting_webhook",
+        target_stripe_price_id: targetPriceId,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("stripe_subscription_id", stripeSubscriptionId);
 
   await markStripeCheckoutAttemptFulfilled(supabase, input.attempt.id);
   return { ok: true as const, alreadyFulfilled: false as const };

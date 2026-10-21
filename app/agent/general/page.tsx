@@ -54,7 +54,7 @@ const copy = {
     backHome: "← Retour à l'accueil",
     navCta: "Commencer",
     heroTitle: "Ton équipe IA, toujours disponible.",
-    heroSub: "Arrête de faire manuellement ce que tes agents peuvent gérer automatiquement. Qualifie des leads, réponds à tes clients, produis du contenu — tout depuis un seul espace, 24h/24.",
+    heroSub: "Arrête de faire manuellement ce que tes agents peuvent gérer automatiquement. Qualifie des leads, réponds à tes clients et produis du contenu depuis un seul espace, 24h/24.",
     stats: [
       { label: "Agents", value: "3 actifs" },
       { label: "Réponse", value: "Instantanée" },
@@ -129,7 +129,7 @@ const copy = {
     footerTerms: "Conditions d'utilisation",
     footerRefund: "Refund policy",
     footerCopy: "© 2026 Boost My Businesses Ltd. Tous droits réservés.",
-    footerMade: "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles, société n° 17313018. Siège social : 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, Royaume-Uni.",
+    footerMade: "Boost My Businesses Ltd est immatriculée en Angleterre et au Pays de Galles, société n° 17313018. Siège social : 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, Royaume-Uni.",
   },
   en: {
     brand: "Boost My Businesses AI",
@@ -138,7 +138,7 @@ const copy = {
     backHome: "← Back to homepage",
     navCta: "Get started",
     heroTitle: "Your AI team, always on.",
-    heroSub: "Stop doing manually what your agents can handle automatically. Qualify leads, answer clients, produce content — all in one workspace, 24/7.",
+    heroSub: "Stop doing manually what your agents can handle automatically. Qualify leads, answer clients and produce content in one workspace, 24/7.",
     stats: [
       { label: "Agents", value: "3 active" },
       { label: "Response", value: "Instant" },
@@ -213,7 +213,7 @@ const copy = {
     footerTerms: "Terms of service",
     footerRefund: "Refund policy",
     footerCopy: "© 2026 Boost My Businesses Ltd. All rights reserved.",
-    footerMade: "Boost My Businesses Ltd — Registered in England & Wales, Company No. 17313018. Registered office: 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, United Kingdom.",
+    footerMade: "Boost My Businesses Ltd is registered in England & Wales, Company No. 17313018. Registered office: 167-169 Great Portland Street, 5th Floor, London, W1W 5PF, United Kingdom.",
   },
 };
 

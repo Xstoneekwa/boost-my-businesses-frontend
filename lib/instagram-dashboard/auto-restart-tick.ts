@@ -15,11 +15,7 @@ import {
   sameSastBusinessDay,
   schedulerTickGate,
 } from "./auto-restart-tick-helpers";
-import {
-  acquireDeviceSessionLock,
-  bindDeviceSessionLockToRequest,
-  releaseDeviceSessionLock,
-} from "@/lib/instagram-dashboard/device-session-lock";
+
 import {
   assertTrustedDispatcherIdentity,
   isRunDispatcherWorkerId,
@@ -448,37 +444,11 @@ async function writeBlockedCandidateDecision(
   });
 }
 
-async function acquireDeviceLock(
-  supabase: SupabaseLike,
-  input: {
-    deviceId: string;
-    workerId: string;
-    accountId: string;
-    appInstanceId: string | null;
-    leaseSeconds: number;
-  },
-) {
-  return acquireDeviceSessionLock(supabase, {
-    ...input,
-    reason: "auto_restart",
-  });
-}
 
-async function bindDeviceLockToRequest(
-  supabase: SupabaseLike,
-  input: { deviceId: string; workerId: string; requestId: string; leaseSeconds: number },
-) {
-  return bindDeviceSessionLockToRequest(supabase, input);
-}
 
-async function releaseDeviceLock(
-  supabase: SupabaseLike,
-  deviceId: string,
-  workerId: string,
-  requestId?: string | null,
-) {
-  await releaseDeviceSessionLock(supabase, { deviceId, workerId, requestId });
-}
+
+
+
 
 async function enqueueAutoRestartRequest(
   supabase: SupabaseLike,
@@ -513,7 +483,7 @@ async function consumeAuthorizationAndCreateRequest(
     metadata: Record<string, unknown>;
   },
 ) {
-  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v3", {
+  const { data, error } = await supabase.rpc("consume_resume_authorization_and_create_request_v4", {
     p_authorization_id: input.authorizationId,
     p_worker_id: input.workerId,
     p_device_id: input.deviceId,
@@ -535,6 +505,10 @@ export type AutoRestartTickSummary = {
   blocked_count: number;
   not_needed_count: number;
   deduplicated_count: number;
+  reconciled_plan_count: number;
+  ambiguous_stale_plan_count: number;
+  reconciled_plan_run_ids: string[];
+  ambiguous_stale_plan_run_ids: string[];
   blocked: Array<{ account_id: string; username: string; reason: string }>;
   enqueued: Array<{ account_id: string; username: string; request_id: string | null }>;
 };
@@ -648,6 +622,35 @@ export async function runAutoRestartTick(
   summary.dry_run = forceDryRun;
 
   try {
+    if (!forceDryRun && !options.manual) {
+      const reconciliationResult = await supabase.rpc(
+        "reconcile_stale_account_session_resume_plans_v1",
+        { p_limit: 100 },
+      );
+      if (reconciliationResult.error) {
+        throw new Error(
+          reconciliationResult.error.message || "stale_resume_plan_reconciliation_failed",
+        );
+      }
+      const reconciliation = readRecord(reconciliationResult.data) ?? {};
+      const reconciled = readRows(reconciliation.reconciled);
+      const ambiguous = readRows(reconciliation.ambiguous);
+      summary.reconciled_plan_count = readNumber(
+        reconciliation.reconciled_count,
+        reconciled.length,
+      );
+      summary.ambiguous_stale_plan_count = readNumber(
+        reconciliation.ambiguous_count,
+        ambiguous.length,
+      );
+      summary.reconciled_plan_run_ids = reconciled
+        .map((row) => readString(row.run_id))
+        .filter(Boolean);
+      summary.ambiguous_stale_plan_run_ids = ambiguous
+        .map((row) => readString(row.run_id))
+        .filter(Boolean);
+    }
+
     const overview = options.overview
       ? { candidates: options.overview.candidates as never[], enabled: true, mode: extendedRules.mode } as unknown as Awaited<ReturnType<typeof getAutoRestartData>>
       : await getAutoRestartData();
@@ -962,34 +965,8 @@ export async function runAutoRestartTick(
               continue;
             }
           }
-          const deviceLock = await acquireDeviceLock(supabase, {
-            deviceId,
-            workerId: executionWorkerId,
-            accountId: candidate.accountId,
-            appInstanceId: candidate.appInstanceId || null,
-            leaseSeconds: env.deviceLockLeaseSeconds,
-          });
-          if (!deviceLock.ok) {
-            summary.blocked_count += 1;
-            summary.blocked.push({
-              account_id: candidate.accountId,
-              username: candidate.username,
-              reason: deviceLock.reason,
-            });
-            await writeBlockedCandidateDecision(supabase, {
-              candidate,
-              requestId,
-              idempotencyKey: `${enqueueKey}:device-lock-blocked`,
-              actor: options.actor || "system",
-              reason: deviceLock.reason,
-              mode: extendedRules.mode,
-              evaluatedAt: now.toISOString(),
-              deviceId,
-              restartCountDay: restartsToday,
-              restartCountWindow: restartsInBusinessSession,
-            });
-            continue;
-          }
+
+
         }
 
         const baseResumeMetadata = buildAutoRestartResumePlanMetadata(scheduledCandidate, now);
@@ -1022,6 +999,7 @@ export async function runAutoRestartTick(
             worker_id: executionWorkerId,
             auto_restart: true,
             ...resumeMetadata,
+                      device_lock_lease_seconds: env.deviceLockLeaseSeconds,
           },
         });
 
@@ -1029,7 +1007,6 @@ export async function runAutoRestartTick(
         const newRequestId = readString(requestRow.id, "") || null;
         const returnedRequestStatus = readString(requestRow.status, "").toLowerCase();
         if (!newRequestId || !ENQUEUE_ACTIVE_REQUEST_STATUSES.has(returnedRequestStatus)) {
-          if (deviceId) await releaseDeviceLock(supabase, deviceId, executionWorkerId);
           const reason = !newRequestId
             ? "enqueue_request_id_missing"
             : `enqueue_returned_terminal_request:${returnedRequestStatus || "unknown"}`;
@@ -1053,40 +1030,7 @@ export async function runAutoRestartTick(
           });
           continue;
         }
-        if (deviceId && newRequestId) {
-          const bound = await bindDeviceLockToRequest(supabase, {
-            deviceId,
-            workerId: executionWorkerId,
-            requestId: newRequestId,
-            leaseSeconds: env.deviceLockLeaseSeconds,
-          });
-          if (!bound.ok) {
-            await supabase.rpc("cancel_account_run_request", {
-              p_request_id: newRequestId,
-              p_reason: bound.reason,
-            });
-            await releaseDeviceLock(supabase, deviceId, executionWorkerId);
-            summary.blocked_count += 1;
-            summary.blocked.push({
-              account_id: candidate.accountId,
-              username: candidate.username,
-              reason: bound.reason,
-            });
-            await writeBlockedCandidateDecision(supabase, {
-              candidate,
-              requestId,
-              idempotencyKey: `${enqueueKey}:bind-blocked`,
-              actor: options.actor || "system",
-              reason: bound.reason,
-              mode: extendedRules.mode,
-              evaluatedAt: now.toISOString(),
-              deviceId,
-              restartCountDay: restartsToday,
-              restartCountWindow: restartsInBusinessSession,
-            });
-            continue;
-          }
-        }
+
         summary.enqueued_count += 1;
         summary.enqueued.push({
           account_id: candidate.accountId,
@@ -1176,7 +1120,7 @@ export async function runAutoRestartTick(
           }),
         });
         if (deviceId) {
-          await releaseDeviceLock(supabase, deviceId, options.workerId);
+
         }
       }
     }
@@ -1238,6 +1182,10 @@ function emptySummary(workerId: string, dryRun: boolean, reason: string | null):
     blocked_count: 0,
     not_needed_count: 0,
     deduplicated_count: 0,
+    reconciled_plan_count: 0,
+    ambiguous_stale_plan_count: 0,
+    reconciled_plan_run_ids: [],
+    ambiguous_stale_plan_run_ids: [],
     blocked: [],
     enqueued: [],
   };
@@ -1543,6 +1491,13 @@ async function processHumanConfirmedResumes(
           await blockResume("resume_candidate_unavailable");
           continue;
         }
+        if (candidate.sourceLineageValid !== true) {
+          await blockResume(
+            candidate.reliability.sourceLineageReason
+              || "canonical_resume_lineage_missing",
+          );
+          continue;
+        }
         const rebuiltMetadata = buildAutoRestartResumePlanMetadata(
           rebuiltCandidate ?? rebuildResolvedIncidentResumeCandidate(candidate),
           now,
@@ -1567,7 +1522,7 @@ async function processHumanConfirmedResumes(
           resume_reason: "resolved_incident_human_authorized",
           resume_strategy: candidate.safeRestartStrategy,
           source_incident_id: incidentId,
-          source_request_id: input.requestId,
+          source_request_id: readString(storedPlan.run_request_id),
           authorization_id: authorizationId,
           retry_generation: readNumber(authorization.retry_generation, 0),
           last_checkpoint: {
@@ -1585,6 +1540,34 @@ async function processHumanConfirmedResumes(
           },
         });
         const storedPlanPayload = readRecord(storedPlan.plan);
+        const storedPhases = readRecord(storedPlanPayload?.phases_to_run);
+        const storedQuota = readRecord(storedPlanPayload?.quota_remaining);
+        if (storedPhases?.post_follow_recovery === true) {
+          const storedFollowRemaining = readNumber(storedQuota?.follow, -1);
+          const candidateFollowRemaining = readNumber(
+            resumeMetadata.resume_plan.quota_remaining.follow,
+            -1,
+          );
+          if (
+            storedPhases.follow !== false
+            || readString(storedPlanPayload?.safe_next_step) !== "post_follow_recovery"
+            || storedPlanPayload?.new_follow_blocked_until_recovery !== true
+            || storedFollowRemaining <= 0
+            || candidateFollowRemaining !== storedFollowRemaining
+          ) {
+            await blockResume("post_follow_recovery_reconciliation_required");
+            continue;
+          }
+          Object.assign(resumeMetadata.resume_plan, {
+            phase_order: ["post_follow_recovery", "welcome", "follow", "unfollow"],
+            safe_next_step: "post_follow_recovery",
+            phases_to_run: {
+              ...resumeMetadata.resume_plan.phases_to_run,
+              post_follow_recovery: true,
+              follow: true,
+            },
+          });
+        }
         const storedUnfollowCheckpoint = readRecord(storedPlanPayload?.unfollow_checkpoint)
           ?? readRecord(readRecord(storedPlanPayload?.unfollow_outcome)?.checkpoint)
           ?? null;
@@ -1624,19 +1607,8 @@ async function processHumanConfirmedResumes(
       }
 
       if (deviceId) {
-        const deviceLock = await acquireDeviceLock(supabase, {
-          deviceId,
-          workerId: input.workerId,
-          accountId,
-          appInstanceId: null,
-          leaseSeconds: input.leaseSeconds,
-        });
-        if (!deviceLock.ok) {
-          // The authorization has not been consumed yet; the natural next
-          // tick may retry after this transient lock clears.
-          await blockResume(deviceLock.reason);
-          continue;
-        }
+
+
       }
 
       try {
@@ -1661,6 +1633,7 @@ async function processHumanConfirmedResumes(
           incident_resume_idempotency_key: readString(authorization.idempotency_key) || null,
           expected_worker_sha: expectedWorkerSha,
           cause_fixed_version: causeFixedVersion,
+                  device_lock_lease_seconds: input.leaseSeconds,
         };
         const atomicResult = await consumeAuthorizationAndCreateRequest(supabase, {
           authorizationId,
@@ -1703,7 +1676,7 @@ async function processHumanConfirmedResumes(
         // The database transaction rolls back authorization consumption and
         // every linked write. Release the pre-acquired device lease only.
         if (deviceId) {
-          await releaseDeviceLock(supabase, deviceId, input.workerId);
+
         }
         await blockResume(sanitizeTickFailureReason(error));
       }

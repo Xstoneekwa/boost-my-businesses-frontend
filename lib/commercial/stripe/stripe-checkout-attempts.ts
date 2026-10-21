@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CheckoutFlowType } from "../catalog.ts";
 import { buildSafeStripeMetadata, rejectUnsafeStripeMetadataKeys } from "./stripe-catalog.ts";
 import { STRIPE_ATTEMPT_STATUS, isStripeAttemptFulfilled } from "./stripe-attempt-state.ts";
+import type { CommercialTestMode } from "./commercial-test-mode.ts";
 
 type Row = Record<string, unknown>;
 
@@ -21,6 +22,7 @@ export type StripeCheckoutAttemptRow = {
   commercial_mode: string | null;
   pricing_snapshot_fingerprint: string | null;
   checkout_mode: "subscription" | "payment";
+  commercial_test_mode: CommercialTestMode | null;
   status: string;
   client_id: string | null;
   auth_user_id: string | null;
@@ -53,6 +55,7 @@ function normalizeAttemptRow(data: Row): StripeCheckoutAttemptRow {
     commercial_mode: readString(data.commercial_mode) || null,
     pricing_snapshot_fingerprint: readString(data.pricing_snapshot_fingerprint) || null,
     checkout_mode: readString(data.checkout_mode) as "subscription" | "payment",
+    commercial_test_mode: (readString(data.commercial_test_mode) || null) as CommercialTestMode | null,
     status: readString(data.status),
     client_id: readString(data.client_id) || null,
     auth_user_id: readString(data.auth_user_id) || null,
@@ -83,6 +86,7 @@ export async function createInternalCheckoutSessionPending(
     pricingSnapshot: Record<string, unknown>;
     catalogSnapshot: Record<string, unknown>;
     totalPeriodCents: number;
+    commercialTestMode: CommercialTestMode;
     metadataSafe?: Record<string, unknown>;
   },
 ) {
@@ -133,6 +137,7 @@ export async function createInternalCheckoutSessionPending(
       outreach_monthly_discounted_cents: (input.quoteSnapshot.outreachLine as Row | null)?.monthlyDiscountedPriceCents ?? null,
       outreach_period_total_cents: (input.quoteSnapshot.outreachLine as Row | null)?.billingPeriodTotalCents ?? null,
       total_period_cents: input.totalPeriodCents,
+      commercial_test_mode: input.commercialTestMode,
       catalog_snapshot: input.catalogSnapshot,
       pricing_snapshot: input.pricingSnapshot,
       metadata: {
@@ -160,6 +165,7 @@ export async function createStripeCheckoutAttempt(
     flowType: CheckoutFlowType;
     stripeCheckoutSessionId: string;
     checkoutMode: "subscription" | "payment";
+    commercialTestMode?: CommercialTestMode | null;
     purchaserEmail: string;
     clientId?: string | null;
     authUserId?: string | null;
@@ -197,6 +203,7 @@ export async function createStripeCheckoutAttempt(
       flow_type: input.flowType,
       stripe_checkout_session_id: input.stripeCheckoutSessionId,
       checkout_mode: input.checkoutMode,
+      commercial_test_mode: input.commercialTestMode ?? null,
       livemode: false,
       status: STRIPE_ATTEMPT_STATUS.SESSION_CREATED,
       purchaser_email: input.purchaserEmail,

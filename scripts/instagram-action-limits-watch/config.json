@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "external_cost_eur": 0,
+  "data_dir": "/Users/admin/Projects/phonefarm-action-limits-watch-data",
+  "max_storage_bytes": 104857600,
+  "signal_retention_days": 30,
+  "raw_retention_hours": 72,
+  "debug_retention_hours": 72,
+  "report_retention_days": 90,
+  "timeout_seconds": 20,
+  "body_max_bytes": 524288,
+  "collection_interval_seconds": 3600,
+  "cooldown_seconds": 86400,
+  "user_agent": "PhoneFarmActionLimitsWatch/1.0 (public RSS read-only; hourly; no authentication)",
+  "sources": [
+    {"id": "reddit_instagram_rss", "url": "https://www.reddit.com/r/Instagram/new/.rss", "enabled": true, "access_status": "LIMITED", "source_credibility": "MEDIUM", "collection_interval_seconds": 3600},
+    {"id": "reddit_marketing_rss", "url": "https://www.reddit.com/r/InstagramMarketing/new/.rss", "enabled": true, "access_status": "LIMITED", "source_credibility": "MEDIUM", "collection_interval_seconds": 7200},
+    {"id": "reddit_json", "enabled": false, "reason": "AUDIT_403"},
+    {"id": "downdetector", "enabled": false, "access_status": "BLOCKED", "source_credibility": "CONTEXTUAL", "reason": "AUDIT_403"},
+    {"id": "meta_status", "enabled": false, "access_status": "LIMITED", "source_credibility": "HIGH", "reason": "NOT_IMPLEMENTED"},
+    {"id": "web_corroboration", "enabled": false, "access_status": "LIMITED", "source_credibility": "CONTEXTUAL", "reason": "NOT_IMPLEMENTED"}
+  ]
+}

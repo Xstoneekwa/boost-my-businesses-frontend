@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CommercialFollowup from "../../CommercialFollowup";
 import { notFound } from "next/navigation";
 import AnalyticsSectionCard from "@/components/restaurant-analytics/AnalyticsSectionCard";
 import DashboardPageHeader from "@/components/restaurant-analytics/DashboardPageHeader";
@@ -63,6 +64,7 @@ function LeadDetail({ lead, returnPath }: { lead: CommercialLeadDetail; returnPa
       {lead.conversion ? <><div className="commercial-link-chain"><strong>{lead.business.name}</strong><span>→</span><Link href="/instagram-dashboard/client-accounts">Client {lead.conversion.clientId}</Link>{lead.conversion.instagramAccountIds.map((accountId) => <span className="commercial-account-chain" key={accountId}>→ <Link href={`/instagram-dashboard/accounts/${encodeURIComponent(accountId)}`}>Instagram account {accountId}</Link></span>)}</div><DetailGrid items={[["Converted", date(lead.conversion.convertedAt)], ["Package", lead.conversion.packageReference], ["Entitlement", lead.conversion.entitlementId], ["Checkout session", lead.conversion.checkoutSessionId], ["Stripe billing profile", lead.conversion.stripeBillingProfileId], ["Stripe subscription", lead.conversion.stripeSubscriptionId]]} /></> : <p className="commercial-detail-empty">This lead has no canonical commercial_conversions row.</p>}
     </AnalyticsSectionCard></section>
 
+    <CommercialFollowup leadId={lead.id} />
     <section className="commercial-timeline"><AnalyticsSectionCard eyebrow="Audit trail" title="Commercial timeline" description="Latest 100 events, newest first. Metadata is summarized and sensitive-looking keys are redacted.">
       {lead.timeline.length === 0 ? <p className="commercial-detail-empty">No commercial events recorded for this lead.</p> : <ol>{lead.timeline.map((event) => <li key={event.id}><span className="commercial-timeline-dot" /><div className="commercial-timeline-head"><strong>{pretty(event.eventType)}</strong><time>{date(event.occurredAt)}</time></div><p>{pretty(event.actorType)}{event.actorUserId ? ` · ${event.actorUserId}` : ""}</p>{event.metadataSummary.length ? <dl>{event.metadataSummary.map((item) => <div key={item.key}><dt>{pretty(item.key)}</dt><dd>{item.value}</dd></div>)}</dl> : null}</li>)}</ol>}
     </AnalyticsSectionCard></section>

@@ -1,6 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import { loadIncidentDetail } from "@/lib/instagram-dashboard/incident-detail";
-import { dispatchIncidentLifecycleNotifications } from "@/lib/instagram-dashboard/incident-lifecycle-notifications";
+import { isIncidentOnlyActionRateLimit } from "@/lib/instagram-dashboard/action-rate-limit-policy";
 import { getInstagramAdminUserContext, jsonError, jsonOk, readJsonBody, readString, requireRelayOrAdmin } from "../../_utils";
 import { verifyCompassRelayKey } from "../../compass/relay-auth";
 
@@ -71,7 +71,13 @@ export async function POST(request: Request) {
   const expectedWorkerSha = readString(body.expected_worker_sha).trim().toLowerCase();
   const causeFixedVersion = readString(body.cause_fixed_version).trim();
 
-  if (action === "resolve" && (!/^[0-9a-f]{40}$/.test(expectedWorkerSha) || !causeFixedVersion || causeFixedVersion.length > 160)) {
+  const detailBeforeAction = action === "resolve" ? await loadIncidentDetail(incidentId) : null;
+  const incidentOnlyActionLimit = Boolean(detailBeforeAction && isIncidentOnlyActionRateLimit({
+    reason: detailBeforeAction.incident.reason,
+    metadata: detailBeforeAction.incident.metadataSafe,
+  }));
+
+  if (action === "resolve" && !incidentOnlyActionLimit && (!/^[0-9a-f]{40}$/.test(expectedWorkerSha) || !causeFixedVersion || causeFixedVersion.length > 160)) {
     return jsonError("A certified corrected Worker SHA and cause-fixed version are required.", 400, {
       code: "INCIDENT_RESOLUTION_RUNTIME_PROOF_REQUIRED",
       blocked_reason: !expectedWorkerSha ? "expected_worker_sha_missing" : "cause_fixed_version_missing_or_invalid",
@@ -80,7 +86,7 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseClient();
-    const { data, error } = await supabase.rpc("transition_account_incident_human_review_v2", {
+    const { data, error } = await supabase.rpc("transition_account_incident_human_review_v3", {
       p_incident_id: incidentId,
       p_action: action,
       p_expected_version: expectedVersion,
@@ -90,50 +96,23 @@ export async function POST(request: Request) {
       p_note: note,
       p_resolution_reason: resolutionReason,
       p_idempotency_key: idempotencyKey,
-      p_expected_worker_sha: action === "resolve" ? expectedWorkerSha : null,
-      p_cause_fixed_version: action === "resolve" ? causeFixedVersion : null,
+      p_expected_worker_sha: action === "resolve" && !incidentOnlyActionLimit ? expectedWorkerSha : null,
+      p_cause_fixed_version: action === "resolve" && !incidentOnlyActionLimit ? causeFixedVersion : null,
       p_channel: channel || null,
       p_notification_id: UUID.test(notificationId) ? notificationId : null,
     });
     if (error) return mapRpcError(error.message, error.code);
 
     const transition = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
-    const notificationIds = Array.isArray(transition.notification_ids)
-      ? transition.notification_ids.map((value) => String(value)).filter((value) => UUID.test(value))
-      : [];
     let deliveries: Array<Record<string, unknown>> = [];
     const idempotent = transition.idempotent === true;
-    if (!idempotent && notificationIds.length && (action === "resolve" || action === "retry_notification")) {
-      const detailBeforeDelivery = await loadIncidentDetail(incidentId);
-      if (detailBeforeDelivery) {
-        const incident = detailBeforeDelivery.incident;
-        try {
-          deliveries = await dispatchIncidentLifecycleNotifications({
-            incidentId,
-            notificationIds,
-            facts: {
-              id: incident.id,
-              accountUsername: incident.accountUsername,
-              incidentType: incident.incidentType,
-              reason: incident.reason,
-              resolutionReason: incident.resolutionReason,
-              resolvedAt: incident.resolvedAt,
-              resolvedBy: incident.resolvedBy,
-            },
-          });
-        } catch {
-          deliveries = notificationIds.map((id) => ({
-            id,
-            status: "failed",
-            error: "delivery_dispatch_failed_after_database_commit",
-          }));
-        }
-      }
+    if (!idempotent && (action === "resolve" || action === "retry_notification")) {
+      deliveries = [{ status: "queued", router: "notification_router_v2" }];
     }
 
     const detail = await loadIncidentDetail(incidentId);
     return jsonOk({
-      contractVersion: "incident_human_review_action_v2",
+      contractVersion: "incident_human_review_action_v3",
       action,
       eventId: transition.event_id ?? null,
       incidentId,
@@ -149,6 +128,17 @@ export async function POST(request: Request) {
       blocked_reason: transition.blocked_reason ?? null,
       expected_worker_sha: transition.expected_worker_sha ?? null,
       cause_fixed_version: transition.cause_fixed_version ?? null,
+      early_resolution_warning: incidentOnlyActionLimit
+        && typeof detailBeforeAction?.incident.metadataSafe?.recommended_pause_until === "string"
+        && Date.parse(detailBeforeAction.incident.metadataSafe.recommended_pause_until) > Date.now()
+          ? "recommended_48h_pause_not_elapsed"
+          : null,
+      equivalent_incidents_resolved: transition.equivalent_incidents_resolved ?? 0,
+      remaining_operator_review_blockers: transition.remaining_operator_review_blockers ?? null,
+      runtime_reactivated: transition.runtime_reactivated === true,
+      runtime_status: transition.runtime_status ?? null,
+      runtime_restore_blocked_reason: transition.runtime_restore_blocked_reason ?? null,
+      manual_stop_persistent_block: false,
       deliveries,
       detail,
     });

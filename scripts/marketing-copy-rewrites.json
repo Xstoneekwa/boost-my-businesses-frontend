@@ -1,0 +1,380 @@
+[
+  {
+    "file": "app/components/MarketingPages.tsx",
+    "language": "fr",
+    "before": "Nous développons votre audience avec des profils réels, ciblés et géolocalisés — grâce à des agents IA opérant depuis de vrais téléphones, entièrement gérés par notre équipe.",
+    "after": "Nous développons votre audience avec des profils réels, ciblés et géolocalisés. Nos agents IA opèrent depuis de vrais téléphones, sous la gestion complète de notre équipe."
+  },
+  {
+    "file": "app/components/MarketingPages.tsx",
+    "language": "en",
+    "before": "We grow your audience with real, targeted, geo-relevant profiles — using AI agents operating from real phones, fully managed by our team.",
+    "after": "We grow your audience with real, targeted, geo-relevant profiles. Our team fully manages the AI agents that make this happen, operating from real phones."
+  },
+  {
+    "file": "app/components/NavbarFooter.tsx",
+    "language": "fr",
+    "before": "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles",
+    "after": "Boost My Businesses Ltd est immatriculée en Angleterre et au Pays de Galles"
+  },
+  {
+    "file": "app/components/NavbarFooter.tsx",
+    "language": "en",
+    "before": "Boost My Businesses Ltd — Registered in England & Wales",
+    "after": "Boost My Businesses Ltd is registered in England & Wales"
+  },
+  {
+    "file": "app/agent/general/page.tsx",
+    "language": "fr",
+    "before": "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles",
+    "after": "Boost My Businesses Ltd est immatriculée en Angleterre et au Pays de Galles"
+  },
+  {
+    "file": "app/agent/general/page.tsx",
+    "language": "en",
+    "before": "Boost My Businesses Ltd — Registered in England & Wales",
+    "after": "Boost My Businesses Ltd is registered in England & Wales"
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Boost My Businesses Ltd — Immatriculée en Angleterre et au Pays de Galles",
+    "after": "Boost My Businesses Ltd est immatriculée en Angleterre et au Pays de Galles"
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Boost My Businesses Ltd — Registered in England &amp; Wales",
+    "after": "Boost My Businesses Ltd is registered in England &amp; Wales"
+  },
+  {
+    "file": "app/agent/general/page.tsx",
+    "language": "fr",
+    "before": "Qualifie des leads, réponds à tes clients, produis du contenu — tout depuis un seul espace, 24h/24.",
+    "after": "Qualifie des leads, réponds à tes clients et produis du contenu depuis un seul espace, 24h/24."
+  },
+  {
+    "file": "app/agent/general/page.tsx",
+    "language": "en",
+    "before": "Qualify leads, answer clients, produce content — all in one workspace, 24/7.",
+    "after": "Qualify leads, answer clients and produce content in one workspace, 24/7."
+  },
+  {
+    "file": "app/components/GrowthContextualVisuals.tsx",
+    "language": "shared",
+    "before": "${copy.discovery[lang]} — ${copy.intent[lang]}",
+    "after": "${copy.discovery[lang]}: ${copy.intent[lang]}"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "Objectif ${product ? \"produit\" : \"de campagne\"} — résultat non garanti",
+    "after": "Objectif ${product ? \"produit\" : \"de campagne\"}. Résultat non garanti"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "en",
+    "before": "${product ? \"Product\" : \"Campaign\"} objective — result not guaranteed",
+    "after": "${product ? \"Product\" : \"Campaign\"} objective. Result not guaranteed"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "EXEMPLE DE CIBLAGE — PAS UN RÉSULTAT CLIENT",
+    "after": "EXEMPLE DE CIBLAGE, PAS UN RÉSULTAT CLIENT"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "en",
+    "before": "TARGETING EXAMPLE — NOT A CLIENT RESULT",
+    "after": "TARGETING EXAMPLE, NOT A CLIENT RESULT"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "Une croissance réelle, ciblée et géographiquement pertinente, propulsée par l’IA et opérée depuis de vrais téléphones — tout en restant entièrement gérée par notre équipe.",
+    "after": "Une croissance réelle, ciblée et géographiquement pertinente, propulsée par l’IA et opérée depuis de vrais téléphones. Notre équipe prend en charge l’ensemble du service."
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "en",
+    "before": "Real, targeted, geo-relevant Instagram growth powered by AI and real phones — fully managed by our team.",
+    "after": "Real, targeted, geo-relevant Instagram growth powered by AI and real phones. Our team manages the entire service."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "en",
+    "before": "A reseller service model — not a fully white-label software platform.",
+    "after": "This is a reseller service model, not a fully white-label software platform."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "en",
+    "before": "Agency pricing is available through our existing volume programme. We’ll review your account mix and the applicable terms together — no separate partner checkout.",
+    "after": "Agency pricing is available through our existing volume programme. We’ll review your account mix and the applicable terms together. There is no separate partner checkout."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "en",
+    "before": "Let’s work out how Instagram Growth fits your agency — before you change your offer.",
+    "after": "Before you change your offer, let’s work out how Instagram Growth fits your agency."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "fr",
+    "before": "Un modèle de service revendeur — pas une plateforme logicielle entièrement en marque blanche.",
+    "after": "Il s’agit d’un service revendeur, et non d’une plateforme logicielle entièrement en marque blanche."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "fr",
+    "before": "Des tarifs agence sont disponibles via notre programme volume existant. Nous examinons ensemble vos comptes et les conditions applicables — sans nouveau checkout partenaire.",
+    "after": "Des tarifs agence sont disponibles via notre programme volume existant. Nous examinons ensemble vos comptes et les conditions applicables. Aucun parcours de paiement partenaire distinct n’est prévu."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "fr",
+    "before": "Voyons comment Instagram Growth s’intègre à votre agence — avant de faire évoluer votre offre.",
+    "after": "Avant de faire évoluer votre offre, voyons comment Instagram Growth s’intègre à votre agence."
+  },
+  {
+    "file": "app/partners/PartnersPage.tsx",
+    "language": "shared",
+    "before": "Boost My Businesses — ${t.home}",
+    "after": "Boost My Businesses: ${t.home}"
+  },
+  {
+    "file": "lib/marketing/seo.ts",
+    "language": "shared",
+    "before": "Boost My Businesses — ${page.label}",
+    "after": "Boost My Businesses: ${page.label}"
+  },
+  {
+    "file": "lib/marketing/seo.ts",
+    "language": "en",
+    "before": "` — ${page.label}`",
+    "after": "`: ${page.label}`"
+  },
+  {
+    "file": "app/instagram-growth/InstagramGrowthFrame.tsx",
+    "language": "shared",
+    "before": "Instagram Growth – BoostMyBusinesses",
+    "after": "Instagram Growth | BoostMyBusinesses"
+  },
+  {
+    "file": "app/instagram-growth/checkout/page.tsx",
+    "language": "en",
+    "before": "Checkout — Instagram Growth",
+    "after": "Checkout | Instagram Growth"
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Boost My Businesses – Croissance Instagram automatisée",
+    "after": "Boost My Businesses | Croissance Instagram automatisée"
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Our AI agents identify them and bring them to you — real, geolocated profiles genuinely interested in your business, engaged with naturally and progressively.",
+    "after": "Our AI agents identify real, geolocated profiles genuinely interested in your business and bring them to you through natural, progressive interactions."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Nos agents IA les identifient et vous les amènent — des profils réels, géolocalisés et vraiment intéressés par votre activité, engagés de manière naturelle et progressive.",
+    "after": "Nos agents IA identifient des profils réels, géolocalisés et vraiment intéressés par votre activité. Ils les amènent à vous grâce à des interactions naturelles et progressives."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "A smarter way to turn Instagram into a real acquisition channel — safely.",
+    "after": "A smarter, safer way to turn Instagram into a real acquisition channel."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "We analyze your niche to reach the profiles that matter — a qualified, engaged audience ready to become clients.",
+    "after": "We analyze your niche to reach the profiles that matter: a qualified, engaged audience ready to become clients."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Nous analysons votre niche pour atteindre les profils qui comptent — une audience qualifiée et engagée, prête à devenir cliente.",
+    "after": "Nous analysons votre niche pour toucher une audience qualifiée et engagée, prête à devenir cliente."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Our AI agents run around the clock and generate targeted interactions for you — even while you sleep.",
+    "after": "Our AI agents run around the clock, generating targeted interactions for you even while you sleep."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Nos agents IA tournent en continu et génèrent des interactions ciblées pour vous — même quand vous dormez.",
+    "after": "Même quand vous dormez, nos agents IA continuent de générer des interactions ciblées pour vous."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Nothing changes—except your results.",
+    "after": "Nothing changes except your results."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Everything starts from our secure dashboard — no installation, no risk for your account.",
+    "after": "Everything starts from our secure dashboard. No installation is needed, and your account stays safe."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Tout se passe depuis notre tableau de bord sécurisé — aucune installation, aucun risque pour votre compte.",
+    "after": "Tout se passe depuis notre tableau de bord sécurisé. Aucune installation n’est nécessaire et votre compte reste en sécurité."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Competitor accounts, geographic zones: tell us who your ideal clients are — on your own with the Growth plan, or with our AI on Pro and Premium.",
+    "after": "Define your ideal clients through competitor accounts and geographic zones. Do it yourself with the Growth plan, or with our AI on the Pro and Premium plans."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Comptes concurrents, zones géographiques : dites-nous qui sont vos clients cibles — seul pour le pack Growth, ou avec notre IA pour Pro et Premium.",
+    "after": "Définissez vos clients cibles à partir de comptes concurrents et de zones géographiques. Faites-le vous-même avec la formule Growth, ou avec notre IA pour les formules Pro et Premium."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Our agents launch, fine-tune and steer your growth day after day. You follow every result from your dashboard.",
+    "after": "Our agents launch your campaign and manage its growth day after day, adjusting it as needed. You follow every result from your dashboard."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Followers — 30 days",
+    "after": "Followers over 30 days"
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Abonnés — 30 jours",
+    "after": "Abonnés sur 30 jours"
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Boost My Business is the value for money we were hoping for — and the results we had stopped daring to expect.",
+    "after": "Boost My Business is the value for money we were hoping for and the results we had stopped daring to expect."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Boost My Business, c'est le rapport qualité-prix qu'on espérait — et les résultats qu'on n'osait plus attendre.",
+    "after": "Boost My Business, c'est le rapport qualité-prix qu'on espérait et les résultats qu'on n'osait plus attendre."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "My DMs have never been so active — qualified, genuinely interested prospects.",
+    "after": "My DMs have never been so active: qualified, genuinely interested prospects."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "Mes DM n'ont jamais été aussi actifs — des prospects qualifiés, vraiment intéressés.",
+    "after": "Mes DM n'ont jamais été aussi actifs : des prospects qualifiés, vraiment intéressés."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "In one month I gained a real, engaged audience — and I didn't have to lift a finger.",
+    "after": "In one month I gained a real, engaged audience and I didn&#39;t have to lift a finger."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "+420 followers in the first month — and above all the right ones, people who actually interact with my content.",
+    "after": "+420 followers in the first month, and above all the right ones, people who actually interact with my content."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "fr",
+    "before": "+420 abonnés le premier mois — et surtout les bons, des gens qui interagissent vraiment avec mon contenu.",
+    "after": "+420 abonnés le premier mois, et surtout les bons, des gens qui interagissent vraiment avec mon contenu."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "accounts close to yours — a competitor, a similar creator, an aligned interest.",
+    "after": "accounts close to yours: a competitor, a similar creator, an aligned interest."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "Your performance doesn't rest on our service alone — your sector and the kind of content you post weigh in just as much.",
+    "after": "Your performance doesn't rest on our service alone. Your sector and the kind of content you post weigh in just as much."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "To Instagram it simply reads as a person using their phone normally — which is why we've never had an account banned.",
+    "after": "To Instagram it simply reads as a person using their phone normally. That's why we've never had an account banned."
+  },
+  {
+    "file": "public/instagram-growth/index.html",
+    "language": "en",
+    "before": "and full transparency on the numbers — so you always know where you stand.",
+    "after": "and full transparency on the numbers, so you always know where you stand."
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "text: \"Business hubs, premium lifestyle, property, hospitality and specialist services.\"",
+    "after": "text: { en: \"Business hubs, premium lifestyle, property, hospitality and specialist services.\", fr: \"Pôles d’affaires, art de vivre haut de gamme, immobilier, hôtellerie et services spécialisés.\" }"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "text: \"Tourism, food, design, wellness, property and creator-led communities.\"",
+    "after": "text: { en: \"Tourism, food, design, wellness, property and creator-led communities.\", fr: \"Tourisme, gastronomie, design, bien-être, immobilier et communautés animées par des créateurs.\" }"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "text: \"Hospitality, coastal lifestyle, food, fitness and local business ecosystems.\"",
+    "after": "text: { en: \"Hospitality, coastal lifestyle, food, fitness and local business ecosystems.\", fr: \"Hôtellerie, vie en bord de mer, gastronomie, fitness et écosystèmes d’entreprises locales.\" }"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "text: \"Professional services, property, education, wellness and sports communities.\"",
+    "after": "text: { en: \"Professional services, property, education, wellness and sports communities.\", fr: \"Services professionnels, immobilier, éducation, bien-être et communautés sportives.\" }"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "text: \"Food, wine, hospitality and travel audiences can combine South African and international discovery sources.\"",
+    "after": "text: { en: \"Food, wine, hospitality and travel audiences can combine South African and international discovery sources.\", fr: \"Les audiences intéressées par la gastronomie, le vin, l’hôtellerie et les voyages peuvent associer des sources de découverte sud-africaines et internationales.\" }"
+  },
+  {
+    "file": "app/components/GrowthLandingPages.tsx",
+    "language": "fr",
+    "before": "<p>{city.text}</p>",
+    "after": "<p>{pick(city.text, lang)}</p>"
+  },
+  {
+    "file": "lib/marketing/seo.ts",
+    "language": "en",
+    "before": "Boost My Businesses | AI-Powered Instagram Growth & Automation",
+    "after": "Instagram Growth & AI Automation | Boost My Businesses"
+  },
+  {
+    "file": "lib/marketing/seo.ts",
+    "language": "en",
+    "before": "Managed Instagram growth powered by AI and real phones, with business automation for calls, leads, support and content.",
+    "after": "Grow your Instagram audience with targeted, AI-powered acquisition. Boost My Businesses combines managed Instagram growth with business automation."
+  }
+]

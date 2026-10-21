@@ -1,0 +1,41 @@
+{
+  "canonical_blocker_labels": {
+    "HOST_STORAGE_CRITICAL": "Operational incident",
+    "account_configuration_failure": "Operational incident",
+    "account_login_required": "Instagram login required",
+    "active_instagram_account_mismatch": "Instagram identity mismatch",
+    "assigned_instagram_package_unavailable": "Instagram app unavailable",
+    "auto_login_device_unavailable": "Operational incident",
+    "auto_login_failed": "Operational incident",
+    "auto_login_identity_mismatch": "Operational incident",
+    "auto_login_request_expired": "Operational incident",
+    "auto_login_verification_required": "Operational incident",
+    "auto_restart_quota_inconsistency": "Operational incident",
+    "auto_restart_resume_plan_invalid": "Operational incident",
+    "email_verification_code_required": "Operational incident",
+    "instagram_account_restriction": "Instagram restriction",
+    "instagram_ads_data_consent_popup_requires_operator": "Operational incident",
+    "instagram_challenge": "Operational incident",
+    "instagram_human_confirmation_required": "Instagram confirmation required",
+    "instagram_restriction": "Operational incident",
+    "login_challenge_pending": "Operational incident",
+    "login_package_mismatch": "Operational incident",
+    "login_verification_code_required": "Operational incident",
+    "orf4b_smoke_test": "Operational incident",
+    "orf4c_smoke_test": "Operational incident",
+    "run_device_unavailable": "Operational incident",
+    "run_identity_verification_failed": "Operational incident",
+    "run_worker_failure": "Operational incident",
+    "runtime_unknown_blocked": "Operational incident",
+    "scheduled_early_failure_retrying": "Operational incident",
+    "system_test_incident": "Operational incident",
+    "ui_state_unknown": "Operational incident",
+    "welcome_retry_final_unverified_send_surface_lost": "Operational incident",
+    "welcome_surface_unstable": "Operational incident"
+  },
+  "operator_approved_timed_label": "Pause until YYYY-MM-DD",
+  "timed_reasons": [
+    "instagram_action_rate_limit",
+    "preventive_follow_restriction"
+  ]
+}

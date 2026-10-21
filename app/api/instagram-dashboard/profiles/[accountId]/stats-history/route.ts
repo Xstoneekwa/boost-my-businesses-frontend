@@ -14,10 +14,9 @@ import {
   DEFAULT_BUSINESS_TIMEZONE,
   formatBusinessTimestamp,
 } from "@/lib/instagram-dashboard/business-timezone";
-import {
-  projectSocialProfileSnapshots,
-  type SocialProfileSnapshotRow,
-} from "@/lib/instagram-dashboard/social-profile-snapshot-contract";
+import { canonicalSocialSnapshotProjection } from "@/lib/instagram-dashboard/canonical-social-snapshot-read";
+import { latestStatsObservations } from "@/lib/instagram-dashboard/latest-stats-observations";
+import type { SocialProfileSnapshotRow } from "@/lib/instagram-dashboard/social-profile-snapshot-contract";
 import { createSupabaseClient } from "@/lib/supabase";
 import { jsonError, jsonOk, readNumber, readString, requireInstagramAdmin, type SupabaseRecord } from "../../../_utils";
 import { verifyCompassRelayKey } from "../../../compass/relay-auth";
@@ -264,14 +263,7 @@ export async function GET(
         .gte("unfollowed_at", since)
         .order("unfollowed_at", { ascending: false })
         .limit(10000),
-      supabase
-        .from("ig_account_social_profile_snapshots")
-        .select("account_id,username_normalized,followers_count,following_count,posts_count,observed_at,snapshot_local_date,account_timezone,timezone_source,source_provider,source_trigger,source_event_id,source_run_id,source_business_session_id,lookup_status,freshness_status,idempotency_key")
-        .eq("account_id", normalizedAccountId)
-        .eq("lookup_status", "found")
-        .gte("observed_at", since)
-        .order("observed_at", { ascending: true })
-        .limit(5000),
+      supabase.rpc("read_stats_social_observations_v1", { p_account_id: normalizedAccountId, p_since: since, p_until: now.toISOString() }),
       supabase
         .from("ig_account_settings")
         .select("total_likes_limit,max_dm_per_run")
@@ -290,9 +282,11 @@ export async function GET(
     if (firstError) return jsonError(firstError.message, 500);
 
     const byDay = new Map<string, DayCounters>();
-    const socialSnapshots = projectSocialProfileSnapshots({
-      rows: (socialSnapshotsResult.data ?? []) as SocialProfileSnapshotRow[],
-    });
+    const storedRows = (socialSnapshotsResult.data ?? []) as SocialProfileSnapshotRow[];
+    if (storedRows.some(row => row.account_id !== normalizedAccountId)) return jsonError("Snapshot account scope mismatch.", 500);
+    const latestObservations = latestStatsObservations(storedRows, normalizedAccountId, now);
+    // Old retained observations belong in the latest-value summary, not invented historical days.
+    const socialSnapshots = canonicalSocialSnapshotProjection(storedRows.filter(row => Date.parse(row.observed_at) >= Date.parse(since)), normalizedAccountId, now).stats;
     const ensureDay = (date: string) => {
       const existing = byDay.get(date);
       if (existing) return existing;
@@ -391,6 +385,7 @@ export async function GET(
     return jsonOk({
       account_id: normalizedAccountId,
       days: rows,
+      latest_observations: latestObservations,
       source: {
         actions: "ig_action_logs",
         runs: "ig_runs.total_* reconciliation for post-follow likes",

@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/restaurant-worker/node_modules/
 /.pnp
 .pnp.*
 .yarn/*

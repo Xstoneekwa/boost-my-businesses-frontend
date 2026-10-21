@@ -1,4 +1,6 @@
+import { traceStep, traceMetric, traceFallback } from "@/lib/instagram-dashboard/profiles-live-causal-context";
 import { getManageData } from "@/app/instagram-dashboard/manage-data";
+import { canonicalSocialSnapshotProjection, readCanonicalSocialSnapshots } from "@/lib/instagram-dashboard/canonical-social-snapshot-read";
 import {
   actionCountersFromLogs,
   interactionEventCounters,
@@ -11,8 +13,13 @@ import { profileCounterBusinessDayStartIso } from "@/lib/instagram-dashboard/pro
 import { businessDayWindow } from "@/lib/instagram-dashboard/business-timezone";
 import { createSupabaseClient } from "@/lib/supabase";
 import { selectCurrentAccountSessionTransition } from "@/lib/account-session-transitions";
+import {
+  projectProfileExecutionPhase,
+  type ProfileExecutionProjection,
+} from "@/lib/instagram-dashboard/profile-execution-phase";
 import { jsonError, jsonOk, requireInstagramAdmin } from "../_utils";
 import { compassRelayAuthFailureReason, relayAuthStatus, verifyCompassRelayKey } from "../compass/relay-auth";
+import { constrainProfilesLiveQuery, profilesLiveResilienceActive } from "@/lib/instagram-dashboard/profiles-live-resilience";
 
 export const dynamic = "force-dynamic";
 
@@ -74,12 +81,13 @@ function fallbackPackageCaps(packageLabel: string) {
 function activeRunControlProjection(
   activeRequest: RecordValue | undefined,
   activeRun: RecordValue | undefined,
+  execution: ProfileExecutionProjection,
 ) {
   if (!activeRequest && !activeRun) return {};
   const reason = activeRun ? "already_running" : "already_requested";
   return {
-    runStatus: "running",
-    currentRunStatus: "running",
+    runStatus: execution.executionDisplayState,
+    currentRunStatus: execution.executionDisplayState,
     eligibility: "blocked_now",
     eligibility_status: "blocked_now",
     eligibilityReason: reason,
@@ -163,13 +171,14 @@ function runScopedCounters(
 function runtimeIndicatorProjection(
   activeRequest: RecordValue | undefined,
   activeRun: RecordValue | undefined,
+  execution: ProfileExecutionProjection,
   latestRun: RecordValue | undefined,
   logs: RecordValue[],
 ) {
   if (activeRequest || activeRun) {
     return {
-      state: "active",
-      reason: activeRun ? "active_run" : "active_request",
+      state: execution.executionPhase === "ACTIVE" ? "active" : "idle",
+      reason: execution.executionPhase.toLowerCase(),
       lastRunId: latestRun ? readString(latestRun.id, "") : null,
     };
   }
@@ -228,7 +237,6 @@ function safeSettingsSummary(
   settings: RecordValue | undefined,
   packageSummary: RecordValue | undefined,
   logs: RecordValue[],
-  accountRow: RecordValue | undefined,
   runs: RecordValue[] = [],
   interactionEvents: RecordValue[] = [],
   projectionGeneratedAt = new Date().toISOString(),
@@ -282,15 +290,6 @@ function safeSettingsSummary(
       source: "canonical_persisted_actions_sast_v1",
     },
     capsToday,
-    followerDelta3d: {
-      value: null,
-      currentFollowers: readNumber(accountRow, ["followers_count"], null),
-      previousFollowers: null,
-      from: null,
-      to: new Date().toISOString(),
-      source: "pending_account_follower_snapshots",
-      freshness: "no_snapshot_table",
-    },
     quotas: {
       follow: { used: counters.follows, max: effectiveFollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events" },
       unfollow: { used: counters.unfollows, max: effectiveUnfollowCap, source: "ig_action_logs+ig_runs+ig_interaction_events+ig_interacted_users" },
@@ -339,24 +338,37 @@ function safeSettingsSummary(
   };
 }
 
-async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGeneratedAt: string) {
+export async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGeneratedAt: string) {
   const ids = accounts.map(accountId).filter(Boolean);
   if (!ids.length) return accounts;
   try {
     const supabase = createSupabaseClient();
     const since = dayStartIso();
-    const [settingsResult, logsResult, packageResult, accountResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult] = await Promise.all([
-      supabase.from("ig_account_settings").select("*").in("account_id", ids),
-      supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000),
-      supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids),
-      supabase.from("ig_accounts").select("id,followers_count").in("id", ids),
-      supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]),
-      supabase.from("ig_runs").select("id,account_id,status").in("account_id", ids).in("status", ["pending", "running", "stopping"]),
-      supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000),
-      supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000),
-      supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000),
-      supabase.from("account_session_transitions").select("id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at").in("account_id", ids).order("updated_at", { ascending: false }).limit(1000),
+    const [settingsResult, logsResult, packageResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult, capsulesResult, socialSnapshotsResult] = await Promise.all([
+      traceStep("runtime.settings", () => constrainProfilesLiveQuery(supabase.from("ig_account_settings").select("*").in("account_id", ids)), { account_count: ids.length }),
+      traceStep("runtime.action_logs", () => constrainProfilesLiveQuery(supabase.from("ig_action_logs").select("account_id,run_id,action_type,status,message,payload,created_at").in("account_id", ids).gte("created_at", since).limit(10000)), { account_count: ids.length }),
+      traceStep("runtime.package_summary", () => constrainProfilesLiveQuery(supabase.from("account_package_summary").select("account_id,commercial_package_label,package_caps,effective_caps_preview,warmup_status,warmup_day,package_started_at").in("account_id", ids)), { account_count: ids.length }),
+      traceStep("runtime.active_requests", () => constrainProfilesLiveQuery(supabase.from("account_run_requests").select("id,account_id,status,run_id,source_surface,root_business_session_id,execution_attempt_no,retry_index,updated_at").in("account_id", ids).in("status", ["pending", "queued", "claimed", "starting", "running", "stopping", "canceling"]).order("updated_at", { ascending: false }).limit(ids.length * 3)), { account_count: ids.length }),
+      traceStep("runtime.active_runs", () => constrainProfilesLiveQuery(supabase.from("ig_runs").select("id,account_id,status,updated_at").in("account_id", ids).in("status", ["pending", "running", "stopping"]).order("updated_at", { ascending: false }).limit(ids.length * 3)), { account_count: ids.length }),
+      traceStep("runtime.session_runs", () => constrainProfilesLiveQuery(supabase.from("ig_runs").select("id,account_id,status,total_follow,total_like,total_dm,total_story,live_counter_revision,created_at,started_at,finished_at,updated_at,performance_summary").in("account_id", ids).gte("created_at", since).order("created_at", { ascending: false }).limit(10000)), { account_count: ids.length }),
+      traceStep("runtime.interaction_events", () => constrainProfilesLiveQuery(supabase.from("ig_interaction_events").select("id,account_id,run_id,event_type,event_status,interaction_type,event_at,payload").in("account_id", ids).gte("event_at", since).limit(10000)), { account_count: ids.length }),
+      traceStep("runtime.unfollows", () => constrainProfilesLiveQuery(supabase.from("ig_interacted_users").select("id,account_id,run_id,last_run_id,username,unfollowed_at,unfollow_result,interaction_status,evidence_confidence").in("account_id", ids).eq("unfollow_result", "success").gte("unfollowed_at", since).limit(10000)), { account_count: ids.length }),
+      traceStep("runtime.transitions", () => constrainProfilesLiveQuery(supabase.from("account_session_transitions").select("id,account_id,run_id,transition_key,transition_state,transition_context,transition_type,follows_completed,follows_remaining,safe_boundary,unfollow_eligible,unfollow_started,unfollow_state,backlog_remaining,next_step,exact_stable_reason,actionable_reason,updated_at").in("account_id", ids).order("updated_at", { ascending: false }).limit(1000)), { account_count: ids.length }),
+      traceStep("runtime.resume_capsules", () => constrainProfilesLiveQuery(supabase.from("account_session_resume_plans").select("run_id,run_request_id,account_id,resume_state,irreversible_work_state,zero_work_certified_at,device_activity_started_at,device_connected_at,instagram_launch_requested_at,instagram_foreground_verified_at,last_updated_at").in("account_id", ids).order("last_updated_at", { ascending: false }).limit(ids.length * 3)), { account_count: ids.length }),
+      traceStep("runtime.social_snapshots", () => readCanonicalSocialSnapshots(supabase, { accountIds: ids, since: new Date(Date.parse(projectionGeneratedAt) - 30 * 86400_000).toISOString(), until: projectionGeneratedAt, includeLastValidGrowth: true }), { account_count: ids.length }),
     ]);
+    const remoteErrors = [settingsResult, logsResult, packageResult, requestsResult, runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult, transitionsResult, capsulesResult, socialSnapshotsResult]
+      .map((result) => result.error).filter(Boolean);
+    if (profilesLiveResilienceActive()) {
+      if (remoteErrors.length) throw remoteErrors[0];
+      const results = [settingsResult, logsResult, packageResult, requestsResult,
+        runsResult, sessionRunsResult, interactionEventsResult, unfollowsResult,
+        transitionsResult, capsulesResult, socialSnapshotsResult];
+      if (results.some((result) => !Array.isArray(result.data))) {
+        throw new Error("Incomplete Profiles Live runtime read");
+      }
+    }
+    const mappingStartedAt = performance.now();
     const settingsByAccount = new Map(
       ((settingsResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
     );
@@ -368,9 +380,6 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
     }
     const packageByAccount = new Map(
       ((packageResult.data ?? []) as RecordValue[]).map((row) => [readString(row.account_id, ""), row]),
-    );
-    const accountById = new Map(
-      ((accountResult.data ?? []) as RecordValue[]).map((row) => [readString(row.id, ""), row]),
     );
     const activeRequestByAccount = new Map<string, RecordValue>();
     for (const row of (requestsResult.data ?? []) as RecordValue[]) {
@@ -414,14 +423,21 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
         transitionsByAccount.set(id, [...(transitionsByAccount.get(id) ?? []), row]);
       }
     }
-    return accounts.map((account) => {
+    const capsulesByAccount = new Map<string, RecordValue[]>();
+    if (!capsulesResult.error) {
+      for (const row of (capsulesResult.data ?? []) as RecordValue[]) {
+        const id = readString(row.account_id, "");
+        if (!id) continue;
+        capsulesByAccount.set(id, [...(capsulesByAccount.get(id) ?? []), row]);
+      }
+    }
+    const enrichedAccounts = accounts.map((account) => {
       const id = accountId(account);
       const runtimeSummary = safeSettingsSummary(
         account,
         settingsByAccount.get(id),
         packageByAccount.get(id),
         logsByAccount.get(id) ?? [],
-        accountById.get(id),
         sessionRunsByAccount.get(id) ?? [],
         interactionEventsByAccount.get(id) ?? [],
         projectionGeneratedAt,
@@ -429,29 +445,47 @@ async function enrichAccountsWithRuntime(accounts: RecordValue[], projectionGene
       const activeRequest = activeRequestByAccount.get(id);
       const activeRun = activeRunByAccount.get(id);
       const runId = activeRunId(activeRequest, activeRun);
+      const requestId = activeRequest ? readString(activeRequest.id, "") : "";
+      const capsule = (capsulesByAccount.get(id) ?? []).find((row) => (
+        (requestId && readString(row.run_request_id, "") === requestId)
+        || (runId && readString(row.run_id, "") === runId)
+      ));
+      const execution = projectProfileExecutionPhase({
+        request: activeRequest,
+        run: activeRun,
+        capsule,
+      });
       return {
         ...account,
         ...runtimeSummary,
+        followerDelta3d: canonicalSocialSnapshotProjection(socialSnapshotsResult.data, id, new Date(projectionGeneratedAt)).followerDelta3d,
+        socialSnapshotReadStatus: socialSnapshotsResult.error ? "unavailable" : "complete",
         currentRunCounters: runScopedCounters(
           runId,
           logsByAccount.get(id) ?? [],
           sessionRunsByAccount.get(id) ?? [],
           interactionEventsByAccount.get(id) ?? [],
         ),
-        runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
+        ...execution,
+        businessExecutionId: execution.rootBusinessSessionId,
+        runtimeIndicator: runtimeIndicatorProjection(activeRequest, activeRun, execution, latestRunByAccount.get(id), logsByAccount.get(id) ?? []),
         latestBusinessTransition: selectCurrentAccountSessionTransition(
           transitionsByAccount.get(id) ?? [],
           runId,
         ),
-        ...activeRunControlProjection(activeRequest, activeRun),
+        ...activeRunControlProjection(activeRequest, activeRun, execution),
       };
     });
-  } catch {
+    traceMetric("runtime.mapping_ms", performance.now() - mappingStartedAt);
+    return enrichedAccounts;
+  } catch (error) {
+    if (profilesLiveResilienceActive()) throw error;
+    traceFallback("runtime_enrichment_exception");
     return accounts;
   }
 }
 
-async function requireRelayOrAdmin(request: Request) {
+export async function requireProfilesReadAccess(request: Request) {
   const relayAuth = verifyCompassRelayKey(request.headers);
   if (relayAuth.ok && relayAuth.mode === "relay_key") return null;
   if (!relayAuth.ok) {
@@ -463,7 +497,7 @@ async function requireRelayOrAdmin(request: Request) {
 export async function GET(request: Request) {
   try {
     const projectionGeneratedAt = new Date().toISOString();
-    const unauthorizedResponse = await requireRelayOrAdmin(request);
+    const unauthorizedResponse = await requireProfilesReadAccess(request);
     if (unauthorizedResponse) return unauthorizedResponse;
 
     const manage = await getManageData({ requireCanonicalComplete: true });

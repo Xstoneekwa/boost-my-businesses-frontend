@@ -48,6 +48,8 @@ export async function POST(request: Request) {
     }
     const origin = resolveStripeTestCheckoutRedirectOrigin(request.url);
     const result = await createStripeSubscriptionCheckoutSession(supabase, {
+      commercialTestMode: "stripe_test",
+      realStripeTestE2E: true,
       commercialMode: readString(body.mode || body.commercial_mode),
       planKey: readString(body.plan_key),
       packageKey: readString(body.package_key || body.plan_key),

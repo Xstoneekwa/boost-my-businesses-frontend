@@ -24,11 +24,21 @@ export type AccountCommercialSubscriptionDisplay = {
   supportLabel: string;
   billingDisplayMode: ClientBillingDisplayMode;
   billingDateIso: string;
+  currentPeriodTotalCents?: number | null;
+  actualAmountDueCents?: number | null;
+  actualRemainingCreditCents?: number | null;
+  financialProjectionSource?: string | null;
 };
 
 function readMetadataString(metadata: unknown, key: string, fallback = "") {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return fallback;
   return readString((metadata as SupabaseRecord)[key], fallback);
+}
+
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || !(key in metadata)) return null;
+  const value = Number((metadata as SupabaseRecord)[key]);
+  return Number.isFinite(value) ? value : null;
 }
 
 function catalogGrowthLabel(planKey: PlanKey, lang: "fr" | "en") {
@@ -78,7 +88,7 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
     getAccountPackageSummaries([accountId]),
     supabase
       .from("client_account_entitlements")
-      .select("plan_key,commercial_package_code,billing_interval_months,pack_monthly_discounted_cents,consumed_at,created_at,metadata,status")
+      .select("plan_key,commercial_package_code,billing_interval_months,pack_monthly_discounted_cents,pack_period_total_cents,consumed_at,created_at,metadata,status")
       .eq("client_id", clientId)
       .eq("account_id", accountId)
       .in("status", ["entitlement_consumed", "entitlement_reserved"])
@@ -108,13 +118,21 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
     ? entitlement.metadata as SupabaseRecord
     : null;
 
+  const commercialPeriodEndAt = entitlement ? resolveSubscriptionPeriodEnd({
+    periodStartAt: readString(entitlement.consumed_at) || readString(entitlement.created_at) || readString(subscriptionRow?.starts_at) || null,
+    billingIntervalMonths: Number(entitlement.billing_interval_months) || null,
+    canonicalStripePeriodEndAt: readMetadataString(entitlementMetadata, "actual_stripe_period_end_at") || null,
+    canonicalEntitlementPeriodEndAt: readMetadataString(entitlementMetadata, "period_end_at") || null,
+    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at") || null,
+  }) : null;
+
   const commercial = entitlement ? {
     planKey: readString(entitlement.plan_key).toLowerCase() || null,
     commercialPackageCode: readString(entitlement.commercial_package_code).toLowerCase() || null,
     checkoutSessionPlanKey: null,
     billingIntervalMonths: Number(entitlement.billing_interval_months) || null,
     periodStartAt: readString(entitlement.consumed_at) || readString(entitlement.created_at) || readString(subscriptionRow?.starts_at) || null,
-    periodEndAt: null,
+    periodEndAt: commercialPeriodEndAt,
     growthEstimateLabel: readMetadataString(entitlementMetadata, "growth_estimate_label") || null,
     monthlyPriceCents: Number(entitlement.pack_monthly_discounted_cents) || null,
   } : null;
@@ -156,10 +174,10 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
 
   const supportLabel = readMetadataString(entitlementMetadata, "support_label") || pendingLabel(input.lang);
 
-  const periodEndAt = resolveSubscriptionPeriodEnd({
-    periodStartAt: commercial?.periodStartAt ?? (readString(subscriptionRow?.starts_at) || null),
-    billingIntervalMonths: commercial?.billingIntervalMonths ?? null,
-    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at"),
+  const periodEndAt = commercial?.periodEndAt ?? resolveSubscriptionPeriodEnd({
+    periodStartAt: readString(subscriptionRow?.starts_at) || null,
+    billingIntervalMonths: null,
+    explicitPeriodEndAt: readMetadataString(subscriptionMetadata, "period_end_at") || null,
   });
 
   const billingDateIso = projection.billingDisplayMode === "next_billing"
@@ -180,5 +198,9 @@ export async function loadAccountCommercialSubscriptionDisplay(input: {
     supportLabel,
     billingDisplayMode: projection.billingDisplayMode,
     billingDateIso,
+    currentPeriodTotalCents: Number(entitlement?.pack_period_total_cents) || null,
+    actualAmountDueCents: readMetadataNumber(entitlementMetadata, "actual_stripe_amount_due_cents"),
+    actualRemainingCreditCents: readMetadataNumber(entitlementMetadata, "actual_stripe_remaining_credit_cents"),
+    financialProjectionSource: readMetadataString(entitlementMetadata, "actual_stripe_source") || null,
   };
 }

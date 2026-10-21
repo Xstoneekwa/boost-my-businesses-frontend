@@ -5,6 +5,7 @@ import {
   isCanonicalVisibleProfile,
   selectCanonicalVisibleProfiles,
   unwrapJsonOkData,
+  canonicalProfilesMembership,
 } from "../app/api/instagram-dashboard/profiles/live/profile-visibility.ts";
 import {
   classifyOperationalProfileLifecycle,
@@ -21,14 +22,15 @@ test("legacy Profiles keeps the all-account lifecycle ledger", () => {
 
 test("manage activeAccounts and live selection share the operational lifecycle contract", () => {
   assert.match(manageSource, /classifyOperationalProfileLifecycle\(account\)/);
-  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.activeAccounts\)/);
+  assert.match(liveSource, /selectCanonicalVisibleProfiles\(manage\.activeAccounts\)/);
 });
 
 test("live endpoint selects the canonical activeAccounts projection", () => {
-  assert.match(liveSource, /unwrapJsonOkData\(await legacyResponse\.json\(\)\)/);
-  assert.match(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.activeAccounts\)/);
-  assert.doesNotMatch(liveSource, /selectCanonicalVisibleProfiles\(legacyPayload\.profiles\)/);
-  assert.match(liveSource, /profiles_live_all_accounts_visible_v2/);
+  assert.match(liveSource, /getManageData\(\{ requireCanonicalComplete: true/);
+  assert.match(liveSource, /selectCanonicalVisibleProfiles\(manage\.activeAccounts\)/);
+  assert.doesNotMatch(liveSource, /selectCanonicalVisibleProfiles\(manage\.allAccounts\)/);
+  assert.doesNotMatch(liveSource, /getLegacyProfiles|legacyPayload/);
+  assert.match(liveSource, /profiles_live_shared_core_v3/);
 });
 
 test("ten allAccounts with two terminal rows return exactly eight visible profiles", () => {
@@ -77,6 +79,8 @@ test("pre-login raw inactive is visible only with an explicit nonterminal lifecy
     provisioningStatus: "login_pending",
     loginStatus: "pending",
     packageLabel: "Premium",
+    customerStatus: "active",
+    subscriptionStatus: "active",
     assignmentStatus: "reserved",
     credentialsStatus: "active",
     connected: false,
@@ -113,10 +117,34 @@ test("terminal lifecycle values and terminal timestamps are excluded generically
 test("terminal predicate remains exact and does not classify raw inactive as terminal", () => {
   assert.deepEqual(
     [...operationalTerminalStatuses].sort(),
-    ["cancelled", "canceled", "deleted", "onboarding_rollback", "rolled_back", "rolled_back_test_onboarding", "tombstone", "tombstoned"].sort(),
+    ["cancelled", "canceled", "deleted", "onboarding_rollback", "released-terminal", "released_terminal", "rolled_back", "rolled_back_test_onboarding", "tombstone", "tombstoned"].sort(),
   );
   assert.ok(!operationalTerminalStatuses.includes("inactive"));
   assert.ok(!operationalTerminalStatuses.includes("deactivated"));
+});
+
+test("commercial and released-terminal states remain excluded even when admin is active", () => {
+  for (const row of [
+    { adminStatus: "active", accountLifecycleStatus: "inactive", capacityStatus: "released_terminal" },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", assignmentStatus: "released-terminal" },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", customerStatus: "cancelled" },
+    { adminStatus: "active", accountLifecycleStatus: "inactive", subscriptionStatus: "canceled" },
+  ]) {
+    assert.equal(isCanonicalVisibleProfile(row), false);
+  }
+});
+
+test("membership certifies only the six visible accounts in a sixteen-record ledger", () => {
+  const active = Array.from({ length: 6 }, (_, index) => ({ accountId: `active-${index}`, active: true, accountLifecycleStatus: "active" }));
+  const excluded = Array.from({ length: 10 }, (_, index) => ({ accountId: `excluded-${index}`, active: false, accountLifecycleStatus: "inactive" }));
+  const payload = { profiles: [...active, ...excluded], activeAccounts: active, errors: [], projection_revision: "2026-10-19T17:00:00.000Z" };
+  const membership = canonicalProfilesMembership(payload, ["active-0", "excluded-0", "absent"]);
+  assert.deepEqual(membership.removedAccountIds, ["excluded-0"]);
+  assert.equal(selectCanonicalVisibleProfiles(payload.profiles).length, 6);
+  assert.equal(canonicalProfilesMembership({ ...payload, errors: ["incomplete read"] }, []), undefined);
+  assert.equal(canonicalProfilesMembership({ ...payload, profiles: [...payload.profiles, active[0]] }, []), undefined);
+  assert.equal(canonicalProfilesMembership({ ...payload, activeAccounts: [...active, excluded[0]] }, []), undefined);
+  assert.equal(canonicalProfilesMembership({ ...payload, projection_revision: "unknown" }, []), undefined);
 });
 
 test("connected transition stays continuously visible", () => {
@@ -124,6 +152,25 @@ test("connected transition stays continuously visible", () => {
   const after = { accountLifecycleStatus: "active", adminStatus: "active", loginStatus: "connected" };
   assert.equal(isCanonicalVisibleProfile(before), true);
   assert.equal(isCanonicalVisibleProfile(after), true);
+});
+
+test("live active account retains the Golden counter projection unchanged", () => {
+  const liveActive = {
+    accountId: "live-active",
+    accountLifecycleStatus: "active",
+    adminStatus: "active",
+    followCount: 42,
+    unfollowCount: 17,
+    likeCount: 9,
+    commentCount: 3,
+    dmCount: 2,
+  };
+  const [selected] = selectCanonicalVisibleProfiles([liveActive]);
+  assert.strictEqual(selected, liveActive);
+  assert.deepEqual(
+    [selected.followCount, selected.unfollowCount, selected.likeCount, selected.commentCount, selected.dmCount],
+    [42, 17, 9, 3, 2],
+  );
 });
 
 test("full refresh and live full snapshot retain the same pre-login account", () => {

@@ -14,11 +14,16 @@
       if (el.dataset.fr === undefined) el.dataset.fr = el.innerHTML;
       el.innerHTML = lang === "en" ? el.dataset.en : el.dataset.fr;
     });
+    document.querySelectorAll("[data-aria-en]").forEach(function (el) {
+      if (el.dataset.ariaFr === undefined) el.dataset.ariaFr = el.getAttribute("aria-label") || "";
+      el.setAttribute("aria-label", lang === "en" ? el.dataset.ariaEn : el.dataset.ariaFr);
+    });
     document.querySelectorAll("#lang button").forEach(function (b) {
       b.classList.toggle("on", b.dataset.lang === lang);
     });
     resetRotator();
     updateBilling();
+    syncPublicCheckoutHrefs();
     try { localStorage.setItem(STORE_LANG, lang); } catch (e) {}
   }
   var langEl = document.getElementById("lang");
@@ -58,6 +63,7 @@
     y: { fr: "facturé sur 12 mois", en: "billed for 12 months" }
   };
   var DISCOUNT = { m: 0, q: 0.10, h: 0.20, y: 0.25 };
+  var PERIOD_MONTHS = { m: 1, q: 3, h: 6, y: 12 };
   var PUBLIC_CHECKOUT_HREFS = {
     growth: "/instagram-growth/checkout?plan=growth&months=1",
     pro: "/instagram-growth/checkout?plan=pro&months=1",
@@ -71,10 +77,10 @@
       var offer = el.getAttribute("data-checkout-offer");
       var href = PUBLIC_CHECKOUT_HREFS[offer];
       if (!href) return;
-      if (currentLang === "en") {
-        href += (href.indexOf("?") >= 0 ? "&" : "?") + "lang=en";
-      }
-      el.setAttribute("href", href);
+      var url = new URL(href, window.location.origin);
+      url.searchParams.set("months", String(PERIOD_MONTHS[currentPeriod]));
+      url.searchParams.set("lang", currentLang);
+      el.setAttribute("href", url.pathname + url.search);
     });
   }
   function updateBilling() {
@@ -93,6 +99,7 @@
     currentPeriod = b.dataset.period;
     billToggle.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
     updateBilling();
+    syncPublicCheckoutHrefs();
   });
 
   /* ---------- Results chart ---------- */
@@ -170,12 +177,21 @@
   var videoPh = document.getElementById("videoPh");
   var videoPlay = document.getElementById("videoPlay");
   if (demoVideo && videoPlay) {
+    if ("IntersectionObserver" in window) {
+      var videoPreloadObserver = new IntersectionObserver(function (entries) {
+        if (!entries[0].isIntersecting) return;
+        demoVideo.preload = "auto";
+        demoVideo.load();
+        videoPreloadObserver.disconnect();
+      }, { rootMargin: "80px 0px" });
+      videoPreloadObserver.observe(demoVideo);
+    }
     videoPlay.addEventListener("click", function () {
+      demoVideo.setAttribute("controls", "");
       demoVideo.play().then(function () {
         if (videoPh) videoPh.style.display = "none";
-        demoVideo.setAttribute("controls", "");
       }).catch(function () {
-        // No video file yet — keep placeholder visible
+        demoVideo.removeAttribute("controls");
       });
     });
   }
@@ -196,11 +212,50 @@
       if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
     });
   }, { threshold: 0.12 });
-  document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  document.querySelectorAll(".reveal").forEach(function (el) {
+    if (!el.matches("[data-product-journey] .stp")) io.observe(el);
+  });
+
+  /* ---------- Connected product journey ---------- */
+  var journey = document.querySelector("[data-product-journey]");
+  if (journey) {
+    var journeyCards = journey.querySelectorAll(".stp");
+    var journeyTimers = [];
+    var journeyInside = false;
+    var journeyReduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    function resetJourney() {
+      journeyTimers.forEach(clearTimeout);
+      journeyTimers = [];
+      journeyInside = false;
+      journey.classList.remove("is-active");
+      journeyCards.forEach(function (card) { card.classList.remove("in"); });
+    }
+    function showJourney() {
+      if (journeyInside) return;
+      journeyInside = true;
+      journey.dataset.revealCycle = String(Number(journey.dataset.revealCycle || 0) + 1);
+      journey.classList.add("is-active");
+      journeyCards.forEach(function (card, index) {
+        if (journeyReduced.matches || index === 0) card.classList.add("in");
+        else journeyTimers.push(setTimeout(function () { card.classList.add("in"); }, index * 520));
+      });
+    }
+    var journeyIo = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting || journeyReduced.matches) showJourney();
+        else resetJourney();
+      });
+    }, { threshold: 0, rootMargin: "0px 0px -6%" });
+    journeyIo.observe(journey);
+    journeyReduced.addEventListener("change", function () {
+      resetJourney();
+      if (journeyReduced.matches) showJourney();
+      else { journeyIo.unobserve(journey); journeyIo.observe(journey); }
+    });
+  }
 
   /* ---------- Init ---------- */
   var saved = "fr";
   try { saved = localStorage.getItem(STORE_LANG) || "fr"; } catch (e) {}
-  syncPublicCheckoutHrefs();
   applyLang(saved);
 })();

@@ -103,6 +103,7 @@ function timeline(actions: ReturnType<typeof actionRow>[], reviewEvents: ReturnT
       id: `review:${row.id}`,
       actionType: row.eventType,
       message: row.resolutionReason ?? (row.note ? "Operator note recorded" : `Incident ${row.newStatus ?? row.eventType}`),
+      resolutionNote: row.note,
       actorType: row.actorType,
       actorId: row.actorId,
       createdAt: row.createdAt,
@@ -179,7 +180,8 @@ export function buildIncidentDetail(input: {
       structuredFailureReason: safeReference(rawMetadata, ["structured_failure_reason", "reason_code"]),
       summary,
       actionRequired: nullableText(incident.action_required),
-      blockingCampaign: Boolean(activeOperatorAction?.blockingCampaign),
+      blockingCampaign: Boolean(activeOperatorAction?.blockingCampaign)
+        || rawMetadata.blocking_campaign === true,
       operatorReviewRequired: Boolean(activeOperatorAction),
       operatorReviewStatus: activeOperatorAction ? "pending" : actions.some((row) => row.actionType === "operator_review_required" && row.status === "resolved") ? "reviewed" : "none",
       occurrenceCount: Math.max(1, numberValue(incident.occurrence_count, 1)),

@@ -71,6 +71,8 @@ function fakeSupabase(input: {
   nextCursor?: string | null;
   wrapped?: boolean;
   capacityDelayMs?: number;
+  workDelayMs?: number;
+  persistFailuresByTarget?: ReadonlySet<string>;
 } = {}) {
   const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   let persistedBundle: Record<string, unknown> | null = null;
@@ -95,6 +97,7 @@ function fakeSupabase(input: {
         return { data: "55555555-5555-4555-8555-555555555555", error: null };
       }
       if (name === "list_target_lifecycle_work_v1") {
+        if (input.workDelayMs) await new Promise((resolve) => setTimeout(resolve, input.workDelayMs));
         return {
           data: {
             rows: input.rows ?? [row],
@@ -110,6 +113,9 @@ function fakeSupabase(input: {
       }
       if (name === "persist_target_lifecycle_shadow_v1") {
         persistedBundle = args?.p_bundle as Record<string, unknown>;
+        if (input.persistFailuresByTarget?.has(String(persistedBundle?.target_id ?? ""))) {
+          return { data: null, error: { message: "isolated_target_persist_failure" } };
+        }
         return {
           data: {
             outcome: input.persistOutcome ?? "processed",
@@ -211,6 +217,55 @@ test("a version divergence or unexpected business action triggers the lifecycle 
     assert.equal(result.autoKilled, true);
     assert.ok(fake.calls.some((call) => call.name === "trigger_target_lifecycle_auto_kill_v1"));
   }
+});
+
+test("operational list latency is reported without permanently auto-killing the producer", async () => {
+  const fake = fakeSupabase({
+    state: {
+      ...runtimeState,
+      caps_safe: { ...runtimeState.caps_safe, pipeline_duration_ms: 250 },
+    },
+    rows: [],
+    nextCursor: null,
+    workDelayMs: 775,
+  });
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:slow-list",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+
+  assert.equal(result.active, true);
+  assert.equal(result.autoKilled, false);
+  assert.ok(result.reasons.includes("target_lifecycle_cycle_latency_exceeded"));
+  assert.equal(fake.calls.some((call) => call.name === "trigger_target_lifecycle_auto_kill_v1"), false);
+});
+
+test("one target persistence failure is isolated while the cursor remains before the failed row", async () => {
+  const secondTargetId = "66666666-6666-4666-8666-666666666666";
+  const secondRow = { ...row, target_id: secondTargetId, normalized_username: "target.two" };
+  const fake = fakeSupabase({
+    rows: [row, secondRow],
+    nextCursor: secondTargetId,
+    persistFailuresByTarget: new Set([row.target_id]),
+  });
+  const result = await processTargetLifecycleBatch(fake.client as never, {
+    workerId: "backend-target-lifecycle-cron",
+    batchKey: "target-lifecycle-cron:isolated-target-error",
+    processorRelease: "backend-sha",
+    calculatedAt: "2026-07-31T12:00:00.000Z",
+  });
+
+  assert.equal(result.active, true);
+  assert.equal(result.autoKilled, false);
+  assert.equal(result.errors, 1);
+  assert.equal(result.processed, 1);
+  assert.equal(result.nextCursor, null);
+  const persistCalls = fake.calls.filter((call) => call.name === "persist_target_lifecycle_shadow_v1");
+  assert.equal(persistCalls.length, 3);
+  const advance = fake.calls.find((call) => call.name === "advance_target_lifecycle_scan_cursor_v1");
+  assert.equal(advance?.args?.p_next_cursor, null);
 });
 
 test("inactive runtime performs no lease, work or persistence call", async () => {

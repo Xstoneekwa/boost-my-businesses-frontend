@@ -101,6 +101,7 @@ export type ManageAccount = {
   phoneName: string;
   macHostName: string;
   deviceId?: string | null;
+  assignmentId?: string | null;
   assignmentStatus?: string | null;
   assignmentHealth?: AccountAssignmentHealth;
   assignmentHealthReason?: AccountAssignmentHealthReason;
@@ -588,7 +589,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         .limit(5000)),
       constrainProfilesLiveQuery(supabase
         .from("account_assignments")
-        .select("account_id,status,device_id,app_instance_id,starts_at,ends_at,released_at,schedule_mode,slot_kind")
+        .select("id,account_id,status,device_id,app_instance_id,starts_at,ends_at,released_at,schedule_mode,slot_kind")
         .in("account_id", accountIds)
         .in("status", ["pending", "reserved", "active"])
         .order("starts_at", { ascending: false })
@@ -776,6 +777,7 @@ async function enrichWithAssignmentAndCredentialStatus(overview: ManageOverview)
         appInstanceIndex: appInstanceIndex ?? account.appInstanceIndex ?? null,
         assignmentHealth: capacityState.assignmentHealth,
         assignmentHealthReason: capacityState.assignmentHealthReason,
+        assignmentId: readString(assignment, ["id"], "") || null,
         assignmentStatus: readString(assignment, ["status"], account.assignmentStatus ?? "") || account.assignmentStatus || null,
         assignmentStartsAt,
         assignmentEndsAt,

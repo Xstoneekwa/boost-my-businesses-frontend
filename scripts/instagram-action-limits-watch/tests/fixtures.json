@@ -1,0 +1,23 @@
+{
+  "fixture_notice": "SYNTHETIC TEST DATA ONLY — no real account or measured Instagram limit",
+  "incident": {
+    "account_id": "synthetic-account-review",
+    "username_safe": "synthetic-user",
+    "action_type": "FOLLOW",
+    "occurred_at": "2026-09-07T12:00:00Z",
+    "actions_before_problem": 30,
+    "instagram_message_reason": "Synthetic action restriction",
+    "instagram_version": null,
+    "device_context_safe": null,
+    "region_proxy_context": null
+  },
+  "evidence": {
+    "source": "reddit",
+    "source_url": "https://www.reddit.com/r/Instagram/comments/synthetic01/demo/",
+    "published_at": "2026-09-07T11:50:00Z",
+    "title": "SYNTHETIC — I cannot follow",
+    "text_or_excerpt": "SYNTHETIC: I cannot follow after 30 follows. I waited 24 hours but I am still blocked.",
+    "author_reference": "synthetic-author-01",
+    "synthetic": true
+  }
+}

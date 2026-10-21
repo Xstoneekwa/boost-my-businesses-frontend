@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import CommercialCheckoutForm from "./CommercialCheckoutForm";
 
 export const metadata = {
-  title: "Checkout — Instagram Growth",
+  title: "Checkout | Instagram Growth",
 };
 
 export default function InstagramGrowthCheckoutPage() {

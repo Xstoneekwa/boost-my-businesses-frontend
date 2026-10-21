@@ -1,6 +1,5 @@
 import { isTargetRowCanonicallyEligible } from "./instagram-dashboard/account-target-eligibility.ts";
 import {
-  buildPeriodicBatchId,
   buildPeriodicInitializationPatch,
   buildPeriodicVerificationJobPayload,
   buildPeriodicWindowKey,
@@ -31,16 +30,16 @@ type SchedulerQuery = {
   in: (column: string, values: unknown[]) => SchedulerQuery;
   limit: (count: number) => Promise<{ data: unknown[] | null; error: { message?: string } | null }>;
   update: (values: Record<string, unknown>) => SchedulerQuery;
-  upsert: (
-    values: Record<string, unknown> | Record<string, unknown>[],
-    options?: { onConflict?: string; ignoreDuplicates?: boolean },
-  ) => Promise<{ error: { message?: string } | null }>;
   insert: (values: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>;
   maybeSingle: () => Promise<{ data: PeriodicRevalidationTargetRow | null; error: { message?: string } | null }>;
 };
 
 export type PeriodicRevalidationSchedulerSupabase = {
   from: (table: string) => SchedulerQuery;
+  rpc: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { message?: string } | null }>;
 };
 
 function readString(value: unknown, fallback = "") {
@@ -120,9 +119,16 @@ export async function runPeriodicTargetRevalidationScheduler(
 
   if (!schedulerEnv.enabled) return summary;
 
-  const windowKey = buildPeriodicWindowKey(now);
-  const batchId = buildPeriodicBatchId(windowKey);
+  if (!dryRun) {
+    const { data: terminalized, error: hygieneError } = await supabase.rpc(
+      "terminalize_invalid_ct_target_evidence_jobs_v1",
+      { p_limit: Math.min(enqueueLimit * 4, 100) },
+    );
+    if (hygieneError) summary.errors_count += 1;
+    else summary.invalid_terminalized_count = Math.max(0, Number(terminalized) || 0);
+  }
 
+  const windowKey = buildPeriodicWindowKey(now);
   const { data: candidateRows, error: candidateError } = await supabase
     .from("ig_targets")
     .select("id,account_id,normalized_username,target_username,status,quality_status,verification_status,archived_at,deleted_at,periodic_revalidation_next_due_at,periodic_revalidation_window_key")
@@ -142,7 +148,7 @@ export async function runPeriodicTargetRevalidationScheduler(
   if (targetIds.length > 0) {
     const { data: jobs } = await supabase
       .from("ct_target_verification_jobs")
-      .select("target_id,status,batch_id")
+      .select("target_id,status,batch_id,metadata_safe")
       .in("target_id", targetIds)
       .limit(5000);
     for (const job of (jobs as PeriodicVerificationJobRow[] | null) ?? []) {
@@ -212,38 +218,29 @@ export async function runPeriodicTargetRevalidationScheduler(
       continue;
     }
 
-    const claim = await supabase
-      .from("ig_targets")
-      .update({ periodic_revalidation_window_key: windowKey })
-      .eq("id", targetId)
-      .eq("account_id", accountId)
-      .select("id")
-      .maybeSingle();
-
-    if (claim.error || !claim.data) {
-      summary.skipped_window_claim_count += 1;
-      continue;
-    }
-
     const payload = buildPeriodicVerificationJobPayload({
       targetId,
       accountId,
       normalizedUsername: username,
       windowKey,
     });
-    const { error: upsertError } = await supabase
-      .from("ct_target_verification_jobs")
-      .upsert(payload, { onConflict: "target_id", ignoreDuplicates: true });
+    const { data: enqueueResult, error: enqueueError } = await supabase.rpc(
+      "enqueue_ct_target_evidence_revalidation_job_v1",
+      {
+        p_target_id: payload.target_id,
+        p_account_id: payload.account_id,
+        p_normalized_username: payload.normalized_username,
+        p_window_key: windowKey,
+      },
+    );
 
-    if (upsertError) {
+    if (enqueueError) {
       summary.errors_count += 1;
-      await supabase
-        .from("ig_targets")
-        .update({ periodic_revalidation_window_key: null })
-        .eq("id", targetId)
-        .eq("account_id", accountId)
-        .select("id")
-        .maybeSingle();
+      continue;
+    }
+    if (enqueueResult !== "enqueued") {
+      if (enqueueResult === "active_job_exists") summary.skipped_active_job_count += 1;
+      else summary.skipped_window_claim_count += 1;
       continue;
     }
 
@@ -256,7 +253,7 @@ export async function runPeriodicTargetRevalidationScheduler(
       result: "accepted",
       reason: "periodic_weekly_due",
       actor_type: "system",
-      batch_id: batchId,
+      batch_id: null,
       counts: { enqueued: 1 },
       metadata_safe: { periodic_window_key: windowKey },
     });

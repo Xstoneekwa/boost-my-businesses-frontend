@@ -2,7 +2,7 @@ import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { generateCommercialOutreachMessage } from "./outreach-ai";
-import { COMMERCIAL_OUTREACH_PROMPT_VERSION, type CommercialOutreachAngle, type CommercialOutreachChannel, type CommercialOutreachTemplateKey } from "./outreach-contract";
+import { COMMERCIAL_OUTREACH_PROMPT_VERSION, commercialOutreachCopyTemplateKey, type CommercialOutreachAngle, type CommercialOutreachChannel } from "./outreach-contract";
 import { buildCommercialOutreachFactLedger } from "./outreach-facts";
 import { commercialOutreachContentHash, validateCommercialOutreachMessage } from "./outreach-validation";
 
@@ -44,9 +44,15 @@ async function processItem(
   workerId: string,
   generate: typeof generateCommercialOutreachMessage,
 ) {
+  const copyKey = commercialOutreachCopyTemplateKey(text(item.channel) as CommercialOutreachChannel, text(item.angle) as CommercialOutreachAngle);
+  // Never label a new V3 generation with an old immutable copy version.
+  if (item.template_version !== copyKey) {
+    await completeFailure(supabase, item, workerId, ["copy_version_requires_regeneration"]);
+    return "failed";
+  }
   const [{ data: leadData, error: leadError }, { data: templateData, error: templateError }] = await Promise.all([
     supabase.from("commercial_leads").select("id,campaign_id,business_id,qualification_status,outreach_status,priority,city_snapshot,subsegment_snapshot,outreach_channel,message_angle").eq("id", text(item.lead_id)).single<Row>(),
-    supabase.from("commercial_outreach_templates").select("template_key,channel,angle,intent,active").eq("template_key", text(item.template_key)).single<Row>(),
+    supabase.from("commercial_outreach_templates").select("template_key,channel,angle,intent,active").eq("template_key", copyKey).single<Row>(),
   ]);
   if (leadError || templateError || !leadData || !templateData) {
     await completeFailure(supabase, item, workerId, ["generation_context_unavailable"]);
@@ -74,13 +80,24 @@ async function processItem(
     return "failed";
   }
 
+  // Claiming intentionally clears item.validation_codes. Read the last failure
+  // from the append-only audit so the bounded second attempt can correct it.
+  let previousValidationCodes: string[] = [];
+  if (number(item.generation_attempt_count) > 1) {
+    const { data: failures } = await supabase.from("commercial_outreach_events")
+      .select("metadata_safe").eq("item_id", text(item.id)).eq("event_type", "generation_failed")
+      .order("occurred_at", { ascending: false }).limit(1);
+    const codes = row(row(failures?.[0]).metadata_safe).validation_codes;
+    previousValidationCodes = Array.isArray(codes) ? codes.map(text).filter(Boolean).slice(0, 20) : [];
+  }
   const generated = await generate({
     channel: text(item.channel) as CommercialOutreachChannel,
     angle: text(item.angle) as CommercialOutreachAngle,
-    templateKey: text(item.template_key) as CommercialOutreachTemplateKey,
+    templateKey: copyKey,
     templateIntent: text(template.intent),
     businessName,
     verifiedFacts,
+    previousValidationCodes,
   });
   if (!generated.ok || !generated.message) {
     await completeFailure(supabase, item, workerId, [generated.errorCode], generated.model);
@@ -130,9 +147,16 @@ export async function processCommercialOutreachBatch(dependencies: CommercialOut
   const items = Array.isArray(data) ? data.map(row) : [];
   let ready = 0; let failed = 0;
   for (const item of items) {
-    const outcome = await processItem(supabase, item, workerId, generate);
-    if (outcome === "ready") ready += 1;
-    else if (outcome === "failed") failed += 1;
+    try {
+      const outcome = await processItem(supabase, item, workerId, generate);
+      if (outcome === "ready") ready += 1;
+      else if (outcome === "failed") failed += 1;
+    } catch {
+      // Persist unexpected generation errors. A DB outage is recovered by the
+      // expiring claim lease; no item remains silently generating forever.
+      await completeFailure(supabase, item, workerId, ["generation_unexpected_failure"]);
+      failed += 1;
+    }
   }
   return { workerId, claimed: items.length, ready, failed, realEmailSend: false, realInstagramDmSend: false, phoneFarmDmExecution: false };
 }

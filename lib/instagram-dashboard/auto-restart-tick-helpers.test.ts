@@ -6,6 +6,7 @@ import { maxRetriesBlockReason, restartDelayBlockReason } from "./auto-restart-o
 import { resolveCanonicalAttemptIdentity } from "./auto-restart-lineage-policy.ts";
 import {
   resolvePartialUnfollowLiveResume,
+  resolvePartialUnfollowResumeBoundary,
   resolvePlannedAccountSession,
 } from "./auto-restart-phase-plan.ts";
 
@@ -18,6 +19,24 @@ import {
   sameSastBusinessDay,
   unfollowDecisionNextEvaluationAt,
 } from "./auto-restart-tick-helpers.ts";
+
+// Synthetic proof of the current immutable business boundary, not a claim
+// about historical account data. Use the actual production boundary resolver.
+function syntheticResumeBoundary(
+  overrides: Parameters<typeof resolvePartialUnfollowResumeBoundary>[0] = {},
+) {
+  return resolvePartialUnfollowResumeBoundary({
+    sourceAccountId: "synthetic-account", currentAccountId: "synthetic-account",
+    sourceBusinessDateSast: "2026-07-30", currentBusinessDateSast: "2026-07-30",
+    sourceAssignmentId: "synthetic-assignment", currentAssignmentId: "synthetic-assignment",
+    sourceScheduledWindowStart: "2026-07-30T16:00:00Z",
+    currentScheduledWindowStart: "2026-07-30T16:00:00Z",
+    sourceScheduledWindowEnd: "2026-07-30T22:00:00Z",
+    currentScheduledWindowEnd: "2026-07-30T22:00:00Z",
+    sourceBusinessSessionId: "business-session-1",
+    ...overrides,
+  });
+}
 
 test("auto restart request idempotency is stable per business session and retry", () => {
   const key = autoRestartTickIdempotencyKey("dispatcher-mac-1", "2026-06-25T12:00:00.000Z");
@@ -261,6 +280,7 @@ test("Loriele two-tick lineage rebuilds an exact request only after circuit and 
         scheduled_session_ends_at: "2026-07-30T22:00:00+00:00",
       },
     },
+    legacyBusinessSessionId: "business-session-1",
     runProjectionAttemptId: 1,
   });
   assert.equal(identity.lineageValid, true);
@@ -271,6 +291,7 @@ test("Loriele two-tick lineage rebuilds an exact request only after circuit and 
     sessionTerminationClass: "partial_resumable",
     unfollowPhaseStatus: "partial_resumable",
     lineageValid: identity.lineageValid,
+    resumeBoundary: syntheticResumeBoundary(),
     autoRestartEnabled: true,
     unfollowEnabled: true,
     dailyQuotaRemaining: 79,
@@ -371,6 +392,59 @@ test("Loriele two-tick lineage rebuilds an exact request only after circuit and 
   });
 });
 
+test("legacy scheduler metadata cannot authorize a two-tick rebuild without a proved root", () => {
+  const identity = resolveCanonicalAttemptIdentity({
+    sourceRunId: "synthetic-run",
+    sourceAccountId: "synthetic-account",
+    sourceRequest: {
+      id: "synthetic-request", account_id: "synthetic-account", run_id: "synthetic-run",
+      metadata_safe: {
+        source: "schedule_session_cron", trigger: "scheduler", worker_id: "schedule_session_cron",
+        assignment_id: "synthetic-assignment", device_timezone: "Africa/Johannesburg",
+        scheduled_session_at: "2026-07-30T16:00:00+00:00",
+        scheduled_session_ends_at: "2026-07-30T22:00:00+00:00",
+      },
+    },
+    runProjectionAttemptId: 1,
+  });
+  assert.equal(identity.lineageValid, false);
+  assert.equal(identity.lineageReason, "legacy_resume_lineage_unprovable");
+  assert.equal(identity.canonicalBusinessSessionId, null);
+  assert.equal(identity.canonicalAttemptId, null);
+  assert.equal(identity.canonicalRetryIndex, null);
+  const continuation = resolvePartialUnfollowLiveResume({
+    sessionTerminationClass: "partial_resumable", unfollowPhaseStatus: "partial_resumable",
+    lineageValid: identity.lineageValid, autoRestartEnabled: true, unfollowEnabled: true,
+    resumeBoundary: syntheticResumeBoundary(),
+    dailyQuotaRemaining: 79, sessionQuotaRemaining: 50, terminalTotal: 0,
+    actionableNow: 6, technicalHoldTotal: 0, nextCandidateRetryAt: null,
+    phaseCircuitOpen: false, phaseCircuitNextRetryAt: null,
+  });
+  assert.equal(continuation.authorized, false);
+});
+
+test("a proved run lineage cannot bypass a missing or contradictory business boundary", () => {
+  for (const [override, reason] of [
+    [{ sourceBusinessSessionId: null }, "resume_business_boundary_missing"],
+    [{ sourceAccountId: "different-account" }, "resume_account_mismatch"],
+    [{ sourceBusinessDateSast: "2026-07-29" }, "resume_business_day_mismatch"],
+    [{ sourceAssignmentId: "different-assignment" }, "resume_assignment_mismatch"],
+    [{ sourceScheduledWindowEnd: "2026-07-30T21:00:00Z" }, "resume_window_mismatch"],
+  ] as const) {
+    const continuation = resolvePartialUnfollowLiveResume({
+      sessionTerminationClass: "partial_resumable", unfollowPhaseStatus: "partial_resumable",
+      lineageValid: true, resumeBoundary: syntheticResumeBoundary(override),
+      autoRestartEnabled: true, unfollowEnabled: true,
+      dailyQuotaRemaining: 79, sessionQuotaRemaining: 50, terminalTotal: 0,
+      actionableNow: 6, technicalHoldTotal: 0, nextCandidateRetryAt: null,
+      phaseCircuitOpen: false, phaseCircuitNextRetryAt: null,
+    });
+    assert.equal(continuation.authorized, false);
+    assert.equal(continuation.discardPersistedPlan, true);
+    assert.equal(continuation.reason, reason);
+  }
+});
+
 test("recoverable retry requires proven cleanup and lock release", () => {
   const candidate = recoverableCandidate(0);
   candidate.reliability.cleanupCompleted = false;
@@ -462,4 +536,33 @@ test("operator-stop continuation fails closed without canonical source lineage",
     ok: false,
     reason: "operator_stop_continuation_invalid",
   });
+});
+
+test("completed preflight runtime support requires bound lineage and a fresh business boundary", () => {
+  const candidate = recoverableCandidate(0);
+  Object.assign(candidate, {
+    restrictionPreflightContinuation: true,
+    restartNeedReason: "restriction_preflight_completed_live_business_plan",
+    sourceLineageValid: true,
+    sourceRequestId: "preflight-request",
+    canonicalAttemptId: 1,
+    freshBoundaryOnly: true,
+    exactViewportResumeAvailable: false,
+    safeRestartStrategy: "fresh_target_restart",
+    restartNeeded: true,
+  });
+  Object.assign(candidate.reliability, {
+    restartAllowed: false, restartBlockReason: "resume_plan_missing",
+    sessionTerminationClass: "unknown", failureCategory: "",
+  });
+  assert.equal(resumePlanRuntimeSupported(candidate).ok, true);
+  for (const delta of [
+    { sourceLineageValid: false }, { sourceRequestId: null }, { canonicalAttemptId: null },
+    { freshBoundaryOnly: false }, { exactViewportResumeAvailable: true },
+    { safeRestartStrategy: "exact_checkpoint_resume" }, { restartNeeded: false },
+    { restartNeedReason: "ordinary_missing_plan" },
+  ]) {
+    assert.equal(resumePlanRuntimeSupported({ ...candidate, ...delta }).ok, false);
+  }
+  assert.equal(resumePlanRuntimeSupported({ ...candidate, restrictionPreflightContinuation: false }).ok, false);
 });

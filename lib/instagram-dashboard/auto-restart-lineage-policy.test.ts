@@ -12,6 +12,65 @@ import {
   isZeroBusinessInfrastructureRetry,
 } from "./auto-restart-lineage-policy.ts";
 
+for (const metadata of [
+  { attempt_id: 2 },
+  {},
+  { resume_plan_version: 2, resume_plan: { current_attempt_id: 2 } },
+]) {
+  test(`legacy lineage without a proved root stays closed: ${JSON.stringify(metadata)}`, () => {
+    const identity = resolveCanonicalAttemptIdentity({
+      sourceRunId: "synthetic-run",
+      sourceAccountId: "synthetic-account",
+      sourceRequest: {
+        id: "synthetic-request",
+        account_id: "synthetic-account",
+        run_id: "synthetic-run",
+        metadata_safe: metadata,
+      },
+      runProjectionAttemptId: 1,
+    });
+    assert.equal(identity.lineageValid, false);
+    assert.equal(identity.lineageMode, "fail_closed");
+    assert.equal(identity.lineageReason, "legacy_resume_lineage_unprovable");
+    assert.equal(identity.canonicalBusinessSessionId, null);
+    assert.equal(identity.canonicalAttemptId, null);
+    assert.equal(identity.canonicalRetryIndex, null);
+  });
+}
+
+test("a proved root never excuses contradictory canonical lineage or request binding", () => {
+  const sourceRequest = {
+    id: "synthetic-request",
+    account_id: "synthetic-account",
+    run_id: "synthetic-run",
+    root_business_session_id: "synthetic-root",
+    execution_attempt_no: 2,
+    retry_index: 1,
+    metadata_safe: { business_session_id: "synthetic-root", attempt_id: 2, retry_index: 1 },
+  };
+  const input = { sourceRunId: "synthetic-run", sourceAccountId: "synthetic-account", sourceRequest };
+  assert.equal(resolveCanonicalAttemptIdentity(input).lineageValid, true);
+  for (const contradiction of [
+    { account_id: "different-account" },
+    { run_id: "different-run" },
+    { root_business_session_id: "different-root" },
+    { execution_attempt_no: 3 },
+    { retry_index: 0 },
+    { execution_attempt_no: null },
+    { retry_index: null },
+    { root_business_session_id: null },
+  ]) {
+    const identity = resolveCanonicalAttemptIdentity({
+      ...input, sourceRequest: { ...sourceRequest, ...contradiction },
+    });
+    assert.equal(identity.lineageValid, false);
+    assert.equal(identity.lineageMode, "fail_closed");
+    assert.equal(identity.canonicalBusinessSessionId, null);
+    assert.equal(identity.canonicalAttemptId, null);
+    assert.equal(identity.canonicalRetryIndex, null);
+  }
+});
+
 test("the linked request is canonical when the run projection has a stale attempt", () => {
   assert.deepEqual(resolveCanonicalAttemptIdentity({
     sourceRunId: "run-mythyl",
@@ -20,15 +79,22 @@ test("the linked request is canonical when the run projection has a stale attemp
       run_id: "run-mythyl",
       metadata_safe: { attempt_id: 2 },
     },
+    legacyBusinessSessionId: "session-mythyl",
     runProjectionAttemptId: 1,
   }), {
     sourceRequestId: "request-mythyl",
+    canonicalBusinessSessionId: "session-mythyl",
     canonicalAttemptId: 2,
+    canonicalRetryIndex: 1,
     requestAttemptId: 2,
     runProjectionAttemptId: 1,
-    attemptSource: "account_run_requests.metadata_safe.attempt_id",
+    attemptSource: "account_run_requests.metadata_safe.attempt_id_legacy",
     divergence: true,
     attemptContractMissing: false,
+    canonicalTuplePresent: false,
+    canonicalLegacyMismatch: false,
+    lineageMode: "compatible_legacy_fallback",
+    lineageReason: "",
     lineageValid: true,
   });
   assert.equal(resolveCanonicalNextRetryIndex({
@@ -60,10 +126,11 @@ test("legacy initial requests without attempt metadata use an explicit run fallb
       run_id: "run-loriele",
       metadata_safe: {},
     },
+    legacyBusinessSessionId: "session-loriele",
     runProjectionAttemptId: 1,
   });
   assert.equal(identity.canonicalAttemptId, 1);
-  assert.equal(identity.attemptSource, "ig_runs.performance_summary.attempt_id_fallback");
+  assert.equal(identity.attemptSource, "ig_runs.performance_summary.attempt_id_legacy_fallback");
   assert.equal(identity.divergence, false);
   assert.equal(identity.attemptContractMissing, false);
   assert.equal(identity.lineageValid, true);
@@ -93,7 +160,7 @@ test("resume_plan.current_attempt_id is accepted as the request-linked canonical
       run_id: "run-retry",
       metadata_safe: {
         resume_plan_version: 2,
-        resume_plan: { current_attempt_id: 2 },
+        resume_plan: { current_attempt_id: 2, business_session_id: "session-retry" },
       },
     },
     runProjectionAttemptId: 1,

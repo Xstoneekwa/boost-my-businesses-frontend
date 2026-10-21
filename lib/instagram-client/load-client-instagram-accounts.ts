@@ -7,6 +7,7 @@ import { isActiveClientConnectStatus, shouldSuppressPassiveReadyToConnect } from
 import { projectPassiveReadinessByAccountId } from "./project-client-workspace-readiness";
 import { filterClientSelectableInstagramAccounts } from "./client-account-visibility";
 import { projectCanonicalLoginStatus } from "@/lib/instagram-dashboard/canonical-login-state";
+import { isIncidentOnlyActionRateLimit } from "@/lib/instagram-dashboard/action-rate-limit-policy";
 
 type SupabaseRecord = Record<string, unknown>;
 
@@ -38,6 +39,33 @@ async function assignmentStatusByAccount(accountIds: string[]) {
   return map;
 }
 
+async function temporaryActionLimitByAccount(accountIds: string[]) {
+  const map = new Map<string, { detectedAt: string | null; recommendedPauseUntil: string | null }>();
+  if (!accountIds.length) return map;
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase
+    .from("account_incidents")
+    .select("account_id,reason,failure_reason,status,metadata,last_seen_at")
+    .in("account_id", accountIds)
+    .in("status", ["open", "acknowledged"])
+    .order("last_seen_at", { ascending: false })
+    .limit(500);
+  if (error) return map;
+  for (const row of (data ?? []) as SupabaseRecord[]) {
+    const accountId = readString(row.account_id);
+    const reason = readString(row.reason, readString(row.failure_reason));
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as SupabaseRecord
+      : {};
+    if (!accountId || map.has(accountId) || !isIncidentOnlyActionRateLimit({ reason, metadata })) continue;
+    map.set(accountId, {
+      detectedAt: readString(metadata.detected_at, readString(row.last_seen_at)) || null,
+      recommendedPauseUntil: readString(metadata.recommended_pause_until) || null,
+    });
+  }
+  return map;
+}
+
 function normalizeAssignmentStatus(status: string) {
   const normalized = status.toLowerCase();
   if (["active", "assigned", "scheduled", "running"].includes(normalized)) return "assigned";
@@ -59,13 +87,14 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
   const accountIds = [...new Set((links as SupabaseRecord[]).map((row) => readString(row.account_id)).filter(Boolean))];
   if (!accountIds.length) return [];
 
-  const [{ data: accounts }, packageSummaries, assignmentMap] = await Promise.all([
+  const [{ data: accounts }, packageSummaries, assignmentMap, actionLimitMap] = await Promise.all([
     supabase
       .from("ig_accounts")
       .select("id,username,status,admin_lifecycle_status")
       .in("id", accountIds),
     getAccountPackageSummaries(accountIds),
     assignmentStatusByAccount(accountIds),
+    temporaryActionLimitByAccount(accountIds),
   ]);
 
   const linkByAccount = new Map((links as SupabaseRecord[])
@@ -137,6 +166,7 @@ export async function loadClientInstagramAccounts(clientId: string): Promise<Cli
         readinessStatus,
         activeConnectStatus,
         operationPending: isActiveClientConnectStatus(activeConnectStatus),
+        temporaryActionLimit: actionLimitMap.get(row.accountId) ?? null,
       });
     })
     .sort((left, right) => left.username.localeCompare(right.username));

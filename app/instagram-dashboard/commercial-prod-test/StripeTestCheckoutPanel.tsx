@@ -65,6 +65,8 @@ export default function StripeTestCheckoutPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
+          commercial_test_mode: "stripe_test",
+          real_stripe_test_e2e: true,
           plan_key: planKey,
           billing_interval_months: months,
           outreach_addon_key: outreach || "none",
@@ -118,10 +120,10 @@ export default function StripeTestCheckoutPanel() {
 
   return (
     <section className="commercial-prod-test-stripe-panel">
-      <h2>Stripe Test Checkout</h2>
+      <h2>Real Stripe Test checkout</h2>
       <p className="commercial-prod-test-stripe-intro">
-        Admin-only Stripe Test harness. Requires prod-test authorization, server-side test price mappings,
-        and Stripe Test configuration. No public checkout is replaced.
+        Admin-only real Stripe Test harness. This creates Stripe Test objects and requires webhook lineage.
+        It is not the simulated commercial activation harness.
       </p>
 
       <div className="commercial-prod-test-stripe-readiness">

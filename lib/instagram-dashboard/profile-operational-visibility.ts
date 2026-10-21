@@ -11,6 +11,16 @@ export type OperationalProfileRow = {
   adminStatus?: unknown;
   admin_status?: unknown;
   admin_lifecycle_status?: unknown;
+  commercialStatus?: unknown;
+  commercial_status?: unknown;
+  customerStatus?: unknown;
+  customer_status?: unknown;
+  subscriptionStatus?: unknown;
+  subscription_status?: unknown;
+  assignmentStatus?: unknown;
+  assignment_status?: unknown;
+  capacityStatus?: unknown;
+  capacity_status?: unknown;
   accountStatus?: unknown;
   status?: unknown;
   state?: unknown;
@@ -31,6 +41,8 @@ const TERMINAL_STATUSES = new Set([
   "onboarding_rollback",
   "rolled_back",
   "rolled_back_test_onboarding",
+  "released-terminal",
+  "released_terminal",
   "tombstone",
   "tombstoned",
 ]);
@@ -50,6 +62,19 @@ const ADMIN_LIFECYCLE_FIELDS = [
   "adminStatus",
   "admin_status",
   "admin_lifecycle_status",
+] as const;
+
+const COMMERCIAL_LIFECYCLE_FIELDS = [
+  "commercialStatus",
+  "commercial_status",
+  "customerStatus",
+  "customer_status",
+  "subscriptionStatus",
+  "subscription_status",
+  "assignmentStatus",
+  "assignment_status",
+  "capacityStatus",
+  "capacity_status",
 ] as const;
 
 const FALLBACK_LIFECYCLE_FIELDS = ["accountStatus", "status", "state"] as const;
@@ -72,8 +97,9 @@ function hasTimestamp(row: OperationalProfileRow, fields: readonly (keyof Operat
 export function classifyOperationalProfileLifecycle(row: OperationalProfileRow): OperationalProfileLifecycle {
   const accountStatuses = statuses(row, ACCOUNT_LIFECYCLE_FIELDS);
   const adminStatuses = statuses(row, ADMIN_LIFECYCLE_FIELDS);
+  const commercialStatuses = statuses(row, COMMERCIAL_LIFECYCLE_FIELDS);
   const fallbackStatuses = statuses(row, FALLBACK_LIFECYCLE_FIELDS);
-  const allStatuses = [...accountStatuses, ...adminStatuses, ...fallbackStatuses];
+  const allStatuses = [...accountStatuses, ...adminStatuses, ...commercialStatuses, ...fallbackStatuses];
 
   if (hasTimestamp(row, ARCHIVED_TIMESTAMP_FIELDS) || allStatuses.some((status) => ARCHIVED_STATUSES.has(status))) {
     return "archived";
@@ -89,7 +115,7 @@ export function classifyOperationalProfileLifecycle(row: OperationalProfileRow):
   }
 
   const hasRuntimeInactiveStatus = allStatuses.some((status) => RUNTIME_INACTIVE_STATUSES.has(status));
-  const hasExplicitNonterminalLifecycle = [...accountStatuses, ...adminStatuses].some((status) => {
+  const hasExplicitNonterminalLifecycle = [...accountStatuses, ...adminStatuses, ...commercialStatuses].some((status) => {
     return !RUNTIME_INACTIVE_STATUSES.has(status);
   });
   if (hasRuntimeInactiveStatus && !hasExplicitNonterminalLifecycle) return "inactive";

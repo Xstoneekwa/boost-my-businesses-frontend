@@ -7,6 +7,33 @@ import {
 import { targetDecisionFromLookup } from "../lib/instagram-targets.ts";
 
 const fixedNow = new Date("2026-05-30T02:00:00.000Z");
+const tenantId = "11111111-1111-4111-8111-111111111111";
+
+function successfulAvailabilityResult(patch = {}) {
+  return {
+    active: true,
+    autoKilled: false,
+    scopeMode: "all_active_accounts",
+    attempted: 1,
+    accepted: 1,
+    processed: 1,
+    rejected: 0,
+    deduplicated: 0,
+    capHits: 0,
+    errors: 0,
+    retries: 0,
+    crossTenant: 0,
+    outOfOrder: 0,
+    identityTransitions: 1,
+    assessments: 1,
+    currentUpdates: 1,
+    latencyP50Ms: 1,
+    latencyP95Ms: 1,
+    latencyMaxMs: 1,
+    reasons: [],
+    ...patch,
+  };
+}
 
 const baseLookup = {
   ok: true,
@@ -108,6 +135,9 @@ class FakeQuery {
   rows() {
     if (this.table === "ig_targets") return this.db.targets;
     if (this.table === "ct_target_verification_jobs") return this.db.jobs;
+    if (this.table === "ct_target_availability_current") return this.db.availabilityCurrent;
+    if (this.table === "ct_target_identity_current") return this.db.identityCurrent;
+    if (this.table === "client_instagram_accounts") return this.db.clientAccounts;
     return [];
   }
 
@@ -129,6 +159,16 @@ class FakeSupabase {
   constructor(jobs, targets) {
     this.jobs = jobs;
     this.targets = targets;
+    this.availabilityCurrent = [];
+    this.identityCurrent = [];
+    this.clientAccounts = [{
+      client_id: tenantId,
+      account_id: "account-1",
+      active: true,
+      onboarding_status: "ready",
+      provisioning_status: "ready",
+      login_status: "connected",
+    }];
     this.audit = [];
   }
 
@@ -137,28 +177,92 @@ class FakeSupabase {
   }
 
   async rpc(name, args) {
-    assert.equal(name, "claim_ct_target_verification_jobs");
+    if (name === "archive_targets_transition_batch_v1") {
+      const request = args?.p_request;
+      assert.equal(request?.contract, "archive_transition_v1");
+      assert.equal(request?.tenant_id, tenantId);
+      assert.equal(request?.account_id, "account-1");
+      assert.match(String(request?.archive_intent_id ?? ""), /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      assert.equal(request?.target_ids?.length, 1);
+      const target = this.targets.find(
+        (row) => row.id === request.target_ids[0] && row.account_id === request.account_id,
+      );
+      assert.ok(target, "archive transition must remain bound to the requested account and target");
+      Object.assign(target, request.target_patch, {
+        status: "archived",
+        archive_reason: request.reason,
+        archived_at: fixedNow.toISOString(),
+        periodic_revalidation_next_due_at: null,
+        periodic_revalidation_window_key: null,
+      });
+      return { data: { status: "applied" }, error: null };
+    }
+    if (name === "persist_ct_target_evidence_refresh_v1") {
+      const target = this.targets.find((row) => row.id === args.p_target_id && row.account_id === args.p_account_id);
+      if (!target || target.normalized_username !== args.p_expected_normalized_username) {
+        return { data: "identity_mismatch", error: null };
+      }
+      if (args.p_outcome === "found") {
+        if (target.provider_checked_at && target.provider_checked_at >= args.p_provider_checked_at) {
+          return { data: "already_fresher", error: null };
+        }
+        target.followers_count = args.p_followers_count;
+        target.provider_checked_at = args.p_provider_checked_at;
+        target.periodic_revalidation_last_terminal_at = args.p_provider_checked_at;
+        target.periodic_revalidation_next_due_at = new Date(
+          Date.parse(args.p_provider_checked_at) + 7 * 24 * 60 * 60 * 1000,
+        ).toISOString();
+        target.periodic_revalidation_window_key = null;
+        return { data: "updated", error: null };
+      }
+      target.periodic_revalidation_window_key = null;
+      target.periodic_revalidation_next_due_at = new Date(fixedNow.getTime() + 30 * 60 * 1000).toISOString();
+      return { data: args.p_outcome, error: null };
+    }
+    assert.ok([
+      "claim_ct_target_verification_jobs",
+      "claim_ct_target_evidence_revalidation_jobs_v1",
+    ].includes(name));
     const limit = Math.min(Math.max(Number(args.batch_limit) || 5, 1), 10);
-    const workerId = String(args.worker_id || "dashboard_verify_batch");
+    const evidenceOnly = name === "claim_ct_target_evidence_revalidation_jobs_v1";
+    const effectiveLimit = Math.min(Math.max(Number(args.p_batch_limit) || limit, 1), 10);
+    const workerId = String(args.p_worker_id || args.worker_id || "dashboard_verify_batch");
     const ready = this.jobs.filter((job) => {
       const target = this.targets.find((row) => row.id === job.target_id && row.account_id === job.account_id);
       const expiredProcessing = job.status === "processing" && new Date(job.locked_at) < new Date(fixedNow.getTime() - 15 * 60_000);
+      const explicitEvidence = job.metadata_safe?.mode === "evidence_only";
+      const safeLegacyEvidence = !job.metadata_safe?.mode
+        && job.status === "pending"
+        && job.attempt_count === 0
+        && new Date(job.created_at) < new Date(fixedNow.getTime() - 7 * 24 * 60 * 60_000)
+        && target?.status === "valid"
+        && target?.quality_status === "eligible"
+        && target?.verification_status === "found";
       return (
+        (!evidenceOnly || explicitEvidence || safeLegacyEvidence) &&
         (["pending", "retry_scheduled"].includes(job.status) || expiredProcessing) &&
         (!job.next_attempt_at || new Date(job.next_attempt_at) <= fixedNow) &&
         (!job.locked_at || new Date(job.locked_at) < new Date(fixedNow.getTime() - 15 * 60_000)) &&
         target &&
+        target.normalized_username === job.normalized_username &&
         !["archived", "deleted"].includes(target.status) &&
         !target.archived_at &&
         !target.deleted_at
       );
-    }).slice(0, limit);
+    }).slice(0, effectiveLimit);
 
     for (const job of ready) {
       job.status = "processing";
       job.attempt_count += 1;
       job.locked_at = fixedNow.toISOString();
       job.locked_by = workerId;
+      if (evidenceOnly) {
+        job.metadata_safe = {
+          ...job.metadata_safe,
+          mode: "evidence_only",
+          trigger_source: job.metadata_safe?.trigger_source || "legacy_valid_pending",
+        };
+      }
     }
 
     return { data: ready.map((job) => ({ ...job })), error: null };
@@ -169,6 +273,7 @@ function fakeDb(jobs) {
   const targets = jobs.map((job) => ({
     id: job.target_id,
     account_id: job.account_id,
+    normalized_username: job.normalized_username,
     status: "pending_verification",
     archived_at: null,
     deleted_at: null,
@@ -177,26 +282,33 @@ function fakeDb(jobs) {
 }
 
 function fakePeriodicDb(jobs, targetPatch = {}) {
-  const targets = jobs.map((job) => ({
-    id: job.target_id,
-    account_id: job.account_id,
-    normalized_username: job.normalized_username,
-    target_username: job.normalized_username,
-    canonical_username: job.normalized_username,
-    input_username: job.normalized_username,
-    status: "valid",
-    quality_status: "eligible",
-    verification_status: "found",
-    metadata_safe: {
-      instagram_user_id: "ig-100",
-      external_profile_id: "ext-100",
-    },
-    archived_at: null,
-    deleted_at: null,
-    periodic_revalidation_next_due_at: "2026-05-29T02:00:00.000Z",
-    periodic_revalidation_window_key: null,
-    ...targetPatch[job.target_id],
-  }));
+  const targets = [];
+  for (const job of jobs) {
+    if (targets.some((target) => target.id === job.target_id && target.account_id === job.account_id)) continue;
+    targets.push({
+      id: job.target_id,
+      account_id: job.account_id,
+      normalized_username: job.normalized_username,
+      target_username: job.normalized_username,
+      canonical_username: job.normalized_username,
+      input_username: job.normalized_username,
+      status: "valid",
+      quality_status: "eligible",
+      verification_status: "found",
+      metadata_safe: {
+        instagram_user_id: "ig-100",
+        external_profile_id: "ext-100",
+      },
+      archived_at: null,
+      deleted_at: null,
+      periodic_revalidation_next_due_at: "2026-05-29T02:00:00.000Z",
+      periodic_revalidation_window_key: null,
+      updated_at: "2026-05-20T02:00:00.000Z",
+      provider_checked_at: "2026-05-20T02:00:00.000Z",
+      followers_count: 800,
+      ...targetPatch[job.target_id],
+    });
+  }
   return new FakeSupabase(jobs, targets);
 }
 
@@ -265,12 +377,12 @@ test("processor maps low followers, verified, private and not_found safely", asy
     "rejected_low_followers",
     "rejected_verified",
     "rejected_private",
-    "rejected_not_found",
+    undefined,
   ]);
   assert.equal(db.targets[1].status, "archived");
   assert.equal(db.targets[1].archive_reason, "verified_became_ineligible");
-  assert.equal(db.targets[3].status, "archived");
-  assert.equal(db.targets[3].archive_reason, "account_not_found");
+  assert.equal(db.targets[3].status, "pending_verification");
+  assert.equal(db.targets[3].archive_reason, undefined);
   assert.equal(db.jobs.every((job) => job.status === "succeeded"), true);
 });
 
@@ -365,6 +477,267 @@ test("summary stays safe and excludes raw provider payloads", async () => {
   assert.equal(typeof result.summary.duration_ms, "number");
 });
 
+test("evidence-only mode refreshes follower evidence without business mutations", async () => {
+  const job = pendingJob("evidence", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  const before = {
+    status: db.targets[0].status,
+    quality_status: db.targets[0].quality_status,
+    archived_at: db.targets[0].archived_at,
+  };
+  const projected = [];
+
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({ followers_count: 1200 }),
+    processAvailabilityBatch: async (_supabase, observations, context) => {
+      projected.push({ observations, context });
+      return successfulAvailabilityResult();
+    },
+  });
+
+  assert.equal(result.summary.succeeded_count, 1);
+  assert.equal(db.targets[0].followers_count, 1200);
+  assert.equal(db.targets[0].provider_checked_at, fixedNow.toISOString());
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0].observations[0].tenant_id, tenantId);
+  assert.equal(projected[0].observations[0].account_id, "account-1");
+  assert.equal(projected[0].observations[0].target_id, "target-evidence");
+  assert.equal(projected[0].observations[0].lookup_result, "found");
+  assert.equal(projected[0].observations[0].profile_found, true);
+  assert.equal(projected[0].observations[0].observed_at, fixedNow.toISOString());
+  assert.equal(projected[0].context.workerId, "dashboard_verify_batch");
+  assert.deepEqual({
+    status: db.targets[0].status,
+    quality_status: db.targets[0].quality_status,
+    archived_at: db.targets[0].archived_at,
+  }, before);
+});
+
+test("evidence-only mode excludes legacy pending jobs from claim", async () => {
+  const db = fakePeriodicDb([pendingJob("legacy", "target_user", { metadata_safe: {} })]);
+  let providerCalls = 0;
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => {
+      providerCalls += 1;
+      return decisionFromLookup({});
+    },
+  });
+  assert.equal(result.summary.claimed_count, 0);
+  assert.equal(providerCalls, 0);
+  assert.equal(db.jobs[0].status, "pending");
+});
+
+test("old valid legacy pending job is adopted and processed evidence-only", async () => {
+  const job = pendingJob("legacy-old", "target_user", {
+    created_at: new Date(fixedNow.getTime() - 8 * 24 * 60 * 60_000).toISOString(),
+    metadata_safe: {},
+  });
+  const db = fakePeriodicDb([job]);
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({ followers_count: 1300 }),
+    processAvailabilityBatch: async () => successfulAvailabilityResult(),
+  });
+  assert.equal(result.summary.succeeded_count, 1);
+  assert.equal(db.jobs[0].metadata_safe.mode, "evidence_only");
+  assert.equal(db.jobs[0].metadata_safe.trigger_source, "legacy_valid_pending");
+  assert.equal(db.targets[0].followers_count, 1300);
+  assert.equal(db.targets[0].status, "valid");
+});
+
+test("old invalid legacy pending job is not replayed", async () => {
+  const job = pendingJob("legacy-invalid", "target_user", {
+    created_at: new Date(fixedNow.getTime() - 30 * 24 * 60 * 60_000).toISOString(),
+    metadata_safe: {},
+  });
+  const db = fakePeriodicDb([job], { [job.target_id]: { normalized_username: "other_user" } });
+  let providerCalls = 0;
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => {
+      providerCalls += 1;
+      return decisionFromLookup({});
+    },
+  });
+  assert.equal(result.summary.claimed_count, 0);
+  assert.equal(providerCalls, 0);
+  assert.equal(db.jobs[0].status, "pending");
+});
+
+test("evidence-only identity mismatch fails closed without follower overwrite", async () => {
+  const job = pendingJob("mismatch", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({ canonical_username: "other_user", followers_count: 9999 }),
+  });
+  assert.equal(db.targets[0].followers_count, 800);
+  assert.equal(db.jobs[0].status, "failed");
+  assert.equal(db.jobs[0].last_error_code, "identity_mismatch");
+  assert.equal(result.summary.skipped_count, 1);
+});
+
+test("evidence-only lookup failure never advances provider freshness", async () => {
+  const job = pendingJob("not-found-evidence", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  const beforeCheckedAt = db.targets[0].provider_checked_at;
+  await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({
+      ok: false,
+      status: "not_found",
+      reason: "not_found",
+      followers_count: null,
+    }),
+  });
+  assert.equal(db.targets[0].provider_checked_at, beforeCheckedAt);
+  assert.equal(db.targets[0].followers_count, 800);
+  assert.equal(db.targets[0].status, "valid");
+  assert.equal(db.targets[0].archived_at, null);
+});
+
+test("evidence-only stale provider response cannot overwrite newer evidence", async () => {
+  const job = pendingJob("stale-evidence", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const newer = new Date(fixedNow.getTime() + 60_000).toISOString();
+  const db = fakePeriodicDb([job], {
+    [job.target_id]: { provider_checked_at: newer, followers_count: 1500 },
+  });
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({ followers_count: 100 }),
+    processAvailabilityBatch: async () => {
+      assert.fail("stale evidence must not enter the Availability pipeline");
+    },
+  });
+  assert.equal(result.summary.succeeded_count, 1);
+  assert.equal(db.targets[0].provider_checked_at, newer);
+  assert.equal(db.targets[0].followers_count, 1500);
+});
+
+test("duplicate current evidence uses one deterministic Availability idempotency key", async () => {
+  const jobs = [
+    pendingJob("duplicate-a", "target_user", {
+      target_id: "target-shared",
+      batch_id: null,
+      metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+    }),
+    pendingJob("duplicate-b", "target_user", {
+      target_id: "target-shared",
+      batch_id: null,
+      metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+    }),
+  ];
+  const db = fakePeriodicDb(jobs);
+  const keys = [];
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    limit: 2,
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+    processAvailabilityBatch: async (_supabase, observations) => {
+      keys.push(observations[0].idempotency_key);
+      return successfulAvailabilityResult(keys.length === 2 ? { deduplicated: 1 } : {});
+    },
+  });
+  assert.equal(result.summary.succeeded_count, 2);
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("ambiguous tenant binding fails closed before Availability projection", async () => {
+  const job = pendingJob("ambiguous-tenant", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  db.clientAccounts.push({ ...db.clientAccounts[0], client_id: "22222222-2222-4222-8222-222222222222" });
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+    processAvailabilityBatch: async () => {
+      assert.fail("ambiguous tenant binding must not enter the Availability pipeline");
+    },
+  });
+  assert.equal(result.summary.succeeded_count, 0);
+  assert.equal(result.summary.retry_scheduled_count, 1);
+  assert.equal(db.jobs[0].status, "retry_scheduled");
+  assert.equal(db.jobs[0].last_error_code, "processor_error");
+  assert.equal(db.availabilityCurrent.length, 0);
+});
+
+test("existing identity conflict fails closed before Availability projection", async () => {
+  const job = pendingJob("identity-conflict", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  db.identityCurrent.push({
+    tenant_id: tenantId,
+    account_id: job.account_id,
+    target_id: job.target_id,
+    current_username: "target_user",
+    domain_identity_status: "identity_conflict",
+  });
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({}),
+    processAvailabilityBatch: async () => {
+      assert.fail("identity conflict must not enter the Availability pipeline");
+    },
+  });
+  assert.equal(result.summary.retry_scheduled_count, 1);
+  assert.equal(db.jobs[0].status, "retry_scheduled");
+  assert.equal(db.jobs[0].last_error_code, "processor_error");
+  assert.equal(db.availabilityCurrent.length, 0);
+});
+
+test("evidence-only rate limit preserves target and requeues without fake freshness", async () => {
+  const job = pendingJob("rate-evidence", "target_user", {
+    batch_id: null,
+    metadata_safe: { trigger_source: "periodic_weekly", mode: "evidence_only" },
+  });
+  const db = fakePeriodicDb([job]);
+  const before = { ...db.targets[0] };
+  const result = await processTargetVerificationBatch(db, {
+    mode: "evidence_only",
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({
+      ok: false,
+      status: "rate_limited",
+      reason: "rate_limited",
+      metadata: { rate_limited: true },
+    }),
+  });
+  assert.equal(result.summary.rate_limited_count, 1);
+  assert.equal(db.jobs[0].status, "retry_scheduled");
+  assert.equal(db.targets[0].provider_checked_at, before.provider_checked_at);
+  assert.equal(db.targets[0].followers_count, before.followers_count);
+  assert.equal(db.targets[0].status, before.status);
+});
+
 test("periodic weekly terminal success advances next due by exactly seven days", async () => {
   const db = fakePeriodicDb([pendingJob("1", "eligible_one", { batch_id: "periodic_weekly:482148" })]);
   const result = await processTargetVerificationBatch(db, {
@@ -400,8 +773,59 @@ test("periodic weekly rate limit does not advance schedule or archive target", a
   assert.equal(db.targets[0].archived_at, before.archived_at);
 });
 
-test("periodic weekly not_found archives target and clears periodic schedule", async () => {
+test("first periodic not_found records evidence and schedules confirmation without archive", async () => {
   const db = fakePeriodicDb([pendingJob("1", "missing_user", { batch_id: "periodic_weekly:482148" })]);
+  let providerCalls = 0;
+  const verifyUsername = async () => {
+    providerCalls += 1;
+    return decisionFromLookup({
+      ok: false,
+      status: "not_found",
+      reason: "not_found",
+      followers_count: null,
+    });
+  };
+  await processTargetVerificationBatch(db, {
+    now: () => fixedNow,
+    verifyUsername,
+  });
+
+  assert.equal(db.targets[0].status, "valid");
+  assert.equal(db.targets[0].archive_reason, undefined);
+  assert.equal(db.jobs[0].provider_status, "not_found");
+  assert.equal(
+    Date.parse(db.targets[0].periodic_revalidation_next_due_at) - fixedNow.getTime(),
+    30 * 60 * 1000,
+  );
+  assert.equal(db.targets[0].periodic_revalidation_window_key, null);
+  const replay = await processTargetVerificationBatch(db, { now: () => fixedNow, verifyUsername });
+  assert.equal(replay.summary.claimed_count, 0);
+  assert.equal(providerCalls, 1);
+  assert.equal(db.targets[0].status, "valid");
+});
+
+test("canonical unavailable confirmation permits archive with the stable reason", async () => {
+  const targetId = "target-current";
+  const prior = pendingJob("prior", "missing_user", {
+    target_id: targetId,
+    status: "succeeded",
+    provider_status: "not_found",
+    updated_at: new Date(fixedNow.getTime() - 20 * 60 * 1000).toISOString(),
+  });
+  const current = pendingJob("current", "missing_user", {
+    target_id: targetId,
+    batch_id: "periodic_weekly:482149",
+  });
+  const db = fakePeriodicDb([prior, current]);
+  db.availabilityCurrent.push({
+    target_id: targetId,
+    account_id: "account-1",
+    availability_status: "unavailable_confirmed",
+    confidence: "high",
+    identity_status: "identity_confirmed",
+    confirmed_at: new Date(fixedNow.getTime() - 10 * 60 * 1000).toISOString(),
+    valid_until: new Date(fixedNow.getTime() + 12 * 60 * 60 * 1000).toISOString(),
+  });
   await processTargetVerificationBatch(db, {
     now: () => fixedNow,
     verifyUsername: async () => decisionFromLookup({
@@ -415,5 +839,103 @@ test("periodic weekly not_found archives target and clears periodic schedule", a
   assert.equal(db.targets[0].status, "archived");
   assert.equal(db.targets[0].archive_reason, "account_not_found");
   assert.equal(db.targets[0].periodic_revalidation_next_due_at, null);
-  assert.equal(db.targets[0].periodic_revalidation_window_key, null);
+});
+
+test("stale, weak, or identity-conflicted canonical confirmation fails closed", async () => {
+  for (const currentPatch of [
+    { confidence: "low" },
+    { valid_until: new Date(fixedNow.getTime() - 1).toISOString() },
+    { identity_status: "identity_conflict" },
+    { confirmed_at: null },
+  ]) {
+    const job = pendingJob(`current-${JSON.stringify(currentPatch)}`, "missing_user");
+    const db = fakePeriodicDb([job]);
+    db.availabilityCurrent.push({
+      target_id: job.target_id,
+      account_id: job.account_id,
+      availability_status: "unavailable_confirmed",
+      confidence: "high",
+      identity_status: "identity_confirmed",
+      confirmed_at: new Date(fixedNow.getTime() - 10 * 60 * 1000).toISOString(),
+      valid_until: new Date(fixedNow.getTime() + 12 * 60 * 60 * 1000).toISOString(),
+      ...currentPatch,
+    });
+    await processTargetVerificationBatch(db, {
+      now: () => fixedNow,
+      verifyUsername: async () => decisionFromLookup({
+        ok: false,
+        status: "not_found",
+        reason: "not_found",
+        followers_count: null,
+      }),
+    });
+    assert.equal(db.targets[0].status, "valid");
+  }
+});
+
+test("repeated verification jobs cannot bypass missing canonical confirmation", async () => {
+  const targetId = "target-current";
+  const prior = pendingJob("prior", "missing_user", {
+    target_id: targetId,
+    batch_id: "same-observation-batch",
+    status: "succeeded",
+    provider_status: "not_found",
+    updated_at: new Date(fixedNow.getTime() - 20 * 60 * 1000).toISOString(),
+  });
+  const current = pendingJob("current", "missing_user", {
+    target_id: targetId,
+    batch_id: "same-observation-batch",
+  });
+  const db = fakePeriodicDb([prior, current]);
+  await processTargetVerificationBatch(db, {
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({
+      ok: false,
+      status: "not_found",
+      reason: "not_found",
+      followers_count: null,
+    }),
+  });
+
+  assert.equal(db.targets[0].status, "valid");
+  assert.equal(db.targets[0].archive_reason, undefined);
+});
+
+test("a recovered target between not_found observations resets confirmation", async () => {
+  const targetId = "target-current";
+  const oldMissing = pendingJob("old-missing", "missing_user", {
+    target_id: targetId,
+    status: "succeeded",
+    provider_status: "not_found",
+    updated_at: new Date(fixedNow.getTime() - 40 * 60 * 1000).toISOString(),
+  });
+  const recovered = pendingJob("recovered", "missing_user", {
+    target_id: targetId,
+    status: "succeeded",
+    provider_status: "found",
+    updated_at: new Date(fixedNow.getTime() - 10 * 60 * 1000).toISOString(),
+  });
+  const current = pendingJob("current", "missing_user", { target_id: targetId });
+  const db = fakePeriodicDb([oldMissing, recovered, current]);
+  db.availabilityCurrent.push({
+    target_id: targetId,
+    account_id: "account-1",
+    availability_status: "available",
+    confidence: "high",
+    identity_status: "identity_confirmed",
+    confirmed_at: new Date(fixedNow.getTime() - 5 * 60 * 1000).toISOString(),
+    valid_until: new Date(fixedNow.getTime() + 12 * 60 * 60 * 1000).toISOString(),
+  });
+  await processTargetVerificationBatch(db, {
+    now: () => fixedNow,
+    verifyUsername: async () => decisionFromLookup({
+      ok: false,
+      status: "not_found",
+      reason: "not_found",
+      followers_count: null,
+    }),
+  });
+
+  assert.equal(db.targets[0].status, "valid");
+  assert.equal(db.targets[0].archive_reason, undefined);
 });

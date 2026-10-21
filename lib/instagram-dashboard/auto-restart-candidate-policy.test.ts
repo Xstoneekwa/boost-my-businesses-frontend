@@ -30,11 +30,11 @@ test("terminal or exhausted live Unfollow backlog is not-needed, not a blocked i
 
 test("a live Unfollow advisory cannot mask an earlier account safety block", () => {
   assert.deepEqual(resolveAccountRestartEligibility([
-    "manual_stop_requested",
+    "active_run_request_exists",
     "unfollow_phase_circuit_open",
   ]), {
     eligible: false,
-    reason: "manual_stop_requested",
+    reason: "active_run_request_exists",
   });
 });
 
@@ -54,7 +54,6 @@ test("only current real blockers exclude an otherwise normal account", () => {
   for (const reason of [
     "current_window_closed",
     "blocking_incident_active",
-    "manual_stop_requested",
     "manual_only",
     "no_quota_remaining",
     "active_run_exists",
@@ -88,6 +87,42 @@ test("no partial run means no restart even when the account is otherwise eligibl
     restartBlockReason: "session_completed",
     totalRemainingQuota: 23,
   }).needed, false);
+});
+
+test("a rejected stale partial is replaced by a fresh business-window admission", () => {
+  assert.deepEqual(resolveRestartNeed({
+    lastRunId: "old-partial-run",
+    sessionTerminationClass: "partial_resumable",
+    restartAllowed: false,
+    restartBlockReason: "restart_not_needed",
+    totalRemainingQuota: 170,
+    freshBusinessBoundaryReplacementAuthorized: true,
+  }), {
+    needed: true,
+    reason: "stale_partial_resume_replaced_by_fresh_business_window",
+    historicalSafeBoundaryFallback: false,
+    canonicalLiveUnfollowOverride: false,
+  });
+});
+
+test("fresh-window replacement cannot reuse an old exact viewport checkpoint", () => {
+  const strategy = resolveSafeRestartStrategy({
+    restartNeeded: true,
+    followPhasePlanned: true,
+    followRemaining: 50,
+    exactViewportResumeAvailable: false,
+    priorTargetId: "old-target",
+    eligibleTargets: [
+      { id: "fresh-target", createdAt: "2026-08-31T00:00:00Z", lastUsedAt: null },
+    ],
+    workerPlanExplicitlySafe: false,
+    forceFreshBoundary: true,
+  });
+  assert.deepEqual(strategy, {
+    strategy: "next_target",
+    reason: "next_eligible_target_identified",
+    nextTargetId: "fresh-target",
+  });
 });
 
 test("the safe boundary target order mirrors the Worker unused-then-oldest contract", () => {

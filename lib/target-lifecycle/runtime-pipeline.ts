@@ -408,12 +408,14 @@ export async function processTargetLifecycleBatch(
     rejected += invalidRows;
     if (invalidRows) reasons.push("partial_or_invalid_lifecycle_work_row");
     const calculatedAt = validTimestamp(context.calculatedAt) ?? new Date().toISOString();
+    let cursorBlocked = false;
 
     for (const row of rows) {
       if (!row) {
         partialBatch = true;
+        cursorBlocked = true;
         reasons.push("target_lifecycle_cursor_retained_for_invalid_row");
-        break;
+        continue;
       }
       if (performance.now() - batchStarted >= state.caps.pipelineDurationMs) {
         capHits += 1;
@@ -423,7 +425,6 @@ export async function processTargetLifecycleBatch(
       }
       const itemStarted = performance.now();
       let cursorSafe = false;
-      let haltAfterRow = false;
       const bundle = assessmentBundle(row, calculatedAt);
       const capacity = await supabase.rpc("claim_target_lifecycle_assessment_capacity_v1", {
         p_account_id: row.accountId,
@@ -435,10 +436,9 @@ export async function processTargetLifecycleBatch(
       if (capacity.error) {
         errors += 1;
         partialBatch = true;
+        cursorBlocked = true;
         reasons.push("target_lifecycle_capacity_claim_failed");
-        break;
-      }
-      if (capacity.data !== true) {
+      } else if (capacity.data !== true) {
         capHits += 1;
         cursorSafe = true;
         reasons.push("target_lifecycle_assessment_capacity_reached");
@@ -539,13 +539,13 @@ export async function processTargetLifecycleBatch(
             cursorSafe = true;
           } else {
             partialBatch = true;
-            haltAfterRow = true;
+            cursorBlocked = true;
             errors += 1;
             reasons.push(`target_lifecycle_unexpected_persist_outcome:${safeError(outcome)}`);
           }
         } catch (error) {
           partialBatch = true;
-          haltAfterRow = true;
+          cursorBlocked = true;
           errors += 1;
           const reason = safeError(error);
           reasons.push(reason);
@@ -554,8 +554,7 @@ export async function processTargetLifecycleBatch(
           latencies.push(performance.now() - itemStarted);
         }
       }
-      if (cursorSafe) lastHandledCursor = row.targetId;
-      if (haltAfterRow) break;
+      if (cursorSafe && !cursorBlocked) lastHandledCursor = row.targetId;
     }
 
     if (partialBatch) {
@@ -574,13 +573,15 @@ export async function processTargetLifecycleBatch(
     const latencyMaxMs = latencies.length ? Math.max(...latencies) : 0;
     const cycleLatencyMs = performance.now() - batchStarted;
     const volumeViolation = sourceRows.length > state.caps.batchSize;
+    if (invalidRows >= 3) reasons.push("target_lifecycle_abnormal_partial_rows");
+    if (errors >= 3) reasons.push("target_lifecycle_error_rate_exceeded");
+    if (cycleLatencyMs > state.caps.pipelineDurationMs * 3) {
+      reasons.push("target_lifecycle_cycle_latency_exceeded");
+    }
     const criticalReason = businessActionViolations > 0 ? "target_lifecycle_business_action_detected"
       : crossTenant > 0 ? "target_lifecycle_cross_tenant_attempt"
       : versionRegressionSkipped > 0 ? "target_lifecycle_version_divergence"
       : volumeViolation ? "target_lifecycle_unbounded_volume"
-      : invalidRows >= 3 ? "target_lifecycle_abnormal_partial_rows"
-      : errors >= 3 ? "target_lifecycle_critical_error_rate"
-      : cycleLatencyMs > state.caps.pipelineDurationMs * 3 ? "target_lifecycle_critical_latency"
       : "";
     if (criticalReason) {
       await triggerAutoKill(supabase, criticalReason, {

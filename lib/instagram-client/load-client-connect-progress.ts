@@ -17,7 +17,6 @@ const ACTION_REQUIRED_TYPES = new Set([
   "update_instagram_password",
   "review_account_mismatch",
 ]);
-const ACTIVE_ACTION_STATUSES = new Set(["pending", "acknowledged", "pending_verification", "code_submitted", "open"]);
 const ACTIVE_REQUEST_STATUSES = new Set(["queued", "claimed", "starting", "running"]);
 const TERMINAL_REQUEST_STATUSES = new Set(["failed", "blocked", "canceled", "completed"]);
 const EMAIL_CODE_ACTION = "enter_email_verification_code";
@@ -247,7 +246,7 @@ export async function loadClientConnectProgress(input: {
       .maybeSingle(),
     supabase
       .from("account_dashboard_actions")
-      .select("id,account_id,action_type,status,title,safe_client_message,updated_at,metadata")
+      .select("id,account_id,action_type,status,title,safe_client_message,requires_client_action,updated_at,metadata")
       .eq("account_id", accountId)
       .in("action_type", [...ACTION_REQUIRED_TYPES])
       .order("updated_at", { ascending: false })

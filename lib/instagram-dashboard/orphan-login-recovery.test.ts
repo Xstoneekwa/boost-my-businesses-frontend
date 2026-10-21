@@ -21,6 +21,20 @@ test("orphan recovery run type is technical only", () => {
   );
 });
 
+test("blocked orphan lookup uses the canonical terminal request timestamp", () => {
+  const source = readFileSync(new URL("../instagram-dashboard/orphan-login-recovery.ts", import.meta.url), "utf8");
+  assert.match(source, /select\("id,status,error_code,completed_at,created_at"\)/);
+  assert.match(source, /eq\("account_id", accountId\)/);
+  assert.match(source, /eq\("requested_run_type", "login_provisioning"\)/);
+  assert.match(source, /eq\("status", "blocked"\)/);
+  assert.match(source, /eq\("error_code", "orphan_challenge_provenance_weak"\)/);
+  assert.match(source, /order\("completed_at", \{ ascending: false, nullsFirst: false \}\)/);
+  assert.match(source, /order\("created_at", \{ ascending: false \}\)/);
+  assert.match(source, /limit\(1\)/);
+  assert.match(source, /readString\(blockedRequest\.completed_at/);
+  assert.doesNotMatch(source, /finished_at/);
+});
+
 test("client secure preparation status blocks connect", () => {
   const status = projectClientReadinessStatus({
     audience: "client",
@@ -40,7 +54,7 @@ test("client secure preparation status blocks connect", () => {
     },
   });
   assert.equal(status, "secure_preparation_in_progress");
-  assert.equal(clientReadinessMessage(status, "fr"), "La préparation sécurisée de votre compte est en cours.");
+  assert.equal(clientReadinessMessage(status, "fr"), "Nous finalisons une étape sécurisée de préparation. Actualisez dans quelques instants.");
   assert.equal(clientReadinessAllowsConnect(status), false);
 });
 

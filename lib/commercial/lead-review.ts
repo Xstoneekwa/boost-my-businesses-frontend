@@ -16,6 +16,7 @@ import {
   type CommercialReviewReadModel,
 } from "./lead-review-contract";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getHumanReviewFeedback } from "./human-review-feedback-service";
 
 type Row = Record<string, unknown>;
 
@@ -191,6 +192,8 @@ export async function getCommercialReviewQueueReadModel(
 ): Promise<CommercialReviewReadModel> {
   await requireCommercialCrmAccess();
   const supabase = createSupabaseAdminClient();
+  const cohort = reviewFilters.scope === "canary" ? await getHumanReviewFeedback() : null;
+  if (cohort) filters = { range: "all", page: 1, pageSize: filters.pageSize };
   const city = reviewFilters.city ?? filters.city;
   const subsegment = reviewFilters.subsegment ?? filters.subsegment;
   const search = reviewFilters.search ?? filters.search;
@@ -242,6 +245,7 @@ export async function getCommercialReviewQueueReadModel(
     head?: boolean;
   } = {}) => {
     let query = supabase.from("commercial_leads").select(head ? "id" : REVIEW_LEAD_FIELDS, { count: "exact", head });
+    if (cohort) query = query.in("id", cohort.members.length ? cohort.members.map((m) => m.id) : ["00000000-0000-0000-0000-000000000000"]);
     if (approved) query = query.eq("qualification_status", "approved").eq("outreach_status", "not_started");
     else query = query.eq("qualification_status", "qualified").is("approved_at", null);
     if (filters.campaign) query = query.eq("campaign_id", filters.campaign);

@@ -180,6 +180,9 @@ export async function POST(request: Request) {
 
     if (error) {
       const message = sanitizeRunControlReason(error.message, "Could not create run request.");
+      if (/^fleet_hold_(requested|active|releasing)$/.test(error.message)) {
+        return jsonError(message, 409, { reason: error.message });
+      }
       if (/account_already_running/i.test(error.message)) {
         return jsonError("A run is already active for this account.", 409);
       }
