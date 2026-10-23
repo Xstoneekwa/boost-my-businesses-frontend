@@ -21,7 +21,7 @@ const row = (v: unknown): Record<string, unknown> => v && typeof v === "object" 
 /** Unique among admissible returned locations, never the provider's popularity order.
  * A full100-result response is potentially truncated and cannot prove uniqueness.
  */
-export function selectFranceSearchLocation(city: string, payload: unknown): { canonicalName: string } | { reason: FranceSearchLocationFailure } {
+export function selectFranceSearchLocation(city: string, payload: unknown, clarified = false): { canonicalName: string } | { reason: FranceSearchLocationFailure } {
   if (!Array.isArray(payload)) return { reason: "LOCATION_RESOLUTION_UNAVAILABLE" };
   const requested = normalizeFranceSearchCity(city);
   const matches = payload.map(row).filter(r => {
@@ -33,15 +33,32 @@ export function selectFranceSearchLocation(city: string, payload: unknown): { ca
     return parts.length >= 2 && parts.every(Boolean) && normalizeFranceSearchCity(parts[0]) === requested
       && parts.at(-1)?.toLocaleLowerCase("fr") === "france";
   });
-  if (matches.length > 1) return { reason: "AMBIGUOUS_LOCATION" };
+  const distinct = new Map<string, Record<string, unknown>>();
+  for (const [index, match] of matches.entries()) {
+    const id = String(match.google_id ?? "");
+    const identified = /^[1-9][0-9]{0,19}$/.test(id)
+      && (typeof match.google_id === "string" || Number.isSafeInteger(match.google_id));
+    if (clarified && (!identified || String(match.canonical_name).split(",").length < 3))
+      return { reason: "LOCATION_RESOLUTION_UNAVAILABLE" };
+    // Missing IDs do not prove duplicate identity. Conflicting rows for the
+    // same ID also fail closed; never select the first/most popular location.
+    const key = identified ? `id:${id}` : `row:${index}`;
+    const previous = distinct.get(key);
+    if (previous && normalizeFranceSearchCity(String(previous.canonical_name)) !== normalizeFranceSearchCity(String(match.canonical_name)))
+      return { reason: "AMBIGUOUS_LOCATION" };
+    if (!previous || String(match.canonical_name) < String(previous.canonical_name)) distinct.set(key, match);
+  }
+  if (distinct.size > 1) return { reason: "AMBIGUOUS_LOCATION" };
   if (payload.length >= 100) return { reason: "LOCATION_RESOLUTION_UNAVAILABLE" };
-  if (!matches.length) return { reason: "UNKNOWN_LOCATION" };
-  return { canonicalName: String(matches[0].canonical_name).trim() };
+  if (!distinct.size) return { reason: "UNKNOWN_LOCATION" };
+  return { canonicalName: String(distinct.values().next().value!.canonical_name).trim() };
 }
 
-/** One bounded lookup per discovery invocation/run reservation, before its query loop.
+/** One initial lookup and at most one saturation clarification per run reservation.
  * The existing discovery reservation rejects replay before this function is reached.
- * No retry, per-candidate lookup, cross-run cache or commercial ledger consumption.
+ * Both share the existing8000ms deadline. No retry, per-candidate lookup, cross-run
+ * cache or commercial ledger consumption. Uniqueness is within the admissible
+ * returned set only, not a claim of national geographic uniqueness.
  */
 export async function resolveFranceSearchLocation(input: { city: string; apiKey: string; fetcher: typeof fetch }): Promise<Resolution> {
   const city = input.city.trim();
@@ -51,19 +68,29 @@ export async function resolveFranceSearchLocation(input: { city: string; apiKey:
   const failure = (reason: FranceSearchLocationFailure): Resolution => ({ ok: false, reason, diagnostic: { ...diagnostic, LOCATION_RESOLUTION: reason } });
   if (!/^[\p{L}\p{M}][\p{L}\p{M} '’\p{Pd}]{1,75}$/u.test(city)) return failure("UNKNOWN_LOCATION");
   if (!input.apiKey.trim()) return failure("LOCATION_RESOLUTION_UNAVAILABLE");
-  const url = new URL("https://www.searchapi.io/api/v1/locations");
-  url.searchParams.set("q", city); url.searchParams.set("limit", "100");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
-  try {
-    diagnostic.LOCATION_API_CALLS = 1;
-    // The key is not in the location URL. No headers, raw payload or provider
-    // message are copied to the allowlisted run diagnostic.
+  const lookup = async (query: string) => {
+    if (controller.signal.aborted) throw new DOMException("Location deadline", "AbortError");
+    const url = new URL("https://www.searchapi.io/api/v1/locations");
+    url.searchParams.set("q", query); url.searchParams.set("limit", "100");
+    diagnostic.LOCATION_API_CALLS += 1;
+    diagnostic.LOCATION_HTTP_STATUS = null;
+    // No key in the URL, raw payload, headers or provider error persisted.
     const response = await input.fetcher(url.toString(), { method: "GET", cache: "no-store", redirect: "error",
       headers: { Authorization: `Bearer ${input.apiKey}` }, signal: controller.signal });
     diagnostic.LOCATION_HTTP_STATUS = response.status;
-    if (!response.ok) return failure("LOCATION_RESOLUTION_UNAVAILABLE");
-    const selected = selectFranceSearchLocation(city, await response.json());
+    return response.ok ? response.json() : null;
+  };
+  try {
+    const payload = await lookup(city);
+    let selected = selectFranceSearchLocation(city, payload);
+    if (Array.isArray(payload) && payload.length === 100
+      && !("reason" in selected && selected.reason === "AMBIGUOUS_LOCATION")) {
+      // Derive only from the caller's validated city and FR country, never a
+      // returned candidate/region. A second saturated response stays refused.
+      selected = selectFranceSearchLocation(city, await lookup(`${city}, France`), true);
+    }
     if ("reason" in selected) return failure(selected.reason);
     if (selected.canonicalName.includes(input.apiKey)) return failure("LOCATION_RESOLUTION_UNAVAILABLE");
     return { ok: true, canonicalName: selected.canonicalName,

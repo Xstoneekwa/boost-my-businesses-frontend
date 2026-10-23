@@ -111,3 +111,102 @@ test("only a whitelist leaves memory; no API key, header, URL or full location r
   const stored = JSON.stringify(r);
   for (const forbidden of [key, "Authorization", "api_key", "arbitrary", "latitude", "reach", "https://"]) assert(!stored.includes(forbidden));
 });
+
+const saturated = (matches: ReturnType<typeof synthetic>[] = []) => [...matches,
+  ...Array.from({ length: 100 - matches.length }, (_, i) => synthetic(`Unrelated ${i}`))];
+
+test("99 results with one admissible city remain valid without clarification", async () => {
+  let calls = 0;
+  const r = await resolveFranceSearchLocation({ city: "Paris", apiKey: key, fetcher: async () => {
+    calls++; return Response.json(saturated([synthetic("Paris")]).slice(0, 99));
+  } });
+  assert.equal(r.ok, true); assert.equal(calls, 1); assert.equal(r.diagnostic.LOCATION_API_CALLS, 1);
+});
+
+for (const city of ["Paris", "Marseille", "Lyon", "Annecy", "Saint-Rémy-de-Provence"]) {
+  test(`${city}: saturated initial response requires exactly one caller-derived clarification`, async () => {
+    const queries: string[] = [], signals: AbortSignal[] = [];
+    const match = synthetic(city, { google_id: 123456, reach: 1 }); // Synthetic ID only.
+    const r = await resolveFranceSearchLocation({ city, apiKey: key, fetcher: async (input, init) => {
+      const url = new URL(String(input)); queries.push(url.searchParams.get("q")!); signals.push(init!.signal!);
+      assert.equal(url.searchParams.get("limit"), "100"); assert.equal(url.searchParams.has("api_key"), false);
+      assert.equal(init?.redirect, "error"); assert.equal(init?.cache, "no-store");
+      // An irrelevant first row/region must never construct the second query.
+      return Response.json(queries.length === 1 ? saturated([synthetic("Other City"), match]) : [match]);
+    } });
+    assert.deepEqual(queries, [city, `${city}, France`]); assert.equal(signals[0], signals[1]);
+    assert.equal(r.ok, true); if (r.ok) assert.equal(r.canonicalName, match.canonical_name);
+    assert.equal(r.diagnostic.LOCATION_API_CALLS, 2); assert.equal(r.diagnostic.LOCATION_RESOLUTION, "RESOLVED");
+  });
+}
+
+test("clarification geographic-ID deduplication is deterministic, never popularity", async () => {
+  const a = synthetic("Paris", { google_id: 123456, reach: 1 });
+  const b = synthetic("Paris", { google_id: "123456", reach: 999999 });
+  for (const rows of [[a, b], [b, a]]) {
+    let calls = 0;
+    const r = await resolveFranceSearchLocation({ city: "Paris", apiKey: key, fetcher: async () => {
+      calls++; return Response.json(calls === 1 ? saturated([a]) : rows);
+    } });
+    assert.equal(r.ok, true); assert.equal(calls, 2);
+    if (r.ok) assert.equal(r.canonicalName, a.canonical_name);
+  }
+  assert.deepEqual(selectFranceSearchLocation("Paris", [a, b]), { canonicalName: a.canonical_name });
+  assert.deepEqual(selectFranceSearchLocation("Paris", [a, { ...b, canonical_name: "Paris,Other Region,France" }], true), { reason: "AMBIGUOUS_LOCATION" });
+});
+
+const clarificationFailures: [string, unknown, string][] = [
+  ["second saturation", saturated([synthetic("Paris", { google_id: 123456 })]), "LOCATION_RESOLUTION_UNAVAILABLE"],
+  ["French homonyms", [synthetic("Paris", { google_id: 123456 }), synthetic("Paris", { google_id: 123457, canonical_name: "Paris,Other Region,France" })], "AMBIGUOUS_LOCATION"],
+  ["different IDs even with identical labels", [synthetic("Paris", { google_id: 123456 }), synthetic("Paris", { google_id: 123457 })], "AMBIGUOUS_LOCATION"],
+  ["foreign homonym", [synthetic("Paris", { google_id: 123456, country_code: "US", canonical_name: "Paris,Texas,United States" })], "UNKNOWN_LOCATION"],
+  ["fictitious/absent", [], "UNKNOWN_LOCATION"],
+  ["provider error HTTP200", { error: "fixture" }, "LOCATION_RESOLUTION_UNAVAILABLE"],
+  ["missing geographic ID", [synthetic("Paris")], "LOCATION_RESOLUTION_UNAVAILABLE"],
+  ["unsafe numeric geographic ID", [synthetic("Paris", { google_id: Number.MAX_SAFE_INTEGER + 1 })], "LOCATION_RESOLUTION_UNAVAILABLE"],
+  ["incomplete canonical", [synthetic("Paris", { google_id: 123456, canonical_name: "Paris,France" })], "LOCATION_RESOLUTION_UNAVAILABLE"],
+];
+for (const [name, payload, reason] of clarificationFailures) test(`clarification ${name}: fail closed, never third request`, async () => {
+  let calls = 0;
+  const r = await resolveFranceSearchLocation({ city: "Paris", apiKey: key, fetcher: async () => {
+    calls++; return Response.json(calls === 1 ? saturated([synthetic("Paris")]) : payload);
+  } });
+  assert.equal(r.ok, false); assert.equal(r.diagnostic.LOCATION_RESOLUTION, reason);
+  assert.equal(calls, 2); assert.equal(r.diagnostic.LOCATION_API_CALLS, 2);
+});
+
+test("already visible French ambiguity cannot be erased by clarification", async () => {
+  let calls = 0;
+  const r = await resolveFranceSearchLocation({ city: "Paris", apiKey: key, fetcher: async () => {
+    calls++; return Response.json(saturated([synthetic("Paris", { google_id: 123456 }),
+      synthetic("Paris", { google_id: 123457, canonical_name: "Paris,Other Region,France" })]));
+  } });
+  assert.equal(calls, 1); assert.equal(r.diagnostic.LOCATION_RESOLUTION, "AMBIGUOUS_LOCATION");
+});
+
+for (const status of [401, 429, 503]) test(`clarification HTTP${status}: two accounted calls, no retry`, async () => {
+  let calls = 0;
+  const r = await resolveFranceSearchLocation({ city: "Paris", apiKey: key, fetcher: async () => {
+    calls++; return calls === 1 ? Response.json(saturated()) : Response.json({ error: key }, { status });
+  } });
+  assert.equal(calls, 2); assert.equal(r.ok, false); assert.equal(r.diagnostic.LOCATION_HTTP_STATUS, status);
+  assert.equal(r.diagnostic.LOCATION_RESOLUTION, "LOCATION_RESOLUTION_UNAVAILABLE"); assert(!JSON.stringify(r).includes(key));
+});
+
+test("clarification shares remaining8000ms deadline, no new timer/retry", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  const pending = resolveFranceSearchLocation({ city: "Paris", apiKey: key, fetcher: async (_input, init) => {
+    calls++;
+    if (calls === 1) { t.mock.timers.tick(3000); return Response.json(saturated()); }
+    return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => {
+      reject(new DOMException("fixture", "AbortError"));
+    }, { once: true }));
+  } });
+  // Drain the response-body microtasks until clarification has started.
+  for (let i = 0; i < 20 && calls < 2; i++) await Promise.resolve();
+  assert.equal(calls, 2); t.mock.timers.tick(4999); t.mock.timers.tick(1);
+  const r = await pending;
+  assert.equal(r.ok, false); assert.equal(calls, 2); assert.equal(r.diagnostic.LOCATION_TIMEOUT, true);
+  assert.equal(r.diagnostic.LOCATION_HTTP_STATUS, null);
+});
